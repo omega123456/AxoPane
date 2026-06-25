@@ -1,5 +1,6 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { vi } from 'vitest'
 import { ipc } from './ipc-mock'
 import type { DirectoryEntry, ListDirRequest, ListDirResponse } from '@/lib/types/ipc'
 import { renderApp } from './utils/render-app'
@@ -117,14 +118,26 @@ describe('App', () => {
 
   it('toggles theme via the command bar button', async () => {
     const user = userEvent.setup()
+    const saveConfig = vi.fn((payload) => payload.config)
+    ipc.override('save_config', saveConfig)
     installListDirOverride()
     renderApp()
 
+    const toggle = await screen.findByRole('button', { name: 'Light theme' })
     expect(document.documentElement).toHaveClass('dark')
 
-    await user.click(await screen.findByRole('button', { name: 'Light theme' }))
+    await user.click(toggle)
 
     expect(document.documentElement).not.toHaveClass('dark')
+    await waitFor(() => {
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({
+            theme: 'light',
+          }),
+        }),
+      )
+    })
   })
 
   it('toggles sorting when a header is clicked', async () => {

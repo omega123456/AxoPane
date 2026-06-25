@@ -15,11 +15,13 @@ import type { OpProgress } from '@/lib/types/ipc'
 
 type JobCardProps = {
   operation: OpProgress
+  throughputHistory: number[]
   hasConflict: boolean
   reorderable: boolean
   onPause: () => void
   onResume: () => void
   onCancel: () => void
+  onDismiss: () => void
   onSkip: () => void
   onRetry: () => void
   onResolve: () => void
@@ -27,24 +29,36 @@ type JobCardProps = {
   onMoveDown?: () => void
 }
 
-const SPARK_BARS = [
+const BAR_HEIGHTS = [
   'h-2',
-  'h-4',
   'h-2.5',
-  'h-5',
-  'h-6',
-  'h-4',
-  'h-5',
   'h-3',
-  'h-6',
   'h-4',
-  'h-7',
   'h-3.5',
   'h-5',
-  'h-8',
-  'h-4',
   'h-6',
-]
+] as const
+
+function sparklineHeights(history: number[]): readonly string[] {
+  const samples =
+    history.length >= 16
+      ? history.slice(-16)
+      : Array.from({ length: 16 - history.length }, () => history[0] ?? 0).concat(history)
+
+  const max = Math.max(...samples, 1)
+  const min = Math.min(...samples)
+  const range = max - min
+
+  if (range === 0) {
+    const steadyHeight = samples[0] > 0 ? 'h-5' : 'h-2'
+    return Array.from({ length: samples.length }, () => steadyHeight)
+  }
+
+  return samples.map((sample) => {
+    const bucket = Math.round(((sample - min) / range) * (BAR_HEIGHTS.length - 1))
+    return BAR_HEIGHTS[bucket]
+  })
+}
 
 function verb(operation: OpProgress) {
   return operation.kind === 'move' ? 'Moving' : 'Copying'
@@ -52,11 +66,13 @@ function verb(operation: OpProgress) {
 
 export function JobCard({
   operation,
+  throughputHistory,
   hasConflict,
   reorderable,
   onPause,
   onResume,
   onCancel,
+  onDismiss,
   onSkip,
   onRetry,
   onResolve,
@@ -75,7 +91,9 @@ export function JobCard({
   const isCompleted = operation.status === 'completed'
   const isFailed = operation.status === 'failed'
   const isPaused = operation.status === 'paused'
+  const isCancelled = operation.status === 'cancelled'
   const isConflict = operation.status === 'conflict' || hasConflict
+  const sparkline = sparklineHeights(throughputHistory)
 
   return (
     <article
@@ -109,11 +127,16 @@ export function JobCard({
               {isFailed ? (
                 <XCircleIcon className="h-4 w-4 shrink-0 text-accent-red" />
               ) : null}
+              {isCancelled ? (
+                <XCircleIcon className="h-4 w-4 shrink-0 text-light-text-muted dark:text-dark-text-muted" />
+              ) : null}
               <span className="truncate">
                 {isCompleted
                   ? `${verb(operation)} complete`
                   : isFailed
                     ? `${verb(operation)} failed`
+                    : isCancelled
+                      ? `${verb(operation)} cancelled`
                     : `${verb(operation)} ${formatCount(operation.totalItems)} items`}
               </span>
             </div>
@@ -184,9 +207,13 @@ export function JobCard({
         <div className="mt-3 rounded-tab bg-accent-red-soft px-3 py-2 text-uxs text-accent-red">
           {operation.errorMessage}
         </div>
+      ) : isCancelled ? (
+        <div className="mt-3 rounded-tab border border-light-border px-3 py-2 text-uxs text-light-text-muted dark:border-dark-border dark:text-dark-text-muted">
+          Transfer cancelled. Already-copied files were kept.
+        </div>
       ) : (
-        <div className="mt-3.5 flex h-queue-bars items-end gap-0.5">
-          {SPARK_BARS.map((bar, index) => (
+        <div aria-hidden="true" className="mt-3.5 flex h-queue-bars items-end gap-0.5">
+          {sparkline.map((bar, index) => (
             <span
               key={`${bar}-${index}`}
               className={`flex-1 rounded-sm bg-accent-blue-light opacity-60 dark:bg-accent-blue ${bar} ${
@@ -207,14 +234,31 @@ export function JobCard({
             Resolve conflict
           </button>
         ) : isFailed ? (
+          <>
+            <button
+              type="button"
+              onClick={onRetry}
+              className="flex items-center gap-1.5 rounded-md bg-accent-blue-soft px-4 py-2 text-xs font-semibold text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-accent-blue"
+            >
+              <RotateCcwIcon className="h-3.5 w-3.5" /> Retry
+            </button>
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="flex items-center gap-1.5 rounded-md border border-light-border px-3.5 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
+            >
+              <XIcon className="h-3.5 w-3.5" /> Dismiss
+            </button>
+          </>
+        ) : isCompleted || isCancelled ? (
           <button
             type="button"
-            onClick={onRetry}
-            className="flex items-center gap-1.5 rounded-md bg-accent-blue-soft px-4 py-2 text-xs font-semibold text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-accent-blue"
+            onClick={onDismiss}
+            className="flex items-center gap-1.5 rounded-md border border-light-border px-3.5 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
           >
-            <RotateCcwIcon className="h-3.5 w-3.5" /> Retry
+            <XIcon className="h-3.5 w-3.5" /> Dismiss
           </button>
-        ) : isCompleted ? null : isPaused ? (
+        ) : isPaused ? (
           <button
             type="button"
             onClick={onResume}
@@ -232,7 +276,7 @@ export function JobCard({
           </button>
         )}
 
-        {!isCompleted && !isFailed ? (
+        {!isCompleted && !isFailed && !isCancelled ? (
           <button
             type="button"
             onClick={onSkip}
@@ -242,7 +286,7 @@ export function JobCard({
           </button>
         ) : null}
 
-        {!isCompleted ? (
+        {!isCompleted && !isFailed && !isCancelled ? (
           <button
             type="button"
             onClick={onCancel}

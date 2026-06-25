@@ -29,6 +29,7 @@ function reorder(operations: OpProgress[], id: string, delta: number) {
 export function QueuePanel() {
   const order = useQueueStore((state) => state.order)
   const operationsMap = useQueueStore((state) => state.operations)
+  const throughputHistory = useQueueStore((state) => state.throughputHistory)
   const operations = useMemo(
     () =>
       order
@@ -42,6 +43,7 @@ export function QueuePanel() {
   const resume = useQueueStore((state) => state.resume)
   const cancel = useQueueStore((state) => state.cancel)
   const retry = useQueueStore((state) => state.retry)
+  const dismiss = useQueueStore((state) => state.dismissOperation)
   const setExpanded = useQueueStore((state) => state.setExpanded)
 
   const activeCount = operations.filter((operation) => !isTerminal(operation.status)).length
@@ -72,11 +74,13 @@ export function QueuePanel() {
             <JobCard
               key={operation.operationId}
               operation={operation}
+              throughputHistory={throughputHistory[operation.operationId] ?? []}
               hasConflict={Boolean(conflicts[operation.operationId])}
               reorderable={reorderable}
               onPause={() => pause(operation.operationId)}
               onResume={() => resume(operation.operationId)}
               onCancel={() => cancel(operation.operationId)}
+              onDismiss={() => dismiss(operation.operationId)}
               onSkip={() => cancel(operation.operationId)}
               onRetry={() => retry(operation.operationId)}
               onResolve={() => setExpanded(true)}

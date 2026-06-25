@@ -366,6 +366,57 @@ fn completed_jobs_auto_remove_after_retention() {
 }
 
 #[test]
+fn cancelled_jobs_auto_remove_after_retention() {
+    let dir = tempdir().expect("temp dir");
+    let service = OpsService::new(Duration::from_millis(60));
+    service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
+
+    let removed_ids: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let removed_sink = removed_ids.clone();
+    service.set_removed_emitter(move |operation_id| {
+        removed_sink.lock().expect("removed lock").push(operation_id);
+    });
+
+    let blocker = parking_op(&service, &dir.path().join("a"));
+    wait_for(&service, &blocker, |progress| progress.status == OpStatus::Conflict);
+
+    let pending = parking_op(&service, &dir.path().join("b"));
+    wait_for(&service, &pending, |progress| progress.status == OpStatus::Pending);
+
+    service.cancel_op(&pending);
+    wait_for(&service, &pending, |progress| progress.status == OpStatus::Cancelled);
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let present = service
+            .snapshot()
+            .iter()
+            .any(|snapshot| snapshot.progress.operation_id == pending);
+        if !present {
+            break;
+        }
+        if Instant::now() >= deadline {
+            panic!("cancelled operation was not auto-removed");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if removed_ids.lock().expect("removed lock").contains(&pending) {
+            break;
+        }
+        if Instant::now() >= deadline {
+            panic!("cancelled operation did not emit a removed event");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    service.resolve_conflict(&blocker, ConflictResolution::Skip, false, None);
+    wait_for(&service, &blocker, |progress| progress.status == OpStatus::Completed);
+}
+
+#[test]
 fn failed_jobs_persist_and_can_retry() {
     let dir = tempdir().expect("temp dir");
     let dest = dir.path().join("dest");

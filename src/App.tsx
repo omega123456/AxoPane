@@ -20,6 +20,7 @@ import { checkForAppUpdate, summarizeUpdate } from '@/lib/updater'
 import { useUpdaterStore } from '@/stores/updater-store'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
+import { useConfigStore } from '@/stores/config-store'
 import { useLayoutStore } from '@/stores/layout-store'
 import { useKeymapStore } from '@/stores/keymap-store'
 import { initializePanes, usePanesStore } from '@/stores/panes-store'
@@ -39,7 +40,9 @@ function App() {
   const volumes = usePanesStore((state) => state.volumes)
   const activePane = panes[activePaneId]
   const theme = useThemeStore((state) => state.theme)
-  const setTheme = useThemeStore((state) => state.setTheme)
+  const applyTheme = useThemeStore((state) => state.setTheme)
+  const syncThemePreference = useThemeStore((state) => state.setThemePreference)
+  const persistThemePreference = useConfigStore((state) => state.setThemePreference)
   const detailsVisible = useLayoutStore((state) => state.detailsVisible)
   const defaultPaneMode = useLayoutStore((state) => state.defaultPaneMode)
   const activeSelection = useSelectionStore((state) => state.selections[activePaneId])
@@ -60,10 +63,7 @@ function App() {
       ])
 
       hydrateAppConfig(config)
-
-      if (config.theme === 'light' || config.theme === 'dark') {
-        setTheme(config.theme)
-      }
+      syncThemePreference(config.theme)
 
       initialize({
         session,
@@ -74,7 +74,7 @@ function App() {
 
       await Promise.all([reloadPane('left'), reloadPane('right')])
     })()
-  }, [initialize, reloadPane, setTheme])
+  }, [initialize, reloadPane, syncThemePreference])
 
   useEffect(() => {
     void initializePanes()
@@ -166,7 +166,15 @@ function App() {
     <main className="flex h-screen flex-col overflow-hidden bg-light-window font-ui text-light-text dark:bg-dark-window dark:text-dark-text">
       <UpdateBanner />
       <AppFrame
-        commandBar={<CommandBar theme={theme} setTheme={setTheme} />}
+        commandBar={
+          <CommandBar
+            theme={theme}
+            setTheme={(nextTheme) => {
+              applyTheme(nextTheme)
+              void persistThemePreference(nextTheme)
+            }}
+          />
+        }
         statusBar={<StatusBar activePane={activePane} summary={statusSummary} />}
         overlay={<QueueOverlay />}
       >

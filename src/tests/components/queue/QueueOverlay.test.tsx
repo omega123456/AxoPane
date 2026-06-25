@@ -90,6 +90,22 @@ describe('QueueOverlay', () => {
     expect(useQueueStore.getState().order).toEqual([])
   })
 
+  it('lets the collapsed toast dismiss terminal jobs', async () => {
+    const user = userEvent.setup()
+    ipc.override('queue_snapshot', [
+      { progress: progress({ status: 'cancelled', currentFileName: null, bytesPerSecond: 0 }), conflict: null },
+    ])
+    render(<QueueOverlay />)
+
+    await screen.findByRole('button', { name: 'Expand transfer queue' })
+    await user.click(screen.getByRole('button', { name: 'Dismiss transfer queue' }))
+
+    await waitFor(() => {
+      expect(useQueueStore.getState().order).toEqual([])
+    })
+    expect(screen.queryByRole('button', { name: 'Expand transfer queue' })).not.toBeInTheDocument()
+  })
+
   it('surfaces a conflict in the active pane only and keeps Enter mapped to Skip', async () => {
     const user = userEvent.setup()
     const resolveSpy = vi.fn(() => undefined)

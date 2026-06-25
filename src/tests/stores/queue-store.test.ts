@@ -59,15 +59,19 @@ describe('queue store', () => {
       'op-2',
     ])
     expect(activeConflict(state)?.operationId).toBe('op-2')
+    expect(state.throughputHistory['op-1']).toEqual([100])
   })
 
   it('appends new operations on first progress and updates in place after', () => {
     useQueueStore.getState().applyProgress(progress({ operationId: 'op-1', copiedBytes: 100 }))
-    useQueueStore.getState().applyProgress(progress({ operationId: 'op-1', copiedBytes: 900 }))
+    useQueueStore
+      .getState()
+      .applyProgress(progress({ operationId: 'op-1', copiedBytes: 900, bytesPerSecond: 275 }))
 
     const operations = orderedOperations(useQueueStore.getState())
     expect(operations).toHaveLength(1)
     expect(operations[0].copiedBytes).toBe(900)
+    expect(useQueueStore.getState().throughputHistory['op-1']).toEqual([100, 275])
   })
 
   it('clears a conflict when the op leaves the conflict state', () => {
@@ -163,6 +167,7 @@ describe('queue store', () => {
     expect(state.order).toEqual(['op-2'])
     expect(state.operations['op-1']).toBeUndefined()
     expect(state.conflicts['op-1']).toBeUndefined()
+    expect(state.throughputHistory['op-1']).toBeUndefined()
     expect(orderedOperations(state).map((operation) => operation.operationId)).toEqual(['op-2'])
   })
 
@@ -170,6 +175,17 @@ describe('queue store', () => {
     useQueueStore.getState().applyProgress(progress({ operationId: 'op-1', status: 'active' }))
     useQueueStore.getState().removeOperation('missing')
     expect(orderedOperations(useQueueStore.getState())).toHaveLength(1)
+  })
+
+  it('dismisses only terminal operations', () => {
+    useQueueStore.getState().applyProgress(progress({ operationId: 'op-1', status: 'cancelled' }))
+    useQueueStore.getState().applyProgress(progress({ operationId: 'op-2', status: 'active' }))
+
+    useQueueStore.getState().dismissOperation('op-1')
+    useQueueStore.getState().dismissOperation('op-2')
+
+    expect(useQueueStore.getState().operations['op-1']).toBeUndefined()
+    expect(useQueueStore.getState().operations['op-2']).toBeDefined()
   })
 
   it('reports terminal status and unfinished work', () => {

@@ -1,9 +1,11 @@
 import { beforeEach } from 'vitest'
+import { useConfigStore } from '@/stores/config-store'
 import { useLayoutStore } from '@/stores/layout-store'
 import { clearSelectionForPane, useSelectionStore } from '@/stores/selection-store'
 import { initializeTheme, useThemeStore } from '@/stores/theme-store'
 
 beforeEach(() => {
+  useConfigStore.getState().reset()
   useLayoutStore.getState().reset()
   useSelectionStore.getState().reset()
   document.documentElement.classList.remove('dark')
@@ -73,7 +75,7 @@ describe('theme-store', () => {
     useThemeStore.getState().toggleTheme()
     expect(useThemeStore.getState().theme).toBe('dark')
 
-    useThemeStore.setState({ theme: 'light' })
+    useConfigStore.setState({ theme: 'light' })
     initializeTheme()
     expect(document.documentElement).not.toHaveClass('dark')
   })

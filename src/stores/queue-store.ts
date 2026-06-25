@@ -18,6 +18,8 @@ type QueueStore = {
   operations: Record<string, OpProgress>
   /** Submission / display order. */
   order: string[]
+  /** Recent throughput samples keyed by operation id. */
+  throughputHistory: Record<string, number[]>
   /** Pending conflicts keyed by operation id. */
   conflicts: Record<string, ConflictInfo>
   /** Whether the queue panel is expanded (vs collapsed toast). */
@@ -29,6 +31,8 @@ type QueueStore = {
   applyConflict: (conflict: ConflictInfo) => void
   /** Drop an operation the backend has auto-removed from the queue. */
   removeOperation: (id: string) => void
+  /** Dismiss a terminal operation from the UI. */
+  dismissOperation: (id: string) => void
   /** Side-effecting controls that proxy to the backend and update local state. */
   pause: (id: string) => void
   resume: (id: string) => void
@@ -47,16 +51,38 @@ function defaultState() {
   return {
     operations: {} as Record<string, OpProgress>,
     order: [] as string[],
+    throughputHistory: {} as Record<string, number[]>,
     conflicts: {} as Record<string, ConflictInfo>,
     expanded: false,
   }
 }
 
+const MAX_THROUGHPUT_SAMPLES = 16
 const TERMINAL: ReadonlySet<OpProgress['status']> = new Set([
   'completed',
   'failed',
   'cancelled',
 ])
+
+function appendThroughputSample(existing: number[] | undefined, sample: number): number[] {
+  const next = [...(existing ?? []), sample]
+  return next.slice(-MAX_THROUGHPUT_SAMPLES)
+}
+
+function pruneOperationState(state: QueueStore, id: string): Partial<QueueStore> {
+  const operations = { ...state.operations }
+  delete operations[id]
+  const conflicts = { ...state.conflicts }
+  delete conflicts[id]
+  const throughputHistory = { ...state.throughputHistory }
+  delete throughputHistory[id]
+  return {
+    operations,
+    conflicts,
+    throughputHistory,
+    order: state.order.filter((entry) => entry !== id),
+  }
+}
 
 export const useQueueStore = create<QueueStore>((set) => ({
   ...defaultState(),
@@ -65,19 +91,31 @@ export const useQueueStore = create<QueueStore>((set) => ({
   hydrate: (snapshots) => {
     const operations: Record<string, OpProgress> = {}
     const conflicts: Record<string, ConflictInfo> = {}
+    const throughputHistory: Record<string, number[]> = {}
     const order: string[] = []
     for (const snapshot of snapshots) {
       operations[snapshot.progress.operationId] = snapshot.progress
+      throughputHistory[snapshot.progress.operationId] = appendThroughputSample(
+        undefined,
+        snapshot.progress.bytesPerSecond,
+      )
       order.push(snapshot.progress.operationId)
       if (snapshot.conflict) {
         conflicts[snapshot.progress.operationId] = snapshot.conflict
       }
     }
-    set({ operations, order, conflicts })
+    set({ operations, order, throughputHistory, conflicts })
   },
   applyProgress: (progress) =>
     set((state) => {
       const operations = { ...state.operations, [progress.operationId]: progress }
+      const throughputHistory = {
+        ...state.throughputHistory,
+        [progress.operationId]: appendThroughputSample(
+          state.throughputHistory[progress.operationId],
+          progress.bytesPerSecond,
+        ),
+      }
       const order = state.order.includes(progress.operationId)
         ? state.order
         : [...state.order, progress.operationId]
@@ -90,7 +128,7 @@ export const useQueueStore = create<QueueStore>((set) => ({
         delete conflicts[progress.operationId]
       }
 
-      return { operations, order, conflicts }
+      return { operations, order, throughputHistory, conflicts }
     }),
   applyConflict: (conflict) =>
     set((state) => ({
@@ -106,15 +144,15 @@ export const useQueueStore = create<QueueStore>((set) => ({
       if (!state.order.includes(id) && !state.operations[id]) {
         return state
       }
-      const operations = { ...state.operations }
-      delete operations[id]
-      const conflicts = { ...state.conflicts }
-      delete conflicts[id]
-      return {
-        operations,
-        conflicts,
-        order: state.order.filter((entry) => entry !== id),
+      return pruneOperationState(state, id)
+    }),
+  dismissOperation: (id) =>
+    set((state) => {
+      const operation = state.operations[id]
+      if (!operation || !isTerminal(operation.status)) {
+        return state
       }
+      return pruneOperationState(state, id)
     }),
   pause: (id) => {
     void pauseOp(id)

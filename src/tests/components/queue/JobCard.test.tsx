@@ -31,6 +31,7 @@ function noopHandlers() {
     onPause: vi.fn(),
     onResume: vi.fn(),
     onCancel: vi.fn(),
+    onDismiss: vi.fn(),
     onSkip: vi.fn(),
     onRetry: vi.fn(),
     onResolve: vi.fn(),
@@ -40,7 +41,13 @@ function noopHandlers() {
 describe('JobCard', () => {
   it('renders the active copy header, percent, current file and controls', () => {
     render(
-      <JobCard operation={progress({})} hasConflict={false} reorderable={false} {...noopHandlers()} />,
+      <JobCard
+        operation={progress({})}
+        throughputHistory={[240_000_000, 250_000_000, 260_046_848]}
+        hasConflict={false}
+        reorderable={false}
+        {...noopHandlers()}
+      />,
     )
     expect(screen.getByText('Copying 1,248 items')).toBeInTheDocument()
     expect(screen.getByText('63%')).toBeInTheDocument()
@@ -55,6 +62,7 @@ describe('JobCard', () => {
     render(
       <JobCard
         operation={progress({ etaSeconds: null })}
+        throughputHistory={[260_046_848]}
         hasConflict={false}
         reorderable={false}
         {...noopHandlers()}
@@ -69,6 +77,7 @@ describe('JobCard', () => {
     render(
       <JobCard
         operation={progress({ status: 'paused' })}
+        throughputHistory={[260_046_848, 0]}
         hasConflict={false}
         reorderable={false}
         {...handlers}
@@ -79,17 +88,22 @@ describe('JobCard', () => {
     expect(handlers.onResume).toHaveBeenCalled()
   })
 
-  it('renders completed state with no controls', () => {
+  it('renders completed state with a dismiss control', async () => {
+    const handlers = noopHandlers()
+    const user = userEvent.setup()
     render(
       <JobCard
         operation={progress({ status: 'completed', progressPercent: 100, currentFileName: null })}
+        throughputHistory={[260_046_848, 200_000_000, 0]}
         hasConflict={false}
         reorderable={false}
-        {...noopHandlers()}
+        {...handlers}
       />,
     )
     expect(screen.getByText('Copying complete')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Pause/ })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Dismiss/ }))
+    expect(handlers.onDismiss).toHaveBeenCalled()
   })
 
   it('renders failed state with a retry control and error message', async () => {
@@ -98,6 +112,7 @@ describe('JobCard', () => {
     render(
       <JobCard
         operation={progress({ status: 'failed', errorMessage: 'disk full' })}
+        throughputHistory={[260_046_848, 120_000_000, 0]}
         hasConflict={false}
         reorderable={false}
         {...handlers}
@@ -107,6 +122,28 @@ describe('JobCard', () => {
     expect(screen.getByText('disk full')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /Retry/ }))
     expect(handlers.onRetry).toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: /Dismiss/ }))
+    expect(handlers.onDismiss).toHaveBeenCalled()
+  })
+
+  it('renders cancelled state with a dismiss control and no active actions', async () => {
+    const handlers = noopHandlers()
+    const user = userEvent.setup()
+    render(
+      <JobCard
+        operation={progress({ status: 'cancelled', currentFileName: null })}
+        throughputHistory={[260_046_848, 190_000_000, 0]}
+        hasConflict={false}
+        reorderable={false}
+        {...handlers}
+      />,
+    )
+    expect(screen.getByText('Copying cancelled')).toBeInTheDocument()
+    expect(screen.getByText(/Already-copied files were kept/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Pause/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Cancel/ })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Dismiss/ }))
+    expect(handlers.onDismiss).toHaveBeenCalled()
   })
 
   it('exposes reorder controls when reorderable', async () => {
@@ -116,6 +153,7 @@ describe('JobCard', () => {
     render(
       <JobCard
         operation={progress({ status: 'pending' })}
+        throughputHistory={[0]}
         hasConflict={false}
         reorderable
         {...noopHandlers()}
@@ -135,6 +173,7 @@ describe('JobCard', () => {
     render(
       <JobCard
         operation={progress({ status: 'conflict' })}
+        throughputHistory={[260_046_848]}
         hasConflict
         reorderable={false}
         {...handlers}
@@ -148,6 +187,7 @@ describe('JobCard', () => {
     render(
       <JobCard
         operation={progress({ kind: 'move' })}
+        throughputHistory={[260_046_848]}
         hasConflict={false}
         reorderable={false}
         {...noopHandlers()}

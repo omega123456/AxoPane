@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::volumes::{self, VolumeInfo};
 
-/// How long a completed operation lingers in the queue before being auto-removed.
+/// How long a completed or cancelled operation lingers in the queue before being auto-removed.
 pub const DEFAULT_COMPLETED_RETENTION: Duration = Duration::from_secs(4);
 
 /// Number of progress samples required before an ETA is considered stable enough
@@ -279,6 +279,11 @@ impl OpsService {
         *self.removed_emitter.lock().expect("removed emitter lock") = Some(Arc::new(emitter));
     }
 
+    fn schedule_auto_remove_for(&self, id: &str) {
+        let removed = self.removed_emitter.lock().expect("removed emitter lock").clone();
+        schedule_auto_remove(id, &self.inner, removed, self.completed_retention);
+    }
+
     fn emit_progress(&self, op: &OpState) {
         if let Some(emitter) = self
             .progress_emitter
@@ -445,6 +450,7 @@ impl OpsService {
                 guard.status = OpStatus::Cancelled;
                 guard.completed_at = Some(Instant::now());
                 self.emit_progress(&guard);
+                self.schedule_auto_remove_for(id);
                 false
             } else {
                 guard.cancel.store(true, Ordering::Relaxed);
@@ -902,7 +908,7 @@ fn release_and_reschedule(
         });
     }
 
-    // Auto-remove completed operations after the retention window.
+    // Auto-remove completed/cancelled operations after the retention window.
     schedule_auto_remove(id, inner, removed, retention);
 }
 
@@ -944,7 +950,12 @@ fn schedule_auto_remove(
         .expect("ops lock")
         .ops
         .get(id)
-        .map(|op| matches!(op.lock().expect("op lock").status, OpStatus::Completed))
+        .map(|op| {
+            matches!(
+                op.lock().expect("op lock").status,
+                OpStatus::Completed | OpStatus::Cancelled
+            )
+        })
         .unwrap_or(false);
 
     if !should_remove {
@@ -956,12 +967,17 @@ fn schedule_auto_remove(
     thread::spawn(move || {
         thread::sleep(retention);
         let mut guard = inner.lock().expect("ops lock");
-        let still_completed = guard
+        let still_terminal = guard
             .ops
             .get(&id)
-            .map(|op| matches!(op.lock().expect("op lock").status, OpStatus::Completed))
+            .map(|op| {
+                matches!(
+                    op.lock().expect("op lock").status,
+                    OpStatus::Completed | OpStatus::Cancelled
+                )
+            })
             .unwrap_or(false);
-        if still_completed {
+        if still_terminal {
             guard.ops.remove(&id);
             guard.order.retain(|entry| entry != &id);
             drop(guard);

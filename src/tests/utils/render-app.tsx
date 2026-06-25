@@ -9,12 +9,12 @@ import { useTabsStore } from '@/stores/tabs-store'
 import { initializeTheme } from '@/stores/theme-store'
 
 export function renderApp() {
-  initializeTheme()
   useConfigStore.getState().reset()
   useLayoutStore.getState().reset()
   usePanesStore.getState().reset()
   useTabsStore.getState().reset()
   useSelectionStore.getState().reset()
+  initializeTheme()
 
   const queryClient = new QueryClient({
     defaultOptions: {
