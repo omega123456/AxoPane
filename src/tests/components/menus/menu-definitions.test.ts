@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { buildContextMenuItems, resolveMenuTarget } from '@/components/menus/menu-definitions'
+import {
+  buildContextMenuItems,
+  describeMenuTarget,
+  resolveMenuTarget,
+} from '@/components/menus/menu-definitions'
 import { useClipboardStore } from '@/stores/clipboard-store'
 import { useKeymapStore } from '@/stores/keymap-store'
 import { usePanesStore } from '@/stores/panes-store'
@@ -58,8 +62,11 @@ describe('menu definitions', () => {
   it('builds folder menus with enabled calculate size for manual capability', () => {
     const items = buildContextMenuItems('left', { kind: 'folder', entry: folderEntry }, 'windows')
     const calculate = items.find((item) => item.id === 'calculateSize')
+    const open = items.find((item) => item.id === 'open')
     expect(calculate?.disabled).toBe(false)
+    expect(calculate?.separatorBefore).toBe(true)
     expect(calculate?.shortcut).toBe('Space')
+    expect(open?.strong).toBe(true)
   })
 
   it('hides calculate size when Everything is available and disables paste without clipboard data', () => {
@@ -78,6 +85,21 @@ describe('menu definitions', () => {
 
     const fileItems = buildContextMenuItems('left', { kind: 'file', entry: fileEntry }, 'macos')
     expect(fileItems.find((item) => item.id === 'openInNewTab')?.disabled).toBe(true)
+    expect(fileItems.find((item) => item.id === 'openInNewTab')?.separatorBefore).toBe(true)
     expect(fileItems.find((item) => item.id === 'openInNewTab')?.shortcut).toBe('⌘Enter')
+  })
+
+  it('describes header metadata for file, folder, and multi-select targets', () => {
+    expect(describeMenuTarget({ kind: 'file', entry: fileEntry })).toEqual({
+      title: 'Report.txt',
+      chip: 'TXT',
+    })
+    expect(describeMenuTarget({ kind: 'folder', entry: folderEntry })).toEqual({
+      title: 'Documents',
+      chip: 'DIR',
+    })
+    expect(describeMenuTarget({ kind: 'multi' })).toEqual({
+      title: 'Multiple items',
+    })
   })
 })

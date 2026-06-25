@@ -40,7 +40,8 @@ export function TabBar({ paneId, title, currentPath, isActive }: TabBarProps) {
               event.preventDefault()
               openMenu({
                 paneId,
-                title: `Tab menu for ${tabLabel(tab)}`,
+                title: tabLabel(tab),
+                chip: 'TAB',
                 x: event.clientX,
                 y: event.clientY,
                 items: buildContextMenuItems(paneId, { kind: 'tab', tabId: tab.id }, os),

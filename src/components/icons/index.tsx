@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -45,6 +46,7 @@ function withDefaults(Icon: LucideIcon) {
 }
 
 export const AlertTriangleIcon = withDefaults(AlertTriangle)
+export const CheckIcon = withDefaults(Check)
 export const ArrowLeftIcon = withDefaults(ArrowLeft)
 export const ArrowRightIcon = withDefaults(ArrowRight)
 export const ArrowUpIcon = withDefaults(ArrowUp)

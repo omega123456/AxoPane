@@ -21,8 +21,10 @@ export async function openSettingsSection(
   section: 'keybindings' | 'columns' | 'layout',
 ) {
   await page.getByRole('button', { name: 'Settings' }).click()
-  if (section !== 'keybindings') {
-    await page.getByRole('button', { name: new RegExp(`^${section}$`, 'i') }).click()
+  if (section === 'columns') {
+    await page.getByRole('button', { name: 'Columns' }).click()
+  } else if (section === 'layout') {
+    await page.getByRole('button', { name: 'View & Layout' }).click()
   }
 }
 

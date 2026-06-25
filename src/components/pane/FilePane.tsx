@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { buildContextMenuItems, resolveMenuTarget } from '@/components/menus/menu-definitions'
+import {
+  buildContextMenuItems,
+  describeMenuTarget,
+  resolveMenuTarget,
+} from '@/components/menus/menu-definitions'
 import { BreadcrumbBar } from './BreadcrumbBar'
 import { FileRow } from './FileRow'
 import { HeaderRow } from './HeaderRow'
@@ -182,9 +186,11 @@ export function FilePane({ paneId }: FilePaneProps) {
     }
 
     const target = resolveMenuTarget(paneId, entry)
+    const { title, chip } = describeMenuTarget(target)
     openMenu({
       paneId,
-      title: `${pane.title} menu`,
+      title,
+      chip,
       x: event.clientX,
       y: event.clientY,
       items: buildContextMenuItems(paneId, target, os),

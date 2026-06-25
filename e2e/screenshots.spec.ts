@@ -70,7 +70,7 @@ for (const mode of ['light', 'dark'] as const) {
   test(`settings columns ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
     await openSettingsSection(page, 'columns')
-    await expect(page.getByText('Shown').first()).toBeVisible()
+    await expect(page.getByRole('switch', { name: 'Created column' })).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`phase-8-settings-columns-${mode}.png`)
   })
 
@@ -84,14 +84,14 @@ for (const mode of ['light', 'dark'] as const) {
   test(`pane context menu ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
     await rightClickPane(page, 'Left pane')
-    await expect(page.getByRole('menu', { name: 'Left pane menu' })).toBeVisible()
+    await expect(page.getByRole('menu', { name: 'This folder' })).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`phase-8-context-pane-${mode}.png`)
   })
 
   test(`row context menu ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
     await page.getByRole('row', { name: /Documents/ }).first().click({ button: 'right' })
-    await expect(page.getByRole('menu', { name: 'Left pane menu' })).toBeVisible()
+    await expect(page.getByRole('menu', { name: 'Documents' })).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`phase-8-context-row-${mode}.png`)
   })
 
@@ -106,7 +106,7 @@ for (const mode of ['light', 'dark'] as const) {
   test(`rename dialog ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
     await page.getByRole('row', { name: /Documents/ }).first().click({ button: 'right' })
-    const menu = page.getByRole('menu', { name: 'Left pane menu' })
+    const menu = page.getByRole('menu', { name: 'Documents' })
     await expect(menu).toBeVisible()
     await menu.getByRole('menuitem').filter({ hasText: 'Rename' }).click()
     await expect(page.getByRole('dialog', { name: 'Rename' })).toBeVisible()
@@ -116,7 +116,7 @@ for (const mode of ['light', 'dark'] as const) {
   test(`delete dialog ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
     await page.getByRole('row', { name: /Documents/ }).first().click({ button: 'right' })
-    const menu = page.getByRole('menu', { name: 'Left pane menu' })
+    const menu = page.getByRole('menu', { name: 'Documents' })
     await expect(menu).toBeVisible()
     await menu.getByRole('menuitem').filter({ hasText: 'Delete' }).click()
     await expect(page.getByRole('dialog', { name: 'Confirm delete' })).toBeVisible()

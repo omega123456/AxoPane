@@ -30,7 +30,8 @@ export function TreeNode({ path, depth }: TreeNodeProps) {
           event.preventDefault()
           openMenu({
             paneId: activePaneId,
-            title: `Tree menu for ${node.name}`,
+            title: node.name,
+            chip: 'DIR',
             x: event.clientX,
             y: event.clientY,
             items: buildContextMenuItems(activePaneId, { kind: 'tree', path: node.path }, detectPlatformOs()),

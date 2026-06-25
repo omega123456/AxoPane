@@ -10,13 +10,32 @@ import { useSelectionStore } from '@/stores/selection-store'
 import { useTabsStore } from '@/stores/tabs-store'
 import type { PaneId } from '@/types/pane'
 
-type MenuTarget =
+export type MenuTarget =
   | { kind: 'file'; entry: DirectoryEntry }
   | { kind: 'folder'; entry: DirectoryEntry }
   | { kind: 'multi' }
   | { kind: 'empty' }
   | { kind: 'tab'; tabId: string }
   | { kind: 'tree'; path: string }
+
+function fileChip(entry: DirectoryEntry): string {
+  const dot = entry.name.lastIndexOf('.')
+  const ext = dot > 0 ? entry.name.slice(dot + 1).toUpperCase() : ''
+  return ext && ext.length <= 4 ? ext : 'FILE'
+}
+
+export function describeMenuTarget(target: MenuTarget): { title: string; chip?: string } {
+  switch (target.kind) {
+    case 'file':
+      return { title: target.entry.name, chip: fileChip(target.entry) }
+    case 'folder':
+      return { title: target.entry.name, chip: 'DIR' }
+    case 'multi':
+      return { title: 'Multiple items' }
+    default:
+      return { title: 'This folder' }
+  }
+}
 
 function shortcutFor(commandId: keyof ReturnType<typeof useKeymapStore.getState>['bindings'], os: PlatformOs) {
   const binding = useKeymapStore.getState().bindings[commandId][0]
@@ -27,7 +46,13 @@ function baseAction(
   paneId: PaneId,
   commandId: Parameters<typeof executeCommand>[0],
   os: PlatformOs,
-  options?: { disabled?: boolean; danger?: boolean; targetEntryId?: string },
+  options?: {
+    disabled?: boolean
+    danger?: boolean
+    targetEntryId?: string
+    strong?: boolean
+    separatorBefore?: boolean
+  },
 ): ContextMenuItem {
   return {
     id: commandId,
@@ -35,6 +60,8 @@ function baseAction(
     shortcut: shortcutFor(commandId, os),
     disabled: options?.disabled,
     danger: options?.danger,
+    strong: options?.strong,
+    separatorBefore: options?.separatorBefore,
     onSelect: () => executeCommand(commandId, paneId, options?.targetEntryId),
   }
 }
@@ -72,6 +99,7 @@ function calculateSizeItem(paneId: PaneId, entry: DirectoryEntry, os: PlatformOs
     ...baseAction(paneId, 'calculateSize', os, {
       targetEntryId: entry.id,
       disabled: Boolean(volume?.isNetwork),
+      separatorBefore: true,
     }),
     hidden: everythingStatus?.isAvailable ?? false,
   }
@@ -90,17 +118,21 @@ export function buildContextMenuItems(paneId: PaneId, target: MenuTarget, os: Pl
         id: 'refresh-tab',
         label: 'Refresh',
         shortcut: shortcutFor('refresh', os),
+        strong: true,
         onSelect: () => executeCommand('refresh', paneId),
       },
       {
         id: 'close-tab',
         label: 'Close tab',
         disabled: tabs.tabs.length <= 1,
+        danger: true,
+        separatorBefore: true,
         onSelect: () => void usePanesStore.getState().closeTab(paneId, target.tabId),
       },
       {
         id: 'open-tab-other',
         label: 'Open in other pane',
+        separatorBefore: true,
         onSelect: () => void usePanesStore.getState().navigatePane(paneId === 'left' ? 'right' : 'left', pane.path),
       },
     ]
@@ -116,12 +148,14 @@ export function buildContextMenuItems(paneId: PaneId, target: MenuTarget, os: Pl
         id: 'open-tree',
         label: 'Open',
         shortcut: shortcutFor('open', os),
+        strong: true,
         onSelect: () => void usePanesStore.getState().navigatePane(paneId, target.path),
       },
       {
         id: 'open-tree-tab',
         label: 'Open in new tab',
         shortcut: shortcutFor('openInNewTab', os),
+        separatorBefore: true,
         onSelect: () => void usePanesStore.getState().openTabFromPath(paneId, target.path),
       },
       {
@@ -149,50 +183,58 @@ export function buildContextMenuItems(paneId: PaneId, target: MenuTarget, os: Pl
   if (target.kind === 'empty') {
     return [
       baseAction(paneId, 'paste', os, { disabled: !canPaste }),
-      baseAction(paneId, 'newFolder', os),
+      baseAction(paneId, 'newFolder', os, { separatorBefore: true }),
       baseAction(paneId, 'newFile', os),
-      baseAction(paneId, 'refresh', os),
-      baseAction(paneId, 'selectAll', os, { disabled: pane.entries.length === 0 }),
+      baseAction(paneId, 'refresh', os, { separatorBefore: true, strong: true }),
+      baseAction(paneId, 'selectAll', os, { disabled: pane.entries.length === 0, separatorBefore: true }),
     ]
   }
 
   if (target.kind === 'multi') {
     return [
-      baseAction(paneId, 'copy', os, { disabled: selectedEntries.length === 0 }),
+      baseAction(paneId, 'copy', os, { disabled: selectedEntries.length === 0, strong: true }),
       baseAction(paneId, 'cut', os, { disabled: selectedEntries.length === 0 }),
-      baseAction(paneId, 'paste', os, { disabled: !canPaste }),
-      baseAction(paneId, 'delete', os, { disabled: selectedEntries.length === 0, danger: true }),
-      baseAction(paneId, 'refresh', os),
-      baseAction(paneId, 'selectAll', os, { disabled: pane.entries.length === 0 }),
+      baseAction(paneId, 'paste', os, { disabled: !canPaste, separatorBefore: true }),
+      baseAction(paneId, 'delete', os, {
+        disabled: selectedEntries.length === 0,
+        danger: true,
+        separatorBefore: true,
+      }),
+      baseAction(paneId, 'refresh', os, { separatorBefore: true }),
+      baseAction(paneId, 'selectAll', os, { disabled: pane.entries.length === 0, separatorBefore: true }),
     ]
   }
 
   const entry = target.entry
   const targetEntryId = entry.id
   const common = [
-    baseAction(paneId, 'open', os, { targetEntryId }),
-    baseAction(paneId, 'copy', os, { targetEntryId }),
+    baseAction(paneId, 'open', os, { targetEntryId, strong: true }),
+    baseAction(paneId, 'copy', os, { targetEntryId, separatorBefore: true }),
     baseAction(paneId, 'cut', os, { targetEntryId }),
-    baseAction(paneId, 'paste', os, { disabled: !canPaste }),
-    baseAction(paneId, 'rename', os, { targetEntryId }),
-    baseAction(paneId, 'delete', os, { targetEntryId, danger: true }),
+    baseAction(paneId, 'paste', os, { disabled: !canPaste, separatorBefore: true }),
+    baseAction(paneId, 'rename', os, { targetEntryId, separatorBefore: true }),
+    baseAction(paneId, 'delete', os, { targetEntryId, danger: true, separatorBefore: true }),
   ]
 
   if (target.kind === 'folder') {
     return [
       ...common,
       calculateSizeItem(paneId, entry, os),
-      baseAction(paneId, 'openInNewTab', os, { targetEntryId }),
+      baseAction(paneId, 'openInNewTab', os, { targetEntryId, separatorBefore: true }),
       baseAction(paneId, 'openInOtherPane', os, { targetEntryId }),
-      baseAction(paneId, 'refresh', os),
+      baseAction(paneId, 'refresh', os, { separatorBefore: true }),
     ]
   }
 
   return [
     ...common,
-    baseAction(paneId, 'openInNewTab', os, { targetEntryId, disabled: true }),
+    baseAction(paneId, 'openInNewTab', os, {
+      targetEntryId,
+      disabled: true,
+      separatorBefore: true,
+    }),
     baseAction(paneId, 'openInOtherPane', os, { targetEntryId, disabled: true }),
-    baseAction(paneId, 'refresh', os),
+    baseAction(paneId, 'refresh', os, { separatorBefore: true }),
   ]
 }
 

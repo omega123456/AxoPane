@@ -7,6 +7,9 @@ export type ContextMenuItem = {
   disabled?: boolean
   danger?: boolean
   hidden?: boolean
+  strong?: boolean
+  submenu?: boolean
+  separatorBefore?: boolean
   onSelect?: () => void
 }
 
@@ -15,6 +18,7 @@ export type ContextMenuState = {
   x: number
   y: number
   title: string
+  chip?: string
   items: ContextMenuItem[]
   targetId?: string
 }
@@ -31,16 +35,17 @@ type Store = {
 export const useContextMenuStore = create<Store>((set) => ({
   menu: null,
   activeIndex: 0,
-  openMenu: (menu) =>
+  openMenu: (menu) => {
+    const visibleItems = menu.items.filter((item) => !item.hidden)
+    const activeIndex = visibleItems.findIndex((item) => !item.disabled)
     set({
       menu: {
         ...menu,
-        items: menu.items.filter((item) => !item.hidden),
+        items: visibleItems,
       },
-      activeIndex: menu.items.findIndex((item) => !item.hidden && !item.disabled) >= 0
-        ? menu.items.findIndex((item) => !item.hidden && !item.disabled)
-        : 0,
-    }),
+      activeIndex: activeIndex >= 0 ? activeIndex : 0,
+    })
+  },
   closeMenu: () => set({ menu: null, activeIndex: 0 }),
   moveActive: (direction) =>
     set((state) => {
