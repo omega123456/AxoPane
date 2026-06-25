@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { TreeNode } from './TreeNode'
+import { isPathInsideVolume } from '@/lib/volumes'
 import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 
@@ -11,9 +12,7 @@ export function FolderTree() {
   const treeWidth = useLayoutStore((state) => state.treeWidth)
 
   useEffect(() => {
-    const root = treeRoots.find((candidate) =>
-      activePath.toLowerCase().startsWith(candidate.toLowerCase()),
-    )
+    const root = treeRoots.find((candidate) => isPathInsideVolume(activePath, candidate))
 
     if (root) {
       void ensureTreeChildren(root)

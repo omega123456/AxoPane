@@ -7,10 +7,34 @@ use std::cmp::Ordering;
 use sysinfo::Disks;
 
 #[cfg(all(not(feature = "test-utils"), windows))]
-use std::ffi::OsStr;
+use std::ffi::{c_void, OsStr};
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+use std::path::Path;
 
 #[cfg(all(not(feature = "test-utils"), windows))]
 use std::os::windows::ffi::OsStrExt;
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+use windows_sys::Win32::Foundation::{ERROR_MORE_DATA, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS, HANDLE};
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+use windows_sys::Win32::NetworkManagement::WNet::{
+    WNetCloseEnum, WNetEnumResourceW, WNetOpenEnumW, NETRESOURCEW, RESOURCETYPE_DISK,
+    RESOURCE_CONNECTED, RESOURCE_REMEMBERED,
+};
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+use windows::core::{Interface, PCWSTR};
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
+    COINIT_APARTMENTTHREADED, STGM_READ,
+};
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+use windows::Win32::UI::Shell::{IShellLinkW, ShellLink, SLGP_UNCPRIORITY};
 
 #[cfg(all(not(feature = "test-utils"), windows))]
 use windows_sys::Win32::Storage::FileSystem::{
@@ -79,6 +103,8 @@ pub fn list_volumes() -> Vec<VolumeInfo> {
         });
     }
 
+    extend_network_resources(&mut volumes);
+    extend_network_shortcuts(&mut volumes);
     sort_volumes(&mut volumes);
     volumes
 }
@@ -228,6 +254,317 @@ fn disk_space_for_root(root: &[u16]) -> (u64, u64) {
     (total_bytes, free_bytes)
 }
 
+#[cfg(all(not(feature = "test-utils"), windows))]
+fn extend_network_resources(volumes: &mut Vec<VolumeInfo>) {
+    extend_network_resources_for_scope(volumes, RESOURCE_CONNECTED);
+    extend_network_resources_for_scope(volumes, RESOURCE_REMEMBERED);
+}
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+fn extend_network_resources_for_scope(volumes: &mut Vec<VolumeInfo>, scope: u32) {
+    let mut handle: HANDLE = std::ptr::null_mut();
+    let status = unsafe {
+        WNetOpenEnumW(scope, RESOURCETYPE_DISK, 0, std::ptr::null(), &mut handle)
+    };
+
+    if status != ERROR_SUCCESS {
+        return;
+    }
+
+    let mut buffer = vec![0_u8; 16 * 1024];
+    loop {
+        let mut count = u32::MAX;
+        let mut buffer_size = buffer.len() as u32;
+        let status = unsafe {
+            WNetEnumResourceW(
+                handle,
+                &mut count,
+                buffer.as_mut_ptr().cast::<c_void>(),
+                &mut buffer_size,
+            )
+        };
+
+        if status == ERROR_NO_MORE_ITEMS {
+            break;
+        }
+
+        if status == ERROR_MORE_DATA && buffer_size as usize > buffer.len() {
+            buffer.resize(buffer_size as usize, 0);
+            continue;
+        }
+
+        if status != ERROR_SUCCESS {
+            break;
+        }
+
+        let resources = unsafe {
+            std::slice::from_raw_parts(buffer.as_ptr().cast::<NETRESOURCEW>(), count as usize)
+        };
+
+        for resource in resources {
+            if resource.dwType != RESOURCETYPE_DISK {
+                continue;
+            }
+
+            let remote_name = wide_ptr_to_string(resource.lpRemoteName);
+            let local_name = wide_ptr_to_string(resource.lpLocalName);
+            let mount_root = normalize_network_mount_root(&local_name, &remote_name);
+
+            let Some(mount_root) = mount_root else {
+                continue;
+            };
+
+            if volumes
+                .iter()
+                .any(|volume| volume.mount_root.eq_ignore_ascii_case(&mount_root))
+            {
+                continue;
+            }
+
+            push_network_volume(volumes, mount_root, None, true);
+        }
+    }
+
+    unsafe {
+        WNetCloseEnum(handle);
+    }
+}
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+fn wide_ptr_to_string(ptr: *const u16) -> String {
+    if ptr.is_null() {
+        return String::new();
+    }
+
+    let mut len = 0_usize;
+    unsafe {
+        while *ptr.add(len) != 0 {
+            len += 1;
+        }
+
+        String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len))
+            .trim()
+            .to_string()
+    }
+}
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+fn extend_network_shortcuts(volumes: &mut Vec<VolumeInfo>) {
+    let Some(root) = std::env::var_os("APPDATA") else {
+        return;
+    };
+
+    let shortcuts_dir = Path::new(&root)
+        .join("Microsoft")
+        .join("Windows")
+        .join("Network Shortcuts");
+
+    let initialized_com = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok() };
+
+    {
+        let Ok(entries) = std::fs::read_dir(shortcuts_dir) else {
+            if initialized_com {
+                unsafe {
+                    CoUninitialize();
+                }
+            }
+            return;
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                extend_network_shortcut_dir(volumes, &path);
+            } else if path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("lnk"))
+            {
+                extend_network_shortcut_file(volumes, &path, None);
+            }
+        }
+    }
+
+    if initialized_com {
+        unsafe {
+            CoUninitialize();
+        }
+    }
+}
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+fn extend_network_shortcut_dir(volumes: &mut Vec<VolumeInfo>, path: &Path) {
+    let label = path.file_name().and_then(|name| name.to_str()).map(str::to_string);
+    let target_lnk = path.join("target.lnk");
+
+    if target_lnk.exists() {
+        extend_network_shortcut_file(volumes, &target_lnk, label.as_deref());
+        return;
+    }
+
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let shortcut = entry.path();
+        if shortcut
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("lnk"))
+        {
+            extend_network_shortcut_file(volumes, &shortcut, label.as_deref());
+        }
+    }
+}
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+fn extend_network_shortcut_file(volumes: &mut Vec<VolumeInfo>, path: &Path, label: Option<&str>) {
+    if let Some(candidate) = resolve_shell_link_target(path) {
+        if let Some(mount_root) = normalize_network_mount_root("", &candidate) {
+            push_network_volume(volumes, mount_root, label, false);
+        }
+    }
+}
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+fn push_network_volume(
+    volumes: &mut Vec<VolumeInfo>,
+    mount_root: String,
+    label: Option<&str>,
+    query_space: bool,
+) {
+    if volumes
+        .iter()
+        .any(|volume| volume.mount_root.eq_ignore_ascii_case(&mount_root))
+    {
+        return;
+    }
+
+    let fallback_label = label
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.trim().to_string())
+        .unwrap_or_else(|| label_for_unc_root(&mount_root));
+
+    let (total_bytes, free_bytes, label) = if query_space {
+        let space_root = to_wide(&space_query_root(&mount_root));
+        let (total_bytes, free_bytes) = disk_space_for_root(&space_root);
+        let volume_label = read_volume_label(&space_root);
+        let label = if volume_label.is_empty() {
+            fallback_label
+        } else {
+            volume_label
+        };
+        (total_bytes, free_bytes, label)
+    } else {
+        (0, 0, fallback_label)
+    };
+
+    volumes.push(VolumeInfo {
+        mount_root,
+        label,
+        total_bytes,
+        free_bytes,
+        is_network: true,
+    });
+}
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+fn resolve_shell_link_target(path: &Path) -> Option<String> {
+    let link: IShellLinkW =
+        unsafe { CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()? };
+    let persist_file: IPersistFile = link.cast().ok()?;
+    let link_path = to_wide_path(path);
+
+    unsafe {
+        persist_file
+            .Load(PCWSTR(link_path.as_ptr()), STGM_READ)
+            .ok()?;
+    }
+
+    let mut target = [0_u16; 32_768];
+    unsafe {
+        link.GetPath(&mut target, std::ptr::null_mut(), SLGP_UNCPRIORITY.0 as u32)
+            .ok()?;
+    }
+
+    let end = target
+        .iter()
+        .position(|value| *value == 0)
+        .unwrap_or(target.len());
+    let value = String::from_utf16_lossy(&target[..end]).trim().to_string();
+
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+fn to_wide_path(path: &Path) -> Vec<u16> {
+    path.as_os_str().encode_wide().chain(Some(0)).collect()
+}
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+fn normalize_network_mount_root(local_name: &str, remote_name: &str) -> Option<String> {
+    if let Some(local_root) = normalize_drive_root(local_name) {
+        return Some(local_root);
+    }
+
+    let trimmed = remote_name.trim().trim_end_matches(['\\', '/']);
+    if !trimmed.starts_with("\\\\") {
+        return None;
+    }
+
+    let parts: Vec<_> = trimmed
+        .trim_start_matches('\\')
+        .split(['\\', '/'])
+        .filter(|part| !part.is_empty())
+        .collect();
+
+    if parts.len() < 2 {
+        return None;
+    }
+
+    Some(format!("\\\\{}\\{}", parts[0], parts[1]))
+}
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+fn normalize_drive_root(value: &str) -> Option<String> {
+    let trimmed = value.trim().trim_end_matches(['\\', '/']);
+    let mut chars = trimmed.chars();
+    let drive = chars.next()?;
+    let colon = chars.next()?;
+
+    if chars.next().is_none() && drive.is_ascii_alphabetic() && colon == ':' {
+        Some(format!("{}:\\", drive.to_ascii_uppercase()))
+    } else {
+        None
+    }
+}
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+fn space_query_root(mount_root: &str) -> String {
+    if mount_root.starts_with("\\\\") && !mount_root.ends_with('\\') {
+        format!("{mount_root}\\")
+    } else {
+        mount_root.to_string()
+    }
+}
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+fn label_for_unc_root(mount_root: &str) -> String {
+    let parts: Vec<_> = mount_root
+        .trim_start_matches('\\')
+        .split('\\')
+        .filter(|part| !part.is_empty())
+        .collect();
+
+    match parts.as_slice() {
+        [server, share, ..] => format!("{share} ({server})"),
+        _ => mount_root.to_string(),
+    }
+}
+
 pub fn path_is_network(path: &std::path::Path, volumes: &[VolumeInfo]) -> bool {
     let path_text = path.to_string_lossy().to_ascii_lowercase();
 
@@ -236,9 +573,9 @@ pub fn path_is_network(path: &std::path::Path, volumes: &[VolumeInfo]) -> bool {
         .filter(|volume| {
             let mount = volume.mount_root.to_ascii_lowercase();
             path_text == mount
-                || path_text
-                    .strip_prefix(&mount)
-                    .is_some_and(|remainder| remainder.starts_with('\\') || remainder.starts_with('/'))
+                || path_text.strip_prefix(&mount).is_some_and(|remainder| {
+                    remainder.starts_with('\\') || remainder.starts_with('/')
+                })
         })
         .max_by_key(|volume| volume.mount_root.len())
         .is_some_and(|volume| volume.is_network)

@@ -975,6 +975,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tempfile",
  "time",
+ "windows",
  "windows-sys 0.61.2",
 ]
 

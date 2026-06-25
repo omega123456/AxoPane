@@ -5,7 +5,8 @@ use std::fs;
 use std::path::Path;
 
 use file_explorer_lib::fs::{
-    canonicalize_dir, default_start_dir, list_dir, ListDirOptions, SortDirection, SortKey,
+    canonicalize_dir, default_start_dir, display_path_from_text, list_dir, ListDirOptions,
+    SortDirection, SortKey,
 };
 use tempfile::tempdir;
 
@@ -234,4 +235,18 @@ fn canonicalize_dir_strips_extended_length_prefix() {
     let canonical = canonicalize_dir(fixture.path()).expect("canonical");
     assert!(canonical.is_absolute());
     assert!(!canonical.to_string_lossy().starts_with("\\\\?\\"));
+}
+
+#[test]
+fn display_paths_strip_windows_extended_unc_prefix() {
+    if cfg!(windows) {
+        assert_eq!(
+            display_path_from_text("\\\\?\\UNC\\raspberry.pi\\share"),
+            "\\\\raspberry.pi\\share"
+        );
+        assert_eq!(
+            display_path_from_text("\\\\?\\C:\\Users\\Omega"),
+            "C:\\Users\\Omega"
+        );
+    }
 }

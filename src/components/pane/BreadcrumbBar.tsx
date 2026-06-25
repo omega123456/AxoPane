@@ -78,13 +78,28 @@ export function splitPath(path: string): Segment[] {
     return [{ label: '.', path: '.' }]
   }
 
-  const windowsRoot = path.match(/^([A-Za-z]:)[\\/]?/)
+  const displayPath = normalizeExtendedWindowsPath(path)
+
+  const uncRoot = displayPath.match(/^\\\\([^\\/]+)[\\/]([^\\/]+)[\\/]?/)
+  if (uncRoot) {
+    const rootPath = `\\\\${uncRoot[1]}\\${uncRoot[2]}`
+    const segments: Segment[] = [{ label: rootPath, path: rootPath }]
+    const rest = displayPath.slice(uncRoot[0].length).split(/[\\/]/).filter(Boolean)
+    let current = rootPath
+    for (const part of rest) {
+      current = `${current}\\${part}`
+      segments.push({ label: part, path: current })
+    }
+    return segments
+  }
+
+  const windowsRoot = displayPath.match(/^([A-Za-z]:)[\\/]?/)
   if (windowsRoot) {
     const drive = windowsRoot[1]
     const rootPath = `${drive}\\`
     const segments: Segment[] = [{ label: drive, path: rootPath }]
 
-    const rest = path.slice(windowsRoot[0].length).split(/[\\/]/).filter(Boolean)
+    const rest = displayPath.slice(windowsRoot[0].length).split(/[\\/]/).filter(Boolean)
     let current = drive
     for (const part of rest) {
       current = `${current}\\${part}`
@@ -93,7 +108,7 @@ export function splitPath(path: string): Segment[] {
     return segments
   }
 
-  const parts = path.split(/[\\/]/).filter(Boolean)
+  const parts = displayPath.split(/[\\/]/).filter(Boolean)
   const segments: Segment[] = [{ label: '/', path: '/' }]
   let current = ''
   for (const part of parts) {
@@ -101,4 +116,16 @@ export function splitPath(path: string): Segment[] {
     segments.push({ label: part, path: current })
   }
   return segments
+}
+
+function normalizeExtendedWindowsPath(path: string) {
+  if (path.toLowerCase().startsWith('\\\\?\\unc\\')) {
+    return `\\\\${path.slice(8)}`
+  }
+
+  if (/^\\\\\?\\[A-Za-z]:[\\/]/.test(path)) {
+    return path.slice(4)
+  }
+
+  return path
 }

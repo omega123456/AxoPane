@@ -47,6 +47,19 @@ describe('splitPath', () => {
     expect(splitPath('C:')).toEqual([{ label: 'C:', path: 'C:\\' }])
   })
 
+  it('splits UNC paths from the share root without synthetic prefix segments', () => {
+    expect(splitPath('\\\\raspberry.pi\\share\\TV')).toEqual([
+      { label: '\\\\raspberry.pi\\share', path: '\\\\raspberry.pi\\share' },
+      { label: 'TV', path: '\\\\raspberry.pi\\share\\TV' },
+    ])
+  })
+
+  it('normalizes extended UNC paths before splitting breadcrumbs', () => {
+    expect(splitPath('\\\\?\\UNC\\raspberry.pi\\share')).toEqual([
+      { label: '\\\\raspberry.pi\\share', path: '\\\\raspberry.pi\\share' },
+    ])
+  })
+
   it('splits POSIX paths into cumulative segments under the root', () => {
     expect(splitPath('/home/omega/dev')).toEqual([
       { label: '/', path: '/' },
@@ -71,5 +84,18 @@ describe('BreadcrumbBar navigation', () => {
     await user.click(screen.getByRole('button', { name: 'Users' }))
 
     expect(navigatePane).toHaveBeenCalledWith('left', 'C:\\Users')
+  })
+
+  it('navigates UNC breadcrumbs using real network paths', async () => {
+    const user = userEvent.setup()
+    const navigatePane = vi.fn(() => Promise.resolve())
+    usePanesStore.setState({ navigatePane })
+
+    render(<BreadcrumbBar pane={pane('\\\\?\\UNC\\raspberry.pi\\share\\TV')} isActive />)
+    await user.click(screen.getByRole('button', { name: '\\\\raspberry.pi\\share' }))
+    await user.click(screen.getByRole('button', { name: 'TV' }))
+
+    expect(navigatePane).toHaveBeenNthCalledWith(1, 'left', '\\\\raspberry.pi\\share')
+    expect(navigatePane).toHaveBeenNthCalledWith(2, 'left', '\\\\raspberry.pi\\share\\TV')
   })
 })

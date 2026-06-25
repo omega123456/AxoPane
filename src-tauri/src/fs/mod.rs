@@ -101,6 +101,25 @@ pub fn canonicalize_dir(path: &Path) -> Result<PathBuf, FsError> {
     Ok(dunce::canonicalize(path)?)
 }
 
+pub fn display_path_from_path(path: &Path) -> String {
+    display_path_from_text(&path.to_string_lossy())
+}
+
+pub fn display_path_from_text(path: &str) -> String {
+    #[cfg(windows)]
+    {
+        if let Some(rest) = path.strip_prefix("\\\\?\\UNC\\") {
+            return format!("\\\\{rest}");
+        }
+
+        if let Some(rest) = path.strip_prefix("\\\\?\\") {
+            return rest.to_string();
+        }
+    }
+
+    path.to_string()
+}
+
 /// The directory the app should open into on a fresh session: the user's home
 /// directory when known, otherwise the first available volume root, falling
 /// back to the platform filesystem root (`C:\` on Windows, `/` elsewhere).
@@ -188,7 +207,7 @@ pub fn list_dir(options: &ListDirOptions) -> Result<ListDirResponse, FsError> {
     );
 
     Ok(ListDirResponse {
-        path: directory.to_string_lossy().into_owned(),
+        path: display_path_from_path(&directory),
         entries,
     })
 }
@@ -298,9 +317,9 @@ fn build_entry_from_path(path: &Path) -> Result<DirectoryEntry, FsError> {
     let is_system = attributes.iter().any(|attribute| attribute == "system");
 
     Ok(DirectoryEntry {
-        id: path.to_string_lossy().into_owned(),
+        id: display_path_from_path(path),
         name: name.clone(),
-        path: path.to_string_lossy().into_owned(),
+        path: display_path_from_path(path),
         is_dir,
         size_bytes: (!is_dir).then_some(metadata.len()),
         item_count: if is_dir { read_item_count(path) } else { None },
@@ -326,9 +345,9 @@ fn build_entry(entry: &DirEntry) -> Result<DirectoryEntry, FsError> {
     let is_system = attributes.iter().any(|attribute| attribute == "system");
 
     Ok(DirectoryEntry {
-        id: path.to_string_lossy().into_owned(),
+        id: display_path_from_path(&path),
         name: name.clone(),
-        path: path.to_string_lossy().into_owned(),
+        path: display_path_from_path(&path),
         is_dir,
         size_bytes: (!is_dir).then_some(metadata.len()),
         item_count: if is_dir { read_item_count(&path) } else { None },

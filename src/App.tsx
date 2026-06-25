@@ -11,6 +11,7 @@ import { FolderTree } from '@/components/tree/FolderTree'
 import { QueueOverlay } from '@/components/queue/QueueOverlay'
 import { hydrateAppConfig, persistAppConfig } from '@/lib/app-config'
 import { executeCommand } from '@/lib/commands'
+import { isPathInsideVolume } from '@/lib/volumes'
 import { everythingStatus, listVolumes, loadConfig, loadSession } from '@/lib/ipc/commands'
 import { installCloseGuard } from '@/lib/close-guard'
 import { onDirPatch, onSizeState, onVolumesChanged } from '@/lib/ipc/events'
@@ -175,9 +176,7 @@ function App() {
       itemCount: activePane.entries.length,
       selectionCount,
       focusedEntry,
-      volume: volumes.find((volume) =>
-        (activePane.path ?? '').toLowerCase().startsWith(volume.mountRoot.toLowerCase()),
-      ),
+      volume: volumes.find((volume) => isPathInsideVolume(activePane.path ?? '', volume.mountRoot)),
     }
   }, [activePane, activeSelection, volumes])
 

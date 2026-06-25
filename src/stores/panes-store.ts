@@ -25,7 +25,7 @@ import {
 } from '@/stores/tabs-store'
 import { useConfigStore } from '@/stores/config-store'
 import { log } from '@/lib/app-log-commands'
-import { formatVolumeTreeName, sortVolumesForTree } from '@/lib/volumes'
+import { formatVolumeTreeName, isPathInsideVolume, sortVolumesForTree } from '@/lib/volumes'
 
 type PaneId = 'left' | 'right'
 type SizeStateKind = SizeStateEvent['state']
@@ -148,6 +148,13 @@ export function getParentPath(path: string): string | null {
     return null
   }
 
+  path = normalizeExtendedWindowsPath(path)
+
+  // UNC share root: "\\server\share" is already the highest listable folder.
+  if (/^\\\\[^\\/]+[\\/]?$/.test(path) || /^\\\\[^\\/]+[\\/][^\\/]+[\\/]?$/.test(path)) {
+    return null
+  }
+
   // Windows drive root: "C:\" or "C:" -> already at the top, cannot go up.
   if (/^[A-Za-z]:[\\/]?$/.test(path)) {
     return null
@@ -177,6 +184,18 @@ export function getParentPath(path: string): string | null {
   }
 
   return stripped.slice(0, lastSep)
+}
+
+function normalizeExtendedWindowsPath(path: string) {
+  if (path.toLowerCase().startsWith('\\\\?\\unc\\')) {
+    return `\\\\${path.slice(8)}`
+  }
+
+  if (/^\\\\\?\\[A-Za-z]:[\\/]/.test(path)) {
+    return path.slice(4)
+  }
+
+  return path
 }
 
 function entrySortValue(entry: DirectoryEntry, sizeState: EntrySizeState | undefined, sortKey: SortKey) {
@@ -270,7 +289,7 @@ function buildRootTreeState(
       }
 
       const nodePath = node.path.toLowerCase()
-      return activeRoots.some((root) => nodePath.startsWith(root))
+      return activeRoots.some((root) => isPathInsideVolume(nodePath, root))
     }),
   ) as Record<string, TreeNodeState>
 

@@ -176,16 +176,24 @@ describe('panes-store navigation', () => {
       showHiddenFiles: false,
       everythingStatus: { status: 'unavailable', isAvailable: false },
       volumes: [
+        {
+          mountRoot: '\\\\nas\\media',
+          label: 'Media Share',
+          totalBytes: 1,
+          freeBytes: 1,
+          isNetwork: true,
+        },
         { mountRoot: 'Z:\\', label: 'Share', totalBytes: 1, freeBytes: 1, isNetwork: true },
         { mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false },
         { mountRoot: 'D:\\', label: '', totalBytes: 1, freeBytes: 1, isNetwork: false },
       ],
     })
 
-    expect(usePanesStore.getState().treeRoots).toEqual(['C:\\', 'D:\\', 'Z:\\'])
+    expect(usePanesStore.getState().treeRoots).toEqual(['\\\\nas\\media', 'C:\\', 'D:\\', 'Z:\\'])
     expect(usePanesStore.getState().treeNodes['C:\\'].name).toBe('Windows (C:)')
     expect(usePanesStore.getState().treeNodes['D:\\'].name).toBe('D:')
     expect(usePanesStore.getState().treeNodes['Z:\\'].name).toBe('Share (Z:)')
+    expect(usePanesStore.getState().treeNodes['\\\\nas\\media'].name).toBe('Media Share')
 
     usePanesStore.setState((state) => ({
       treeNodes: {
@@ -279,6 +287,11 @@ describe('panes-store navigation', () => {
     expect(getParentPath('C:\\Users')).toBe('C:\\')
     expect(getParentPath('C:\\')).toBeNull()
     expect(getParentPath('C:')).toBeNull()
+    expect(getParentPath('\\\\nas')).toBeNull()
+    expect(getParentPath('\\\\nas\\media')).toBeNull()
+    expect(getParentPath('\\\\nas\\media\\shows')).toBe('\\\\nas\\media')
+    expect(getParentPath('\\\\?\\UNC\\nas\\media')).toBeNull()
+    expect(getParentPath('\\\\?\\UNC\\nas\\media\\shows')).toBe('\\\\nas\\media')
     expect(getParentPath('/home/omega')).toBe('/home')
     expect(getParentPath('/home')).toBe('/')
     expect(getParentPath('/')).toBeNull()
