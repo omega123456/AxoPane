@@ -82,6 +82,29 @@ describe('executeCommand file actions', () => {
     })
   })
 
+  it('opens a transfer confirmation for copy-to-other-pane with source and destination folders', () => {
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        right: { ...state.panes.right, path: 'D:\\dest' },
+      },
+    }))
+    useSelectionStore.getState().setSelection('left', ['Alpha', 'Beta'], 'Alpha', 'Beta')
+
+    executeCommand('copyToOtherPane', 'left')
+
+    expect(useActionDialogStore.getState().dialog).toMatchObject({
+      kind: 'transferConfirm',
+      operation: 'copy',
+      sourceDir: 'C:\\root',
+      destinationDir: 'D:\\dest',
+      targets: [
+        { id: 'Alpha', path: 'C:\\root\\Alpha' },
+        { id: 'Beta', path: 'C:\\root\\Beta' },
+      ],
+    })
+  })
+
   it('gates rename/delete on a target or selection', () => {
     expect(canExecuteCommand('rename', 'left', 'Alpha')).toBe(true)
     expect(canExecuteCommand('delete', 'left')).toBe(false)

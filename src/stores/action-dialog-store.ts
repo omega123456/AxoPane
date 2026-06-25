@@ -1,10 +1,12 @@
 import { create } from 'zustand'
+import type { OpKind } from '@/lib/types/ipc'
 import type { PaneId } from '@/types/pane'
 
 export type DeleteTarget = {
   id: string
   name: string
   path: string
+  sizeBytes?: number | null
 }
 
 export type ActionDialog =
@@ -12,6 +14,14 @@ export type ActionDialog =
   | { kind: 'newFolder'; paneId: PaneId }
   | { kind: 'newFile'; paneId: PaneId }
   | { kind: 'delete'; paneId: PaneId; targets: DeleteTarget[] }
+  | {
+      kind: 'transferConfirm'
+      paneId: PaneId
+      operation: OpKind
+      sourceDir: string
+      destinationDir: string
+      targets: DeleteTarget[]
+    }
 
 type ActionDialogStore = {
   dialog: ActionDialog | null

@@ -9,7 +9,7 @@ import { DetailsPanel } from '@/components/details/DetailsPanel'
 import { FilePane } from '@/components/pane/FilePane'
 import { FolderTree } from '@/components/tree/FolderTree'
 import { QueueOverlay } from '@/components/queue/QueueOverlay'
-import { hydrateAppConfig } from '@/lib/app-config'
+import { hydrateAppConfig, persistAppConfig } from '@/lib/app-config'
 import { executeCommand } from '@/lib/commands'
 import { everythingStatus, listVolumes, loadConfig, loadSession } from '@/lib/ipc/commands'
 import { installCloseGuard } from '@/lib/close-guard'
@@ -62,12 +62,16 @@ function App() {
         listVolumes(),
       ])
 
-      hydrateAppConfig(config)
-      syncThemePreference(config.theme)
+      const { config: hydratedConfig, migrated } = hydrateAppConfig(config)
+      syncThemePreference(hydratedConfig.theme)
+
+      if (migrated) {
+        await persistAppConfig()
+      }
 
       initialize({
         session,
-        showHiddenFiles: config.showHiddenFiles,
+        showHiddenFiles: hydratedConfig.showHiddenFiles,
         everythingStatus: status,
         volumes: nextVolumes,
       })

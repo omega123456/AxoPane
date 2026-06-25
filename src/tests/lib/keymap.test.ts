@@ -4,6 +4,7 @@ import {
   defaultKeymap,
   findKeybindingConflicts,
   formatShortcutLabel,
+  migrateKeymap,
   mergeKeymap,
   normalizeShortcut,
   resolveCommandForEvent,
@@ -35,5 +36,19 @@ describe('keymap', () => {
     const merged = mergeKeymap({ rename: ['Ctrl+R'] })
     expect(merged.open).toEqual(['Enter'])
     expect(findKeybindingConflicts(merged)).toContainEqual(['Ctrl+R', ['refresh', 'rename']])
+  })
+
+  it('migrates the legacy refresh F5 binding back to the current default', () => {
+    const migrated = migrateKeymap({ refresh: ['F5'] })
+    expect(migrated.migrated).toBe(true)
+    expect(migrated.bindings.refresh).toEqual(['Ctrl+R'])
+    expect(findKeybindingConflicts(migrated.bindings)).toEqual([])
+  })
+
+  it('prefers the current default owner when a stale conflict still exists', () => {
+    const event = new KeyboardEvent('keydown', { key: 'F5' })
+    const conflicted = mergeKeymap({ refresh: ['F5'] })
+
+    expect(resolveCommandForEvent(event, conflicted)).toBe('copyToOtherPane')
   })
 })

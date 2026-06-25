@@ -116,6 +116,43 @@ describe('ActionDialog', () => {
     expect(remove).toHaveBeenCalledWith({ paths: ['C:\\root\\a.txt', 'C:\\root\\b.txt'] })
   })
 
+  it('confirms a transfer and shows what will move from where to where', async () => {
+    const user = userEvent.setup()
+    const startOp = vi.fn(() => 'op-1')
+    ipc.override('start_op', startOp)
+
+    useActionDialogStore.getState().open({
+      kind: 'transferConfirm',
+      paneId: 'left',
+      operation: 'move',
+      sourceDir: 'C:\\root',
+      destinationDir: 'D:\\dest',
+      targets: [
+        { id: 'a', name: 'a.txt', path: 'C:\\root\\a.txt', sizeBytes: 10 },
+        { id: 'b', name: 'b.txt', path: 'C:\\root\\b.txt', sizeBytes: 12 },
+      ],
+    })
+    render(<ActionDialog />)
+
+    expect(screen.getByText('Move 2 items to the other pane?')).toBeInTheDocument()
+    expect(screen.getByText('C:\\root')).toBeInTheDocument()
+    expect(screen.getByText('D:\\dest')).toBeInTheDocument()
+    expect(screen.getByText('a.txt')).toBeInTheDocument()
+    expect(screen.getByText('b.txt')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Move' }))
+
+    await waitFor(() => expect(useActionDialogStore.getState().dialog).toBeNull())
+    expect(startOp).toHaveBeenCalledWith({
+      kind: 'move',
+      destinationDir: 'D:\\dest',
+      items: [
+        { sourcePath: 'C:\\root\\a.txt', name: 'a.txt', sizeBytes: 10 },
+        { sourcePath: 'C:\\root\\b.txt', name: 'b.txt', sizeBytes: 12 },
+      ],
+    })
+  })
+
   it('dismisses on cancel without calling the backend', async () => {
     const user = userEvent.setup()
     const create = vi.fn(() => dir('x'))

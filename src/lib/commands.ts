@@ -142,13 +142,17 @@ export function executeCommand(commandId: CommandId, paneId: 'left' | 'right', t
       const otherPaneId = paneId === 'left' ? 'right' : 'left'
       const destinationDir = panes.panes[otherPaneId].path
 
-      void startOp({
-        kind: commandId === 'copyToOtherPane' ? 'copy' : 'move',
+      useActionDialogStore.getState().open({
+        kind: 'transferConfirm',
+        paneId,
+        operation: commandId === 'copyToOtherPane' ? 'copy' : 'move',
+        sourceDir: pane.path,
         destinationDir,
-        items: transferEntries.map((item) => ({
-          sourcePath: item.path,
+        targets: transferEntries.map((item) => ({
+          id: item.id,
           name: item.name,
-          sizeBytes: item.sizeBytes ?? 0,
+          path: item.path,
+          sizeBytes: item.sizeBytes,
         })),
       })
       break

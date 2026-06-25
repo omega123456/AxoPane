@@ -53,6 +53,22 @@ export const defaultKeymap: Record<CommandId, Shortcut[]> = {
   showSettings: ['Ctrl+,'],
 }
 
+type KeymapMigration = {
+  commandId: CommandId
+  from: Shortcut[]
+  to: Shortcut[]
+}
+
+const legacyKeymapMigrations: KeymapMigration[] = [
+  {
+    // Earlier builds used F5 for refresh. Once cross-pane copy moved onto F5,
+    // persisted configs could shadow the new default indefinitely.
+    commandId: 'refresh',
+    from: ['F5'],
+    to: defaultKeymap.refresh,
+  },
+]
+
 const modifierOrder = ['Ctrl', 'Meta', 'Alt', 'Shift'] as const
 const modifierLabels: Record<PlatformOs, Record<'Ctrl' | 'Meta' | 'Alt' | 'Shift', string>> = {
   windows: {
@@ -222,6 +238,34 @@ export function mergeKeymap(overrides: Partial<Record<CommandId, Shortcut[]>>) {
   ) as Record<CommandId, Shortcut[]>
 }
 
+function shortcutsEqual(left: Shortcut[], right: Shortcut[]) {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  return left.every((shortcut, index) => normalizeShortcut(shortcut) === normalizeShortcut(right[index]))
+}
+
+export function migrateKeymap(overrides: Partial<Record<CommandId, Shortcut[]>>) {
+  const nextOverrides = { ...overrides }
+  let migrated = false
+
+  for (const migration of legacyKeymapMigrations) {
+    const current = (nextOverrides[migration.commandId] ?? []).map(normalizeShortcut).filter(Boolean)
+    if (!shortcutsEqual(current, migration.from)) {
+      continue
+    }
+
+    nextOverrides[migration.commandId] = [...migration.to]
+    migrated = true
+  }
+
+  return {
+    bindings: mergeKeymap(nextOverrides),
+    migrated,
+  }
+}
+
 export function findKeybindingConflicts(keymap: Record<CommandId, Shortcut[]>) {
   const seen = new Map<Shortcut, CommandId[]>()
   for (const [commandId, shortcuts] of Object.entries(keymap) as [CommandId, Shortcut[]][]) {
@@ -241,11 +285,28 @@ export function resolveCommandForEvent(
   event: KeyboardEvent,
   keymap: Record<CommandId, Shortcut[]>,
 ): CommandId | null {
-  for (const commandId of Object.keys(keymap) as CommandId[]) {
-    if (keymap[commandId].some((shortcut) => eventMatchesShortcut(event, shortcut))) {
-      return commandId
-    }
+  const matchingCommands = (Object.keys(keymap) as CommandId[]).filter((commandId) =>
+    keymap[commandId].some((shortcut) => eventMatchesShortcut(event, shortcut)),
+  )
+
+  if (matchingCommands.length === 0) {
+    return null
   }
 
-  return null
+  if (matchingCommands.length === 1) {
+    return matchingCommands[0]
+  }
+
+  const capturedShortcut = captureShortcut(event)
+  if (!capturedShortcut) {
+    return matchingCommands[0]
+  }
+
+  const defaultOwner = matchingCommands.find((commandId) =>
+    defaultKeymap[commandId].some(
+      (shortcut) => normalizeShortcut(shortcut) === normalizeShortcut(capturedShortcut),
+    ),
+  )
+
+  return defaultOwner ?? matchingCommands[0]
 }

@@ -2,6 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
+import { ActionDialog } from '@/components/dialogs/ActionDialog'
 import { FilePane } from '@/components/pane/FilePane'
 import { executeCommand } from '@/lib/commands'
 import { resolveCommandForEvent } from '@/lib/keymap'
@@ -192,7 +193,7 @@ describe('FilePane state rendering', () => {
     expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('Nested B')
   })
 
-  it('starts direct cross-pane transfers from F5 and F6', async () => {
+  it('requires confirmation before cross-pane transfers from F5 and F6 start', async () => {
     const user = userEvent.setup()
     const startSpy = vi.fn(() => 'op-1')
     ipc.override('start_op', startSpy)
@@ -212,16 +213,35 @@ describe('FilePane state rendering', () => {
       },
     }))
 
-    render(<FilePane paneId="left" />)
+    render(
+      <>
+        <FilePane paneId="left" />
+        <ActionDialog />
+      </>,
+    )
     screen.getByLabelText('Left pane').focus()
 
-    await user.keyboard('{F5}{F6}')
+    await user.keyboard('{F5}')
+    const copyDialog = screen.getByRole('dialog', { name: 'Confirm copy' })
+    expect(copyDialog).toBeInTheDocument()
+    expect(within(copyDialog).getByText('C:\\root')).toBeInTheDocument()
+    expect(within(copyDialog).getByText('D:\\dest')).toBeInTheDocument()
+    expect(within(copyDialog).getByText('Alpha')).toBeInTheDocument()
+    expect(startSpy).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Copy' }))
 
     expect(startSpy).toHaveBeenNthCalledWith(1, {
       kind: 'copy',
       destinationDir: 'D:\\dest',
       items: [{ sourcePath: 'C:\\root\\Alpha', name: 'Alpha', sizeBytes: 10 }],
     })
+
+    screen.getByLabelText('Left pane').focus()
+    await user.keyboard('{F6}')
+    expect(screen.getByRole('dialog', { name: 'Confirm move' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Move' }))
+
     expect(startSpy).toHaveBeenNthCalledWith(2, {
       kind: 'move',
       destinationDir: 'D:\\dest',

@@ -3,6 +3,7 @@ import type { AppConfig, ThemePreference } from '@/lib/types/ipc'
 import { useConfigStore } from '@/stores/config-store'
 import { defaultColumns, defaultLayout, useLayoutStore } from '@/stores/layout-store'
 import { useKeymapStore } from '@/stores/keymap-store'
+import { migrateKeymap } from '@/lib/keymap'
 
 export function defaultAppConfig(): AppConfig {
   return {
@@ -36,9 +37,11 @@ export function buildAppConfig(): AppConfig {
 }
 
 export function hydrateAppConfig(config: AppConfig) {
+  const { bindings, migrated } = migrateKeymap(config.keybindings)
   const next = {
     ...defaultAppConfig(),
     ...config,
+    keybindings: bindings,
     layout: { ...defaultLayout, ...config.layout },
     columns: config.columns?.length ? config.columns : defaultColumns,
   }
@@ -50,6 +53,11 @@ export function hydrateAppConfig(config: AppConfig) {
   })
   useLayoutStore.getState().hydrate(next.layout, next.columns)
   useKeymapStore.getState().hydrate(next.keybindings)
+
+  return {
+    config: next,
+    migrated,
+  }
 }
 
 export async function persistAppConfig() {

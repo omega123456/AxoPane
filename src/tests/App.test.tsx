@@ -140,6 +140,79 @@ describe('App', () => {
     })
   })
 
+  it('migrates a stale F5 refresh config and keeps F5 mapped to confirmed copy between panes', async () => {
+    const user = userEvent.setup()
+    const saveConfig = vi.fn((payload) => payload.config)
+    const startOp = vi.fn(() => 'op-1')
+    ipc.override('load_config', {
+      theme: 'dark',
+      showHiddenFiles: false,
+      dismissedEverythingBanner: false,
+      keybindings: {
+        refresh: ['F5'],
+      },
+      columns: [
+        { key: 'name', visible: true },
+        { key: 'size', visible: true },
+        { key: 'items', visible: true },
+        { key: 'type', visible: true },
+        { key: 'modified', visible: true },
+        { key: 'created', visible: false },
+      ],
+      layout: {
+        detailsVisible: true,
+        treeWidth: 'default',
+        defaultPaneMode: 'dual',
+        restoreSession: true,
+      },
+    })
+    ipc.override('save_config', saveConfig)
+    ipc.override('start_op', startOp)
+    installListDirOverride()
+    renderApp()
+
+    const leftPane = await screen.findByLabelText('Left pane')
+    await waitFor(() => {
+      expect(getRowInPane('Left pane', 'Report.txt')).toBeTruthy()
+    })
+
+    leftPane.focus()
+    await user.keyboard('{ArrowDown}{ArrowDown}{F5}')
+    const copyDialog = screen.getByRole('dialog', { name: 'Confirm copy' })
+    expect(copyDialog).toBeInTheDocument()
+    expect(within(copyDialog).getByText('C:\\Users\\Omega')).toBeInTheDocument()
+    expect(within(copyDialog).getByText('D:\\projects')).toBeInTheDocument()
+    expect(within(copyDialog).getByText('Report.txt')).toBeInTheDocument()
+    expect(startOp).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Copy' }))
+
+    expect(startOp).toHaveBeenCalledWith({
+      kind: 'copy',
+      destinationDir: 'D:\\projects',
+      items: [
+        {
+          sourcePath: 'C:\\Users\\Omega\\Report.txt',
+          name: 'Report.txt',
+          sizeBytes: 2048,
+        },
+      ],
+    })
+
+    await waitFor(() => {
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({
+            keybindings: expect.objectContaining({
+              refresh: ['Ctrl+R'],
+              copyToOtherPane: ['F5'],
+            }),
+          }),
+        }),
+      )
+    })
+  })
+
   it('toggles sorting when a header is clicked', async () => {
     const user = userEvent.setup()
     installListDirOverride()
