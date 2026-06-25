@@ -9,6 +9,7 @@ type FileRowProps = {
   isActivePane: boolean
   isFocused: boolean
   isSelected: boolean
+  onPointerDown: () => void
   onActivate: () => void
   onClick: (event: MouseEvent<HTMLButtonElement>) => void
   onContextMenu: (event: MouseEvent<HTMLButtonElement>) => void
@@ -23,6 +24,7 @@ export function FileRow({
   isActivePane,
   isFocused,
   isSelected,
+  onPointerDown,
   onActivate,
   onClick,
   onContextMenu,
@@ -36,6 +38,10 @@ export function FileRow({
       type="button"
       role="row"
       data-entry-id={entry.id}
+      onMouseDown={(event) => {
+        event.preventDefault()
+        onPointerDown()
+      }}
       onDoubleClick={onActivate}
       onClick={onClick}
       onContextMenu={onContextMenu}

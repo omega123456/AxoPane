@@ -3,6 +3,7 @@ import { ArrowUpIcon, FolderIcon } from '@/components/icons'
 type ParentRowProps = {
   isActivePane: boolean
   isFocused: boolean
+  onPointerDown: () => void
   onActivate: () => void
   onFocus: () => void
 }
@@ -13,13 +14,17 @@ type ParentRowProps = {
  * navigates to the parent directory. It is intentionally never selectable for
  * copy/move or folder-size operations — it carries no entry id.
  */
-export function ParentRow({ isActivePane, isFocused, onActivate, onFocus }: ParentRowProps) {
+export function ParentRow({ isActivePane, isFocused, onPointerDown, onActivate, onFocus }: ParentRowProps) {
   return (
     <button
       type="button"
       role="row"
       data-parent-row="true"
       aria-label="Go to parent folder"
+      onMouseDown={(event) => {
+        event.preventDefault()
+        onPointerDown()
+      }}
       onClick={onFocus}
       onDoubleClick={onActivate}
       onKeyDown={(event) => {

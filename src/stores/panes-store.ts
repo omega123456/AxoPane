@@ -25,6 +25,7 @@ import {
 } from '@/stores/tabs-store'
 import { useConfigStore } from '@/stores/config-store'
 import { log } from '@/lib/app-log-commands'
+import { formatVolumeTreeName, sortVolumesForTree } from '@/lib/volumes'
 
 type PaneId = 'left' | 'right'
 type SizeStateKind = SizeStateEvent['state']
@@ -255,6 +256,40 @@ function paneIdFromTabId(tabId: string): PaneId {
   return tabId.startsWith('right') ? 'right' : 'left'
 }
 
+function buildRootTreeState(
+  volumes: VolumeInfo[],
+  currentNodes: Record<string, TreeNodeState> = {},
+) {
+  const sortedVolumes = sortVolumesForTree(volumes)
+  const treeRoots = sortedVolumes.map((volume) => volume.mountRoot)
+  const activeRoots = treeRoots.map((root) => root.toLowerCase())
+  const nextTreeNodes = Object.fromEntries(
+    Object.entries(currentNodes).filter(([, node]) => {
+      if (node.parentPath === null) {
+        return false
+      }
+
+      const nodePath = node.path.toLowerCase()
+      return activeRoots.some((root) => nodePath.startsWith(root))
+    }),
+  ) as Record<string, TreeNodeState>
+
+  for (const volume of sortedVolumes) {
+    const existing = currentNodes[volume.mountRoot]
+    nextTreeNodes[volume.mountRoot] = {
+      id: volume.mountRoot,
+      name: formatVolumeTreeName(volume),
+      path: volume.mountRoot,
+      parentPath: null,
+      children: existing?.children ?? [],
+      expanded: existing?.expanded ?? false,
+      loaded: existing?.loaded ?? false,
+    }
+  }
+
+  return { treeRoots, treeNodes: nextTreeNodes }
+}
+
 const sessionPersistDelayMs = 200
 let sessionPersistTimer: number | undefined
 
@@ -330,6 +365,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
 
     const activeLeft = activeTab('left')
     const activeRight = activeTab('right')
+    const { treeRoots, treeNodes } = buildRootTreeState(volumes)
 
     set((state) => ({
       ...state,
@@ -357,21 +393,8 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           title: 'Right pane',
         },
       },
-      treeRoots: volumes.map((volume) => volume.mountRoot),
-      treeNodes: Object.fromEntries(
-        volumes.map((volume) => [
-          volume.mountRoot,
-          {
-            id: volume.mountRoot,
-            name: volume.label || volume.mountRoot,
-            path: volume.mountRoot,
-            parentPath: null,
-            children: [],
-            expanded: false,
-            loaded: false,
-          },
-        ]),
-      ),
+      treeRoots,
+      treeNodes,
     }))
   },
   setActivePane: (paneId) => {
@@ -812,7 +835,15 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       }
     }),
   setEverythingStatus: (everythingStatus) => set({ everythingStatus }),
-  setVolumes: (volumes) => set({ volumes }),
+  setVolumes: (volumes) =>
+    set((state) => {
+      const nextTree = buildRootTreeState(volumes, state.treeNodes)
+      return {
+        volumes,
+        treeRoots: nextTree.treeRoots,
+        treeNodes: nextTree.treeNodes,
+      }
+    }),
   setShowHiddenFiles: async (showHiddenFiles) => {
     if (get().showHiddenFiles === showHiddenFiles) {
       return

@@ -117,10 +117,24 @@ export const fixtures: {
   delete_entries: undefined,
   list_volumes: [
     {
+      mountRoot: 'Z:\\',
+      label: 'Share',
+      totalBytes: 500_000_000,
+      freeBytes: 200_000_000,
+      isNetwork: true,
+    },
+    {
       mountRoot: 'C:\\',
-      label: 'System',
+      label: 'Windows',
       totalBytes: 1_000_000_000,
       freeBytes: 500_000_000,
+      isNetwork: false,
+    },
+    {
+      mountRoot: 'D:\\',
+      label: 'Projects',
+      totalBytes: 2_000_000_000,
+      freeBytes: 1_400_000_000,
       isNetwork: false,
     },
   ],

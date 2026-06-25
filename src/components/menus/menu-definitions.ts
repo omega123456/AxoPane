@@ -76,6 +76,8 @@ function commandLabel(commandId: Parameters<typeof executeCommand>[0]) {
     copy: 'Copy',
     cut: 'Cut',
     paste: 'Paste',
+    copyToOtherPane: 'Copy to other pane',
+    moveToOtherPane: 'Move to other pane',
     newFolder: 'New folder',
     newFile: 'New file',
     calculateSize: 'Calculate size',

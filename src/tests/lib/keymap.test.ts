@@ -23,6 +23,12 @@ describe('keymap', () => {
     const event = new KeyboardEvent('keydown', { key: 'r', ctrlKey: true })
     expect(captureShortcut(event)).toBe('Ctrl+R')
     expect(resolveCommandForEvent(event, defaultKeymap)).toBe('refresh')
+
+    const copyToOtherPane = new KeyboardEvent('keydown', { key: 'F5' })
+    expect(resolveCommandForEvent(copyToOtherPane, defaultKeymap)).toBe('copyToOtherPane')
+
+    const copyToClipboard = new KeyboardEvent('keydown', { key: 'c', ctrlKey: true })
+    expect(resolveCommandForEvent(copyToClipboard, defaultKeymap)).toBe('copy')
   })
 
   it('merges defaults and detects conflicts', () => {

@@ -166,6 +166,69 @@ describe('FilePane state rendering', () => {
     expect(goUp).toHaveBeenCalledWith('left')
   })
 
+  it('keeps pane keyboard focus after opening a folder with the mouse', async () => {
+    const user = userEvent.setup()
+    ipc.override('list_dir', (payload) => {
+      if (payload.path === 'C:\\root\\Alpha') {
+        return { path: payload.path, entries: [entry('Nested A'), entry('Nested B')] }
+      }
+
+      return { path: payload.path, entries: [entry('Alpha')] }
+    })
+    ipc.override('set_tab_watch', () => undefined)
+    ipc.override('save_session', (payload) => payload.session)
+    seedPane({ path: 'C:\\root', entries: [entry('Alpha')], focusedEntryId: 'Alpha' })
+
+    render(<FilePane paneId="left" />)
+    const pane = screen.getByLabelText('Left pane')
+    const row = within(pane).getByRole('row', { name: /Alpha/ })
+
+    await user.dblClick(row)
+    await screen.findByRole('row', { name: /Nested A/ })
+
+    expect(document.activeElement).toBe(pane)
+
+    await user.keyboard('{ArrowDown}')
+    expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('Nested B')
+  })
+
+  it('starts direct cross-pane transfers from F5 and F6', async () => {
+    const user = userEvent.setup()
+    const startSpy = vi.fn(() => 'op-1')
+    ipc.override('start_op', startSpy)
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: {
+          ...state.panes.left,
+          path: 'C:\\root',
+          entries: [entry('Alpha', false)],
+          focusedEntryId: 'Alpha',
+        },
+        right: {
+          ...state.panes.right,
+          path: 'D:\\dest',
+        },
+      },
+    }))
+
+    render(<FilePane paneId="left" />)
+    screen.getByLabelText('Left pane').focus()
+
+    await user.keyboard('{F5}{F6}')
+
+    expect(startSpy).toHaveBeenNthCalledWith(1, {
+      kind: 'copy',
+      destinationDir: 'D:\\dest',
+      items: [{ sourcePath: 'C:\\root\\Alpha', name: 'Alpha', sizeBytes: 10 }],
+    })
+    expect(startSpy).toHaveBeenNthCalledWith(2, {
+      kind: 'move',
+      destinationDir: 'D:\\dest',
+      items: [{ sourcePath: 'C:\\root\\Alpha', name: 'Alpha', sizeBytes: 10 }],
+    })
+  })
+
   it('dispatches a focused-pane command only once when a global window fallback is also active', async () => {
     const user = userEvent.setup()
     const startSpy = vi.fn(() => 'op-1')

@@ -56,6 +56,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   const resolveConflict = useQueueStore((state) => state.resolve)
   const setSelection = useSelectionStore((state) => state.setSelection)
   const openMenu = useContextMenuStore((state) => state.openMenu)
+  const paneRef = useRef<HTMLElement | null>(null)
   const parentRef = useRef<HTMLDivElement | null>(null)
   const isActivePane = activePaneId === paneId
   const os = detectPlatformOs()
@@ -123,6 +124,11 @@ export function FilePane({ paneId }: FilePaneProps) {
     setFocusedEntry(paneId, nextEntry.id)
     setSelection(paneId, [nextEntry.id], nextEntry.id, nextEntry.id)
     rowVirtualizer.scrollToIndex(bounded)
+  }
+
+  function focusPaneShell() {
+    setActivePane(paneId)
+    paneRef.current?.focus()
   }
 
   async function activateEntry(entryId: string) {
@@ -200,6 +206,7 @@ export function FilePane({ paneId }: FilePaneProps) {
 
   return (
     <section
+      ref={paneRef}
       aria-label={pane.title}
       className={`relative flex min-h-0 flex-col bg-light-surface dark:bg-dark-surface ${
         isActivePane ? 'outline outline-1 outline-accent-blue-border' : ''
@@ -264,7 +271,12 @@ export function FilePane({ paneId }: FilePaneProps) {
       ) : showEmpty ? (
         <EmptyState />
       ) : (
-        <div ref={parentRef} className="min-h-0 flex-1 overflow-auto" onContextMenu={(event) => showMenu(event)}>
+        <div
+          ref={parentRef}
+          className="min-h-0 flex-1 overflow-auto"
+          onMouseDown={() => focusPaneShell()}
+          onContextMenu={(event) => showMenu(event)}
+        >
           {/*
             Styling-constraint exception: runtime geometry only. The total
             scroll height and each row's translateY come from
@@ -291,6 +303,7 @@ export function FilePane({ paneId }: FilePaneProps) {
                     <ParentRow
                       isActivePane={isActivePane}
                       isFocused={pane.focusedEntryId === PARENT_ROW_ID}
+                      onPointerDown={focusPaneShell}
                       onActivate={() => void activateEntry(PARENT_ROW_ID)}
                       onFocus={() => focusByRowIndex(0)}
                     />
@@ -310,6 +323,7 @@ export function FilePane({ paneId }: FilePaneProps) {
                     isActivePane={isActivePane}
                     isFocused={pane.focusedEntryId === entry.id}
                     isSelected={selection.selectedIds.includes(entry.id)}
+                    onPointerDown={focusPaneShell}
                     onActivate={() => void activateEntry(entry.id)}
                     onClick={(event) => selectWithModifiers(entry.id, event)}
                     onMiddleClick={() => void openTabFromPath(paneId, entry.path)}

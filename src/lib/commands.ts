@@ -16,6 +16,10 @@ export function executeCommand(commandId: CommandId, paneId: 'left' | 'right', t
   const entry = targetEntryId ? pane.entries.find((item) => item.id === targetEntryId) : undefined
   const selectedEntries = pane.entries.filter((item) => selection.selectedIds.includes(item.id))
   const effectiveEntries = entry ? [entry] : selectedEntries
+  const focusedEntry = pane.focusedEntryId
+    ? pane.entries.find((item) => item.id === pane.focusedEntryId)
+    : undefined
+  const transferEntries = entry ? [entry] : selectedEntries.length > 0 ? selectedEntries : focusedEntry ? [focusedEntry] : []
 
   switch (commandId) {
     case 'open': {
@@ -129,6 +133,26 @@ export function executeCommand(commandId: CommandId, paneId: 'left' | 'right', t
       })
       break
     }
+    case 'copyToOtherPane':
+    case 'moveToOtherPane': {
+      if (transferEntries.length === 0) {
+        break
+      }
+
+      const otherPaneId = paneId === 'left' ? 'right' : 'left'
+      const destinationDir = panes.panes[otherPaneId].path
+
+      void startOp({
+        kind: commandId === 'copyToOtherPane' ? 'copy' : 'move',
+        destinationDir,
+        items: transferEntries.map((item) => ({
+          sourcePath: item.path,
+          name: item.name,
+          sizeBytes: item.sizeBytes ?? 0,
+        })),
+      })
+      break
+    }
     default:
       log.info('command not implemented', { commandId, paneId, targetEntryId, entries: effectiveEntries.length })
   }
@@ -154,6 +178,9 @@ export function canExecuteCommand(commandId: CommandId, paneId: 'left' | 'right'
     case 'rename':
     case 'delete':
       return Boolean(entry || selection.selectedIds.length > 0)
+    case 'copyToOtherPane':
+    case 'moveToOtherPane':
+      return Boolean(entry || selection.selectedIds.length > 0 || pane.focusedEntryId)
     default:
       return true
   }

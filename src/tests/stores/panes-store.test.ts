@@ -166,6 +166,55 @@ describe('panes-store navigation', () => {
     expect(usePanesStore.getState().treeNodes['C:\\root'].expanded).toBe(false)
   })
 
+  it('sorts tree roots by drive letter, formats labels, and keeps tree state in sync with volume changes', () => {
+    usePanesStore.getState().initialize({
+      session: {
+        activePane: 'left',
+        leftPath: 'C:\\root',
+        rightPath: 'D:\\work',
+      },
+      showHiddenFiles: false,
+      everythingStatus: { status: 'unavailable', isAvailable: false },
+      volumes: [
+        { mountRoot: 'Z:\\', label: 'Share', totalBytes: 1, freeBytes: 1, isNetwork: true },
+        { mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false },
+        { mountRoot: 'D:\\', label: '', totalBytes: 1, freeBytes: 1, isNetwork: false },
+      ],
+    })
+
+    expect(usePanesStore.getState().treeRoots).toEqual(['C:\\', 'D:\\', 'Z:\\'])
+    expect(usePanesStore.getState().treeNodes['C:\\'].name).toBe('Windows (C:)')
+    expect(usePanesStore.getState().treeNodes['D:\\'].name).toBe('D:')
+    expect(usePanesStore.getState().treeNodes['Z:\\'].name).toBe('Share (Z:)')
+
+    usePanesStore.setState((state) => ({
+      treeNodes: {
+        ...state.treeNodes,
+        'C:\\': { ...state.treeNodes['C:\\'], expanded: true, loaded: true, children: ['C:\\root'] },
+        'C:\\root': {
+          id: 'C:\\root',
+          name: 'root',
+          path: 'C:\\root',
+          parentPath: 'C:\\',
+          children: [],
+          expanded: false,
+          loaded: false,
+        },
+      },
+    }))
+
+    usePanesStore.getState().setVolumes([
+      { mountRoot: 'Y:\\', label: 'Archive', totalBytes: 1, freeBytes: 1, isNetwork: true },
+      { mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false },
+    ])
+
+    expect(usePanesStore.getState().treeRoots).toEqual(['C:\\', 'Y:\\'])
+    expect(usePanesStore.getState().treeNodes['C:\\'].expanded).toBe(true)
+    expect(usePanesStore.getState().treeNodes['C:\\root']).toBeDefined()
+    expect(usePanesStore.getState().treeNodes['Y:\\'].name).toBe('Archive (Y:)')
+    expect(usePanesStore.getState().treeNodes['D:\\']).toBeUndefined()
+  })
+
   it('eagerly requests folder sizes on reload only when Everything is available', async () => {
     const request = vi.fn(() => undefined)
     ipc.override('request_folder_sizes', request)

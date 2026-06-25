@@ -11,6 +11,8 @@ export type CommandId =
   | 'copy'
   | 'cut'
   | 'paste'
+  | 'copyToOtherPane'
+  | 'moveToOtherPane'
   | 'newFolder'
   | 'newFile'
   | 'calculateSize'
