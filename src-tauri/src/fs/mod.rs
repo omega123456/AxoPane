@@ -1,0 +1,487 @@
+use std::cmp::Ordering;
+use std::ffi::OsStr;
+use std::fs::{self, DirEntry, Metadata};
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+
+use lexical_sort::natural_lexical_cmp;
+use serde::{Deserialize, Serialize};
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SortKey {
+    Name,
+    Size,
+    Items,
+    Type,
+    Modified,
+    Created,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SortDirection {
+    Asc,
+    Desc,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListDirOptions {
+    pub path: String,
+    pub sort_key: SortKey,
+    pub sort_direction: SortDirection,
+    pub filter: String,
+    pub show_hidden: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryEntry {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub size_bytes: Option<u64>,
+    pub item_count: Option<u64>,
+    pub type_label: String,
+    pub modified_at: Option<String>,
+    pub created_at: Option<String>,
+    pub attributes: Vec<String>,
+    pub is_hidden: bool,
+    pub is_system: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListDirResponse {
+    pub path: String,
+    pub entries: Vec<DirectoryEntry>,
+}
+
+#[derive(Debug)]
+pub enum FsError {
+    Io(std::io::Error),
+    InvalidFileName(PathBuf),
+    InvalidName(String),
+    AlreadyExists(PathBuf),
+}
+
+impl std::fmt::Display for FsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(error) => write!(f, "{error}"),
+            Self::InvalidFileName(path) => write!(f, "invalid file name: {}", path.display()),
+            Self::InvalidName(name) => write!(f, "invalid name: \"{name}\""),
+            Self::AlreadyExists(path) => {
+                write!(f, "an item named \"{}\" already exists", path.display())
+            }
+        }
+    }
+}
+
+impl std::error::Error for FsError {}
+
+impl From<std::io::Error> for FsError {
+    fn from(value: std::io::Error) -> Self {
+        Self::Io(value)
+    }
+}
+
+/// Canonicalizes a user-supplied path into an absolute, real path.
+///
+/// Uses `dunce::canonicalize` so Windows results stay in the familiar
+/// `C:\Users\...` form instead of the extended-length `\\?\C:\Users\...`
+/// prefix that `std::fs::canonicalize` returns. The result is the absolute
+/// location the OS actually resolves, which is what every later navigation,
+/// breadcrumb, and watcher operation depends on.
+pub fn canonicalize_dir(path: &Path) -> Result<PathBuf, FsError> {
+    Ok(dunce::canonicalize(path)?)
+}
+
+/// The directory the app should open into on a fresh session: the user's home
+/// directory when known, otherwise the first available volume root, falling
+/// back to the platform filesystem root (`C:\` on Windows, `/` elsewhere).
+pub fn default_start_dir() -> PathBuf {
+    if let Some(home) = home_dir() {
+        if home.is_dir() {
+            return home;
+        }
+    }
+
+    if let Some(volume) = crate::volumes::list_volumes().into_iter().next() {
+        let root = PathBuf::from(volume.mount_root);
+        if root.is_dir() {
+            return root;
+        }
+    }
+
+    platform_root()
+}
+
+fn platform_root() -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from("C:\\")
+    } else {
+        PathBuf::from("/")
+    }
+}
+
+fn home_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    let keys = ["USERPROFILE", "HOME"];
+    #[cfg(not(windows))]
+    let keys = ["HOME"];
+
+    for key in keys {
+        if let Some(value) = std::env::var_os(key) {
+            if !value.is_empty() {
+                return Some(PathBuf::from(value));
+            }
+        }
+    }
+
+    None
+}
+
+pub fn list_dir(options: &ListDirOptions) -> Result<ListDirResponse, FsError> {
+    let requested = Path::new(&options.path);
+    let directory = canonicalize_dir(requested).map_err(|error| {
+        log::warn!(
+            "list_dir: failed to canonicalize {:?}: {error}",
+            options.path
+        );
+        error
+    })?;
+    log::debug!(
+        "list_dir: requested {:?} -> canonical {}",
+        options.path,
+        directory.display()
+    );
+    let normalized_filter = options.filter.to_lowercase();
+    let mut entries = Vec::new();
+
+    for entry in fs::read_dir(&directory)? {
+        let entry = entry?;
+        let listed = build_entry(&entry)?;
+
+        if !options.show_hidden && (listed.is_hidden || listed.is_system) {
+            continue;
+        }
+
+        if !normalized_filter.is_empty() && !listed.name.to_lowercase().contains(&normalized_filter)
+        {
+            continue;
+        }
+
+        entries.push(listed);
+    }
+
+    entries.sort_by(|left, right| compare_entries(left, right, options.sort_key, options.sort_direction));
+
+    log::info!(
+        "list_dir: {} -> {} entries",
+        directory.display(),
+        entries.len()
+    );
+
+    Ok(ListDirResponse {
+        path: directory.to_string_lossy().into_owned(),
+        entries,
+    })
+}
+
+/// Validates a single user-supplied file/folder name. Names must be non-empty,
+/// must not be the special `.`/`..` entries, and must not contain a path
+/// separator or NUL (which would let a "name" escape its parent directory).
+fn validate_name(name: &str) -> Result<(), FsError> {
+    let trimmed = name.trim();
+    if trimmed.is_empty()
+        || trimmed == "."
+        || trimmed == ".."
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed.contains('\0')
+    {
+        return Err(FsError::InvalidName(name.to_string()));
+    }
+
+    Ok(())
+}
+
+/// Creates a new directory named `name` inside `parent` and returns its entry.
+pub fn create_directory(parent: &str, name: &str) -> Result<DirectoryEntry, FsError> {
+    validate_name(name)?;
+    let directory = canonicalize_dir(Path::new(parent))?;
+    let target = directory.join(name.trim());
+    if target.exists() {
+        return Err(FsError::AlreadyExists(target));
+    }
+
+    fs::create_dir(&target)?;
+    log::info!("create_directory: {}", target.display());
+    build_entry_from_path(&target)
+}
+
+/// Creates a new empty file named `name` inside `parent` and returns its entry.
+pub fn create_file(parent: &str, name: &str) -> Result<DirectoryEntry, FsError> {
+    validate_name(name)?;
+    let directory = canonicalize_dir(Path::new(parent))?;
+    let target = directory.join(name.trim());
+    if target.exists() {
+        return Err(FsError::AlreadyExists(target));
+    }
+
+    // create_new fails if the file already exists, closing the check-then-create
+    // race left open by the `exists()` guard above.
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&target)?;
+    log::info!("create_file: {}", target.display());
+    build_entry_from_path(&target)
+}
+
+/// Renames the item at `path` to `new_name` within its current directory and
+/// returns the resulting entry.
+pub fn rename_entry(path: &str, new_name: &str) -> Result<DirectoryEntry, FsError> {
+    validate_name(new_name)?;
+    let source = Path::new(path);
+    let parent = source
+        .parent()
+        .ok_or_else(|| FsError::InvalidFileName(source.to_path_buf()))?;
+    let target = parent.join(new_name.trim());
+
+    // A no-op rename to the same name is allowed; otherwise refuse to clobber an
+    // existing item.
+    if target != source && target.exists() {
+        return Err(FsError::AlreadyExists(target));
+    }
+
+    fs::rename(source, &target)?;
+    log::info!("rename_entry: {} -> {}", source.display(), target.display());
+    build_entry_from_path(&target)
+}
+
+/// Permanently deletes the items at the given paths (files or directories,
+/// recursively). Best-effort: the first failure aborts and is reported.
+pub fn delete_entries(paths: &[String]) -> Result<(), FsError> {
+    for path in paths {
+        let target = Path::new(path);
+        let metadata = fs::symlink_metadata(target)?;
+        if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            fs::remove_dir_all(target)?;
+        } else {
+            fs::remove_file(target)?;
+        }
+        log::info!("delete_entries: removed {}", target.display());
+    }
+
+    Ok(())
+}
+
+/// Builds a [`DirectoryEntry`] from an absolute path (used after a mutating
+/// operation produces a new/renamed item). Mirrors [`build_entry`] but reads
+/// metadata directly from the path rather than a [`DirEntry`].
+fn build_entry_from_path(path: &Path) -> Result<DirectoryEntry, FsError> {
+    let metadata = path.metadata()?;
+    let name = path
+        .file_name()
+        .and_then(OsStr::to_str)
+        .ok_or_else(|| FsError::InvalidFileName(path.to_path_buf()))?
+        .to_string();
+    let is_dir = metadata.is_dir();
+    let attributes = collect_attributes(path, &metadata);
+    let is_hidden = attributes.iter().any(|attribute| attribute == "hidden");
+    let is_system = attributes.iter().any(|attribute| attribute == "system");
+
+    Ok(DirectoryEntry {
+        id: path.to_string_lossy().into_owned(),
+        name: name.clone(),
+        path: path.to_string_lossy().into_owned(),
+        is_dir,
+        size_bytes: (!is_dir).then_some(metadata.len()),
+        item_count: if is_dir { read_item_count(path) } else { None },
+        type_label: infer_type_label(&name, is_dir),
+        modified_at: system_time_to_rfc3339(metadata.modified().ok()),
+        created_at: system_time_to_rfc3339(metadata.created().ok()),
+        attributes,
+        is_hidden,
+        is_system,
+    })
+}
+
+fn build_entry(entry: &DirEntry) -> Result<DirectoryEntry, FsError> {
+    let path = entry.path();
+    let metadata = entry.metadata()?;
+    let name = entry
+        .file_name()
+        .into_string()
+        .map_err(|_| FsError::InvalidFileName(path.clone()))?;
+    let is_dir = metadata.is_dir();
+    let attributes = collect_attributes(&path, &metadata);
+    let is_hidden = attributes.iter().any(|attribute| attribute == "hidden");
+    let is_system = attributes.iter().any(|attribute| attribute == "system");
+
+    Ok(DirectoryEntry {
+        id: path.to_string_lossy().into_owned(),
+        name: name.clone(),
+        path: path.to_string_lossy().into_owned(),
+        is_dir,
+        size_bytes: (!is_dir).then_some(metadata.len()),
+        item_count: if is_dir { read_item_count(&path) } else { None },
+        type_label: infer_type_label(&name, is_dir),
+        modified_at: system_time_to_rfc3339(metadata.modified().ok()),
+        created_at: system_time_to_rfc3339(metadata.created().ok()),
+        attributes,
+        is_hidden,
+        is_system,
+    })
+}
+
+/// Counts the immediate children of a directory for the "Items" column.
+///
+/// This deliberately never propagates an error: drive roots and home folders
+/// routinely contain entries we cannot open (`System Volume Information`,
+/// `$RECYCLE.BIN`, legacy access-denied junctions like `Application Data`).
+/// A failure to count one child must not abort the entire parent listing, so an
+/// unreadable directory simply reports an unknown count (`None`).
+fn read_item_count(path: &Path) -> Option<u64> {
+    match fs::read_dir(path) {
+        Ok(entries) => Some(entries.count() as u64),
+        Err(error) => {
+            log::debug!("read_item_count: cannot count {}: {error}", path.display());
+            None
+        }
+    }
+}
+
+fn infer_type_label(name: &str, is_dir: bool) -> String {
+    if is_dir {
+        return "Folder".to_string();
+    }
+
+    Path::new(name)
+        .extension()
+        .and_then(OsStr::to_str)
+        .filter(|extension| !extension.is_empty())
+        .map(|extension| format!("{} file", extension.to_ascii_uppercase()))
+        .unwrap_or_else(|| "File".to_string())
+}
+
+fn compare_entries(
+    left: &DirectoryEntry,
+    right: &DirectoryEntry,
+    sort_key: SortKey,
+    sort_direction: SortDirection,
+) -> Ordering {
+    match left.is_dir.cmp(&right.is_dir).reverse() {
+        Ordering::Equal => {}
+        non_equal => return non_equal,
+    }
+
+    let base_order = match sort_key {
+        SortKey::Name => natural_name_compare(&left.name, &right.name),
+        SortKey::Size => compare_optional_u64(left.size_bytes, right.size_bytes)
+            .then_with(|| natural_name_compare(&left.name, &right.name)),
+        SortKey::Items => compare_optional_u64(left.item_count, right.item_count)
+            .then_with(|| natural_name_compare(&left.name, &right.name)),
+        SortKey::Type => natural_name_compare(&left.type_label, &right.type_label)
+            .then_with(|| natural_name_compare(&left.name, &right.name)),
+        SortKey::Modified => compare_optional_string(left.modified_at.as_deref(), right.modified_at.as_deref())
+            .then_with(|| natural_name_compare(&left.name, &right.name)),
+        SortKey::Created => compare_optional_string(left.created_at.as_deref(), right.created_at.as_deref())
+            .then_with(|| natural_name_compare(&left.name, &right.name)),
+    };
+
+    match sort_direction {
+        SortDirection::Asc => base_order,
+        SortDirection::Desc => base_order.reverse(),
+    }
+}
+
+fn natural_name_compare(left: &str, right: &str) -> Ordering {
+    natural_lexical_cmp(&left.to_ascii_lowercase(), &right.to_ascii_lowercase())
+}
+
+fn compare_optional_u64(left: Option<u64>, right: Option<u64>) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => left.cmp(&right),
+        (Some(_), None) => Ordering::Greater,
+        (None, Some(_)) => Ordering::Less,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+fn compare_optional_string(left: Option<&str>, right: Option<&str>) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => left.cmp(right),
+        (Some(_), None) => Ordering::Greater,
+        (None, Some(_)) => Ordering::Less,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+fn system_time_to_rfc3339(value: Option<SystemTime>) -> Option<String> {
+    value.and_then(|time| OffsetDateTime::from(time).format(&Rfc3339).ok())
+}
+
+fn collect_attributes(path: &Path, metadata: &Metadata) -> Vec<String> {
+    let mut attributes = Vec::new();
+
+    if metadata.permissions().readonly() {
+        attributes.push("readonly".to_string());
+    }
+
+    if metadata.file_type().is_symlink() {
+        attributes.push("symlink".to_string());
+    }
+
+    if is_hidden(path, metadata) {
+        attributes.push("hidden".to_string());
+    }
+
+    if is_system(metadata) {
+        attributes.push("system".to_string());
+    }
+
+    attributes
+}
+
+#[cfg(windows)]
+fn is_hidden(path: &Path, metadata: &Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+    const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
+
+    let file_attributes = metadata.file_attributes();
+    file_attributes & FILE_ATTRIBUTE_HIDDEN != 0
+        || (path
+            .file_name()
+            .and_then(OsStr::to_str)
+            .is_some_and(|name| name.starts_with('.'))
+            && file_attributes & FILE_ATTRIBUTE_SYSTEM == 0)
+}
+
+#[cfg(not(windows))]
+fn is_hidden(path: &Path, _metadata: &Metadata) -> bool {
+    path.file_name()
+        .and_then(OsStr::to_str)
+        .is_some_and(|name| name.starts_with('.'))
+}
+
+#[cfg(windows)]
+fn is_system(metadata: &Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
+    metadata.file_attributes() & FILE_ATTRIBUTE_SYSTEM != 0
+}
+
+#[cfg(not(windows))]
+fn is_system(_metadata: &Metadata) -> bool {
+    false
+}

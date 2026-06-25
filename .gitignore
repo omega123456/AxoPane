@@ -1,0 +1,14 @@
+.claude
+.agent
+.agents
+.vscode
+node_modules
+.cargo/*
+!.cargo/config.toml
+dist
+coverage
+playwright-report
+src-tauri/target
+pnpm-debug.log*
+test-results
+.tmp

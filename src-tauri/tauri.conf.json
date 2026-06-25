@@ -1,0 +1,44 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "File Explorer",
+  "version": "0.1.0",
+  "identifier": "com.example.fileexplorer",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "pnpm exec vite dev --host 127.0.0.1 --port 1420",
+    "beforeBuildCommand": "pnpm exec vite build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "File Explorer",
+        "width": 1600,
+        "height": 960,
+        "minWidth": 1280,
+        "minHeight": 720,
+        "decorations": true,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": "v1Compatible",
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "resources": ["resources/windows/Everything64.dll"]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY_BEFORE_SIGNED_RELEASE",
+      "endpoints": ["https://github.com/OWNER/REPO/releases/latest/download/latest.json"],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

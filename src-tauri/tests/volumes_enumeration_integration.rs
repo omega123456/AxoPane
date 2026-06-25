@@ -1,0 +1,27 @@
+use file_explorer_lib::volumes::list_volumes;
+
+#[test]
+fn enumerates_test_fixture_volumes_under_test_utils() {
+    let volumes = list_volumes();
+
+    if cfg!(windows) {
+        assert_eq!(volumes.len(), 2);
+        assert_eq!(volumes[0].mount_root, "C:\\");
+        assert_eq!(volumes[0].label, "Fixture System");
+        assert!(!volumes[0].is_network);
+        assert_eq!(volumes[1].mount_root, "\\\\fixture\\share");
+        assert!(volumes[1].is_network);
+    } else {
+        assert_eq!(volumes.len(), 2);
+        assert_eq!(volumes[0].mount_root, "/");
+        assert_eq!(volumes[0].label, "Fixture Root");
+        assert!(!volumes[0].is_network);
+        assert_eq!(volumes[1].mount_root, "/Volumes/fixture-network");
+        assert!(volumes[1].is_network);
+    }
+
+    for volume in &volumes {
+        assert!(!volume.mount_root.is_empty());
+        assert!(volume.total_bytes >= volume.free_bytes);
+    }
+}

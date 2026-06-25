@@ -1,0 +1,109 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-ui: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Cascadia Code", "Cascadia Mono", ui-monospace, "SF Mono", Consolas, "Liberation Mono", monospace;
+
+  --color-dark-backdrop: #161616;
+  --color-dark-window: #202020;
+  --color-dark-titlebar: #262626;
+  --color-dark-menubar: #232323;
+  --color-dark-surface: #272727;
+  --color-dark-panel: #242424;
+  --color-dark-tree: #212121;
+  --color-dark-header: #2c2c2c;
+  --color-dark-hover: rgba(255, 255, 255, 0.055);
+  --color-dark-border: rgba(255, 255, 255, 0.075);
+  --color-dark-border-strong: rgba(255, 255, 255, 0.13);
+  --color-dark-text: #f3f3f3;
+  --color-dark-text-soft: #cdcdcd;
+  --color-dark-text-muted: #999999;
+  --color-dark-text-faint: #6b6b6b;
+  --color-dark-skeleton: rgba(255, 255, 255, 0.06);
+  --color-dark-skeleton-strong: rgba(255, 255, 255, 0.14);
+
+  --color-light-backdrop: #d8d8d8;
+  --color-light-window: #f7f7f7;
+  --color-light-titlebar: #ededed;
+  --color-light-menubar: #f1f1f1;
+  --color-light-surface: #ffffff;
+  --color-light-panel: #f6f6f6;
+  --color-light-tree: #f1f1f1;
+  --color-light-header: #efefef;
+  --color-light-hover: rgba(0, 0, 0, 0.045);
+  --color-light-border: rgba(0, 0, 0, 0.08);
+  --color-light-border-strong: rgba(0, 0, 0, 0.14);
+  --color-light-text: #1b1b1b;
+  --color-light-text-soft: #3d3d3d;
+  --color-light-text-muted: #6e6e6e;
+  --color-light-text-faint: #9b9b9b;
+  --color-light-skeleton: rgba(0, 0, 0, 0.06);
+  --color-light-skeleton-strong: rgba(0, 0, 0, 0.12);
+
+  --color-accent-blue: #4cc2ff;
+  --color-accent-blue-light: #0067c0;
+  --color-accent-blue-soft: rgba(76, 194, 255, 0.15);
+  --color-accent-blue-strong: rgba(76, 194, 255, 0.26);
+  --color-accent-blue-border: rgba(76, 194, 255, 0.42);
+  --color-accent-green: #5fb98a;
+  --color-accent-amber: #e3b04b;
+  --color-accent-red: #e0626b;
+  --color-accent-red-soft: rgba(224, 98, 107, 0.15);
+  --color-file-video: #a44bcf;
+  --color-file-video-soft: rgba(164, 75, 207, 0.14);
+  --color-file-video-border: rgba(164, 75, 207, 0.35);
+  --color-file-archive: #c2861f;
+  --color-file-archive-soft: rgba(194, 134, 31, 0.14);
+  --color-file-archive-border: rgba(194, 134, 31, 0.35);
+  --color-file-iso: #3a6fd0;
+  --color-file-iso-soft: rgba(58, 111, 208, 0.14);
+  --color-file-iso-border: rgba(58, 111, 208, 0.35);
+  --color-file-doc: #6e7682;
+  --color-file-doc-soft: rgba(110, 118, 130, 0.14);
+  --color-file-doc-border: rgba(110, 118, 130, 0.35);
+  --color-file-code: #1f97a6;
+  --color-file-code-soft: rgba(31, 151, 166, 0.14);
+  --color-file-code-border: rgba(31, 151, 166, 0.35);
+
+  --text-2xs: 0.625rem;
+  --text-2xs--line-height: 0.875rem;
+  --text-uxs: 0.6875rem;
+  --text-uxs--line-height: 0.95rem;
+  --text-usm: 0.71875rem;
+  --text-usm--line-height: 1rem;
+  --text-row: 0.78125rem;
+  --text-row--line-height: 1.05rem;
+
+  --spacing-title: 2.5rem;
+  --spacing-command: 2.75rem;
+  --spacing-tabs: 2.125rem;
+  --spacing-crumb: 2.125rem;
+  --spacing-headrow: 1.875rem;
+  --spacing-row: 1.875rem;
+  --spacing-status: 1.625rem;
+  --spacing-tree: 12.75rem;
+  --spacing-details: 18.75rem;
+  --spacing-window: 50.375rem;
+  --spacing-window-min: 91.25rem;
+  --spacing-search: 14.375rem;
+  --spacing-sizecol: 5.25rem;
+  --spacing-itemcol: 3.875rem;
+  --spacing-typecol: 7.25rem;
+  --spacing-modcol: 6rem;
+  --spacing-frame: 28.375rem;
+  --spacing-copycard: 31.125rem;
+  --spacing-popover: 13.25rem;
+  --spacing-conflict: 26rem;
+  --spacing-queue-bars: 2rem;
+  --spacing-queue-list: 30rem;
+
+  --container-strata: 93.75rem;
+
+  --radius-window: 0.5625rem;
+  --radius-tab: 0.4375rem;
+
+  --shadow-window: 0 24px 70px rgba(0, 0, 0, 0.62), 0 2px 10px rgba(0, 0, 0, 0.5);
+  --shadow-float: 0 10px 34px rgba(0, 0, 0, 0.5);
+}

@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default capability set for the file explorer core services","local":true,"windows":["main"],"permissions":["core:default","log:default","updater:default"]}}
