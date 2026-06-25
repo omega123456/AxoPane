@@ -28,7 +28,7 @@ export function buildAppConfig(): AppConfig {
     keybindings: keymap.bindings,
     columns: layout.columns,
     layout: {
-      detailsVisible: layout.detailsVisible,
+      detailsVisible: false,
       treeWidth: layout.treeWidth,
       defaultPaneMode: layout.defaultPaneMode,
       restoreSession: layout.restoreSession,
@@ -42,7 +42,7 @@ export function hydrateAppConfig(config: AppConfig) {
     ...defaultAppConfig(),
     ...config,
     keybindings: bindings,
-    layout: { ...defaultLayout, ...config.layout },
+    layout: { ...defaultLayout, ...config.layout, detailsVisible: false },
     columns: config.columns?.length ? config.columns : defaultColumns,
   }
 

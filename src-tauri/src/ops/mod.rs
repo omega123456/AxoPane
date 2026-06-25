@@ -280,7 +280,11 @@ impl OpsService {
     }
 
     fn schedule_auto_remove_for(&self, id: &str) {
-        let removed = self.removed_emitter.lock().expect("removed emitter lock").clone();
+        let removed = self
+            .removed_emitter
+            .lock()
+            .expect("removed emitter lock")
+            .clone();
         schedule_auto_remove(id, &self.inner, removed, self.completed_retention);
     }
 
@@ -309,8 +313,11 @@ impl OpsService {
         let id = format!("op-{}", self.next_id.fetch_add(1, Ordering::Relaxed));
         let destination_dir = PathBuf::from(&request.destination_dir);
 
-        let mut source_paths: Vec<PathBuf> =
-            request.items.iter().map(|item| PathBuf::from(&item.source_path)).collect();
+        let mut source_paths: Vec<PathBuf> = request
+            .items
+            .iter()
+            .map(|item| PathBuf::from(&item.source_path))
+            .collect();
         source_paths.push(destination_dir.clone());
         let path_refs: Vec<&Path> = source_paths.iter().map(PathBuf::as_path).collect();
         let op_volumes = self.volumes_for(&path_refs);
@@ -374,7 +381,11 @@ impl OpsService {
                 if op.status != OpStatus::Pending {
                     continue;
                 }
-                if op.volumes.iter().any(|vol| inner.busy_volumes.contains(vol)) {
+                if op
+                    .volumes
+                    .iter()
+                    .any(|vol| inner.busy_volumes.contains(vol))
+                {
                     continue;
                 }
                 let volumes = op.volumes.clone();
@@ -394,14 +405,34 @@ impl OpsService {
     fn spawn_worker(self: &OpsService, id: String) {
         let inner = self.inner.clone();
         let resolver = self.resolver.clone();
-        let progress = self.progress_emitter.lock().expect("progress emitter lock").clone();
-        let conflict = self.conflict_emitter.lock().expect("conflict emitter lock").clone();
-        let removed = self.removed_emitter.lock().expect("removed emitter lock").clone();
+        let progress = self
+            .progress_emitter
+            .lock()
+            .expect("progress emitter lock")
+            .clone();
+        let conflict = self
+            .conflict_emitter
+            .lock()
+            .expect("conflict emitter lock")
+            .clone();
+        let removed = self
+            .removed_emitter
+            .lock()
+            .expect("removed emitter lock")
+            .clone();
         let retention = self.completed_retention;
 
         let handle = thread::spawn(move || {
-            run_operation(id.clone(), &inner, &resolver, progress.clone(), conflict.clone());
-            release_and_reschedule(&id, &inner, &resolver, progress, conflict, removed, retention);
+            run_operation(
+                id.clone(),
+                &inner,
+                &resolver,
+                progress.clone(),
+                conflict.clone(),
+            );
+            release_and_reschedule(
+                &id, &inner, &resolver, progress, conflict, removed, retention,
+            );
         });
 
         let mut inner = self.inner.lock().expect("ops lock");
@@ -485,8 +516,11 @@ impl OpsService {
 
         let mut new_order: VecDeque<String> = VecDeque::new();
         // Non-pending ops keep their absolute position relative to each other.
-        let mut requested: Vec<String> =
-            ids.iter().filter(|id| pending.contains(*id)).cloned().collect();
+        let mut requested: Vec<String> = ids
+            .iter()
+            .filter(|id| pending.contains(*id))
+            .cloned()
+            .collect();
         for id in inner.order.iter() {
             if pending.contains(id) {
                 if let Some(next) = requested_pop(&mut requested) {
@@ -575,9 +609,10 @@ impl OpsService {
     /// True when any operation is still active, pending, paused or in conflict.
     pub fn has_unfinished_work(&self) -> bool {
         let inner = self.inner.lock().expect("ops lock");
-        inner.ops.values().any(|op| {
-            !op.lock().expect("op lock").is_terminal()
-        })
+        inner
+            .ops
+            .values()
+            .any(|op| !op.lock().expect("op lock").is_terminal())
     }
 
     fn op(&self, id: &str) -> Option<Arc<Mutex<OpState>>> {
@@ -731,7 +766,8 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
                 let _ = remove_target(&target);
             }
             Some((ConflictResolution::Rename, rename_to)) => {
-                let new_name = rename_to.unwrap_or_else(|| unique_name(&destination_dir, &item.name));
+                let new_name =
+                    rename_to.unwrap_or_else(|| unique_name(&destination_dir, &item.name));
                 target = destination_dir.join(new_name);
             }
             None => {
@@ -743,7 +779,12 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
 
     // Wait out any pause before doing IO.
     wait_while_paused(op_arc, ctx.resolver);
-    if op_arc.lock().expect("op lock").cancel.load(Ordering::Relaxed) {
+    if op_arc
+        .lock()
+        .expect("op lock")
+        .cancel
+        .load(Ordering::Relaxed)
+    {
         return;
     }
 
@@ -765,7 +806,12 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
 
     match result {
         Ok(()) => {
-            if op_arc.lock().expect("op lock").cancel.load(Ordering::Relaxed) {
+            if op_arc
+                .lock()
+                .expect("op lock")
+                .cancel
+                .load(Ordering::Relaxed)
+            {
                 return;
             }
             advance_item(ctx, item)
@@ -903,8 +949,16 @@ fn release_and_reschedule(
         let conflict = conflict.clone();
         let removed = removed.clone();
         thread::spawn(move || {
-            run_operation(next.clone(), &inner, &resolver, progress.clone(), conflict.clone());
-            release_and_reschedule(&next, &inner, &resolver, progress, conflict, removed, retention);
+            run_operation(
+                next.clone(),
+                &inner,
+                &resolver,
+                progress.clone(),
+                conflict.clone(),
+            );
+            release_and_reschedule(
+                &next, &inner, &resolver, progress, conflict, removed, retention,
+            );
         });
     }
 
@@ -925,7 +979,11 @@ fn collect_startable(inner: &Arc<Mutex<Inner>>) -> Vec<String> {
         if op.status != OpStatus::Pending {
             continue;
         }
-        if op.volumes.iter().any(|vol| guard.busy_volumes.contains(vol)) {
+        if op
+            .volumes
+            .iter()
+            .any(|vol| guard.busy_volumes.contains(vol))
+        {
             continue;
         }
         let volumes = op.volumes.clone();
@@ -1036,14 +1094,23 @@ fn copy_dir_recursive(
 ) -> Result<(), String> {
     fs::create_dir_all(target).map_err(|error| error.to_string())?;
     for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
-        if ctx.op_arc.lock().expect("op lock").cancel.load(Ordering::Relaxed) {
+        if ctx
+            .op_arc
+            .lock()
+            .expect("op lock")
+            .cancel
+            .load(Ordering::Relaxed)
+        {
             return Ok(());
         }
 
         let entry = entry.map_err(|error| error.to_string())?;
         let child_target = target.join(entry.file_name());
         if entry.path().is_dir() {
-            let canonical_child = entry.path().canonicalize().map_err(|error| error.to_string())?;
+            let canonical_child = entry
+                .path()
+                .canonicalize()
+                .map_err(|error| error.to_string())?;
             if !canonical_child.starts_with(root) {
                 return Err(format!(
                     "Refusing to copy linked directory \"{}\" outside the selected source tree.",
@@ -1074,7 +1141,13 @@ fn move_path(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(), St
         Err(_) => {
             // Cross-volume move: copy then delete the source.
             copy_path(source, target, ctx)?;
-            if ctx.op_arc.lock().expect("op lock").cancel.load(Ordering::Relaxed) {
+            if ctx
+                .op_arc
+                .lock()
+                .expect("op lock")
+                .cancel
+                .load(Ordering::Relaxed)
+            {
                 return Ok(());
             }
             remove_source(source)
@@ -1082,7 +1155,11 @@ fn move_path(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(), St
     }
 }
 
-fn copy_file_with_progress(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(), String> {
+fn copy_file_with_progress(
+    source: &Path,
+    target: &Path,
+    ctx: &WorkerCtx<'_>,
+) -> Result<(), String> {
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
@@ -1093,11 +1170,19 @@ fn copy_file_with_progress(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) ->
 
     loop {
         wait_while_paused(ctx.op_arc, ctx.resolver);
-        if ctx.op_arc.lock().expect("op lock").cancel.load(Ordering::Relaxed) {
+        if ctx
+            .op_arc
+            .lock()
+            .expect("op lock")
+            .cancel
+            .load(Ordering::Relaxed)
+        {
             return Ok(());
         }
 
-        let read = reader.read(&mut buffer).map_err(|error| error.to_string())?;
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|error| error.to_string())?;
         if read == 0 {
             break;
         }

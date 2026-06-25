@@ -20,7 +20,6 @@ export type CommandId =
   | 'openInOtherPane'
   | 'selectAll'
   | 'clearFilter'
-  | 'toggleDetails'
   | 'showSettings'
 
 export type ColumnKey = SortKey
@@ -181,6 +180,10 @@ export type DeleteEntriesRequest = {
   paths: string[]
 }
 
+export type OpenPathRequest = {
+  path: string
+}
+
 export type WatchTarget = {
   tabId: string
   path: string
@@ -308,6 +311,10 @@ export type IpcCommandMap = {
   }
   delete_entries: {
     request: DeleteEntriesRequest
+    response: void
+  }
+  open_path: {
+    request: OpenPathRequest
     response: void
   }
   list_volumes: {

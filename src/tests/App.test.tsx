@@ -63,9 +63,7 @@ function createDirResponse(payload: ListDirRequest): ListDirResponse {
     payload.path === 'C:\\' ||
     payload.path === 'D:\\'
 
-  const entries = isRootPath
-    ? rootEntries
-    : []
+  const entries = isRootPath ? rootEntries : []
 
   const filtered = entries.filter((entry) =>
     payload.filter ? entry.name.toLowerCase().includes(payload.filter.toLowerCase()) : true,
@@ -161,7 +159,7 @@ describe('App', () => {
         { key: 'created', visible: false },
       ],
       layout: {
-        detailsVisible: true,
+        detailsVisible: false,
         treeWidth: 'default',
         defaultPaneMode: 'dual',
         restoreSession: true,
@@ -219,7 +217,9 @@ describe('App', () => {
     installListDirOverride()
     renderApp()
 
-    const modifiedHeader = await within(screen.getByLabelText('Left pane')).findByRole('button', { name: /Modified/i })
+    const modifiedHeader = await within(screen.getByLabelText('Left pane')).findByRole('button', {
+      name: /Modified/i,
+    })
     await user.click(modifiedHeader)
 
     await waitFor(() => {
@@ -240,7 +240,9 @@ describe('App', () => {
 
     await waitFor(() => {
       expect(within(screen.getByLabelText('Left pane')).getByText('Media')).toBeInTheDocument()
-      expect(within(screen.getByLabelText('Left pane')).queryByText('Documents')).not.toBeInTheDocument()
+      expect(
+        within(screen.getByLabelText('Left pane')).queryByText('Documents'),
+      ).not.toBeInTheDocument()
     })
 
     await user.type(filter, '{Escape}')

@@ -71,7 +71,9 @@ fn copies_files_into_destination_and_completes() {
         items: vec![item],
     });
 
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
     assert!(dest.join("alpha.txt").exists());
 
     assert_eq!(common::bootstrap_message(), "phase-1-common");
@@ -94,7 +96,9 @@ fn move_removes_source() {
         items: vec![item],
     });
 
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
     assert!(dest.join("beta.txt").exists());
     assert!(!source.exists());
 }
@@ -135,13 +139,21 @@ fn jobs_on_disjoint_volumes_run_in_parallel() {
 
     // Both parked in Conflict at the same time proves they were dispatched in
     // parallel; a shared volume would keep one Pending until the other finished.
-    wait_for(&service, &id_a, |progress| progress.status == OpStatus::Conflict);
-    wait_for(&service, &id_b, |progress| progress.status == OpStatus::Conflict);
+    wait_for(&service, &id_a, |progress| {
+        progress.status == OpStatus::Conflict
+    });
+    wait_for(&service, &id_b, |progress| {
+        progress.status == OpStatus::Conflict
+    });
 
     service.resolve_conflict(&id_a, ConflictResolution::Skip, false, None);
     service.resolve_conflict(&id_b, ConflictResolution::Skip, false, None);
-    wait_for(&service, &id_a, |progress| progress.status == OpStatus::Completed);
-    wait_for(&service, &id_b, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id_a, |progress| {
+        progress.status == OpStatus::Completed
+    });
+    wait_for(&service, &id_b, |progress| {
+        progress.status == OpStatus::Completed
+    });
 }
 
 #[test]
@@ -156,7 +168,9 @@ fn jobs_sharing_a_volume_do_not_park_simultaneously() {
 
     // Volumes are derived from the shared temp-dir root, so both ops share a
     // volume: the first parks in Conflict while the second stays Pending.
-    wait_for(&service, &id_a, |progress| progress.status == OpStatus::Conflict);
+    wait_for(&service, &id_a, |progress| {
+        progress.status == OpStatus::Conflict
+    });
     let second = service
         .snapshot()
         .into_iter()
@@ -165,10 +179,16 @@ fn jobs_sharing_a_volume_do_not_park_simultaneously() {
     assert_eq!(second.progress.status, OpStatus::Pending);
 
     service.resolve_conflict(&id_a, ConflictResolution::Skip, false, None);
-    wait_for(&service, &id_a, |progress| progress.status == OpStatus::Completed);
-    wait_for(&service, &id_b, |progress| progress.status == OpStatus::Conflict);
+    wait_for(&service, &id_a, |progress| {
+        progress.status == OpStatus::Completed
+    });
+    wait_for(&service, &id_b, |progress| {
+        progress.status == OpStatus::Conflict
+    });
     service.resolve_conflict(&id_b, ConflictResolution::Skip, false, None);
-    wait_for(&service, &id_b, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id_b, |progress| {
+        progress.status == OpStatus::Completed
+    });
 }
 
 #[test]
@@ -210,13 +230,19 @@ fn conflict_pauses_only_its_job() {
     });
 
     // The conflicting op parks in Conflict.
-    wait_for(&service, &conflict_id, |progress| progress.status == OpStatus::Conflict);
+    wait_for(&service, &conflict_id, |progress| {
+        progress.status == OpStatus::Conflict
+    });
     // The sibling, on a disjoint volume, completes regardless.
-    wait_for(&service, &sibling_id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &sibling_id, |progress| {
+        progress.status == OpStatus::Completed
+    });
 
     // Resolve with Replace; the conflicting op then completes.
     service.resolve_conflict(&conflict_id, ConflictResolution::Replace, false, None);
-    wait_for(&service, &conflict_id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &conflict_id, |progress| {
+        progress.status == OpStatus::Completed
+    });
     assert_eq!(fs::read(dest.join("dup.txt")).unwrap(), b"new-content");
 }
 
@@ -242,9 +268,13 @@ fn skip_resolution_leaves_existing_file() {
         }],
     });
 
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Conflict);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Conflict
+    });
     service.resolve_conflict(&id, ConflictResolution::Skip, false, None);
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
 
     assert_eq!(fs::read(dest.join("keep.txt")).unwrap(), b"original");
 }
@@ -271,9 +301,13 @@ fn rename_resolution_writes_a_new_name() {
         }],
     });
 
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Conflict);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Conflict
+    });
     service.resolve_conflict(&id, ConflictResolution::Rename, false, None);
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
 
     assert_eq!(fs::read(dest.join("photo.png")).unwrap(), b"existing");
     assert_eq!(fs::read(dest.join("photo (1).png")).unwrap(), b"fresh");
@@ -304,9 +338,13 @@ fn cancel_keeps_already_copied_files() {
         }],
     });
 
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Conflict);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Conflict
+    });
     service.cancel_op(&id);
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Cancelled);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Cancelled
+    });
 
     // The pre-existing destination file is untouched (we never replaced it).
     assert_eq!(fs::read(dest.join("already.txt")).unwrap(), b"existing");
@@ -324,10 +362,14 @@ fn completed_jobs_auto_remove_after_retention() {
     let service = OpsService::new(Duration::from_millis(60));
     service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
 
-    let removed_ids: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let removed_ids: Arc<std::sync::Mutex<Vec<String>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
     let removed_sink = removed_ids.clone();
     service.set_removed_emitter(move |operation_id| {
-        removed_sink.lock().expect("removed lock").push(operation_id);
+        removed_sink
+            .lock()
+            .expect("removed lock")
+            .push(operation_id);
     });
 
     let id = service.start_op(StartOpRequest {
@@ -335,7 +377,9 @@ fn completed_jobs_auto_remove_after_retention() {
         destination_dir: dest.to_string_lossy().into_owned(),
         items: vec![item],
     });
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
 
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
@@ -371,20 +415,30 @@ fn cancelled_jobs_auto_remove_after_retention() {
     let service = OpsService::new(Duration::from_millis(60));
     service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
 
-    let removed_ids: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let removed_ids: Arc<std::sync::Mutex<Vec<String>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
     let removed_sink = removed_ids.clone();
     service.set_removed_emitter(move |operation_id| {
-        removed_sink.lock().expect("removed lock").push(operation_id);
+        removed_sink
+            .lock()
+            .expect("removed lock")
+            .push(operation_id);
     });
 
     let blocker = parking_op(&service, &dir.path().join("a"));
-    wait_for(&service, &blocker, |progress| progress.status == OpStatus::Conflict);
+    wait_for(&service, &blocker, |progress| {
+        progress.status == OpStatus::Conflict
+    });
 
     let pending = parking_op(&service, &dir.path().join("b"));
-    wait_for(&service, &pending, |progress| progress.status == OpStatus::Pending);
+    wait_for(&service, &pending, |progress| {
+        progress.status == OpStatus::Pending
+    });
 
     service.cancel_op(&pending);
-    wait_for(&service, &pending, |progress| progress.status == OpStatus::Cancelled);
+    wait_for(&service, &pending, |progress| {
+        progress.status == OpStatus::Cancelled
+    });
 
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
@@ -413,7 +467,9 @@ fn cancelled_jobs_auto_remove_after_retention() {
     }
 
     service.resolve_conflict(&blocker, ConflictResolution::Skip, false, None);
-    wait_for(&service, &blocker, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &blocker, |progress| {
+        progress.status == OpStatus::Completed
+    });
 }
 
 #[test]
@@ -437,7 +493,9 @@ fn failed_jobs_persist_and_can_retry() {
         }],
     });
 
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Failed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Failed
+    });
 
     // It persists (retention does not remove failed ops).
     std::thread::sleep(Duration::from_millis(80));
@@ -449,7 +507,9 @@ fn failed_jobs_persist_and_can_retry() {
     // Now create the source and retry; it should succeed.
     fs::write(&missing, b"now-present").expect("create source");
     service.retry_op(&id);
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
     assert!(dest.join("missing.txt").exists());
 }
 
@@ -476,7 +536,9 @@ fn pending_jobs_can_be_reordered() {
             size_bytes: 1,
         }],
     });
-    wait_for(&service, &blocker, |progress| progress.status == OpStatus::Conflict);
+    wait_for(&service, &blocker, |progress| {
+        progress.status == OpStatus::Conflict
+    });
 
     let item1 = seed_file(&dir.path().join("first.txt"), 4);
     let item2 = seed_file(&dir.path().join("second.txt"), 4);
@@ -529,11 +591,15 @@ fn has_unfinished_work_reflects_active_and_pending() {
             size_bytes: 1,
         }],
     });
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Conflict);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Conflict
+    });
     assert!(service.has_unfinished_work());
 
     service.resolve_conflict(&id, ConflictResolution::Skip, false, None);
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
 }
 
 #[test]
@@ -559,7 +625,9 @@ fn pause_and_resume_transitions_status() {
     // It may finish very fast; pausing a finished op is a no-op, which is fine.
     service.pause_op(&id);
     service.resume_op(&id);
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
 }
 
 #[test]
@@ -586,7 +654,9 @@ fn copies_a_directory_tree() {
         }],
     });
 
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
     assert_eq!(fs::read(dest.join("tree").join("top.txt")).unwrap(), b"top");
     assert_eq!(
         fs::read(dest.join("tree").join("nested").join("deep.txt")).unwrap(),
@@ -622,7 +692,9 @@ fn measures_directory_byte_total_when_size_is_unknown() {
         }],
     });
 
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
 
     let progress = service
         .snapshot()
@@ -655,7 +727,9 @@ fn rejects_copying_a_directory_into_its_own_descendant() {
         }],
     });
 
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Failed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Failed
+    });
     let progress = service
         .snapshot()
         .into_iter()
@@ -677,7 +751,9 @@ fn cancelling_a_pending_op_marks_it_cancelled_immediately() {
     service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
 
     let blocker = parking_op(&service, &dir.path().join("a"));
-    wait_for(&service, &blocker, |progress| progress.status == OpStatus::Conflict);
+    wait_for(&service, &blocker, |progress| {
+        progress.status == OpStatus::Conflict
+    });
 
     // A second op on the same volume stays Pending; cancelling it is immediate.
     let pending = parking_op(&service, &dir.path().join("b"));
@@ -689,10 +765,14 @@ fn cancelling_a_pending_op_marks_it_cancelled_immediately() {
     assert_eq!(snapshot.progress.status, OpStatus::Pending);
 
     service.cancel_op(&pending);
-    wait_for(&service, &pending, |progress| progress.status == OpStatus::Cancelled);
+    wait_for(&service, &pending, |progress| {
+        progress.status == OpStatus::Cancelled
+    });
 
     service.resolve_conflict(&blocker, ConflictResolution::Skip, false, None);
-    wait_for(&service, &blocker, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &blocker, |progress| {
+        progress.status == OpStatus::Completed
+    });
 }
 
 #[test]
@@ -724,7 +804,9 @@ fn emits_incremental_current_file_progress() {
         }],
     });
 
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
 
     let snapshots = events.lock().expect("events lock");
     assert!(snapshots.iter().any(|progress| {
@@ -757,7 +839,9 @@ fn snapshot_progress_reports_percent_and_rate() {
         items,
     });
 
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
     let final_progress = service
         .snapshot()
         .into_iter()
@@ -775,7 +859,9 @@ fn reorder_ignores_unknown_and_non_pending_ids() {
     service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
 
     let blocker = parking_op(&service, &dir.path().join("a"));
-    wait_for(&service, &blocker, |progress| progress.status == OpStatus::Conflict);
+    wait_for(&service, &blocker, |progress| {
+        progress.status == OpStatus::Conflict
+    });
     let pending = parking_op(&service, &dir.path().join("b"));
 
     // Unknown ids and the active blocker id are ignored; pending order is stable.
@@ -788,10 +874,16 @@ fn reorder_ignores_unknown_and_non_pending_ids() {
     assert_eq!(order, vec![blocker.clone(), pending.clone()]);
 
     service.resolve_conflict(&blocker, ConflictResolution::Skip, false, None);
-    wait_for(&service, &blocker, |progress| progress.status == OpStatus::Completed);
-    wait_for(&service, &pending, |progress| progress.status == OpStatus::Conflict);
+    wait_for(&service, &blocker, |progress| {
+        progress.status == OpStatus::Completed
+    });
+    wait_for(&service, &pending, |progress| {
+        progress.status == OpStatus::Conflict
+    });
     service.resolve_conflict(&pending, ConflictResolution::Skip, false, None);
-    wait_for(&service, &pending, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &pending, |progress| {
+        progress.status == OpStatus::Completed
+    });
 }
 
 #[test]
@@ -815,14 +907,18 @@ fn rename_with_explicit_target_uses_given_name() {
         }],
     });
 
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Conflict);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Conflict
+    });
     service.resolve_conflict(
         &id,
         ConflictResolution::Rename,
         false,
         Some("doc-copy".to_string()),
     );
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
     assert_eq!(fs::read(dest.join("doc-copy")).unwrap(), b"body");
 }
 
@@ -835,7 +931,10 @@ fn pause_during_active_copy_halts_then_resumes() {
     // Many sizable items so the copy is in flight long enough to pause.
     let mut items = Vec::new();
     for index in 0..200 {
-        items.push(seed_file(&dir.path().join(format!("big-{index}.bin")), 65_536));
+        items.push(seed_file(
+            &dir.path().join(format!("big-{index}.bin")),
+            65_536,
+        ));
     }
 
     let service = OpsService::new(Duration::from_secs(30));
@@ -869,7 +968,9 @@ fn pause_during_active_copy_halts_then_resumes() {
     if saw_pause {
         service.resume_op(&id);
     }
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
 }
 
 #[test]
@@ -900,7 +1001,9 @@ fn cross_volume_move_copies_then_deletes_source() {
         }],
     });
 
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
     assert!(dest.join("payload.bin").exists());
     assert!(!source.exists());
 }
@@ -926,7 +1029,9 @@ fn operates_without_a_matching_volume_table() {
         destination_dir: dest.to_string_lossy().into_owned(),
         items: vec![item],
     });
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
     assert!(dest.join("orphan.txt").exists());
     assert!(progress_seen.load(Ordering::SeqCst));
 }
@@ -952,9 +1057,13 @@ fn auto_rename_handles_extensionless_names() {
         }],
     });
 
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Conflict);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Conflict
+    });
     service.resolve_conflict(&id, ConflictResolution::Rename, false, None);
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
     assert_eq!(fs::read(dest.join("Makefile (1)")).unwrap(), b"all:");
 }
 
@@ -998,10 +1107,14 @@ fn apply_to_all_reuses_resolution_for_later_conflicts() {
         items,
     });
 
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Conflict);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Conflict
+    });
     // Apply Replace to all remaining conflicts.
     service.resolve_conflict(&id, ConflictResolution::Replace, true, None);
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
 
     assert_eq!(fs::read(dest.join("dup-0.txt")).unwrap(), b"new");
     assert_eq!(fs::read(dest.join("dup-1.txt")).unwrap(), b"new");

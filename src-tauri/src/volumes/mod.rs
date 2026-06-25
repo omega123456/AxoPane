@@ -263,9 +263,8 @@ fn extend_network_resources(volumes: &mut Vec<VolumeInfo>) {
 #[cfg(all(not(feature = "test-utils"), windows))]
 fn extend_network_resources_for_scope(volumes: &mut Vec<VolumeInfo>, scope: u32) {
     let mut handle: HANDLE = std::ptr::null_mut();
-    let status = unsafe {
-        WNetOpenEnumW(scope, RESOURCETYPE_DISK, 0, std::ptr::null(), &mut handle)
-    };
+    let status =
+        unsafe { WNetOpenEnumW(scope, RESOURCETYPE_DISK, 0, std::ptr::null(), &mut handle) };
 
     if status != ERROR_SUCCESS {
         return;
@@ -393,7 +392,10 @@ fn extend_network_shortcuts(volumes: &mut Vec<VolumeInfo>) {
 
 #[cfg(all(not(feature = "test-utils"), windows))]
 fn extend_network_shortcut_dir(volumes: &mut Vec<VolumeInfo>, path: &Path) {
-    let label = path.file_name().and_then(|name| name.to_str()).map(str::to_string);
+    let label = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string);
     let target_lnk = path.join("target.lnk");
 
     if target_lnk.exists() {

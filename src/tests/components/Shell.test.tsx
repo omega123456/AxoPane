@@ -4,17 +4,15 @@ import { beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { CommandBar } from '@/components/shell/CommandBar'
 import { StatusBar } from '@/components/shell/StatusBar'
-import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 
 beforeEach(() => {
   ipc.install()
   usePanesStore.getState().reset()
-  useLayoutStore.getState().reset()
 })
 
 describe('CommandBar', () => {
-  it('shows the path, fires up/refresh, toggles details and theme', async () => {
+  it('shows the path, fires up/refresh, and toggles theme', async () => {
     const user = userEvent.setup()
     const goUp = vi.fn(() => Promise.resolve())
     const reloadPane = vi.fn(() => Promise.resolve())
@@ -22,7 +20,10 @@ describe('CommandBar', () => {
     usePanesStore.setState((state) => ({
       goUp,
       reloadPane,
-      panes: { ...state.panes, left: { ...state.panes.left, path: 'C:\\Users', filterApplied: '' } },
+      panes: {
+        ...state.panes,
+        left: { ...state.panes.left, path: 'C:\\Users', filterApplied: '' },
+      },
     }))
 
     render(<CommandBar theme="dark" setTheme={setTheme} />)
@@ -32,9 +33,6 @@ describe('CommandBar', () => {
     await user.click(screen.getByRole('button', { name: 'Refresh' }))
     expect(goUp).toHaveBeenCalledWith('left')
     expect(reloadPane).toHaveBeenCalledWith('left')
-
-    await user.click(screen.getByRole('button', { name: /details/i }))
-    expect(useLayoutStore.getState().detailsVisible).toBe(false)
 
     await user.click(screen.getByRole('button', { name: 'Light theme' }))
     expect(setTheme).toHaveBeenCalledWith('light')
@@ -47,7 +45,10 @@ describe('CommandBar', () => {
     }))
     render(<CommandBar theme="light" setTheme={vi.fn()} />)
     expect(screen.getByText('Filter: mkv')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /hidden files/i })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: /hidden files/i })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
     expect(screen.getByRole('button', { name: 'Dark theme' })).toBeInTheDocument()
   })
 
@@ -89,7 +90,13 @@ describe('StatusBar', () => {
             isHidden: false,
             isSystem: false,
           },
-          volume: { mountRoot: 'C:\\', label: 'System', totalBytes: 4_000_000_000_000, freeBytes: 412_000_000_000, isNetwork: false },
+          volume: {
+            mountRoot: 'C:\\',
+            label: 'System',
+            totalBytes: 4_000_000_000_000,
+            freeBytes: 412_000_000_000,
+            isNetwork: false,
+          },
         }}
       />,
     )

@@ -5,7 +5,6 @@ import { ContextMenu } from '@/components/menus/ContextMenu'
 import { AppFrame } from '@/components/shell/AppFrame'
 import { CommandBar } from '@/components/shell/CommandBar'
 import { StatusBar } from '@/components/shell/StatusBar'
-import { DetailsPanel } from '@/components/details/DetailsPanel'
 import { FilePane } from '@/components/pane/FilePane'
 import { FolderTree } from '@/components/tree/FolderTree'
 import { QueueOverlay } from '@/components/queue/QueueOverlay'
@@ -52,7 +51,6 @@ function App() {
   const applyTheme = useThemeStore((state) => state.setTheme)
   const syncThemePreference = useThemeStore((state) => state.setThemePreference)
   const persistThemePreference = useConfigStore((state) => state.setThemePreference)
-  const detailsVisible = useLayoutStore((state) => state.detailsVisible)
   const defaultPaneMode = useLayoutStore((state) => state.defaultPaneMode)
   const activeSelection = useSelectionStore((state) => state.selections[activePaneId])
   const keymap = useKeymapStore((state) => state.bindings)
@@ -207,7 +205,6 @@ function App() {
             <FilePane paneId="right" />
           </div>
         )}
-        {detailsVisible ? <DetailsPanel paneId={activePaneId} /> : null}
       </AppFrame>
       <ContextMenu />
       <SettingsModal />

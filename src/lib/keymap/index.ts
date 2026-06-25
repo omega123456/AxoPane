@@ -27,7 +27,6 @@ export const commandLabels: Record<CommandId, string> = {
   openInOtherPane: 'Open in other pane',
   selectAll: 'Select all',
   clearFilter: 'Clear filter',
-  toggleDetails: 'Toggle details',
   showSettings: 'Settings',
 }
 
@@ -49,7 +48,6 @@ export const defaultKeymap: Record<CommandId, Shortcut[]> = {
   openInOtherPane: ['Ctrl+Shift+Enter'],
   selectAll: ['Ctrl+A'],
   clearFilter: ['Escape'],
-  toggleDetails: ['Alt+Enter'],
   showSettings: ['Ctrl+,'],
 }
 
@@ -123,7 +121,12 @@ export function normalizeShortcut(value: string): Shortcut {
       key = 'Space'
     } else if (lower === 'escape' || lower === 'esc') {
       key = 'Escape'
-    } else if (lower === 'arrowup' || lower === 'arrowdown' || lower === 'arrowleft' || lower === 'arrowright') {
+    } else if (
+      lower === 'arrowup' ||
+      lower === 'arrowdown' ||
+      lower === 'arrowleft' ||
+      lower === 'arrowright'
+    ) {
       key = `Arrow${lower.slice(5, 6).toUpperCase()}${lower.slice(6)}`
     } else if (lower.length === 1) {
       key = lower.toUpperCase()
@@ -202,7 +205,8 @@ export function captureShortcut(event: KeyboardEvent): Shortcut | null {
 export function parseShortcut(shortcut: Shortcut): ShortcutParts {
   const normalized = normalizeShortcut(shortcut)
   const parts = normalized.split('+').filter(Boolean)
-  const key = parts.find((part) => !modifierOrder.includes(part as (typeof modifierOrder)[number])) ?? ''
+  const key =
+    parts.find((part) => !modifierOrder.includes(part as (typeof modifierOrder)[number])) ?? ''
 
   return {
     ctrl: parts.includes('Ctrl'),
@@ -243,7 +247,9 @@ function shortcutsEqual(left: Shortcut[], right: Shortcut[]) {
     return false
   }
 
-  return left.every((shortcut, index) => normalizeShortcut(shortcut) === normalizeShortcut(right[index]))
+  return left.every(
+    (shortcut, index) => normalizeShortcut(shortcut) === normalizeShortcut(right[index]),
+  )
 }
 
 export function migrateKeymap(overrides: Partial<Record<CommandId, Shortcut[]>>) {
@@ -251,7 +257,9 @@ export function migrateKeymap(overrides: Partial<Record<CommandId, Shortcut[]>>)
   let migrated = false
 
   for (const migration of legacyKeymapMigrations) {
-    const current = (nextOverrides[migration.commandId] ?? []).map(normalizeShortcut).filter(Boolean)
+    const current = (nextOverrides[migration.commandId] ?? [])
+      .map(normalizeShortcut)
+      .filter(Boolean)
     if (!shortcutsEqual(current, migration.from)) {
       continue
     }

@@ -56,7 +56,7 @@ describe('SettingsModal', () => {
     })
   })
 
-  it('keeps theme, hidden-file, column, and layout changes in draft on Windows until Save', async () => {
+  it('keeps theme, hidden-file, and column changes in draft on Windows until Save', async () => {
     const user = userEvent.setup()
     const saveConfig = vi.fn((payload) => payload.config)
     ipc.override('save_config', saveConfig)
@@ -67,14 +67,15 @@ describe('SettingsModal', () => {
 
     await user.click(screen.getByRole('switch', { name: 'Show hidden files' }))
     await user.click(screen.getByRole('radio', { name: 'Dark' }))
-    await user.click(screen.getByRole('switch', { name: 'Details panel' }))
     await user.click(screen.getByRole('button', { name: 'Columns' }))
     await user.click(screen.getByRole('switch', { name: 'Created column' }))
 
     expect(usePanesStore.getState().showHiddenFiles).toBe(false)
     expect(useThemeStore.getState().preference).toBe('system')
-    expect(useLayoutStore.getState().detailsVisible).toBe(true)
-    expect(useLayoutStore.getState().columns.find((column) => column.key === 'created')?.visible).toBe(false)
+    expect(useLayoutStore.getState().detailsVisible).toBe(false)
+    expect(
+      useLayoutStore.getState().columns.find((column) => column.key === 'created')?.visible,
+    ).toBe(false)
 
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
 
@@ -82,7 +83,9 @@ describe('SettingsModal', () => {
       expect(usePanesStore.getState().showHiddenFiles).toBe(true)
       expect(useThemeStore.getState().preference).toBe('dark')
       expect(useLayoutStore.getState().detailsVisible).toBe(false)
-      expect(useLayoutStore.getState().columns.find((column) => column.key === 'created')?.visible).toBe(true)
+      expect(
+        useLayoutStore.getState().columns.find((column) => column.key === 'created')?.visible,
+      ).toBe(true)
       expect(saveConfig).toHaveBeenCalled()
     })
   })
@@ -96,14 +99,16 @@ describe('SettingsModal', () => {
 
     await user.click(screen.getByRole('switch', { name: 'Show hidden files' }))
     await user.click(screen.getByRole('radio', { name: 'Dark' }))
-    await user.click(screen.getByRole('switch', { name: 'Details panel' }))
     await user.click(screen.getByRole('button', { name: 'Reset to defaults' }))
 
-    expect(screen.getByRole('switch', { name: 'Show hidden files' })).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByRole('switch', { name: 'Show hidden files' })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    )
     expect(screen.getByRole('radio', { name: 'System' })).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByRole('switch', { name: 'Details panel' })).toHaveAttribute('aria-checked', 'true')
     expect(usePanesStore.getState().showHiddenFiles).toBe(false)
     expect(useThemeStore.getState().preference).toBe('system')
+    expect(useLayoutStore.getState().detailsVisible).toBe(false)
   })
 })
 

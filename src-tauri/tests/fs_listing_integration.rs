@@ -30,7 +30,11 @@ fn lists_sorted_filtered_entries_with_metadata() {
     })
     .expect("list dir");
 
-    let names: Vec<_> = response.entries.iter().map(|entry| entry.name.as_str()).collect();
+    let names: Vec<_> = response
+        .entries
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
     assert_eq!(names, vec!["file2.txt", "file10.txt"]);
 
     let file_entry = &response.entries[0];
@@ -67,7 +71,10 @@ fn keeps_folders_first_and_respects_hidden_toggle() {
         .iter()
         .map(|entry| entry.name.as_str())
         .collect();
-    assert_eq!(visible_names, vec!["beta2", "beta10", "alpha2.txt", "alpha10.txt"]);
+    assert_eq!(
+        visible_names,
+        vec!["beta2", "beta10", "alpha2.txt", "alpha10.txt"]
+    );
     assert!(hidden_filtered.entries.iter().all(|entry| !entry.is_hidden));
     assert_eq!(hidden_filtered.entries[0].item_count, Some(0));
 
@@ -80,14 +87,20 @@ fn keeps_folders_first_and_respects_hidden_toggle() {
     })
     .expect("list dir with hidden");
 
-    assert!(hidden_included.entries.iter().any(|entry| entry.name == ".secret"));
+    assert!(hidden_included
+        .entries
+        .iter()
+        .any(|entry| entry.name == ".secret"));
     let hidden_entry = hidden_included
         .entries
         .iter()
         .find(|entry| entry.name == ".secret")
         .expect("hidden entry");
     assert!(hidden_entry.is_hidden);
-    assert!(hidden_entry.attributes.iter().any(|attribute| attribute == "hidden"));
+    assert!(hidden_entry
+        .attributes
+        .iter()
+        .any(|attribute| attribute == "hidden"));
     assert_eq!(common::bootstrap_message(), "phase-1-common");
 }
 

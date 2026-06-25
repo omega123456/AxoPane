@@ -12,7 +12,7 @@ export const defaultColumns: ColumnConfig[] = [
 ]
 
 export const defaultLayout: LayoutConfig = {
-  detailsVisible: true,
+  detailsVisible: false,
   treeWidth: 'default',
   defaultPaneMode: 'dual',
   restoreSession: true,
@@ -45,7 +45,10 @@ function normalizeColumns(columns: ColumnConfig[]) {
   }
   for (const key of columnOrder) {
     if (!seen.has(key)) {
-      ordered.push({ key, visible: defaultColumns.find((column) => column.key === key)?.visible ?? true })
+      ordered.push({
+        key,
+        visible: defaultColumns.find((column) => column.key === key)?.visible ?? true,
+      })
     }
   }
   return ordered

@@ -38,7 +38,11 @@ impl From<jwalk::Error> for ManualSizeError {
     }
 }
 
-pub fn calculate(path: &Path, cancel: &Arc<AtomicBool>, timeout: Duration) -> Result<u64, ManualSizeError> {
+pub fn calculate(
+    path: &Path,
+    cancel: &Arc<AtomicBool>,
+    timeout: Duration,
+) -> Result<u64, ManualSizeError> {
     let started_at = Instant::now();
     let metadata = std::fs::symlink_metadata(path)?;
 

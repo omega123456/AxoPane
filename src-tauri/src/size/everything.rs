@@ -38,7 +38,9 @@ mod platform {
             match self {
                 Self::DllUnavailable => write!(f, "Everything64.dll unavailable"),
                 Self::NotReady => write!(f, "Everything database is not ready"),
-                Self::QueryFailed(code) => write!(f, "Everything query failed with error code {code}"),
+                Self::QueryFailed(code) => {
+                    write!(f, "Everything query failed with error code {code}")
+                }
             }
         }
     }
@@ -64,17 +66,24 @@ mod platform {
                 .find(|candidate| candidate.exists())
                 .unwrap_or_else(|| PathBuf::from("Everything64.dll"));
 
-            let library = unsafe { Library::new(path) }.map_err(|_| EverythingError::DllUnavailable)?;
+            let library =
+                unsafe { Library::new(path) }.map_err(|_| EverythingError::DllUnavailable)?;
             let library = Arc::new(library);
 
             unsafe {
                 Ok(Self {
-                    set_search_w: *library.get(b"Everything_SetSearchW\0").map_err(|_| EverythingError::DllUnavailable)?,
+                    set_search_w: *library
+                        .get(b"Everything_SetSearchW\0")
+                        .map_err(|_| EverythingError::DllUnavailable)?,
                     set_request_flags: *library
                         .get(b"Everything_SetRequestFlags\0")
                         .map_err(|_| EverythingError::DllUnavailable)?,
-                    set_max: *library.get(b"Everything_SetMax\0").map_err(|_| EverythingError::DllUnavailable)?,
-                    query_w: *library.get(b"Everything_QueryW\0").map_err(|_| EverythingError::DllUnavailable)?,
+                    set_max: *library
+                        .get(b"Everything_SetMax\0")
+                        .map_err(|_| EverythingError::DllUnavailable)?,
+                    query_w: *library
+                        .get(b"Everything_QueryW\0")
+                        .map_err(|_| EverythingError::DllUnavailable)?,
                     get_num_results: *library
                         .get(b"Everything_GetNumResults\0")
                         .map_err(|_| EverythingError::DllUnavailable)?,
@@ -135,12 +144,20 @@ mod platform {
     }
 
     fn dll_candidates() -> Vec<PathBuf> {
-        let mut candidates = vec![PathBuf::from("Everything64.dll"), PathBuf::from("resources/windows/Everything64.dll")];
+        let mut candidates = vec![
+            PathBuf::from("Everything64.dll"),
+            PathBuf::from("resources/windows/Everything64.dll"),
+        ];
 
         if let Ok(current_exe) = std::env::current_exe() {
             if let Some(parent) = current_exe.parent() {
                 candidates.push(parent.join("Everything64.dll"));
-                candidates.push(parent.join("resources").join("windows").join("Everything64.dll"));
+                candidates.push(
+                    parent
+                        .join("resources")
+                        .join("windows")
+                        .join("Everything64.dll"),
+                );
             }
         }
 
@@ -148,7 +165,10 @@ mod platform {
     }
 
     fn to_wide(value: &str) -> Vec<u16> {
-        OsStr::new(value).encode_wide().chain(std::iter::once(0)).collect()
+        OsStr::new(value)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
     }
 }
 

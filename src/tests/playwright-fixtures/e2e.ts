@@ -1,4 +1,10 @@
-import type { AppConfig, IpcCommandMap, IpcEventMap, ListDirResponse, SessionState } from '@/lib/types/ipc'
+import type {
+  AppConfig,
+  IpcCommandMap,
+  IpcEventMap,
+  ListDirResponse,
+  SessionState,
+} from '@/lib/types/ipc'
 import { conflictQueueSnapshot, emptyQueueSnapshot, expandedQueueSnapshot } from './queue'
 
 type CommandMap = Partial<{
@@ -38,7 +44,7 @@ const lightConfig: AppConfig = {
     { key: 'created', visible: false },
   ],
   layout: {
-    detailsVisible: true,
+    detailsVisible: false,
     treeWidth: 'default',
     defaultPaneMode: 'dual',
     restoreSession: true,

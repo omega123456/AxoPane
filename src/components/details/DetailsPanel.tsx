@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { CopyIcon, FolderOpenIcon, InfoIcon } from '@/components/icons'
+import { executeCommand } from '@/lib/commands'
 import { logFrontend } from '@/lib/app-log-commands'
 import { usePanesStore } from '@/stores/panes-store'
 import type { PaneId } from '@/types/pane'
@@ -10,7 +11,6 @@ type DetailsPanelProps = {
 
 export function DetailsPanel({ paneId }: DetailsPanelProps) {
   const pane = usePanesStore((state) => state.panes[paneId])
-  const navigatePane = usePanesStore((state) => state.navigatePane)
   const entry = pane.entries.find((item) => item.id === pane.focusedEntryId) ?? pane.entries[0]
 
   if (!entry) {
@@ -34,37 +34,38 @@ export function DetailsPanel({ paneId }: DetailsPanelProps) {
             Preview placeholder
           </span>
         </div>
-        <h2 className="mt-4 break-all text-sm font-semibold text-light-text dark:text-dark-text">{entry.name}</h2>
+        <h2 className="mt-4 break-all text-sm font-semibold text-light-text dark:text-dark-text">
+          {entry.name}
+        </h2>
         <dl className="mt-4 space-y-2 text-row">
           <div className="flex justify-between gap-3 border-b border-light-border py-2 dark:border-dark-border">
             <dt className="text-light-text-muted dark:text-dark-text-muted">Type</dt>
-            <dd className="text-right text-light-text-soft dark:text-dark-text-soft">{entry.typeLabel}</dd>
+            <dd className="text-right text-light-text-soft dark:text-dark-text-soft">
+              {entry.typeLabel}
+            </dd>
           </div>
           <div className="flex justify-between gap-3 border-b border-light-border py-2 dark:border-dark-border">
             <dt className="text-light-text-muted dark:text-dark-text-muted">Path</dt>
-            <dd className="text-right text-light-text-soft dark:text-dark-text-soft">{entry.path}</dd>
+            <dd className="text-right text-light-text-soft dark:text-dark-text-soft">
+              {entry.path}
+            </dd>
           </div>
           <div className="flex justify-between gap-3 border-b border-light-border py-2 dark:border-dark-border">
             <dt className="text-light-text-muted dark:text-dark-text-muted">Modified</dt>
-            <dd className="text-right text-light-text-soft dark:text-dark-text-soft">{entry.modifiedAt ?? '—'}</dd>
+            <dd className="text-right text-light-text-soft dark:text-dark-text-soft">
+              {entry.modifiedAt ?? '—'}
+            </dd>
           </div>
           <div className="flex justify-between gap-3 border-b border-light-border py-2 dark:border-dark-border">
             <dt className="text-light-text-muted dark:text-dark-text-muted">Created</dt>
-            <dd className="text-right text-light-text-soft dark:text-dark-text-soft">{entry.createdAt ?? '—'}</dd>
+            <dd className="text-right text-light-text-soft dark:text-dark-text-soft">
+              {entry.createdAt ?? '—'}
+            </dd>
           </div>
         </dl>
       </div>
       <div className="grid grid-cols-3 gap-2 border-t border-light-border p-3 dark:border-dark-border">
-        <ActionButton
-          label="Open"
-          onClick={() => {
-            if (entry.isDir) {
-              void navigatePane(paneId, entry.path)
-            } else {
-              logFrontend('Open requested for file', { path: entry.path })
-            }
-          }}
-        >
+        <ActionButton label="Open" onClick={() => executeCommand('open', paneId, entry.id)}>
           <FolderOpenIcon className="h-4 w-4" />
         </ActionButton>
         <ActionButton

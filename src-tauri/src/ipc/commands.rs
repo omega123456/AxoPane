@@ -9,11 +9,12 @@ use super::mock;
 use super::types::{
     AppConfig, CancelSizeRequest, CancelSizeResponse, CreateEntryRequest, DeleteEntriesRequest,
     FolderSizeRequest, FolderSizesRequest, InitialShellResponse, ListDirRequest, ListDirResponse,
-    OpIdRequest, RefreshTabRequest, RenameEntryRequest, ReorderOpsRequest, ResolveConflictRequest,
-    SaveConfigRequest, SaveSessionRequest, SessionState, SetTabWatchRequest, SizeStateEvent,
-    StartOpRequest, VolumeInfo,
+    OpIdRequest, OpenPathRequest, RefreshTabRequest, RenameEntryRequest, ReorderOpsRequest,
+    ResolveConflictRequest, SaveConfigRequest, SaveSessionRequest, SessionState,
+    SetTabWatchRequest, SizeStateEvent, StartOpRequest, VolumeInfo,
 };
 use crate::fs::DirectoryEntry;
+use std::path::Path;
 use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
@@ -61,6 +62,15 @@ pub fn rename_entry(payload: RenameEntryRequest) -> Result<DirectoryEntry, Strin
 pub fn delete_entries(payload: DeleteEntriesRequest) -> Result<(), String> {
     fs::delete_entries(&payload.paths).map_err(|error| {
         let message = format!("Failed to delete items: {error}");
+        log::error!("{message}");
+        message
+    })
+}
+
+#[tauri::command]
+pub fn open_path(payload: OpenPathRequest) -> Result<(), String> {
+    crate::launch::open_path(Path::new(&payload.path)).map_err(|error| {
+        let message = format!("Failed to open \"{}\": {error}", payload.path);
         log::error!("{message}");
         message
     })
@@ -255,10 +265,7 @@ pub fn load_config(state: State<'_, PersistenceState>) -> AppConfig {
 }
 
 #[tauri::command]
-pub fn save_config(
-    payload: SaveConfigRequest,
-    state: State<'_, PersistenceState>,
-) -> AppConfig {
+pub fn save_config(payload: SaveConfigRequest, state: State<'_, PersistenceState>) -> AppConfig {
     state.config.replace(payload.config.clone());
     payload.config
 }

@@ -1,18 +1,21 @@
 import { startOp } from '@/lib/queue-commands'
 import { log } from '@/lib/app-log-commands'
-import { persistAppConfig } from '@/lib/app-config'
+import { openPath } from '@/lib/ipc/commands'
 import type { CommandId, DirectoryEntry } from '@/lib/types/ipc'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useClipboardStore } from '@/stores/clipboard-store'
 import { useInlineRenameStore } from '@/stores/inline-rename-store'
-import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useSettingsStore } from '@/stores/settings-store'
 
 const PARENT_ROW_ID = '..'
 
-export function executeCommand(commandId: CommandId, paneId: 'left' | 'right', targetEntryId?: string) {
+export function executeCommand(
+  commandId: CommandId,
+  paneId: 'left' | 'right',
+  targetEntryId?: string,
+) {
   const panes = usePanesStore.getState()
   const pane = panes.panes[paneId]
   const selection = useSelectionStore.getState().selections[paneId]
@@ -22,7 +25,13 @@ export function executeCommand(commandId: CommandId, paneId: 'left' | 'right', t
   const focusedEntry = pane.focusedEntryId
     ? pane.entries.find((item) => item.id === pane.focusedEntryId)
     : undefined
-  const transferEntries = entry ? [entry] : selectedEntries.length > 0 ? selectedEntries : focusedEntry ? [focusedEntry] : []
+  const transferEntries = entry
+    ? [entry]
+    : selectedEntries.length > 0
+      ? selectedEntries
+      : focusedEntry
+        ? [focusedEntry]
+        : []
 
   switch (commandId) {
     case 'open': {
@@ -36,6 +45,14 @@ export function executeCommand(commandId: CommandId, paneId: 'left' | 'right', t
         const focused = pane.entries.find((item) => item.id === focusId)
         if (focused?.isDir) {
           void panes.navigatePane(paneId, focused.path)
+        } else if (focused) {
+          void openPath({ path: focused.path }).catch((error) => {
+            log.error('open command failed', {
+              paneId,
+              path: focused.path,
+              error,
+            })
+          })
         }
       }
       break
@@ -75,10 +92,6 @@ export function executeCommand(commandId: CommandId, paneId: 'left' | 'right', t
     case 'clearFilter':
       panes.clearFilter(paneId)
       break
-    case 'toggleDetails':
-      useLayoutStore.getState().setDetailsVisible(!useLayoutStore.getState().detailsVisible)
-      void persistAppConfig()
-      break
     case 'showSettings':
       useSettingsStore.getState().open('keybindings')
       break
@@ -107,7 +120,11 @@ export function executeCommand(commandId: CommandId, paneId: 'left' | 'right', t
         useActionDialogStore.getState().open({
           kind: 'delete',
           paneId,
-          targets: effectiveEntries.map((item) => ({ id: item.id, name: item.name, path: item.path })),
+          targets: effectiveEntries.map((item) => ({
+            id: item.id,
+            name: item.name,
+            path: item.path,
+          })),
         })
       }
       break
@@ -115,7 +132,9 @@ export function executeCommand(commandId: CommandId, paneId: 'left' | 'right', t
     case 'copy':
     case 'cut': {
       if (effectiveEntries.length > 0) {
-        useClipboardStore.getState().setClipboard(commandId === 'copy' ? 'copy' : 'move', paneId, effectiveEntries)
+        useClipboardStore
+          .getState()
+          .setClipboard(commandId === 'copy' ? 'copy' : 'move', paneId, effectiveEntries)
       }
       break
     }
@@ -165,11 +184,20 @@ export function executeCommand(commandId: CommandId, paneId: 'left' | 'right', t
       break
     }
     default:
-      log.info('command not implemented', { commandId, paneId, targetEntryId, entries: effectiveEntries.length })
+      log.info('command not implemented', {
+        commandId,
+        paneId,
+        targetEntryId,
+        entries: effectiveEntries.length,
+      })
   }
 }
 
-export function canExecuteCommand(commandId: CommandId, paneId: 'left' | 'right', targetEntryId?: string) {
+export function canExecuteCommand(
+  commandId: CommandId,
+  paneId: 'left' | 'right',
+  targetEntryId?: string,
+) {
   const pane = usePanesStore.getState().panes[paneId]
   const selection = useSelectionStore.getState().selections[paneId]
   const clipboard = useClipboardStore.getState()

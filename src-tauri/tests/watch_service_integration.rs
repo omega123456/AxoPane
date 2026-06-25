@@ -35,8 +35,14 @@ fn refresh_tab_emits_incremental_patch() {
 
     let patch = service.refresh_tab(target, |_| {}).expect("refresh");
     assert_eq!(patch.tab_id, "left-1");
-    assert!(patch.removed.iter().any(|path| path.ends_with("before.txt")));
-    assert!(patch.changed.iter().any(|entry| entry.path.ends_with("after.txt")));
+    assert!(patch
+        .removed
+        .iter()
+        .any(|path| path.ends_with("before.txt")));
+    assert!(patch
+        .changed
+        .iter()
+        .any(|entry| entry.path.ends_with("after.txt")));
 }
 
 #[test]
@@ -62,10 +68,16 @@ fn watcher_coalesces_changes_and_emits_patch() {
         .set_tab_watch(
             Some(target),
             move |patch| {
-                patches_for_callback.lock().expect("patches lock").push(patch);
+                patches_for_callback
+                    .lock()
+                    .expect("patches lock")
+                    .push(patch);
             },
             move |_, message| {
-                errors_for_callback.lock().expect("errors lock").push(message);
+                errors_for_callback
+                    .lock()
+                    .expect("errors lock")
+                    .push(message);
             },
         )
         .expect("set watch");
@@ -85,9 +97,10 @@ fn watcher_coalesces_changes_and_emits_patch() {
     let recorded = patches.lock().expect("patches lock").clone();
     assert!(!recorded.is_empty());
     assert!(errors.lock().expect("errors lock").is_empty());
-    assert!(recorded
+    assert!(recorded.iter().any(|patch| patch
+        .changed
         .iter()
-        .any(|patch| patch.changed.iter().any(|entry| entry.path.ends_with("storm.txt"))));
+        .any(|entry| entry.path.ends_with("storm.txt"))));
     assert_eq!(common::bootstrap_message(), "phase-1-common");
 }
 
@@ -114,7 +127,10 @@ fn replacing_a_pane_watch_discards_the_previous_tab_watch() {
                 show_hidden: true,
             }),
             move |patch| {
-                patches_for_callback.lock().expect("patches lock").push(patch);
+                patches_for_callback
+                    .lock()
+                    .expect("patches lock")
+                    .push(patch);
             },
             move |_, _| {},
         )
@@ -141,7 +157,10 @@ fn replacing_a_pane_watch_discards_the_previous_tab_watch() {
     let deadline = Instant::now() + Duration::from_secs(2);
     while Instant::now() < deadline {
         let recorded = patches.lock().expect("patches lock");
-        if recorded.iter().any(|patch| patch.path == left_b.to_string_lossy()) {
+        if recorded
+            .iter()
+            .any(|patch| patch.path == left_b.to_string_lossy())
+        {
             break;
         }
         drop(recorded);
@@ -149,6 +168,10 @@ fn replacing_a_pane_watch_discards_the_previous_tab_watch() {
     }
 
     let recorded = patches.lock().expect("patches lock").clone();
-    assert!(recorded.iter().any(|patch| patch.path == left_b.to_string_lossy()));
-    assert!(!recorded.iter().any(|patch| patch.path == left_a.to_string_lossy()));
+    assert!(recorded
+        .iter()
+        .any(|patch| patch.path == left_b.to_string_lossy()));
+    assert!(!recorded
+        .iter()
+        .any(|patch| patch.path == left_a.to_string_lossy()));
 }

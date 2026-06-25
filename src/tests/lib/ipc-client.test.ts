@@ -9,6 +9,7 @@ import {
   listVolumes,
   loadConfig,
   loadSession,
+  openPath,
   refreshTab,
   requestFolderSize,
   requestFolderSizes,
@@ -24,10 +25,7 @@ import {
   onVolumesChanged,
   onWatchError,
 } from '@/lib/ipc/events'
-import {
-  invokePlaywrightCommand,
-  listenPlaywrightEvent,
-} from '@/lib/ipc/playwright-ipc-mock'
+import { invokePlaywrightCommand, listenPlaywrightEvent } from '@/lib/ipc/playwright-ipc-mock'
 
 beforeEach(() => {
   ipc.install()
@@ -49,7 +47,13 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
   it('passes payloads for request commands', async () => {
     ipc.override('list_dir', (payload) => ({ path: payload.path, entries: [] }))
     await expect(
-      listDir({ path: 'C:\\x', sortKey: 'name', sortDirection: 'asc', filter: '', showHidden: false }),
+      listDir({
+        path: 'C:\\x',
+        sortKey: 'name',
+        sortDirection: 'asc',
+        filter: '',
+        showHidden: false,
+      }),
     ).resolves.toEqual({ path: 'C:\\x', entries: [] })
 
     ipc.override('cancel_size', (payload) => ({ cancelled: payload.path === 'C:\\x' }))
@@ -57,12 +61,21 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
 
     ipc.override('request_folder_size', () => undefined)
     ipc.override('request_folder_sizes', () => undefined)
+    ipc.override('open_path', () => undefined)
     ipc.override('set_tab_watch', () => undefined)
     await expect(requestFolderSize({ path: 'C:\\x' })).resolves.toBeUndefined()
     await expect(requestFolderSizes({ paths: ['C:\\x'] })).resolves.toBeUndefined()
+    await expect(openPath({ path: 'C:\\x' })).resolves.toBeUndefined()
     await expect(setTabWatch(null)).resolves.toBeUndefined()
     await expect(
-      refreshTab({ tabId: 't', path: 'C:\\x', sortKey: 'name', sortDirection: 'asc', filter: '', showHidden: false }),
+      refreshTab({
+        tabId: 't',
+        path: 'C:\\x',
+        sortKey: 'name',
+        sortDirection: 'asc',
+        filter: '',
+        showHidden: false,
+      }),
     ).resolves.toHaveProperty('changed')
 
     ipc.override('save_config', (payload) => payload.config)
@@ -74,7 +87,7 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
         keybindings: {},
         columns: [],
         layout: {
-          detailsVisible: true,
+          detailsVisible: false,
           treeWidth: 'default',
           defaultPaneMode: 'dual',
           restoreSession: true,
@@ -94,7 +107,13 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
     })
 
     await expect(
-      listDir({ path: 'C:\\x', sortKey: 'name', sortDirection: 'asc', filter: '', showHidden: false }),
+      listDir({
+        path: 'C:\\x',
+        sortKey: 'name',
+        sortDirection: 'asc',
+        filter: '',
+        showHidden: false,
+      }),
     ).rejects.toThrow('boom')
   })
 

@@ -1,4 +1,4 @@
-import { beforeEach } from 'vitest'
+import { beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { canExecuteCommand, executeCommand } from '@/lib/commands'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
@@ -33,7 +33,11 @@ beforeEach(() => {
   usePanesStore.setState((state) => ({
     panes: {
       ...state.panes,
-      left: { ...state.panes.left, path: 'C:\\root', entries: [entry('Alpha'), entry('Beta', false)] },
+      left: {
+        ...state.panes.left,
+        path: 'C:\\root',
+        entries: [entry('Alpha'), entry('Beta', false)],
+      },
     },
   }))
 })
@@ -41,12 +45,27 @@ beforeEach(() => {
 describe('executeCommand file actions', () => {
   it('opens the new-folder prompt', () => {
     executeCommand('newFolder', 'left')
-    expect(useActionDialogStore.getState().dialog).toMatchObject({ kind: 'newFolder', paneId: 'left' })
+    expect(useActionDialogStore.getState().dialog).toMatchObject({
+      kind: 'newFolder',
+      paneId: 'left',
+    })
   })
 
   it('opens the new-file prompt', () => {
     executeCommand('newFile', 'left')
-    expect(useActionDialogStore.getState().dialog).toMatchObject({ kind: 'newFile', paneId: 'left' })
+    expect(useActionDialogStore.getState().dialog).toMatchObject({
+      kind: 'newFile',
+      paneId: 'left',
+    })
+  })
+
+  it('opens non-folder items through the OS opener command', async () => {
+    const openPath = vi.fn(() => undefined)
+    ipc.override('open_path', openPath)
+
+    executeCommand('open', 'left', 'Beta')
+
+    expect(openPath).toHaveBeenCalledWith({ path: 'C:\\root\\Beta' })
   })
 
   it('starts an inline rename seeded with the target name', () => {

@@ -11,6 +11,7 @@ import type {
   InitialShellResponse,
   ListDirRequest,
   ListDirResponse,
+  OpenPathRequest,
   RenameEntryRequest,
   WatchTarget,
   SessionState,
@@ -40,6 +41,10 @@ export function renameEntry(payload: RenameEntryRequest) {
 
 export function deleteEntries(payload: DeleteEntriesRequest) {
   return invokeCommand({ command: 'delete_entries', payload }) as Promise<void>
+}
+
+export function openPath(payload: OpenPathRequest) {
+  return invokeCommand({ command: 'open_path', payload }) as Promise<void>
 }
 
 export function listVolumes() {

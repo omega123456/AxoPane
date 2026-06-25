@@ -47,9 +47,16 @@ describe('DetailsPanel', () => {
       value: { writeText },
       configurable: true,
     })
-    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+    const openPath = vi.fn(() => undefined)
+    ipc.override('open_path', openPath)
 
-    const file = entry({ id: 'r', name: 'Report.txt', path: 'C:\\Users\\Omega\\Report.txt', isDir: false, typeLabel: 'TXT file' })
+    const file = entry({
+      id: 'r',
+      name: 'Report.txt',
+      path: 'C:\\Users\\Omega\\Report.txt',
+      isDir: false,
+      typeLabel: 'TXT file',
+    })
     usePanesStore.setState((state) => ({
       panes: {
         ...state.panes,
@@ -64,9 +71,8 @@ describe('DetailsPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Copy path' }))
     await user.click(screen.getByRole('button', { name: 'Properties' }))
 
+    expect(openPath).toHaveBeenCalledWith({ path: 'C:\\Users\\Omega\\Report.txt' })
     expect(writeText).toHaveBeenCalledWith('C:\\Users\\Omega\\Report.txt')
-    expect(info).toHaveBeenCalled()
-    info.mockRestore()
   })
 
   it('navigates when opening a focused folder', async () => {

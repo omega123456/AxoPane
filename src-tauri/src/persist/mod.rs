@@ -1,5 +1,5 @@
-use std::fs;
 use std::collections::HashMap;
+use std::fs;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -139,7 +139,9 @@ pub struct Session {
 
 impl Default for Session {
     fn default() -> Self {
-        let start = crate::fs::default_start_dir().to_string_lossy().into_owned();
+        let start = crate::fs::default_start_dir()
+            .to_string_lossy()
+            .into_owned();
         Self {
             active_pane: "left".to_string(),
             left_path: start.clone(),
@@ -205,7 +207,10 @@ where
     }
 
     pub fn current(&self) -> T {
-        self.value.lock().expect("persist store mutex poisoned").clone()
+        self.value
+            .lock()
+            .expect("persist store mutex poisoned")
+            .clone()
     }
 
     pub fn replace(&self, next_value: T) {
@@ -268,8 +273,14 @@ impl PersistenceState {
         fs::create_dir_all(config_dir)?;
 
         Ok(Self {
-            config: PersistedStore::load(config_dir.join("config.json"), Duration::from_millis(200))?,
-            session: PersistedStore::load(config_dir.join("session.json"), Duration::from_millis(200))?,
+            config: PersistedStore::load(
+                config_dir.join("config.json"),
+                Duration::from_millis(200),
+            )?,
+            session: PersistedStore::load(
+                config_dir.join("session.json"),
+                Duration::from_millis(200),
+            )?,
         })
     }
 }
@@ -297,7 +308,9 @@ where
     let serialized = serde_json::to_vec_pretty(value)?;
     let temp_path = path.with_extension(format!(
         "{}.tmp",
-        path.extension().and_then(|extension| extension.to_str()).unwrap_or("json")
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or("json")
     ));
 
     fs::write(&temp_path, serialized)?;
@@ -321,7 +334,9 @@ where
     let serialized = serde_json::to_vec_pretty(value)?;
     let temp_path = path.with_extension(format!(
         "{}.tmp",
-        path.extension().and_then(|extension| extension.to_str()).unwrap_or("json")
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or("json")
     ));
 
     fs::write(&temp_path, serialized)?;
@@ -339,7 +354,9 @@ where
 fn replace_file_atomic(source: &Path, target: &Path) -> Result<(), PersistError> {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH};
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
 
     fn wide(value: &OsStr) -> Vec<u16> {
         value.encode_wide().chain(std::iter::once(0)).collect()

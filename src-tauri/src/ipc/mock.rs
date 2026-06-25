@@ -1,6 +1,4 @@
-use super::types::{
-    AppConfig, InitialShellResponse, PaneShell, SessionState, TreeRoot,
-};
+use super::types::{AppConfig, InitialShellResponse, PaneShell, SessionState, TreeRoot};
 
 pub fn initial_shell() -> InitialShellResponse {
     InitialShellResponse {

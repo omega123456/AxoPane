@@ -24,7 +24,13 @@ import {
   formatShortcutLabel,
   mergeKeymap,
 } from '@/lib/keymap'
-import type { ColumnConfig, CommandId, LayoutConfig, Shortcut, ThemePreference } from '@/lib/types/ipc'
+import type {
+  ColumnConfig,
+  CommandId,
+  LayoutConfig,
+  Shortcut,
+  ThemePreference,
+} from '@/lib/types/ipc'
 import { useConfigStore } from '@/stores/config-store'
 import { defaultColumns, defaultLayout, useLayoutStore } from '@/stores/layout-store'
 import { useKeymapStore } from '@/stores/keymap-store'
@@ -161,7 +167,9 @@ function SettingsModalContent() {
       <div className="flex h-settings-modal-h max-h-full w-settings-modal-w max-w-full flex-col overflow-hidden rounded-modal border border-light-border-strong bg-light-window shadow-window dark:border-dark-border-strong dark:bg-dark-window">
         <header className="flex h-12 flex-none items-center gap-2.5 border-b border-light-border bg-light-titlebar pl-4 pr-2 dark:border-dark-border dark:bg-dark-titlebar">
           <SettingsIcon className="size-4 text-accent-blue-light dark:text-accent-blue" />
-          <span className="text-usm font-semibold text-light-text dark:text-dark-text">Settings</span>
+          <span className="text-usm font-semibold text-light-text dark:text-dark-text">
+            Settings
+          </span>
           <button
             type="button"
             aria-label="Close settings"
@@ -245,17 +253,6 @@ function SettingsModalContent() {
                 />
                 <SectionLabel className="mb-3 mt-5">Layout</SectionLabel>
                 <SettingRow
-                  title="Details panel"
-                  description="Show the details panel beside the active pane"
-                  control={
-                    <ToggleSwitch
-                      label="Details panel"
-                      checked={draft.layout.detailsVisible}
-                      onChange={(value) => updateLayout('detailsVisible', value)}
-                    />
-                  }
-                />
-                <SettingRow
                   fixedCopy
                   title="Tree width"
                   description="Width of the folder sidebar"
@@ -313,7 +310,9 @@ function SettingsModalContent() {
                       onDragStart={(event) => event.dataTransfer.setData('text/column', column.key)}
                       onDragOver={(event) => event.preventDefault()}
                       onDrop={(event) => {
-                        const fromKey = event.dataTransfer.getData('text/column') as ColumnConfig['key']
+                        const fromKey = event.dataTransfer.getData(
+                          'text/column',
+                        ) as ColumnConfig['key']
                         updateDraft((current) => {
                           const columns = [...current.columns]
                           const fromIndex = columns.findIndex((item) => item.key === fromKey)
@@ -376,7 +375,10 @@ function SettingsModalContent() {
                       const shortcut = draft.bindings[commandId][0] ?? ''
                       const hasConflict = (conflicts.get(commandId)?.length ?? 0) > 0
                       return (
-                        <tr key={commandId} className="border-b border-light-border dark:border-dark-border">
+                        <tr
+                          key={commandId}
+                          className="border-b border-light-border dark:border-dark-border"
+                        >
                           <td className="py-3 text-row text-light-text dark:text-dark-text">
                             {commandLabels[commandId]}
                           </td>

@@ -103,7 +103,11 @@ describe('FilePane state rendering', () => {
 
   it('focuses the parent row when arrowing up from the first entry', async () => {
     const user = userEvent.setup()
-    seedPane({ path: 'C:\\root\\dir', entries: [entry('Alpha'), entry('Beta')], focusedEntryId: 'Alpha' })
+    seedPane({
+      path: 'C:\\root\\dir',
+      entries: [entry('Alpha'), entry('Beta')],
+      focusedEntryId: 'Alpha',
+    })
 
     render(<FilePane paneId="left" />)
     const pane = screen.getByLabelText('Left pane')
@@ -145,6 +149,19 @@ describe('FilePane state rendering', () => {
 
     await user.pointer({ keys: '[MouseMiddle]', target: row })
     expect(useTabsStore.getState().panes.left.tabs.length).toBeGreaterThan(1)
+  })
+
+  it('opens non-folder items with the OS default application on activation', async () => {
+    const user = userEvent.setup()
+    const openPath = vi.fn(() => undefined)
+    ipc.override('open_path', openPath)
+    seedPane({ entries: [entry('Report.txt', false)], focusedEntryId: 'Report.txt' })
+
+    render(<FilePane paneId="left" />)
+    const row = within(screen.getByLabelText('Left pane')).getByRole('row', { name: /Report\.txt/ })
+
+    await user.dblClick(row)
+    expect(openPath).toHaveBeenCalledWith({ path: 'C:\\root\\Report.txt' })
   })
 
   it('handles arrow navigation, Ctrl+R refresh, and Backspace', async () => {

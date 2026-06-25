@@ -37,7 +37,10 @@ export function describeMenuTarget(target: MenuTarget): { title: string; chip?: 
   }
 }
 
-function shortcutFor(commandId: keyof ReturnType<typeof useKeymapStore.getState>['bindings'], os: PlatformOs) {
+function shortcutFor(
+  commandId: keyof ReturnType<typeof useKeymapStore.getState>['bindings'],
+  os: PlatformOs,
+) {
   const binding = useKeymapStore.getState().bindings[commandId][0]
   return binding ? formatShortcutLabel(binding, os) : undefined
 }
@@ -85,7 +88,6 @@ function commandLabel(commandId: Parameters<typeof executeCommand>[0]) {
     openInOtherPane: 'Open in other pane',
     selectAll: 'Select all',
     clearFilter: 'Clear filter',
-    toggleDetails: 'Toggle details',
     showSettings: 'Settings',
   }
 
@@ -95,7 +97,9 @@ function commandLabel(commandId: Parameters<typeof executeCommand>[0]) {
 function calculateSizeItem(paneId: PaneId, entry: DirectoryEntry, os: PlatformOs): ContextMenuItem {
   const everythingStatus = usePanesStore.getState().everythingStatus
   const volumes = usePanesStore.getState().volumes
-  const volume = volumes.find((item) => entry.path.toLowerCase().startsWith(item.mountRoot.toLowerCase()))
+  const volume = volumes.find((item) =>
+    entry.path.toLowerCase().startsWith(item.mountRoot.toLowerCase()),
+  )
 
   return {
     ...baseAction(paneId, 'calculateSize', os, {
@@ -107,7 +111,11 @@ function calculateSizeItem(paneId: PaneId, entry: DirectoryEntry, os: PlatformOs
   }
 }
 
-export function buildContextMenuItems(paneId: PaneId, target: MenuTarget, os: PlatformOs): ContextMenuItem[] {
+export function buildContextMenuItems(
+  paneId: PaneId,
+  target: MenuTarget,
+  os: PlatformOs,
+): ContextMenuItem[] {
   const pane = usePanesStore.getState().panes[paneId]
   const clipboard = useClipboardStore.getState()
   const selectedEntries = selectedEntriesForPane(paneId)
@@ -135,7 +143,10 @@ export function buildContextMenuItems(paneId: PaneId, target: MenuTarget, os: Pl
         id: 'open-tab-other',
         label: 'Open in other pane',
         separatorBefore: true,
-        onSelect: () => void usePanesStore.getState().navigatePane(paneId === 'left' ? 'right' : 'left', pane.path),
+        onSelect: () =>
+          void usePanesStore
+            .getState()
+            .navigatePane(paneId === 'left' ? 'right' : 'left', pane.path),
       },
     ]
   }
@@ -143,7 +154,9 @@ export function buildContextMenuItems(paneId: PaneId, target: MenuTarget, os: Pl
   if (target.kind === 'tree') {
     const networkNode = usePanesStore
       .getState()
-      .volumes.find((volume) => target.path.toLowerCase().startsWith(volume.mountRoot.toLowerCase()))?.isNetwork
+      .volumes.find((volume) =>
+        target.path.toLowerCase().startsWith(volume.mountRoot.toLowerCase()),
+      )?.isNetwork
 
     return [
       {
@@ -164,7 +177,10 @@ export function buildContextMenuItems(paneId: PaneId, target: MenuTarget, os: Pl
         id: 'open-tree-other',
         label: 'Open in other pane',
         shortcut: shortcutFor('openInOtherPane', os),
-        onSelect: () => void usePanesStore.getState().navigatePane(paneId === 'left' ? 'right' : 'left', target.path),
+        onSelect: () =>
+          void usePanesStore
+            .getState()
+            .navigatePane(paneId === 'left' ? 'right' : 'left', target.path),
       },
       {
         id: 'calculate-tree',
@@ -188,7 +204,10 @@ export function buildContextMenuItems(paneId: PaneId, target: MenuTarget, os: Pl
       baseAction(paneId, 'newFolder', os, { separatorBefore: true }),
       baseAction(paneId, 'newFile', os),
       baseAction(paneId, 'refresh', os, { separatorBefore: true, strong: true }),
-      baseAction(paneId, 'selectAll', os, { disabled: pane.entries.length === 0, separatorBefore: true }),
+      baseAction(paneId, 'selectAll', os, {
+        disabled: pane.entries.length === 0,
+        separatorBefore: true,
+      }),
     ]
   }
 
@@ -203,7 +222,10 @@ export function buildContextMenuItems(paneId: PaneId, target: MenuTarget, os: Pl
         separatorBefore: true,
       }),
       baseAction(paneId, 'refresh', os, { separatorBefore: true }),
-      baseAction(paneId, 'selectAll', os, { disabled: pane.entries.length === 0, separatorBefore: true }),
+      baseAction(paneId, 'selectAll', os, {
+        disabled: pane.entries.length === 0,
+        separatorBefore: true,
+      }),
     ]
   }
 

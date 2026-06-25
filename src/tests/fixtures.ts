@@ -115,6 +115,7 @@ export const fixtures: {
     isSystem: false,
   },
   delete_entries: undefined,
+  open_path: undefined,
   list_volumes: [
     {
       mountRoot: 'Z:\\',
@@ -169,7 +170,7 @@ export const fixtures: {
       { key: 'created', visible: false },
     ],
     layout: {
-      detailsVisible: true,
+      detailsVisible: false,
       treeWidth: 'default',
       defaultPaneMode: 'dual',
       restoreSession: true,
@@ -189,7 +190,7 @@ export const fixtures: {
       { key: 'created', visible: false },
     ],
     layout: {
-      detailsVisible: true,
+      detailsVisible: false,
       treeWidth: 'default',
       defaultPaneMode: 'dual',
       restoreSession: true,

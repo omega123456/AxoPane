@@ -56,7 +56,6 @@ export function FilePane({ paneId }: FilePaneProps) {
   const activePaneId = usePanesStore((state) => state.activePaneId)
   const setActivePane = usePanesStore((state) => state.setActivePane)
   const setFocusedEntry = usePanesStore((state) => state.setFocusedEntry)
-  const navigatePane = usePanesStore((state) => state.navigatePane)
   const goUp = usePanesStore((state) => state.goUp)
   const openTabFromPath = usePanesStore((state) => state.openTabFromPath)
   const reloadPane = usePanesStore((state) => state.reloadPane)
@@ -100,8 +99,7 @@ export function FilePane({ paneId }: FilePaneProps) {
           index,
           start: index * 30,
         }))
-  const totalHeight =
-    virtualItems.length > 0 ? rowVirtualizer.getTotalSize() : rowCount * 30
+  const totalHeight = virtualItems.length > 0 ? rowVirtualizer.getTotalSize() : rowCount * 30
 
   useEffect(() => {
     const items = itemsToRender
@@ -188,19 +186,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   }
 
   async function activateEntry(entryId: string) {
-    if (entryId === PARENT_ROW_ID) {
-      await goUp(paneId)
-      return
-    }
-
-    const entry = pane.entries.find((item) => item.id === entryId)
-    if (!entry) {
-      return
-    }
-
-    if (entry.isDir) {
-      await navigatePane(paneId, entry.path)
-    }
+    executeCommand('open', paneId, entryId)
   }
 
   function selectWithModifiers(entryId: string, event: React.MouseEvent<HTMLButtonElement>) {
@@ -285,7 +271,9 @@ export function FilePane({ paneId }: FilePaneProps) {
           event.preventDefault()
           focusByRowIndex(focusedRowIndex - 1)
         } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
-          const target = document.querySelector<HTMLInputElement>(`input[aria-label="${pane.title} filter"]`)
+          const target = document.querySelector<HTMLInputElement>(
+            `input[aria-label="${pane.title} filter"]`,
+          )
           target?.focus()
           target?.setSelectionRange(target.value.length, target.value.length)
         } else {
@@ -307,12 +295,7 @@ export function FilePane({ paneId }: FilePaneProps) {
         }
       }}
     >
-      <TabBar
-        paneId={paneId}
-        title={pane.title}
-        currentPath={pane.path}
-        isActive={isActivePane}
-      />
+      <TabBar paneId={paneId} title={pane.title} currentPath={pane.path} isActive={isActivePane} />
       <EverythingBanner />
       <BreadcrumbBar pane={pane} isActive={isActivePane} />
       <HeaderRow pane={pane} />
@@ -345,10 +328,7 @@ export function FilePane({ paneId }: FilePaneProps) {
             static utility/@theme token can express. Every design-system value
             (color/spacing/typography) elsewhere stays a pure Tailwind utility.
           */}
-          <div
-            style={{ height: `${totalHeight}px`, position: 'relative' }}
-            className="min-h-full"
-          >
+          <div style={{ height: `${totalHeight}px`, position: 'relative' }} className="min-h-full">
             {itemsToRender.map((virtualRow) => {
               const rowStyle = {
                 position: 'absolute' as const,

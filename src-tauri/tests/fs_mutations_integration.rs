@@ -1,8 +1,6 @@
 use std::fs;
 
-use file_explorer_lib::fs::{
-    create_directory, create_file, delete_entries, rename_entry, FsError,
-};
+use file_explorer_lib::fs::{create_directory, create_file, delete_entries, rename_entry, FsError};
 use tempfile::tempdir;
 
 #[test]

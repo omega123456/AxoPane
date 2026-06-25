@@ -35,7 +35,7 @@ describe('EverythingBanner', () => {
       keybindings: {},
       columns: [],
       layout: {
-        detailsVisible: true,
+        detailsVisible: false,
         treeWidth: 'default' as const,
         defaultPaneMode: 'dual' as const,
         restoreSession: true,

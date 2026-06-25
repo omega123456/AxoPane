@@ -1,5 +1,6 @@
 pub mod fs;
 pub mod ipc;
+pub mod launch;
 pub mod ops;
 pub mod persist;
 pub mod size;
@@ -9,9 +10,9 @@ pub mod watch;
 #[cfg(not(feature = "test-utils"))]
 use ipc::commands;
 #[cfg(not(feature = "test-utils"))]
-use persist::PersistenceState;
-#[cfg(not(feature = "test-utils"))]
 use ops::OpsService;
+#[cfg(not(feature = "test-utils"))]
+use persist::PersistenceState;
 #[cfg(not(feature = "test-utils"))]
 use size::SizeService;
 #[cfg(not(feature = "test-utils"))]
@@ -76,6 +77,7 @@ pub fn run() {
             commands::create_file,
             commands::rename_entry,
             commands::delete_entries,
+            commands::open_path,
             commands::list_volumes,
             commands::everything_status,
             commands::request_folder_size,

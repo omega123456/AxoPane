@@ -29,7 +29,7 @@ describe('config-store', () => {
       keybindings: {},
       columns: [],
       layout: {
-        detailsVisible: true,
+        detailsVisible: false,
         treeWidth: 'default' as const,
         defaultPaneMode: 'dual' as const,
         restoreSession: true,
@@ -47,7 +47,7 @@ describe('config-store', () => {
           showHiddenFiles: false,
           dismissedEverythingBanner: true,
           layout: {
-            detailsVisible: true,
+            detailsVisible: false,
             treeWidth: 'default',
             defaultPaneMode: 'dual',
             restoreSession: true,

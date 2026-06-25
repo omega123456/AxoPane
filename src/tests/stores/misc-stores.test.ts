@@ -15,8 +15,10 @@ describe('layout-store', () => {
   it('toggles details visibility and resets', () => {
     useLayoutStore.getState().setDetailsVisible(false)
     expect(useLayoutStore.getState().detailsVisible).toBe(false)
-    useLayoutStore.getState().reset()
+    useLayoutStore.getState().setDetailsVisible(true)
     expect(useLayoutStore.getState().detailsVisible).toBe(true)
+    useLayoutStore.getState().reset()
+    expect(useLayoutStore.getState().detailsVisible).toBe(false)
   })
 
   it('preserves a user-defined column order through setColumns and hydrate', () => {
@@ -36,14 +38,13 @@ describe('layout-store', () => {
     expect(afterSet.find((column) => column.key === 'size')?.visible).toBe(false)
 
     useLayoutStore.getState().reset()
-    useLayoutStore
-      .getState()
-      .hydrate(useLayoutStore.getState(), reordered)
-    expect(useLayoutStore.getState().columns.slice(0, 3).map((column) => column.key)).toEqual([
-      'modified',
-      'name',
-      'size',
-    ])
+    useLayoutStore.getState().hydrate(useLayoutStore.getState(), reordered)
+    expect(
+      useLayoutStore
+        .getState()
+        .columns.slice(0, 3)
+        .map((column) => column.key),
+    ).toEqual(['modified', 'name', 'size'])
   })
 
   it('moves a column to a new position', () => {

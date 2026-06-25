@@ -20,7 +20,12 @@ fn manual_sizer_sums_nested_file_sizes() {
     fs::write(root.join("alpha.txt"), b"abcd").expect("alpha");
     fs::write(root.join("nested").join("beta.txt"), b"12345").expect("beta");
 
-    let size = calculate(root, &Arc::new(AtomicBool::new(false)), Duration::from_secs(1)).expect("size");
+    let size = calculate(
+        root,
+        &Arc::new(AtomicBool::new(false)),
+        Duration::from_secs(1),
+    )
+    .expect("size");
     assert_eq!(size, 9);
 }
 
@@ -45,7 +50,8 @@ fn manual_sizer_times_out() {
         fs::write(root.join(format!("file-{index}.bin")), vec![0_u8; 4096]).expect("seed file");
     }
 
-    let error = calculate(root, &Arc::new(AtomicBool::new(false)), Duration::ZERO).expect_err("timeout");
+    let error =
+        calculate(root, &Arc::new(AtomicBool::new(false)), Duration::ZERO).expect_err("timeout");
     assert!(matches!(error, ManualSizeError::Timeout));
 }
 
@@ -60,7 +66,12 @@ fn manual_sizer_does_not_follow_symlinks() {
     fs::write(root.join("real").join("inside.txt"), vec![0_u8; 7]).expect("real file");
     symlink(root.join("real"), root.join("link")).expect("symlink");
 
-    let size = calculate(root, &Arc::new(AtomicBool::new(false)), Duration::from_secs(1)).expect("size");
+    let size = calculate(
+        root,
+        &Arc::new(AtomicBool::new(false)),
+        Duration::from_secs(1),
+    )
+    .expect("size");
     assert_eq!(size, 7);
 }
 
@@ -75,7 +86,9 @@ fn everything_stub_reports_unavailable_under_test_utils() {
 
     let fixture = tempdir().expect("temp dir");
     fs::create_dir(fixture.path().join("folder")).expect("folder");
-    assert!(handle.query_folder_size(&fixture.path().join("folder")).is_err());
+    assert!(handle
+        .query_folder_size(&fixture.path().join("folder"))
+        .is_err());
 }
 
 #[cfg(windows)]
@@ -112,7 +125,11 @@ fn capability_selection_prefers_network_na_and_manual_fallback() {
     );
 
     let local = VolumeInfo {
-        mount_root: if cfg!(windows) { String::from("C:\\") } else { String::from("/") },
+        mount_root: if cfg!(windows) {
+            String::from("C:\\")
+        } else {
+            String::from("/")
+        },
         label: String::from("Local"),
         total_bytes: 1,
         free_bytes: 1,

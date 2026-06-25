@@ -18,9 +18,11 @@ fn config_and_session_round_trip_through_atomic_storage() {
     let session_path = fixture.path().join("session.json");
 
     let config_store =
-        PersistedStore::<Config>::load(config_path.clone(), Duration::from_millis(5)).expect("config store");
+        PersistedStore::<Config>::load(config_path.clone(), Duration::from_millis(5))
+            .expect("config store");
     let session_store =
-        PersistedStore::<Session>::load(session_path.clone(), Duration::from_millis(5)).expect("session store");
+        PersistedStore::<Session>::load(session_path.clone(), Duration::from_millis(5))
+            .expect("session store");
 
     config_store.replace(Config {
         theme: "dark".to_string(),

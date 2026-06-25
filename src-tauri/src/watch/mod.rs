@@ -55,7 +55,12 @@ struct WatchedTab {
 }
 
 impl WatchService {
-    pub fn set_tab_watch<FPatch, FError>(&self, target: Option<WatchTarget>, emit_patch: FPatch, emit_error: FError) -> Result<(), String>
+    pub fn set_tab_watch<FPatch, FError>(
+        &self,
+        target: Option<WatchTarget>,
+        emit_patch: FPatch,
+        emit_error: FError,
+    ) -> Result<(), String>
     where
         FPatch: Fn(DirPatch) + Send + Sync + 'static,
         FError: Fn(String, String) + Send + Sync + 'static,
@@ -63,7 +68,9 @@ impl WatchService {
         let mut guard = self.inner.lock().expect("watch service lock");
 
         if let Some(target) = target {
-            let runtime = guard.get_or_insert_with(|| create_runtime(emit_patch, emit_error).expect("watch runtime"));
+            let runtime = guard.get_or_insert_with(|| {
+                create_runtime(emit_patch, emit_error).expect("watch runtime")
+            });
             let path = PathBuf::from(&target.path);
             let snapshot = snapshot_for_target(&target)?;
             let pane_name = pane_scope(&target.tab_id).to_string();
@@ -73,7 +80,9 @@ impl WatchService {
                 let same_tab_previous = tabs.get(&target.tab_id).cloned();
                 let stale_tabs = tabs
                     .iter()
-                    .filter(|(tab_id, _)| pane_scope(tab_id) == pane_name && *tab_id != &target.tab_id)
+                    .filter(|(tab_id, _)| {
+                        pane_scope(tab_id) == pane_name && *tab_id != &target.tab_id
+                    })
                     .map(|(tab_id, watched)| (tab_id.clone(), watched.clone()))
                     .collect::<Vec<_>>();
                 (same_tab_previous, stale_tabs)
@@ -117,7 +126,11 @@ impl WatchService {
         Ok(())
     }
 
-    pub fn refresh_tab<FPatch>(&self, target: WatchTarget, emit_patch: FPatch) -> Result<DirPatch, String>
+    pub fn refresh_tab<FPatch>(
+        &self,
+        target: WatchTarget,
+        emit_patch: FPatch,
+    ) -> Result<DirPatch, String>
     where
         FPatch: Fn(DirPatch) + Send + Sync + 'static,
     {
@@ -126,7 +139,10 @@ impl WatchService {
             .get_or_insert_with(|| create_runtime(emit_patch, |_, _| {}).expect("watch runtime"));
 
         let mut tabs = runtime.tabs.lock().expect("watch tabs lock");
-        let previous = tabs.get(&target.tab_id).map(|tab| tab.snapshot.clone()).unwrap_or_default();
+        let previous = tabs
+            .get(&target.tab_id)
+            .map(|tab| tab.snapshot.clone())
+            .unwrap_or_default();
         let next = snapshot_for_target(&target)?;
         let patch = diff_entries(&target.tab_id, &target.path, "refresh", &previous, &next);
 
@@ -142,7 +158,10 @@ impl WatchService {
     }
 }
 
-fn create_runtime<FPatch, FError>(emit_patch: FPatch, emit_error: FError) -> Result<WatchRuntime, String>
+fn create_runtime<FPatch, FError>(
+    emit_patch: FPatch,
+    emit_error: FError,
+) -> Result<WatchRuntime, String>
 where
     FPatch: Fn(DirPatch) + Send + Sync + 'static,
     FError: Fn(String, String) + Send + Sync + 'static,
@@ -165,10 +184,9 @@ where
 
                 let mut tabs = tabs_for_callback.lock().expect("watch tabs lock");
                 for watched in tabs.values_mut() {
-                    if !changed_paths
-                        .iter()
-                        .any(|changed_path| changed_path.parent() == Some(Path::new(&watched.target.path)))
-                    {
+                    if !changed_paths.iter().any(|changed_path| {
+                        changed_path.parent() == Some(Path::new(&watched.target.path))
+                    }) {
                         continue;
                     }
 

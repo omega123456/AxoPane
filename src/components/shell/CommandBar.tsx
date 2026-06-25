@@ -1,6 +1,4 @@
 import type { ThemeMode } from '@/stores/theme-store'
-import { persistAppConfig } from '@/lib/app-config'
-import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import {
@@ -10,7 +8,6 @@ import {
   EyeIcon,
   EyeOffIcon,
   MoonStarIcon,
-  PanelLeftIcon,
   RefreshIcon,
   SearchIcon,
   SettingsIcon,
@@ -29,8 +26,6 @@ export function CommandBar({ theme, setTheme }: CommandBarProps) {
   const goUp = usePanesStore((state) => state.goUp)
   const showHiddenFiles = usePanesStore((state) => state.showHiddenFiles)
   const setShowHiddenFiles = usePanesStore((state) => state.setShowHiddenFiles)
-  const detailsVisible = useLayoutStore((state) => state.detailsVisible)
-  const setDetailsVisible = useLayoutStore((state) => state.setDetailsVisible)
   const openSettings = useSettingsStore((state) => state.open)
 
   return (
@@ -50,7 +45,9 @@ export function CommandBar({ theme, setTheme }: CommandBarProps) {
         className="inline-flex h-8 items-center gap-2 rounded-tab bg-accent-blue-soft px-3 text-row font-semibold text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-accent-blue"
       >
         <SearchIcon className="h-4 w-4" />
-        <span className="truncate">{pane.filterApplied ? `Filter: ${pane.filterApplied}` : pane.path}</span>
+        <span className="truncate">
+          {pane.filterApplied ? `Filter: ${pane.filterApplied}` : pane.path}
+        </span>
         <ChevronDownIcon className="h-4 w-4" />
       </button>
       <div className="ml-auto flex items-center gap-2">
@@ -69,17 +66,6 @@ export function CommandBar({ theme, setTheme }: CommandBarProps) {
         </button>
         <button
           type="button"
-          onClick={() => {
-            setDetailsVisible(!detailsVisible)
-            void persistAppConfig()
-          }}
-          className="inline-flex h-8 items-center gap-2 rounded-tab border border-light-border bg-light-surface px-3 text-row text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border dark:bg-dark-surface dark:text-dark-text-soft"
-        >
-          <PanelLeftIcon className="h-4 w-4" />
-          {detailsVisible ? 'Hide details' : 'Show details'}
-        </button>
-        <button
-          type="button"
           onClick={() => openSettings('keybindings')}
           className="inline-flex h-8 items-center gap-2 rounded-tab border border-light-border bg-light-surface px-3 text-row text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border dark:bg-dark-surface dark:text-dark-text-soft"
         >
@@ -91,7 +77,11 @@ export function CommandBar({ theme, setTheme }: CommandBarProps) {
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
           className="inline-flex h-8 items-center gap-2 rounded-tab border border-light-border bg-light-surface px-3 text-row text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border dark:bg-dark-surface dark:text-dark-text-soft"
         >
-          {theme === 'dark' ? <SunIcon className="h-4 w-4" /> : <MoonStarIcon className="h-4 w-4" />}
+          {theme === 'dark' ? (
+            <SunIcon className="h-4 w-4" />
+          ) : (
+            <MoonStarIcon className="h-4 w-4" />
+          )}
           <span>{theme === 'dark' ? 'Light theme' : 'Dark theme'}</span>
         </button>
       </div>

@@ -198,7 +198,9 @@ pub fn list_dir(options: &ListDirOptions) -> Result<ListDirResponse, FsError> {
         entries.push(listed);
     }
 
-    entries.sort_by(|left, right| compare_entries(left, right, options.sort_key, options.sort_direction));
+    entries.sort_by(|left, right| {
+        compare_entries(left, right, options.sort_key, options.sort_direction)
+    });
 
     log::info!(
         "list_dir: {} -> {} entries",
@@ -409,10 +411,14 @@ fn compare_entries(
             .then_with(|| natural_name_compare(&left.name, &right.name)),
         SortKey::Type => natural_name_compare(&left.type_label, &right.type_label)
             .then_with(|| natural_name_compare(&left.name, &right.name)),
-        SortKey::Modified => compare_optional_string(left.modified_at.as_deref(), right.modified_at.as_deref())
-            .then_with(|| natural_name_compare(&left.name, &right.name)),
-        SortKey::Created => compare_optional_string(left.created_at.as_deref(), right.created_at.as_deref())
-            .then_with(|| natural_name_compare(&left.name, &right.name)),
+        SortKey::Modified => {
+            compare_optional_string(left.modified_at.as_deref(), right.modified_at.as_deref())
+                .then_with(|| natural_name_compare(&left.name, &right.name))
+        }
+        SortKey::Created => {
+            compare_optional_string(left.created_at.as_deref(), right.created_at.as_deref())
+                .then_with(|| natural_name_compare(&left.name, &right.name))
+        }
     };
 
     match sort_direction {

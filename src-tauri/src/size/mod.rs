@@ -96,7 +96,11 @@ impl SizeService {
     pub fn everything_status(&self) -> EverythingStatus {
         let inner = self.inner.lock().expect("size service lock");
 
-        match inner.everything.as_ref().map(|handle| handle.availability()) {
+        match inner
+            .everything
+            .as_ref()
+            .map(|handle| handle.availability())
+        {
             Some(EverythingAvailability::Available) => EverythingStatus {
                 status: EverythingStatusKind::Available,
                 is_available: true,
@@ -182,42 +186,54 @@ impl SizeService {
                 let Some(handle) = handle else {
                     return;
                 };
-                self.spawn_job(path, SizeSource::Everything, emitter, move |job_path, cancel| {
-                    if cancel.load(Ordering::Relaxed) {
-                        return Some(SizeUpdate {
-                            path: job_path,
-                            state: SizeStateKind::Error,
-                            source: SizeSource::Everything,
-                            size_bytes: None,
-                        });
-                    }
+                self.spawn_job(
+                    path,
+                    SizeSource::Everything,
+                    emitter,
+                    move |job_path, cancel| {
+                        if cancel.load(Ordering::Relaxed) {
+                            return Some(SizeUpdate {
+                                path: job_path,
+                                state: SizeStateKind::Error,
+                                source: SizeSource::Everything,
+                                size_bytes: None,
+                            });
+                        }
 
-                    match handle.query_folder_size(Path::new(&job_path)) {
-                        Ok(Some(size_bytes)) => Some(SizeUpdate {
-                            path: job_path,
-                            state: SizeStateKind::Ready,
-                            source: SizeSource::Everything,
-                            size_bytes: Some(size_bytes),
-                        }),
-                        Ok(None) => Some(SizeUpdate {
-                            path: job_path,
-                            state: SizeStateKind::Na,
-                            source: SizeSource::Everything,
-                            size_bytes: None,
-                        }),
-                        Err(_) => Some(SizeUpdate {
-                            path: job_path,
-                            state: SizeStateKind::Error,
-                            source: SizeSource::Everything,
-                            size_bytes: None,
-                        }),
-                    }
-                });
+                        match handle.query_folder_size(Path::new(&job_path)) {
+                            Ok(Some(size_bytes)) => Some(SizeUpdate {
+                                path: job_path,
+                                state: SizeStateKind::Ready,
+                                source: SizeSource::Everything,
+                                size_bytes: Some(size_bytes),
+                            }),
+                            Ok(None) => Some(SizeUpdate {
+                                path: job_path,
+                                state: SizeStateKind::Na,
+                                source: SizeSource::Everything,
+                                size_bytes: None,
+                            }),
+                            Err(_) => Some(SizeUpdate {
+                                path: job_path,
+                                state: SizeStateKind::Error,
+                                source: SizeSource::Everything,
+                                size_bytes: None,
+                            }),
+                        }
+                    },
+                );
             }
             SizeBackend::Manual => {
                 let timeout = self.timeout;
-                self.spawn_job(path, SizeSource::Manual, emitter, move |job_path, cancel| {
-                    match manual::calculate(Path::new(&job_path), &cancel, timeout) {
+                self.spawn_job(
+                    path,
+                    SizeSource::Manual,
+                    emitter,
+                    move |job_path, cancel| match manual::calculate(
+                        Path::new(&job_path),
+                        &cancel,
+                        timeout,
+                    ) {
                         Ok(size_bytes) => Some(SizeUpdate {
                             path: job_path,
                             state: SizeStateKind::Ready,
@@ -237,8 +253,8 @@ impl SizeService {
                             source: SizeSource::Manual,
                             size_bytes: None,
                         }),
-                    }
-                });
+                    },
+                );
             }
         }
     }

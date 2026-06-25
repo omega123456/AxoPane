@@ -7,7 +7,7 @@ use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::events;
 use file_explorer_lib::ipc::mock;
 use file_explorer_lib::ipc::types::{
-    CreateEntryRequest, DeleteEntriesRequest, RenameEntryRequest,
+    CreateEntryRequest, DeleteEntriesRequest, OpenPathRequest, RenameEntryRequest,
 };
 use tempfile::tempdir;
 
@@ -71,4 +71,19 @@ fn create_command_surfaces_errors_as_strings() {
     })
     .expect_err("should conflict");
     assert!(error.contains("Failed to create folder"));
+}
+
+#[cfg(feature = "test-utils")]
+#[test]
+fn open_path_command_uses_safe_test_utils_fallback() {
+    let fixture = tempdir().expect("temp dir");
+    let file_path = fixture.path().join("report.txt");
+    fs::write(&file_path, b"report").expect("seed file");
+
+    let error = commands::open_path(OpenPathRequest {
+        path: file_path.to_string_lossy().into_owned(),
+    })
+    .expect_err("test-utils should block real app launching");
+
+    assert!(error.contains("unsupported"));
 }
