@@ -10,7 +10,6 @@ export type DeleteTarget = {
 }
 
 export type ActionDialog =
-  | { kind: 'rename'; paneId: PaneId; entryId: string; path: string; initialValue: string }
   | { kind: 'newFolder'; paneId: PaneId }
   | { kind: 'newFile'; paneId: PaneId }
   | { kind: 'delete'; paneId: PaneId; targets: DeleteTarget[] }

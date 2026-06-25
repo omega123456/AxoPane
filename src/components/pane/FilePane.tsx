@@ -19,6 +19,9 @@ import { EverythingBanner } from '@/components/states/EverythingBanner'
 import { LoadingSkeleton } from '@/components/states/LoadingSkeleton'
 import { PermissionDenied } from '@/components/states/PermissionDenied'
 import { useElementVirtualizer } from '@/lib/use-element-virtualizer'
+import { renameEntryInPane } from '@/lib/file-actions'
+import { log } from '@/lib/app-log-commands'
+import { useInlineRenameStore } from '@/stores/inline-rename-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { activeConflict, useQueueStore } from '@/stores/queue-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
@@ -35,6 +38,14 @@ function isPermissionError(message: string | null) {
 }
 
 const PARENT_ROW_ID = '..'
+
+function isEditableTarget(target: EventTarget | null) {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  )
+}
 
 type FilePaneProps = {
   paneId: PaneId
@@ -56,8 +67,17 @@ export function FilePane({ paneId }: FilePaneProps) {
   const resolveConflict = useQueueStore((state) => state.resolve)
   const setSelection = useSelectionStore((state) => state.setSelection)
   const openMenu = useContextMenuStore((state) => state.openMenu)
+  const rename = useInlineRenameStore((state) =>
+    state.rename?.paneId === paneId ? state.rename : null,
+  )
+  const cancelRename = useInlineRenameStore((state) => state.cancelRename)
+  const setRenameBusy = useInlineRenameStore((state) => state.setBusy)
+  const setRenameError = useInlineRenameStore((state) => state.setError)
+  const setRenameValue = useInlineRenameStore((state) => state.setValue)
   const paneRef = useRef<HTMLElement | null>(null)
   const parentRef = useRef<HTMLDivElement | null>(null)
+  const renameSubmittingRef = useRef(false)
+  const ignoreNextRenameBlurRef = useRef(false)
   const isActivePane = activePaneId === paneId
   const os = detectPlatformOs()
 
@@ -129,6 +149,42 @@ export function FilePane({ paneId }: FilePaneProps) {
   function focusPaneShell() {
     setActivePane(paneId)
     paneRef.current?.focus()
+  }
+
+  async function submitRename() {
+    if (!rename || rename.busy || renameSubmittingRef.current) {
+      return
+    }
+
+    const trimmed = rename.value.trim()
+    if (!trimmed) {
+      cancelRename()
+      renameSubmittingRef.current = false
+      return
+    }
+
+    if (trimmed === rename.initialValue) {
+      cancelRename()
+      focusPaneShell()
+      renameSubmittingRef.current = false
+      return
+    }
+
+    renameSubmittingRef.current = true
+    setRenameBusy(true)
+    setRenameError(null)
+    try {
+      await renameEntryInPane(rename.paneId, rename.path, trimmed)
+      renameSubmittingRef.current = false
+      cancelRename()
+      focusPaneShell()
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      log.error('inline rename failed', { paneId, path: rename.path, error: message })
+      setRenameError(message)
+      setRenameBusy(false)
+      renameSubmittingRef.current = false
+    }
   }
 
   async function activateEntry(entryId: string) {
@@ -207,6 +263,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   return (
     <section
       ref={paneRef}
+      data-pane-id={paneId}
       aria-label={pane.title}
       className={`relative flex min-h-0 flex-col bg-light-surface dark:bg-dark-surface ${
         isActivePane ? 'outline outline-1 outline-accent-blue-border' : ''
@@ -214,6 +271,10 @@ export function FilePane({ paneId }: FilePaneProps) {
       onMouseDown={() => setActivePane(paneId)}
       onKeyDown={(event) => {
         if (!isActivePane) {
+          return
+        }
+
+        if (isEditableTarget(event.target)) {
           return
         }
 
@@ -323,11 +384,30 @@ export function FilePane({ paneId }: FilePaneProps) {
                     isActivePane={isActivePane}
                     isFocused={pane.focusedEntryId === entry.id}
                     isSelected={selection.selectedIds.includes(entry.id)}
+                    isRenaming={rename?.entryId === entry.id}
+                    renameValue={rename?.entryId === entry.id ? rename.value : ''}
+                    renameBusy={rename?.entryId === entry.id ? rename.busy : false}
+                    renameError={rename?.entryId === entry.id ? rename.error : null}
                     onPointerDown={focusPaneShell}
                     onActivate={() => void activateEntry(entry.id)}
                     onClick={(event) => selectWithModifiers(entry.id, event)}
                     onMiddleClick={() => void openTabFromPath(paneId, entry.path)}
                     onContextMenu={(event) => showMenu(event, entry.id)}
+                    onRenameChange={(value) => setRenameValue(value)}
+                    onRenameSubmit={() => void submitRename()}
+                    onRenameCancel={() => {
+                      ignoreNextRenameBlurRef.current = true
+                      renameSubmittingRef.current = false
+                      cancelRename()
+                      focusPaneShell()
+                    }}
+                    onRenameBlur={() => {
+                      if (ignoreNextRenameBlurRef.current) {
+                        ignoreNextRenameBlurRef.current = false
+                        return
+                      }
+                      void submitRename()
+                    }}
                   />
                 </div>
               )

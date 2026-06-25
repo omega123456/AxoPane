@@ -28,6 +28,14 @@ import { useSettingsStore } from '@/stores/settings-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { initializeTheme, useThemeStore } from '@/stores/theme-store'
 
+function isEditableTarget(target: EventTarget | null) {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  )
+}
+
 function App() {
   const initialize = usePanesStore((state) => state.initialize)
   const setEverythingStatus = usePanesStore((state) => state.setEverythingStatus)
@@ -112,8 +120,15 @@ function App() {
         return
       }
 
-      const target = event.target
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+      if (isEditableTarget(event.target)) {
+        return
+      }
+
+      if (event.key === 'Tab' && defaultPaneMode === 'dual') {
+        event.preventDefault()
+        const nextPaneId = usePanesStore.getState().activePaneId === 'left' ? 'right' : 'left'
+        usePanesStore.getState().setActivePane(nextPaneId)
+        document.querySelector<HTMLElement>(`[data-pane-id="${nextPaneId}"]`)?.focus()
         return
       }
 
@@ -128,7 +143,7 @@ function App() {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [actionDialogOpen, keymap, menuOpen, settingsOpen])
+  }, [actionDialogOpen, defaultPaneMode, keymap, menuOpen, settingsOpen])
 
   useEffect(() => {
     const unlistenVolumesPromise = onVolumesChanged((event) => {

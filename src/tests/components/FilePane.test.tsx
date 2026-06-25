@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
@@ -7,6 +7,7 @@ import { FilePane } from '@/components/pane/FilePane'
 import { executeCommand } from '@/lib/commands'
 import { resolveCommandForEvent } from '@/lib/keymap'
 import { useClipboardStore } from '@/stores/clipboard-store'
+import { useInlineRenameStore } from '@/stores/inline-rename-store'
 import { useKeymapStore } from '@/stores/keymap-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
@@ -44,6 +45,7 @@ beforeEach(() => {
   usePanesStore.getState().reset()
   useTabsStore.getState().reset()
   useSelectionStore.getState().reset()
+  useInlineRenameStore.getState().reset()
 })
 
 describe('FilePane state rendering', () => {
@@ -82,12 +84,13 @@ describe('FilePane state rendering', () => {
     seedPane({ path: 'C:\\root\\dir', entries: [entry('Alpha')], focusedEntryId: 'Alpha' })
 
     render(<FilePane paneId="left" />)
+    const pane = screen.getByLabelText('Left pane')
     const parentRow = screen.getByRole('row', { name: 'Go to parent folder' })
 
     await user.click(parentRow)
     expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('..')
 
-    parentRow.focus()
+    pane.focus()
     await user.keyboard('{Enter}')
     expect(goUp).toHaveBeenCalledWith('left')
   })
@@ -165,6 +168,59 @@ describe('FilePane state rendering', () => {
 
     await user.keyboard('{Backspace}')
     expect(goUp).toHaveBeenCalledWith('left')
+  })
+
+  it('lets the filter input keep Backspace instead of triggering go up', async () => {
+    const user = userEvent.setup()
+    const goUp = vi.fn(() => Promise.resolve())
+    usePanesStore.setState({ goUp })
+    seedPane({ entries: [entry('Alpha')], filterDraft: 'Media', filterApplied: 'Media' })
+
+    render(<FilePane paneId="left" />)
+    const filter = screen.getByRole('textbox', { name: 'Left pane filter' })
+
+    await user.click(filter)
+    await user.keyboard('{Backspace}')
+
+    expect(filter).toHaveValue('Medi')
+    expect(goUp).not.toHaveBeenCalled()
+
+    await waitFor(() => {
+      expect(usePanesStore.getState().panes.left.filterApplied).toBe('Medi')
+    })
+  })
+
+  it('renames inline instead of opening a modal', async () => {
+    const rename = vi.fn((payload: { path: string; newName: string }) => ({
+      ...entry(payload.newName, false),
+      path: `C:\\root\\${payload.newName}`,
+    }))
+    ipc.override('rename_entry', rename)
+    ipc.override('list_dir', (payload) => ({
+      path: payload.path,
+      entries: [entry('Reports', false)],
+    }))
+    ipc.override('set_tab_watch', () => undefined)
+    ipc.override('save_session', (payload) => payload.session)
+    seedPane({ path: 'C:\\root', entries: [entry('Alpha', false)], focusedEntryId: 'Alpha' })
+
+    render(<FilePane paneId="left" />)
+    act(() => {
+      executeCommand('rename', 'left', 'Alpha')
+    })
+
+    const input = await screen.findByRole('textbox', { name: 'Rename Alpha' })
+    expect(screen.queryByRole('dialog', { name: 'Rename' })).not.toBeInTheDocument()
+
+    fireEvent.change(input, { target: { value: 'Reports' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => {
+      expect(rename).toHaveBeenCalledWith({ path: 'C:\\root\\Alpha', newName: 'Reports' })
+    })
+    await waitFor(() => {
+      expect(screen.queryByRole('textbox', { name: 'Rename Alpha' })).not.toBeInTheDocument()
+    })
   })
 
   it('keeps pane keyboard focus after opening a folder with the mouse', async () => {

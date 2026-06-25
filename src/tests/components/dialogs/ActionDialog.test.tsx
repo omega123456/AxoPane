@@ -71,29 +71,6 @@ describe('ActionDialog', () => {
     expect(useActionDialogStore.getState().dialog).not.toBeNull()
   })
 
-  it('renames an entry from its current name', async () => {
-    const user = userEvent.setup()
-    const rename = vi.fn((payload: { path: string; newName: string }) => dir(payload.newName))
-    ipc.override('rename_entry', rename)
-
-    useActionDialogStore.getState().open({
-      kind: 'rename',
-      paneId: 'left',
-      entryId: 'C:\\root\\Old',
-      path: 'C:\\root\\Old',
-      initialValue: 'Old',
-    })
-    render(<ActionDialog />)
-
-    const input = screen.getByLabelText('New name')
-    await user.clear(input)
-    await user.type(input, 'Reports')
-    await user.keyboard('{Enter}')
-
-    await waitFor(() => expect(useActionDialogStore.getState().dialog).toBeNull())
-    expect(rename).toHaveBeenCalledWith({ path: 'C:\\root\\Old', newName: 'Reports' })
-  })
-
   it('confirms a delete and calls the backend', async () => {
     const user = userEvent.setup()
     const remove = vi.fn(() => undefined)

@@ -4,10 +4,13 @@ import { persistAppConfig } from '@/lib/app-config'
 import type { CommandId, DirectoryEntry } from '@/lib/types/ipc'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useClipboardStore } from '@/stores/clipboard-store'
+import { useInlineRenameStore } from '@/stores/inline-rename-store'
 import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useSettingsStore } from '@/stores/settings-store'
+
+const PARENT_ROW_ID = '..'
 
 export function executeCommand(commandId: CommandId, paneId: 'left' | 'right', targetEntryId?: string) {
   const panes = usePanesStore.getState()
@@ -25,6 +28,11 @@ export function executeCommand(commandId: CommandId, paneId: 'left' | 'right', t
     case 'open': {
       const focusId = targetEntryId ?? pane.focusedEntryId
       if (focusId) {
+        if (focusId === PARENT_ROW_ID) {
+          void panes.goUp(paneId)
+          break
+        }
+
         const focused = pane.entries.find((item) => item.id === focusId)
         if (focused?.isDir) {
           void panes.navigatePane(paneId, focused.path)
@@ -85,8 +93,7 @@ export function executeCommand(commandId: CommandId, paneId: 'left' | 'right', t
       // selected entry when invoked from the keyboard.
       const target = entry ?? (selectedEntries.length === 1 ? selectedEntries[0] : undefined)
       if (target) {
-        useActionDialogStore.getState().open({
-          kind: 'rename',
+        useInlineRenameStore.getState().beginRename({
           paneId,
           entryId: target.id,
           path: target.path,

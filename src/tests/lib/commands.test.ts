@@ -2,6 +2,7 @@ import { beforeEach } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { canExecuteCommand, executeCommand } from '@/lib/commands'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
+import { useInlineRenameStore } from '@/stores/inline-rename-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import type { DirectoryEntry } from '@/lib/types/ipc'
@@ -28,6 +29,7 @@ beforeEach(() => {
   usePanesStore.getState().reset()
   useSelectionStore.getState().reset()
   useActionDialogStore.getState().close()
+  useInlineRenameStore.getState().reset()
   usePanesStore.setState((state) => ({
     panes: {
       ...state.panes,
@@ -47,10 +49,10 @@ describe('executeCommand file actions', () => {
     expect(useActionDialogStore.getState().dialog).toMatchObject({ kind: 'newFile', paneId: 'left' })
   })
 
-  it('opens a rename prompt seeded with the target name', () => {
+  it('starts an inline rename seeded with the target name', () => {
     executeCommand('rename', 'left', 'Alpha')
-    expect(useActionDialogStore.getState().dialog).toMatchObject({
-      kind: 'rename',
+    expect(useInlineRenameStore.getState().rename).toMatchObject({
+      paneId: 'left',
       entryId: 'Alpha',
       initialValue: 'Alpha',
       path: 'C:\\root\\Alpha',
@@ -60,13 +62,13 @@ describe('executeCommand file actions', () => {
   it('renames the sole selected entry when invoked without an explicit target', () => {
     useSelectionStore.getState().setSelection('left', ['Beta'], 'Beta', 'Beta')
     executeCommand('rename', 'left')
-    expect(useActionDialogStore.getState().dialog).toMatchObject({ kind: 'rename', entryId: 'Beta' })
+    expect(useInlineRenameStore.getState().rename).toMatchObject({ entryId: 'Beta' })
   })
 
-  it('does not open a rename prompt when multiple entries are selected', () => {
+  it('does not start inline rename when multiple entries are selected', () => {
     useSelectionStore.getState().setSelection('left', ['Alpha', 'Beta'], 'Alpha', 'Beta')
     executeCommand('rename', 'left')
-    expect(useActionDialogStore.getState().dialog).toBeNull()
+    expect(useInlineRenameStore.getState().rename).toBeNull()
   })
 
   it('opens a delete confirmation for the selected entries', () => {

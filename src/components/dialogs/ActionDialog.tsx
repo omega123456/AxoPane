@@ -5,7 +5,6 @@ import {
   createFileInPane,
   createFolderInPane,
   deleteEntriesInPane,
-  renameEntryInPane,
 } from '@/lib/file-actions'
 import { startOp } from '@/lib/queue-commands'
 import { useActionDialogStore, type ActionDialog as ActionDialogState } from '@/stores/action-dialog-store'
@@ -28,7 +27,6 @@ export function ActionDialog() {
 }
 
 const promptCopy = {
-  rename: { title: 'Rename', label: 'New name', confirm: 'Rename' },
   newFolder: { title: 'New folder', label: 'Folder name', confirm: 'Create' },
   newFile: { title: 'New file', label: 'File name', confirm: 'Create' },
 } as const
@@ -36,14 +34,14 @@ const promptCopy = {
 function PromptDialog({
   dialog,
 }: {
-  dialog: Extract<ActionDialogState, { kind: 'rename' | 'newFolder' | 'newFile' }>
+  dialog: Extract<ActionDialogState, { kind: 'newFolder' | 'newFile' }>
 }) {
   const close = useActionDialogStore((state) => state.close)
   const busy = useActionDialogStore((state) => state.busy)
   const error = useActionDialogStore((state) => state.error)
   const setBusy = useActionDialogStore((state) => state.setBusy)
   const setError = useActionDialogStore((state) => state.setError)
-  const [value, setValue] = useState(dialog.kind === 'rename' ? dialog.initialValue : '')
+  const [value, setValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const copy = promptCopy[dialog.kind]
 
@@ -61,9 +59,7 @@ function PromptDialog({
     setBusy(true)
     setError(null)
     try {
-      if (dialog.kind === 'rename') {
-        await renameEntryInPane(dialog.paneId, dialog.path, trimmed)
-      } else if (dialog.kind === 'newFolder') {
+      if (dialog.kind === 'newFolder') {
         await createFolderInPane(dialog.paneId, trimmed)
       } else {
         await createFileInPane(dialog.paneId, trimmed)

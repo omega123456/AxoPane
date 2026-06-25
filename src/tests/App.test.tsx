@@ -4,6 +4,7 @@ import { vi } from 'vitest'
 import { ipc } from './ipc-mock'
 import type { DirectoryEntry, ListDirRequest, ListDirResponse } from '@/lib/types/ipc'
 import { renderApp } from './utils/render-app'
+import { usePanesStore } from '@/stores/panes-store'
 
 const rootEntries: DirectoryEntry[] = [
   {
@@ -247,6 +248,26 @@ describe('App', () => {
     await waitFor(() => {
       expect(within(screen.getByLabelText('Left pane')).getByText('Documents')).toBeInTheDocument()
     })
+  })
+
+  it('switches the active pane when Tab is pressed', async () => {
+    const user = userEvent.setup()
+    installListDirOverride()
+    renderApp()
+
+    const leftPane = await screen.findByLabelText('Left pane')
+    const rightPane = await screen.findByLabelText('Right pane')
+
+    leftPane.focus()
+    expect(usePanesStore.getState().activePaneId).toBe('left')
+
+    await user.keyboard('{Tab}')
+    expect(usePanesStore.getState().activePaneId).toBe('right')
+    expect(document.activeElement).toBe(rightPane)
+
+    await user.keyboard('{Shift>}{Tab}{/Shift}')
+    expect(usePanesStore.getState().activePaneId).toBe('left')
+    expect(document.activeElement).toBe(leftPane)
   })
 
   it('supports click, ctrl-click, and shift-click selection', async () => {
