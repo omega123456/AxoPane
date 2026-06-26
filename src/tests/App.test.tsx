@@ -109,7 +109,6 @@ describe('App', () => {
 
     expect(await screen.findByLabelText('Left pane')).toBeInTheDocument()
     expect(await screen.findByLabelText('Right pane')).toBeInTheDocument()
-    expect(await screen.findByText('Shared tree')).toBeInTheDocument()
     await waitFor(() => {
       expect(getRowInPane('Left pane', 'Documents')).toBeTruthy()
     })

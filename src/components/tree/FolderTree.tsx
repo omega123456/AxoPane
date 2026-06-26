@@ -25,11 +25,6 @@ export function FolderTree() {
       style={{ width: `${treeWidthPx}px` }}
       className="flex min-h-0 shrink-0 flex-col border-r border-light-border bg-light-tree dark:border-dark-border dark:bg-dark-tree"
     >
-      <div className="border-b border-light-border px-3 py-3 dark:border-dark-border">
-        <p className="font-mono text-uxs uppercase tracking-wide text-light-text-muted dark:text-dark-text-muted">
-          Shared tree
-        </p>
-      </div>
       <div className="min-h-0 flex-1 overflow-auto py-2">
         {groups.map((group) => (
           <section key={group.category} className="mb-2">
