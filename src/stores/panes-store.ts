@@ -109,6 +109,7 @@ type PanesStore = {
   setShowHiddenFiles: (showHiddenFiles: boolean) => Promise<void>
   requestManualSize: (paneId: PaneId, entryId: string) => Promise<void>
   ensureTreeChildren: (path: string | null) => Promise<void>
+  revealPath: (path: string | null) => Promise<void>
   toggleTreeNode: (path: string) => Promise<void>
   reset: () => void
 }
@@ -1029,6 +1030,54 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         },
       }))
     }
+  },
+  revealPath: async (path) => {
+    if (!path) {
+      return
+    }
+
+    // Only reveal paths that live under one of the tree roots (volumes); paths
+    // outside any volume have no node to expand to.
+    const root = get().treeRoots.find((candidate) => isPathInsideVolume(path, candidate))
+    if (!root) {
+      return
+    }
+
+    // Build the ancestor chain from the root down to the active path.
+    const chain: string[] = []
+    let current: string | null = path
+    while (current) {
+      chain.unshift(current)
+      if (current.toLowerCase() === root.toLowerCase()) {
+        break
+      }
+      current = getParentPath(current)
+    }
+
+    // Load each ancestor's children so the next node down the chain exists, then
+    // expand every ancestor (all but the active leaf) so the active node renders.
+    for (let index = 0; index < chain.length - 1; index += 1) {
+      await get().ensureTreeChildren(chain[index])
+    }
+
+    set((state) => {
+      // Ancestors of the active path (all chain entries but the leaf) stay open;
+      // every other expanded branch collapses so only the active path is shown.
+      const ancestors = new Set(chain.slice(0, -1).map((entry) => entry.toLowerCase()))
+      const leaf = path.toLowerCase()
+      const treeNodes = { ...state.treeNodes }
+      for (const [nodePath, node] of Object.entries(state.treeNodes)) {
+        const lowerPath = nodePath.toLowerCase()
+        if (ancestors.has(lowerPath)) {
+          if (!node.expanded) {
+            treeNodes[nodePath] = { ...node, expanded: true }
+          }
+        } else if (lowerPath !== leaf && node.expanded) {
+          treeNodes[nodePath] = { ...node, expanded: false }
+        }
+      }
+      return { treeNodes }
+    })
   },
   toggleTreeNode: async (path) => {
     const node = get().treeNodes[path]

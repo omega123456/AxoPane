@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { buildContextMenuItems } from '@/components/menus/menu-definitions'
 import { ChevronRightIcon } from '@/components/icons'
 import { EntryIcon } from '@/components/icons/EntryIcon'
@@ -17,16 +18,26 @@ export function TreeNode({ path, depth }: TreeNodeProps) {
   const toggleTreeNode = usePanesStore((state) => state.toggleTreeNode)
   const navigatePane = usePanesStore((state) => state.navigatePane)
   const openMenu = useContextMenuStore((state) => state.openMenu)
+  const rowRef = useRef<HTMLDivElement>(null)
+
+  const isCurrent = Boolean(node) && activePath === node.path
+
+  // Keep the active folder visible: scroll its row into view within the tree
+  // whenever this node becomes the current one.
+  useEffect(() => {
+    if (isCurrent) {
+      rowRef.current?.scrollIntoView({ block: 'nearest' })
+    }
+  }, [isCurrent])
 
   if (!node) {
     return null
   }
 
-  const isCurrent = activePath === node.path
-
   return (
     <li>
       <div
+        ref={rowRef}
         onContextMenu={(event) => {
           event.preventDefault()
           openMenu({

@@ -222,6 +222,91 @@ describe('panes-store navigation', () => {
     expect(usePanesStore.getState().treeNodes['C:\\root'].expanded).toBe(false)
   })
 
+  it('reveals the active path by expanding its ancestor chain down to the leaf', async () => {
+    usePanesStore.getState().initialize({
+      session: { activePane: 'left', leftPath: 'C:\\', rightPath: 'C:\\' },
+      showHiddenFiles: false,
+      everythingStatus: { status: 'unavailable', isAvailable: false },
+      volumes: [{ mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false }],
+    })
+
+    const children: Record<string, string> = {
+      'C:\\': 'C:\\Users',
+      'C:\\Users': 'C:\\Users\\Omega',
+    }
+    ipc.override('list_dir', (payload: ListDirRequest): ListDirResponse => {
+      const child = children[payload.path]
+      return {
+        path: payload.path,
+        entries: child ? [{ ...dir('child'), id: child, name: child, path: child }] : [],
+      }
+    })
+
+    await usePanesStore.getState().revealPath('C:\\Users\\Omega')
+
+    const nodes = usePanesStore.getState().treeNodes
+    expect(nodes['C:\\'].expanded).toBe(true)
+    expect(nodes['C:\\Users'].expanded).toBe(true)
+    // The leaf is rendered but not force-expanded.
+    expect(nodes['C:\\Users\\Omega']).toBeDefined()
+  })
+
+  it('collapses unrelated branches when revealing a different path', async () => {
+    usePanesStore.getState().initialize({
+      session: { activePane: 'left', leftPath: 'C:\\', rightPath: 'C:\\' },
+      showHiddenFiles: false,
+      everythingStatus: { status: 'unavailable', isAvailable: false },
+      volumes: [{ mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false }],
+    })
+
+    // Seed an expanded, unrelated branch that should collapse on reveal.
+    usePanesStore.setState((state) => ({
+      treeNodes: {
+        ...state.treeNodes,
+        'C:\\Other': {
+          id: 'C:\\Other',
+          name: 'Other',
+          path: 'C:\\Other',
+          parentPath: 'C:\\',
+          children: [],
+          expanded: true,
+          loaded: true,
+        },
+      },
+    }))
+
+    const children: Record<string, string> = {
+      'C:\\': 'C:\\Users',
+      'C:\\Users': 'C:\\Users\\Omega',
+    }
+    ipc.override('list_dir', (payload: ListDirRequest): ListDirResponse => {
+      const child = children[payload.path]
+      return {
+        path: payload.path,
+        entries: child ? [{ ...dir('child'), id: child, name: child, path: child }] : [],
+      }
+    })
+
+    await usePanesStore.getState().revealPath('C:\\Users\\Omega')
+
+    const nodes = usePanesStore.getState().treeNodes
+    expect(nodes['C:\\Users'].expanded).toBe(true)
+    expect(nodes['C:\\Other'].expanded).toBe(false)
+  })
+
+  it('ignores reveal for empty or out-of-volume paths', async () => {
+    usePanesStore.getState().initialize({
+      session: { activePane: 'left', leftPath: 'C:\\', rightPath: 'C:\\' },
+      showHiddenFiles: false,
+      everythingStatus: { status: 'unavailable', isAvailable: false },
+      volumes: [{ mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false }],
+    })
+
+    await usePanesStore.getState().revealPath(null)
+    await usePanesStore.getState().revealPath('D:\\outside')
+    expect(usePanesStore.getState().treeNodes['D:\\outside']).toBeUndefined()
+  })
+
   it('sorts tree roots by drive letter, formats labels, and keeps tree state in sync with volume changes', () => {
     usePanesStore.getState().initialize({
       session: {

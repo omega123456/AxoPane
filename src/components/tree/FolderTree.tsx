@@ -1,23 +1,20 @@
 import { useEffect } from 'react'
 import { TreeNode } from './TreeNode'
-import { isPathInsideVolume } from '@/lib/volumes'
 import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 
 export function FolderTree() {
   const treeRoots = usePanesStore((state) => state.treeRoots)
-  const ensureTreeChildren = usePanesStore((state) => state.ensureTreeChildren)
+  const revealPath = usePanesStore((state) => state.revealPath)
   const activePaneId = usePanesStore((state) => state.activePaneId)
   const activePath = usePanesStore((state) => state.panes[activePaneId].path)
   const treeWidth = useLayoutStore((state) => state.treeWidth)
 
+  // Track the active folder: expand the ancestor chain down to it so the node is
+  // rendered (TreeNode then scrolls it into view).
   useEffect(() => {
-    const root = treeRoots.find((candidate) => isPathInsideVolume(activePath, candidate))
-
-    if (root) {
-      void ensureTreeChildren(root)
-    }
-  }, [activePath, ensureTreeChildren, treeRoots])
+    void revealPath(activePath)
+  }, [activePath, revealPath])
 
   return (
     <aside
