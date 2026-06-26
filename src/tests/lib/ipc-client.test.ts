@@ -201,6 +201,7 @@ describe('playwright ipc mock module', () => {
         totalBytes: 100,
         freeBytes: 25,
         isNetwork: true,
+        isRemovable: false,
       },
     ]
     ;(globalThis as { __PLAYWRIGHT_IPC_SCENARIO__?: unknown }).__PLAYWRIGHT_IPC_SCENARIO__ = {

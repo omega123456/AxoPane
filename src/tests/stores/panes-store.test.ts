@@ -227,7 +227,7 @@ describe('panes-store navigation', () => {
       session: { activePane: 'left', leftPath: 'C:\\', rightPath: 'C:\\' },
       showHiddenFiles: false,
       everythingStatus: { status: 'unavailable', isAvailable: false },
-      volumes: [{ mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false }],
+      volumes: [{ mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false, isRemovable: false }],
     })
 
     const children: Record<string, string> = {
@@ -256,7 +256,7 @@ describe('panes-store navigation', () => {
       session: { activePane: 'left', leftPath: 'C:\\', rightPath: 'C:\\' },
       showHiddenFiles: false,
       everythingStatus: { status: 'unavailable', isAvailable: false },
-      volumes: [{ mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false }],
+      volumes: [{ mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false, isRemovable: false }],
     })
 
     // Seed an expanded, unrelated branch that should collapse on reveal.
@@ -299,7 +299,7 @@ describe('panes-store navigation', () => {
       session: { activePane: 'left', leftPath: 'C:\\', rightPath: 'C:\\' },
       showHiddenFiles: false,
       everythingStatus: { status: 'unavailable', isAvailable: false },
-      volumes: [{ mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false }],
+      volumes: [{ mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false, isRemovable: false }],
     })
 
     await usePanesStore.getState().revealPath(null)
@@ -323,10 +323,11 @@ describe('panes-store navigation', () => {
           totalBytes: 1,
           freeBytes: 1,
           isNetwork: true,
+          isRemovable: false,
         },
-        { mountRoot: 'Z:\\', label: 'Share', totalBytes: 1, freeBytes: 1, isNetwork: true },
-        { mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false },
-        { mountRoot: 'D:\\', label: '', totalBytes: 1, freeBytes: 1, isNetwork: false },
+        { mountRoot: 'Z:\\', label: 'Share', totalBytes: 1, freeBytes: 1, isNetwork: true, isRemovable: false },
+        { mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false, isRemovable: false },
+        { mountRoot: 'D:\\', label: '', totalBytes: 1, freeBytes: 1, isNetwork: false, isRemovable: false },
       ],
     })
 
@@ -353,8 +354,8 @@ describe('panes-store navigation', () => {
     }))
 
     usePanesStore.getState().setVolumes([
-      { mountRoot: 'Y:\\', label: 'Archive', totalBytes: 1, freeBytes: 1, isNetwork: true },
-      { mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false },
+      { mountRoot: 'Y:\\', label: 'Archive', totalBytes: 1, freeBytes: 1, isNetwork: true, isRemovable: false },
+      { mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false, isRemovable: false },
     ])
 
     expect(usePanesStore.getState().treeRoots).toEqual(['C:\\', 'Y:\\'])

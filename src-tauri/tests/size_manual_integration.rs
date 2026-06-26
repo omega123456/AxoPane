@@ -118,6 +118,7 @@ fn capability_selection_prefers_network_na_and_manual_fallback() {
         total_bytes: 1,
         free_bytes: 1,
         is_network: true,
+        is_removable: false,
     };
 
     assert_eq!(
@@ -135,6 +136,7 @@ fn capability_selection_prefers_network_na_and_manual_fallback() {
         total_bytes: 1,
         free_bytes: 1,
         is_network: false,
+        is_removable: false,
     };
 
     let local_mount = local.mount_root.clone();

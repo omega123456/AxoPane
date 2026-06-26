@@ -4,12 +4,10 @@ import { useSettingsStore } from '@/stores/settings-store'
 import {
   ArrowLeftIcon,
   ArrowUpIcon,
-  ChevronDownIcon,
   EyeIcon,
   EyeOffIcon,
   MoonStarIcon,
   RefreshIcon,
-  SearchIcon,
   SettingsIcon,
   SunIcon,
 } from '@/components/icons'
@@ -21,7 +19,6 @@ type CommandBarProps = {
 
 export function CommandBar({ theme, setTheme }: CommandBarProps) {
   const activePaneId = usePanesStore((state) => state.activePaneId)
-  const pane = usePanesStore((state) => state.panes[activePaneId])
   const reloadPane = usePanesStore((state) => state.reloadPane)
   const goUp = usePanesStore((state) => state.goUp)
   const showHiddenFiles = usePanesStore((state) => state.showHiddenFiles)
@@ -39,17 +36,6 @@ export function CommandBar({ theme, setTheme }: CommandBarProps) {
       <ToolbarButton label="Refresh" onClick={() => void reloadPane(activePaneId)}>
         <RefreshIcon className="h-4 w-4" />
       </ToolbarButton>
-      <div className="mx-2 h-5 w-px bg-light-border dark:bg-dark-border" />
-      <button
-        type="button"
-        className="inline-flex h-8 items-center gap-2 rounded-tab bg-accent-blue-soft px-3 text-row font-semibold text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-accent-blue"
-      >
-        <SearchIcon className="h-4 w-4" />
-        <span className="truncate">
-          {pane.filterApplied ? `Filter: ${pane.filterApplied}` : pane.path}
-        </span>
-        <ChevronDownIcon className="h-4 w-4" />
-      </button>
       <div className="ml-auto flex items-center gap-2">
         <button
           type="button"

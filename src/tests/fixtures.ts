@@ -123,6 +123,7 @@ export const fixtures: {
       totalBytes: 500_000_000,
       freeBytes: 200_000_000,
       isNetwork: true,
+      isRemovable: false,
     },
     {
       mountRoot: 'C:\\',
@@ -130,6 +131,7 @@ export const fixtures: {
       totalBytes: 1_000_000_000,
       freeBytes: 500_000_000,
       isNetwork: false,
+      isRemovable: false,
     },
     {
       mountRoot: 'D:\\',
@@ -137,6 +139,15 @@ export const fixtures: {
       totalBytes: 2_000_000_000,
       freeBytes: 1_400_000_000,
       isNetwork: false,
+      isRemovable: false,
+    },
+    {
+      mountRoot: 'E:\\',
+      label: 'USB Stick',
+      totalBytes: 64_000_000,
+      freeBytes: 32_000_000,
+      isNetwork: false,
+      isRemovable: true,
     },
   ],
   everything_status: {

@@ -1,4 +1,4 @@
-import type { VolumeInfo } from '@/lib/types/ipc'
+import type { VolumeCategory, VolumeGroup, VolumeInfo } from '@/lib/types/ipc'
 
 const windowsDriveRootPattern = /^([A-Za-z]:)[\\/]?$/
 
@@ -39,6 +39,40 @@ export function sortVolumesForTree(volumes: VolumeInfo[]) {
       sensitivity: 'base',
     }),
   )
+}
+
+// Network mounts win over the removable flag (a mapped network drive can report
+// as removable on some systems but belongs under Network Drives), so the order
+// of these checks matters.
+export function volumeCategory(volume: VolumeInfo): VolumeCategory {
+  if (volume.isNetwork) {
+    return 'network'
+  }
+
+  if (volume.isRemovable) {
+    return 'removable'
+  }
+
+  return 'fixed'
+}
+
+// Tree section order + headings. Only non-empty sections are rendered.
+const categoryOrder: { category: VolumeCategory; label: string }[] = [
+  { category: 'fixed', label: 'Drives' },
+  { category: 'removable', label: 'Removable Drives' },
+  { category: 'network', label: 'Network Drives' },
+]
+
+export function groupVolumesByCategory(volumes: VolumeInfo[]): VolumeGroup[] {
+  const sorted = sortVolumesForTree(volumes)
+
+  return categoryOrder
+    .map(({ category, label }) => ({
+      category,
+      label,
+      volumes: sorted.filter((volume) => volumeCategory(volume) === category),
+    }))
+    .filter((group) => group.volumes.length > 0)
 }
 
 export function formatVolumeTreeName(volume: VolumeInfo) {

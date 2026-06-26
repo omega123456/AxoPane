@@ -17,6 +17,7 @@ export function TreeNode({ path, depth }: TreeNodeProps) {
   const activePath = usePanesStore((state) => state.panes[activePaneId].path)
   const toggleTreeNode = usePanesStore((state) => state.toggleTreeNode)
   const navigatePane = usePanesStore((state) => state.navigatePane)
+  const openTabFromPath = usePanesStore((state) => state.openTabFromPath)
   const openMenu = useContextMenuStore((state) => state.openMenu)
   const rowRef = useRef<HTMLDivElement>(null)
 
@@ -68,6 +69,12 @@ export function TreeNode({ path, depth }: TreeNodeProps) {
         <button
           type="button"
           onClick={() => void navigatePane(activePaneId, node.path)}
+          onAuxClick={(event) => {
+            if (event.button === 1) {
+              event.preventDefault()
+              void openTabFromPath(activePaneId, node.path)
+            }
+          }}
           className="flex min-w-0 flex-1 items-center gap-2 rounded-tab py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
         >
           <EntryIcon

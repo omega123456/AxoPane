@@ -29,6 +29,12 @@ export function TabBar({ paneId, title, currentPath, isActive }: TabBarProps) {
     void closeTab(paneId, tabId)
   }
 
+  function onTabAuxClick(event: MouseEvent<HTMLDivElement>, tabId: string) {
+    if (event.button !== 1 || !canClose) return
+    event.preventDefault()
+    void closeTab(paneId, tabId)
+  }
+
   return (
     <div className="flex h-tabs items-center gap-2 overflow-x-auto border-b border-light-border bg-light-panel px-3 dark:border-dark-border dark:bg-dark-panel">
       {paneTabs.tabs.map((tab, index) => {
@@ -36,6 +42,7 @@ export function TabBar({ paneId, title, currentPath, isActive }: TabBarProps) {
         return (
           <div
             key={tab.id}
+            onAuxClick={(event) => onTabAuxClick(event, tab.id)}
             onContextMenu={(event) => {
               event.preventDefault()
               openMenu({

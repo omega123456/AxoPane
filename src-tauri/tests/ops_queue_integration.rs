@@ -21,6 +21,7 @@ fn volume(mount: &str) -> VolumeInfo {
         total_bytes: 1_000_000,
         free_bytes: 1_000_000,
         is_network: false,
+        is_removable: false,
     }
 }
 

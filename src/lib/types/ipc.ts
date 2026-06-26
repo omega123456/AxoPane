@@ -80,6 +80,15 @@ export type VolumeInfo = {
   totalBytes: number
   freeBytes: number
   isNetwork: boolean
+  isRemovable: boolean
+}
+
+export type VolumeCategory = 'fixed' | 'removable' | 'network'
+
+export type VolumeGroup = {
+  category: VolumeCategory
+  label: string
+  volumes: VolumeInfo[]
 }
 
 export type ColumnConfig = {

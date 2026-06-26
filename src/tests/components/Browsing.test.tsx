@@ -178,4 +178,33 @@ describe('TreeNode', () => {
     await user.click(screen.getByText('root'))
     expect(navigate).toHaveBeenCalledWith('left', 'C:\\root')
   })
+
+  it('opens a node in a new tab on the active pane via middle-click', async () => {
+    const user = userEvent.setup()
+    const openTab = vi.fn(() => Promise.resolve())
+    usePanesStore.setState({
+      activePaneId: 'right',
+      openTabFromPath: openTab,
+      treeNodes: {
+        'C:\\root': {
+          id: 'C:\\root',
+          name: 'root',
+          path: 'C:\\root',
+          parentPath: null,
+          children: [],
+          expanded: true,
+          loaded: true,
+        },
+      },
+    })
+
+    render(
+      <ul>
+        <TreeNode path={'C:\\root'} depth={0} />
+      </ul>,
+    )
+
+    await user.pointer({ keys: '[MouseMiddle]', target: screen.getByText('root') })
+    expect(openTab).toHaveBeenCalledWith('right', 'C:\\root')
+  })
 })

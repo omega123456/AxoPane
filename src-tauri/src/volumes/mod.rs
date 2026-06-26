@@ -64,6 +64,7 @@ pub struct VolumeInfo {
     pub total_bytes: u64,
     pub free_bytes: u64,
     pub is_network: bool,
+    pub is_removable: bool,
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]
@@ -100,6 +101,7 @@ pub fn list_volumes() -> Vec<VolumeInfo> {
             total_bytes,
             free_bytes,
             is_network: drive_type == DRIVE_REMOTE,
+            is_removable: matches!(drive_type, DRIVE_REMOVABLE | DRIVE_CDROM),
         });
     }
 
@@ -125,6 +127,7 @@ pub fn list_volumes() -> Vec<VolumeInfo> {
                 disk.mount_point().to_string_lossy().as_ref(),
                 disk.file_system().to_string_lossy().as_ref(),
             ),
+            is_removable: disk.is_removable(),
         })
         .collect();
 
@@ -147,6 +150,7 @@ fn test_volumes() -> Vec<VolumeInfo> {
                 total_bytes: 1_000_000,
                 free_bytes: 400_000,
                 is_network: false,
+                is_removable: false,
             },
             VolumeInfo {
                 mount_root: String::from("D:\\"),
@@ -154,6 +158,7 @@ fn test_volumes() -> Vec<VolumeInfo> {
                 total_bytes: 2_000_000,
                 free_bytes: 1_100_000,
                 is_network: false,
+                is_removable: true,
             },
             VolumeInfo {
                 mount_root: String::from("Z:\\"),
@@ -161,6 +166,7 @@ fn test_volumes() -> Vec<VolumeInfo> {
                 total_bytes: 3_000_000,
                 free_bytes: 2_200_000,
                 is_network: true,
+                is_removable: false,
             },
         ];
     }
@@ -172,6 +178,7 @@ fn test_volumes() -> Vec<VolumeInfo> {
             total_bytes: 1_000_000,
             free_bytes: 400_000,
             is_network: false,
+            is_removable: false,
         },
         VolumeInfo {
             mount_root: String::from("/Volumes/fixture-network"),
@@ -179,6 +186,7 @@ fn test_volumes() -> Vec<VolumeInfo> {
             total_bytes: 2_000_000,
             free_bytes: 1_500_000,
             is_network: true,
+            is_removable: false,
         },
     ]
 }
@@ -466,6 +474,7 @@ fn push_network_volume(
         total_bytes,
         free_bytes,
         is_network: true,
+        is_removable: false,
     });
 }
 

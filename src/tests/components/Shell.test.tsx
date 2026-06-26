@@ -12,7 +12,7 @@ beforeEach(() => {
 })
 
 describe('CommandBar', () => {
-  it('shows the path, fires up/refresh, and toggles theme', async () => {
+  it('fires up/refresh, and toggles theme', async () => {
     const user = userEvent.setup()
     const goUp = vi.fn(() => Promise.resolve())
     const reloadPane = vi.fn(() => Promise.resolve())
@@ -27,7 +27,6 @@ describe('CommandBar', () => {
     }))
 
     render(<CommandBar theme="dark" setTheme={setTheme} />)
-    expect(screen.getByText('C:\\Users')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Up' }))
     await user.click(screen.getByRole('button', { name: 'Refresh' }))
@@ -38,13 +37,12 @@ describe('CommandBar', () => {
     expect(setTheme).toHaveBeenCalledWith('light')
   })
 
-  it('shows the active filter when one is applied and hidden-files state', () => {
+  it('reflects the hidden-files state and theme label', () => {
     usePanesStore.setState((state) => ({
       showHiddenFiles: true,
       panes: { ...state.panes, left: { ...state.panes.left, filterApplied: 'mkv' } },
     }))
     render(<CommandBar theme="light" setTheme={vi.fn()} />)
-    expect(screen.getByText('Filter: mkv')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /hidden files/i })).toHaveAttribute(
       'aria-pressed',
       'true',
@@ -96,6 +94,7 @@ describe('StatusBar', () => {
             totalBytes: 4_000_000_000_000,
             freeBytes: 412_000_000_000,
             isNetwork: false,
+            isRemovable: false,
           },
         }}
       />,

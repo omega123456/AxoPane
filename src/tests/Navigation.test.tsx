@@ -85,6 +85,26 @@ describe('Navigation: tabs, breadcrumb, session, live patching', () => {
     })
   })
 
+  it('closes a tab on middle-click', async () => {
+    const user = userEvent.setup()
+    installDefaults()
+    renderApp()
+
+    await waitFor(() => expect(getRow('Left pane', 'Documents')).toBeTruthy())
+
+    const leftPane = screen.getByLabelText('Left pane')
+    await user.click(within(leftPane).getByRole('button', { name: 'New tab in Left pane' }))
+    await waitFor(() => {
+      expect(useTabsStore.getState().panes.left.tabs).toHaveLength(2)
+    })
+
+    const tab = within(leftPane).getAllByRole('tab')[0]
+    await user.pointer({ keys: '[MouseMiddle]', target: tab })
+    await waitFor(() => {
+      expect(useTabsStore.getState().panes.left.tabs).toHaveLength(1)
+    })
+  })
+
   it('opens a folder in a new tab on middle-click', async () => {
     const user = userEvent.setup()
     installDefaults()

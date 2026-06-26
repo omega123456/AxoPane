@@ -44,8 +44,8 @@ describe('menu definitions', () => {
     usePanesStore.setState({
       everythingStatus: { status: 'unavailable', isAvailable: false },
       volumes: [
-        { mountRoot: 'C:\\', label: 'System', totalBytes: 1, freeBytes: 1, isNetwork: false },
-        { mountRoot: '\\\\server\\', label: 'Share', totalBytes: 1, freeBytes: 1, isNetwork: true },
+        { mountRoot: 'C:\\', label: 'System', totalBytes: 1, freeBytes: 1, isNetwork: false, isRemovable: false },
+        { mountRoot: '\\\\server\\', label: 'Share', totalBytes: 1, freeBytes: 1, isNetwork: true, isRemovable: false },
       ],
       panes: {
         left: {
