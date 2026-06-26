@@ -43,7 +43,9 @@
   "plugins": {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlDQTgwOUEzQUY5RkQzMzAKUldRdzA1K3Zvd21vbkpVaFBhY2dTbjgvaHlsSWtuNzBzV1lZSTB6d20wdU14d2Y0US95aEZHbmIK",
-      "endpoints": ["https://github.com/OWNER/REPO/releases/latest/download/latest.json"],
+      "endpoints": [
+        "https://github.com/omega123456/AxoPane/releases/latest/download/latest.json"
+      ],
       "windows": {
         "installMode": "passive"
       }
