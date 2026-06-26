@@ -129,13 +129,13 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`phase-8-new-folder-${mode}.png`)
   })
 
-  test(`rename dialog ${mode}`, async ({ page }) => {
+  test(`rename inline ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
     await page.getByRole('row', { name: /Documents/ }).first().click({ button: 'right' })
     const menu = page.getByRole('menu', { name: 'Documents' })
     await expect(menu).toBeVisible()
     await menu.getByRole('menuitem').filter({ hasText: 'Rename' }).click()
-    await expect(page.getByRole('dialog', { name: 'Rename' })).toBeVisible()
+    await expect(page.getByRole('textbox', { name: /Rename Documents/ })).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`phase-8-rename-${mode}.png`)
   })
 
