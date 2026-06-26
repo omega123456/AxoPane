@@ -154,6 +154,62 @@ describe('panes-store navigation', () => {
     expect(usePanesStore.getState().panes.left.entries).toBe(before)
   })
 
+  it('records history and steps back and forward', async () => {
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    await usePanesStore.getState().navigatePane('left', 'C:\\root\\child')
+    expect(usePanesStore.getState().panes.left.history).toEqual(['C:\\root', 'C:\\root\\child'])
+    expect(usePanesStore.getState().panes.left.historyIndex).toBe(1)
+
+    await usePanesStore.getState().goBack('left')
+    expect(usePanesStore.getState().panes.left.path).toBe('C:\\root')
+    expect(usePanesStore.getState().panes.left.historyIndex).toBe(0)
+
+    await usePanesStore.getState().goForward('left')
+    expect(usePanesStore.getState().panes.left.path).toBe('C:\\root\\child')
+    expect(usePanesStore.getState().panes.left.historyIndex).toBe(1)
+  })
+
+  it('treats back at the start and forward at the end as no-ops', async () => {
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+
+    await usePanesStore.getState().goBack('left')
+    expect(usePanesStore.getState().panes.left.path).toBe('C:\\root')
+    expect(usePanesStore.getState().panes.left.historyIndex).toBe(0)
+
+    await usePanesStore.getState().goForward('left')
+    expect(usePanesStore.getState().panes.left.path).toBe('C:\\root')
+    expect(usePanesStore.getState().panes.left.historyIndex).toBe(0)
+  })
+
+  it('truncates forward history when navigating after going back', async () => {
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    await usePanesStore.getState().navigatePane('left', 'C:\\root\\child')
+    await usePanesStore.getState().goBack('left')
+    await usePanesStore.getState().navigatePane('left', 'C:\\root\\other')
+
+    expect(usePanesStore.getState().panes.left.history).toEqual(['C:\\root', 'C:\\root\\other'])
+    expect(usePanesStore.getState().panes.left.historyIndex).toBe(1)
+  })
+
+  it('does not grow history when navigating to the current path', async () => {
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    expect(usePanesStore.getState().panes.left.history).toEqual(['C:\\root'])
+    expect(usePanesStore.getState().panes.left.historyIndex).toBe(0)
+  })
+
+  it('resets pane history when a new tab is opened', async () => {
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    await usePanesStore.getState().navigatePane('left', 'C:\\root\\child')
+    await usePanesStore.getState().openTabFromPath('left', 'C:\\root\\Alpha')
+
+    expect(usePanesStore.getState().panes.left.history).toEqual(['C:\\root\\Alpha'])
+    expect(usePanesStore.getState().panes.left.historyIndex).toBe(0)
+
+    await usePanesStore.getState().goBack('left')
+    expect(usePanesStore.getState().panes.left.path).toBe('C:\\root\\Alpha')
+  })
+
   it('builds tree children and tolerates listing failures', async () => {
     await usePanesStore.getState().ensureTreeChildren('C:\\root')
     expect(usePanesStore.getState().treeNodes['C:\\root'].loaded).toBe(true)

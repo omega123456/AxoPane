@@ -272,6 +272,57 @@ describe('App', () => {
     expect(document.activeElement).toBe(leftPane)
   })
 
+  it('navigates back and forward with the mouse side buttons', async () => {
+    const user = userEvent.setup()
+    installListDirOverride()
+    renderApp()
+
+    const leftPane = await screen.findByLabelText('Left pane')
+    await waitFor(() => {
+      expect(getRowInPane('Left pane', 'Documents')).toBeTruthy()
+    })
+
+    const startPath = usePanesStore.getState().panes.left.path
+    leftPane.focus()
+    await user.keyboard('{Enter}') // open the focused Documents folder
+
+    await waitFor(() => {
+      expect(usePanesStore.getState().panes.left.path).toBe('C:\\Users\\Omega\\Documents')
+    })
+
+    // Button 3 = browser "back".
+    act(() => {
+      window.dispatchEvent(new MouseEvent('mouseup', { button: 3 }))
+    })
+    await waitFor(() => {
+      expect(usePanesStore.getState().panes.left.path).toBe(startPath)
+    })
+
+    // Button 4 = browser "forward".
+    act(() => {
+      window.dispatchEvent(new MouseEvent('mouseup', { button: 4 }))
+    })
+    await waitFor(() => {
+      expect(usePanesStore.getState().panes.left.path).toBe('C:\\Users\\Omega\\Documents')
+    })
+  })
+
+  it('ignores mouse side buttons that are not back/forward', async () => {
+    installListDirOverride()
+    renderApp()
+
+    await waitFor(() => {
+      expect(getRowInPane('Left pane', 'Documents')).toBeTruthy()
+    })
+    const startPath = usePanesStore.getState().panes.left.path
+
+    act(() => {
+      window.dispatchEvent(new MouseEvent('mouseup', { button: 1 }))
+    })
+
+    expect(usePanesStore.getState().panes.left.path).toBe(startPath)
+  })
+
   it('supports click, ctrl-click, and shift-click selection', async () => {
     const user = userEvent.setup()
     installListDirOverride()

@@ -30,6 +30,10 @@ import { formatVolumeTreeName, isPathInsideVolume, sortVolumesForTree } from '@/
 type PaneId = 'left' | 'right'
 type SizeStateKind = SizeStateEvent['state']
 
+// When `viaHistory` is set the navigation is a back/forward step and must not
+// rewrite the pane's history stack (the index has already been moved).
+type NavigateOptions = { viaHistory?: boolean }
+
 type TreeNodeState = {
   id: string
   name: string
@@ -61,6 +65,8 @@ type PaneState = {
   error: string | null
   visibleStartIndex: number
   visibleEndIndex: number
+  history: string[]
+  historyIndex: number
 }
 
 type InitializePayload = {
@@ -83,8 +89,10 @@ type PanesStore = {
   initialize: (payload: InitializePayload) => void
   setActivePane: (paneId: PaneId) => void
   reloadPane: (paneId: PaneId) => Promise<void>
-  navigatePane: (paneId: PaneId, path: string) => Promise<void>
+  navigatePane: (paneId: PaneId, path: string, options?: NavigateOptions) => Promise<void>
   goUp: (paneId: PaneId) => Promise<void>
+  goBack: (paneId: PaneId) => Promise<void>
+  goForward: (paneId: PaneId) => Promise<void>
   openTabFromPath: (paneId: PaneId, path: string) => Promise<void>
   closeTab: (paneId: PaneId, tabId: string) => Promise<void>
   switchTab: (paneId: PaneId, tabId: string) => Promise<void>
@@ -123,6 +131,8 @@ function createPane(id: PaneId, title: string, path = '.') : PaneState {
     error: null,
     visibleStartIndex: 0,
     visibleEndIndex: 40,
+    history: [],
+    historyIndex: -1,
   }
 }
 
@@ -401,6 +411,8 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           filterDraft: activeLeft.filter,
           filterApplied: activeLeft.filter,
           title: 'Left pane',
+          history: [activeLeft.path],
+          historyIndex: 0,
         },
         right: {
           ...state.panes.right,
@@ -410,6 +422,8 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           filterDraft: activeRight.filter,
           filterApplied: activeRight.filter,
           title: 'Right pane',
+          history: [activeRight.path],
+          historyIndex: 0,
         },
       },
       treeRoots,
@@ -445,18 +459,29 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         get().sizeStates,
       )
 
-      set((state) => ({
-        panes: {
-          ...state.panes,
-          [paneId]: {
-            ...state.panes[paneId],
-            path: response.path,
-            entries: sortedEntries,
-            focusedEntryId: sortedEntries[0]?.id ?? null,
-            loading: false,
+      set((state) => {
+        const previous = state.panes[paneId]
+        // Seed the back/forward stack the first time a pane resolves a real path
+        // (initial load, or after a tab switch reset its history to empty).
+        const seeded =
+          previous.historyIndex === -1
+            ? { history: [response.path], historyIndex: 0 }
+            : { history: previous.history, historyIndex: previous.historyIndex }
+
+        return {
+          panes: {
+            ...state.panes,
+            [paneId]: {
+              ...previous,
+              path: response.path,
+              entries: sortedEntries,
+              focusedEntryId: sortedEntries[0]?.id ?? null,
+              loading: false,
+              ...seeded,
+            },
           },
-        },
-      }))
+        }
+      })
 
       const nextPane = get().panes[paneId]
       useTabsStore.getState().patchActiveTab(paneId, {
@@ -512,17 +537,33 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       }))
     }
   },
-  navigatePane: async (paneId, path) => {
-    log.debug('navigatePane', { paneId, path })
-    set((state) => ({
-      panes: {
-        ...state.panes,
-        [paneId]: {
-          ...state.panes[paneId],
-          path,
+  navigatePane: async (paneId, path, options = {}) => {
+    log.debug('navigatePane', { paneId, path, viaHistory: options.viaHistory ?? false })
+    set((state) => {
+      const pane = state.panes[paneId]
+      let { history, historyIndex } = pane
+
+      // A fresh navigation truncates any forward history and appends the target,
+      // skipping a no-op push when we are already sitting on that path. A
+      // back/forward step (viaHistory) leaves the stack untouched.
+      if (!options.viaHistory) {
+        const base = historyIndex >= 0 ? history.slice(0, historyIndex + 1) : []
+        history = base[base.length - 1] === path ? base : [...base, path]
+        historyIndex = history.length - 1
+      }
+
+      return {
+        panes: {
+          ...state.panes,
+          [paneId]: {
+            ...pane,
+            path,
+            history,
+            historyIndex,
+          },
         },
-      },
-    }))
+      }
+    })
     await get().reloadPane(paneId)
   },
   goUp: async (paneId) => {
@@ -532,6 +573,40 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     if (parentPath) {
       await get().navigatePane(paneId, parentPath)
     }
+  },
+  goBack: async (paneId) => {
+    const pane = get().panes[paneId]
+    if (pane.historyIndex <= 0) {
+      return
+    }
+
+    const nextIndex = pane.historyIndex - 1
+    const path = pane.history[nextIndex]
+    log.debug('goBack', { paneId, path })
+    set((state) => ({
+      panes: {
+        ...state.panes,
+        [paneId]: { ...state.panes[paneId], historyIndex: nextIndex },
+      },
+    }))
+    await get().navigatePane(paneId, path, { viaHistory: true })
+  },
+  goForward: async (paneId) => {
+    const pane = get().panes[paneId]
+    if (pane.historyIndex < 0 || pane.historyIndex >= pane.history.length - 1) {
+      return
+    }
+
+    const nextIndex = pane.historyIndex + 1
+    const path = pane.history[nextIndex]
+    log.debug('goForward', { paneId, path })
+    set((state) => ({
+      panes: {
+        ...state.panes,
+        [paneId]: { ...state.panes[paneId], historyIndex: nextIndex },
+      },
+    }))
+    await get().navigatePane(paneId, path, { viaHistory: true })
   },
   openTabFromPath: async (paneId, path) => {
     log.debug('openTabFromPath', { paneId, path })
@@ -556,6 +631,8 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           typing: false,
           entries: [],
           focusedEntryId: null,
+          history: [],
+          historyIndex: -1,
         },
       },
     }))
@@ -590,6 +667,8 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           typing: false,
           entries: [],
           focusedEntryId: null,
+          history: [],
+          historyIndex: -1,
         },
       },
     }))
@@ -621,6 +700,8 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           typing: false,
           entries: [],
           focusedEntryId: null,
+          history: [],
+          historyIndex: -1,
         },
       },
     }))

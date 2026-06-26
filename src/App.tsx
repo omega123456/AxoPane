@@ -145,6 +145,32 @@ function App() {
   }, [actionDialogOpen, defaultPaneMode, keymap, menuOpen, settingsOpen])
 
   useEffect(() => {
+    // Mouse buttons 3 (back) and 4 (forward) drive history navigation on the
+    // active pane. A mousedown over a pane already sets it active, so by the
+    // time we read `activePaneId` here it reflects the pane under the cursor.
+    function onMouseUp(event: MouseEvent) {
+      if (event.button !== 3 && event.button !== 4) {
+        return
+      }
+
+      if (settingsOpen || menuOpen || actionDialogOpen) {
+        return
+      }
+
+      event.preventDefault()
+      const paneId = usePanesStore.getState().activePaneId
+      if (event.button === 3) {
+        void usePanesStore.getState().goBack(paneId)
+      } else {
+        void usePanesStore.getState().goForward(paneId)
+      }
+    }
+
+    window.addEventListener('mouseup', onMouseUp)
+    return () => window.removeEventListener('mouseup', onMouseUp)
+  }, [actionDialogOpen, menuOpen, settingsOpen])
+
+  useEffect(() => {
     const unlistenVolumesPromise = onVolumesChanged((event) => {
       setVolumes(event.volumes)
     })
