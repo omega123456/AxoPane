@@ -160,7 +160,8 @@ describe('App', () => {
       ],
       layout: {
         detailsVisible: false,
-        treeWidth: 'default',
+        treeWidthPx: 204,
+        paneSplit: 0.5,
         defaultPaneMode: 'dual',
         restoreSession: true,
         zoom: '100',

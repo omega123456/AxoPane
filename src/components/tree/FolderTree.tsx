@@ -9,7 +9,7 @@ export function FolderTree() {
   const revealPath = usePanesStore((state) => state.revealPath)
   const activePaneId = usePanesStore((state) => state.activePaneId)
   const activePath = usePanesStore((state) => state.panes[activePaneId].path)
-  const treeWidth = useLayoutStore((state) => state.treeWidth)
+  const treeWidthPx = useLayoutStore((state) => state.treeWidthPx)
 
   const groups = useMemo(() => groupVolumesByCategory(volumes), [volumes])
 
@@ -21,9 +21,9 @@ export function FolderTree() {
 
   return (
     <aside
-      className={`flex min-h-0 shrink-0 flex-col border-r border-light-border bg-light-tree dark:border-dark-border dark:bg-dark-tree ${
-        treeWidth === 'compact' ? 'w-44' : treeWidth === 'wide' ? 'w-64' : 'w-tree'
-      }`}
+      // Width is user-draggable runtime geometry; no static token can express it.
+      style={{ width: `${treeWidthPx}px` }}
+      className="flex min-h-0 shrink-0 flex-col border-r border-light-border bg-light-tree dark:border-dark-border dark:bg-dark-tree"
     >
       <div className="border-b border-light-border px-3 py-3 dark:border-dark-border">
         <p className="font-mono text-uxs uppercase tracking-wide text-light-text-muted dark:text-dark-text-muted">

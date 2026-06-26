@@ -1,6 +1,5 @@
 export type ThemePreference = 'system' | 'light' | 'dark'
 export type PaneMode = 'dual' | 'single'
-export type TreeWidth = 'compact' | 'default' | 'wide'
 export type ZoomLevel = '80' | '90' | '100' | '110' | '120' | '125' | '150'
 export type Shortcut = string
 export type CommandId =
@@ -98,7 +97,10 @@ export type ColumnConfig = {
 
 export type LayoutConfig = {
   detailsVisible: boolean
-  treeWidth: TreeWidth
+  /** Folder-tree sidebar width in pixels (user-draggable). */
+  treeWidthPx: number
+  /** Fraction of the dual-pane area allotted to the left pane (0..1, user-draggable). */
+  paneSplit: number
   defaultPaneMode: PaneMode
   restoreSession: boolean
   zoom: ZoomLevel

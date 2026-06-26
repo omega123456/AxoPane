@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
     pub theme: String,
@@ -31,11 +31,14 @@ pub struct ColumnConfig {
     pub visible: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct LayoutConfig {
     pub details_visible: bool,
-    pub tree_width: String,
+    #[serde(default = "default_tree_width_px")]
+    pub tree_width_px: f64,
+    #[serde(default = "default_pane_split")]
+    pub pane_split: f64,
     pub default_pane_mode: String,
     pub restore_session: bool,
     #[serde(default = "default_zoom")]
@@ -46,11 +49,20 @@ fn default_zoom() -> String {
     "100".to_string()
 }
 
+fn default_tree_width_px() -> f64 {
+    204.0
+}
+
+fn default_pane_split() -> f64 {
+    0.5
+}
+
 impl Default for LayoutConfig {
     fn default() -> Self {
         Self {
             details_visible: true,
-            tree_width: "default".to_string(),
+            tree_width_px: default_tree_width_px(),
+            pane_split: default_pane_split(),
             default_pane_mode: "dual".to_string(),
             restore_session: true,
             zoom: default_zoom(),

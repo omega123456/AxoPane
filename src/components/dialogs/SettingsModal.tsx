@@ -65,7 +65,8 @@ function cloneDraft(): DraftState {
     columns: layout.columns.map((column) => ({ ...column })),
     layout: {
       detailsVisible: layout.detailsVisible,
-      treeWidth: layout.treeWidth,
+      treeWidthPx: layout.treeWidthPx,
+      paneSplit: layout.paneSplit,
       defaultPaneMode: layout.defaultPaneMode,
       restoreSession: layout.restoreSession,
       zoom: layout.zoom,
@@ -272,23 +273,6 @@ function SettingsModalContent() {
                     }
                   />
                   <SectionLabel className="mb-3 mt-5">Layout</SectionLabel>
-                  <SettingRow
-                    fixedCopy
-                    title="Tree width"
-                    description="Width of the folder sidebar"
-                    control={
-                      <SegmentedControl
-                        ariaLabel="Tree width"
-                        value={draft.layout.treeWidth}
-                        onChange={(value) => updateLayout('treeWidth', value)}
-                        options={[
-                          { value: 'compact', label: 'Compact' },
-                          { value: 'default', label: 'Default' },
-                          { value: 'wide', label: 'Wide' },
-                        ]}
-                      />
-                    }
-                  />
                   <SettingRow
                     fixedCopy
                     title="Default pane mode"

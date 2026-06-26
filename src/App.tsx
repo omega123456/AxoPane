@@ -5,8 +5,7 @@ import { ContextMenu } from '@/components/menus/ContextMenu'
 import { AppFrame } from '@/components/shell/AppFrame'
 import { CommandBar } from '@/components/shell/CommandBar'
 import { StatusBar } from '@/components/shell/StatusBar'
-import { FilePane } from '@/components/pane/FilePane'
-import { FolderTree } from '@/components/tree/FolderTree'
+import { WorkspaceLayout } from '@/components/shell/WorkspaceLayout'
 import { QueueOverlay } from '@/components/queue/QueueOverlay'
 import { hydrateAppConfig, persistAppConfig } from '@/lib/app-config'
 import { executeCommand } from '@/lib/commands'
@@ -220,17 +219,7 @@ function App() {
         statusBar={<StatusBar activePane={activePane} summary={statusSummary} />}
         overlay={<QueueOverlay />}
       >
-        <FolderTree />
-        {defaultPaneMode === 'single' ? (
-          <div className="min-h-0 flex-1">
-            <FilePane paneId={activePaneId} />
-          </div>
-        ) : (
-          <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-1 divide-x divide-light-border dark:divide-dark-border">
-            <FilePane paneId="left" />
-            <FilePane paneId="right" />
-          </div>
-        )}
+        <WorkspaceLayout />
       </AppFrame>
       <ContextMenu />
       <SettingsModal />

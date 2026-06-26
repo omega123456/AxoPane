@@ -36,7 +36,8 @@ describe('EverythingBanner', () => {
       columns: [],
       layout: {
         detailsVisible: false,
-        treeWidth: 'default' as const,
+        treeWidthPx: 204,
+        paneSplit: 0.5,
         defaultPaneMode: 'dual' as const,
         restoreSession: true,
         zoom: '100' as const,

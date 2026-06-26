@@ -34,9 +34,25 @@ export const defaultColumns: ColumnConfig[] = [
   { key: 'created', visible: false },
 ]
 
+/** Folder-tree sidebar drag bounds, in pixels. */
+export const TREE_WIDTH_MIN = 160
+export const TREE_WIDTH_MAX = 480
+/** Dual-pane split drag bounds, as the fraction allotted to the left pane. */
+export const PANE_SPLIT_MIN = 0.2
+export const PANE_SPLIT_MAX = 0.8
+
+export function clampTreeWidth(width: number) {
+  return Math.min(TREE_WIDTH_MAX, Math.max(TREE_WIDTH_MIN, width))
+}
+
+export function clampPaneSplit(split: number) {
+  return Math.min(PANE_SPLIT_MAX, Math.max(PANE_SPLIT_MIN, split))
+}
+
 export const defaultLayout: LayoutConfig = {
   detailsVisible: false,
-  treeWidth: 'default',
+  treeWidthPx: 204,
+  paneSplit: 0.5,
   defaultPaneMode: 'dual',
   restoreSession: true,
   zoom: '100',
@@ -46,7 +62,8 @@ type LayoutStore = LayoutConfig & {
   columns: ColumnConfig[]
   hydrate: (layout: LayoutConfig, columns: ColumnConfig[]) => void
   setDetailsVisible: (visible: boolean) => void
-  setTreeWidth: (width: LayoutConfig['treeWidth']) => void
+  setTreeWidthPx: (width: number) => void
+  setPaneSplit: (split: number) => void
   setDefaultPaneMode: (mode: LayoutConfig['defaultPaneMode']) => void
   setRestoreSession: (restoreSession: boolean) => void
   setZoom: (zoom: ZoomLevel) => void
@@ -84,10 +101,16 @@ export const useLayoutStore = create<LayoutStore>((set) => ({
   columns: defaultColumns,
   hydrate: (layout, columns) => {
     applyZoom(layout.zoom)
-    set({ ...layout, columns: normalizeColumns(columns) })
+    set({
+      ...layout,
+      treeWidthPx: clampTreeWidth(layout.treeWidthPx),
+      paneSplit: clampPaneSplit(layout.paneSplit),
+      columns: normalizeColumns(columns),
+    })
   },
   setDetailsVisible: (detailsVisible) => set({ detailsVisible }),
-  setTreeWidth: (treeWidth) => set({ treeWidth }),
+  setTreeWidthPx: (width) => set({ treeWidthPx: clampTreeWidth(width) }),
+  setPaneSplit: (split) => set({ paneSplit: clampPaneSplit(split) }),
   setDefaultPaneMode: (defaultPaneMode) => set({ defaultPaneMode }),
   setRestoreSession: (restoreSession) => set({ restoreSession }),
   setZoom: (zoom) => {

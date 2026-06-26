@@ -93,14 +93,16 @@ describe('layout-store', () => {
     const appRoot = document.createElement('div')
     appRoot.id = 'root'
     document.body.appendChild(appRoot)
-    useLayoutStore.getState().setTreeWidth('wide')
+    useLayoutStore.getState().setTreeWidthPx(320)
+    useLayoutStore.getState().setPaneSplit(0.35)
     useLayoutStore.getState().setDefaultPaneMode('single')
     useLayoutStore.getState().setRestoreSession(false)
     useLayoutStore.getState().setZoom('125')
     useLayoutStore.getState().toggleColumn('created')
 
     expect(useLayoutStore.getState()).toMatchObject({
-      treeWidth: 'wide',
+      treeWidthPx: 320,
+      paneSplit: 0.35,
       defaultPaneMode: 'single',
       restoreSession: false,
       zoom: '125',

@@ -30,7 +30,8 @@ describe('config-store', () => {
       columns: [],
       layout: {
         detailsVisible: false,
-        treeWidth: 'default' as const,
+        treeWidthPx: 204,
+        paneSplit: 0.5,
         defaultPaneMode: 'dual' as const,
         restoreSession: true,
         zoom: '100' as const,
@@ -49,7 +50,8 @@ describe('config-store', () => {
           dismissedEverythingBanner: true,
           layout: {
             detailsVisible: false,
-            treeWidth: 'default',
+            treeWidthPx: 204,
+            paneSplit: 0.5,
             defaultPaneMode: 'dual',
             restoreSession: true,
             zoom: '100',

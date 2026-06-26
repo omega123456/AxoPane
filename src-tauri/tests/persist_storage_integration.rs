@@ -44,7 +44,8 @@ fn config_and_session_round_trip_through_atomic_storage() {
         ],
         layout: LayoutConfig {
             details_visible: false,
-            tree_width: "wide".to_string(),
+            tree_width_px: 320.0,
+            pane_split: 0.4,
             default_pane_mode: "single".to_string(),
             restore_session: false,
             zoom: "150".to_string(),
@@ -84,7 +85,8 @@ fn config_and_session_round_trip_through_atomic_storage() {
             ],
             layout: LayoutConfig {
                 details_visible: false,
-                tree_width: "wide".to_string(),
+                tree_width_px: 320.0,
+                pane_split: 0.4,
                 default_pane_mode: "single".to_string(),
                 restore_session: false,
                 zoom: "150".to_string(),
