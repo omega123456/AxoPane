@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { gotoScenario, openSettingsSection, rightClickPane } from './helpers'
 import { screenshotScenarios } from '../src/tests/playwright-fixtures/e2e'
+import { expandedQueueFinalProgressEvent } from '../src/tests/playwright-fixtures/queue'
 
 for (const mode of ['light', 'dark'] as const) {
   test(`browsing ${mode}`, async ({ page }) => {
@@ -51,6 +52,17 @@ for (const mode of ['light', 'dark'] as const) {
     await gotoScenario(page, screenshotScenarios.queueExpanded[mode])
     await page.getByRole('button', { name: 'Expand transfer queue' }).click()
     await expect(page.getByRole('region', { name: 'Transfer queue' })).toBeVisible()
+    await expect(
+      page.getByRole('progressbar', {
+        name: `Copying ${expandedQueueFinalProgressEvent.totalItems.toLocaleString()} items`,
+      }),
+    ).toHaveAttribute('aria-valuenow', String(Math.round(expandedQueueFinalProgressEvent.progressPercent)))
+    // The chart is throttled, so wait until its filled extent reaches the final
+    // seeded percent before capturing (condition-based, no fixed delay).
+    await expect(page.locator('[data-testid="throughput-chart-fill-extent"]').first()).toHaveAttribute(
+      'width',
+      String(expandedQueueFinalProgressEvent.progressPercent),
+    )
     await expect(page.locator('main')).toHaveScreenshot(`phase-8-queue-expanded-${mode}.png`)
   })
 

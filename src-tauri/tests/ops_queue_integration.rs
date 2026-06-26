@@ -2,9 +2,10 @@
 mod common;
 
 use std::fs;
+use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use file_explorer_lib::ops::{
@@ -29,6 +30,21 @@ fn seed_file(path: &Path, bytes: usize) -> OpItem {
         source_path: path.to_string_lossy().into_owned(),
         name: path.file_name().unwrap().to_string_lossy().into_owned(),
         size_bytes: bytes as u64,
+    }
+}
+
+fn deterministic_instants(offsets_ms: &[u64]) -> impl Fn() -> Instant + Send + Sync + 'static {
+    let base = Instant::now();
+    let mut instants = VecDeque::new();
+    for offset_ms in offsets_ms {
+        instants.push_back(base + Duration::from_millis(*offset_ms));
+    }
+    let last = instants.back().copied().unwrap_or(base);
+    let instants = Arc::new(Mutex::new(instants));
+
+    move || {
+        let mut guard = instants.lock().expect("instant queue lock");
+        guard.pop_front().unwrap_or(last)
     }
 }
 
@@ -507,6 +523,19 @@ fn failed_jobs_persist_and_can_retry() {
     // Now create the source and retry; it should succeed.
     fs::write(&missing, b"now-present").expect("create source");
     service.retry_op(&id);
+    let pending_progress = service
+        .snapshot()
+        .into_iter()
+        .find(|snapshot| snapshot.progress.operation_id == id)
+        .expect("retried op present")
+        .progress;
+    assert_eq!(pending_progress.status, OpStatus::Pending);
+    assert_eq!(pending_progress.bytes_per_second, 0);
+    assert_eq!(pending_progress.eta_seconds, None);
+    assert_eq!(pending_progress.current_file_name, None);
+    assert_eq!(pending_progress.current_file_copied_bytes, 0);
+    assert_eq!(pending_progress.copied_bytes, 0);
+    assert_eq!(pending_progress.error_message, None);
     wait_for(&service, &id, |progress| {
         progress.status == OpStatus::Completed
     });
@@ -850,6 +879,154 @@ fn snapshot_progress_reports_percent_and_rate() {
         .progress;
     assert_eq!(final_progress.progress_percent.round() as u64, 100);
     assert_eq!(final_progress.completed_items, 4);
+}
+
+fn events_for_mid_copy_rate(rate_window: Duration) -> Vec<OpProgress> {
+    let dir = tempdir().expect("temp dir");
+    let dest = dir.path().join("dest");
+    fs::create_dir(&dest).expect("dest");
+
+    let source = dir.path().join("large.bin");
+    let bytes = vec![5_u8; 3 * 1024 * 1024];
+    fs::write(&source, bytes).expect("source");
+
+    let events = Arc::new(Mutex::new(Vec::<OpProgress>::new()));
+    let events_clone = events.clone();
+
+    let service = OpsService::with_rate_window(Duration::from_secs(30), rate_window);
+    service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
+    service.set_progress_emitter(move |progress| {
+        events_clone.lock().expect("events lock").push(progress);
+    });
+
+    let id = service.start_op(StartOpRequest {
+        kind: OpKind::Copy,
+        destination_dir: dest.to_string_lossy().into_owned(),
+        items: vec![OpItem {
+            source_path: source.to_string_lossy().into_owned(),
+            name: "large.bin".to_string(),
+            size_bytes: 3 * 1024 * 1024,
+        }],
+    });
+
+    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    let snapshots = events.lock().expect("events lock").clone();
+    snapshots
+}
+
+#[test]
+fn mid_copy_active_snapshot_reports_positive_instantaneous_rate() {
+    let mid_copy_progress = events_for_mid_copy_rate(Duration::from_millis(250))
+        .into_iter()
+        .find(|progress| {
+            progress.status == OpStatus::Active
+                && progress.copied_bytes > 0
+                && progress.copied_bytes < progress.total_bytes
+        })
+        .expect("mid-copy active progress");
+
+    assert!(mid_copy_progress.bytes_per_second > 0);
+}
+
+#[test]
+fn zero_rate_window_recomputes_each_chunk() {
+    let dir = tempdir().expect("temp dir");
+    let dest = dir.path().join("dest");
+    fs::create_dir(&dest).expect("dest");
+
+    let source = dir.path().join("large.bin");
+    let bytes = vec![9_u8; 3 * 1024 * 1024];
+    fs::write(&source, bytes).expect("source");
+
+    let events = Arc::new(Mutex::new(Vec::<OpProgress>::new()));
+    let events_clone = events.clone();
+
+    let mut service = OpsService::with_rate_window(Duration::from_secs(30), Duration::ZERO);
+    service.set_instant_now_for_tests(deterministic_instants(&[0, 1, 6, 31, 56, 57]));
+    service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
+    service.set_progress_emitter(move |progress| {
+        events_clone.lock().expect("events lock").push(progress);
+    });
+
+    let id = service.start_op(StartOpRequest {
+        kind: OpKind::Copy,
+        destination_dir: dest.to_string_lossy().into_owned(),
+        items: vec![OpItem {
+            source_path: source.to_string_lossy().into_owned(),
+            name: "large.bin".to_string(),
+            size_bytes: 3 * 1024 * 1024,
+        }],
+    });
+
+    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+
+    let active_chunk_rates: Vec<u64> = events
+        .lock()
+        .expect("events lock")
+        .iter()
+        .filter(|progress| {
+            progress.operation_id == id
+                && progress.status == OpStatus::Active
+                && progress.current_file_copied_bytes > 0
+                && progress.current_file_copied_bytes < progress.current_file_total_bytes
+        })
+        .map(|progress| progress.bytes_per_second)
+        .collect();
+
+    assert!(active_chunk_rates.len() >= 2);
+    assert!(active_chunk_rates.iter().all(|rate| *rate > 0));
+    assert_ne!(active_chunk_rates[0], active_chunk_rates[1]);
+}
+
+#[test]
+fn large_rate_window_holds_prior_rate_between_chunks() {
+    let dir = tempdir().expect("temp dir");
+    let dest = dir.path().join("dest");
+    fs::create_dir(&dest).expect("dest");
+
+    let source = dir.path().join("large.bin");
+    let bytes = vec![7_u8; 3 * 1024 * 1024];
+    fs::write(&source, bytes).expect("source");
+
+    let events = Arc::new(Mutex::new(Vec::<OpProgress>::new()));
+    let events_clone = events.clone();
+
+    let mut service =
+        OpsService::with_rate_window(Duration::from_secs(30), Duration::from_secs(60));
+    service.set_instant_now_for_tests(deterministic_instants(&[0, 1, 6, 31, 56, 57]));
+    service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
+    service.set_progress_emitter(move |progress| {
+        events_clone.lock().expect("events lock").push(progress);
+    });
+
+    let id = service.start_op(StartOpRequest {
+        kind: OpKind::Copy,
+        destination_dir: dest.to_string_lossy().into_owned(),
+        items: vec![OpItem {
+            source_path: source.to_string_lossy().into_owned(),
+            name: "large.bin".to_string(),
+            size_bytes: 3 * 1024 * 1024,
+        }],
+    });
+
+    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+
+    let active_chunk_rates: Vec<u64> = events
+        .lock()
+        .expect("events lock")
+        .iter()
+        .filter(|progress| {
+            progress.operation_id == id
+                && progress.status == OpStatus::Active
+                && progress.current_file_copied_bytes > 0
+                && progress.current_file_copied_bytes < progress.current_file_total_bytes
+        })
+        .map(|progress| progress.bytes_per_second)
+        .collect();
+
+    assert!(active_chunk_rates.len() >= 2);
+    assert!(active_chunk_rates[0] > 0);
+    assert_eq!(active_chunk_rates[0], active_chunk_rates[1]);
 }
 
 #[test]

@@ -5,7 +5,13 @@ import type {
   ListDirResponse,
   SessionState,
 } from '@/lib/types/ipc'
-import { conflictQueueSnapshot, emptyQueueSnapshot, expandedQueueSnapshot } from './queue'
+import {
+  conflictQueueSnapshot,
+  emptyQueueSnapshot,
+  expandedQueueProgressEvents,
+  expandedQueueSeedSnapshot,
+  expandedQueueSnapshot,
+} from './queue'
 
 type CommandMap = Partial<{
   [CommandName in keyof IpcCommandMap]: IpcCommandMap[CommandName]['response']
@@ -208,13 +214,19 @@ export const screenshotScenarios = {
     light: {
       commands: {
         load_config: lightConfig,
-        queue_snapshot: expandedQueueSnapshot,
+        queue_snapshot: expandedQueueSeedSnapshot,
+      },
+      events: {
+        'queue://progress': expandedQueueProgressEvents,
       },
     },
     dark: {
       commands: {
         load_config: darkConfig,
-        queue_snapshot: expandedQueueSnapshot,
+        queue_snapshot: expandedQueueSeedSnapshot,
+      },
+      events: {
+        'queue://progress': expandedQueueProgressEvents,
       },
     },
   },

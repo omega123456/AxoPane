@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
-import type { ConflictInfo, OpProgress, OpSnapshot } from '@/lib/types/ipc'
+import type { ConflictInfo, OpProgress, OpSnapshot, ThroughputSample } from '@/lib/types/ipc'
 import {
   activeConflict,
   hasUnfinishedWork,
@@ -40,6 +40,10 @@ function conflict(id: string): ConflictInfo {
   }
 }
 
+function sample(percent: number, rate: number): ThroughputSample {
+  return { percent, rate }
+}
+
 beforeEach(() => {
   ipc.install()
   useQueueStore.getState().reset()
@@ -59,19 +63,169 @@ describe('queue store', () => {
       'op-2',
     ])
     expect(activeConflict(state)?.operationId).toBe('op-2')
-    expect(state.throughputHistory['op-1']).toEqual([100])
+    expect(state.throughputHistory['op-1']).toEqual([sample(40, 100)])
+    expect(state.throughputPeak['op-1']).toBe(100)
   })
 
-  it('appends new operations on first progress and updates in place after', () => {
+  it('opens a new smoothed bucket when progress advances into a new bucket', () => {
     useQueueStore.getState().applyProgress(progress({ operationId: 'op-1', copiedBytes: 100 }))
     useQueueStore
       .getState()
-      .applyProgress(progress({ operationId: 'op-1', copiedBytes: 900, bytesPerSecond: 275 }))
+      .applyProgress(
+        progress({
+          operationId: 'op-1',
+          copiedBytes: 900,
+          progressPercent: 90,
+          bytesPerSecond: 300,
+        }),
+      )
 
     const operations = orderedOperations(useQueueStore.getState())
     expect(operations).toHaveLength(1)
     expect(operations[0].copiedBytes).toBe(900)
-    expect(useQueueStore.getState().throughputHistory['op-1']).toEqual([100, 275])
+    // The new bucket opens at the EMA-smoothed rate (smoothing carries across
+    // the boundary so the leading edge never jumps): 100 + (300 - 100)*0.25 = 150.
+    expect(useQueueStore.getState().throughputHistory['op-1']).toEqual([
+      sample(40, 100),
+      sample(90, 150),
+    ])
+    // Peak tracks the displayed (smoothed) rate, non-decreasing.
+    expect(useQueueStore.getState().throughputPeak['op-1']).toBe(150)
+  })
+
+  it('ratchets the throughput peak up only — a stall never drops it', () => {
+    useQueueStore.getState().applyProgress(
+      progress({ operationId: 'op-1', progressPercent: 40, bytesPerSecond: 100 }),
+    )
+    useQueueStore.getState().applyProgress(
+      progress({
+        operationId: 'op-1',
+        progressPercent: 60,
+        copiedBytes: 600,
+        bytesPerSecond: 600,
+      }),
+    )
+    // The burst smooths to 100 + (600 - 100)*0.25 = 225.
+    expect(useQueueStore.getState().throughputPeak['op-1']).toBe(225)
+
+    // A non-advancing stall EMA-steps the active bucket down
+    // (225 + (0 - 225)*0.25 = 168.75); the frozen peak must hold at the earlier
+    // high (225) so the Y ceiling never drops.
+    useQueueStore.getState().applyProgress(
+      progress({
+        operationId: 'op-1',
+        progressPercent: 60,
+        copiedBytes: 600,
+        bytesPerSecond: 0,
+      }),
+    )
+    const state = useQueueStore.getState()
+    expect(state.throughputHistory['op-1'].at(-1)).toEqual(sample(60, 168.75))
+    expect(state.throughputPeak['op-1']).toBe(225)
+  })
+
+  it('folds non-advancing readings into the active bucket via EMA', () => {
+    useQueueStore.getState().applyProgress(progress({ operationId: 'op-1', progressPercent: 40 }))
+    useQueueStore
+      .getState()
+      .applyProgress(progress({ operationId: 'op-1', progressPercent: 40, bytesPerSecond: 200 }))
+
+    // EMA step on the changed rate: 100 + (200 - 100) * 0.25 = 125.
+    expect(useQueueStore.getState().throughputHistory['op-1']).toEqual([sample(40, 125)])
+  })
+
+  it('resets throughput history when percent or counters regress', () => {
+    useQueueStore.getState().applyProgress(
+      progress({ operationId: 'op-1', progressPercent: 40, copiedBytes: 400, completedItems: 4 }),
+    )
+    useQueueStore.getState().applyProgress(
+      progress({ operationId: 'op-1', progressPercent: 70, copiedBytes: 700, completedItems: 7 }),
+    )
+
+    useQueueStore.getState().applyProgress(
+      progress({
+        operationId: 'op-1',
+        progressPercent: 12,
+        copiedBytes: 120,
+        completedItems: 1,
+        bytesPerSecond: 90,
+      }),
+    )
+
+    expect(useQueueStore.getState().throughputHistory['op-1']).toEqual([sample(12, 90)])
+    expect(useQueueStore.getState().throughputPeak['op-1']).toBe(90)
+  })
+
+  it('preserves existing throughput history when hydrate runs again', () => {
+    useQueueStore.getState().applyProgress(progress({ operationId: 'op-1', progressPercent: 40 }))
+    useQueueStore
+      .getState()
+      .applyProgress(
+        progress({
+          operationId: 'op-1',
+          progressPercent: 70,
+          bytesPerSecond: 200,
+        }),
+      )
+
+    const existingHistory = useQueueStore.getState().throughputHistory['op-1']
+    const existingPeak = useQueueStore.getState().throughputPeak['op-1']
+    useQueueStore
+      .getState()
+      .hydrate([{ progress: progress({ operationId: 'op-1', progressPercent: 75, bytesPerSecond: 150 }), conflict: null }])
+
+    expect(useQueueStore.getState().throughputHistory['op-1']).toEqual(existingHistory)
+    // Hydrate never lowers the peak (here the snapshot rate is below it).
+    expect(useQueueStore.getState().throughputPeak['op-1']).toBe(existingPeak)
+  })
+
+  it('buckets samples by progress so history stays bounded no matter how many events arrive', () => {
+    for (let index = 0; index <= 1000; index += 1) {
+      useQueueStore.getState().applyProgress(
+        progress({
+          operationId: 'op-1',
+          progressPercent: index / 10,
+          copiedBytes: index,
+          completedItems: index,
+          bytesPerSecond: 200,
+        }),
+      )
+    }
+
+    const history = useQueueStore.getState().throughputHistory['op-1']
+    // 1001 advancing events collapse into at most one sample per progress bucket.
+    expect(history.length).toBeGreaterThan(1)
+    expect(history.length).toBeLessThanOrEqual(60)
+    for (let index = 1; index < history.length; index += 1) {
+      expect(history[index].percent).toBeGreaterThanOrEqual(history[index - 1].percent)
+    }
+  })
+
+  it('keeps passed progress buckets immutable while updating only the active bucket', () => {
+    const apply = (percent: number, rate: number) =>
+      useQueueStore.getState().applyProgress(
+        progress({
+          operationId: 'op-1',
+          progressPercent: percent,
+          copiedBytes: percent,
+          completedItems: Math.floor(percent),
+          bytesPerSecond: rate,
+        }),
+      )
+
+    apply(5, 100)
+    apply(10, 500) // crosses into a new bucket → append
+    const afterTwo = useQueueStore.getState().throughputHistory['op-1']
+    expect(afterTwo).toHaveLength(2)
+
+    // Two more events within the same bucket as 10% must update in place, never
+    // append, and must not touch the earlier (now-immutable) 5% bucket.
+    apply(10.01, 999)
+    apply(10.02, 999)
+    const history = useQueueStore.getState().throughputHistory['op-1']
+    expect(history).toHaveLength(2)
+    expect(history[0]).toEqual(afterTwo[0])
+    expect(history[1].percent).toBe(10.02)
   })
 
   it('clears a conflict when the op leaves the conflict state', () => {
@@ -133,10 +287,20 @@ describe('queue store', () => {
     useQueueStore.getState().applyProgress(
       progress({ operationId: 'op-1', status: 'failed', errorMessage: 'boom' }),
     )
+    useQueueStore.getState().applyProgress(
+      progress({
+        operationId: 'op-1',
+        progressPercent: 85,
+        copiedBytes: 850,
+        completedItems: 8,
+      }),
+    )
     useQueueStore.getState().retry('op-1')
     const operation = useQueueStore.getState().operations['op-1']
     expect(operation.status).toBe('pending')
     expect(operation.errorMessage).toBeNull()
+    expect(useQueueStore.getState().throughputHistory['op-1']).toEqual([])
+    expect(useQueueStore.getState().throughputPeak['op-1']).toBe(0)
   })
 
   it('resolve clears the conflict locally', () => {
@@ -168,6 +332,7 @@ describe('queue store', () => {
     expect(state.operations['op-1']).toBeUndefined()
     expect(state.conflicts['op-1']).toBeUndefined()
     expect(state.throughputHistory['op-1']).toBeUndefined()
+    expect(state.throughputPeak['op-1']).toBeUndefined()
     expect(orderedOperations(state).map((operation) => operation.operationId)).toEqual(['op-2'])
   })
 
@@ -186,6 +351,10 @@ describe('queue store', () => {
 
     expect(useQueueStore.getState().operations['op-1']).toBeUndefined()
     expect(useQueueStore.getState().operations['op-2']).toBeDefined()
+    expect(useQueueStore.getState().throughputHistory['op-1']).toBeUndefined()
+    expect(useQueueStore.getState().throughputHistory['op-2']).toBeDefined()
+    expect(useQueueStore.getState().throughputPeak['op-1']).toBeUndefined()
+    expect(useQueueStore.getState().throughputPeak['op-2']).toBeDefined()
   })
 
   it('reports terminal status and unfinished work', () => {

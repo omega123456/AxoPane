@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   ArrowRightIcon,
   CheckCircleIcon,
@@ -10,12 +10,14 @@ import {
   XCircleIcon,
   XIcon,
 } from '@/components/icons'
+import { ThroughputChart } from '@/components/queue/ThroughputChart'
 import { formatBytes, formatCount, formatEta, formatRate } from '@/lib/format'
-import type { OpProgress } from '@/lib/types/ipc'
+import type { OpProgress, ThroughputSample } from '@/lib/types/ipc'
 
 type JobCardProps = {
   operation: OpProgress
-  throughputHistory: number[]
+  throughputHistory: ThroughputSample[]
+  throughputPeak: number
   hasConflict: boolean
   reorderable: boolean
   onPause: () => void
@@ -29,36 +31,14 @@ type JobCardProps = {
   onMoveDown?: () => void
 }
 
-const BAR_HEIGHTS = [
-  'h-2',
-  'h-2.5',
-  'h-3',
-  'h-4',
-  'h-3.5',
-  'h-5',
-  'h-6',
-] as const
-
-function sparklineHeights(history: number[]): readonly string[] {
-  const samples =
-    history.length >= 16
-      ? history.slice(-16)
-      : Array.from({ length: 16 - history.length }, () => history[0] ?? 0).concat(history)
-
-  const max = Math.max(...samples, 1)
-  const min = Math.min(...samples)
-  const range = max - min
-
-  if (range === 0) {
-    const steadyHeight = samples[0] > 0 ? 'h-5' : 'h-2'
-    return Array.from({ length: samples.length }, () => steadyHeight)
-  }
-
-  return samples.map((sample) => {
-    const bucket = Math.round(((sample - min) / range) * (BAR_HEIGHTS.length - 1))
-    return BAR_HEIGHTS[bucket]
-  })
-}
+const LIVE_REGION_THROTTLE_MS = 5000
+/**
+ * Cadence the visible metrics row refreshes at. The backend reports a jittery
+ * instantaneous rate many times a second; sampling it on a calm interval keeps
+ * the speed number readable (and roughly in step with the averaged chart)
+ * instead of flickering on every progress event.
+ */
+const METRICS_REFRESH_MS = 500
 
 function verb(operation: OpProgress) {
   return operation.kind === 'move' ? 'Moving' : 'Copying'
@@ -67,6 +47,7 @@ function verb(operation: OpProgress) {
 export function JobCard({
   operation,
   throughputHistory,
+  throughputPeak,
   hasConflict,
   reorderable,
   onPause,
@@ -81,6 +62,7 @@ export function JobCard({
 }: JobCardProps) {
   const headingId = useId()
   const percent = Math.min(100, Math.max(0, operation.progressPercent))
+  const roundedPercent = Math.round(percent)
   const filePercent =
     operation.currentFileTotalBytes > 0
       ? Math.min(
@@ -93,7 +75,89 @@ export function JobCard({
   const isPaused = operation.status === 'paused'
   const isCancelled = operation.status === 'cancelled'
   const isConflict = operation.status === 'conflict' || hasConflict
-  const sparkline = sparklineHeights(throughputHistory)
+  const isPending = operation.status === 'pending'
+  const showChart = !isPending && !isPaused && !isCompleted && !isFailed && !isCancelled
+  // Show the chart's smoothed leading-edge rate (not the raw instantaneous one)
+  // so the number matches the curve and stays calm; fall back before any history.
+  const currentRate =
+    throughputHistory.length > 0
+      ? throughputHistory[throughputHistory.length - 1].rate
+      : operation.bytesPerSecond
+  const metrics = useMemo(
+    () => ({
+      rate: formatRate(currentRate),
+      eta:
+        operation.etaSeconds !== null ? formatEta(operation.etaSeconds) : 'estimating…',
+      items: `${formatCount(operation.completedItems)} / ${formatCount(operation.totalItems)} items`,
+    }),
+    [currentRate, operation.completedItems, operation.etaSeconds, operation.totalItems],
+  )
+  // Throttle the live view (metrics + chart) to a calm, fixed cadence so the
+  // number and the chart's leading edge update together a few times per second
+  // — like the Windows copy dialog — rather than on every backend event.
+  const liveView = useMemo(
+    () => ({ metrics, samples: throughputHistory, percent, peak: throughputPeak }),
+    [metrics, throughputHistory, percent, throughputPeak],
+  )
+  const [view, setView] = useState(liveView)
+  const latestViewRef = useRef(liveView)
+  useEffect(() => {
+    latestViewRef.current = liveView
+  })
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setView(latestViewRef.current)
+    }, METRICS_REFRESH_MS)
+    return () => window.clearInterval(intervalId)
+  }, [])
+  const displayMetrics = view.metrics
+
+  const metricsAnnouncement = `${metrics.rate}, ${metrics.eta}, ${metrics.items}`
+  const [liveMetricsAnnouncement, setLiveMetricsAnnouncement] = useState(metricsAnnouncement)
+  const liveMetricsAnnouncementRef = useRef(liveMetricsAnnouncement)
+  const pendingLiveAnnouncementRef = useRef<string | null>(null)
+  const liveRegionTimerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    liveMetricsAnnouncementRef.current = liveMetricsAnnouncement
+  }, [liveMetricsAnnouncement])
+
+  useEffect(() => {
+    if (metricsAnnouncement === liveMetricsAnnouncement) {
+      pendingLiveAnnouncementRef.current = null
+      if (liveRegionTimerRef.current !== null) {
+        window.clearTimeout(liveRegionTimerRef.current)
+        liveRegionTimerRef.current = null
+      }
+      return
+    }
+
+    pendingLiveAnnouncementRef.current = metricsAnnouncement
+    if (liveRegionTimerRef.current !== null) {
+      return
+    }
+
+    liveRegionTimerRef.current = window.setTimeout(() => {
+      liveRegionTimerRef.current = null
+      const nextAnnouncement = pendingLiveAnnouncementRef.current
+      pendingLiveAnnouncementRef.current = null
+      if (
+        nextAnnouncement !== null &&
+        nextAnnouncement !== liveMetricsAnnouncementRef.current
+      ) {
+        setLiveMetricsAnnouncement(nextAnnouncement)
+        liveMetricsAnnouncementRef.current = nextAnnouncement
+      }
+    }, LIVE_REGION_THROTTLE_MS)
+  }, [liveMetricsAnnouncement, metricsAnnouncement])
+
+  useEffect(() => {
+    return () => {
+      if (liveRegionTimerRef.current !== null) {
+        window.clearTimeout(liveRegionTimerRef.current)
+      }
+    }
+  }, [])
 
   return (
     <article
@@ -152,35 +216,21 @@ export function JobCard({
             isFailed ? 'text-accent-red' : 'text-accent-blue-light dark:text-accent-blue'
           }`}
         >
-          {Math.round(percent)}%
+          {roundedPercent}%
         </span>
       </div>
 
-      <div className="mt-3.5 h-2 overflow-hidden rounded-full bg-light-skeleton dark:bg-dark-skeleton">
-        <div
-          className={`h-full rounded-full ${
-            isFailed
-              ? 'bg-accent-red'
-              : 'bg-accent-blue-light dark:bg-accent-blue'
-          }`}
-          style={{ width: `${percent}%` }}
-        />
-      </div>
-
-      <div className="mt-2 flex flex-wrap items-center gap-2 font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-        <span className="text-light-text-soft dark:text-dark-text-soft">
-          {formatRate(operation.bytesPerSecond)}
+      <div className="mt-2">
+        <span className="sr-only" aria-live="polite" aria-atomic="true">
+          {liveMetricsAnnouncement}
         </span>
-        <span className="text-light-text-faint dark:text-dark-text-faint">·</span>
-        <span>
-          {operation.etaSeconds !== null
-            ? formatEta(operation.etaSeconds)
-            : 'estimating…'}
-        </span>
-        <span className="text-light-text-faint dark:text-dark-text-faint">·</span>
-        <span>
-          {formatCount(operation.completedItems)} / {formatCount(operation.totalItems)} items
-        </span>
+        <div className="flex flex-wrap items-center gap-2 font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
+          <span className="text-light-text-soft dark:text-dark-text-soft">{displayMetrics.rate}</span>
+          <span className="text-light-text-faint dark:text-dark-text-faint">·</span>
+          <span>{displayMetrics.eta}</span>
+          <span className="text-light-text-faint dark:text-dark-text-faint">·</span>
+          <span>{displayMetrics.items}</span>
+        </div>
       </div>
 
       {operation.currentFileName ? (
@@ -194,7 +244,14 @@ export function JobCard({
               {formatBytes(operation.currentFileTotalBytes)}
             </span>
           </div>
-          <div className="mt-2 h-1 overflow-hidden rounded-full bg-light-skeleton dark:bg-dark-skeleton">
+          <div
+            role="progressbar"
+            aria-label={`Current file progress for ${operation.currentFileName}`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(filePercent)}
+            className="mt-2 h-1 overflow-hidden rounded-full bg-light-skeleton dark:bg-dark-skeleton"
+          >
             <div
               className="h-full rounded-full bg-accent-blue-light opacity-70 dark:bg-accent-blue"
               style={{ width: `${filePercent}%` }}
@@ -211,18 +268,22 @@ export function JobCard({
         <div className="mt-3 rounded-tab border border-light-border px-3 py-2 text-uxs text-light-text-muted dark:border-dark-border dark:text-dark-text-muted">
           Transfer cancelled. Already-copied files were kept.
         </div>
-      ) : (
-        <div aria-hidden="true" className="mt-3.5 flex h-queue-bars items-end gap-0.5">
-          {sparkline.map((bar, index) => (
-            <span
-              key={`${bar}-${index}`}
-              className={`flex-1 rounded-sm bg-accent-blue-light opacity-60 dark:bg-accent-blue ${bar} ${
-                index % 4 === 1 ? 'opacity-70' : ''
-              }`}
-            />
-          ))}
+      ) : showChart ? (
+        <div
+          role="progressbar"
+          aria-labelledby={headingId}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={roundedPercent}
+          className="mt-3.5"
+        >
+          <ThroughputChart
+            samples={view.samples}
+            currentPercent={view.percent}
+            peakRate={view.peak}
+          />
         </div>
-      )}
+      ) : null}
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
         {isConflict ? (

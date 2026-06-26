@@ -11,6 +11,7 @@ import type {
   ConflictResolution,
   OpProgress,
   OpSnapshot,
+  ThroughputSample,
 } from '@/lib/types/ipc'
 
 type QueueStore = {
@@ -18,8 +19,20 @@ type QueueStore = {
   operations: Record<string, OpProgress>
   /** Submission / display order. */
   order: string[]
-  /** Recent throughput samples keyed by operation id. */
-  throughputHistory: Record<string, number[]>
+  /** Per-bucket averaged throughput samples keyed by operation id. */
+  throughputHistory: Record<string, ThroughputSample[]>
+  /**
+   * The chart's frozen Y-axis maximum: the highest *averaged* (plotted) rate
+   * seen so far, non-decreasing for the life of the operation. It ratchets up
+   * when the curve reaches a new high and never drops, so the scale holds still
+   * (Windows copy-dialog style) as speed falls — no rescaling under the curve.
+   */
+  throughputPeak: Record<string, number>
+  /**
+   * The last raw rate folded per operation, used to gate the EMA so a backend
+   * value held across chunks doesn't collapse the smoothing. Internal state.
+   */
+  throughputLastRaw: Record<string, number>
   /** Pending conflicts keyed by operation id. */
   conflicts: Record<string, ConflictInfo>
   /** Whether the queue panel is expanded (vs collapsed toast). */
@@ -51,22 +64,91 @@ function defaultState() {
   return {
     operations: {} as Record<string, OpProgress>,
     order: [] as string[],
-    throughputHistory: {} as Record<string, number[]>,
+    throughputHistory: {} as Record<string, ThroughputSample[]>,
+    throughputPeak: {} as Record<string, number>,
+    throughputLastRaw: {} as Record<string, number>,
     conflicts: {} as Record<string, ConflictInfo>,
     expanded: false,
   }
 }
 
-const MAX_THROUGHPUT_SAMPLES = 16
+/**
+ * Number of progress-% buckets the history is quantised into. A new sample is
+ * appended when progress crosses into the next bucket, so history length is
+ * bounded and passed buckets stay immutable (preserving the historical shape).
+ * Coarser buckets give a cleaner line at the cost of horizontal resolution.
+ */
+const THROUGHPUT_BUCKETS = 60
+/**
+ * EMA factor for the continuous smoothed rate. Smoothing carries *across* bucket
+ * boundaries so the leading edge never jumps to a raw reading — the whole curve,
+ * including the active point, is the same denoised value.
+ */
+const THROUGHPUT_EMA_FACTOR = 0.25
 const TERMINAL: ReadonlySet<OpProgress['status']> = new Set([
   'completed',
   'failed',
   'cancelled',
 ])
 
-function appendThroughputSample(existing: number[] | undefined, sample: number): number[] {
-  const next = [...(existing ?? []), sample]
-  return next.slice(-MAX_THROUGHPUT_SAMPLES)
+function shouldResetThroughputHistory(
+  previousProgress: OpProgress | undefined,
+  nextProgress: OpProgress,
+): boolean {
+  if (!previousProgress) {
+    return false
+  }
+
+  return (
+    nextProgress.progressPercent < previousProgress.progressPercent ||
+    nextProgress.copiedBytes < previousProgress.copiedBytes ||
+    nextProgress.completedItems < previousProgress.completedItems ||
+    nextProgress.status === 'pending'
+  )
+}
+
+function bucketOf(percent: number): number {
+  const clamped = Math.min(100, Math.max(0, percent))
+  return Math.min(THROUGHPUT_BUCKETS - 1, Math.floor((clamped / 100) * THROUGHPUT_BUCKETS))
+}
+
+type FoldedThroughput = {
+  history: ThroughputSample[]
+  /** The raw rate just folded, to gate EMA stepping on the next reading. */
+  lastRaw: number
+}
+
+function foldThroughputSample(
+  existing: ThroughputSample[] | undefined,
+  lastRaw: number,
+  percent: number,
+  rate: number,
+): FoldedThroughput {
+  if (!existing || existing.length === 0) {
+    return { history: [{ percent, rate }], lastRaw: rate }
+  }
+
+  const lastSample = existing[existing.length - 1]
+  // Step the EMA only when the raw rate changes (a new backend sampling window).
+  // The backend holds a rate constant between windows and re-emits it on every
+  // chunk; stepping per event would let the EMA collapse onto each raw value,
+  // re-introducing the jitter. The smoothed value carries across buckets.
+  const smoothed =
+    rate === lastRaw
+      ? lastSample.rate
+      : lastSample.rate + (rate - lastSample.rate) * THROUGHPUT_EMA_FACTOR
+
+  // Crossing into a new bucket appends a point (passed buckets stay frozen);
+  // otherwise the active point tracks the latest percent + smoothed rate. Either
+  // way the value is the *continuous* smoothed rate, so the leading edge is as
+  // calm as the rest of the line.
+  return bucketOf(percent) > bucketOf(lastSample.percent)
+    ? { history: [...existing, { percent, rate: smoothed }], lastRaw: rate }
+    : { history: [...existing.slice(0, -1), { percent, rate: smoothed }], lastRaw: rate }
+}
+
+function seedThroughputHistory(progress: OpProgress): ThroughputSample[] {
+  return [{ percent: progress.progressPercent, rate: progress.bytesPerSecond }]
 }
 
 function pruneOperationState(state: QueueStore, id: string): Partial<QueueStore> {
@@ -76,10 +158,16 @@ function pruneOperationState(state: QueueStore, id: string): Partial<QueueStore>
   delete conflicts[id]
   const throughputHistory = { ...state.throughputHistory }
   delete throughputHistory[id]
+  const throughputPeak = { ...state.throughputPeak }
+  delete throughputPeak[id]
+  const throughputLastRaw = { ...state.throughputLastRaw }
+  delete throughputLastRaw[id]
   return {
     operations,
     conflicts,
     throughputHistory,
+    throughputPeak,
+    throughputLastRaw,
     order: state.order.filter((entry) => entry !== id),
   }
 }
@@ -89,31 +177,73 @@ export const useQueueStore = create<QueueStore>((set) => ({
   setExpanded: (expanded) => set({ expanded }),
   toggleExpanded: () => set((state) => ({ expanded: !state.expanded })),
   hydrate: (snapshots) => {
-    const operations: Record<string, OpProgress> = {}
-    const conflicts: Record<string, ConflictInfo> = {}
-    const throughputHistory: Record<string, number[]> = {}
-    const order: string[] = []
-    for (const snapshot of snapshots) {
-      operations[snapshot.progress.operationId] = snapshot.progress
-      throughputHistory[snapshot.progress.operationId] = appendThroughputSample(
-        undefined,
-        snapshot.progress.bytesPerSecond,
-      )
-      order.push(snapshot.progress.operationId)
-      if (snapshot.conflict) {
-        conflicts[snapshot.progress.operationId] = snapshot.conflict
+    set((state) => {
+      const operations: Record<string, OpProgress> = {}
+      const conflicts: Record<string, ConflictInfo> = {}
+      const throughputHistory: Record<string, ThroughputSample[]> = {}
+      const throughputPeak: Record<string, number> = {}
+      const throughputLastRaw: Record<string, number> = {}
+      const order: string[] = []
+
+      for (const snapshot of snapshots) {
+        const id = snapshot.progress.operationId
+        operations[id] = snapshot.progress
+        const existingHistory = state.throughputHistory[id]
+        const seededHistory = existingHistory ?? seedThroughputHistory(snapshot.progress)
+        throughputHistory[id] = seededHistory
+        // Preserve an in-flight EMA gate; seed a fresh one from the snapshot rate.
+        throughputLastRaw[id] = existingHistory
+          ? state.throughputLastRaw[id] ?? 0
+          : snapshot.progress.bytesPerSecond
+        throughputPeak[id] = Math.max(
+          state.throughputPeak[id] ?? 0,
+          seededHistory[seededHistory.length - 1]?.rate ?? 0,
+        )
+        order.push(id)
+        if (snapshot.conflict) {
+          conflicts[id] = snapshot.conflict
+        }
       }
-    }
-    set({ operations, order, throughputHistory, conflicts })
+      return {
+        operations,
+        order,
+        throughputHistory,
+        throughputPeak,
+        throughputLastRaw,
+        conflicts,
+      }
+    })
   },
   applyProgress: (progress) =>
     set((state) => {
+      const previousProgress = state.operations[progress.operationId]
+      const resetHistory = shouldResetThroughputHistory(previousProgress, progress)
       const operations = { ...state.operations, [progress.operationId]: progress }
+      const folded = resetHistory
+        ? { history: seedThroughputHistory(progress), lastRaw: progress.bytesPerSecond }
+        : foldThroughputSample(
+            state.throughputHistory[progress.operationId],
+            state.throughputLastRaw[progress.operationId] ?? 0,
+            progress.progressPercent,
+            progress.bytesPerSecond,
+          )
       const throughputHistory = {
         ...state.throughputHistory,
-        [progress.operationId]: appendThroughputSample(
-          state.throughputHistory[progress.operationId],
-          progress.bytesPerSecond,
+        [progress.operationId]: folded.history,
+      }
+      const throughputLastRaw = {
+        ...state.throughputLastRaw,
+        [progress.operationId]: folded.lastRaw,
+      }
+      // Frozen Y ceiling: the non-decreasing max of the displayed (averaged)
+      // rate. It ratchets up when the curve reaches a new high and never drops,
+      // so the scale holds still as speed falls. Reset on rewind/restart.
+      const latestRate = folded.history[folded.history.length - 1]?.rate ?? 0
+      const throughputPeak = {
+        ...state.throughputPeak,
+        [progress.operationId]: Math.max(
+          resetHistory ? 0 : state.throughputPeak[progress.operationId] ?? 0,
+          latestRate,
         ),
       }
       const order = state.order.includes(progress.operationId)
@@ -128,7 +258,14 @@ export const useQueueStore = create<QueueStore>((set) => ({
         delete conflicts[progress.operationId]
       }
 
-      return { operations, order, throughputHistory, conflicts }
+      return {
+        operations,
+        order,
+        throughputHistory,
+        throughputPeak,
+        throughputLastRaw,
+        conflicts,
+      }
     }),
   applyConflict: (conflict) =>
     set((state) => ({
@@ -176,6 +313,18 @@ export const useQueueStore = create<QueueStore>((set) => ({
         operations: {
           ...state.operations,
           [id]: { ...operation, status: 'pending', errorMessage: null },
+        },
+        throughputHistory: {
+          ...state.throughputHistory,
+          [id]: [],
+        },
+        throughputPeak: {
+          ...state.throughputPeak,
+          [id]: 0,
+        },
+        throughputLastRaw: {
+          ...state.throughputLastRaw,
+          [id]: 0,
         },
       }
     })

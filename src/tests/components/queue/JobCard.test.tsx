@@ -1,8 +1,8 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { JobCard } from '@/components/queue/JobCard'
-import type { OpProgress } from '@/lib/types/ipc'
+import type { OpProgress, ThroughputSample } from '@/lib/types/ipc'
 
 function progress(overrides: Partial<OpProgress>): OpProgress {
   return {
@@ -38,12 +38,21 @@ function noopHandlers() {
   }
 }
 
+function samples(...entries: Array<[number, number]>): ThroughputSample[] {
+  return entries.map(([percent, rate]) => ({ percent, rate }))
+}
+
 describe('JobCard', () => {
-  it('renders the active copy header, percent, current file and controls', () => {
+  it('renders the active copy header, percent, current file, chart and controls', () => {
     render(
       <JobCard
         operation={progress({})}
-        throughputHistory={[240_000_000, 250_000_000, 260_046_848]}
+        throughputHistory={samples(
+          [22, 240_000_000],
+          [41, 250_000_000],
+          [63, 260_046_848],
+        )}
+        throughputPeak={260_046_848}
         hasConflict={false}
         reorderable={false}
         {...noopHandlers()}
@@ -53,6 +62,15 @@ describe('JobCard', () => {
     expect(screen.getByText('63%')).toBeInTheDocument()
     expect(screen.getByText('master-reel-final.mkv')).toBeInTheDocument()
     expect(screen.getByText('812 / 1,248 items')).toBeInTheDocument()
+    expect(screen.getByTestId('throughput-chart-line')).toBeInTheDocument()
+    expect(
+      screen.getByRole('progressbar', { name: 'Copying 1,248 items' }),
+    ).toHaveAttribute('aria-valuenow', '63')
+    expect(
+      screen.getByRole('progressbar', {
+        name: 'Current file progress for master-reel-final.mkv',
+      }),
+    ).toHaveAttribute('aria-valuenow', '60')
     expect(screen.getByRole('button', { name: /Pause/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Skip/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Cancel/ })).toBeInTheDocument()
@@ -62,7 +80,8 @@ describe('JobCard', () => {
     render(
       <JobCard
         operation={progress({ etaSeconds: null })}
-        throughputHistory={[260_046_848]}
+        throughputHistory={samples([63, 260_046_848])}
+        throughputPeak={260_046_848}
         hasConflict={false}
         reorderable={false}
         {...noopHandlers()}
@@ -71,48 +90,57 @@ describe('JobCard', () => {
     expect(screen.getByText('estimating…')).toBeInTheDocument()
   })
 
-  it('renders a Resume control when paused', async () => {
+  it('renders a Resume control when paused and hides the chart', async () => {
     const handlers = noopHandlers()
     const user = userEvent.setup()
     render(
       <JobCard
         operation={progress({ status: 'paused' })}
-        throughputHistory={[260_046_848, 0]}
+        throughputHistory={samples([58, 260_046_848], [63, 0])}
+        throughputPeak={260_046_848}
         hasConflict={false}
         reorderable={false}
         {...handlers}
       />,
     )
+    expect(
+      screen.queryByRole('progressbar', { name: 'Copying 1,248 items' }),
+    ).not.toBeInTheDocument()
     const resume = screen.getByRole('button', { name: /Resume/ })
     await user.click(resume)
     expect(handlers.onResume).toHaveBeenCalled()
   })
 
-  it('renders completed state with a dismiss control', async () => {
+  it('renders completed state with a dismiss control and no chart progressbar', async () => {
     const handlers = noopHandlers()
     const user = userEvent.setup()
     render(
       <JobCard
         operation={progress({ status: 'completed', progressPercent: 100, currentFileName: null })}
-        throughputHistory={[260_046_848, 200_000_000, 0]}
+        throughputHistory={samples([63, 260_046_848], [82, 200_000_000], [100, 0])}
+        throughputPeak={260_046_848}
         hasConflict={false}
         reorderable={false}
         {...handlers}
       />,
     )
     expect(screen.getByText('Copying complete')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('progressbar', { name: 'Copying complete' }),
+    ).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Pause/ })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /Dismiss/ }))
     expect(handlers.onDismiss).toHaveBeenCalled()
   })
 
-  it('renders failed state with a retry control and error message', async () => {
+  it('renders failed state with a retry control, error message and no chart progressbar', async () => {
     const handlers = noopHandlers()
     const user = userEvent.setup()
     render(
       <JobCard
         operation={progress({ status: 'failed', errorMessage: 'disk full' })}
-        throughputHistory={[260_046_848, 120_000_000, 0]}
+        throughputHistory={samples([63, 260_046_848], [72, 120_000_000], [72, 0])}
+        throughputPeak={260_046_848}
         hasConflict={false}
         reorderable={false}
         {...handlers}
@@ -120,19 +148,23 @@ describe('JobCard', () => {
     )
     expect(screen.getByText('Copying failed')).toBeInTheDocument()
     expect(screen.getByText('disk full')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('progressbar', { name: 'Copying failed' }),
+    ).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /Retry/ }))
     expect(handlers.onRetry).toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: /Dismiss/ }))
     expect(handlers.onDismiss).toHaveBeenCalled()
   })
 
-  it('renders cancelled state with a dismiss control and no active actions', async () => {
+  it('renders cancelled state with a dismiss control, retained note box and no chart progressbar', async () => {
     const handlers = noopHandlers()
     const user = userEvent.setup()
     render(
       <JobCard
         operation={progress({ status: 'cancelled', currentFileName: null })}
-        throughputHistory={[260_046_848, 190_000_000, 0]}
+        throughputHistory={samples([63, 260_046_848], [67, 190_000_000], [67, 0])}
+        throughputPeak={260_046_848}
         hasConflict={false}
         reorderable={false}
         {...handlers}
@@ -140,6 +172,9 @@ describe('JobCard', () => {
     )
     expect(screen.getByText('Copying cancelled')).toBeInTheDocument()
     expect(screen.getByText(/Already-copied files were kept/i)).toBeInTheDocument()
+    expect(
+      screen.queryByRole('progressbar', { name: 'Copying cancelled' }),
+    ).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Pause/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Cancel/ })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /Dismiss/ }))
@@ -153,7 +188,8 @@ describe('JobCard', () => {
     render(
       <JobCard
         operation={progress({ status: 'pending' })}
-        throughputHistory={[0]}
+        throughputHistory={samples([0, 0])}
+        throughputPeak={0}
         hasConflict={false}
         reorderable
         {...noopHandlers()}
@@ -167,18 +203,22 @@ describe('JobCard', () => {
     expect(onMoveDown).toHaveBeenCalled()
   })
 
-  it('shows a resolve action while in conflict', async () => {
+  it('shows a resolve action while in conflict and keeps the chart progressbar', async () => {
     const handlers = noopHandlers()
     const user = userEvent.setup()
     render(
       <JobCard
         operation={progress({ status: 'conflict' })}
-        throughputHistory={[260_046_848]}
+        throughputHistory={samples([33, 260_046_848], [63, 0])}
+        throughputPeak={260_046_848}
         hasConflict
         reorderable={false}
         {...handlers}
       />,
     )
+    expect(
+      screen.getByRole('progressbar', { name: 'Copying 1,248 items' }),
+    ).toHaveAttribute('aria-valuenow', '63')
     await user.click(screen.getByRole('button', { name: /Resolve conflict/ }))
     expect(handlers.onResolve).toHaveBeenCalled()
   })
@@ -187,12 +227,136 @@ describe('JobCard', () => {
     render(
       <JobCard
         operation={progress({ kind: 'move' })}
-        throughputHistory={[260_046_848]}
+        throughputHistory={samples([63, 260_046_848])}
+        throughputPeak={260_046_848}
         hasConflict={false}
         reorderable={false}
         {...noopHandlers()}
       />,
     )
     expect(screen.getByText('Moving 1,248 items')).toBeInTheDocument()
+  })
+
+  it('throttles live metrics announcements for five seconds on a dedicated hidden node', () => {
+    vi.useFakeTimers()
+    const { rerender, container } = render(
+      <JobCard
+        operation={progress({})}
+        throughputHistory={samples([63, 260_046_848])}
+        throughputPeak={260_046_848}
+        hasConflict={false}
+        reorderable={false}
+        {...noopHandlers()}
+      />,
+    )
+
+    const liveRegion = container.querySelector('[aria-live="polite"]')
+    try {
+      expect(liveRegion).toHaveClass('sr-only')
+      expect(liveRegion?.parentElement).not.toHaveAttribute('aria-live')
+      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 812 / 1,248 items')
+
+      act(() => {
+        rerender(
+          <JobCard
+            operation={progress({
+              bytesPerSecond: 300_000_000,
+              etaSeconds: 120,
+              completedItems: 900,
+            })}
+            throughputHistory={samples([63, 300_000_000])}
+            throughputPeak={300_000_000}
+            hasConflict={false}
+            reorderable={false}
+            {...noopHandlers()}
+          />,
+        )
+      })
+
+      // The visible metrics row is throttled too, so right after the rerender it
+      // still shows the previous values. (Scope to the metrics row — the chart's
+      // ceiling label can carry the same rate string when speed equals the peak.)
+      const metricsRow = liveRegion?.parentElement as HTMLElement
+      expect(within(metricsRow).getByText('248.0 MB/s')).toBeInTheDocument()
+      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 812 / 1,248 items')
+
+      // After the metrics refresh interval the visible row catches up…
+      act(() => {
+        vi.advanceTimersByTime(1000)
+      })
+      expect(within(metricsRow).getByText('286.1 MB/s')).toBeInTheDocument()
+      expect(screen.getByText('about 2 min left')).toBeInTheDocument()
+      expect(screen.getByText('900 / 1,248 items')).toBeInTheDocument()
+      // …but the slower 5s live region is still on the old announcement.
+      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 812 / 1,248 items')
+
+      act(() => {
+        vi.advanceTimersByTime(3999)
+      })
+      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 812 / 1,248 items')
+
+      act(() => {
+        vi.advanceTimersByTime(1)
+      })
+      expect(liveRegion).toHaveTextContent('286.1 MB/s, about 2 min left, 900 / 1,248 items')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('drops a pending announcement when metrics return to the current announced value before the throttle fires', () => {
+    vi.useFakeTimers()
+    const { rerender, container } = render(
+      <JobCard
+        operation={progress({})}
+        throughputHistory={samples([63, 260_046_848])}
+        throughputPeak={260_046_848}
+        hasConflict={false}
+        reorderable={false}
+        {...noopHandlers()}
+      />,
+    )
+
+    const liveRegion = container.querySelector('[aria-live="polite"]')
+    try {
+      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 812 / 1,248 items')
+
+      act(() => {
+        rerender(
+          <JobCard
+            operation={progress({
+              bytesPerSecond: 300_000_000,
+              etaSeconds: 120,
+              completedItems: 900,
+            })}
+            throughputHistory={samples([63, 300_000_000])}
+            throughputPeak={300_000_000}
+            hasConflict={false}
+            reorderable={false}
+            {...noopHandlers()}
+          />,
+        )
+      })
+
+      act(() => {
+        rerender(
+          <JobCard
+            operation={progress({})}
+            throughputHistory={samples([63, 260_046_848])}
+            throughputPeak={260_046_848}
+            hasConflict={false}
+            reorderable={false}
+            {...noopHandlers()}
+          />,
+        )
+      })
+
+      act(() => {
+        vi.advanceTimersByTime(5000)
+      })
+      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 812 / 1,248 items')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { ChevronDownIcon } from '@/components/icons'
 import { JobCard } from '@/components/queue/JobCard'
 import { reorderOps } from '@/lib/queue-commands'
-import type { OpProgress } from '@/lib/types/ipc'
+import type { OpProgress, ThroughputSample } from '@/lib/types/ipc'
 import { isTerminal, useQueueStore } from '@/stores/queue-store'
 
 /** Move a pending operation within the pending sub-list and persist the order. */
@@ -30,6 +30,7 @@ export function QueuePanel() {
   const order = useQueueStore((state) => state.order)
   const operationsMap = useQueueStore((state) => state.operations)
   const throughputHistory = useQueueStore((state) => state.throughputHistory)
+  const throughputPeak = useQueueStore((state) => state.throughputPeak)
   const operations = useMemo(
     () =>
       order
@@ -70,11 +71,13 @@ export function QueuePanel() {
       <div className="max-h-queue-list overflow-auto">
         {operations.map((operation) => {
           const reorderable = operation.status === 'pending'
+          const samples = (throughputHistory[operation.operationId] ?? []) as ThroughputSample[]
           return (
             <JobCard
               key={operation.operationId}
               operation={operation}
-              throughputHistory={throughputHistory[operation.operationId] ?? []}
+              throughputHistory={samples}
+              throughputPeak={throughputPeak[operation.operationId] ?? 0}
               hasConflict={Boolean(conflicts[operation.operationId])}
               reorderable={reorderable}
               onPause={() => pause(operation.operationId)}

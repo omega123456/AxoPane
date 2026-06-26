@@ -256,6 +256,11 @@ export type OpProgress = {
   errorMessage: string | null
 }
 
+export type ThroughputSample = {
+  percent: number
+  rate: number
+}
+
 export type OpSnapshot = {
   progress: OpProgress
   conflict: ConflictInfo | null

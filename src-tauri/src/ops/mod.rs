@@ -24,6 +24,8 @@ use crate::volumes::{self, VolumeInfo};
 
 /// How long a completed or cancelled operation lingers in the queue before being auto-removed.
 pub const DEFAULT_COMPLETED_RETENTION: Duration = Duration::from_secs(4);
+/// How often active operations recompute their short-window instantaneous rate.
+pub const DEFAULT_RATE_WINDOW: Duration = Duration::from_millis(250);
 
 /// Number of progress samples required before an ETA is considered stable enough
 /// to surface to the UI.
@@ -119,6 +121,7 @@ type ProgressEmitter = Arc<dyn Fn(OpProgress) + Send + Sync>;
 type ConflictEmitter = Arc<dyn Fn(ConflictInfo) + Send + Sync>;
 /// Emits the id of an operation once it has been auto-removed from the queue.
 type RemovedEmitter = Arc<dyn Fn(String) + Send + Sync>;
+type InstantNow = Arc<dyn Fn() -> Instant + Send + Sync>;
 
 /// Shared, mutable per-operation control + state.
 struct OpState {
@@ -136,6 +139,8 @@ struct OpState {
     bytes_per_second: u64,
     eta_seconds: Option<u64>,
     sample_count: u64,
+    rate_sample_at: Option<Instant>,
+    rate_sample_bytes: u64,
     current_file_name: Option<String>,
     current_file_copied: u64,
     current_file_total: u64,
@@ -204,6 +209,25 @@ impl OpState {
     fn visible_copied_bytes(&self) -> u64 {
         self.copied_bytes.saturating_add(self.current_file_copied)
     }
+
+    fn reset_runtime_state(&mut self) {
+        self.completed_items = 0;
+        self.copied_bytes = 0;
+        self.bytes_per_second = 0;
+        self.eta_seconds = None;
+        self.sample_count = 0;
+        self.rate_sample_at = None;
+        self.rate_sample_bytes = 0;
+        self.current_file_name = None;
+        self.current_file_copied = 0;
+        self.current_file_total = 0;
+        self.error_message = None;
+        self.completed_at = None;
+        self.conflict = None;
+        self.conflict_resolution = None;
+        self.apply_to_all = None;
+        self.rename_to = None;
+    }
 }
 
 struct Inner {
@@ -225,6 +249,8 @@ pub struct OpsService {
     conflict_emitter: Mutex<Option<ConflictEmitter>>,
     removed_emitter: Mutex<Option<RemovedEmitter>>,
     completed_retention: Duration,
+    rate_window: Duration,
+    instant_now: InstantNow,
     volumes: Mutex<Vec<VolumeInfo>>,
 }
 
@@ -236,6 +262,10 @@ impl Default for OpsService {
 
 impl OpsService {
     pub fn new(completed_retention: Duration) -> Self {
+        Self::with_rate_window(completed_retention, DEFAULT_RATE_WINDOW)
+    }
+
+    pub fn with_rate_window(completed_retention: Duration, rate_window: Duration) -> Self {
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 ops: HashMap::new(),
@@ -249,6 +279,8 @@ impl OpsService {
             conflict_emitter: Mutex::new(None),
             removed_emitter: Mutex::new(None),
             completed_retention,
+            rate_window,
+            instant_now: Arc::new(Instant::now),
             volumes: Mutex::new(volumes::list_volumes()),
         }
     }
@@ -277,6 +309,14 @@ impl OpsService {
         F: Fn(String) + Send + Sync + 'static,
     {
         *self.removed_emitter.lock().expect("removed emitter lock") = Some(Arc::new(emitter));
+    }
+
+    #[cfg(feature = "test-utils")]
+    pub fn set_instant_now_for_tests<F>(&mut self, instant_now: F)
+    where
+        F: Fn() -> Instant + Send + Sync + 'static,
+    {
+        self.instant_now = Arc::new(instant_now);
     }
 
     fn schedule_auto_remove_for(&self, id: &str) {
@@ -339,6 +379,8 @@ impl OpsService {
             bytes_per_second: 0,
             eta_seconds: None,
             sample_count: 0,
+            rate_sample_at: None,
+            rate_sample_bytes: 0,
             current_file_name: None,
             current_file_copied: 0,
             current_file_total: 0,
@@ -421,6 +463,8 @@ impl OpsService {
             .expect("removed emitter lock")
             .clone();
         let retention = self.completed_retention;
+        let rate_window = self.rate_window;
+        let instant_now = self.instant_now.clone();
 
         let handle = thread::spawn(move || {
             run_operation(
@@ -429,9 +473,19 @@ impl OpsService {
                 &resolver,
                 progress.clone(),
                 conflict.clone(),
+                rate_window,
+                instant_now.clone(),
             );
             release_and_reschedule(
-                &id, &inner, &resolver, progress, conflict, removed, retention,
+                &id,
+                &inner,
+                &resolver,
+                progress,
+                conflict,
+                removed,
+                retention,
+                rate_window,
+                instant_now,
             );
         });
 
@@ -576,10 +630,7 @@ impl OpsService {
             let mut guard = op.lock().expect("op lock");
             if matches!(guard.status, OpStatus::Failed) {
                 guard.status = OpStatus::Pending;
-                guard.error_message = None;
-                guard.completed_at = None;
-                guard.completed_items = 0;
-                guard.copied_bytes = 0;
+                guard.reset_runtime_state();
                 guard.cancel = Arc::new(AtomicBool::new(false));
                 guard.pause = Arc::new(AtomicBool::new(false));
                 self.emit_progress(&guard);
@@ -636,6 +687,8 @@ fn run_operation(
     resolver: &Arc<Condvar>,
     progress: Option<ProgressEmitter>,
     conflict: Option<ConflictEmitter>,
+    rate_window: Duration,
+    instant_now: InstantNow,
 ) {
     let op_arc = {
         let guard = inner.lock().expect("ops lock");
@@ -648,6 +701,8 @@ fn run_operation(
     {
         let mut op = op_arc.lock().expect("op lock");
         op.status = OpStatus::Active;
+        op.rate_sample_at = Some(instant_now());
+        op.rate_sample_bytes = 0;
         if let Some(emitter) = &progress {
             emitter(op.progress());
         }
@@ -678,7 +733,7 @@ fn run_operation(
         }
     }
 
-    let start = Instant::now();
+    let start = instant_now();
 
     for item in items {
         {
@@ -693,6 +748,8 @@ fn run_operation(
             resolver,
             progress: &progress,
             start,
+            rate_window,
+            instant_now: &instant_now,
         };
         process_item(&ctx, &item, &conflict);
 
@@ -729,6 +786,8 @@ struct WorkerCtx<'a> {
     resolver: &'a Arc<Condvar>,
     progress: &'a Option<ProgressEmitter>,
     start: Instant,
+    rate_window: Duration,
+    instant_now: &'a InstantNow,
 }
 
 fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEmitter>) {
@@ -885,7 +944,7 @@ fn advance_item(ctx: &WorkerCtx<'_>, item: &OpItem) {
     op.current_file_name = None;
     op.current_file_copied = 0;
     op.current_file_total = 0;
-    refresh_rate_locked(&mut op, ctx.start);
+    refresh_rate_locked_with_now(&mut op, ctx.start, ctx.rate_window, (ctx.instant_now)());
 
     if let Some(emitter) = ctx.progress {
         emitter(op.progress());
@@ -895,22 +954,39 @@ fn advance_item(ctx: &WorkerCtx<'_>, item: &OpItem) {
 fn report_chunk_progress(ctx: &WorkerCtx<'_>, copied_delta: u64) {
     let mut op = ctx.op_arc.lock().expect("op lock");
     op.current_file_copied = op.current_file_copied.saturating_add(copied_delta);
-    refresh_rate_locked(&mut op, ctx.start);
+    refresh_rate_locked_with_now(&mut op, ctx.start, ctx.rate_window, (ctx.instant_now)());
     if let Some(emitter) = ctx.progress {
         emitter(op.progress());
     }
 }
 
-fn refresh_rate_locked(op: &mut OpState, start: Instant) {
+fn refresh_rate_locked_with_now(
+    op: &mut OpState,
+    start: Instant,
+    rate_window: Duration,
+    now: Instant,
+) {
     op.sample_count += 1;
     let visible_copied = op.visible_copied_bytes();
-    let elapsed = start.elapsed().as_secs_f64().max(0.001);
-    let rate = (visible_copied as f64 / elapsed) as u64;
-    op.bytes_per_second = rate;
+    let last_sample_at = op.rate_sample_at.unwrap_or(start);
+    let last_sample_bytes = op.rate_sample_bytes;
+    let should_recompute = rate_window.is_zero()
+        || op.bytes_per_second == 0
+        || now.duration_since(last_sample_at) >= rate_window;
 
-    if op.sample_count >= ETA_STABILIZATION_SAMPLES && rate > 0 {
+    if should_recompute {
+        let sample_elapsed = now.duration_since(last_sample_at).as_secs_f64().max(0.001);
+        let sample_bytes = visible_copied.saturating_sub(last_sample_bytes);
+        op.bytes_per_second = (sample_bytes as f64 / sample_elapsed) as u64;
+        op.rate_sample_at = Some(now);
+        op.rate_sample_bytes = visible_copied;
+    }
+
+    let stable_elapsed = start.elapsed().as_secs_f64().max(0.001);
+    let stable_rate = (visible_copied as f64 / stable_elapsed) as u64;
+    if op.sample_count >= ETA_STABILIZATION_SAMPLES && stable_rate > 0 {
         let remaining = op.total_bytes.saturating_sub(visible_copied);
-        op.eta_seconds = Some(remaining / rate.max(1));
+        op.eta_seconds = Some(remaining / stable_rate.max(1));
     }
 }
 
@@ -923,6 +999,8 @@ fn release_and_reschedule(
     conflict: Option<ConflictEmitter>,
     removed: Option<RemovedEmitter>,
     retention: Duration,
+    rate_window: Duration,
+    instant_now: InstantNow,
 ) {
     let volumes = {
         let guard = inner.lock().expect("ops lock");
@@ -948,6 +1026,7 @@ fn release_and_reschedule(
         let progress = progress.clone();
         let conflict = conflict.clone();
         let removed = removed.clone();
+        let instant_now = instant_now.clone();
         thread::spawn(move || {
             run_operation(
                 next.clone(),
@@ -955,9 +1034,19 @@ fn release_and_reschedule(
                 &resolver,
                 progress.clone(),
                 conflict.clone(),
+                rate_window,
+                instant_now.clone(),
             );
             release_and_reschedule(
-                &next, &inner, &resolver, progress, conflict, removed, retention,
+                &next,
+                &inner,
+                &resolver,
+                progress,
+                conflict,
+                removed,
+                retention,
+                rate_window,
+                instant_now,
             );
         });
     }
