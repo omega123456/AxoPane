@@ -163,6 +163,7 @@ describe('App', () => {
         treeWidth: 'default',
         defaultPaneMode: 'dual',
         restoreSession: true,
+        zoom: '100',
       },
     })
     ipc.override('save_config', saveConfig)

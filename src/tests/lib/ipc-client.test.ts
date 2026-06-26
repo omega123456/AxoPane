@@ -92,6 +92,7 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
           treeWidth: 'default',
           defaultPaneMode: 'dual',
           restoreSession: true,
+          zoom: '100',
         },
       }),
     ).resolves.toHaveProperty('theme', 'light')

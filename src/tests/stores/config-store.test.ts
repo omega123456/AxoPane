@@ -33,6 +33,7 @@ describe('config-store', () => {
         treeWidth: 'default' as const,
         defaultPaneMode: 'dual' as const,
         restoreSession: true,
+        zoom: '100' as const,
       },
     }))
     ipc.override('save_config', saveConfig)
@@ -51,6 +52,7 @@ describe('config-store', () => {
             treeWidth: 'default',
             defaultPaneMode: 'dual',
             restoreSession: true,
+            zoom: '100',
           },
         }),
       }),

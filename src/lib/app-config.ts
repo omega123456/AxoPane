@@ -32,6 +32,7 @@ export function buildAppConfig(): AppConfig {
       treeWidth: layout.treeWidth,
       defaultPaneMode: layout.defaultPaneMode,
       restoreSession: layout.restoreSession,
+      zoom: layout.zoom,
     },
   }
 }

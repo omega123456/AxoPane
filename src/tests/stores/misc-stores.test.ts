@@ -87,16 +87,21 @@ describe('layout-store', () => {
   })
 
   it('updates scalar layout preferences and toggles individual columns', () => {
+    const setProperty = vi.spyOn(document.documentElement.style, 'setProperty')
     useLayoutStore.getState().setTreeWidth('wide')
     useLayoutStore.getState().setDefaultPaneMode('single')
     useLayoutStore.getState().setRestoreSession(false)
+    useLayoutStore.getState().setZoom('125')
     useLayoutStore.getState().toggleColumn('created')
 
     expect(useLayoutStore.getState()).toMatchObject({
       treeWidth: 'wide',
       defaultPaneMode: 'single',
       restoreSession: false,
+      zoom: '125',
     })
+    expect(setProperty).toHaveBeenCalledWith('zoom', '1.25')
+    setProperty.mockRestore()
     expect(useLayoutStore.getState().columns.find((column) => column.key === 'created')).toEqual({
       key: 'created',
       visible: true,

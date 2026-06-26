@@ -115,8 +115,9 @@
   --spacing-queue-chart: 8rem;
   --spacing-queue-list: 30rem;
 
-  --spacing-settings-modal-w: 48.75rem;
-  --spacing-settings-modal-h: 38.75rem;
+  --spacing-settings-modal-w: min(80vw, 1300px);
+    --spacing-settings-modal-h: min(85vh, 52rem);
+    --spacing-settings-content: 52rem;
   --spacing-settings-nav: 11.375rem;
   --spacing-modal-footer: 3.625rem;
   --spacing-switch-w: 2.375rem;

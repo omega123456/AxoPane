@@ -10,6 +10,7 @@ import {
   Button,
   SectionLabel,
   SegmentedControl,
+  SelectField,
   SettingRow,
   ToggleSwitch,
 } from '@/components/controls'
@@ -32,7 +33,7 @@ import type {
   ThemePreference,
 } from '@/lib/types/ipc'
 import { useConfigStore } from '@/stores/config-store'
-import { defaultColumns, defaultLayout, useLayoutStore } from '@/stores/layout-store'
+import { defaultColumns, defaultLayout, useLayoutStore, zoomLevels } from '@/stores/layout-store'
 import { useKeymapStore } from '@/stores/keymap-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSettingsStore } from '@/stores/settings-store'
@@ -66,6 +67,7 @@ function cloneDraft(): DraftState {
       treeWidth: layout.treeWidth,
       defaultPaneMode: layout.defaultPaneMode,
       restoreSession: layout.restoreSession,
+      zoom: layout.zoom,
     },
     theme: config.theme,
     showHiddenFiles: config.showHiddenFiles,
@@ -212,7 +214,8 @@ function SettingsModalContent() {
             </div>
           </nav>
 
-          <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
+          <div className="min-h-0 flex-1 overflow-auto px-8 py-6">
+            <div className="mx-auto w-full max-w-settings-content">
             {section === 'layout' ? (
               <div>
                 <SectionLabel className="mb-3">View</SectionLabel>
@@ -248,6 +251,22 @@ function SettingsModalContent() {
                         { value: 'light', label: 'Light' },
                         { value: 'dark', label: 'Dark' },
                       ]}
+                    />
+                  }
+                />
+                <SettingRow
+                  fixedCopy
+                  title="Zoom"
+                  description="Scale the entire interface up or down"
+                  control={
+                    <SelectField
+                      ariaLabel="Zoom"
+                      value={draft.layout.zoom}
+                      onChange={(value) => updateLayout('zoom', value)}
+                      options={zoomLevels.map((level) => ({
+                        value: level,
+                        label: `${level}%`,
+                      }))}
                     />
                   }
                 />
@@ -365,9 +384,9 @@ function SettingsModalContent() {
                   <thead>
                     <tr className="border-b border-light-border text-left text-2xs uppercase tracking-wide text-light-text-muted dark:border-dark-border dark:text-dark-text-muted">
                       <th className="pb-2 font-bold">Command</th>
-                      <th className="pb-2 font-bold">Shortcut</th>
-                      <th className="pb-2 font-bold">Status</th>
-                      <th className="pb-2 text-right font-bold">Reset</th>
+                      <th className="w-44 pb-2 font-bold">Shortcut</th>
+                      <th className="w-28 pb-2 font-bold">Status</th>
+                      <th className="w-20 pb-2 text-right font-bold">Reset</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -450,6 +469,7 @@ function SettingsModalContent() {
                 </table>
               </div>
             ) : null}
+            </div>
           </div>
         </div>
 

@@ -1,6 +1,7 @@
 export type ThemePreference = 'system' | 'light' | 'dark'
 export type PaneMode = 'dual' | 'single'
 export type TreeWidth = 'compact' | 'default' | 'wide'
+export type ZoomLevel = '80' | '90' | '100' | '110' | '120' | '125' | '150'
 export type Shortcut = string
 export type CommandId =
   | 'open'
@@ -91,6 +92,7 @@ export type LayoutConfig = {
   treeWidth: TreeWidth
   defaultPaneMode: PaneMode
   restoreSession: boolean
+  zoom: ZoomLevel
 }
 
 export type AppConfig = {

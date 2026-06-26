@@ -174,6 +174,7 @@ export const fixtures: {
       treeWidth: 'default',
       defaultPaneMode: 'dual',
       restoreSession: true,
+      zoom: '100',
     },
   },
   save_config: {
@@ -194,6 +195,7 @@ export const fixtures: {
       treeWidth: 'default',
       defaultPaneMode: 'dual',
       restoreSession: true,
+      zoom: '100',
     },
   },
   load_session: {

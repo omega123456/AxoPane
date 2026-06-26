@@ -55,6 +55,7 @@ const lightConfig: AppConfig = {
     treeWidth: 'default',
     defaultPaneMode: 'dual',
     restoreSession: true,
+    zoom: '100',
   },
 }
 

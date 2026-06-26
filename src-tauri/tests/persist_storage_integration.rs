@@ -47,6 +47,7 @@ fn config_and_session_round_trip_through_atomic_storage() {
             tree_width: "wide".to_string(),
             default_pane_mode: "single".to_string(),
             restore_session: false,
+            zoom: "150".to_string(),
         },
     });
     session_store.replace(Session {
@@ -86,6 +87,7 @@ fn config_and_session_round_trip_through_atomic_storage() {
                 tree_width: "wide".to_string(),
                 default_pane_mode: "single".to_string(),
                 restore_session: false,
+                zoom: "150".to_string(),
             },
         }
     );

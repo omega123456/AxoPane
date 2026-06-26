@@ -90,6 +90,22 @@ describe('SettingsModal', () => {
     })
   })
 
+  it('applies a zoom selection immediately on macOS', async () => {
+    const user = userEvent.setup()
+    useSettingsStore.getState().open('layout')
+
+    const setProperty = vi.spyOn(document.documentElement.style, 'setProperty')
+    render(<SettingsModal />)
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Zoom' }), '125')
+
+    await waitFor(() => {
+      expect(useLayoutStore.getState().zoom).toBe('125')
+    })
+    expect(setProperty).toHaveBeenCalledWith('zoom', '1.25')
+    setProperty.mockRestore()
+  })
+
   it('resets the draft back to defaults before saving on Windows', async () => {
     const user = userEvent.setup()
     setPlatform('Win32')

@@ -1,6 +1,15 @@
 import { create } from 'zustand'
 import { columnOrder } from '@/lib/columns'
-import type { ColumnConfig, ColumnKey, LayoutConfig } from '@/lib/types/ipc'
+import type { ColumnConfig, ColumnKey, LayoutConfig, ZoomLevel } from '@/lib/types/ipc'
+
+export const zoomLevels: ZoomLevel[] = ['80', '90', '100', '110', '120', '125', '150']
+
+function applyZoom(zoom: ZoomLevel) {
+  if (typeof document === 'undefined') {
+    return
+  }
+  document.documentElement.style.setProperty('zoom', String(Number(zoom) / 100))
+}
 
 export const defaultColumns: ColumnConfig[] = [
   { key: 'name', visible: true },
@@ -16,6 +25,7 @@ export const defaultLayout: LayoutConfig = {
   treeWidth: 'default',
   defaultPaneMode: 'dual',
   restoreSession: true,
+  zoom: '100',
 }
 
 type LayoutStore = LayoutConfig & {
@@ -25,6 +35,7 @@ type LayoutStore = LayoutConfig & {
   setTreeWidth: (width: LayoutConfig['treeWidth']) => void
   setDefaultPaneMode: (mode: LayoutConfig['defaultPaneMode']) => void
   setRestoreSession: (restoreSession: boolean) => void
+  setZoom: (zoom: ZoomLevel) => void
   setColumns: (columns: ColumnConfig[]) => void
   moveColumn: (fromKey: ColumnKey, toKey: ColumnKey) => void
   toggleColumn: (key: ColumnKey) => void
@@ -57,11 +68,18 @@ function normalizeColumns(columns: ColumnConfig[]) {
 export const useLayoutStore = create<LayoutStore>((set) => ({
   ...defaultLayout,
   columns: defaultColumns,
-  hydrate: (layout, columns) => set({ ...layout, columns: normalizeColumns(columns) }),
+  hydrate: (layout, columns) => {
+    applyZoom(layout.zoom)
+    set({ ...layout, columns: normalizeColumns(columns) })
+  },
   setDetailsVisible: (detailsVisible) => set({ detailsVisible }),
   setTreeWidth: (treeWidth) => set({ treeWidth }),
   setDefaultPaneMode: (defaultPaneMode) => set({ defaultPaneMode }),
   setRestoreSession: (restoreSession) => set({ restoreSession }),
+  setZoom: (zoom) => {
+    applyZoom(zoom)
+    set({ zoom })
+  },
   setColumns: (columns) => set({ columns: normalizeColumns(columns) }),
   moveColumn: (fromKey, toKey) => {
     set((state) => {
@@ -83,5 +101,8 @@ export const useLayoutStore = create<LayoutStore>((set) => ({
         column.key === key ? { ...column, visible: !column.visible } : column,
       ),
     })),
-  reset: () => set({ ...defaultLayout, columns: defaultColumns }),
+  reset: () => {
+    applyZoom(defaultLayout.zoom)
+    set({ ...defaultLayout, columns: defaultColumns })
+  },
 }))

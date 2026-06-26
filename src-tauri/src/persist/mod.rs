@@ -38,6 +38,12 @@ pub struct LayoutConfig {
     pub tree_width: String,
     pub default_pane_mode: String,
     pub restore_session: bool,
+    #[serde(default = "default_zoom")]
+    pub zoom: String,
+}
+
+fn default_zoom() -> String {
+    "100".to_string()
 }
 
 impl Default for LayoutConfig {
@@ -47,6 +53,7 @@ impl Default for LayoutConfig {
             tree_width: "default".to_string(),
             default_pane_mode: "dual".to_string(),
             restore_session: true,
+            zoom: default_zoom(),
         }
     }
 }
