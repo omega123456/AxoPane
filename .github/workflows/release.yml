@@ -96,7 +96,7 @@ jobs:
         with:
           tauriScript: pnpm tauri
           tagName: v__VERSION__
-          releaseName: File Explorer v__VERSION__
+          releaseName: AxoPane v__VERSION__
           releaseBody: ${{ steps.release_body.outputs.body }}
           releaseDraft: false
           prerelease: false
@@ -155,7 +155,7 @@ jobs:
         with:
           tauriScript: pnpm tauri
           tagName: v__VERSION__
-          releaseName: File Explorer v__VERSION__
+          releaseName: AxoPane v__VERSION__
           releaseBody: ${{ steps.release_body.outputs.body }}
           releaseDraft: false
           prerelease: false

@@ -209,7 +209,7 @@ function SettingsModalContent() {
               )
             })}
             <div className="mt-auto px-3 py-2.5 font-mono text-2xs leading-relaxed text-light-text-faint dark:text-dark-text-faint">
-              File Explorer
+              AxoPane
               <br />
               build 0.1.0
             </div>
