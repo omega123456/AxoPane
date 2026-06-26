@@ -1,23 +1,30 @@
 import { create } from 'zustand'
 import type { ThemePreference } from '@/lib/types/ipc'
+import { DEFAULT_UPDATE_INTERVAL, type UpdateInterval } from '@/lib/update-intervals'
 import { persistAppConfig } from '@/lib/app-config'
 
-type ConfigStore = {
+type ConfigSnapshot = {
   theme: ThemePreference
   showHiddenFiles: boolean
   dismissedEverythingBanner: boolean
-  hydrate: (config: { theme: ThemePreference; showHiddenFiles: boolean; dismissedEverythingBanner: boolean }) => void
+  updateCheckInterval: UpdateInterval
+}
+
+type ConfigStore = ConfigSnapshot & {
+  hydrate: (config: ConfigSnapshot) => void
   setThemePreference: (theme: ThemePreference) => Promise<void>
   setShowHiddenFiles: (showHiddenFiles: boolean) => Promise<void>
+  setUpdateCheckInterval: (updateCheckInterval: UpdateInterval) => Promise<void>
   dismissEverythingBanner: () => Promise<void>
   reset: () => void
 }
 
-function defaultState() {
+function defaultState(): ConfigSnapshot {
   return {
-    theme: 'system' as ThemePreference,
+    theme: 'system',
     showHiddenFiles: false,
     dismissedEverythingBanner: false,
+    updateCheckInterval: DEFAULT_UPDATE_INTERVAL,
   }
 }
 
@@ -30,6 +37,10 @@ export const useConfigStore = create<ConfigStore>((set) => ({
   },
   setShowHiddenFiles: async (showHiddenFiles) => {
     set({ showHiddenFiles })
+    await persistAppConfig()
+  },
+  setUpdateCheckInterval: async (updateCheckInterval) => {
+    set({ updateCheckInterval })
     await persistAppConfig()
   },
   dismissEverythingBanner: async () => {

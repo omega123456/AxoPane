@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-type Section = 'keybindings' | 'columns' | 'layout'
+type Section = 'keybindings' | 'columns' | 'layout' | 'updates'
 
 type SettingsStore = {
   isOpen: boolean

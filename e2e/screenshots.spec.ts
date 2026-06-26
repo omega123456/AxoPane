@@ -100,6 +100,13 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`phase-8-settings-layout-${mode}.png`)
   })
 
+  test(`settings updates ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.browsing[mode])
+    await openSettingsSection(page, 'updates')
+    await expect(page.getByLabel('Update check frequency')).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`phase-8-settings-updates-${mode}.png`)
+  })
+
   test(`pane context menu ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
     await rightClickPane(page, 'Left pane')

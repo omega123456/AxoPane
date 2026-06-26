@@ -171,6 +171,7 @@ export const fixtures: {
     theme: 'dark',
     showHiddenFiles: false,
     dismissedEverythingBanner: false,
+    updateCheckInterval: '1d',
     keybindings: {},
     columns: [
       { key: 'name', visible: true },
@@ -193,6 +194,7 @@ export const fixtures: {
     theme: 'dark',
     showHiddenFiles: false,
     dismissedEverythingBanner: false,
+    updateCheckInterval: '1d',
     keybindings: {},
     columns: [
       { key: 'name', visible: true },

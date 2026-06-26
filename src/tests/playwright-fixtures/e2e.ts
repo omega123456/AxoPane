@@ -41,6 +41,7 @@ const lightConfig: AppConfig = {
   theme: 'light',
   showHiddenFiles: false,
   dismissedEverythingBanner: false,
+  updateCheckInterval: '1d',
   keybindings: {},
   columns: [
     { key: 'name', visible: true },

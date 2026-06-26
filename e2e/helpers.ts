@@ -18,13 +18,15 @@ export async function gotoScenario(page: Page, scenario: PlaywrightScenario) {
 
 export async function openSettingsSection(
   page: Page,
-  section: 'keybindings' | 'columns' | 'layout',
+  section: 'keybindings' | 'columns' | 'layout' | 'updates',
 ) {
   await page.getByRole('button', { name: 'Settings' }).click()
   if (section === 'columns') {
     await page.getByRole('button', { name: 'Columns' }).click()
   } else if (section === 'layout') {
     await page.getByRole('button', { name: 'View & Layout' }).click()
+  } else if (section === 'updates') {
+    await page.getByRole('button', { name: 'Updates' }).click()
   }
 }
 

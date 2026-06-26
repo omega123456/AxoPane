@@ -50,6 +50,7 @@ fn config_and_session_round_trip_through_atomic_storage() {
             restore_session: false,
             zoom: "150".to_string(),
         },
+        update_check_interval: "5h".to_string(),
     });
     session_store.replace(Session {
         active_pane: "right".to_string(),
@@ -91,6 +92,7 @@ fn config_and_session_round_trip_through_atomic_storage() {
                 restore_session: false,
                 zoom: "150".to_string(),
             },
+            update_check_interval: "5h".to_string(),
         }
     );
     assert_eq!(
@@ -232,6 +234,7 @@ fn legacy_config_without_layout_fields_gets_defaults() {
     assert!(loaded.keybindings.is_empty());
     assert_eq!(loaded.columns.len(), 6);
     assert_eq!(loaded.layout, LayoutConfig::default());
+    assert_eq!(loaded.update_check_interval, "1d");
 }
 
 #[test]

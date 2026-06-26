@@ -110,6 +110,26 @@ describe('SettingsModal', () => {
     })
   })
 
+  it('persists the update check frequency from the Updates section', async () => {
+    const user = userEvent.setup()
+    const saveConfig = vi.fn((payload) => payload.config)
+    ipc.override('save_config', saveConfig)
+    useSettingsStore.getState().open('updates')
+
+    render(<SettingsModal />)
+
+    await user.selectOptions(screen.getByLabelText('Update check frequency'), 'Every hour')
+
+    await waitFor(() => {
+      expect(useConfigStore.getState().updateCheckInterval).toBe('1h')
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({ updateCheckInterval: '1h' }),
+        }),
+      )
+    })
+  })
+
   it('applies a zoom selection immediately on macOS', async () => {
     const user = userEvent.setup()
     useSettingsStore.getState().open('layout')

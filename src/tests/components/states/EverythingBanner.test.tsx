@@ -32,6 +32,7 @@ describe('EverythingBanner', () => {
       theme: 'system' as const,
       showHiddenFiles: false,
       dismissedEverythingBanner: true,
+      updateCheckInterval: '1d' as const,
       keybindings: {},
       columns: [],
       layout: {

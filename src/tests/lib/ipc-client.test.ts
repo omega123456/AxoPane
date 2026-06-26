@@ -85,6 +85,7 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
         theme: 'light',
         showHiddenFiles: true,
         dismissedEverythingBanner: false,
+        updateCheckInterval: '1d',
         keybindings: {},
         columns: [],
         layout: {

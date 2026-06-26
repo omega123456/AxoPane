@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   checkForAppUpdate,
   downloadAndInstallAppUpdate,
+  getAppVersion,
   summarizeUpdate,
   type AppUpdate,
 } from '@/lib/updater'
@@ -38,5 +39,9 @@ describe('updater', () => {
     const update = fakeUpdate()
     expect(await downloadAndInstallAppUpdate(update)).toBe(true)
     expect(update.downloadAndInstall).toHaveBeenCalledOnce()
+  })
+
+  it('falls back to the build version outside a Tauri runtime', async () => {
+    expect(await getAppVersion()).toBe('0.1.0')
   })
 })

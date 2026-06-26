@@ -22,6 +22,12 @@ pub struct Config {
     pub columns: Vec<ColumnConfig>,
     #[serde(default)]
     pub layout: LayoutConfig,
+    #[serde(default = "default_update_check_interval")]
+    pub update_check_interval: String,
+}
+
+fn default_update_check_interval() -> String {
+    "1d".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -108,6 +114,7 @@ impl Default for Config {
             keybindings: HashMap::new(),
             columns: default_columns(),
             layout: LayoutConfig::default(),
+            update_check_interval: default_update_check_interval(),
         }
     }
 }

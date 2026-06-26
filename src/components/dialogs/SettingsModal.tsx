@@ -14,8 +14,10 @@ import {
   SettingRow,
   ToggleSwitch,
 } from '@/components/controls'
+import { UpdatesSettings } from '@/components/dialogs/UpdatesSettings'
 import { persistAppConfig } from '@/lib/app-config'
 import { columnDefinitions } from '@/lib/columns'
+import { DEFAULT_UPDATE_INTERVAL, type UpdateInterval } from '@/lib/update-intervals'
 import {
   captureShortcut,
   commandLabels,
@@ -40,12 +42,13 @@ import { usePanesStore } from '@/stores/panes-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useThemeStore } from '@/stores/theme-store'
 
-type Section = 'layout' | 'columns' | 'keybindings'
+type Section = 'layout' | 'columns' | 'keybindings' | 'updates'
 
 const sectionNav: { key: Section; label: string }[] = [
   { key: 'layout', label: 'View & Layout' },
   { key: 'columns', label: 'Columns' },
   { key: 'keybindings', label: 'Keybindings' },
+  { key: 'updates', label: 'Updates' },
 ]
 
 type DraftState = {
@@ -54,6 +57,7 @@ type DraftState = {
   layout: LayoutConfig
   theme: ThemePreference
   showHiddenFiles: boolean
+  updateCheckInterval: UpdateInterval
 }
 
 function cloneDraft(): DraftState {
@@ -73,6 +77,7 @@ function cloneDraft(): DraftState {
     },
     theme: config.theme,
     showHiddenFiles: config.showHiddenFiles,
+    updateCheckInterval: config.updateCheckInterval,
   }
 }
 
@@ -84,6 +89,7 @@ function applyDraft(draft: DraftState) {
     ...config,
     theme: draft.theme,
     showHiddenFiles: draft.showHiddenFiles,
+    updateCheckInterval: draft.updateCheckInterval,
   })
   useThemeStore.getState().setThemePreference(draft.theme)
   usePanesStore.setState({ showHiddenFiles: draft.showHiddenFiles })
@@ -159,6 +165,7 @@ function SettingsModalContent() {
       layout: { ...defaultLayout },
       theme: 'system',
       showHiddenFiles: false,
+      updateCheckInterval: DEFAULT_UPDATE_INTERVAL,
     }))
   }
 
@@ -474,6 +481,15 @@ function SettingsModalContent() {
                     </tbody>
                   </table>
                 </div>
+              ) : null}
+
+              {section === 'updates' ? (
+                <UpdatesSettings
+                  value={draft.updateCheckInterval}
+                  onChange={(value) =>
+                    updateDraft((current) => ({ ...current, updateCheckInterval: value }))
+                  }
+                />
               ) : null}
             </div>
           </div>

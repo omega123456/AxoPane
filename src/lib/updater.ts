@@ -39,6 +39,20 @@ function canUseNativeUpdater() {
   )
 }
 
+/**
+ * Resolves the running app version from the Tauri runtime, falling back to the
+ * static build version compiled into the bundle when the native API is
+ * unavailable (web preview, tests).
+ */
+export async function getAppVersion(): Promise<string> {
+  if (!canUseNativeUpdater()) {
+    return import.meta.env.VITE_APP_VERSION ?? '0.1.0'
+  }
+
+  const { getVersion } = await import('@tauri-apps/api/app')
+  return getVersion()
+}
+
 export async function checkForAppUpdate(): Promise<AppUpdate | null> {
   if (!canUseNativeUpdater()) {
     return null

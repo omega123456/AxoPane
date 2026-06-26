@@ -1,5 +1,10 @@
 import { saveConfig } from '@/lib/ipc/commands'
 import type { AppConfig, ThemePreference } from '@/lib/types/ipc'
+import {
+  DEFAULT_UPDATE_INTERVAL,
+  isUpdateInterval,
+  type UpdateInterval,
+} from '@/lib/update-intervals'
 import { useConfigStore } from '@/stores/config-store'
 import { defaultColumns, defaultLayout, useLayoutStore } from '@/stores/layout-store'
 import { useKeymapStore } from '@/stores/keymap-store'
@@ -13,6 +18,7 @@ export function defaultAppConfig(): AppConfig {
     keybindings: {},
     columns: defaultColumns,
     layout: defaultLayout,
+    updateCheckInterval: DEFAULT_UPDATE_INTERVAL,
   }
 }
 
@@ -35,23 +41,29 @@ export function buildAppConfig(): AppConfig {
       restoreSession: layout.restoreSession,
       zoom: layout.zoom,
     },
+    updateCheckInterval: config.updateCheckInterval,
   }
 }
 
 export function hydrateAppConfig(config: AppConfig) {
   const { bindings, migrated } = migrateKeymap(config.keybindings)
+  const updateCheckInterval: UpdateInterval = isUpdateInterval(config.updateCheckInterval ?? '')
+    ? config.updateCheckInterval
+    : DEFAULT_UPDATE_INTERVAL
   const next = {
     ...defaultAppConfig(),
     ...config,
     keybindings: bindings,
     layout: { ...defaultLayout, ...config.layout, detailsVisible: false },
     columns: config.columns?.length ? config.columns : defaultColumns,
+    updateCheckInterval,
   }
 
   useConfigStore.getState().hydrate({
     theme: next.theme as ThemePreference,
     showHiddenFiles: next.showHiddenFiles,
     dismissedEverythingBanner: next.dismissedEverythingBanner,
+    updateCheckInterval: next.updateCheckInterval,
   })
   useLayoutStore.getState().hydrate(next.layout, next.columns)
   useKeymapStore.getState().hydrate(next.keybindings)

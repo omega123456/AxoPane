@@ -15,7 +15,6 @@ import { installCloseGuard } from '@/lib/close-guard'
 import { onDirPatch, onSizeState, onVolumesChanged } from '@/lib/ipc/events'
 import { resolveCommandForEvent } from '@/lib/keymap'
 import { UpdateBanner } from '@/components/states/UpdateBanner'
-import { checkForAppUpdate, summarizeUpdate } from '@/lib/updater'
 import { useUpdaterStore } from '@/stores/updater-store'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
@@ -56,6 +55,7 @@ function App() {
   const settingsOpen = useSettingsStore((state) => state.isOpen)
   const menuOpen = useContextMenuStore((state) => state.menu !== null)
   const actionDialogOpen = useActionDialogStore((state) => state.dialog !== null)
+  const updateCheckInterval = useConfigStore((state) => state.updateCheckInterval)
 
   useEffect(() => {
     initializeTheme()
@@ -91,12 +91,13 @@ function App() {
   }, [])
 
   useEffect(() => {
-    void checkForAppUpdate().then((update) => {
-      if (update) {
-        useUpdaterStore.getState().setAvailable(update, summarizeUpdate(update))
-      }
-    })
-  }, [])
+    // Always checks once on launch, then schedules background polls at the
+    // configured cadence. Re-runs when the cadence setting changes.
+    useUpdaterStore.getState().startPeriodicCheck()
+    return () => {
+      useUpdaterStore.getState().stopPeriodicCheck()
+    }
+  }, [updateCheckInterval])
 
   useEffect(() => {
     let unlisten: (() => void) | undefined

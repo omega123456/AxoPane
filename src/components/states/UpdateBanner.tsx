@@ -1,6 +1,4 @@
 import { AlertTriangleIcon, DownloadIcon, XIcon } from '@/components/icons'
-import { log } from '@/lib/app-log-commands'
-import { downloadAndInstallAppUpdate } from '@/lib/updater'
 import { useUpdaterStore } from '@/stores/updater-store'
 
 export function UpdateBanner() {
@@ -8,7 +6,7 @@ export function UpdateBanner() {
   const update = useUpdaterStore((state) => state.update)
   const status = useUpdaterStore((state) => state.status)
   const error = useUpdaterStore((state) => state.error)
-  const setStatus = useUpdaterStore((state) => state.setStatus)
+  const downloadAndInstall = useUpdaterStore((state) => state.downloadAndInstall)
   const dismiss = useUpdaterStore((state) => state.dismiss)
 
   if (!summary || !update) {
@@ -16,21 +14,6 @@ export function UpdateBanner() {
   }
 
   const installing = status === 'installing'
-
-  async function install() {
-    if (!update || installing) {
-      return
-    }
-
-    setStatus('installing')
-    try {
-      await downloadAndInstallAppUpdate(update)
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause)
-      log.error('app update install failed', { error: message })
-      setStatus('error', message)
-    }
-  }
 
   return (
     <div
@@ -52,7 +35,7 @@ export function UpdateBanner() {
       <button
         type="button"
         disabled={installing}
-        onClick={() => void install()}
+        onClick={() => void downloadAndInstall()}
         className="inline-flex h-7 shrink-0 items-center gap-1 rounded-tab px-2 text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border disabled:opacity-40 dark:text-accent-blue"
       >
         {installing ? 'Installing…' : 'Install & restart'}

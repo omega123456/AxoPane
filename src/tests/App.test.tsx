@@ -147,6 +147,7 @@ describe('App', () => {
       theme: 'dark',
       showHiddenFiles: false,
       dismissedEverythingBanner: false,
+      updateCheckInterval: '1d',
       keybindings: {
         refresh: ['F5'],
       },

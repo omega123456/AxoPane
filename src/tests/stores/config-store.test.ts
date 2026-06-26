@@ -13,6 +13,7 @@ describe('config-store', () => {
       theme: 'light',
       showHiddenFiles: true,
       dismissedEverythingBanner: true,
+      updateCheckInterval: '1d',
     })
 
     const state = useConfigStore.getState()
@@ -21,11 +22,26 @@ describe('config-store', () => {
     expect(state.dismissedEverythingBanner).toBe(true)
   })
 
+  it('persists the update check interval through save_config', async () => {
+    const saveConfig = vi.fn((payload) => payload.config)
+    ipc.override('save_config', saveConfig)
+
+    await useConfigStore.getState().setUpdateCheckInterval('5h')
+
+    expect(useConfigStore.getState().updateCheckInterval).toBe('5h')
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({ updateCheckInterval: '5h' }),
+      }),
+    )
+  })
+
   it('persists the dismissed banner flag through save_config', () => {
     const saveConfig = vi.fn(() => ({
       theme: 'system' as const,
       showHiddenFiles: false,
       dismissedEverythingBanner: true,
+      updateCheckInterval: '1d' as const,
       keybindings: {},
       columns: [],
       layout: {

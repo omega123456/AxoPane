@@ -1,3 +1,5 @@
+import type { UpdateInterval } from '@/lib/update-intervals'
+
 export type ThemePreference = 'system' | 'light' | 'dark'
 export type PaneMode = 'dual' | 'single'
 export type ZoomLevel = '80' | '90' | '100' | '110' | '120' | '125' | '150'
@@ -113,6 +115,7 @@ export type AppConfig = {
   keybindings: Partial<Record<CommandId, Shortcut[]>>
   columns: ColumnConfig[]
   layout: LayoutConfig
+  updateCheckInterval: UpdateInterval
 }
 
 export type SessionTab = {
