@@ -124,12 +124,20 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
 
+      # Restore the cache warmed on main (see ci.yml). Tag-scoped caches are not
+      # reused across releases, so releases only restore and do not save.
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: |
-            src-tauri -> target
+          workspaces: ./src-tauri -> target
+          cache-on-failure: true
+          prefix-key: v0-rust-file-explorer-macos-arm
+          add-job-id-key: false
+          cache-all-crates: true
+          save-if: false
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
@@ -160,7 +168,7 @@ jobs:
           releaseDraft: false
           prerelease: false
           assetNamePattern: '[name]-[version]-[platform]-[arch][setup][ext]'
-          args: --bundles dmg -- --locked
+          args: --target aarch64-apple-darwin --bundles dmg -- --locked
 
   validate-release:
     needs:
