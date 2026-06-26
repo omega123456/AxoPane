@@ -11,11 +11,25 @@ import {
   ChevronRight,
   ChevronUp,
   Copy,
+  Cpu,
+  Database,
+  Disc,
   Download,
   Eye,
   EyeOff,
   File,
+  FileArchive,
+  FileAudio,
+  FileCode2,
+  FileCog,
+  FileImage,
+  FileText,
+  FileType,
+  FileVideo,
   Folder,
+  FolderCog,
+  FolderDown,
+  FolderGit2,
   FolderOpen,
   GripVertical,
   Info,
@@ -34,6 +48,7 @@ import {
   SquareCheckBig,
   SkipForward,
   Sun,
+  Type,
   X,
   XCircle,
 } from 'lucide-react'
@@ -55,11 +70,25 @@ export const ChevronDownIcon = withDefaults(ChevronDown)
 export const ChevronRightIcon = withDefaults(ChevronRight)
 export const ChevronUpIcon = withDefaults(ChevronUp)
 export const CopyIcon = withDefaults(Copy)
+export const CpuIcon = withDefaults(Cpu)
+export const DatabaseIcon = withDefaults(Database)
+export const DiscIcon = withDefaults(Disc)
 export const DownloadIcon = withDefaults(Download)
 export const EyeIcon = withDefaults(Eye)
 export const EyeOffIcon = withDefaults(EyeOff)
 export const FileIcon = withDefaults(File)
+export const FileArchiveIcon = withDefaults(FileArchive)
+export const FileAudioIcon = withDefaults(FileAudio)
+export const FileCode2Icon = withDefaults(FileCode2)
+export const FileCogIcon = withDefaults(FileCog)
+export const FileImageIcon = withDefaults(FileImage)
+export const FileTextIcon = withDefaults(FileText)
+export const FileTypeIcon = withDefaults(FileType)
+export const FileVideoIcon = withDefaults(FileVideo)
 export const FolderIcon = withDefaults(Folder)
+export const FolderCogIcon = withDefaults(FolderCog)
+export const FolderDownIcon = withDefaults(FolderDown)
+export const FolderGit2Icon = withDefaults(FolderGit2)
 export const FolderOpenIcon = withDefaults(FolderOpen)
 export const GripVerticalIcon = withDefaults(GripVertical)
 export const InfoIcon = withDefaults(Info)
@@ -78,5 +107,6 @@ export const SquareCheckIcon = withDefaults(SquareCheckBig)
 export const SquareIcon = withDefaults(Square)
 export const SkipForwardIcon = withDefaults(SkipForward)
 export const SunIcon = withDefaults(Sun)
+export const TypeIcon = withDefaults(Type)
 export const XIcon = withDefaults(X)
 export const XCircleIcon = withDefaults(XCircle)

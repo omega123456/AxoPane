@@ -11,6 +11,13 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`phase-8-browsing-${mode}.png`)
   })
 
+  test(`file types ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.fileTypes[mode])
+    await expect(page.getByRole('region', { name: 'Left pane' })).toBeVisible()
+    await expect(page.getByRole('row', { name: /installer\.exe/ }).first()).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`phase-8-file-types-${mode}.png`)
+  })
+
   test(`loading ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.loading[mode])
     await expect(page.getByRole('status', { name: 'Loading folder' }).first()).toBeVisible()

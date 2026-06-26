@@ -66,6 +66,21 @@
   --color-file-code: #1f97a6;
   --color-file-code-soft: rgba(31, 151, 166, 0.14);
   --color-file-code-border: rgba(31, 151, 166, 0.35);
+  --color-file-web: #e0734d;
+  --color-file-web-soft: rgba(224, 115, 77, 0.14);
+  --color-file-web-border: rgba(224, 115, 77, 0.35);
+  --color-file-office: #6c7ae0;
+  --color-file-office-soft: rgba(108, 122, 224, 0.14);
+  --color-file-office-border: rgba(108, 122, 224, 0.35);
+  --color-file-image: #d6588b;
+  --color-file-image-soft: rgba(214, 88, 139, 0.14);
+  --color-file-image-border: rgba(214, 88, 139, 0.35);
+  --color-file-audio: #b06cd6;
+  --color-file-audio-soft: rgba(176, 108, 214, 0.14);
+  --color-file-audio-border: rgba(176, 108, 214, 0.35);
+  --color-file-font: #5a8f7b;
+  --color-file-font-soft: rgba(90, 143, 123, 0.14);
+  --color-file-font-border: rgba(90, 143, 123, 0.35);
 
   --text-2xs: 0.625rem;
   --text-2xs--line-height: 0.875rem;

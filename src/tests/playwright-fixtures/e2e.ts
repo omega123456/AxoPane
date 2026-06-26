@@ -12,6 +12,7 @@ import {
   expandedQueueSeedSnapshot,
   expandedQueueSnapshot,
 } from './queue'
+import { fileTypesListDir } from './file-types'
 
 type CommandMap = Partial<{
   [CommandName in keyof IpcCommandMap]: IpcCommandMap[CommandName]['response']
@@ -78,6 +79,22 @@ export const screenshotScenarios = {
     dark: {
       commands: {
         load_config: darkConfig,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+    },
+  },
+  fileTypes: {
+    light: {
+      commands: {
+        load_config: lightConfig,
+        list_dir: fileTypesListDir,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+    },
+    dark: {
+      commands: {
+        load_config: darkConfig,
+        list_dir: fileTypesListDir,
         queue_snapshot: emptyQueueSnapshot,
       },
     },

@@ -1,6 +1,7 @@
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import { columnDefinitions } from '@/lib/columns'
-import { AlertTriangleIcon, FileIcon, FolderIcon } from '@/components/icons'
+import { AlertTriangleIcon } from '@/components/icons'
+import { EntryIcon } from '@/components/icons/EntryIcon'
 import { useLayoutStore } from '@/stores/layout-store'
 import { SizeValue } from './SizeValue'
 
@@ -88,11 +89,7 @@ export function FileRow({
             return (
               <span key={column.key} className={definition.className}>
                 <span className="flex min-w-0 items-center gap-2">
-                  {entry.isDir ? (
-                    <FolderIcon className="h-4 w-4 shrink-0 text-accent-blue-light dark:text-accent-blue" />
-                  ) : (
-                    <FileIcon className="h-4 w-4 shrink-0 text-accent-blue-light dark:text-accent-blue" />
-                  )}
+                  <EntryIcon entry={entry} />
                   <input
                     ref={renameInputRef}
                     aria-label={`Rename ${entry.name}`}
@@ -184,11 +181,7 @@ export function FileRow({
           return (
             <span key={column.key} className={definition.className}>
               <span className="flex min-w-0 items-center gap-2">
-                {entry.isDir ? (
-                  <FolderIcon className="h-4 w-4 shrink-0 text-accent-blue-light dark:text-accent-blue" />
-                ) : (
-                  <FileIcon className="h-4 w-4 shrink-0 text-accent-blue-light dark:text-accent-blue" />
-                )}
+                <EntryIcon entry={entry} />
                 <span className="truncate text-light-text dark:text-dark-text">{entry.name}</span>
               </span>
             </span>
