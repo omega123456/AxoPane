@@ -216,12 +216,18 @@ mod platform {
 #[cfg(all(windows, feature = "test-utils"))]
 pub use platform::*;
 
+// Non-Windows targets never have Everything. This stub mirrors the Windows API
+// surface (including the unused `Available` / `NotReady` variants) so `size::mod`
+// compiles identically across platforms; it always reports the unavailable
+// fallback. The variants are `pub`, so they raise no dead-code warnings.
 #[cfg(not(windows))]
 mod platform {
     use std::path::Path;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum EverythingAvailability {
+        Available,
+        NotReady,
         Unavailable,
     }
 

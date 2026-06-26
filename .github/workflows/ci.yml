@@ -60,6 +60,12 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      # The Rust build embeds the frontend via `generate_context!`, which requires
+      # `frontendDist` (../dist) to exist. `cargo build` does not run the Tauri
+      # `beforeBuildCommand`, so build the frontend explicitly first.
+      - name: Build frontend
+        run: pnpm exec vite build
+
       - name: Build Rust release binary
         run: cargo build --release --locked --target aarch64-apple-darwin --manifest-path src-tauri/Cargo.toml
 
@@ -99,6 +105,12 @@ jobs:
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
+
+      # The Rust build embeds the frontend via `generate_context!`, which requires
+      # `frontendDist` (../dist) to exist. `cargo build` does not run the Tauri
+      # `beforeBuildCommand`, so build the frontend explicitly first.
+      - name: Build frontend
+        run: pnpm exec vite build
 
       - name: Build Rust release binary
         run: cargo build --release --locked --manifest-path src-tauri/Cargo.toml
