@@ -51,6 +51,17 @@ export const defaultKeymap: Record<CommandId, Shortcut[]> = {
   showSettings: ['Ctrl+,'],
 }
 
+// Clipboard commands are bound to the platform's native editing shortcuts
+// (Ctrl/⌘+C/X/V) and are intentionally NOT remappable. Treating them as the OS
+// default keeps them off the conflict checker (they previously surfaced spurious
+// "Conflict" badges when a stale persisted override shadowed them) and stops the
+// Settings UI from offering a rebind that would fight the platform.
+export const reservedCommands: ReadonlySet<CommandId> = new Set(['copy', 'cut', 'paste'])
+
+export function isReservedCommand(commandId: CommandId) {
+  return reservedCommands.has(commandId)
+}
+
 type KeymapMigration = {
   commandId: CommandId
   from: Shortcut[]
@@ -237,7 +248,14 @@ export function mergeKeymap(overrides: Partial<Record<CommandId, Shortcut[]>>) {
   return Object.fromEntries(
     Object.entries(defaultKeymap).map(([commandId, defaults]) => [
       commandId,
-      (overrides[commandId as CommandId] ?? defaults).map(normalizeShortcut).filter(Boolean),
+      // Reserved commands always use their OS default, ignoring any persisted
+      // override so they can never be rebound or shadowed.
+      (isReservedCommand(commandId as CommandId)
+        ? defaults
+        : (overrides[commandId as CommandId] ?? defaults)
+      )
+        .map(normalizeShortcut)
+        .filter(Boolean),
     ]),
   ) as Record<CommandId, Shortcut[]>
 }
@@ -277,6 +295,9 @@ export function migrateKeymap(overrides: Partial<Record<CommandId, Shortcut[]>>)
 export function findKeybindingConflicts(keymap: Record<CommandId, Shortcut[]>) {
   const seen = new Map<Shortcut, CommandId[]>()
   for (const [commandId, shortcuts] of Object.entries(keymap) as [CommandId, Shortcut[]][]) {
+    if (isReservedCommand(commandId)) {
+      continue
+    }
     for (const shortcut of shortcuts) {
       const normalized = normalizeShortcut(shortcut)
       if (!normalized) {

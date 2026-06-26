@@ -8,7 +8,21 @@ function applyZoom(zoom: ZoomLevel) {
   if (typeof document === 'undefined') {
     return
   }
-  document.documentElement.style.setProperty('zoom', String(Number(zoom) / 100))
+  const factor = Number(zoom) / 100
+  const root = document.documentElement
+  root.style.setProperty('zoom', String(factor))
+  // `zoom` scales rendered size but `100vh` still resolves to the unzoomed
+  // viewport, so a zoomed root would render taller than the window and scroll
+  // the whole page (pane/tree internal scrolling never engages). Counter-scale
+  // the root height so its rendered height (height * factor) stays exactly one
+  // viewport, then chain an explicit height through body/#root so the app shell
+  // fills it. Runtime geometry only — no static token can express 100/factor.
+  root.style.height = `${100 / factor}vh`
+  document.body.style.height = '100%'
+  const appRoot = document.getElementById('root')
+  if (appRoot) {
+    appRoot.style.height = '100%'
+  }
 }
 
 export const defaultColumns: ColumnConfig[] = [

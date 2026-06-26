@@ -23,6 +23,7 @@ import {
   detectPlatformOs,
   findKeybindingConflicts,
   formatShortcutLabel,
+  isReservedCommand,
   mergeKeymap,
 } from '@/lib/keymap'
 import type {
@@ -216,259 +217,280 @@ function SettingsModalContent() {
 
           <div className="min-h-0 flex-1 overflow-auto px-8 py-6">
             <div className="mx-auto w-full max-w-settings-content">
-            {section === 'layout' ? (
-              <div>
-                <SectionLabel className="mb-3">View</SectionLabel>
-                <SettingRow
-                  title="Show hidden files"
-                  description="Include hidden and system items in directory listings"
-                  control={
-                    <ToggleSwitch
-                      label="Show hidden files"
-                      checked={draft.showHiddenFiles}
-                      onChange={(value) =>
-                        updateDraft((current) => ({ ...current, showHiddenFiles: value }))
-                      }
-                    />
-                  }
-                />
-                <SettingRow
-                  fixedCopy
-                  title="Theme"
-                  description="Choose how the explorer matches your desktop appearance"
-                  control={
-                    <SegmentedControl
-                      ariaLabel="Theme"
-                      value={draft.theme}
-                      onChange={(value) =>
-                        updateDraft((current) => ({
-                          ...current,
-                          theme: value,
-                        }))
-                      }
-                      options={[
-                        { value: 'system', label: 'System' },
-                        { value: 'light', label: 'Light' },
-                        { value: 'dark', label: 'Dark' },
-                      ]}
-                    />
-                  }
-                />
-                <SettingRow
-                  fixedCopy
-                  title="Zoom"
-                  description="Scale the entire interface up or down"
-                  control={
-                    <SelectField
-                      ariaLabel="Zoom"
-                      value={draft.layout.zoom}
-                      onChange={(value) => updateLayout('zoom', value)}
-                      options={zoomLevels.map((level) => ({
-                        value: level,
-                        label: `${level}%`,
-                      }))}
-                    />
-                  }
-                />
-                <SectionLabel className="mb-3 mt-5">Layout</SectionLabel>
-                <SettingRow
-                  fixedCopy
-                  title="Tree width"
-                  description="Width of the folder sidebar"
-                  control={
-                    <SegmentedControl
-                      ariaLabel="Tree width"
-                      value={draft.layout.treeWidth}
-                      onChange={(value) => updateLayout('treeWidth', value)}
-                      options={[
-                        { value: 'compact', label: 'Compact' },
-                        { value: 'default', label: 'Default' },
-                        { value: 'wide', label: 'Wide' },
-                      ]}
-                    />
-                  }
-                />
-                <SettingRow
-                  fixedCopy
-                  title="Default pane mode"
-                  description="How panes open on a fresh window"
-                  control={
-                    <SegmentedControl
-                      ariaLabel="Default pane mode"
-                      value={draft.layout.defaultPaneMode}
-                      onChange={(value) => updateLayout('defaultPaneMode', value)}
-                      options={[
-                        { value: 'dual', label: 'Dual' },
-                        { value: 'single', label: 'Single' },
-                      ]}
-                    />
-                  }
-                />
-                <SettingRow
-                  title="Restore last session"
-                  description="Reopen the previous tabs and folders on launch"
-                  control={
-                    <ToggleSwitch
-                      label="Restore last session"
-                      checked={draft.layout.restoreSession}
-                      onChange={(value) => updateLayout('restoreSession', value)}
-                    />
-                  }
-                />
-              </div>
-            ) : null}
-
-            {section === 'columns' ? (
-              <div>
-                <SectionLabel className="mb-3">Columns</SectionLabel>
-                <ul className="space-y-1">
-                  {draft.columns.map((column) => (
-                    <li
-                      key={column.key}
-                      draggable
-                      onDragStart={(event) => event.dataTransfer.setData('text/column', column.key)}
-                      onDragOver={(event) => event.preventDefault()}
-                      onDrop={(event) => {
-                        const fromKey = event.dataTransfer.getData(
-                          'text/column',
-                        ) as ColumnConfig['key']
-                        updateDraft((current) => {
-                          const columns = [...current.columns]
-                          const fromIndex = columns.findIndex((item) => item.key === fromKey)
-                          const toIndex = columns.findIndex((item) => item.key === column.key)
-                          if (fromIndex === -1 || toIndex === -1) {
-                            return current
-                          }
-                          const [moved] = columns.splice(fromIndex, 1)
-                          columns.splice(toIndex, 0, moved)
-                          return { ...current, columns }
-                        })
-                      }}
-                      className="flex items-center justify-between rounded-tab border border-light-border bg-light-surface px-3 py-2.5 dark:border-dark-border dark:bg-dark-surface"
-                    >
-                      <span className="inline-flex items-center gap-3 text-row text-light-text dark:text-dark-text">
-                        <GripVerticalIcon className="size-4 text-light-text-muted dark:text-dark-text-muted" />
-                        {columnDefinitions[column.key].label}
-                      </span>
+              {section === 'layout' ? (
+                <div>
+                  <SectionLabel className="mb-3">View</SectionLabel>
+                  <SettingRow
+                    title="Show hidden files"
+                    description="Include hidden and system items in directory listings"
+                    control={
                       <ToggleSwitch
-                        label={`${columnDefinitions[column.key].label} column`}
-                        checked={column.visible}
-                        onChange={() =>
-                          updateDraft((current) => ({
-                            ...current,
-                            columns: current.columns.map((item) =>
-                              item.key === column.key ? { ...item, visible: !item.visible } : item,
-                            ),
-                          }))
+                        label="Show hidden files"
+                        checked={draft.showHiddenFiles}
+                        onChange={(value) =>
+                          updateDraft((current) => ({ ...current, showHiddenFiles: value }))
                         }
                       />
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
-            {section === 'keybindings' ? (
-              <div>
-                <SectionLabel className="mb-3">Shortcuts</SectionLabel>
-                <label className="mb-4 flex items-center gap-2 rounded-tab border border-light-border-strong bg-light-surface px-3 py-2 dark:border-dark-border-strong dark:bg-dark-surface">
-                  <SearchIcon className="size-4 text-light-text-muted dark:text-dark-text-muted" />
-                  <input
-                    aria-label="Search keybindings"
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    className="w-full bg-transparent text-row text-light-text focus-visible:outline-none dark:text-dark-text"
+                    }
                   />
-                </label>
-                <table className="w-full table-fixed">
-                  <thead>
-                    <tr className="border-b border-light-border text-left text-2xs uppercase tracking-wide text-light-text-muted dark:border-dark-border dark:text-dark-text-muted">
-                      <th className="pb-2 font-bold">Command</th>
-                      <th className="w-44 pb-2 font-bold">Shortcut</th>
-                      <th className="w-28 pb-2 font-bold">Status</th>
-                      <th className="w-20 pb-2 text-right font-bold">Reset</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredCommands.map((commandId) => {
-                      const shortcut = draft.bindings[commandId][0] ?? ''
-                      const hasConflict = (conflicts.get(commandId)?.length ?? 0) > 0
-                      return (
-                        <tr
-                          key={commandId}
-                          className="border-b border-light-border dark:border-dark-border"
-                        >
-                          <td className="py-3 text-row text-light-text dark:text-dark-text">
-                            {commandLabels[commandId]}
-                          </td>
-                          <td className="py-3">
-                            <button
-                              type="button"
-                              aria-label={`Capture ${commandLabels[commandId]} shortcut`}
-                              onClick={() => setCapturing(commandId)}
-                              onKeyDown={(event) => {
-                                if (capturing !== commandId) {
-                                  return
-                                }
+                  <SettingRow
+                    fixedCopy
+                    title="Theme"
+                    description="Choose how the explorer matches your desktop appearance"
+                    control={
+                      <SegmentedControl
+                        ariaLabel="Theme"
+                        value={draft.theme}
+                        onChange={(value) =>
+                          updateDraft((current) => ({
+                            ...current,
+                            theme: value,
+                          }))
+                        }
+                        options={[
+                          { value: 'system', label: 'System' },
+                          { value: 'light', label: 'Light' },
+                          { value: 'dark', label: 'Dark' },
+                        ]}
+                      />
+                    }
+                  />
+                  <SettingRow
+                    fixedCopy
+                    title="Zoom"
+                    description="Scale the entire interface up or down"
+                    control={
+                      <SelectField
+                        ariaLabel="Zoom"
+                        value={draft.layout.zoom}
+                        onChange={(value) => updateLayout('zoom', value)}
+                        options={zoomLevels.map((level) => ({
+                          value: level,
+                          label: `${level}%`,
+                        }))}
+                      />
+                    }
+                  />
+                  <SectionLabel className="mb-3 mt-5">Layout</SectionLabel>
+                  <SettingRow
+                    fixedCopy
+                    title="Tree width"
+                    description="Width of the folder sidebar"
+                    control={
+                      <SegmentedControl
+                        ariaLabel="Tree width"
+                        value={draft.layout.treeWidth}
+                        onChange={(value) => updateLayout('treeWidth', value)}
+                        options={[
+                          { value: 'compact', label: 'Compact' },
+                          { value: 'default', label: 'Default' },
+                          { value: 'wide', label: 'Wide' },
+                        ]}
+                      />
+                    }
+                  />
+                  <SettingRow
+                    fixedCopy
+                    title="Default pane mode"
+                    description="How panes open on a fresh window"
+                    control={
+                      <SegmentedControl
+                        ariaLabel="Default pane mode"
+                        value={draft.layout.defaultPaneMode}
+                        onChange={(value) => updateLayout('defaultPaneMode', value)}
+                        options={[
+                          { value: 'dual', label: 'Dual' },
+                          { value: 'single', label: 'Single' },
+                        ]}
+                      />
+                    }
+                  />
+                  <SettingRow
+                    title="Restore last session"
+                    description="Reopen the previous tabs and folders on launch"
+                    control={
+                      <ToggleSwitch
+                        label="Restore last session"
+                        checked={draft.layout.restoreSession}
+                        onChange={(value) => updateLayout('restoreSession', value)}
+                      />
+                    }
+                  />
+                </div>
+              ) : null}
 
-                                event.preventDefault()
-                                const shortcutValue = captureShortcut(event.nativeEvent)
-                                if (!shortcutValue) {
-                                  return
-                                }
+              {section === 'columns' ? (
+                <div>
+                  <SectionLabel className="mb-3">Columns</SectionLabel>
+                  <ul className="space-y-1">
+                    {draft.columns.map((column) => (
+                      <li
+                        key={column.key}
+                        draggable
+                        onDragStart={(event) =>
+                          event.dataTransfer.setData('text/column', column.key)
+                        }
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={(event) => {
+                          const fromKey = event.dataTransfer.getData(
+                            'text/column',
+                          ) as ColumnConfig['key']
+                          updateDraft((current) => {
+                            const columns = [...current.columns]
+                            const fromIndex = columns.findIndex((item) => item.key === fromKey)
+                            const toIndex = columns.findIndex((item) => item.key === column.key)
+                            if (fromIndex === -1 || toIndex === -1) {
+                              return current
+                            }
+                            const [moved] = columns.splice(fromIndex, 1)
+                            columns.splice(toIndex, 0, moved)
+                            return { ...current, columns }
+                          })
+                        }}
+                        className="flex items-center justify-between rounded-tab border border-light-border bg-light-surface px-3 py-2.5 dark:border-dark-border dark:bg-dark-surface"
+                      >
+                        <span className="inline-flex items-center gap-3 text-row text-light-text dark:text-dark-text">
+                          <GripVerticalIcon className="size-4 text-light-text-muted dark:text-dark-text-muted" />
+                          {columnDefinitions[column.key].label}
+                        </span>
+                        <ToggleSwitch
+                          label={`${columnDefinitions[column.key].label} column`}
+                          checked={column.visible}
+                          onChange={() =>
+                            updateDraft((current) => ({
+                              ...current,
+                              columns: current.columns.map((item) =>
+                                item.key === column.key
+                                  ? { ...item, visible: !item.visible }
+                                  : item,
+                              ),
+                            }))
+                          }
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
 
-                                setCapturing(null)
-                                updateDraft((current) => ({
-                                  ...current,
-                                  bindings: {
-                                    ...current.bindings,
-                                    [commandId]: [shortcutValue],
-                                  },
-                                }))
-                              }}
-                              className="w-36 rounded-tab border border-light-border-strong bg-light-surface px-3 py-2 text-left font-mono text-row text-light-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border-strong dark:bg-dark-surface dark:text-dark-text"
-                            >
-                              {capturing === commandId
-                                ? 'Press keys...'
-                                : shortcut
-                                  ? formatShortcutLabel(shortcut, os)
-                                  : 'Unassigned'}
-                            </button>
-                          </td>
-                          <td className="py-3 text-row text-light-text-muted dark:text-dark-text-muted">
-                            {hasConflict ? (
-                              <span className="inline-flex items-center gap-2 text-accent-amber">
-                                <AlertTriangleIcon className="size-4" />
-                                Conflict
-                              </span>
+              {section === 'keybindings' ? (
+                <div>
+                  <SectionLabel className="mb-3">Shortcuts</SectionLabel>
+                  <label className="mb-4 flex items-center gap-2 rounded-tab border border-light-border-strong bg-light-surface px-3 py-2 dark:border-dark-border-strong dark:bg-dark-surface">
+                    <SearchIcon className="size-4 text-light-text-muted dark:text-dark-text-muted" />
+                    <input
+                      aria-label="Search keybindings"
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      className="w-full bg-transparent text-row text-light-text focus-visible:outline-none dark:text-dark-text"
+                    />
+                  </label>
+                  <table className="w-full table-fixed">
+                    <thead>
+                      <tr className="border-b border-light-border text-left text-2xs uppercase tracking-wide text-light-text-muted dark:border-dark-border dark:text-dark-text-muted">
+                        <th className="pb-2 font-bold">Command</th>
+                        <th className="w-44 pb-2 font-bold">Shortcut</th>
+                        <th className="w-28 pb-2 font-bold">Status</th>
+                        <th className="w-20 pb-2 text-right font-bold">Reset</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredCommands.map((commandId) => {
+                        const shortcut = draft.bindings[commandId][0] ?? ''
+                        const hasConflict = (conflicts.get(commandId)?.length ?? 0) > 0
+                        const reserved = isReservedCommand(commandId)
+                        return (
+                          <tr
+                            key={commandId}
+                            className="border-b border-light-border dark:border-dark-border"
+                          >
+                            <td className="py-3 text-row text-light-text dark:text-dark-text">
+                              {commandLabels[commandId]}
+                            </td>
+                            {reserved ? (
+                              <>
+                                <td className="py-3">
+                                  <span className="inline-block w-36 rounded-tab border border-light-border bg-light-panel px-3 py-2 text-left font-mono text-row text-light-text-muted dark:border-dark-border dark:bg-dark-panel dark:text-dark-text-muted">
+                                    {formatShortcutLabel(shortcut, os)}
+                                  </span>
+                                </td>
+                                <td className="py-3 text-row text-light-text-muted dark:text-dark-text-muted">
+                                  System default
+                                </td>
+                                <td className="py-3" />
+                              </>
                             ) : (
-                              'OK'
+                              <>
+                                <td className="py-3">
+                                  <button
+                                    type="button"
+                                    aria-label={`Capture ${commandLabels[commandId]} shortcut`}
+                                    onClick={() => setCapturing(commandId)}
+                                    onKeyDown={(event) => {
+                                      if (capturing !== commandId) {
+                                        return
+                                      }
+
+                                      event.preventDefault()
+                                      const shortcutValue = captureShortcut(event.nativeEvent)
+                                      if (!shortcutValue) {
+                                        return
+                                      }
+
+                                      setCapturing(null)
+                                      updateDraft((current) => ({
+                                        ...current,
+                                        bindings: {
+                                          ...current.bindings,
+                                          [commandId]: [shortcutValue],
+                                        },
+                                      }))
+                                    }}
+                                    className="w-36 rounded-tab border border-light-border-strong bg-light-surface px-3 py-2 text-left font-mono text-row text-light-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border-strong dark:bg-dark-surface dark:text-dark-text"
+                                  >
+                                    {capturing === commandId
+                                      ? 'Press keys...'
+                                      : shortcut
+                                        ? formatShortcutLabel(shortcut, os)
+                                        : 'Unassigned'}
+                                  </button>
+                                </td>
+                                <td className="py-3 text-row text-light-text-muted dark:text-dark-text-muted">
+                                  {hasConflict ? (
+                                    <span className="inline-flex items-center gap-2 text-accent-amber">
+                                      <AlertTriangleIcon className="size-4" />
+                                      Conflict
+                                    </span>
+                                  ) : (
+                                    'OK'
+                                  )}
+                                </td>
+                                <td className="py-3 text-right">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateDraft((current) => ({
+                                        ...current,
+                                        bindings: {
+                                          ...current.bindings,
+                                          [commandId]: [...defaultKeymap[commandId]],
+                                        },
+                                      }))
+                                    }
+                                    className="rounded-tab px-3 py-2 text-row text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-soft"
+                                  >
+                                    Reset
+                                  </button>
+                                </td>
+                              </>
                             )}
-                          </td>
-                          <td className="py-3 text-right">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                updateDraft((current) => ({
-                                  ...current,
-                                  bindings: {
-                                    ...current.bindings,
-                                    [commandId]: [...defaultKeymap[commandId]],
-                                  },
-                                }))
-                              }
-                              className="rounded-tab px-3 py-2 text-row text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-soft"
-                            >
-                              Reset
-                            </button>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : null}
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>

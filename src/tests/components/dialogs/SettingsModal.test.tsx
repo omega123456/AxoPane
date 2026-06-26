@@ -56,6 +56,26 @@ describe('SettingsModal', () => {
     })
   })
 
+  it('renders reserved clipboard commands as non-remappable system defaults', () => {
+    useSettingsStore.getState().open('keybindings')
+
+    render(<SettingsModal />)
+
+    // Reserved commands have no capture or reset affordance and are labelled as
+    // platform defaults rather than ever flagged as conflicts.
+    expect(screen.queryByRole('button', { name: 'Capture Copy shortcut' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Capture Cut shortcut' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Capture Paste shortcut' })).toBeNull()
+
+    const copyRow = screen.getByText('Copy').closest('tr')
+    if (!copyRow) {
+      throw new Error('Copy row missing')
+    }
+    expect(within(copyRow).getByText('System default')).toBeInTheDocument()
+    expect(within(copyRow).queryByRole('button', { name: 'Reset' })).toBeNull()
+    expect(within(copyRow).queryByText('Conflict')).toBeNull()
+  })
+
   it('keeps theme, hidden-file, and column changes in draft on Windows until Save', async () => {
     const user = userEvent.setup()
     const saveConfig = vi.fn((payload) => payload.config)

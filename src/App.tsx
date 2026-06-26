@@ -205,7 +205,7 @@ function App() {
   }, [activePane, activeSelection, volumes])
 
   return (
-    <main className="flex h-screen flex-col overflow-hidden bg-light-window font-ui text-light-text dark:bg-dark-window dark:text-dark-text">
+    <main className="flex h-full flex-col overflow-hidden bg-light-window font-ui text-light-text dark:bg-dark-window dark:text-dark-text">
       <UpdateBanner />
       <AppFrame
         commandBar={
@@ -226,7 +226,7 @@ function App() {
             <FilePane paneId={activePaneId} />
           </div>
         ) : (
-          <div className="grid min-h-0 flex-1 grid-cols-2 divide-x divide-light-border dark:divide-dark-border">
+          <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-1 divide-x divide-light-border dark:divide-dark-border">
             <FilePane paneId="left" />
             <FilePane paneId="right" />
           </div>

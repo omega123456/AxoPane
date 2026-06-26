@@ -251,7 +251,7 @@ export function FilePane({ paneId }: FilePaneProps) {
       ref={paneRef}
       data-pane-id={paneId}
       aria-label={pane.title}
-      className={`relative flex min-h-0 flex-col bg-light-surface dark:bg-dark-surface ${
+      className={`relative flex h-full min-h-0 flex-col bg-light-surface dark:bg-dark-surface ${
         isActivePane ? 'outline outline-1 outline-accent-blue-border' : ''
       }`}
       onMouseDown={() => setActivePane(paneId)}

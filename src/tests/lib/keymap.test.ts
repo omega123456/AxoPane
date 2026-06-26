@@ -4,6 +4,7 @@ import {
   defaultKeymap,
   findKeybindingConflicts,
   formatShortcutLabel,
+  isReservedCommand,
   migrateKeymap,
   mergeKeymap,
   normalizeShortcut,
@@ -43,6 +44,19 @@ describe('keymap', () => {
     expect(migrated.migrated).toBe(true)
     expect(migrated.bindings.refresh).toEqual(['Ctrl+R'])
     expect(findKeybindingConflicts(migrated.bindings)).toEqual([])
+  })
+
+  it('forces reserved clipboard commands to OS defaults and keeps them off the conflict checker', () => {
+    expect(isReservedCommand('copy')).toBe(true)
+    expect(isReservedCommand('cut')).toBe(true)
+    expect(isReservedCommand('paste')).toBe(true)
+    expect(isReservedCommand('rename')).toBe(false)
+
+    // A stale persisted override for a reserved command is ignored: it always
+    // resolves back to the platform default and never surfaces a conflict.
+    const merged = mergeKeymap({ copy: ['Ctrl+Shift+C'], copyToOtherPane: ['Ctrl+C'] })
+    expect(merged.copy).toEqual(['Ctrl+C'])
+    expect(findKeybindingConflicts(merged)).toEqual([])
   })
 
   it('prefers the current default owner when a stale conflict still exists', () => {

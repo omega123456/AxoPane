@@ -21,7 +21,7 @@ export function FolderTree() {
 
   return (
     <aside
-      className={`flex shrink-0 flex-col border-r border-light-border bg-light-tree dark:border-dark-border dark:bg-dark-tree ${
+      className={`flex min-h-0 shrink-0 flex-col border-r border-light-border bg-light-tree dark:border-dark-border dark:bg-dark-tree ${
         treeWidth === 'compact' ? 'w-44' : treeWidth === 'wide' ? 'w-64' : 'w-tree'
       }`}
     >

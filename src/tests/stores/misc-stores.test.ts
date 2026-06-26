@@ -88,6 +88,11 @@ describe('layout-store', () => {
 
   it('updates scalar layout preferences and toggles individual columns', () => {
     const setProperty = vi.spyOn(document.documentElement.style, 'setProperty')
+    // Provide the app root so applyZoom exercises its height-compensation path
+    // (the zoomed root is counter-scaled so 100vh content never scrolls the page).
+    const appRoot = document.createElement('div')
+    appRoot.id = 'root'
+    document.body.appendChild(appRoot)
     useLayoutStore.getState().setTreeWidth('wide')
     useLayoutStore.getState().setDefaultPaneMode('single')
     useLayoutStore.getState().setRestoreSession(false)
@@ -101,6 +106,9 @@ describe('layout-store', () => {
       zoom: '125',
     })
     expect(setProperty).toHaveBeenCalledWith('zoom', '1.25')
+    expect(document.documentElement.style.height).toBe('80vh')
+    expect(appRoot.style.height).toBe('100%')
+    appRoot.remove()
     setProperty.mockRestore()
     expect(useLayoutStore.getState().columns.find((column) => column.key === 'created')).toEqual({
       key: 'created',
