@@ -18,6 +18,7 @@ import { ErrorState } from '@/components/states/ErrorState'
 import { EverythingBanner } from '@/components/states/EverythingBanner'
 import { LoadingSkeleton } from '@/components/states/LoadingSkeleton'
 import { PermissionDenied } from '@/components/states/PermissionDenied'
+import { useDelayedFlag } from '@/lib/use-delayed-flag'
 import { useElementVirtualizer } from '@/lib/use-element-virtualizer'
 import { renameEntryInPane } from '@/lib/file-actions'
 import { log } from '@/lib/app-log-commands'
@@ -79,6 +80,10 @@ export function FilePane({ paneId }: FilePaneProps) {
   const ignoreNextRenameBlurRef = useRef(false)
   const isActivePane = activePaneId === paneId
   const os = detectPlatformOs()
+  // Suppress the loading skeleton on fast loads: it only appears once loading
+  // has lasted longer than a second, avoiding a jarring flash-and-replace when
+  // a folder resolves in a few milliseconds.
+  const showSkeleton = useDelayedFlag(pane.loading, 1000)
 
   const hasParent = getParentPath(pane.path) !== null
   const parentOffset = hasParent ? 1 : 0
@@ -299,7 +304,7 @@ export function FilePane({ paneId }: FilePaneProps) {
       <EverythingBanner />
       <BreadcrumbBar pane={pane} isActive={isActivePane} />
       <HeaderRow pane={pane} />
-      {pane.loading ? (
+      {showSkeleton ? (
         <div className="min-h-0 flex-1 overflow-auto">
           <LoadingSkeleton />
         </div>

@@ -49,10 +49,46 @@ beforeEach(() => {
 })
 
 describe('FilePane state rendering', () => {
-  it('renders the loading skeleton', () => {
-    seedPane({ loading: true })
-    render(<FilePane paneId="left" />)
-    expect(screen.getByRole('status', { name: 'Loading folder' })).toBeInTheDocument()
+  it('renders the loading skeleton only after loading persists past the delay', () => {
+    vi.useFakeTimers()
+    try {
+      seedPane({ loading: true })
+      render(<FilePane paneId="left" />)
+
+      // Suppressed initially to avoid a flash on fast loads.
+      expect(screen.queryByRole('status', { name: 'Loading folder' })).not.toBeInTheDocument()
+
+      act(() => {
+        vi.advanceTimersByTime(1000)
+      })
+
+      expect(screen.getByRole('status', { name: 'Loading folder' })).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not flash the loading skeleton when a load resolves quickly', () => {
+    vi.useFakeTimers()
+    try {
+      seedPane({ loading: true })
+      const view = render(<FilePane paneId="left" />)
+
+      act(() => {
+        vi.advanceTimersByTime(200)
+      })
+      // Loading finishes before the delay elapses.
+      seedPane({ loading: false })
+      view.rerender(<FilePane paneId="left" />)
+
+      act(() => {
+        vi.advanceTimersByTime(1000)
+      })
+
+      expect(screen.queryByRole('status', { name: 'Loading folder' })).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('renders the empty state at a root with no parent', () => {
