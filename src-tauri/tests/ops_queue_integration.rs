@@ -1,8 +1,8 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use std::fs;
 use std::collections::VecDeque;
+use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -792,6 +792,7 @@ fn cancelling_a_pending_op_marks_it_cancelled_immediately() {
         .find(|snapshot| snapshot.progress.operation_id == pending)
         .expect("pending op");
     assert_eq!(snapshot.progress.status, OpStatus::Pending);
+    assert_eq!(snapshot.progress.item_names, vec!["park.txt".to_string()]);
 
     service.cancel_op(&pending);
     wait_for(&service, &pending, |progress| {
@@ -909,7 +910,9 @@ fn events_for_mid_copy_rate(rate_window: Duration) -> Vec<OpProgress> {
         }],
     });
 
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
     let snapshots = events.lock().expect("events lock").clone();
     snapshots
 }
@@ -958,7 +961,9 @@ fn zero_rate_window_recomputes_each_chunk() {
         }],
     });
 
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
 
     let active_chunk_rates: Vec<u64> = events
         .lock()
@@ -1009,7 +1014,9 @@ fn large_rate_window_holds_prior_rate_between_chunks() {
         }],
     });
 
-    wait_for(&service, &id, |progress| progress.status == OpStatus::Completed);
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
 
     let active_chunk_rates: Vec<u64> = events
         .lock()

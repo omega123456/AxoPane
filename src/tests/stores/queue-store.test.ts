@@ -15,6 +15,7 @@ function progress(overrides: Partial<OpProgress>): OpProgress {
     kind: 'copy',
     status: 'active',
     sourceDir: 'C:\\src',
+    itemNames: ['a.txt'],
     destinationDir: 'D:\\dst',
     totalItems: 10,
     completedItems: 4,

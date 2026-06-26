@@ -44,6 +44,16 @@ function verb(operation: OpProgress) {
   return operation.kind === 'move' ? 'Moving' : 'Copying'
 }
 
+function itemSummary(itemNames: string[]) {
+  if (itemNames.length === 0) {
+    return null
+  }
+  if (itemNames.length <= 2) {
+    return itemNames.join(', ')
+  }
+  return `${itemNames.slice(0, 2).join(', ')}, +${formatCount(itemNames.length - 2)} more`
+}
+
 export function JobCard({
   operation,
   throughputHistory,
@@ -76,6 +86,8 @@ export function JobCard({
   const isCancelled = operation.status === 'cancelled'
   const isConflict = operation.status === 'conflict' || hasConflict
   const isPending = operation.status === 'pending'
+  const queuedItems = itemSummary(operation.itemNames)
+  const showQueuedItems = isPending && queuedItems !== null
   const showChart = !isPending && !isPaused && !isCompleted && !isFailed && !isCancelled
   // Show the chart's smoothed leading-edge rate (not the raw instantaneous one)
   // so the number matches the curve and stays calm; fall back before any history.
@@ -205,6 +217,11 @@ export function JobCard({
               </span>
             </div>
             <div className="mt-1 truncate font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
+              {showQueuedItems ? (
+                <span className="mb-1 block truncate text-light-text-soft dark:text-dark-text-soft">
+                  {queuedItems}
+                </span>
+              ) : null}
               {operation.sourceDir}{' '}
               <ArrowRightIcon className="inline h-3 w-3 align-[-2px] text-accent-blue-light dark:text-accent-blue" />{' '}
               {operation.destinationDir}

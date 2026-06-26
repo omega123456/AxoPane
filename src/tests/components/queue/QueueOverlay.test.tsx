@@ -13,6 +13,7 @@ function progress(overrides: Partial<OpProgress>): OpProgress {
     kind: 'copy',
     status: 'active',
     sourceDir: 'C:\\src',
+    itemNames: ['a.txt'],
     destinationDir: 'D:\\dst',
     totalItems: 4,
     completedItems: 1,
@@ -230,6 +231,56 @@ describe('QueueOverlay', () => {
     expect(reorderSpy).toHaveBeenCalled()
     await waitFor(() => {
       expect(useQueueStore.getState().order).toEqual(['op-2', 'op-1'])
+    })
+  })
+
+  it('keeps the panel responsive after cancelling a queued operation', async () => {
+    const user = userEvent.setup()
+    const cancelSpy = vi.fn(() => undefined)
+    ipc.override('cancel_op', cancelSpy)
+    ipc.override('queue_snapshot', [
+      { progress: progress({ operationId: 'op-1', status: 'active' }), conflict: null },
+      {
+        progress: progress({
+          operationId: 'op-2',
+          status: 'pending',
+          itemNames: ['queued.zip'],
+          currentFileName: null,
+          bytesPerSecond: 0,
+        }),
+        conflict: null,
+      },
+    ])
+    render(<QueueOverlay />)
+    await screen.findByRole('button', { name: 'Expand transfer queue' })
+
+    act(() => {
+      useQueueStore.getState().setExpanded(true)
+    })
+    await screen.findByRole('region', { name: 'Transfer queue' })
+
+    await user.click(screen.getAllByRole('button', { name: /Cancel/ })[1])
+    expect(cancelSpy).toHaveBeenCalledWith({ id: 'op-2' })
+
+    act(() => {
+      ipc.emit(
+        'queue://progress',
+        progress({
+          operationId: 'op-2',
+          status: 'cancelled',
+          itemNames: ['queued.zip'],
+          currentFileName: null,
+          bytesPerSecond: 0,
+        }),
+      )
+    })
+
+    await waitFor(() => {
+      expect(useQueueStore.getState().operations['op-2'].status).toBe('cancelled')
+    })
+    await user.click(screen.getByRole('button', { name: /Fewer details/ }))
+    await waitFor(() => {
+      expect(useQueueStore.getState().expanded).toBe(false)
     })
   })
 })

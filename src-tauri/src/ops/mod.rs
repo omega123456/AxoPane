@@ -94,6 +94,7 @@ pub struct OpProgress {
     pub kind: OpKind,
     pub status: OpStatus,
     pub source_dir: String,
+    pub item_names: Vec<String>,
     pub destination_dir: String,
     pub total_items: u64,
     pub completed_items: u64,
@@ -177,6 +178,7 @@ impl OpState {
                 .first()
                 .map(|item| parent_dir(&item.source_path))
                 .unwrap_or_default(),
+            item_names: self.items.iter().map(|item| item.name.clone()).collect(),
             destination_dir: self.destination_dir.to_string_lossy().into_owned(),
             total_items: self.total_items,
             completed_items: self.completed_items,
@@ -526,28 +528,30 @@ impl OpsService {
     }
 
     pub fn cancel_op(&self, id: &str) {
-        let notify = if let Some(op) = self.op(id) {
+        let (notify, schedule_removal) = if let Some(op) = self.op(id) {
             let mut guard = op.lock().expect("op lock");
             if guard.is_terminal() {
-                false
+                (false, false)
             } else if matches!(guard.status, OpStatus::Pending) {
                 // Never started: mark cancelled immediately.
                 guard.status = OpStatus::Cancelled;
                 guard.completed_at = Some(Instant::now());
                 self.emit_progress(&guard);
-                self.schedule_auto_remove_for(id);
-                false
+                (false, true)
             } else {
                 guard.cancel.store(true, Ordering::Relaxed);
                 guard.pause.store(false, Ordering::Relaxed);
-                true
+                (true, false)
             }
         } else {
-            false
+            (false, false)
         };
 
         if notify {
             self.resolver.notify_all();
+        }
+        if schedule_removal {
+            self.schedule_auto_remove_for(id);
         }
     }
 

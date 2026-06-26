@@ -242,6 +242,7 @@ export type OpProgress = {
   kind: OpKind
   status: OpStatus
   sourceDir: string
+  itemNames: string[]
   destinationDir: string
   totalItems: number
   completedItems: number

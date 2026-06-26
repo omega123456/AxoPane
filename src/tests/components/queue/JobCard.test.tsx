@@ -10,6 +10,7 @@ function progress(overrides: Partial<OpProgress>): OpProgress {
     kind: 'copy',
     status: 'active',
     sourceDir: 'C:\\src',
+    itemNames: ['master-reel-final.mkv'],
     destinationDir: 'D:\\dst',
     totalItems: 1248,
     completedItems: 812,
@@ -201,6 +202,27 @@ describe('JobCard', () => {
     await user.click(screen.getByRole('button', { name: 'Move job down' }))
     expect(onMoveUp).toHaveBeenCalled()
     expect(onMoveDown).toHaveBeenCalled()
+  })
+
+  it('shows queued item names separately from the source folder', () => {
+    render(
+      <JobCard
+        operation={progress({
+          status: 'pending',
+          sourceDir: 'C:\\Downloads',
+          itemNames: ['Season 01', 'poster.jpg', 'notes.txt'],
+          destinationDir: 'D:\\Sorted',
+        })}
+        throughputHistory={samples([0, 0])}
+        throughputPeak={0}
+        hasConflict={false}
+        reorderable
+        {...noopHandlers()}
+      />,
+    )
+
+    expect(screen.getByText('Season 01, poster.jpg, +1 more')).toBeInTheDocument()
+    expect(screen.getByText(/C:\\Downloads/)).toHaveTextContent('D:\\Sorted')
   })
 
   it('shows a resolve action while in conflict and keeps the chart progressbar', async () => {
