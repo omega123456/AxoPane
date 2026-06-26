@@ -3,12 +3,13 @@ mod common;
 
 use std::fs;
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use file_explorer_lib::size::everything::{EverythingAvailability, EverythingHandle};
 use file_explorer_lib::size::manual::{calculate, ManualSizeError};
-use file_explorer_lib::size::{SizeBackend, SizeService};
+use file_explorer_lib::size::{SizeBackend, SizeService, SizeSource, SizeStateKind, SizeUpdate};
 use file_explorer_lib::volumes::VolumeInfo;
 use tempfile::tempdir;
 
@@ -145,4 +146,105 @@ fn capability_selection_prefers_network_na_and_manual_fallback() {
     }
 
     assert_eq!(common::bootstrap_message(), "phase-1-common");
+}
+
+#[test]
+fn size_service_request_paths_emits_manual_success_lifecycle() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    fs::write(root.join("alpha.bin"), vec![1_u8; 7]).expect("alpha");
+    fs::create_dir(root.join("nested")).expect("nested");
+    fs::write(root.join("nested").join("beta.bin"), vec![1_u8; 5]).expect("beta");
+
+    let service = SizeService::new(Duration::from_secs(1));
+    let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
+    let updates_for_emitter = updates.clone();
+
+    service.request_paths(vec![root.to_string_lossy().into_owned()], move |update| {
+        updates_for_emitter
+            .lock()
+            .expect("updates lock")
+            .push(update);
+    });
+
+    wait_for_updates(&updates, |updates| {
+        updates
+            .iter()
+            .any(|update| update.state == SizeStateKind::Ready)
+    });
+
+    let recorded = updates.lock().expect("updates lock").clone();
+    assert_eq!(recorded[0].state, SizeStateKind::Unknown);
+    assert_eq!(recorded[1].state, SizeStateKind::Calculating);
+    let ready = recorded
+        .iter()
+        .find(|update| update.state == SizeStateKind::Ready)
+        .expect("ready update");
+    assert_eq!(ready.source, SizeSource::Manual);
+    assert_eq!(ready.size_bytes, Some(12));
+}
+
+#[test]
+fn size_service_reports_missing_manual_path_as_error() {
+    let fixture = tempdir().expect("temp dir");
+    let missing = fixture.path().join("missing");
+    let service = SizeService::new(Duration::from_millis(100));
+    let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
+    let updates_for_emitter = updates.clone();
+
+    service.request_paths(vec![missing.to_string_lossy().into_owned()], move |update| {
+        updates_for_emitter
+            .lock()
+            .expect("updates lock")
+            .push(update);
+    });
+
+    wait_for_updates(&updates, |updates| {
+        updates
+            .iter()
+            .any(|update| update.state == SizeStateKind::Error)
+    });
+
+    let recorded = updates.lock().expect("updates lock").clone();
+    assert!(recorded
+        .iter()
+        .any(|update| update.source == SizeSource::Manual && update.state == SizeStateKind::Error));
+}
+
+#[cfg(windows)]
+#[test]
+fn size_service_reports_fixture_network_paths_as_not_applicable() {
+    let service = SizeService::new(Duration::from_secs(1));
+    let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
+    let updates_for_emitter = updates.clone();
+
+    service.request_paths(vec!["Z:\\".to_string()], move |update| {
+        updates_for_emitter
+            .lock()
+            .expect("updates lock")
+            .push(update);
+    });
+
+    let recorded = updates.lock().expect("updates lock").clone();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].state, SizeStateKind::Na);
+    assert_eq!(recorded[0].source, SizeSource::Network);
+    assert_eq!(recorded[0].size_bytes, None);
+}
+
+fn wait_for_updates(
+    updates: &Arc<Mutex<Vec<SizeUpdate>>>,
+    predicate: impl Fn(&[SizeUpdate]) -> bool,
+) {
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < deadline {
+        let recorded = updates.lock().expect("updates lock").clone();
+        if predicate(&recorded) {
+            return;
+        }
+        drop(recorded);
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    panic!("timed out waiting for size updates");
 }

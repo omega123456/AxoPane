@@ -6,8 +6,8 @@ use std::thread;
 use std::time::Duration;
 
 use file_explorer_lib::persist::{
-    load_json_or_default, write_json_atomic_with_failure, ColumnConfig, Config, LayoutConfig,
-    PersistedStore, Session, SessionPane, SessionTab,
+    load_json_or_default, write_json_atomic, write_json_atomic_with_failure, ColumnConfig, Config,
+    LayoutConfig, PersistedStore, PersistenceState, Session, SessionPane, SessionTab,
 };
 use tempfile::tempdir;
 
@@ -228,4 +228,80 @@ fn legacy_config_without_layout_fields_gets_defaults() {
     assert!(loaded.keybindings.is_empty());
     assert_eq!(loaded.columns.len(), 6);
     assert_eq!(loaded.layout, LayoutConfig::default());
+}
+
+#[test]
+fn missing_persistence_files_load_defaults_and_state_creates_directory() {
+    let fixture = tempdir().expect("temp dir");
+    let config_dir = fixture.path().join("nested").join("config");
+
+    let state = PersistenceState::load(&config_dir).expect("persistence state");
+
+    assert!(config_dir.is_dir());
+    assert_eq!(state.config.current(), Config::default());
+    assert_eq!(state.session.current().active_pane, "left");
+}
+
+#[test]
+fn explicit_flush_writes_current_value_immediately() {
+    let fixture = tempdir().expect("temp dir");
+    let path = fixture.path().join("config.json");
+    let store =
+        PersistedStore::<Config>::load(path.clone(), Duration::from_secs(60)).expect("store");
+
+    store.replace(Config {
+        theme: "dark".to_string(),
+        show_hidden_files: true,
+        ..Config::default()
+    });
+    store.flush_now().expect("flush");
+
+    let loaded: Config = load_json_or_default(&path).expect("load config");
+    assert_eq!(loaded.theme, "dark");
+    assert!(loaded.show_hidden_files);
+}
+
+#[test]
+fn malformed_json_surfaces_a_serde_error() {
+    let fixture = tempdir().expect("temp dir");
+    let path = fixture.path().join("config.json");
+    fs::write(&path, b"{not valid json").expect("seed invalid");
+
+    let error = load_json_or_default::<Config>(&path).expect_err("invalid json");
+    assert!(!error.to_string().is_empty());
+}
+
+#[test]
+fn debounced_writes_keep_only_the_latest_generation() {
+    let fixture = tempdir().expect("temp dir");
+    let path = fixture.path().join("config.json");
+    let store =
+        PersistedStore::<Config>::load(path.clone(), Duration::from_millis(20)).expect("store");
+
+    store.replace(Config {
+        theme: "light".to_string(),
+        show_hidden_files: false,
+        ..Config::default()
+    });
+    store.replace(Config {
+        theme: "dark".to_string(),
+        show_hidden_files: true,
+        ..Config::default()
+    });
+    thread::sleep(Duration::from_millis(80));
+
+    let loaded: Config = load_json_or_default(&path).expect("load config");
+    assert_eq!(loaded.theme, "dark");
+    assert!(loaded.show_hidden_files);
+}
+
+#[test]
+fn atomic_writer_creates_missing_parent_directories() {
+    let fixture = tempdir().expect("temp dir");
+    let path = fixture.path().join("deep").join("config.json");
+
+    write_json_atomic(&path, &Config::default()).expect("write config");
+
+    let loaded: Config = load_json_or_default(&path).expect("load config");
+    assert_eq!(loaded, Config::default());
 }

@@ -1,10 +1,13 @@
 import { beforeEach, vi } from 'vitest'
+import { waitFor } from '@testing-library/react'
 import { ipc } from '@/tests/ipc-mock'
 import { canExecuteCommand, executeCommand } from '@/lib/commands'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
+import { useClipboardStore } from '@/stores/clipboard-store'
 import { useInlineRenameStore } from '@/stores/inline-rename-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
+import { useSettingsStore } from '@/stores/settings-store'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 
 function entry(name: string, isDir = true): DirectoryEntry {
@@ -29,7 +32,9 @@ beforeEach(() => {
   usePanesStore.getState().reset()
   useSelectionStore.getState().reset()
   useActionDialogStore.getState().close()
+  useClipboardStore.getState().clearClipboard()
   useInlineRenameStore.getState().reset()
+  useSettingsStore.getState().close()
   usePanesStore.setState((state) => ({
     panes: {
       ...state.panes,
@@ -37,6 +42,10 @@ beforeEach(() => {
         ...state.panes.left,
         path: 'C:\\root',
         entries: [entry('Alpha'), entry('Beta', false)],
+      },
+      right: {
+        ...state.panes.right,
+        path: 'D:\\dest',
       },
     },
   }))
@@ -66,6 +75,65 @@ describe('executeCommand file actions', () => {
     executeCommand('open', 'left', 'Beta')
 
     expect(openPath).toHaveBeenCalledWith({ path: 'C:\\root\\Beta' })
+  })
+
+  it('navigates folders and parent rows through the pane store', () => {
+    const navigatePane = vi.fn()
+    const goUp = vi.fn()
+    usePanesStore.setState({ navigatePane, goUp })
+
+    executeCommand('open', 'left', 'Alpha')
+    executeCommand('open', 'left', '..')
+
+    expect(navigatePane).toHaveBeenCalledWith('left', 'C:\\root\\Alpha')
+    expect(goUp).toHaveBeenCalledWith('left')
+  })
+
+  it('runs pane-level commands for go-up, refresh, clear-filter, select-all, and settings', () => {
+    const goUp = vi.fn()
+    const refreshEverything = vi.fn()
+    const clearFilter = vi.fn()
+    usePanesStore.setState({ goUp, refreshEverything, clearFilter })
+
+    executeCommand('goUp', 'left')
+    executeCommand('refresh', 'left')
+    executeCommand('clearFilter', 'left')
+    executeCommand('selectAll', 'left')
+    executeCommand('showSettings', 'left')
+
+    expect(goUp).toHaveBeenCalledWith('left')
+    expect(refreshEverything).toHaveBeenCalledWith('left')
+    expect(clearFilter).toHaveBeenCalledWith('left')
+    expect(useSelectionStore.getState().selections.left.selectedIds).toEqual(['Alpha', 'Beta'])
+    expect(useSettingsStore.getState().isOpen).toBe(true)
+    expect(useSettingsStore.getState().section).toBe('keybindings')
+  })
+
+  it('requests manual size only for the focused directory target', () => {
+    const requestManualSize = vi.fn()
+    usePanesStore.setState({ requestManualSize })
+
+    executeCommand('calculateSize', 'left', 'Alpha')
+    executeCommand('calculateSize', 'left')
+
+    expect(requestManualSize).toHaveBeenCalledWith('left', 'Alpha')
+    expect(requestManualSize).toHaveBeenCalledOnce()
+  })
+
+  it('opens directories in a new tab or the opposite pane', () => {
+    const openTabFromPath = vi.fn()
+    const navigatePane = vi.fn()
+    usePanesStore.setState({ openTabFromPath, navigatePane })
+
+    executeCommand('openInNewTab', 'left', 'Alpha')
+    executeCommand('openInNewTab', 'left', 'Beta')
+    executeCommand('openInOtherPane', 'left', 'Alpha')
+    executeCommand('openInOtherPane', 'left', 'Beta')
+
+    expect(openTabFromPath).toHaveBeenCalledOnce()
+    expect(openTabFromPath).toHaveBeenCalledWith('left', 'C:\\root\\Alpha')
+    expect(navigatePane).toHaveBeenCalledOnce()
+    expect(navigatePane).toHaveBeenCalledWith('right', 'C:\\root\\Alpha')
   })
 
   it('starts an inline rename seeded with the target name', () => {
@@ -103,6 +171,49 @@ describe('executeCommand file actions', () => {
     })
   })
 
+  it('copies and cuts selected entries into the clipboard', () => {
+    useSelectionStore.getState().setSelection('left', ['Beta'], 'Beta', 'Beta')
+
+    executeCommand('copy', 'left')
+    expect(useClipboardStore.getState()).toMatchObject({
+      mode: 'copy',
+      sourcePaneId: 'left',
+      entries: [{ id: 'Beta' }],
+    })
+
+    executeCommand('cut', 'left', 'Alpha')
+    expect(useClipboardStore.getState()).toMatchObject({
+      mode: 'move',
+      sourcePaneId: 'left',
+      entries: [{ id: 'Alpha' }],
+    })
+  })
+
+  it('pastes clipboard entries through the queue and clears moved items after enqueue', async () => {
+    const startOp = vi.fn(() => 'op-1')
+    ipc.override('start_op', startOp)
+    useClipboardStore.getState().setClipboard('move', 'right', [entry('Beta', false)])
+
+    executeCommand('paste', 'left')
+    await waitFor(() => expect(startOp).toHaveBeenCalledOnce())
+
+    expect(startOp).toHaveBeenCalledWith({
+      kind: 'move',
+      destinationDir: 'C:\\root',
+      items: [{ sourcePath: 'C:\\root\\Beta', name: 'Beta', sizeBytes: 10 }],
+    })
+    expect(useClipboardStore.getState().entries).toEqual([])
+  })
+
+  it('does not paste with an empty clipboard', () => {
+    const startOp = vi.fn(() => 'op-1')
+    ipc.override('start_op', startOp)
+
+    executeCommand('paste', 'left')
+
+    expect(startOp).not.toHaveBeenCalled()
+  })
+
   it('opens a transfer confirmation for copy-to-other-pane with source and destination folders', () => {
     usePanesStore.setState((state) => ({
       panes: {
@@ -126,10 +237,48 @@ describe('executeCommand file actions', () => {
     })
   })
 
+  it('uses the focused item as the transfer target when there is no explicit target or selection', () => {
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: { ...state.panes.left, focusedEntryId: 'Alpha' },
+      },
+    }))
+
+    executeCommand('moveToOtherPane', 'left')
+
+    expect(useActionDialogStore.getState().dialog).toMatchObject({
+      kind: 'transferConfirm',
+      operation: 'move',
+      targets: [{ id: 'Alpha', path: 'C:\\root\\Alpha' }],
+    })
+  })
+
   it('gates rename/delete on a target or selection', () => {
     expect(canExecuteCommand('rename', 'left', 'Alpha')).toBe(true)
     expect(canExecuteCommand('delete', 'left')).toBe(false)
     useSelectionStore.getState().setSelection('left', ['Alpha'], 'Alpha', 'Alpha')
     expect(canExecuteCommand('delete', 'left')).toBe(true)
+  })
+
+  it('gates commands that require clipboard entries, directory targets, or transfer candidates', () => {
+    expect(canExecuteCommand('paste', 'left')).toBe(false)
+    useClipboardStore.getState().setClipboard('copy', 'left', [entry('Beta', false)])
+    expect(canExecuteCommand('paste', 'left')).toBe(true)
+
+    expect(canExecuteCommand('selectAll', 'left')).toBe(true)
+    expect(canExecuteCommand('openInNewTab', 'left', 'Alpha')).toBe(true)
+    expect(canExecuteCommand('openInOtherPane', 'left', 'Beta')).toBe(false)
+    expect(canExecuteCommand('calculateSize', 'left', 'Alpha')).toBe(true)
+    expect(canExecuteCommand('copyToOtherPane', 'left')).toBe(false)
+
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: { ...state.panes.left, focusedEntryId: 'Beta' },
+      },
+    }))
+    expect(canExecuteCommand('moveToOtherPane', 'left')).toBe(true)
+    expect(canExecuteCommand('showSettings', 'left')).toBe(true)
   })
 })

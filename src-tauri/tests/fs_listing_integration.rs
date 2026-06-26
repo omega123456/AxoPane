@@ -263,3 +263,77 @@ fn display_paths_strip_windows_extended_unc_prefix() {
         );
     }
 }
+
+#[test]
+fn list_dir_sorts_by_size_items_type_modified_and_created() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    fs::create_dir(root.join("empty-folder")).expect("empty folder");
+    fs::create_dir(root.join("full-folder")).expect("full folder");
+    fs::write(root.join("full-folder").join("child.txt"), "x").expect("child");
+    fs::write(root.join("small.txt"), "1").expect("small");
+    fs::write(root.join("large.log"), "12345").expect("large");
+    fs::write(root.join("no-extension"), "123").expect("plain");
+
+    let by_size = list_names(root, SortKey::Size, SortDirection::Desc);
+    assert_eq!(by_size, vec!["full-folder", "empty-folder", "large.log", "no-extension", "small.txt"]);
+
+    let by_items = list_names(root, SortKey::Items, SortDirection::Desc);
+    assert_eq!(by_items[..2], ["full-folder", "empty-folder"]);
+
+    let by_type = list_names(root, SortKey::Type, SortDirection::Asc);
+    assert_eq!(by_type, vec!["empty-folder", "full-folder", "no-extension", "large.log", "small.txt"]);
+
+    let by_modified = list_names(root, SortKey::Modified, SortDirection::Asc);
+    assert_eq!(by_modified.len(), 5);
+
+    let by_created = list_names(root, SortKey::Created, SortDirection::Desc);
+    assert_eq!(by_created.len(), 5);
+}
+
+#[test]
+fn list_dir_reports_readonly_and_plain_file_type_metadata() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    let plain = root.join("LICENSE");
+    fs::write(&plain, "license").expect("plain");
+    let mut permissions = fs::metadata(&plain).expect("metadata").permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(&plain, permissions).expect("readonly");
+
+    let response = list_dir(&ListDirOptions {
+        path: root.to_string_lossy().into_owned(),
+        sort_key: SortKey::Name,
+        sort_direction: SortDirection::Asc,
+        filter: String::new(),
+        show_hidden: false,
+    })
+    .expect("list dir");
+
+    let entry = response
+        .entries
+        .iter()
+        .find(|entry| entry.name == "LICENSE")
+        .expect("plain file");
+    assert_eq!(entry.type_label, "File");
+    assert!(entry.attributes.iter().any(|attribute| attribute == "readonly"));
+
+    let mut permissions = fs::metadata(&plain).expect("metadata").permissions();
+    permissions.set_readonly(false);
+    fs::set_permissions(&plain, permissions).expect("restore writable");
+}
+
+fn list_names(root: &Path, sort_key: SortKey, sort_direction: SortDirection) -> Vec<String> {
+    list_dir(&ListDirOptions {
+        path: root.to_string_lossy().into_owned(),
+        sort_key,
+        sort_direction,
+        filter: String::new(),
+        show_hidden: true,
+    })
+    .expect("list dir")
+    .entries
+    .into_iter()
+    .map(|entry| entry.name)
+    .collect()
+}

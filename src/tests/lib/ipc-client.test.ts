@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, vi } from 'vitest'
+import { waitFor } from '@testing-library/react'
 import { ipc } from '@/tests/ipc-mock'
 import { invokeCommand, subscribeToEvent } from '@/lib/ipc/client'
 import {
@@ -179,11 +180,65 @@ describe('ipc client (Playwright web build fallback)', () => {
 })
 
 describe('playwright ipc mock module', () => {
+  afterEach(() => {
+    delete (globalThis as { __PLAYWRIGHT_IPC_SCENARIO__?: unknown }).__PLAYWRIGHT_IPC_SCENARIO__
+  })
+
   it('returns fixture responses and manages listeners', async () => {
     await expect(invokePlaywrightCommand('list_volumes', undefined)).resolves.toBeInstanceOf(Array)
     const handler = vi.fn()
     const unlisten = await listenPlaywrightEvent('dir://patch', handler)
     unlisten()
     expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('uses scenario command overrides, command errors, and async delays', async () => {
+    const overriddenVolumes = [
+      {
+        mountRoot: 'Z:\\',
+        label: 'Archive',
+        totalBytes: 100,
+        freeBytes: 25,
+        isNetwork: true,
+      },
+    ]
+    ;(globalThis as { __PLAYWRIGHT_IPC_SCENARIO__?: unknown }).__PLAYWRIGHT_IPC_SCENARIO__ = {
+      commands: { list_volumes: overriddenVolumes },
+      commandErrors: { open_path: 'Cannot open this file' },
+      delaysMs: { list_volumes: 1 },
+    }
+
+    await expect(invokePlaywrightCommand('list_volumes', undefined)).resolves.toEqual(
+      overriddenVolumes,
+    )
+    await expect(invokePlaywrightCommand('open_path', { path: 'C:\\blocked.txt' })).rejects.toThrow(
+      'Cannot open this file',
+    )
+  })
+
+  it('replays scripted scenario events to all current listeners', async () => {
+    ;(globalThis as { __PLAYWRIGHT_IPC_SCENARIO__?: unknown }).__PLAYWRIGHT_IPC_SCENARIO__ = {
+      events: {
+        'size://state': [
+          {
+            path: 'C:\\folder',
+            state: 'ready',
+            source: 'manual',
+            sizeBytes: 42,
+          },
+        ],
+      },
+    }
+    const first = vi.fn()
+    const second = vi.fn()
+
+    const unlistenFirst = await listenPlaywrightEvent('size://state', first)
+    const unlistenSecond = await listenPlaywrightEvent('size://state', second)
+
+    await waitFor(() => expect(first).toHaveBeenCalled())
+    expect(second).toHaveBeenCalled()
+
+    unlistenFirst()
+    unlistenSecond()
   })
 })

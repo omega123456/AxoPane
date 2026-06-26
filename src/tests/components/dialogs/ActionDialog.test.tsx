@@ -71,6 +71,26 @@ describe('ActionDialog', () => {
     expect(useActionDialogStore.getState().dialog).not.toBeNull()
   })
 
+  it('creates a file on Enter and dismisses prompts on Escape', async () => {
+    const user = userEvent.setup()
+    const create = vi.fn((payload: { parent: string; name: string }) => dir(payload.name, false))
+    ipc.override('create_file', create)
+
+    useActionDialogStore.getState().open({ kind: 'newFile', paneId: 'left' })
+    const { unmount } = render(<ActionDialog />)
+
+    await user.type(screen.getByLabelText('File name'), 'notes.txt{Enter}')
+
+    await waitFor(() => expect(useActionDialogStore.getState().dialog).toBeNull())
+    expect(create).toHaveBeenCalledWith({ parent: 'C:\\root', name: 'notes.txt' })
+
+    unmount()
+    useActionDialogStore.getState().open({ kind: 'newFile', paneId: 'left' })
+    render(<ActionDialog />)
+    await user.keyboard('{Escape}')
+    expect(useActionDialogStore.getState().dialog).toBeNull()
+  })
+
   it('confirms a delete and calls the backend', async () => {
     const user = userEvent.setup()
     const remove = vi.fn(() => undefined)
@@ -91,6 +111,36 @@ describe('ActionDialog', () => {
 
     await waitFor(() => expect(useActionDialogStore.getState().dialog).toBeNull())
     expect(remove).toHaveBeenCalledWith({ paths: ['C:\\root\\a.txt', 'C:\\root\\b.txt'] })
+  })
+
+  it('renders singular delete copy, handles Escape, and shows delete errors', async () => {
+    const user = userEvent.setup()
+    ipc.override('delete_entries', () => {
+      throw new Error('delete was denied')
+    })
+
+    useActionDialogStore.getState().open({
+      kind: 'delete',
+      paneId: 'left',
+      targets: [{ id: 'a', name: 'a.txt', path: 'C:\\root\\a.txt' }],
+    })
+    const { unmount } = render(<ActionDialog />)
+
+    expect(screen.getByText('Delete 1 item?')).toBeInTheDocument()
+    expect(screen.getByText('a.txt')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
+    expect(await screen.findByText('delete was denied')).toBeInTheDocument()
+    expect(useActionDialogStore.getState().dialog).not.toBeNull()
+
+    unmount()
+    useActionDialogStore.getState().open({
+      kind: 'delete',
+      paneId: 'left',
+      targets: [{ id: 'a', name: 'a.txt', path: 'C:\\root\\a.txt' }],
+    })
+    render(<ActionDialog />)
+    await user.keyboard('{Escape}')
+    expect(useActionDialogStore.getState().dialog).toBeNull()
   })
 
   it('confirms a transfer and shows what will move from where to where', async () => {
@@ -128,6 +178,62 @@ describe('ActionDialog', () => {
         { sourcePath: 'C:\\root\\b.txt', name: 'b.txt', sizeBytes: 12 },
       ],
     })
+  })
+
+  it('renders transfer overflow, submits on Enter, and keeps the dialog open on queue errors', async () => {
+    const user = userEvent.setup()
+    const startOp = vi.fn(() => {
+      throw new Error('queue is unavailable')
+    })
+    ipc.override('start_op', startOp)
+
+    useActionDialogStore.getState().open({
+      kind: 'transferConfirm',
+      paneId: 'left',
+      operation: 'copy',
+      sourceDir: 'C:\\root',
+      destinationDir: 'D:\\dest',
+      targets: [
+        { id: 'a', name: 'a.txt', path: 'C:\\root\\a.txt', sizeBytes: null },
+        { id: 'b', name: 'b.txt', path: 'C:\\root\\b.txt', sizeBytes: 12 },
+        { id: 'c', name: 'c.txt', path: 'C:\\root\\c.txt', sizeBytes: 14 },
+        { id: 'd', name: 'd.txt', path: 'C:\\root\\d.txt', sizeBytes: 16 },
+        { id: 'e', name: 'e.txt', path: 'C:\\root\\e.txt', sizeBytes: 18 },
+      ],
+    })
+    const { unmount } = render(<ActionDialog />)
+
+    expect(screen.getByText('Copy 5 items to the other pane?')).toBeInTheDocument()
+    expect(screen.getByText('and 1 more')).toBeInTheDocument()
+
+    await user.keyboard('{Enter}')
+
+    expect(await screen.findByText('queue is unavailable')).toBeInTheDocument()
+    expect(startOp).toHaveBeenCalledWith({
+      kind: 'copy',
+      destinationDir: 'D:\\dest',
+      items: [
+        { sourcePath: 'C:\\root\\a.txt', name: 'a.txt', sizeBytes: 0 },
+        { sourcePath: 'C:\\root\\b.txt', name: 'b.txt', sizeBytes: 12 },
+        { sourcePath: 'C:\\root\\c.txt', name: 'c.txt', sizeBytes: 14 },
+        { sourcePath: 'C:\\root\\d.txt', name: 'd.txt', sizeBytes: 16 },
+        { sourcePath: 'C:\\root\\e.txt', name: 'e.txt', sizeBytes: 18 },
+      ],
+    })
+    expect(useActionDialogStore.getState().dialog).not.toBeNull()
+
+    unmount()
+    useActionDialogStore.getState().open({
+      kind: 'transferConfirm',
+      paneId: 'left',
+      operation: 'copy',
+      sourceDir: 'C:\\root',
+      destinationDir: 'D:\\dest',
+      targets: [{ id: 'a', name: 'a.txt', path: 'C:\\root\\a.txt' }],
+    })
+    render(<ActionDialog />)
+    await user.keyboard('{Escape}')
+    expect(useActionDialogStore.getState().dialog).toBeNull()
   })
 
   it('dismisses on cancel without calling the backend', async () => {

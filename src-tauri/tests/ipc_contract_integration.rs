@@ -7,8 +7,9 @@ use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::events;
 use file_explorer_lib::ipc::mock;
 use file_explorer_lib::ipc::types::{
-    CreateEntryRequest, DeleteEntriesRequest, OpenPathRequest, RenameEntryRequest,
+    CreateEntryRequest, DeleteEntriesRequest, ListDirRequest, OpenPathRequest, RenameEntryRequest,
 };
+use file_explorer_lib::fs::{SortDirection, SortKey};
 use tempfile::tempdir;
 
 #[test]
@@ -16,6 +17,14 @@ fn exposes_mock_contract_data() {
     let shell = mock::initial_shell();
     assert_eq!(shell.panes.len(), 2);
     assert_eq!(shell.tree_roots[0].label, "This PC");
+
+    let config = mock::config();
+    assert_eq!(config.theme, "system");
+    assert!(!config.show_hidden_files);
+
+    let session = mock::session();
+    assert_eq!(session.active_pane, "left");
+    assert_eq!(session.left_path, "C:\\Users\\Omega");
 }
 
 #[test]
@@ -73,6 +82,60 @@ fn create_command_surfaces_errors_as_strings() {
     assert!(error.contains("Failed to create folder"));
 }
 
+#[test]
+fn list_dir_command_surfaces_errors_as_strings() {
+    let fixture = tempdir().expect("temp dir");
+    let missing = fixture.path().join("missing");
+
+    let error = commands::list_dir(ListDirRequest {
+        path: missing.to_string_lossy().into_owned(),
+        sort_key: SortKey::Name,
+        sort_direction: SortDirection::Asc,
+        filter: String::new(),
+        show_hidden: false,
+    })
+    .expect_err("missing directory");
+
+    assert!(error.contains("Failed to load"));
+    assert!(error.contains("missing"));
+}
+
+#[test]
+fn file_rename_and_delete_commands_surface_errors_as_strings() {
+    let fixture = tempdir().expect("temp dir");
+    let parent = fixture.path().to_string_lossy().into_owned();
+    fs::write(fixture.path().join("taken.txt"), "taken").expect("taken");
+    fs::write(fixture.path().join("source.txt"), "source").expect("source");
+
+    let create_error = commands::create_file(CreateEntryRequest {
+        parent: parent.clone(),
+        name: "taken.txt".to_string(),
+    })
+    .expect_err("create conflict");
+    assert!(create_error.contains("Failed to create file"));
+
+    let rename_error = commands::rename_entry(RenameEntryRequest {
+        path: fixture
+            .path()
+            .join("source.txt")
+            .to_string_lossy()
+            .into_owned(),
+        new_name: "taken.txt".to_string(),
+    })
+    .expect_err("rename conflict");
+    assert!(rename_error.contains("Failed to rename"));
+
+    let delete_error = commands::delete_entries(DeleteEntriesRequest {
+        paths: vec![fixture
+            .path()
+            .join("missing.txt")
+            .to_string_lossy()
+            .into_owned()],
+    })
+    .expect_err("delete missing");
+    assert!(delete_error.contains("Failed to delete items"));
+}
+
 #[cfg(feature = "test-utils")]
 #[test]
 fn open_path_command_uses_safe_test_utils_fallback() {
@@ -86,4 +149,17 @@ fn open_path_command_uses_safe_test_utils_fallback() {
     .expect_err("test-utils should block real app launching");
 
     assert!(error.contains("unsupported"));
+}
+
+#[test]
+fn open_path_command_reports_missing_path_before_launching() {
+    let fixture = tempdir().expect("temp dir");
+    let missing = fixture.path().join("missing.txt");
+
+    let error = commands::open_path(OpenPathRequest {
+        path: missing.to_string_lossy().into_owned(),
+    })
+    .expect_err("missing path");
+
+    assert!(error.contains("Failed to open"));
 }
