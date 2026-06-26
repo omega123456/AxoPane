@@ -24,6 +24,7 @@ A cross-platform **dual-pane desktop file explorer** for **Windows and macOS**, 
   - [Stack](#stack)
   - [Project layout](#project-layout)
   - [Contributing](#contributing)
+  - [License](LICENSE)
   - [CLAUDE.md](CLAUDE.md)
 
 ## How it works
@@ -297,3 +298,7 @@ file-explorer/
 1. Complete **[Setup](#setup)** (including Playwright, cargo-nextest, and Rust coverage tools if you run the full suite), then stay on the latest dependencies with `pnpm install` as needed.
 2. Run `pnpm lint`, `pnpm typecheck`, and `pnpm test:all` (Vitest coverage, Rust with llvm-cov, Playwright) before opening a PR.
 3. For behavior that depends on the native shell, verify with `pnpm dev` when possible. See **[CLAUDE.md](CLAUDE.md)** for IPC conventions, styling constraints, and screenshot baseline workflow.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
