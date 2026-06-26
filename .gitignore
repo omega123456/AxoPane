@@ -12,3 +12,4 @@ src-tauri/target
 pnpm-debug.log*
 test-results
 .tmp
+.playwright-mcp

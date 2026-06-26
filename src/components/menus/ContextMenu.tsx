@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import { ChevronRightIcon } from '@/components/icons'
 import { useContextMenuStore } from '@/stores/context-menu-store'
 
@@ -18,6 +18,47 @@ export function ContextMenu() {
     ref.current?.focus()
   }, [menu])
 
+  // Anchor the menu at the cursor, then clamp it into the viewport so a
+  // right-click near the right/bottom edge keeps the menu attached to the
+  // pointer instead of overflowing off-screen. Writing the clamped geometry
+  // straight to the node (rather than via state) keeps this a pure DOM-sync
+  // effect with no extra render.
+  useLayoutEffect(() => {
+    const node = ref.current
+    if (!menu || !node) {
+      return
+    }
+
+    // The app zooms the UI via CSS `zoom` on <html> (see layout-store). Pointer
+    // coordinates (`menu.x/y`), `getBoundingClientRect()` and `innerWidth/
+    // Height` are all in real viewport pixels, but `left`/`top` written on a
+    // node inside the zoomed root are interpreted in *zoomed* units (the browser
+    // multiplies them by the zoom factor). So we do all the geometry math in
+    // real pixels, then divide the final offsets by the zoom factor.
+    const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1
+    const { width, height } = node.getBoundingClientRect()
+    const margin = 8
+    const maxLeft = window.innerWidth - width - margin
+    const maxTop = window.innerHeight - height - margin
+
+    // Flip the menu around the cursor when it would overflow, so a corner stays
+    // pinned to the pointer instead of detaching toward the viewport edge.
+    let left = menu.x
+    if (left > maxLeft) {
+      left = menu.x - width
+    }
+    left = Math.max(margin, Math.min(left, maxLeft))
+
+    let top = menu.y
+    if (top > maxTop) {
+      top = menu.y - height
+    }
+    top = Math.max(margin, Math.min(top, maxTop))
+
+    node.style.left = `${left / zoom}px`
+    node.style.top = `${top / zoom}px`
+  }, [menu])
+
   if (!menu) {
     return null
   }
@@ -29,10 +70,11 @@ export function ContextMenu() {
         role="menu"
         aria-label={menu.title}
         tabIndex={-1}
-        className="absolute w-59 rounded-menu border border-light-border-strong bg-light-window p-1 shadow-window focus-visible:outline-none dark:border-dark-border-strong dark:bg-dark-window"
+        className="absolute w-59 rounded-menu border border-light-border-strong bg-light-window p-1 shadow-menu focus-visible:outline-none dark:border-dark-border-strong dark:bg-dark-window"
         // Styling-constraint exception: runtime geometry only. The menu is
-        // positioned at the cursor (continuous px coords), which no static
-        // utility or @theme token can express. All design-system values
+        // positioned at the cursor (continuous px coords) and clamped into the
+        // viewport by the layout effect above, which no static utility or
+        // @theme token can express. All design-system values
         // (color/spacing/typography/radii) above remain pure Tailwind utilities.
         style={{ left: `${menu.x}px`, top: `${menu.y}px` }}
         onMouseDown={(event) => event.stopPropagation()}
