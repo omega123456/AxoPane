@@ -34,6 +34,19 @@ pub struct InitialShellResponse {
     pub tree_roots: Vec<TreeRoot>,
 }
 
+/// A single log line forwarded from the frontend logger (`app-log-commands.ts`).
+///
+/// `category` defaults to `frontend` and `details` carries the serialized log
+/// context when present.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogFrontendRequest {
+    pub level: String,
+    pub message: String,
+    pub category: Option<String>,
+    pub details: Option<String>,
+}
+
 pub type ListDirRequest = ListDirOptions;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

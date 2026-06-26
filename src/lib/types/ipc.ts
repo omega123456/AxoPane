@@ -294,6 +294,15 @@ export type WatchErrorEvent = {
   message: string
 }
 
+export type FrontendLogLevel = 'debug' | 'info' | 'warn' | 'error'
+
+export type LogFrontendRequest = {
+  level: FrontendLogLevel
+  message: string
+  category?: string
+  details?: string
+}
+
 export type IpcCommandMap = {
   get_initial_shell: {
     request: undefined
@@ -402,6 +411,10 @@ export type IpcCommandMap = {
   has_unfinished_ops: {
     request: undefined
     response: boolean
+  }
+  log_frontend: {
+    request: LogFrontendRequest
+    response: void
   }
 }
 

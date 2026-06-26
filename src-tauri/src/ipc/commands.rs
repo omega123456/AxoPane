@@ -9,8 +9,8 @@ use super::mock;
 use super::types::{
     AppConfig, CancelSizeRequest, CancelSizeResponse, CreateEntryRequest, DeleteEntriesRequest,
     FolderSizeRequest, FolderSizesRequest, InitialShellResponse, ListDirRequest, ListDirResponse,
-    OpIdRequest, OpenPathRequest, RefreshTabRequest, RenameEntryRequest, ReorderOpsRequest,
-    ResolveConflictRequest, SaveConfigRequest, SaveSessionRequest, SessionState,
+    LogFrontendRequest, OpIdRequest, OpenPathRequest, RefreshTabRequest, RenameEntryRequest,
+    ReorderOpsRequest, ResolveConflictRequest, SaveConfigRequest, SaveSessionRequest, SessionState,
     SetTabWatchRequest, SizeStateEvent, StartOpRequest, VolumeInfo,
 };
 use crate::fs::DirectoryEntry;
@@ -282,4 +282,42 @@ pub fn save_session(
 ) -> SessionState {
     state.session.replace(payload.session.clone());
     payload.session
+}
+
+/// Map a frontend level string to a [`log::Level`].
+///
+/// The frontend permits `trace`, which is folded into `Debug`. Unknown values
+/// default to `Info`.
+pub fn frontend_log_level(level: &str) -> log::Level {
+    match level {
+        "error" => log::Level::Error,
+        "warn" => log::Level::Warn,
+        "debug" | "trace" => log::Level::Debug,
+        _ => log::Level::Info,
+    }
+}
+
+/// Compose a single log line from a frontend log request. `category` defaults to
+/// `frontend`; serialized `details` (when present) are appended to the message.
+pub fn format_frontend_log(category: Option<&str>, message: &str, details: Option<&str>) -> String {
+    let category = category.unwrap_or("frontend");
+    match details {
+        Some(details) => format!("[{category}] {message} {details}"),
+        None => format!("[{category}] {message}"),
+    }
+}
+
+/// Forward a frontend log line into the application logger (`tauri-plugin-log`).
+///
+/// The frontend logger (`app-log-commands.ts`) routes every line here so test
+/// runs stay quiet (the line goes to the IPC sink, not the test console) and so
+/// frontend diagnostics share the backend's stdout/webview log targets.
+#[tauri::command]
+pub fn log_frontend(payload: LogFrontendRequest) {
+    let line = format_frontend_log(
+        payload.category.as_deref(),
+        &payload.message,
+        payload.details.as_deref(),
+    );
+    log::log!(frontend_log_level(&payload.level), "{line}");
 }

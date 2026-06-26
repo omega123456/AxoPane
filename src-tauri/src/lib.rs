@@ -97,7 +97,8 @@ pub fn run() {
             commands::resolve_conflict,
             commands::retry_op,
             commands::queue_snapshot,
-            commands::has_unfinished_ops
+            commands::has_unfinished_ops,
+            commands::log_frontend
         ])
         .run(tauri::generate_context!())
         .expect("error while running file explorer application")

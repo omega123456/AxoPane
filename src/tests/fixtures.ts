@@ -215,4 +215,5 @@ export const fixtures: {
   resolve_conflict: undefined,
   queue_snapshot: [],
   has_unfinished_ops: false,
+  log_frontend: undefined,
 }
