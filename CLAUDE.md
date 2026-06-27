@@ -8,18 +8,6 @@ A **super-fast, lightweight, dual-pane cross-OS (Windows + macOS) file explorer*
 
 - **Stack**: Tauri v2 · Rust · React 19 · TypeScript (strict) · Tailwind CSS v4 · pnpm.
 - **Ownership split**: **Rust** owns filesystem/core logic, sorting, in-folder filtering, folder-size capability layer, copy/move queue, fs-watching, volume enumeration, persistence. **React** owns presentation + interaction state (Zustand + Tauri events + a thin typed `invoke()`; TanStack Query only for discrete request/response calls).
-- **Project is currently UNNAMED.** Use the placeholder identifiers in `package.json` / `tauri.conf.json` / `index.html` only. Do **not** reintroduce the prototype's old name "Strata". Set a real bundle identifier before the first signed release.
-
-**Authoritative plan**: `.agent/plans/2026-06-23_dual-pane-file-explorer_plan.md` — implement phase by phase (P0 → P8).
-
-## Design references (FOLLOW FAITHFULLY)
-
-The visual design is **fixed**. Reproduce it faithfully; the **only** thing that changes is iconography.
-
-- **Prototype (React + Tailwind v4)**: `.agent/design/prototype/` — `src/App.jsx` (full dual-pane shell + interaction-state cards) and `src/index.css` (the `@theme {}` design tokens).
-- **Screenshot**: `.agent/design/2026-06-23 23.02.28 claude.ai e64b76d18b31.png`.
-- The prototype's `index.css` `@theme` token block is **ported verbatim** into `src/index.css`. Tokens (e.g. `dark-window`, `tree`, `details`, `sizecol`, `row`, `uxs`) are **locked**.
-- The expanded **copy/move queue panel must match the prototype's `TransferCard`** exactly.
 
 ## Critical Rules for Agents
 
