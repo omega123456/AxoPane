@@ -19,7 +19,9 @@ for (const mode of ['light', 'dark'] as const) {
   })
 
   test(`loading ${mode}`, async ({ page }) => {
+    await page.clock.install()
     await gotoScenario(page, screenshotScenarios.loading[mode])
+    await page.clock.fastForward(1_001)
     await expect(page.getByRole('status', { name: 'Loading folder' }).first()).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`folder-loading-state-${mode}.png`)
   })

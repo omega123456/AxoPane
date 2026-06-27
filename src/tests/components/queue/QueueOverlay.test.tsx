@@ -36,9 +36,12 @@ beforeEach(() => {
 })
 
 describe('QueueOverlay', () => {
-  it('renders nothing when there is no queue work', () => {
+  it('renders nothing when there is no queue work', async () => {
     const { container } = render(<QueueOverlay />)
-    expect(container).toBeEmptyDOMElement()
+    await waitFor(() => {
+      expect(useQueueStore.getState().order).toEqual([])
+      expect(container).toBeEmptyDOMElement()
+    })
   })
 
   it('hydrates from the queue snapshot on mount', async () => {

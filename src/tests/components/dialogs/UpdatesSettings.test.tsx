@@ -18,12 +18,20 @@ beforeEach(() => {
   useUpdaterStore.getState().dismiss()
 })
 
+async function renderUpdatesSettings(status?: ReturnType<typeof useUpdaterStore.getState>['status']) {
+  if (status) {
+    useUpdaterStore.setState({ status })
+  }
+
+  render(<UpdatesSettings value="1d" onChange={vi.fn()} />)
+  await waitFor(() =>
+    expect(screen.getByTestId('updates-app-version')).toHaveTextContent('0.1.0'),
+  )
+}
+
 describe('UpdatesSettings', () => {
   it('shows the running app version', async () => {
-    render(<UpdatesSettings value="1d" onChange={vi.fn()} />)
-    await waitFor(() =>
-      expect(screen.getByTestId('updates-app-version')).toHaveTextContent('0.1.0'),
-    )
+    await renderUpdatesSettings()
   })
 
   it('triggers a manual check from the idle state', async () => {
@@ -56,14 +64,13 @@ describe('UpdatesSettings', () => {
     ['up-to-date', 'updates-up-to-date'],
     ['installing', 'updates-installing'],
   ] as const)('renders the %s status', async (status, testid) => {
-    useUpdaterStore.setState({ status })
-    render(<UpdatesSettings value="1d" onChange={vi.fn()} />)
+    await renderUpdatesSettings(status)
     expect(screen.getByTestId(testid)).toBeInTheDocument()
   })
 
-  it('renders an error status with a retry affordance', () => {
+  it('renders an error status with a retry affordance', async () => {
     useUpdaterStore.setState({ status: 'error', error: 'network down' })
-    render(<UpdatesSettings value="1d" onChange={vi.fn()} />)
+    await renderUpdatesSettings()
     expect(screen.getByTestId('updates-error')).toHaveTextContent('network down')
     expect(screen.getByTestId('updates-check-button')).toBeInTheDocument()
   })

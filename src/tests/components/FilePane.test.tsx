@@ -78,8 +78,10 @@ describe('FilePane state rendering', () => {
         vi.advanceTimersByTime(200)
       })
       // Loading finishes before the delay elapses.
-      seedPane({ loading: false })
-      view.rerender(<FilePane paneId="left" />)
+      act(() => {
+        seedPane({ loading: false })
+        view.rerender(<FilePane paneId="left" />)
+      })
 
       act(() => {
         vi.advanceTimersByTime(1000)

@@ -203,33 +203,28 @@ describe('Navigation: tabs, breadcrumb, session, live patching', () => {
   })
 
   it('pauses patch reflow while the user is typing a filter', async () => {
-    vi.useFakeTimers()
-    try {
-      installDefaults()
-      renderApp()
+    installDefaults()
+    renderApp()
 
-      await vi.waitFor(() => expect(getRow('Left pane', 'Documents')).toBeTruthy())
+    await waitFor(() => expect(getRow('Left pane', 'Documents')).toBeTruthy())
 
-      // Begin typing: setFilterDraft sets typing=true synchronously.
-      act(() => {
-        usePanesStore.getState().setFilterDraft('left', 'Do')
+    // Begin typing: setFilterDraft sets typing=true synchronously.
+    act(() => {
+      usePanesStore.getState().setFilterDraft('left', 'Do')
+    })
+
+    const newEntry = makeEntry('Brand-New', true)
+    act(() => {
+      ipc.emit('dir://patch', {
+        tabId: useTabsStore.getState().panes.left.tabs[0].id,
+        path: 'C:\\Users\\Omega',
+        reason: 'watch',
+        changed: [{ path: newEntry.path, entry: newEntry }],
+        removed: [],
       })
+    })
 
-      const newEntry = makeEntry('Brand-New', true)
-      act(() => {
-        ipc.emit('dir://patch', {
-          tabId: useTabsStore.getState().panes.left.tabs[0].id,
-          path: 'C:\\Users\\Omega',
-          reason: 'watch',
-          changed: [{ path: newEntry.path, entry: newEntry }],
-          removed: [],
-        })
-      })
-
-      // While typing, the patched entry must not appear.
-      expect(getRow('Left pane', 'Brand-New')).toBeFalsy()
-    } finally {
-      vi.useRealTimers()
-    }
+    // While typing, the patched entry must not appear.
+    expect(getRow('Left pane', 'Brand-New')).toBeFalsy()
   })
 })

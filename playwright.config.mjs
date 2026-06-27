@@ -15,6 +15,7 @@ export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
   workers,
+  globalSetup: './e2e/global-setup.ts',
   reporter: 'list',
   use: {
     baseURL,
