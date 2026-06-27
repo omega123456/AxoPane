@@ -12,7 +12,10 @@ fn open_path_uses_the_safe_test_fallback_for_existing_paths() {
 
     let error = open_path(&path).expect_err("test-utils blocks real shell launching");
     assert!(matches!(error, OpenPathError::Unsupported));
-    assert_eq!(error.to_string(), "opening paths is unsupported in this build");
+    assert_eq!(
+        error.to_string(),
+        "opening paths is unsupported in this build"
+    );
     assert!(std::error::Error::source(&error).is_none());
 }
 

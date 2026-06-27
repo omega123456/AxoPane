@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use file_explorer_lib::ops::{
-    copy_path, copy_file_with_progress, move_path, ConflictInfo, ConflictResolution, OpItem,
+    copy_file_with_progress, copy_path, move_path, ConflictInfo, ConflictResolution, OpItem,
     OpKind, OpState, OpStatus, OpsService, WorkerCtx,
 };
 use file_explorer_lib::volumes::VolumeInfo;
@@ -112,7 +112,10 @@ fn ops_service_helpers_cover_default_emitters_and_volume_mapping() {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let seen_clone = Arc::clone(&seen);
     service.set_progress_emitter(Arc::new(move |progress| {
-        seen_clone.lock().expect("seen lock").push(progress.operation_id);
+        seen_clone
+            .lock()
+            .expect("seen lock")
+            .push(progress.operation_id);
     }));
     service.emit_progress(&state());
     assert_eq!(seen.lock().expect("seen lock").as_slice(), ["op-1"]);
@@ -183,7 +186,9 @@ fn file_operation_helpers_respect_cancellation_before_copying() {
     std::fs::write(source_dir.join("beta.txt"), b"beta").expect("source sibling");
 
     let cancelled_state = state();
-    cancelled_state.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+    cancelled_state
+        .cancel
+        .store(true, std::sync::atomic::Ordering::Relaxed);
 
     let op_arc = Arc::new(Mutex::new(cancelled_state));
     let resolver = Arc::new(std::sync::Condvar::new());

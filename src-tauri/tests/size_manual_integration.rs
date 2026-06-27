@@ -1,13 +1,18 @@
 #[path = "common/mod.rs"]
 mod common;
 
+use std::collections::HashMap;
 use std::fs;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use file_explorer_lib::size::everything::{EverythingAvailability, EverythingHandle};
+use file_explorer_lib::size::everything::{
+    build_exact_folder_or_queries, escape_exact_folder_query_path, join_everything_result_path,
+    map_everything_result_sizes, normalize_result_path, EverythingAvailability, EverythingHandle,
+    EVERYTHING_BATCH_CHUNK_SIZE,
+};
 use file_explorer_lib::size::manual::{calculate, ManualSizeError};
 use file_explorer_lib::size::{SizeBackend, SizeService, SizeSource, SizeStateKind, SizeUpdate};
 use file_explorer_lib::volumes::VolumeInfo;
@@ -120,6 +125,9 @@ fn everything_stub_reports_unavailable_under_test_utils() {
     assert!(handle
         .query_folder_size(&fixture.path().join("folder"))
         .is_err());
+    assert!(handle
+        .query_folder_sizes(&[fixture.path().join("folder").to_string_lossy().into_owned()])
+        .is_err());
 }
 
 #[cfg(windows)]
@@ -137,6 +145,75 @@ fn everything_ffi_loads_or_skips_cleanly() {
     fs::create_dir(fixture.path().join("folder")).expect("folder");
     let result = handle.query_folder_size(&fixture.path().join("folder"));
     assert!(result.is_ok());
+}
+
+#[test]
+fn everything_query_helpers_escape_and_chunk_exact_folder_queries() {
+    assert_eq!(
+        escape_exact_folder_query_path(r#"C:\root\say "hello""#),
+        r#"C:\root\say ""hello"""#
+    );
+
+    let queries = build_exact_folder_or_queries(
+        &[
+            r#"C:\root\Alpha"#.to_string(),
+            r#"C:\root\Bravo"#.to_string(),
+            r#"C:\root\say "hello""#.to_string(),
+        ],
+        2,
+    );
+
+    assert_eq!(queries.len(), 2);
+    assert_eq!(
+        queries[0],
+        r#"exact:folder:"C:\root\Alpha" | exact:folder:"C:\root\Bravo""#
+    );
+    assert_eq!(queries[1], r#"exact:folder:"C:\root\say ""hello""""#);
+    assert!(EVERYTHING_BATCH_CHUNK_SIZE >= 1);
+}
+
+#[test]
+fn everything_result_mapping_normalizes_joined_paths() {
+    if cfg!(windows) {
+        let requested = vec![
+            r"C:\Program Files".to_string(),
+            r"C:\Root\Alpha".to_string(),
+            r"C:\Root\Beta".to_string(),
+            r"\\?\UNC\nas\share\Gamma".to_string(),
+        ];
+        let results = vec![
+            (r"C:".to_string(), "Program Files".to_string(), Some(30)),
+            (r"c:\root".to_string(), "ALPHA".to_string(), Some(10)),
+            (r"C:\ROOT".to_string(), "Beta".to_string(), None),
+            (r"\\nas\share".to_string(), "gamma".to_string(), Some(25)),
+        ];
+
+        let mapped = map_everything_result_sizes(&requested, &results);
+        assert_eq!(mapped.get(r"C:\Program Files"), Some(&Some(30)));
+        assert_eq!(mapped.get(r"C:\Root\Alpha"), Some(&Some(10)));
+        assert_eq!(mapped.get(r"C:\Root\Beta"), Some(&None));
+        assert_eq!(mapped.get(r"\\?\UNC\nas\share\Gamma"), Some(&Some(25)));
+        assert_eq!(
+            join_everything_result_path(r"C:", "Program Files"),
+            r"C:\Program Files"
+        );
+        assert_eq!(
+            normalize_result_path(r"\\?\UNC\nas\share\Gamma\"),
+            r"\\nas\share\gamma"
+        );
+        assert_eq!(normalize_result_path(r"C:\Root\Alpha\"), r"c:\root\alpha");
+    } else {
+        let requested = vec!["/tmp/alpha".to_string(), "/tmp/beta".to_string()];
+        let results = vec![
+            ("/tmp".to_string(), "alpha".to_string(), Some(10)),
+            ("/tmp".to_string(), "beta".to_string(), None),
+        ];
+
+        let mapped = map_everything_result_sizes(&requested, &results);
+        assert_eq!(mapped.get("/tmp/alpha"), Some(&Some(10)));
+        assert_eq!(mapped.get("/tmp/beta"), Some(&None));
+        assert_eq!(normalize_result_path("/tmp/alpha/"), "/tmp/alpha");
+    }
 }
 
 #[test]
@@ -217,6 +294,167 @@ fn size_service_request_paths_emits_manual_success_lifecycle() {
 }
 
 #[test]
+fn size_service_cancel_removes_in_flight_manual_jobs() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path().join("cancelled");
+    fs::create_dir_all(&root).expect("root");
+    for index in 0..400 {
+        fs::write(root.join(format!("file-{index}.bin")), vec![1_u8; 4096]).expect("seed file");
+    }
+
+    let service = SizeService::new(Duration::from_secs(5));
+    let target = root.to_string_lossy().into_owned();
+    let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
+    let updates_for_emitter = updates.clone();
+
+    service.request_paths(vec![target.clone()], move |update| {
+        updates_for_emitter
+            .lock()
+            .expect("updates lock")
+            .push(update);
+    });
+
+    wait_for_updates(&updates, |recorded| {
+        recorded
+            .iter()
+            .any(|update| update.state == SizeStateKind::Calculating)
+    });
+
+    assert!(service.cancel(&target));
+
+    let deadline = Instant::now() + Duration::from_millis(200);
+    while Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(!service.cancel(&target));
+}
+
+#[test]
+fn completed_size_jobs_are_removed_from_the_registry() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    fs::write(root.join("alpha.bin"), vec![1_u8; 7]).expect("alpha");
+
+    let service = SizeService::new(Duration::from_secs(1));
+    let target = root.to_string_lossy().into_owned();
+    let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
+    let updates_for_emitter = updates.clone();
+
+    service.request_paths(vec![target.clone()], move |update| {
+        updates_for_emitter
+            .lock()
+            .expect("updates lock")
+            .push(update);
+    });
+
+    wait_for_updates(&updates, |updates| {
+        updates
+            .iter()
+            .any(|update| matches!(update.state, SizeStateKind::Ready | SizeStateKind::Na))
+    });
+
+    assert!(!service.cancel(&target));
+}
+
+#[test]
+fn everything_backed_requests_emit_batched_ready_and_na_results() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    let alpha = root.join("alpha");
+    let beta = root.join("beta");
+    let alpha_path = alpha.to_string_lossy().into_owned();
+    let beta_path = beta.to_string_lossy().into_owned();
+    let service = SizeService::with_everything_handle(
+        Duration::from_secs(1),
+        Some(EverythingHandle::test_available(HashMap::from([(
+            alpha_path.clone(),
+            Some(42),
+        )]))),
+    );
+    let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
+    let updates_for_emitter = updates.clone();
+
+    assert_eq!(
+        service.everything_status().status,
+        file_explorer_lib::size::EverythingStatusKind::Available
+    );
+    assert!(service.everything_status().is_available);
+
+    service.request_paths_with_volumes(
+        vec![alpha_path.clone(), beta_path.clone()],
+        vec![local_volume_for(root)],
+        Arc::new(move |update| {
+            updates_for_emitter
+                .lock()
+                .expect("updates lock")
+                .push(update);
+        }),
+    );
+
+    wait_for_updates(&updates, |recorded| {
+        recorded
+            .iter()
+            .filter(|update| {
+                matches!(update.state, SizeStateKind::Ready | SizeStateKind::Na)
+                    && update.source == SizeSource::Everything
+            })
+            .count()
+            >= 2
+    });
+
+    let recorded = updates.lock().expect("updates lock").clone();
+    assert!(recorded.iter().any(|update| {
+        update.path == alpha_path
+            && update.state == SizeStateKind::Ready
+            && update.source == SizeSource::Everything
+            && update.size_bytes == Some(42)
+    }));
+    assert!(recorded.iter().any(|update| {
+        update.path == beta_path
+            && update.state == SizeStateKind::Na
+            && update.source == SizeSource::Everything
+            && update.size_bytes.is_none()
+    }));
+    assert!(!service.cancel(&alpha_path));
+    assert!(!service.cancel(&beta_path));
+}
+
+#[test]
+fn everything_backed_requests_emit_errors_when_the_batch_query_fails() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    let target = root.join("broken").to_string_lossy().into_owned();
+    let service = SizeService::with_everything_handle(
+        Duration::from_secs(1),
+        Some(EverythingHandle::test_available_error()),
+    );
+    let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
+    let updates_for_emitter = updates.clone();
+
+    service.request_path_with_volumes(
+        target.clone(),
+        vec![local_volume_for(root)],
+        Arc::new(move |update| {
+            updates_for_emitter
+                .lock()
+                .expect("updates lock")
+                .push(update);
+        }),
+    );
+
+    wait_for_updates(&updates, |recorded| {
+        recorded.iter().any(|update| {
+            update.path == target
+                && update.state == SizeStateKind::Error
+                && update.source == SizeSource::Everything
+        })
+    });
+
+    assert!(!service.cancel(&target));
+}
+
+#[test]
 fn size_service_reports_missing_manual_path_as_error() {
     let fixture = tempdir().expect("temp dir");
     let missing = fixture.path().join("missing");
@@ -224,12 +462,15 @@ fn size_service_reports_missing_manual_path_as_error() {
     let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
     let updates_for_emitter = updates.clone();
 
-    service.request_paths(vec![missing.to_string_lossy().into_owned()], move |update| {
-        updates_for_emitter
-            .lock()
-            .expect("updates lock")
-            .push(update);
-    });
+    service.request_paths(
+        vec![missing.to_string_lossy().into_owned()],
+        move |update| {
+            updates_for_emitter
+                .lock()
+                .expect("updates lock")
+                .push(update);
+        },
+    );
 
     wait_for_updates(&updates, |updates| {
         updates
@@ -312,6 +553,95 @@ fn size_service_reports_fixture_network_paths_as_not_applicable() {
     assert_eq!(recorded[0].size_bytes, None);
 }
 
+#[test]
+fn size_service_mixed_backend_requests_emit_network_and_manual_terminal_events() {
+    let fixture = tempdir().expect("temp dir");
+    let local_root = fixture.path();
+    fs::write(local_root.join("alpha.bin"), vec![1_u8; 4]).expect("alpha");
+
+    let service = SizeService::new(Duration::from_secs(1));
+    let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
+    let updates_for_emitter = updates.clone();
+
+    let local_mount = if cfg!(windows) {
+        local_root
+            .components()
+            .next()
+            .expect("component")
+            .as_os_str()
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        "/".to_string()
+    };
+    let network_mount = if cfg!(windows) {
+        "Z:\\".to_string()
+    } else {
+        "/network".to_string()
+    };
+    let network_path = if cfg!(windows) {
+        "Z:\\".to_string()
+    } else {
+        "/network/share".to_string()
+    };
+
+    service.request_paths_with_volumes(
+        vec![
+            network_path.clone(),
+            local_root.to_string_lossy().into_owned(),
+        ],
+        vec![
+            VolumeInfo {
+                mount_root: network_mount,
+                label: "Network".to_string(),
+                total_bytes: 1,
+                free_bytes: 1,
+                is_network: true,
+                is_removable: false,
+            },
+            VolumeInfo {
+                mount_root: local_mount,
+                label: "Local".to_string(),
+                total_bytes: 1,
+                free_bytes: 1,
+                is_network: false,
+                is_removable: false,
+            },
+        ],
+        Arc::new(move |update| {
+            updates_for_emitter
+                .lock()
+                .expect("updates lock")
+                .push(update);
+        }),
+    );
+
+    wait_for_updates(&updates, |recorded| {
+        recorded
+            .iter()
+            .filter(|update| {
+                matches!(
+                    update.state,
+                    SizeStateKind::Ready | SizeStateKind::Error | SizeStateKind::Na
+                )
+            })
+            .count()
+            >= 2
+    });
+
+    let recorded = updates.lock().expect("updates lock").clone();
+    assert!(recorded.iter().any(|update| {
+        update.path == network_path
+            && update.source == SizeSource::Network
+            && update.state == SizeStateKind::Na
+    }));
+    assert!(recorded.iter().any(|update| {
+        update.path == local_root.to_string_lossy()
+            && update.source == SizeSource::Manual
+            && update.state == SizeStateKind::Ready
+    }));
+}
+
 fn wait_for_updates(
     updates: &Arc<Mutex<Vec<SizeUpdate>>>,
     predicate: impl Fn(&[SizeUpdate]) -> bool,
@@ -327,4 +657,26 @@ fn wait_for_updates(
     }
 
     panic!("timed out waiting for size updates");
+}
+
+fn local_volume_for(path: &std::path::Path) -> VolumeInfo {
+    let mount_root = if cfg!(windows) {
+        path.components()
+            .next()
+            .expect("component")
+            .as_os_str()
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        "/".to_string()
+    };
+
+    VolumeInfo {
+        mount_root,
+        label: "Local".to_string(),
+        total_bytes: 1,
+        free_bytes: 1,
+        is_network: false,
+        is_removable: false,
+    }
 }

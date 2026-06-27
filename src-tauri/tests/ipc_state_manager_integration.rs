@@ -13,7 +13,9 @@ use file_explorer_lib::ipc::types::{
     OpenPathRequest, RefreshTabRequest, ReorderOpsRequest, ResolveConflictRequest,
     SaveConfigRequest, SaveSessionRequest, SetTabWatchRequest,
 };
-use file_explorer_lib::ops::{ConflictResolution, OpItem, OpKind, OpStatus, OpsService, StartOpRequest};
+use file_explorer_lib::ops::{
+    ConflictResolution, OpItem, OpKind, OpStatus, OpsService, StartOpRequest,
+};
 use file_explorer_lib::persist::{Config, PersistenceState, Session};
 use file_explorer_lib::size::{size_path_from_string, SizeService};
 use tempfile::tempdir;
@@ -22,7 +24,11 @@ fn op_item(path: &Path) -> OpItem {
     let metadata = fs::metadata(path).expect("metadata");
     OpItem {
         source_path: path.to_string_lossy().into_owned(),
-        name: path.file_name().expect("file name").to_string_lossy().into_owned(),
+        name: path
+            .file_name()
+            .expect("file name")
+            .to_string_lossy()
+            .into_owned(),
         size_bytes: metadata.len(),
     }
 }
@@ -110,7 +116,10 @@ fn commands_cover_filesystem_and_persistence_state() {
         ),
         saved_session
     );
-    assert_eq!(commands::load_session(as_state(&persistence)), saved_session);
+    assert_eq!(
+        commands::load_session(as_state(&persistence)),
+        saved_session
+    );
 
     let folder = commands::create_folder(CreateEntryRequest {
         parent: root.to_string_lossy().into_owned(),
@@ -209,9 +218,38 @@ fn commands_cover_size_and_logging_state() {
         },
         as_state(&size_service),
     );
-    assert!(cancel.cancelled);
+    assert!(!cancel.cancelled);
 
-    assert_eq!(size_path_from_string(&size_root.to_string_lossy()), size_root);
+    let network_size_events = commands::request_folder_sizes(
+        file_explorer_lib::ipc::types::FolderSizesRequest {
+            paths: vec![
+                size_root.to_string_lossy().into_owned(),
+                if cfg!(windows) {
+                    "Z:\\".to_string()
+                } else {
+                    "/Volumes/fixture-network".to_string()
+                },
+            ],
+        },
+        as_state(&size_service),
+    );
+    assert!(network_size_events.iter().any(|event| {
+        event.path == size_root.to_string_lossy()
+            && matches!(
+                event.state,
+                file_explorer_lib::size::SizeStateKind::Ready
+                    | file_explorer_lib::size::SizeStateKind::Na
+            )
+    }));
+    assert!(network_size_events.iter().any(|event| {
+        matches!(event.state, file_explorer_lib::size::SizeStateKind::Na)
+            && event.source == file_explorer_lib::size::SizeSource::Network
+    }));
+
+    assert_eq!(
+        size_path_from_string(&size_root.to_string_lossy()),
+        size_root
+    );
     assert_eq!(commands::frontend_log_level("error"), log::Level::Error);
     assert_eq!(commands::frontend_log_level("trace"), log::Level::Debug);
     assert_eq!(
@@ -240,7 +278,9 @@ fn commands_cover_size_and_logging_state() {
     .expect("set tab watch");
     write_file(&fixture.path().join("watch.txt"), b"watch");
     let refreshed = commands::refresh_tab(
-        RefreshTabRequest { target: watch_target },
+        RefreshTabRequest {
+            target: watch_target,
+        },
         as_state(&watch_service),
     )
     .expect("refresh tab");
@@ -283,7 +323,8 @@ fn commands_cover_queue_state_lifecycle() {
         as_state(&service),
     );
     assert_eq!(
-        wait_for_op(&service, &conflict_id, |status| status == OpStatus::Conflict),
+        wait_for_op(&service, &conflict_id, |status| status
+            == OpStatus::Conflict),
         OpStatus::Conflict
     );
 
@@ -335,7 +376,9 @@ fn commands_cover_queue_state_lifecycle() {
         },
         as_state(&service),
     );
-    wait_for_op(&service, &pending_two, |status| status == OpStatus::Cancelled);
+    wait_for_op(&service, &pending_two, |status| {
+        status == OpStatus::Cancelled
+    });
 
     commands::resolve_conflict(
         ResolveConflictRequest {
@@ -346,10 +389,14 @@ fn commands_cover_queue_state_lifecycle() {
         },
         as_state(&service),
     );
-    wait_for_op(&service, &conflict_id, |status| status == OpStatus::Completed);
+    wait_for_op(&service, &conflict_id, |status| {
+        status == OpStatus::Completed
+    });
     assert_eq!(fs::read(dest.join("dup.txt")).expect("dup"), b"new-content");
 
-    wait_for_op(&service, &pending_one, |status| status == OpStatus::Completed);
+    wait_for_op(&service, &pending_one, |status| {
+        status == OpStatus::Completed
+    });
 
     let failed_id = commands::start_op(
         StartOpRequest {

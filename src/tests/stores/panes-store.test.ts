@@ -2,7 +2,12 @@ import { beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { getParentPath, schedulePersistSession, usePanesStore } from '@/stores/panes-store'
 import { useTabsStore } from '@/stores/tabs-store'
-import type { DirectoryEntry, ListDirRequest, ListDirResponse, SaveConfigRequest } from '@/lib/types/ipc'
+import type {
+  DirectoryEntry,
+  ListDirRequest,
+  ListDirResponse,
+  SaveConfigRequest,
+} from '@/lib/types/ipc'
 
 function dir(name: string, isDir = true): DirectoryEntry {
   return {
@@ -18,6 +23,16 @@ function dir(name: string, isDir = true): DirectoryEntry {
     attributes: [],
     isHidden: false,
     isSystem: false,
+  }
+}
+
+function dirAt(path: string, isDir = true): DirectoryEntry {
+  const name = path.split('\\').filter(Boolean).at(-1) ?? path
+  return {
+    ...dir(name, isDir),
+    id: path,
+    name,
+    path,
   }
 }
 
@@ -40,7 +55,10 @@ beforeEach(() => {
 describe('panes-store navigation', () => {
   it('navigates, sorts, and records an error', async () => {
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
-    expect(usePanesStore.getState().panes.left.entries.map((e) => e.name)).toEqual(['Alpha', 'Beta'])
+    expect(usePanesStore.getState().panes.left.entries.map((e) => e.name)).toEqual([
+      'Alpha',
+      'Beta',
+    ])
 
     await usePanesStore.getState().setSort('left', 'name')
     expect(usePanesStore.getState().panes.left.sortDirection).toBe('desc')
@@ -88,18 +106,89 @@ describe('panes-store navigation', () => {
     expect(request).toHaveBeenCalledOnce()
   })
 
-  it('applies size-state events and re-sorts when sorting by size', async () => {
+  it('sorts locally without reloading the pane or re-requesting sizes', async () => {
+    const listDir = vi.fn(() => ({
+      path: 'C:\\root',
+      entries: [dirAt('C:\\root\\Alpha'), dirAt('C:\\root\\Beta')],
+    }))
+    const setTabWatch = vi.fn(() => undefined)
+    const requestFolderSizes = vi.fn(() => undefined)
+    ipc.override('list_dir', listDir)
+    ipc.override('set_tab_watch', setTabWatch)
+    ipc.override('request_folder_sizes', requestFolderSizes)
+    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    listDir.mockClear()
+    setTabWatch.mockClear()
+    requestFolderSizes.mockClear()
+
+    await usePanesStore.getState().setSort('left', 'name')
+
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'Beta',
+      'Alpha',
+    ])
+    expect(usePanesStore.getState().panes.left.sortDirection).toBe('desc')
+    expect(useTabsStore.getState().panes.left.tabs[0]?.sortDirection).toBe('desc')
+    expect(listDir).not.toHaveBeenCalled()
+    expect(setTabWatch).not.toHaveBeenCalled()
+    expect(requestFolderSizes).not.toHaveBeenCalled()
+  })
+
+  it('keeps size-sorted panes stable while folder sizes stream in, then re-sorts on demand', async () => {
+    ipc.override('list_dir', () => ({
+      path: 'C:\\root',
+      entries: [
+        dirAt('C:\\root\\Zulu'),
+        dirAt('C:\\root\\Gamma'),
+        dirAt('C:\\root\\Beta'),
+        dirAt('C:\\root\\Alpha'),
+      ],
+    }))
+
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
     await usePanesStore.getState().setSort('left', 'size')
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'Alpha',
+      'Beta',
+      'Gamma',
+      'Zulu',
+    ])
 
+    usePanesStore.getState().applySizeState({
+      path: 'C:\\root\\Zulu',
+      state: 'ready',
+      source: 'everything',
+      sizeBytes: 10,
+    })
     usePanesStore.getState().applySizeState({
       path: 'C:\\root\\Alpha',
       state: 'ready',
       source: 'everything',
-      sizeBytes: 9999,
+      sizeBytes: 50,
+    })
+    usePanesStore.getState().applySizeState({
+      path: 'C:\\root\\Beta',
+      state: 'calculating',
+      source: 'everything',
+      sizeBytes: null,
     })
 
-    expect(usePanesStore.getState().sizeStates['C:\\root\\Alpha'].sizeBytes).toBe(9999)
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'Alpha',
+      'Beta',
+      'Gamma',
+      'Zulu',
+    ])
+
+    await usePanesStore.getState().setSort('left', 'size')
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'Zulu',
+      'Alpha',
+      'Beta',
+      'Gamma',
+    ])
   })
 
   it('refreshes everything by clearing size states then reloading', async () => {
@@ -227,7 +316,16 @@ describe('panes-store navigation', () => {
       session: { activePane: 'left', leftPath: 'C:\\', rightPath: 'C:\\' },
       showHiddenFiles: false,
       everythingStatus: { status: 'unavailable', isAvailable: false },
-      volumes: [{ mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false, isRemovable: false }],
+      volumes: [
+        {
+          mountRoot: 'C:\\',
+          label: 'Windows',
+          totalBytes: 1,
+          freeBytes: 1,
+          isNetwork: false,
+          isRemovable: false,
+        },
+      ],
     })
 
     const children: Record<string, string> = {
@@ -256,7 +354,16 @@ describe('panes-store navigation', () => {
       session: { activePane: 'left', leftPath: 'C:\\', rightPath: 'C:\\' },
       showHiddenFiles: false,
       everythingStatus: { status: 'unavailable', isAvailable: false },
-      volumes: [{ mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false, isRemovable: false }],
+      volumes: [
+        {
+          mountRoot: 'C:\\',
+          label: 'Windows',
+          totalBytes: 1,
+          freeBytes: 1,
+          isNetwork: false,
+          isRemovable: false,
+        },
+      ],
     })
 
     // Seed an expanded, unrelated branch that should collapse on reveal.
@@ -299,7 +406,16 @@ describe('panes-store navigation', () => {
       session: { activePane: 'left', leftPath: 'C:\\', rightPath: 'C:\\' },
       showHiddenFiles: false,
       everythingStatus: { status: 'unavailable', isAvailable: false },
-      volumes: [{ mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false, isRemovable: false }],
+      volumes: [
+        {
+          mountRoot: 'C:\\',
+          label: 'Windows',
+          totalBytes: 1,
+          freeBytes: 1,
+          isNetwork: false,
+          isRemovable: false,
+        },
+      ],
     })
 
     await usePanesStore.getState().revealPath(null)
@@ -325,9 +441,30 @@ describe('panes-store navigation', () => {
           isNetwork: true,
           isRemovable: false,
         },
-        { mountRoot: 'Z:\\', label: 'Share', totalBytes: 1, freeBytes: 1, isNetwork: true, isRemovable: false },
-        { mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false, isRemovable: false },
-        { mountRoot: 'D:\\', label: '', totalBytes: 1, freeBytes: 1, isNetwork: false, isRemovable: false },
+        {
+          mountRoot: 'Z:\\',
+          label: 'Share',
+          totalBytes: 1,
+          freeBytes: 1,
+          isNetwork: true,
+          isRemovable: false,
+        },
+        {
+          mountRoot: 'C:\\',
+          label: 'Windows',
+          totalBytes: 1,
+          freeBytes: 1,
+          isNetwork: false,
+          isRemovable: false,
+        },
+        {
+          mountRoot: 'D:\\',
+          label: '',
+          totalBytes: 1,
+          freeBytes: 1,
+          isNetwork: false,
+          isRemovable: false,
+        },
       ],
     })
 
@@ -340,7 +477,12 @@ describe('panes-store navigation', () => {
     usePanesStore.setState((state) => ({
       treeNodes: {
         ...state.treeNodes,
-        'C:\\': { ...state.treeNodes['C:\\'], expanded: true, loaded: true, children: ['C:\\root'] },
+        'C:\\': {
+          ...state.treeNodes['C:\\'],
+          expanded: true,
+          loaded: true,
+          children: ['C:\\root'],
+        },
         'C:\\root': {
           id: 'C:\\root',
           name: 'root',
@@ -354,8 +496,22 @@ describe('panes-store navigation', () => {
     }))
 
     usePanesStore.getState().setVolumes([
-      { mountRoot: 'Y:\\', label: 'Archive', totalBytes: 1, freeBytes: 1, isNetwork: true, isRemovable: false },
-      { mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false, isRemovable: false },
+      {
+        mountRoot: 'Y:\\',
+        label: 'Archive',
+        totalBytes: 1,
+        freeBytes: 1,
+        isNetwork: true,
+        isRemovable: false,
+      },
+      {
+        mountRoot: 'C:\\',
+        label: 'Windows',
+        totalBytes: 1,
+        freeBytes: 1,
+        isNetwork: false,
+        isRemovable: false,
+      },
     ])
 
     expect(usePanesStore.getState().treeRoots).toEqual(['C:\\', 'Y:\\'])
@@ -365,41 +521,116 @@ describe('panes-store navigation', () => {
     expect(usePanesStore.getState().treeNodes['D:\\']).toBeUndefined()
   })
 
-  it('eagerly requests folder sizes on reload only when Everything is available', async () => {
+  it('requests all direct child directories on open when Everything is available', async () => {
     const request = vi.fn(() => undefined)
     ipc.override('request_folder_sizes', request)
+    ipc.override('list_dir', () => ({
+      path: 'C:\\root',
+      entries: [
+        dirAt('C:\\root\\Charlie'),
+        dirAt('C:\\root\\Bravo'),
+        dirAt('C:\\root\\Alpha'),
+        dirAt('C:\\root\\notes.txt', false),
+      ],
+    }))
+    usePanesStore.setState((state) => ({
+      everythingStatus: { status: 'available', isAvailable: true },
+      panes: {
+        ...state.panes,
+        left: {
+          ...state.panes.left,
+          visibleStartIndex: 0,
+          visibleEndIndex: 0,
+        },
+      },
+    }))
 
-    // Everything unavailable (macOS / no-Everything Windows): sizes stay manual,
-    // so reload must NOT auto-request them.
-    usePanesStore.setState({ everythingStatus: { status: 'unavailable', isAvailable: false } })
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
-    expect(request).not.toHaveBeenCalled()
 
-    // Everything available (Windows): reload eagerly requests the visible dataset.
-    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
-    await usePanesStore.getState().navigatePane('left', 'C:\\root')
-    expect(request).toHaveBeenCalledWith({ paths: ['C:\\root\\Alpha'] })
+    expect(request).toHaveBeenCalledWith({
+      paths: ['C:\\root\\Alpha', 'C:\\root\\Bravo', 'C:\\root\\Charlie'],
+    })
   })
 
-  it('requests sizes for newly visible folders only when Everything is available', async () => {
+  it('does not eager-request sizes on open when Everything is unavailable', async () => {
     const request = vi.fn(() => undefined)
-    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
-    await usePanesStore.getState().navigatePane('left', 'C:\\root')
     ipc.override('request_folder_sizes', request)
+    usePanesStore.setState({ everythingStatus: { status: 'unavailable', isAvailable: false } })
 
-    // A range change that includes the directory entry triggers a fresh request
-    // for folders without a recorded size state.
-    usePanesStore.getState().setVisibleRange('left', 0, 5)
-    expect(request).toHaveBeenCalledWith({ paths: ['C:\\root\\Alpha'] })
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
 
-    // Re-emitting the same range is a no-op.
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it('never requests folder sizes when the visible range changes', async () => {
+    const request = vi.fn(() => undefined)
+    ipc.override('request_folder_sizes', request)
+    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
     request.mockClear()
+
     usePanesStore.getState().setVisibleRange('left', 0, 5)
+    usePanesStore.getState().setVisibleRange('left', 5, 10)
+
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it('suppresses duplicate eager requests while pending and after terminal size states', async () => {
+    const request = vi.fn(() => undefined)
+    ipc.override('request_folder_sizes', request)
+    ipc.override('list_dir', () => ({
+      path: 'C:\\root',
+      entries: [dirAt('C:\\root\\Alpha'), dirAt('C:\\root\\Beta')],
+    }))
+    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    expect(request).toHaveBeenCalledWith({ paths: ['C:\\root\\Alpha', 'C:\\root\\Beta'] })
+
+    request.mockClear()
+    await usePanesStore.getState().reloadPane('left')
     expect(request).not.toHaveBeenCalled()
 
-    // With Everything unavailable, scrolling never auto-requests sizes.
-    usePanesStore.setState({ everythingStatus: { status: 'unavailable', isAvailable: false } })
-    usePanesStore.getState().setVisibleRange('left', 0, 8)
+    usePanesStore.getState().applySizeState({
+      path: 'C:\\root\\Alpha',
+      state: 'ready',
+      source: 'everything',
+      sizeBytes: 12,
+    })
+    usePanesStore.getState().applySizeState({
+      path: 'C:\\root\\Beta',
+      state: 'na',
+      source: 'everything',
+      sizeBytes: null,
+    })
+
+    request.mockClear()
+    await usePanesStore.getState().reloadPane('left')
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it('does not retry eager size requests after an error terminal state until explicit refresh', async () => {
+    const request = vi.fn(() => undefined)
+    ipc.override('request_folder_sizes', request)
+    ipc.override('list_dir', () => ({
+      path: 'C:\\root',
+      entries: [dirAt('C:\\root\\Alpha')],
+    }))
+    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    expect(request).toHaveBeenCalledWith({ paths: ['C:\\root\\Alpha'] })
+
+    usePanesStore.getState().applySizeState({
+      path: 'C:\\root\\Alpha',
+      state: 'error',
+      source: 'everything',
+      sizeBytes: null,
+    })
+
+    request.mockClear()
+    await usePanesStore.getState().reloadPane('left')
     expect(request).not.toHaveBeenCalled()
   })
 

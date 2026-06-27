@@ -4,7 +4,11 @@ use crate::persist::PersistenceState;
 use crate::size::SizeService;
 use crate::volumes;
 use crate::watch::WatchService;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+#[cfg(feature = "test-utils")]
+use std::sync::Mutex;
+#[cfg(feature = "test-utils")]
 use std::time::{Duration, Instant};
 
 use super::mock;
@@ -17,9 +21,9 @@ use super::types::{
 };
 use crate::fs::DirectoryEntry;
 use std::path::Path;
+use tauri::State;
 #[cfg(not(feature = "test-utils"))]
 use tauri::{AppHandle, Emitter};
-use tauri::State;
 
 #[cfg(feature = "test-utils")]
 fn noop_dir_patch(_: crate::watch::DirPatch) {}

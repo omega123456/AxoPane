@@ -10,8 +10,8 @@ use file_explorer_lib::fs::{SortDirection, SortKey};
 use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::types::{
     CancelSizeRequest, ConflictResolution, CreateEntryRequest, DeleteEntriesRequest,
-    LogFrontendRequest, OpIdRequest, OpenPathRequest, ReorderOpsRequest,
-    ResolveConflictRequest, SaveConfigRequest, SaveSessionRequest,
+    LogFrontendRequest, OpIdRequest, OpenPathRequest, ReorderOpsRequest, ResolveConflictRequest,
+    SaveConfigRequest, SaveSessionRequest,
 };
 use file_explorer_lib::ops::{OpItem, OpKind, OpStatus, OpsService, StartOpRequest};
 use file_explorer_lib::persist::{Config, PersistenceState, Session};
@@ -211,7 +211,9 @@ fn commands_cover_watch_size_volume_and_logging_flows() {
     assert!(!everything_status.is_available);
     assert!(matches!(
         everything_status.status,
-        EverythingStatusKind::Unavailable | EverythingStatusKind::Unsupported | EverythingStatusKind::NotReady
+        EverythingStatusKind::Unavailable
+            | EverythingStatusKind::Unsupported
+            | EverythingStatusKind::NotReady
     ));
 
     let size_root = root.join("sizes");
@@ -332,7 +334,9 @@ fn commands_cover_queue_lifecycle_flows() {
     let pending_two_index = order.iter().position(|id| id == &pending_two).unwrap();
     assert!(pending_two_index < pending_one_index);
 
-    assert!(commands::has_unfinished_ops(test_app.app.state::<OpsService>()));
+    assert!(commands::has_unfinished_ops(
+        test_app.app.state::<OpsService>()
+    ));
 
     commands::cancel_op(
         OpIdRequest {

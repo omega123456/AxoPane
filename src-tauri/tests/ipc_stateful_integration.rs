@@ -11,9 +11,9 @@ use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::types::{
     AppConfig, CancelSizeResponse, ConflictResolution, CreateEntryRequest, DeleteEntriesRequest,
     FolderSizeRequest, FolderSizesRequest, InitialShellResponse, ListDirRequest, ListDirResponse,
-    OpIdRequest, OpenPathRequest, OpSnapshot, RefreshTabRequest, ReorderOpsRequest,
-    ResolveConflictRequest, SaveConfigRequest, SaveSessionRequest, SessionState, SetTabWatchRequest,
-    WatchDirPatch, WatchTarget,
+    OpIdRequest, OpSnapshot, OpenPathRequest, RefreshTabRequest, ReorderOpsRequest,
+    ResolveConflictRequest, SaveConfigRequest, SaveSessionRequest, SessionState,
+    SetTabWatchRequest, WatchDirPatch, WatchTarget,
 };
 use file_explorer_lib::ops::{OpItem, OpKind, OpStatus, OpsService, StartOpRequest};
 use file_explorer_lib::persist::{Config, PersistenceState, Session};
@@ -112,10 +112,8 @@ impl TestApp<tauri::test::MockRuntime> {
             Ok(value) => value
                 .deserialize::<T>()
                 .map_err(|error| format!("deserialize success: {error}")),
-            Err(value) => Err(
-                serde_json::from_value::<String>(value.clone())
-                    .unwrap_or_else(|_| value.to_string()),
-            ),
+            Err(value) => Err(serde_json::from_value::<String>(value.clone())
+                .unwrap_or_else(|_| value.to_string())),
         }
     }
 
@@ -278,7 +276,10 @@ fn ipc_commands_cover_shell_filesystem_and_persistence_flows() {
         )
         .expect("rename");
     let renamed_path = root.join("done.txt");
-    assert_eq!(renamed.get("name").and_then(Value::as_str), Some("done.txt"));
+    assert_eq!(
+        renamed.get("name").and_then(Value::as_str),
+        Some("done.txt")
+    );
 
     test_app
         .invoke_payload::<(), _>(
@@ -326,8 +327,9 @@ fn ipc_commands_cover_watch_size_and_logging_state() {
     let root = fixture.path();
     write_file(&root.join("before.txt"), b"before");
 
-    let everything_status: EverythingStatus =
-        test_app.invoke("everything_status").expect("everything status");
+    let everything_status: EverythingStatus = test_app
+        .invoke("everything_status")
+        .expect("everything status");
     assert!(!everything_status.is_available);
 
     let volumes: Vec<Value> = test_app.invoke("list_volumes").expect("list volumes");
@@ -374,10 +376,7 @@ fn ipc_commands_cover_watch_size_and_logging_state() {
         .any(|entry| entry.path.ends_with("after.txt")));
 
     test_app
-        .invoke_payload::<(), _>(
-            "set_tab_watch",
-            SetTabWatchRequest { target: None },
-        )
+        .invoke_payload::<(), _>("set_tab_watch", SetTabWatchRequest { target: None })
         .expect("clear watch");
 
     let size_root = root.join("sizes");
@@ -453,7 +452,10 @@ fn ipc_commands_cover_queue_lifecycle_commands() {
     let conflict_snapshot = test_app.wait_for_op(&conflict_id, |snapshot| {
         snapshot.progress.status == OpStatus::Conflict
     });
-    assert_eq!(conflict_snapshot.progress.item_names, vec!["dup.txt".to_string()]);
+    assert_eq!(
+        conflict_snapshot.progress.item_names,
+        vec!["dup.txt".to_string()]
+    );
 
     let pending_one_source = root.join("pending-one.txt");
     let pending_two_source = root.join("pending-two.txt");
@@ -481,8 +483,12 @@ fn ipc_commands_cover_queue_lifecycle_commands() {
         )
         .expect("start pending two");
 
-    test_app.wait_for_op(&pending_one, |snapshot| snapshot.progress.status == OpStatus::Pending);
-    test_app.wait_for_op(&pending_two, |snapshot| snapshot.progress.status == OpStatus::Pending);
+    test_app.wait_for_op(&pending_one, |snapshot| {
+        snapshot.progress.status == OpStatus::Pending
+    });
+    test_app.wait_for_op(&pending_two, |snapshot| {
+        snapshot.progress.status == OpStatus::Pending
+    });
 
     test_app
         .invoke_payload::<(), _>(
@@ -520,8 +526,9 @@ fn ipc_commands_cover_queue_lifecycle_commands() {
         snapshot.progress.status == OpStatus::Cancelled
     });
 
-    let has_unfinished_during_conflict: bool =
-        test_app.invoke("has_unfinished_ops").expect("unfinished ops");
+    let has_unfinished_during_conflict: bool = test_app
+        .invoke("has_unfinished_ops")
+        .expect("unfinished ops");
     assert!(has_unfinished_during_conflict);
 
     test_app
@@ -538,7 +545,10 @@ fn ipc_commands_cover_queue_lifecycle_commands() {
     test_app.wait_for_op(&conflict_id, |snapshot| {
         snapshot.progress.status == OpStatus::Completed
     });
-    assert_eq!(fs::read(dest.join("dup.txt")).expect("resolved dest"), b"new-content");
+    assert_eq!(
+        fs::read(dest.join("dup.txt")).expect("resolved dest"),
+        b"new-content"
+    );
 
     test_app.wait_for_op(&pending_one, |snapshot| {
         snapshot.progress.status == OpStatus::Completed
@@ -558,7 +568,9 @@ fn ipc_commands_cover_queue_lifecycle_commands() {
             },
         )
         .expect("start failed op");
-    test_app.wait_for_op(&failed_id, |snapshot| snapshot.progress.status == OpStatus::Failed);
+    test_app.wait_for_op(&failed_id, |snapshot| {
+        snapshot.progress.status == OpStatus::Failed
+    });
 
     test_app
         .invoke_payload::<(), _>(
@@ -568,7 +580,9 @@ fn ipc_commands_cover_queue_lifecycle_commands() {
             },
         )
         .expect("retry failed op");
-    test_app.wait_for_op(&failed_id, |snapshot| snapshot.progress.status == OpStatus::Failed);
+    test_app.wait_for_op(&failed_id, |snapshot| {
+        snapshot.progress.status == OpStatus::Failed
+    });
 
     let paused_source = root.join("pause.txt");
     write_file(&paused_source, &vec![b'x'; 8192]);
@@ -591,7 +605,10 @@ fn ipc_commands_cover_queue_lifecycle_commands() {
         )
         .expect("pause op");
     test_app.wait_for_op(&paused_id, |snapshot| {
-        matches!(snapshot.progress.status, OpStatus::Paused | OpStatus::Completed)
+        matches!(
+            snapshot.progress.status,
+            OpStatus::Paused | OpStatus::Completed
+        )
     });
 
     test_app
@@ -606,8 +623,12 @@ fn ipc_commands_cover_queue_lifecycle_commands() {
         snapshot.progress.status == OpStatus::Completed
     });
 
-    let unfinished_after: bool = test_app.invoke("has_unfinished_ops").expect("has unfinished");
+    let unfinished_after: bool = test_app
+        .invoke("has_unfinished_ops")
+        .expect("has unfinished");
     assert!(matches!(unfinished_after, false | true));
     let snapshots = test_app.queue_snapshot();
-    assert!(snapshots.iter().any(|snapshot| snapshot.progress.operation_id == failed_id));
+    assert!(snapshots
+        .iter()
+        .any(|snapshot| snapshot.progress.operation_id == failed_id));
 }

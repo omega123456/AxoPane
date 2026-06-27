@@ -7,8 +7,8 @@ use std::time::SystemTime;
 
 use file_explorer_lib::fs::{
     collect_attributes, compare_entries, compare_optional_string, compare_optional_u64,
-    infer_type_label, natural_name_compare, platform_root, read_item_count,
-    system_time_to_rfc3339, validate_name, DirectoryEntry, SortDirection, SortKey,
+    infer_type_label, natural_name_compare, platform_root, read_item_count, system_time_to_rfc3339,
+    validate_name, DirectoryEntry, SortDirection, SortKey,
 };
 use tempfile::tempdir;
 
@@ -39,14 +39,20 @@ fn helper_validation_and_sorting_cover_private_branches() {
 
     assert!(validate_name("report.txt").is_ok());
     for invalid in ["", " ", ".", "..", "a/b", "a\\b", "bad\0name"] {
-        assert!(validate_name(invalid).is_err(), "{invalid:?} should be rejected");
+        assert!(
+            validate_name(invalid).is_err(),
+            "{invalid:?} should be rejected"
+        );
     }
 
     assert_eq!(infer_type_label("archive.zip", false), "ZIP file");
     assert_eq!(infer_type_label("folder", true), "Folder");
     assert_eq!(infer_type_label("LICENSE", false), "File");
 
-    assert_eq!(natural_name_compare("file2.txt", "file10.txt"), Ordering::Less);
+    assert_eq!(
+        natural_name_compare("file2.txt", "file10.txt"),
+        Ordering::Less
+    );
     assert_eq!(compare_optional_u64(Some(4), None), Ordering::Greater);
     assert_eq!(compare_optional_u64(None, Some(4)), Ordering::Less);
     assert_eq!(

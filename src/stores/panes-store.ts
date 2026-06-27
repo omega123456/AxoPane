@@ -17,12 +17,7 @@ import type {
   SortKey,
   VolumeInfo,
 } from '@/lib/types/ipc'
-import {
-  activeTab,
-  fromSessionPane,
-  toSessionPane,
-  useTabsStore,
-} from '@/stores/tabs-store'
+import { activeTab, fromSessionPane, toSessionPane, useTabsStore } from '@/stores/tabs-store'
 import { useConfigStore } from '@/stores/config-store'
 import { log } from '@/lib/app-log-commands'
 import { formatVolumeTreeName, isPathInsideVolume, sortVolumesForTree } from '@/lib/volumes'
@@ -69,6 +64,8 @@ type PaneState = {
   historyIndex: number
 }
 
+type PendingSizeRequests = Record<string, true>
+
 type InitializePayload = {
   session: SessionState
   showHiddenFiles: boolean
@@ -83,6 +80,7 @@ type PanesStore = {
   everythingStatus: EverythingStatus | null
   volumes: VolumeInfo[]
   sizeStates: Record<string, EntrySizeState>
+  pendingSizeRequests: PendingSizeRequests
   treeNodes: Record<string, TreeNodeState>
   treeRoots: string[]
   filterTimers: Partial<Record<PaneId, number>>
@@ -116,7 +114,7 @@ type PanesStore = {
 
 const filterDelayMs = 180
 
-function createPane(id: PaneId, title: string, path = '.') : PaneState {
+function createPane(id: PaneId, title: string, path = '.'): PaneState {
   return {
     id,
     title,
@@ -148,6 +146,7 @@ function defaultState() {
     everythingStatus: null,
     volumes: [] as VolumeInfo[],
     sizeStates: {} as Record<string, EntrySizeState>,
+    pendingSizeRequests: {} as PendingSizeRequests,
     treeNodes: {} as Record<string, TreeNodeState>,
     treeRoots: [] as string[],
     filterTimers: {} as Partial<Record<PaneId, number>>,
@@ -209,7 +208,11 @@ function normalizeExtendedWindowsPath(path: string) {
   return path
 }
 
-function entrySortValue(entry: DirectoryEntry, sizeState: EntrySizeState | undefined, sortKey: SortKey) {
+function entrySortValue(
+  entry: DirectoryEntry,
+  sizeState: EntrySizeState | undefined,
+  sortKey: SortKey,
+) {
   if (sortKey === 'size') {
     return sizeState?.sizeBytes ?? entry.sizeBytes ?? -1
   }
@@ -233,6 +236,17 @@ function entrySortValue(entry: DirectoryEntry, sizeState: EntrySizeState | undef
   return entry.name.toLowerCase()
 }
 
+function isKnownSize(entry: DirectoryEntry, sizeState: EntrySizeState | undefined) {
+  return (sizeState?.sizeBytes ?? entry.sizeBytes) != null
+}
+
+function compareEntryNames(left: DirectoryEntry, right: DirectoryEntry) {
+  return left.name.localeCompare(right.name, undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  })
+}
+
 function sortEntries(
   entries: DirectoryEntry[],
   sortKey: SortKey,
@@ -246,6 +260,21 @@ function sortEntries(
       return left.isDir ? -1 : 1
     }
 
+    if (sortKey === 'size') {
+      const leftState = sizeStates[left.path]
+      const rightState = sizeStates[right.path]
+      const leftHasKnownSize = isKnownSize(left, leftState)
+      const rightHasKnownSize = isKnownSize(right, rightState)
+
+      if (leftHasKnownSize !== rightHasKnownSize) {
+        return leftHasKnownSize ? -1 : 1
+      }
+
+      if (!leftHasKnownSize && !rightHasKnownSize) {
+        return compareEntryNames(left, right)
+      }
+    }
+
     const leftValue = entrySortValue(left, sizeStates[left.path], sortKey)
     const rightValue = entrySortValue(right, sizeStates[right.path], sortKey)
 
@@ -257,20 +286,68 @@ function sortEntries(
       return 1 * direction
     }
 
-    return left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' })
+    return compareEntryNames(left, right)
   })
 }
 
-/**
- * Collects the directory entry paths inside the pane's current visible window.
- * Folder sizes are requested for exactly these paths so the Rust size layer can
- * pick the right backend (Everything / manual / network-N/A) per path.
- */
-function visibleDirectoryPaths(pane: PaneState): string[] {
-  return pane.entries
-    .slice(pane.visibleStartIndex, pane.visibleEndIndex + 1)
-    .filter((entry) => entry.isDir)
-    .map((entry) => entry.path)
+function directoryPaths(entries: DirectoryEntry[]): string[] {
+  return entries.filter((entry) => entry.isDir).map((entry) => entry.path)
+}
+
+function isTerminalSizeState(state: SizeStateKind) {
+  return state === 'ready' || state === 'na' || state === 'error'
+}
+
+function shouldSkipSizeRequest(
+  path: string,
+  sizeStates: Record<string, EntrySizeState>,
+  pendingSizeRequests: PendingSizeRequests,
+) {
+  if (pendingSizeRequests[path]) {
+    return true
+  }
+
+  const sizeState = sizeStates[path]
+  return (
+    sizeState?.state === 'calculating' ||
+    sizeState?.state === 'ready' ||
+    sizeState?.state === 'na' ||
+    sizeState?.state === 'error'
+  )
+}
+
+function collectPendingSizeRequests(
+  paths: string[],
+  sizeStates: Record<string, EntrySizeState>,
+  pendingSizeRequests: PendingSizeRequests,
+) {
+  const seen = new Set<string>()
+
+  return paths.filter((path) => {
+    if (seen.has(path)) {
+      return false
+    }
+    seen.add(path)
+    return !shouldSkipSizeRequest(path, sizeStates, pendingSizeRequests)
+  })
+}
+
+function withPendingSizeRequests(
+  pendingSizeRequests: PendingSizeRequests,
+  paths: string[],
+  value: boolean,
+) {
+  const next = { ...pendingSizeRequests }
+
+  for (const path of paths) {
+    if (value) {
+      next[path] = true
+    } else {
+      delete next[path]
+    }
+  }
+
+  return next
 }
 
 // Eager folder-size requests are only valid where the Everything index can
@@ -436,6 +513,32 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     schedulePersistSession(paneId)
   },
   reloadPane: async (paneId) => {
+    const requestDirectorySizes = async (paths: string[]) => {
+      if (!eagerSizesEnabled(get().everythingStatus)) {
+        return []
+      }
+
+      const pending = collectPendingSizeRequests(paths, get().sizeStates, get().pendingSizeRequests)
+
+      if (pending.length === 0) {
+        return []
+      }
+
+      set((state) => ({
+        pendingSizeRequests: withPendingSizeRequests(state.pendingSizeRequests, pending, true),
+      }))
+
+      try {
+        await requestFolderSizes({ paths: pending })
+        return pending
+      } catch (error) {
+        set((state) => ({
+          pendingSizeRequests: withPendingSizeRequests(state.pendingSizeRequests, pending, false),
+        }))
+        throw error
+      }
+    }
+
     const pane = get().panes[paneId]
     set((state) => ({
       panes: {
@@ -502,21 +605,13 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         showHidden: get().showHiddenFiles,
       })
 
-      // Eager-request folder sizes for the visible directory entries only when
-      // the Everything index is available (Windows). On macOS / no-Everything
-      // Windows, sizes stay manual (Space / "Calculate size") per FR7 / M4.
-      const visibleDirectories = eagerSizesEnabled(get().everythingStatus)
-        ? visibleDirectoryPaths(nextPane)
-        : []
-      if (visibleDirectories.length > 0) {
-        await requestFolderSizes({ paths: visibleDirectories })
-      }
+      const requestedDirectories = await requestDirectorySizes(directoryPaths(nextPane.entries))
 
       log.debug('reloadPane done', {
         paneId,
         path: nextPane.path,
         entries: nextPane.entries.length,
-        sizeRequests: visibleDirectories.length,
+        sizeRequests: requestedDirectories.length,
       })
 
       await get().ensureTreeChildren(getParentPath(nextPane.path) ?? nextPane.path)
@@ -731,10 +826,12 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     const pane = get().panes[paneId]
     set((state) => {
       const nextSizeStates = { ...state.sizeStates }
+      const pendingSizeRequests = { ...state.pendingSizeRequests }
       for (const entry of pane.entries) {
         delete nextSizeStates[entry.path]
+        delete pendingSizeRequests[entry.path]
       }
-      return { sizeStates: nextSizeStates }
+      return { sizeStates: nextSizeStates, pendingSizeRequests }
     })
 
     await get().reloadPane(paneId)
@@ -777,7 +874,9 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           [paneId]: {
             ...pane,
             entries: nextEntries,
-            focusedEntryId: focusedStillPresent ? pane.focusedEntryId : (nextEntries[0]?.id ?? null),
+            focusedEntryId: focusedStillPresent
+              ? pane.focusedEntryId
+              : (nextEntries[0]?.id ?? null),
           },
         },
       }
@@ -786,13 +885,21 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     set((state) => {
       const pane = state.panes[paneId]
       const sortDirection =
-        pane.sortKey === sortKey ? (pane.sortDirection === 'asc' ? 'desc' : 'asc') : sortKey === 'name' || sortKey === 'type' ? 'asc' : 'desc'
+        pane.sortKey === sortKey
+          ? pane.sortDirection === 'asc'
+            ? 'desc'
+            : 'asc'
+          : sortKey === 'name' || sortKey === 'type'
+            ? 'asc'
+            : 'desc'
+      const sortedEntries = sortEntries(pane.entries, sortKey, sortDirection, state.sizeStates)
 
       return {
         panes: {
           ...state.panes,
           [paneId]: {
             ...pane,
+            entries: sortedEntries,
             sortKey,
             sortDirection,
           },
@@ -800,7 +907,12 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       }
     })
 
-    await get().reloadPane(paneId)
+    const nextPane = get().panes[paneId]
+    useTabsStore.getState().patchActiveTab(paneId, {
+      sortKey: nextPane.sortKey,
+      sortDirection: nextPane.sortDirection,
+    })
+    schedulePersistSession(get().activePaneId)
   },
   setFilterDraft: (paneId, value) => {
     const timer = get().filterTimers[paneId]
@@ -890,22 +1002,6 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         },
       },
     }))
-
-    // Newly scrolled-into-view folders need their sizes requested too; the
-    // initial reload only covered the first visible window. Request sizes for
-    // folders that don't yet have a size state recorded — but only where eager
-    // sizing applies (Windows + Everything); otherwise sizing stays manual.
-    if (!eagerSizesEnabled(get().everythingStatus)) {
-      return
-    }
-
-    const pane = get().panes[paneId]
-    const pending = visibleDirectoryPaths(pane).filter((path) => !get().sizeStates[path])
-    if (pending.length > 0) {
-      void requestFolderSizes({ paths: pending }).catch((error) => {
-        log.warn('setVisibleRange size request failed', { paneId, error })
-      })
-    }
   },
   applySizeState: (event) =>
     set((state) => {
@@ -918,21 +1014,11 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         },
       }
 
-      const nextPanes = Object.fromEntries(
-        (Object.entries(state.panes) as [PaneId, PaneState][]).map(([paneId, pane]) => [
-          paneId,
-          pane.sortKey === 'size'
-            ? {
-                ...pane,
-                entries: sortEntries(pane.entries, pane.sortKey, pane.sortDirection, nextSizeStates),
-              }
-            : pane,
-        ]),
-      ) as Record<PaneId, PaneState>
-
       return {
+        pendingSizeRequests: isTerminalSizeState(event.state)
+          ? withPendingSizeRequests(state.pendingSizeRequests, [event.path], false)
+          : state.pendingSizeRequests,
         sizeStates: nextSizeStates,
-        panes: nextPanes,
       }
     }),
   setEverythingStatus: (everythingStatus) => set({ everythingStatus }),

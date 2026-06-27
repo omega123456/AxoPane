@@ -36,19 +36,31 @@ mod watch_src {
         #[test]
         fn diff_entries_reports_changed_and_removed_paths() {
             let previous = HashMap::from([
-                ("C:/before.txt".to_string(), entry("C:/before.txt", "before.txt")),
+                (
+                    "C:/before.txt".to_string(),
+                    entry("C:/before.txt", "before.txt"),
+                ),
                 ("C:/same.txt".to_string(), entry("C:/same.txt", "same.txt")),
             ]);
             let next = HashMap::from([
                 ("C:/same.txt".to_string(), entry("C:/same.txt", "same.txt")),
-                ("C:/after.txt".to_string(), entry("C:/after.txt", "after.txt")),
+                (
+                    "C:/after.txt".to_string(),
+                    entry("C:/after.txt", "after.txt"),
+                ),
             ]);
 
             let patch = diff_entries("left-1", "C:/", "refresh", &previous, &next);
             assert_eq!(patch.tab_id, "left-1");
             assert_eq!(patch.reason, "refresh");
-            assert!(patch.changed.iter().any(|item| item.path.ends_with("after.txt")));
-            assert!(patch.removed.iter().any(|path| path.ends_with("before.txt")));
+            assert!(patch
+                .changed
+                .iter()
+                .any(|item| item.path.ends_with("after.txt")));
+            assert!(patch
+                .removed
+                .iter()
+                .any(|path| path.ends_with("before.txt")));
         }
 
         #[test]

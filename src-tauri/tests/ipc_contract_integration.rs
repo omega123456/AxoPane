@@ -3,13 +3,13 @@ mod common;
 
 use std::fs;
 
+use file_explorer_lib::fs::{SortDirection, SortKey};
 use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::events;
 use file_explorer_lib::ipc::mock;
 use file_explorer_lib::ipc::types::{
     CreateEntryRequest, DeleteEntriesRequest, ListDirRequest, OpenPathRequest, RenameEntryRequest,
 };
-use file_explorer_lib::fs::{SortDirection, SortKey};
 use tempfile::tempdir;
 
 #[test]

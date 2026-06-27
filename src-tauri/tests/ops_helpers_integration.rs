@@ -30,11 +30,20 @@ fn path_helpers_cover_name_root_and_component_logic() {
     assert_eq!(requested_pop(&mut requested), Some("second".to_string()));
     assert_eq!(requested_pop(&mut requested), None);
 
-    assert_eq!(split_name("photo.png"), ("photo".to_string(), "png".to_string()));
+    assert_eq!(
+        split_name("photo.png"),
+        ("photo".to_string(), "png".to_string())
+    );
     assert_eq!(split_name(".env"), (".env".to_string(), String::new()));
-    assert_eq!(split_name("Makefile"), ("Makefile".to_string(), String::new()));
+    assert_eq!(
+        split_name("Makefile"),
+        ("Makefile".to_string(), String::new())
+    );
 
-    assert_eq!(parent_dir("C:\\Users\\Omega\\report.txt"), "C:\\Users\\Omega");
+    assert_eq!(
+        parent_dir("C:\\Users\\Omega\\report.txt"),
+        "C:\\Users\\Omega"
+    );
     assert_eq!(parent_dir("report.txt"), String::new());
 
     if cfg!(windows) {

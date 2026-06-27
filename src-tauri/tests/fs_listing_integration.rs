@@ -275,13 +275,31 @@ fn list_dir_sorts_by_size_items_type_modified_and_created() {
     fs::write(root.join("no-extension"), "123").expect("plain");
 
     let by_size = list_names(root, SortKey::Size, SortDirection::Desc);
-    assert_eq!(by_size, vec!["full-folder", "empty-folder", "large.log", "no-extension", "small.txt"]);
+    assert_eq!(
+        by_size,
+        vec![
+            "full-folder",
+            "empty-folder",
+            "large.log",
+            "no-extension",
+            "small.txt"
+        ]
+    );
 
     let by_items = list_names(root, SortKey::Items, SortDirection::Desc);
     assert_eq!(by_items[..2], ["full-folder", "empty-folder"]);
 
     let by_type = list_names(root, SortKey::Type, SortDirection::Asc);
-    assert_eq!(by_type, vec!["empty-folder", "full-folder", "no-extension", "large.log", "small.txt"]);
+    assert_eq!(
+        by_type,
+        vec![
+            "empty-folder",
+            "full-folder",
+            "no-extension",
+            "large.log",
+            "small.txt"
+        ]
+    );
 
     let by_modified = list_names(root, SortKey::Modified, SortDirection::Asc);
     assert_eq!(by_modified.len(), 5);
@@ -315,7 +333,10 @@ fn list_dir_reports_readonly_and_plain_file_type_metadata() {
         .find(|entry| entry.name == "LICENSE")
         .expect("plain file");
     assert_eq!(entry.type_label, "File");
-    assert!(entry.attributes.iter().any(|attribute| attribute == "readonly"));
+    assert!(entry
+        .attributes
+        .iter()
+        .any(|attribute| attribute == "readonly"));
 
     let mut permissions = fs::metadata(&plain).expect("metadata").permissions();
     permissions.set_readonly(false);

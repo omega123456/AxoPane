@@ -8,8 +8,6 @@ pub mod volumes;
 pub mod watch;
 
 #[cfg(not(feature = "test-utils"))]
-use std::sync::Arc;
-#[cfg(not(feature = "test-utils"))]
 use ipc::commands;
 #[cfg(not(feature = "test-utils"))]
 use ops::OpsService;
@@ -17,6 +15,8 @@ use ops::OpsService;
 use persist::PersistenceState;
 #[cfg(not(feature = "test-utils"))]
 use size::SizeService;
+#[cfg(not(feature = "test-utils"))]
+use std::sync::Arc;
 #[cfg(not(feature = "test-utils"))]
 use tauri::{Emitter, Manager};
 #[cfg(not(feature = "test-utils"))]

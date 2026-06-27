@@ -325,7 +325,8 @@ fn atomic_writer_supports_extensionless_paths_and_error_conversions() {
     let io_error: PersistError = std::io::Error::other("boom").into();
     assert!(matches!(io_error, PersistError::Io(_)));
 
-    let serde_error: PersistError =
-        serde_json::from_str::<Config>("{not valid json").expect_err("serde error").into();
+    let serde_error: PersistError = serde_json::from_str::<Config>("{not valid json")
+        .expect_err("serde error")
+        .into();
     assert!(matches!(serde_error, PersistError::Serde(_)));
 }

@@ -14,9 +14,15 @@ mod fs_src {
         fn private_helpers_handle_types_and_natural_sort() {
             assert_eq!(infer_type_label("archive.zip", false), "ZIP file");
             assert_eq!(infer_type_label("folder", true), "Folder");
-            assert_eq!(natural_name_compare("file2.txt", "file10.txt"), Ordering::Less);
+            assert_eq!(
+                natural_name_compare("file2.txt", "file10.txt"),
+                Ordering::Less
+            );
             assert_eq!(compare_optional_u64(Some(4), None), Ordering::Greater);
-            assert_eq!(compare_optional_string(Some("b"), Some("a")), Ordering::Greater);
+            assert_eq!(
+                compare_optional_string(Some("b"), Some("a")),
+                Ordering::Greater
+            );
         }
 
         #[test]
@@ -24,7 +30,9 @@ mod fs_src {
             let fixture = tempdir().expect("temp dir");
             let file_path = fixture.path().join(".hidden.txt");
             std::fs::write(&file_path, b"hello").expect("file");
-            let mut permissions = std::fs::metadata(&file_path).expect("metadata").permissions();
+            let mut permissions = std::fs::metadata(&file_path)
+                .expect("metadata")
+                .permissions();
             permissions.set_readonly(true);
             std::fs::set_permissions(&file_path, permissions).expect("readonly");
 
@@ -34,8 +42,8 @@ mod fs_src {
             #[cfg(not(windows))]
             assert!(attributes.iter().any(|attribute| attribute == "hidden"));
 
-            let formatted = system_time_to_rfc3339(Some(std::time::SystemTime::UNIX_EPOCH))
-                .expect("timestamp");
+            let formatted =
+                system_time_to_rfc3339(Some(std::time::SystemTime::UNIX_EPOCH)).expect("timestamp");
             assert!(formatted.starts_with("1970-01-01T00:00:00"));
         }
 

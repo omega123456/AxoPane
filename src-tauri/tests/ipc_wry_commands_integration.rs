@@ -71,8 +71,14 @@ fn concrete_apphandle_commands_cover_volume_watch_and_size_wrappers() {
         app.state::<WatchService>(),
     )
     .expect("refresh");
-    assert!(patch.removed.iter().any(|path| path.ends_with("before.txt")));
-    assert!(patch.changed.iter().any(|entry| entry.path.ends_with("after.txt")));
+    assert!(patch
+        .removed
+        .iter()
+        .any(|path| path.ends_with("before.txt")));
+    assert!(patch
+        .changed
+        .iter()
+        .any(|entry| entry.path.ends_with("after.txt")));
 
     commands::set_tab_watch(
         SetTabWatchRequest { target: None },
