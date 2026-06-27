@@ -125,39 +125,39 @@ type RemovedEmitter = Arc<dyn Fn(String) + Send + Sync>;
 type InstantNow = Arc<dyn Fn() -> Instant + Send + Sync>;
 
 /// Shared, mutable per-operation control + state.
-struct OpState {
-    id: String,
-    kind: OpKind,
-    destination_dir: PathBuf,
-    items: Vec<OpItem>,
+pub struct OpState {
+    pub id: String,
+    pub kind: OpKind,
+    pub destination_dir: PathBuf,
+    pub items: Vec<OpItem>,
     /// Mount roots this operation touches (source + destination volumes).
-    volumes: HashSet<String>,
-    status: OpStatus,
-    total_items: u64,
-    completed_items: u64,
-    total_bytes: u64,
-    copied_bytes: u64,
-    bytes_per_second: u64,
-    eta_seconds: Option<u64>,
-    sample_count: u64,
-    rate_sample_at: Option<Instant>,
-    rate_sample_bytes: u64,
-    current_file_name: Option<String>,
-    current_file_copied: u64,
-    current_file_total: u64,
-    error_message: Option<String>,
-    completed_at: Option<Instant>,
-    cancel: Arc<AtomicBool>,
-    pause: Arc<AtomicBool>,
+    pub volumes: HashSet<String>,
+    pub status: OpStatus,
+    pub total_items: u64,
+    pub completed_items: u64,
+    pub total_bytes: u64,
+    pub copied_bytes: u64,
+    pub bytes_per_second: u64,
+    pub eta_seconds: Option<u64>,
+    pub sample_count: u64,
+    pub rate_sample_at: Option<Instant>,
+    pub rate_sample_bytes: u64,
+    pub current_file_name: Option<String>,
+    pub current_file_copied: u64,
+    pub current_file_total: u64,
+    pub error_message: Option<String>,
+    pub completed_at: Option<Instant>,
+    pub cancel: Arc<AtomicBool>,
+    pub pause: Arc<AtomicBool>,
     /// Pending conflict, and the channel the worker waits on for resolution.
-    conflict: Option<ConflictInfo>,
-    conflict_resolution: Option<ConflictResolution>,
-    apply_to_all: Option<ConflictResolution>,
-    rename_to: Option<String>,
+    pub conflict: Option<ConflictInfo>,
+    pub conflict_resolution: Option<ConflictResolution>,
+    pub apply_to_all: Option<ConflictResolution>,
+    pub rename_to: Option<String>,
 }
 
 impl OpState {
-    fn progress(&self) -> OpProgress {
+    pub fn progress(&self) -> OpProgress {
         let visible_copied_bytes = self.visible_copied_bytes();
         let progress_percent = if self.total_bytes == 0 {
             if matches!(self.status, OpStatus::Completed) {
@@ -194,25 +194,25 @@ impl OpState {
         }
     }
 
-    fn snapshot(&self) -> OpSnapshot {
+    pub fn snapshot(&self) -> OpSnapshot {
         OpSnapshot {
             progress: self.progress(),
             conflict: self.conflict.clone(),
         }
     }
 
-    fn is_terminal(&self) -> bool {
+    pub fn is_terminal(&self) -> bool {
         matches!(
             self.status,
             OpStatus::Completed | OpStatus::Failed | OpStatus::Cancelled
         )
     }
 
-    fn visible_copied_bytes(&self) -> u64 {
+    pub fn visible_copied_bytes(&self) -> u64 {
         self.copied_bytes.saturating_add(self.current_file_copied)
     }
 
-    fn reset_runtime_state(&mut self) {
+    pub fn reset_runtime_state(&mut self) {
         self.completed_items = 0;
         self.copied_bytes = 0;
         self.bytes_per_second = 0;
@@ -292,36 +292,24 @@ impl OpsService {
         *self.volumes.lock().expect("volumes lock") = volumes;
     }
 
-    pub fn set_progress_emitter<F>(&self, emitter: F)
-    where
-        F: Fn(OpProgress) + Send + Sync + 'static,
-    {
-        *self.progress_emitter.lock().expect("progress emitter lock") = Some(Arc::new(emitter));
+    pub fn set_progress_emitter(&self, emitter: ProgressEmitter) {
+        *self.progress_emitter.lock().expect("progress emitter lock") = Some(emitter);
     }
 
-    pub fn set_conflict_emitter<F>(&self, emitter: F)
-    where
-        F: Fn(ConflictInfo) + Send + Sync + 'static,
-    {
-        *self.conflict_emitter.lock().expect("conflict emitter lock") = Some(Arc::new(emitter));
+    pub fn set_conflict_emitter(&self, emitter: ConflictEmitter) {
+        *self.conflict_emitter.lock().expect("conflict emitter lock") = Some(emitter);
     }
 
-    pub fn set_removed_emitter<F>(&self, emitter: F)
-    where
-        F: Fn(String) + Send + Sync + 'static,
-    {
-        *self.removed_emitter.lock().expect("removed emitter lock") = Some(Arc::new(emitter));
+    pub fn set_removed_emitter(&self, emitter: RemovedEmitter) {
+        *self.removed_emitter.lock().expect("removed emitter lock") = Some(emitter);
     }
 
     #[cfg(feature = "test-utils")]
-    pub fn set_instant_now_for_tests<F>(&mut self, instant_now: F)
-    where
-        F: Fn() -> Instant + Send + Sync + 'static,
-    {
-        self.instant_now = Arc::new(instant_now);
+    pub fn set_instant_now_for_tests(&mut self, instant_now: InstantNow) {
+        self.instant_now = instant_now;
     }
 
-    fn schedule_auto_remove_for(&self, id: &str) {
+    pub fn schedule_auto_remove_for(&self, id: &str) {
         let removed = self
             .removed_emitter
             .lock()
@@ -330,7 +318,7 @@ impl OpsService {
         schedule_auto_remove(id, &self.inner, removed, self.completed_retention);
     }
 
-    fn emit_progress(&self, op: &OpState) {
+    pub fn emit_progress(&self, op: &OpState) {
         if let Some(emitter) = self
             .progress_emitter
             .lock()
@@ -341,7 +329,7 @@ impl OpsService {
         }
     }
 
-    fn volumes_for(&self, paths: &[&Path]) -> HashSet<String> {
+    pub fn volumes_for(&self, paths: &[&Path]) -> HashSet<String> {
         let volumes = self.volumes.lock().expect("volumes lock").clone();
         let mut roots = HashSet::new();
         for path in paths {
@@ -675,7 +663,7 @@ impl OpsService {
     }
 }
 
-fn requested_pop(requested: &mut Vec<String>) -> Option<String> {
+pub fn requested_pop(requested: &mut Vec<String>) -> Option<String> {
     if requested.is_empty() {
         None
     } else {
@@ -785,13 +773,13 @@ fn run_operation(
 
 /// Shared context threaded through the copy/move worker helpers. Bundling these
 /// fields keeps the recursive copy signatures small (no `too_many_arguments`).
-struct WorkerCtx<'a> {
-    op_arc: &'a Arc<Mutex<OpState>>,
-    resolver: &'a Arc<Condvar>,
-    progress: &'a Option<ProgressEmitter>,
-    start: Instant,
-    rate_window: Duration,
-    instant_now: &'a InstantNow,
+pub struct WorkerCtx<'a> {
+    pub op_arc: &'a Arc<Mutex<OpState>>,
+    pub resolver: &'a Arc<Condvar>,
+    pub progress: &'a Option<ProgressEmitter>,
+    pub start: Instant,
+    pub rate_window: Duration,
+    pub instant_now: &'a InstantNow,
 }
 
 fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEmitter>) {
@@ -1145,7 +1133,7 @@ fn schedule_auto_remove(
 /// Sum the byte size of a directory tree to drive byte-accurate progress.
 /// Symlinks are not followed (consistent with the copy's link guard, and to stay
 /// cycle-safe) and IO errors are skipped so measurement never aborts the op.
-fn measure_tree_size(path: &Path, cancel: &Arc<AtomicBool>) -> u64 {
+pub fn measure_tree_size(path: &Path, cancel: &Arc<AtomicBool>) -> u64 {
     let mut total = 0_u64;
     let Ok(entries) = fs::read_dir(path) else {
         return total;
@@ -1168,7 +1156,7 @@ fn measure_tree_size(path: &Path, cancel: &Arc<AtomicBool>) -> u64 {
     total
 }
 
-fn copy_path(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(), String> {
+pub fn copy_path(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(), String> {
     if source.is_dir() {
         let root = source.canonicalize().map_err(|error| error.to_string())?;
         let mut visited = HashSet::from([root.clone()]);
@@ -1178,7 +1166,7 @@ fn copy_path(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(), St
     }
 }
 
-fn copy_dir_recursive(
+pub fn copy_dir_recursive(
     source: &Path,
     target: &Path,
     root: &Path,
@@ -1225,7 +1213,7 @@ fn copy_dir_recursive(
     Ok(())
 }
 
-fn move_path(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(), String> {
+pub fn move_path(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(), String> {
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
@@ -1248,7 +1236,7 @@ fn move_path(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(), St
     }
 }
 
-fn copy_file_with_progress(
+pub fn copy_file_with_progress(
     source: &Path,
     target: &Path,
     ctx: &WorkerCtx<'_>,
@@ -1289,7 +1277,7 @@ fn copy_file_with_progress(
     writer.flush().map_err(|error| error.to_string())
 }
 
-fn remove_target(target: &Path) -> Result<(), String> {
+pub fn remove_target(target: &Path) -> Result<(), String> {
     if target.is_dir() {
         fs::remove_dir_all(target).map_err(|error| error.to_string())
     } else {
@@ -1297,7 +1285,7 @@ fn remove_target(target: &Path) -> Result<(), String> {
     }
 }
 
-fn remove_source(source: &Path) -> Result<(), String> {
+pub fn remove_source(source: &Path) -> Result<(), String> {
     if source.is_dir() {
         fs::remove_dir_all(source).map_err(|error| error.to_string())
     } else {
@@ -1305,7 +1293,7 @@ fn remove_source(source: &Path) -> Result<(), String> {
     }
 }
 
-fn unique_name(dir: &Path, name: &str) -> String {
+pub fn unique_name(dir: &Path, name: &str) -> String {
     let (stem, ext) = split_name(name);
     let mut counter = 1;
     loop {
@@ -1321,14 +1309,14 @@ fn unique_name(dir: &Path, name: &str) -> String {
     }
 }
 
-fn split_name(name: &str) -> (String, String) {
+pub fn split_name(name: &str) -> (String, String) {
     match name.rfind('.') {
         Some(index) if index > 0 => (name[..index].to_string(), name[index + 1..].to_string()),
         _ => (name.to_string(), String::new()),
     }
 }
 
-fn parent_dir(path: &str) -> String {
+pub fn parent_dir(path: &str) -> String {
     Path::new(path)
         .parent()
         .map(|parent| parent.to_string_lossy().into_owned())
@@ -1360,7 +1348,7 @@ pub fn volume_root_for(path: &Path, volumes: &[VolumeInfo]) -> String {
     fallback_root(&path_text)
 }
 
-fn fallback_root(path_text: &str) -> String {
+pub fn fallback_root(path_text: &str) -> String {
     if let Some(index) = path_text.find(':') {
         return path_text[..=index].to_string();
     }
@@ -1371,7 +1359,7 @@ fn fallback_root(path_text: &str) -> String {
     }
 }
 
-fn is_nested_copy_target(source: &Path, target: &Path) -> bool {
+pub fn is_nested_copy_target(source: &Path, target: &Path) -> bool {
     let source_components = normalized_components(source);
     let target_components = normalized_components(target);
 
@@ -1379,7 +1367,7 @@ fn is_nested_copy_target(source: &Path, target: &Path) -> bool {
         && target_components.starts_with(&source_components)
 }
 
-fn normalized_components(path: &Path) -> Vec<String> {
+pub fn normalized_components(path: &Path) -> Vec<String> {
     use std::path::Component;
 
     let mut normalized = Vec::new();

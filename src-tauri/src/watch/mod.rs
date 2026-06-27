@@ -42,10 +42,10 @@ pub struct WatchService {
     inner: Mutex<Option<WatchRuntime>>,
 }
 
-struct WatchRuntime {
-    debouncer: Debouncer<notify::RecommendedWatcher, FileIdMap>,
+pub struct WatchRuntime {
+    pub debouncer: Debouncer<notify::RecommendedWatcher, FileIdMap>,
     tabs: Arc<Mutex<HashMap<String, WatchedTab>>>,
-    watch_counts: HashMap<PathBuf, usize>,
+    pub watch_counts: HashMap<PathBuf, usize>,
 }
 
 #[derive(Clone)]
@@ -55,22 +55,21 @@ struct WatchedTab {
 }
 
 impl WatchService {
-    pub fn set_tab_watch<FPatch, FError>(
+    pub fn set_tab_watch(
         &self,
         target: Option<WatchTarget>,
-        emit_patch: FPatch,
-        emit_error: FError,
-    ) -> Result<(), String>
-    where
-        FPatch: Fn(DirPatch) + Send + Sync + 'static,
-        FError: Fn(String, String) + Send + Sync + 'static,
-    {
+        emit_patch: Arc<dyn Fn(DirPatch) + Send + Sync>,
+        emit_error: Arc<dyn Fn(String, String) + Send + Sync>,
+    ) -> Result<(), String> {
         let mut guard = self.inner.lock().expect("watch service lock");
 
         if let Some(target) = target {
-            let runtime = guard.get_or_insert_with(|| {
-                create_runtime(emit_patch, emit_error).expect("watch runtime")
-            });
+            if guard.is_none() {
+                let runtime = create_runtime(Arc::clone(&emit_patch), Arc::clone(&emit_error))?;
+                *guard = Some(runtime);
+            }
+
+            let runtime = guard.as_mut().expect("watch runtime");
             let path = PathBuf::from(&target.path);
             let snapshot = snapshot_for_target(&target)?;
             let pane_name = pane_scope(&target.tab_id).to_string();
@@ -78,20 +77,20 @@ impl WatchService {
             let (same_tab_previous, stale_tabs) = {
                 let tabs = runtime.tabs.lock().expect("watch tabs lock");
                 let same_tab_previous = tabs.get(&target.tab_id).cloned();
-                let stale_tabs = tabs
-                    .iter()
-                    .filter(|(tab_id, _)| {
-                        pane_scope(tab_id) == pane_name && *tab_id != &target.tab_id
-                    })
-                    .map(|(tab_id, watched)| (tab_id.clone(), watched.clone()))
-                    .collect::<Vec<_>>();
+                let mut stale_tabs = Vec::new();
+                for (tab_id, watched) in tabs.iter() {
+                    if pane_scope(tab_id) == pane_name && *tab_id != target.tab_id {
+                        stale_tabs.push((tab_id.clone(), watched.clone()));
+                    }
+                }
                 (same_tab_previous, stale_tabs)
             };
 
-            if same_tab_previous
-                .as_ref()
-                .is_none_or(|previous| previous.target.path != target.path)
-            {
+            let should_add_watch = match same_tab_previous.as_ref() {
+                Some(previous) => previous.target.path != target.path,
+                None => true,
+            };
+            if should_add_watch {
                 add_watch(runtime, &path)?;
             }
 
@@ -126,23 +125,24 @@ impl WatchService {
         Ok(())
     }
 
-    pub fn refresh_tab<FPatch>(
+    pub fn refresh_tab(
         &self,
         target: WatchTarget,
-        emit_patch: FPatch,
-    ) -> Result<DirPatch, String>
-    where
-        FPatch: Fn(DirPatch) + Send + Sync + 'static,
-    {
+        emit_patch: Arc<dyn Fn(DirPatch) + Send + Sync>,
+    ) -> Result<DirPatch, String> {
         let mut guard = self.inner.lock().expect("watch service lock");
-        let runtime = guard
-            .get_or_insert_with(|| create_runtime(emit_patch, |_, _| {}).expect("watch runtime"));
+        if guard.is_none() {
+            let runtime = create_runtime(Arc::clone(&emit_patch), Arc::new(noop_watch_error))?;
+            *guard = Some(runtime);
+        }
+
+        let runtime = guard.as_mut().expect("watch runtime");
 
         let mut tabs = runtime.tabs.lock().expect("watch tabs lock");
-        let previous = tabs
-            .get(&target.tab_id)
-            .map(|tab| tab.snapshot.clone())
-            .unwrap_or_default();
+        let previous = match tabs.get(&target.tab_id) {
+            Some(tab) => tab.snapshot.clone(),
+            None => HashMap::new(),
+        };
         let next = snapshot_for_target(&target)?;
         let patch = diff_entries(&target.tab_id, &target.path, "refresh", &previous, &next);
 
@@ -158,17 +158,13 @@ impl WatchService {
     }
 }
 
-fn create_runtime<FPatch, FError>(
-    emit_patch: FPatch,
-    emit_error: FError,
-) -> Result<WatchRuntime, String>
-where
-    FPatch: Fn(DirPatch) + Send + Sync + 'static,
-    FError: Fn(String, String) + Send + Sync + 'static,
-{
+pub fn create_runtime(
+    emit_patch: Arc<dyn Fn(DirPatch) + Send + Sync>,
+    emit_error: Arc<dyn Fn(String, String) + Send + Sync>,
+) -> Result<WatchRuntime, String> {
     let tabs = Arc::new(Mutex::new(HashMap::<String, WatchedTab>::new()));
-    let patch_emitter = Arc::new(emit_patch);
-    let error_emitter = Arc::new(emit_error);
+    let patch_emitter = emit_patch;
+    let error_emitter = emit_error;
     let tabs_for_callback = tabs.clone();
 
     let debouncer = new_debouncer(
@@ -184,9 +180,7 @@ where
 
                 let mut tabs = tabs_for_callback.lock().expect("watch tabs lock");
                 for watched in tabs.values_mut() {
-                    if !changed_paths.iter().any(|changed_path| {
-                        changed_path.parent() == Some(Path::new(&watched.target.path))
-                    }) {
+                    if !matches_watched_parent(&changed_paths, &watched.target.path) {
                         continue;
                     }
 
@@ -210,14 +204,7 @@ where
             }
             Err(errors) => {
                 for error in errors {
-                    error_emitter(
-                        error
-                            .paths
-                            .first()
-                            .map(|path| path.to_string_lossy().into_owned())
-                            .unwrap_or_default(),
-                        error.to_string(),
-                    );
+                    error_emitter(first_error_path(&error), error.to_string());
                 }
             }
         },
@@ -231,11 +218,33 @@ where
     })
 }
 
-fn pane_scope(tab_id: &str) -> &str {
-    tab_id.split_once('-').map_or(tab_id, |(scope, _)| scope)
+pub fn pane_scope(tab_id: &str) -> &str {
+    match tab_id.split_once('-') {
+        Some((scope, _)) => scope,
+        None => tab_id,
+    }
 }
 
-fn add_watch(runtime: &mut WatchRuntime, path: &Path) -> Result<(), String> {
+fn noop_watch_error(_: String, _: String) {}
+
+fn matches_watched_parent(changed_paths: &HashSet<PathBuf>, watched_path: &str) -> bool {
+    let watched_parent = Path::new(watched_path);
+    for changed_path in changed_paths {
+        if changed_path.parent() == Some(watched_parent) {
+            return true;
+        }
+    }
+    false
+}
+
+fn first_error_path(error: &notify::Error) -> String {
+    match error.paths.first() {
+        Some(path) => path.to_string_lossy().into_owned(),
+        None => String::new(),
+    }
+}
+
+pub fn add_watch(runtime: &mut WatchRuntime, path: &Path) -> Result<(), String> {
     match runtime.watch_counts.get_mut(path) {
         Some(count) => {
             *count += 1;
@@ -252,7 +261,7 @@ fn add_watch(runtime: &mut WatchRuntime, path: &Path) -> Result<(), String> {
     }
 }
 
-fn remove_watch(runtime: &mut WatchRuntime, path: &Path) -> Result<(), String> {
+pub fn remove_watch(runtime: &mut WatchRuntime, path: &Path) -> Result<(), String> {
     let Some(count) = runtime.watch_counts.get_mut(path) else {
         return Ok(());
     };
@@ -270,7 +279,9 @@ fn remove_watch(runtime: &mut WatchRuntime, path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn snapshot_for_target(target: &WatchTarget) -> Result<HashMap<String, DirectoryEntry>, String> {
+pub fn snapshot_for_target(
+    target: &WatchTarget,
+) -> Result<HashMap<String, DirectoryEntry>, String> {
     let response = fs::list_dir(&ListDirOptions {
         path: target.path.clone(),
         sort_key: target.sort_key,
@@ -287,7 +298,7 @@ fn snapshot_for_target(target: &WatchTarget) -> Result<HashMap<String, Directory
         .collect())
 }
 
-fn diff_entries(
+pub fn diff_entries(
     tab_id: &str,
     path: &str,
     reason: &str,

@@ -26,7 +26,7 @@ pub struct Config {
     pub update_check_interval: String,
 }
 
-fn default_update_check_interval() -> String {
+pub fn default_update_check_interval() -> String {
     "1d".to_string()
 }
 
@@ -51,15 +51,15 @@ pub struct LayoutConfig {
     pub zoom: String,
 }
 
-fn default_zoom() -> String {
+pub fn default_zoom() -> String {
     "100".to_string()
 }
 
-fn default_tree_width_px() -> f64 {
+pub fn default_tree_width_px() -> f64 {
     204.0
 }
 
-fn default_pane_split() -> f64 {
+pub fn default_pane_split() -> f64 {
     0.5
 }
 
@@ -76,7 +76,7 @@ impl Default for LayoutConfig {
     }
 }
 
-fn default_columns() -> Vec<ColumnConfig> {
+pub fn default_columns() -> Vec<ColumnConfig> {
     vec![
         ColumnConfig {
             key: "name".to_string(),
@@ -131,11 +131,11 @@ pub struct SessionTab {
     pub filter: String,
 }
 
-fn default_sort_key() -> String {
+pub fn default_sort_key() -> String {
     "name".to_string()
 }
 
-fn default_sort_direction() -> String {
+pub fn default_sort_direction() -> String {
     "asc".to_string()
 }
 

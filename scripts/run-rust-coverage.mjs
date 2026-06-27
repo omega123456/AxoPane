@@ -16,6 +16,10 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const rustCoverageTargetDir = path.join(
+  process.env.TEMP ?? process.env.TMP ?? root,
+  'file-explorer-llvm-cov',
+)
 
 function tryReadCommand(command, args) {
   try {
@@ -127,7 +131,10 @@ const [command, commandArgs] = hasRustup
 // progress goes to stderr and is inherited untouched.
 const child = spawn(command, commandArgs, {
   cwd: root,
-  env,
+  env: {
+    ...env,
+    CARGO_TARGET_DIR: env.CARGO_TARGET_DIR ?? rustCoverageTargetDir,
+  },
   stdio: ['inherit', 'pipe', 'inherit'],
   shell: process.platform === 'win32',
 })

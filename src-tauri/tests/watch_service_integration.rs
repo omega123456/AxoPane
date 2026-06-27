@@ -27,13 +27,15 @@ fn refresh_tab_emits_incremental_patch() {
     };
 
     service
-        .set_tab_watch(Some(target.clone()), |_| {}, |_, _| {})
+        .set_tab_watch(Some(target.clone()), Arc::new(|_| {}), Arc::new(|_, _| {}))
         .expect("set watch");
 
     fs::remove_file(root.join("before.txt")).expect("remove before");
     fs::write(root.join("after.txt"), "b").expect("after");
 
-    let patch = service.refresh_tab(target, |_| {}).expect("refresh");
+    let patch = service
+        .refresh_tab(target, Arc::new(|_| {}))
+        .expect("refresh");
     assert_eq!(patch.tab_id, "left-1");
     assert!(patch
         .removed
@@ -43,6 +45,37 @@ fn refresh_tab_emits_incremental_patch() {
         .changed
         .iter()
         .any(|entry| entry.path.ends_with("after.txt")));
+}
+
+#[test]
+fn refresh_tab_initializes_snapshot_on_first_use() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    fs::write(root.join("initial.txt"), "seed").expect("initial");
+
+    let service = WatchService::default();
+    let target = WatchTarget {
+        tab_id: String::from("left-2"),
+        path: root.to_string_lossy().into_owned(),
+        sort_key: SortKey::Name,
+        sort_direction: SortDirection::Asc,
+        filter: String::new(),
+        show_hidden: true,
+    };
+
+    let first_patch = service
+        .refresh_tab(target.clone(), Arc::new(|_| {}))
+        .expect("first refresh");
+    assert!(first_patch
+        .changed
+        .iter()
+        .any(|entry| entry.path.ends_with("initial.txt")));
+
+    let second_patch = service
+        .refresh_tab(target, Arc::new(|_| {}))
+        .expect("second refresh");
+    assert!(second_patch.changed.is_empty());
+    assert!(second_patch.removed.is_empty());
 }
 
 #[test]
@@ -67,18 +100,18 @@ fn watcher_coalesces_changes_and_emits_patch() {
     service
         .set_tab_watch(
             Some(target),
-            move |patch| {
+            Arc::new(move |patch| {
                 patches_for_callback
                     .lock()
                     .expect("patches lock")
                     .push(patch);
-            },
-            move |_, message| {
+            }),
+            Arc::new(move |_, message| {
                 errors_for_callback
                     .lock()
                     .expect("errors lock")
                     .push(message);
-            },
+            }),
         )
         .expect("set watch");
 
@@ -126,13 +159,13 @@ fn replacing_a_pane_watch_discards_the_previous_tab_watch() {
                 filter: String::new(),
                 show_hidden: true,
             }),
-            move |patch| {
+            Arc::new(move |patch| {
                 patches_for_callback
                     .lock()
                     .expect("patches lock")
                     .push(patch);
-            },
-            move |_, _| {},
+            }),
+            Arc::new(move |_, _| {}),
         )
         .expect("set first watch");
 
@@ -146,8 +179,8 @@ fn replacing_a_pane_watch_discards_the_previous_tab_watch() {
                 filter: String::new(),
                 show_hidden: true,
             }),
-            |_| {},
-            |_, _| {},
+            Arc::new(|_| {}),
+            Arc::new(|_, _| {}),
         )
         .expect("replace watch");
 

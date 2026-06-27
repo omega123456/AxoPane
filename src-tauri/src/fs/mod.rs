@@ -140,7 +140,7 @@ pub fn default_start_dir() -> PathBuf {
     platform_root()
 }
 
-fn platform_root() -> PathBuf {
+pub fn platform_root() -> PathBuf {
     if cfg!(windows) {
         PathBuf::from("C:\\")
     } else {
@@ -217,7 +217,7 @@ pub fn list_dir(options: &ListDirOptions) -> Result<ListDirResponse, FsError> {
 /// Validates a single user-supplied file/folder name. Names must be non-empty,
 /// must not be the special `.`/`..` entries, and must not contain a path
 /// separator or NUL (which would let a "name" escape its parent directory).
-fn validate_name(name: &str) -> Result<(), FsError> {
+pub fn validate_name(name: &str) -> Result<(), FsError> {
     let trimmed = name.trim();
     if trimmed.is_empty()
         || trimmed == "."
@@ -270,9 +270,10 @@ pub fn create_file(parent: &str, name: &str) -> Result<DirectoryEntry, FsError> 
 pub fn rename_entry(path: &str, new_name: &str) -> Result<DirectoryEntry, FsError> {
     validate_name(new_name)?;
     let source = Path::new(path);
-    let parent = source
-        .parent()
-        .ok_or_else(|| FsError::InvalidFileName(source.to_path_buf()))?;
+    let parent = match source.parent() {
+        Some(parent) => parent,
+        None => return Err(FsError::InvalidFileName(source.to_path_buf())),
+    };
     let target = parent.join(new_name.trim());
 
     // A no-op rename to the same name is allowed; otherwise refuse to clobber an
@@ -308,15 +309,24 @@ pub fn delete_entries(paths: &[String]) -> Result<(), FsError> {
 /// metadata directly from the path rather than a [`DirEntry`].
 fn build_entry_from_path(path: &Path) -> Result<DirectoryEntry, FsError> {
     let metadata = path.metadata()?;
-    let name = path
-        .file_name()
-        .and_then(OsStr::to_str)
-        .ok_or_else(|| FsError::InvalidFileName(path.to_path_buf()))?
-        .to_string();
+    let Some(file_name) = path.file_name() else {
+        return Err(FsError::InvalidFileName(path.to_path_buf()));
+    };
+    let Some(name) = OsStr::to_str(file_name) else {
+        return Err(FsError::InvalidFileName(path.to_path_buf()));
+    };
+    let name = name.to_string();
     let is_dir = metadata.is_dir();
     let attributes = collect_attributes(path, &metadata);
-    let is_hidden = attributes.iter().any(|attribute| attribute == "hidden");
-    let is_system = attributes.iter().any(|attribute| attribute == "system");
+    let mut is_hidden = false;
+    let mut is_system = false;
+    for attribute in &attributes {
+        if attribute == "hidden" {
+            is_hidden = true;
+        } else if attribute == "system" {
+            is_system = true;
+        }
+    }
 
     Ok(DirectoryEntry {
         id: display_path_from_path(path),
@@ -337,14 +347,21 @@ fn build_entry_from_path(path: &Path) -> Result<DirectoryEntry, FsError> {
 fn build_entry(entry: &DirEntry) -> Result<DirectoryEntry, FsError> {
     let path = entry.path();
     let metadata = entry.metadata()?;
-    let name = entry
-        .file_name()
-        .into_string()
-        .map_err(|_| FsError::InvalidFileName(path.clone()))?;
+    let name = match entry.file_name().into_string() {
+        Ok(name) => name,
+        Err(_) => return Err(FsError::InvalidFileName(path.clone())),
+    };
     let is_dir = metadata.is_dir();
     let attributes = collect_attributes(&path, &metadata);
-    let is_hidden = attributes.iter().any(|attribute| attribute == "hidden");
-    let is_system = attributes.iter().any(|attribute| attribute == "system");
+    let mut is_hidden = false;
+    let mut is_system = false;
+    for attribute in &attributes {
+        if attribute == "hidden" {
+            is_hidden = true;
+        } else if attribute == "system" {
+            is_system = true;
+        }
+    }
 
     Ok(DirectoryEntry {
         id: display_path_from_path(&path),
@@ -369,7 +386,7 @@ fn build_entry(entry: &DirEntry) -> Result<DirectoryEntry, FsError> {
 /// `$RECYCLE.BIN`, legacy access-denied junctions like `Application Data`).
 /// A failure to count one child must not abort the entire parent listing, so an
 /// unreadable directory simply reports an unknown count (`None`).
-fn read_item_count(path: &Path) -> Option<u64> {
+pub fn read_item_count(path: &Path) -> Option<u64> {
     match fs::read_dir(path) {
         Ok(entries) => Some(entries.count() as u64),
         Err(error) => {
@@ -379,7 +396,7 @@ fn read_item_count(path: &Path) -> Option<u64> {
     }
 }
 
-fn infer_type_label(name: &str, is_dir: bool) -> String {
+pub fn infer_type_label(name: &str, is_dir: bool) -> String {
     if is_dir {
         return "Folder".to_string();
     }
@@ -392,7 +409,7 @@ fn infer_type_label(name: &str, is_dir: bool) -> String {
         .unwrap_or_else(|| "File".to_string())
 }
 
-fn compare_entries(
+pub fn compare_entries(
     left: &DirectoryEntry,
     right: &DirectoryEntry,
     sort_key: SortKey,
@@ -427,11 +444,11 @@ fn compare_entries(
     }
 }
 
-fn natural_name_compare(left: &str, right: &str) -> Ordering {
+pub fn natural_name_compare(left: &str, right: &str) -> Ordering {
     natural_lexical_cmp(&left.to_ascii_lowercase(), &right.to_ascii_lowercase())
 }
 
-fn compare_optional_u64(left: Option<u64>, right: Option<u64>) -> Ordering {
+pub fn compare_optional_u64(left: Option<u64>, right: Option<u64>) -> Ordering {
     match (left, right) {
         (Some(left), Some(right)) => left.cmp(&right),
         (Some(_), None) => Ordering::Greater,
@@ -440,7 +457,7 @@ fn compare_optional_u64(left: Option<u64>, right: Option<u64>) -> Ordering {
     }
 }
 
-fn compare_optional_string(left: Option<&str>, right: Option<&str>) -> Ordering {
+pub fn compare_optional_string(left: Option<&str>, right: Option<&str>) -> Ordering {
     match (left, right) {
         (Some(left), Some(right)) => left.cmp(right),
         (Some(_), None) => Ordering::Greater,
@@ -449,11 +466,11 @@ fn compare_optional_string(left: Option<&str>, right: Option<&str>) -> Ordering 
     }
 }
 
-fn system_time_to_rfc3339(value: Option<SystemTime>) -> Option<String> {
+pub fn system_time_to_rfc3339(value: Option<SystemTime>) -> Option<String> {
     value.and_then(|time| OffsetDateTime::from(time).format(&Rfc3339).ok())
 }
 
-fn collect_attributes(path: &Path, metadata: &Metadata) -> Vec<String> {
+pub fn collect_attributes(path: &Path, metadata: &Metadata) -> Vec<String> {
     let mut attributes = Vec::new();
 
     if metadata.permissions().readonly() {

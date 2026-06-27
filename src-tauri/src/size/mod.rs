@@ -95,12 +95,12 @@ impl SizeService {
 
     pub fn everything_status(&self) -> EverythingStatus {
         let inner = self.inner.lock().expect("size service lock");
+        let availability = match inner.everything.as_ref() {
+            Some(handle) => Some(handle.availability()),
+            None => None,
+        };
 
-        match inner
-            .everything
-            .as_ref()
-            .map(|handle| handle.availability())
-        {
+        match availability {
             Some(EverythingAvailability::Available) => EverythingStatus {
                 status: EverythingStatusKind::Available,
                 is_available: true,
@@ -160,7 +160,7 @@ impl SizeService {
         }
     }
 
-    fn request_path_with_volumes(
+    pub fn request_path_with_volumes(
         &self,
         path: String,
         volumes: Vec<VolumeInfo>,
@@ -190,7 +190,7 @@ impl SizeService {
                     path,
                     SizeSource::Everything,
                     emitter,
-                    move |job_path, cancel| {
+                    Box::new(move |job_path, cancel| {
                         if cancel.load(Ordering::Relaxed) {
                             return Some(SizeUpdate {
                                 path: job_path,
@@ -220,7 +220,7 @@ impl SizeService {
                                 size_bytes: None,
                             }),
                         }
-                    },
+                    }),
                 );
             }
             SizeBackend::Manual => {
@@ -229,7 +229,7 @@ impl SizeService {
                     path,
                     SizeSource::Manual,
                     emitter,
-                    move |job_path, cancel| match manual::calculate(
+                    Box::new(move |job_path, cancel| match manual::calculate(
                         Path::new(&job_path),
                         &cancel,
                         timeout,
@@ -253,21 +253,19 @@ impl SizeService {
                             source: SizeSource::Manual,
                             size_bytes: None,
                         }),
-                    },
+                    }),
                 );
             }
         }
     }
 
-    fn spawn_job<F>(
+    fn spawn_job(
         &self,
         path: String,
         source: SizeSource,
         emitter: Arc<dyn Fn(SizeUpdate) + Send + Sync>,
-        work: F,
-    ) where
-        F: FnOnce(String, Arc<AtomicBool>) -> Option<SizeUpdate> + Send + 'static,
-    {
+        work: Box<dyn FnOnce(String, Arc<AtomicBool>) -> Option<SizeUpdate> + Send + 'static>,
+    ) {
         self.cancel(&path);
 
         emitter(SizeUpdate {

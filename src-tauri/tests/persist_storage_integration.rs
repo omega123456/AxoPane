@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use file_explorer_lib::persist::{
     load_json_or_default, write_json_atomic, write_json_atomic_with_failure, ColumnConfig, Config,
-    LayoutConfig, PersistedStore, PersistenceState, Session, SessionPane, SessionTab,
+    LayoutConfig, PersistError, PersistedStore, PersistenceState, Session, SessionPane, SessionTab,
 };
 use tempfile::tempdir;
 
@@ -311,4 +311,21 @@ fn atomic_writer_creates_missing_parent_directories() {
 
     let loaded: Config = load_json_or_default(&path).expect("load config");
     assert_eq!(loaded, Config::default());
+}
+
+#[test]
+fn atomic_writer_supports_extensionless_paths_and_error_conversions() {
+    let fixture = tempdir().expect("temp dir");
+    let path = fixture.path().join("session");
+
+    write_json_atomic_with_failure(&path, &Session::default(), false).expect("write session");
+    let loaded: Session = load_json_or_default(&path).expect("load session");
+    assert_eq!(loaded, Session::default());
+
+    let io_error: PersistError = std::io::Error::other("boom").into();
+    assert!(matches!(io_error, PersistError::Io(_)));
+
+    let serde_error: PersistError =
+        serde_json::from_str::<Config>("{not valid json").expect_err("serde error").into();
+    assert!(matches!(serde_error, PersistError::Serde(_)));
 }

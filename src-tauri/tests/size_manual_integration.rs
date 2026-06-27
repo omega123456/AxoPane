@@ -56,6 +56,36 @@ fn manual_sizer_times_out() {
     assert!(matches!(error, ManualSizeError::Timeout));
 }
 
+#[test]
+fn manual_size_error_formats_and_converts_io_failures() {
+    let fixture = tempdir().expect("temp dir");
+    let missing = fixture.path().join("missing");
+
+    let error = calculate(
+        &missing,
+        &Arc::new(AtomicBool::new(false)),
+        Duration::from_secs(1),
+    )
+    .expect_err("missing path");
+    assert!(!error.to_string().is_empty());
+    assert!(matches!(error, ManualSizeError::Io(_)));
+}
+
+#[test]
+fn manual_sizer_returns_zero_for_regular_files() {
+    let fixture = tempdir().expect("temp dir");
+    let file = fixture.path().join("plain.txt");
+    fs::write(&file, b"content").expect("file");
+
+    let size = calculate(
+        &file,
+        &Arc::new(AtomicBool::new(false)),
+        Duration::from_secs(1),
+    )
+    .expect("size");
+    assert_eq!(size, 0);
+}
+
 #[cfg(unix)]
 #[test]
 fn manual_sizer_does_not_follow_symlinks() {
@@ -211,6 +241,54 @@ fn size_service_reports_missing_manual_path_as_error() {
     assert!(recorded
         .iter()
         .any(|update| update.source == SizeSource::Manual && update.state == SizeStateKind::Error));
+}
+
+#[test]
+fn request_path_with_explicit_volumes_emits_terminal_events() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    fs::write(root.join("alpha.bin"), vec![1_u8; 4]).expect("alpha");
+
+    let service = SizeService::new(Duration::from_secs(1));
+    let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
+    let updates_for_emitter = updates.clone();
+    let local_root = if cfg!(windows) {
+        root.components()
+            .next()
+            .expect("component")
+            .as_os_str()
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        "/".to_string()
+    };
+
+    service.request_path_with_volumes(
+        root.to_string_lossy().into_owned(),
+        vec![VolumeInfo {
+            mount_root: local_root,
+            label: "Local".to_string(),
+            total_bytes: 1,
+            free_bytes: 1,
+            is_network: false,
+            is_removable: false,
+        }],
+        Arc::new(move |update| {
+            updates_for_emitter
+                .lock()
+                .expect("updates lock")
+                .push(update);
+        }),
+    );
+
+    wait_for_updates(&updates, |recorded| {
+        recorded.iter().any(|update| {
+            matches!(
+                update.state,
+                SizeStateKind::Ready | SizeStateKind::Error | SizeStateKind::Na
+            )
+        })
+    });
 }
 
 #[cfg(windows)]

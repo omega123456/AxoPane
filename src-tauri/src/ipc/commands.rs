@@ -4,6 +4,8 @@ use crate::persist::PersistenceState;
 use crate::size::SizeService;
 use crate::volumes;
 use crate::watch::WatchService;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use super::mock;
 use super::types::{
@@ -15,7 +17,15 @@ use super::types::{
 };
 use crate::fs::DirectoryEntry;
 use std::path::Path;
-use tauri::{AppHandle, Emitter, State};
+#[cfg(not(feature = "test-utils"))]
+use tauri::{AppHandle, Emitter};
+use tauri::State;
+
+#[cfg(feature = "test-utils")]
+fn noop_dir_patch(_: crate::watch::DirPatch) {}
+
+#[cfg(feature = "test-utils")]
+fn noop_watch_error(_: String, _: String) {}
 
 #[tauri::command]
 pub fn get_initial_shell() -> InitialShellResponse {
@@ -76,6 +86,7 @@ pub fn open_path(payload: OpenPathRequest) -> Result<(), String> {
     })
 }
 
+#[cfg(not(feature = "test-utils"))]
 #[tauri::command]
 pub fn list_volumes(app: AppHandle) -> Result<Vec<VolumeInfo>, String> {
     let volumes = volumes::list_volumes();
@@ -91,11 +102,18 @@ pub fn list_volumes(app: AppHandle) -> Result<Vec<VolumeInfo>, String> {
     Ok(volumes)
 }
 
+#[cfg(feature = "test-utils")]
+#[tauri::command]
+pub fn list_volumes() -> Result<Vec<VolumeInfo>, String> {
+    Ok(volumes::list_volumes())
+}
+
 #[tauri::command]
 pub fn everything_status(state: State<'_, SizeService>) -> super::types::EverythingStatus {
     state.everything_status()
 }
 
+#[cfg(not(feature = "test-utils"))]
 #[tauri::command]
 pub fn request_folder_size(
     payload: FolderSizeRequest,
@@ -111,6 +129,21 @@ pub fn request_folder_size(
     );
 }
 
+#[cfg(feature = "test-utils")]
+#[tauri::command]
+pub fn request_folder_size(
+    payload: FolderSizeRequest,
+    state: State<'_, SizeService>,
+) -> Vec<SizeStateEvent> {
+    request_folder_sizes(
+        FolderSizesRequest {
+            paths: vec![payload.path],
+        },
+        state,
+    )
+}
+
+#[cfg(not(feature = "test-utils"))]
 #[tauri::command]
 pub fn request_folder_sizes(
     payload: FolderSizesRequest,
@@ -131,6 +164,53 @@ pub fn request_folder_sizes(
     });
 }
 
+#[cfg(feature = "test-utils")]
+#[tauri::command]
+pub fn request_folder_sizes(
+    payload: FolderSizesRequest,
+    state: State<'_, SizeService>,
+) -> Vec<SizeStateEvent> {
+    let updates = Arc::new(Mutex::new(Vec::<SizeStateEvent>::new()));
+    let updates_for_emitter = Arc::clone(&updates);
+    let expected_paths = payload.paths.len().max(1);
+
+    state.request_paths(payload.paths, move |update| {
+        updates_for_emitter
+            .lock()
+            .expect("size updates lock")
+            .push(SizeStateEvent {
+                path: update.path,
+                state: update.state,
+                source: update.source,
+                size_bytes: update.size_bytes,
+            });
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < deadline {
+        let recorded = updates.lock().expect("size updates lock");
+        let terminal_count = recorded
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event.state,
+                    crate::size::SizeStateKind::Ready
+                        | crate::size::SizeStateKind::Error
+                        | crate::size::SizeStateKind::Na
+                )
+            })
+            .count();
+        if terminal_count >= expected_paths {
+            return recorded.clone();
+        }
+        drop(recorded);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let recorded = updates.lock().expect("size updates lock").clone();
+    recorded
+}
+
 #[tauri::command]
 pub fn cancel_size(
     payload: CancelSizeRequest,
@@ -141,6 +221,7 @@ pub fn cancel_size(
     }
 }
 
+#[cfg(not(feature = "test-utils"))]
 #[tauri::command]
 pub fn set_tab_watch(
     payload: SetTabWatchRequest,
@@ -152,7 +233,7 @@ pub fn set_tab_watch(
 
     state.set_tab_watch(
         payload.target,
-        move |patch| {
+        Arc::new(move |patch| {
             let _ = patch_app.emit(
                 super::events::DIR_PATCH,
                 super::types::DirPatchEvent {
@@ -170,24 +251,38 @@ pub fn set_tab_watch(
                     removed: patch.removed,
                 },
             );
-        },
-        move |path, message| {
+        }),
+        Arc::new(move |path, message| {
             log::warn!("watch error for {path}: {message}");
             let _ = error_app.emit(
                 super::events::WATCH_ERROR,
                 super::types::WatchErrorEvent { path, message },
             );
-        },
+        }),
     )
 }
 
+#[cfg(feature = "test-utils")]
+#[tauri::command]
+pub fn set_tab_watch(
+    payload: SetTabWatchRequest,
+    state: State<'_, WatchService>,
+) -> Result<(), String> {
+    state.set_tab_watch(
+        payload.target,
+        Arc::new(noop_dir_patch),
+        Arc::new(noop_watch_error),
+    )
+}
+
+#[cfg(not(feature = "test-utils"))]
 #[tauri::command]
 pub fn refresh_tab(
     payload: RefreshTabRequest,
     app: AppHandle,
     state: State<'_, WatchService>,
 ) -> Result<super::types::DirPatchEvent, String> {
-    let patch = state.refresh_tab(payload.target, |_| {})?;
+    let patch = state.refresh_tab(payload.target, Arc::new(|_| {}))?;
     let event = super::types::DirPatchEvent {
         tab_id: patch.tab_id,
         path: patch.path,
@@ -207,6 +302,29 @@ pub fn refresh_tab(
         .map_err(|error| error.to_string())?;
 
     Ok(event)
+}
+
+#[cfg(feature = "test-utils")]
+#[tauri::command]
+pub fn refresh_tab(
+    payload: RefreshTabRequest,
+    state: State<'_, WatchService>,
+) -> Result<super::types::DirPatchEvent, String> {
+    let patch = state.refresh_tab(payload.target, Arc::new(noop_dir_patch))?;
+    Ok(super::types::DirPatchEvent {
+        tab_id: patch.tab_id,
+        path: patch.path,
+        reason: patch.reason,
+        changed: patch
+            .changed
+            .into_iter()
+            .map(|change| super::types::DirEntryPatch {
+                path: change.path,
+                entry: change.entry,
+            })
+            .collect(),
+        removed: patch.removed,
+    })
 }
 
 #[tauri::command]

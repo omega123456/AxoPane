@@ -382,12 +382,12 @@ fn completed_jobs_auto_remove_after_retention() {
     let removed_ids: Arc<std::sync::Mutex<Vec<String>>> =
         Arc::new(std::sync::Mutex::new(Vec::new()));
     let removed_sink = removed_ids.clone();
-    service.set_removed_emitter(move |operation_id| {
+    service.set_removed_emitter(Arc::new(move |operation_id| {
         removed_sink
             .lock()
             .expect("removed lock")
             .push(operation_id);
-    });
+    }));
 
     let id = service.start_op(StartOpRequest {
         kind: OpKind::Copy,
@@ -435,12 +435,12 @@ fn cancelled_jobs_auto_remove_after_retention() {
     let removed_ids: Arc<std::sync::Mutex<Vec<String>>> =
         Arc::new(std::sync::Mutex::new(Vec::new()));
     let removed_sink = removed_ids.clone();
-    service.set_removed_emitter(move |operation_id| {
+    service.set_removed_emitter(Arc::new(move |operation_id| {
         removed_sink
             .lock()
             .expect("removed lock")
             .push(operation_id);
-    });
+    }));
 
     let blocker = parking_op(&service, &dir.path().join("a"));
     wait_for(&service, &blocker, |progress| {
@@ -821,9 +821,9 @@ fn emits_incremental_current_file_progress() {
 
     let service = OpsService::new(Duration::from_secs(30));
     service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
-    service.set_progress_emitter(move |progress| {
+    service.set_progress_emitter(Arc::new(move |progress| {
         events_clone.lock().expect("events lock").push(progress);
-    });
+    }));
 
     let id = service.start_op(StartOpRequest {
         kind: OpKind::Copy,
@@ -897,9 +897,9 @@ fn events_for_mid_copy_rate(rate_window: Duration) -> Vec<OpProgress> {
 
     let service = OpsService::with_rate_window(Duration::from_secs(30), rate_window);
     service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
-    service.set_progress_emitter(move |progress| {
+    service.set_progress_emitter(Arc::new(move |progress| {
         events_clone.lock().expect("events lock").push(progress);
-    });
+    }));
 
     let id = service.start_op(StartOpRequest {
         kind: OpKind::Copy,
@@ -946,11 +946,11 @@ fn zero_rate_window_recomputes_each_chunk() {
     let events_clone = events.clone();
 
     let mut service = OpsService::with_rate_window(Duration::from_secs(30), Duration::ZERO);
-    service.set_instant_now_for_tests(deterministic_instants(&[0, 1, 6, 31, 56, 57]));
+    service.set_instant_now_for_tests(Arc::new(deterministic_instants(&[0, 1, 6, 31, 56, 57])));
     service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
-    service.set_progress_emitter(move |progress| {
+    service.set_progress_emitter(Arc::new(move |progress| {
         events_clone.lock().expect("events lock").push(progress);
-    });
+    }));
 
     let id = service.start_op(StartOpRequest {
         kind: OpKind::Copy,
@@ -999,11 +999,11 @@ fn large_rate_window_holds_prior_rate_between_chunks() {
 
     let mut service =
         OpsService::with_rate_window(Duration::from_secs(30), Duration::from_secs(60));
-    service.set_instant_now_for_tests(deterministic_instants(&[0, 1, 6, 31, 56, 57]));
+    service.set_instant_now_for_tests(Arc::new(deterministic_instants(&[0, 1, 6, 31, 56, 57])));
     service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
-    service.set_progress_emitter(move |progress| {
+    service.set_progress_emitter(Arc::new(move |progress| {
         events_clone.lock().expect("events lock").push(progress);
-    });
+    }));
 
     let id = service.start_op(StartOpRequest {
         kind: OpKind::Copy,
@@ -1206,8 +1206,10 @@ fn operates_without_a_matching_volume_table() {
 
     let service = OpsService::new(Duration::from_millis(50));
     service.set_volumes(Vec::new());
-    service.set_progress_emitter(move |_progress| progress_clone.store(true, Ordering::SeqCst));
-    service.set_conflict_emitter(move |_conflict| {});
+    service.set_progress_emitter(Arc::new(move |_progress| {
+        progress_clone.store(true, Ordering::SeqCst)
+    }));
+    service.set_conflict_emitter(Arc::new(move |_conflict| {}));
 
     let id = service.start_op(StartOpRequest {
         kind: OpKind::Copy,

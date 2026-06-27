@@ -8,6 +8,8 @@ pub mod volumes;
 pub mod watch;
 
 #[cfg(not(feature = "test-utils"))]
+use std::sync::Arc;
+#[cfg(not(feature = "test-utils"))]
 use ipc::commands;
 #[cfg(not(feature = "test-utils"))]
 use ops::OpsService;
@@ -55,17 +57,17 @@ pub fn run() {
 
             let ops = OpsService::default();
             let progress_handle = app.handle().clone();
-            ops.set_progress_emitter(move |progress| {
+            ops.set_progress_emitter(Arc::new(move |progress| {
                 let _ = progress_handle.emit(ipc::events::QUEUE_PROGRESS, progress);
-            });
+            }));
             let conflict_handle = app.handle().clone();
-            ops.set_conflict_emitter(move |conflict| {
+            ops.set_conflict_emitter(Arc::new(move |conflict| {
                 let _ = conflict_handle.emit(ipc::events::QUEUE_CONFLICT, conflict);
-            });
+            }));
             let removed_handle = app.handle().clone();
-            ops.set_removed_emitter(move |operation_id| {
+            ops.set_removed_emitter(Arc::new(move |operation_id| {
                 let _ = removed_handle.emit(ipc::events::QUEUE_REMOVED, operation_id);
-            });
+            }));
             app.manage(ops);
 
             Ok(())

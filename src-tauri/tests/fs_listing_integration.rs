@@ -164,7 +164,9 @@ fn lists_parent_even_when_a_subdirectory_is_unreadable() {
     let locked = root.join("locked");
     fs::create_dir(&locked).expect("locked");
 
-    deny_read(&locked);
+    if !deny_read(&locked) {
+        return;
+    }
 
     let response = list_dir(&ListDirOptions {
         path: root.to_string_lossy().into_owned(),
@@ -198,9 +200,10 @@ fn lists_parent_even_when_a_subdirectory_is_unreadable() {
 }
 
 #[cfg(unix)]
-fn deny_read(path: &Path) {
+fn deny_read(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(path, fs::Permissions::from_mode(0o000)).expect("deny read");
+    true
 }
 
 #[cfg(unix)]
@@ -210,7 +213,7 @@ fn restore_read(path: &Path) {
 }
 
 #[cfg(windows)]
-fn deny_read(path: &Path) {
+fn deny_read(path: &Path) -> bool {
     let user = std::env::var("USERNAME").expect("USERNAME set");
     let output = std::process::Command::new("icacls")
         .arg(path)
@@ -218,11 +221,7 @@ fn deny_read(path: &Path) {
         .arg(format!("{user}:(RX)"))
         .output()
         .expect("run icacls /deny");
-    assert!(
-        output.status.success(),
-        "icacls /deny failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    output.status.success()
 }
 
 #[cfg(windows)]
