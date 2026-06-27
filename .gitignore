@@ -10,6 +10,6 @@ coverage
 playwright-report
 src-tauri/target
 pnpm-debug.log*
-test-results
+test-results-run
 .tmp
 .playwright-mcp
