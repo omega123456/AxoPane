@@ -1,5 +1,5 @@
 import type { MouseEvent } from 'react'
-import { buildContextMenuItems } from '@/components/menus/menu-definitions'
+import { buildContextMenuContent } from '@/components/menus/menu-definitions'
 import { PlusIcon, XIcon } from '@/components/icons'
 import { detectPlatformOs } from '@/lib/keymap'
 import { useContextMenuStore } from '@/stores/context-menu-store'
@@ -51,7 +51,7 @@ export function TabBar({ paneId, title, currentPath, isActive }: TabBarProps) {
                 chip: 'TAB',
                 x: event.clientX,
                 y: event.clientY,
-                items: buildContextMenuItems(paneId, { kind: 'tab', tabId: tab.id }, os),
+                ...buildContextMenuContent(paneId, { kind: 'tab', tabId: tab.id }, os),
               })
             }}
             className={`group inline-flex shrink-0 items-center gap-1 rounded-tab border px-2 py-1 text-row ${

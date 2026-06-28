@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { ActionDialog } from '@/components/dialogs/ActionDialog'
+import { ContextMenu } from '@/components/menus/ContextMenu'
 import { FilePane } from '@/components/pane/FilePane'
 import { executeCommand } from '@/lib/commands'
 import { resolveCommandForEvent } from '@/lib/keymap'
@@ -12,7 +13,7 @@ import { useKeymapStore } from '@/stores/keymap-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useTabsStore } from '@/stores/tabs-store'
-import type { DirectoryEntry } from '@/lib/types/ipc'
+import type { DirectoryEntry, LoadNativeMenuRequest } from '@/lib/types/ipc'
 
 function entry(name: string, isDir = true): DirectoryEntry {
   return {
@@ -386,5 +387,44 @@ describe('FilePane state rendering', () => {
     } finally {
       window.removeEventListener('keydown', fallback)
     }
+  })
+
+  it('requests native enrichment for the selected filesystem row without disturbing selection semantics', async () => {
+    const user = userEvent.setup()
+    const loadNativeMenu = vi.fn((payload: LoadNativeMenuRequest) => ({
+      requestId: payload.requestId,
+      items: [],
+    }))
+    ipc.override('load_native_menu', loadNativeMenu)
+    seedPane({
+      path: 'C:\\root',
+      entries: [entry('Alpha', false), entry('Beta')],
+      focusedEntryId: 'Beta',
+    })
+    useSelectionStore.getState().setSelection('left', ['Beta'], 'Beta', 'Beta')
+
+    render(
+      <>
+        <FilePane paneId="left" />
+        <ContextMenu />
+      </>,
+    )
+
+    await user.pointer({
+      keys: '[MouseRight]',
+      target: within(screen.getByLabelText('Left pane')).getByRole('row', { name: /Alpha/ }),
+    })
+
+    await waitFor(() => {
+      expect(loadNativeMenu).toHaveBeenCalledTimes(1)
+    })
+    expect(loadNativeMenu).toHaveBeenCalledWith({
+      requestId: expect.any(String),
+      targetKind: 'file',
+      targetPath: 'C:\\root\\Alpha',
+      folderPath: 'C:\\root',
+      selectedPaths: ['C:\\root\\Alpha'],
+    })
+    expect(useSelectionStore.getState().selections.left.selectedIds).toEqual(['Alpha'])
   })
 })

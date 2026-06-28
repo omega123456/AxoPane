@@ -18,6 +18,7 @@ import {
   Eye,
   EyeOff,
   File,
+  FilePlus2,
   FileArchive,
   FileAudio,
   FileCode2,
@@ -30,6 +31,7 @@ import {
   FolderCog,
   FolderDown,
   FolderGit2,
+  FolderPlus,
   FolderOpen,
   GripVertical,
   Info,
@@ -41,13 +43,16 @@ import {
   Play,
   Plus,
   RefreshCcw,
+  Scissors,
   RotateCcw,
   Search,
   Settings,
+  Share2,
   Square,
   SquareCheckBig,
   SkipForward,
   Sun,
+  Trash2,
   Type,
   X,
   XCircle,
@@ -77,6 +82,7 @@ export const DownloadIcon = withDefaults(Download)
 export const EyeIcon = withDefaults(Eye)
 export const EyeOffIcon = withDefaults(EyeOff)
 export const FileIcon = withDefaults(File)
+export const FilePlusIcon = withDefaults(FilePlus2)
 export const FileArchiveIcon = withDefaults(FileArchive)
 export const FileAudioIcon = withDefaults(FileAudio)
 export const FileCode2Icon = withDefaults(FileCode2)
@@ -89,6 +95,7 @@ export const FolderIcon = withDefaults(Folder)
 export const FolderCogIcon = withDefaults(FolderCog)
 export const FolderDownIcon = withDefaults(FolderDown)
 export const FolderGit2Icon = withDefaults(FolderGit2)
+export const FolderPlusIcon = withDefaults(FolderPlus)
 export const FolderOpenIcon = withDefaults(FolderOpen)
 export const GripVerticalIcon = withDefaults(GripVertical)
 export const InfoIcon = withDefaults(Info)
@@ -100,13 +107,16 @@ export const PauseIcon = withDefaults(Pause)
 export const PlayIcon = withDefaults(Play)
 export const PlusIcon = withDefaults(Plus)
 export const RefreshIcon = withDefaults(RefreshCcw)
+export const ScissorsIcon = withDefaults(Scissors)
 export const RotateCcwIcon = withDefaults(RotateCcw)
 export const SearchIcon = withDefaults(Search)
 export const SettingsIcon = withDefaults(Settings)
+export const Share2Icon = withDefaults(Share2)
 export const SquareCheckIcon = withDefaults(SquareCheckBig)
 export const SquareIcon = withDefaults(Square)
 export const SkipForwardIcon = withDefaults(SkipForward)
 export const SunIcon = withDefaults(Sun)
+export const Trash2Icon = withDefaults(Trash2)
 export const TypeIcon = withDefaults(Type)
 export const XIcon = withDefaults(X)
 export const XCircleIcon = withDefaults(XCircle)

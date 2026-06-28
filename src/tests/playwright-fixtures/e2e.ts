@@ -5,6 +5,7 @@ import type {
   ListDirResponse,
   SessionState,
 } from '@/lib/types/ipc'
+import { contextMenuFixtures } from './context-menu'
 import {
   conflictQueueSnapshot,
   emptyQueueSnapshot,
@@ -69,6 +70,67 @@ const darkConfig: AppConfig = {
 const emptyRootListDir: ListDirResponse = {
   path: 'C:\\',
   entries: [],
+}
+
+function scenarioByTheme(commands: CommandMap): { light: PlaywrightScenario; dark: PlaywrightScenario } {
+  return {
+    light: {
+      commands: {
+        load_config: lightConfig,
+        ...commands,
+      },
+    },
+    dark: {
+      commands: {
+        load_config: darkConfig,
+        ...commands,
+      },
+    },
+  }
+}
+
+function delayedScenarioByTheme(
+  commands: CommandMap,
+  delaysMs: DelayMap,
+): { light: PlaywrightScenario; dark: PlaywrightScenario } {
+  return {
+    light: {
+      commands: {
+        load_config: lightConfig,
+        ...commands,
+      },
+      delaysMs,
+    },
+    dark: {
+      commands: {
+        load_config: darkConfig,
+        ...commands,
+      },
+      delaysMs,
+    },
+  }
+}
+
+function errorScenarioByTheme(
+  commands: CommandMap,
+  commandErrors: ErrorMap,
+): { light: PlaywrightScenario; dark: PlaywrightScenario } {
+  return {
+    light: {
+      commands: {
+        load_config: lightConfig,
+        ...commands,
+      },
+      commandErrors,
+    },
+    dark: {
+      commands: {
+        load_config: darkConfig,
+        ...commands,
+      },
+      commandErrors,
+    },
+  }
 }
 
 export const screenshotScenarios = {
@@ -264,4 +326,30 @@ export const screenshotScenarios = {
       },
     },
   },
+  paneContextMenu: scenarioByTheme({
+    queue_snapshot: emptyQueueSnapshot,
+    load_native_menu: contextMenuFixtures.emptyNativeExtras,
+  }),
+  rowContextMenu: scenarioByTheme({
+    queue_snapshot: emptyQueueSnapshot,
+    load_native_menu: contextMenuFixtures.nativeExtras,
+  }),
+  rowContextMenuLoading: delayedScenarioByTheme(
+    {
+      queue_snapshot: emptyQueueSnapshot,
+      load_native_menu: contextMenuFixtures.nativeExtras,
+    },
+    {
+      load_native_menu: 1_500,
+    },
+  ),
+  rowContextMenuFailure: errorScenarioByTheme(
+    {
+      queue_snapshot: emptyQueueSnapshot,
+      load_native_menu: contextMenuFixtures.emptyNativeExtras,
+    },
+    {
+      load_native_menu: contextMenuFixtures.nativeFailureMessage,
+    },
+  ),
 } satisfies Record<string, { light: PlaywrightScenario; dark: PlaywrightScenario }>

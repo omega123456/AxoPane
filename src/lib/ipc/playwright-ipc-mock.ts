@@ -35,11 +35,25 @@ function readDelay<CommandName extends keyof IpcCommandMap>(command: CommandName
   return readScenario()?.delaysMs?.[command] ?? 0
 }
 
+function withLiveNativeRequestId<CommandName extends keyof IpcCommandMap>(
+  command: CommandName,
+  payload: IpcCommandMap[CommandName]['request'],
+  response: IpcCommandMap[CommandName]['response'],
+) {
+  if (command !== 'load_native_menu') {
+    return response
+  }
+
+  return {
+    ...(response as IpcCommandMap['load_native_menu']['response']),
+    requestId: (payload as IpcCommandMap['load_native_menu']['request']).requestId,
+  } as IpcCommandMap[CommandName]['response']
+}
+
 export async function invokePlaywrightCommand<CommandName extends keyof IpcCommandMap>(
   command: CommandName,
-  _payload: IpcCommandMap[CommandName]['request'],
+  payload: IpcCommandMap[CommandName]['request'],
 ) {
-  void _payload
   const delayMs = readDelay(command)
   if (delayMs > 0) {
     await new Promise((resolve) => window.setTimeout(resolve, delayMs))
@@ -52,9 +66,9 @@ export async function invokePlaywrightCommand<CommandName extends keyof IpcComma
 
   const override = readCommandOverride(command)
   if (override.found) {
-    return override.value
+    return withLiveNativeRequestId(command, payload, override.value)
   }
-  return getFixtureResponse(command)
+  return withLiveNativeRequestId(command, payload, getFixtureResponse(command))
 }
 
 export async function listenPlaywrightEvent<EventName extends keyof IpcEventMap>(

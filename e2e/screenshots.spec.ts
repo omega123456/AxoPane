@@ -110,17 +110,76 @@ for (const mode of ['light', 'dark'] as const) {
   })
 
   test(`pane context menu ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.browsing[mode])
+    await gotoScenario(page, screenshotScenarios.paneContextMenu[mode])
     await rightClickPane(page, 'Left pane')
     await expect(page.getByRole('menu', { name: 'This folder' })).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`pane-context-menu-${mode}.png`)
   })
 
   test(`row context menu ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.browsing[mode])
+    await gotoScenario(page, screenshotScenarios.rowContextMenu[mode])
+    await page.getByRole('row', { name: /Documents/ }).first().click({ button: 'right' })
+    const menu = page.getByRole('menu', { name: 'Documents' })
+    await expect(menu).toBeVisible()
+    await expect(menu.getByRole('menuitem', { name: 'Open in VS Code' })).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`row-context-menu-${mode}.png`)
+  })
+
+  test(`row context menu submenu ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.rowContextMenu[mode])
+    await page.getByRole('row', { name: /Documents/ }).first().click({ button: 'right' })
+    const menu = page.getByRole('menu', { name: 'Documents' })
+    await expect(menu).toBeVisible()
+    const submenuParent = menu.getByRole('menuitem', { name: '7-Zip' })
+    await expect(submenuParent).toBeVisible()
+    await submenuParent.hover()
+    const submenu = page.getByRole('menu', { name: '7-Zip' })
+    await expect(submenu).toBeVisible()
+    const [menuBox, submenuParentBox, submenuBox] = await Promise.all([
+      menu.boundingBox(),
+      submenuParent.boundingBox(),
+      submenu.boundingBox(),
+    ])
+    expect(menuBox).not.toBeNull()
+    expect(submenuParentBox).not.toBeNull()
+    expect(submenuBox).not.toBeNull()
+    expect(submenuBox!.x).toBeGreaterThanOrEqual(8)
+    expect(submenuBox!.x + submenuBox!.width).toBeLessThanOrEqual(page.viewportSize()!.width - 8)
+    expect(Math.abs(submenuBox!.y - submenuParentBox!.y)).toBeLessThanOrEqual(12)
+    await expect(page.locator('main')).toHaveScreenshot(`row-context-menu-submenu-${mode}.png`)
+  })
+
+  test(`row context menu submenu left fallback ${mode}`, async ({ page }) => {
+    await page.setViewportSize({ width: 520, height: 720 })
+    await gotoScenario(page, screenshotScenarios.rowContextMenu[mode])
+    const row = page.getByRole('row', { name: /Documents/ }).first()
+    const rowBox = await row.boundingBox()
+    expect(rowBox).not.toBeNull()
+    await page.mouse.click((rowBox?.x ?? 0) + (rowBox?.width ?? 0) - 4, (rowBox?.y ?? 0) + 12, {
+      button: 'right',
+    })
+
+    const menu = page.getByRole('menu', { name: 'Documents' })
+    await expect(menu).toBeVisible()
+    await menu.getByRole('menuitem', { name: '7-Zip' }).hover({ force: true })
+    const submenu = page.getByRole('menu', { name: '7-Zip' })
+    await expect(submenu).toBeVisible()
+    const [menuBox, submenuBox] = await Promise.all([menu.boundingBox(), submenu.boundingBox()])
+    expect(menuBox).not.toBeNull()
+    expect(submenuBox).not.toBeNull()
+    expect(submenuBox!.x + submenuBox!.width).toBeLessThanOrEqual(page.viewportSize()!.width - 8)
+    expect(submenuBox!.x).toBeGreaterThanOrEqual(8)
+    expect(submenuBox!.x + submenuBox!.width).toBeLessThanOrEqual(menuBox!.x + menuBox!.width)
+  })
+
+  test(`row context menu loading ${mode}`, async ({ page }) => {
+    await page.clock.install()
+    await gotoScenario(page, screenshotScenarios.rowContextMenuLoading[mode])
     await page.getByRole('row', { name: /Documents/ }).first().click({ button: 'right' })
     await expect(page.getByRole('menu', { name: 'Documents' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`row-context-menu-${mode}.png`)
+    await page.clock.fastForward(1_001)
+    await expect(page.getByRole('status', { name: 'Loading native menu items' })).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`row-context-menu-loading-${mode}.png`)
   })
 
   test(`new folder dialog ${mode}`, async ({ page }) => {
@@ -136,7 +195,7 @@ for (const mode of ['light', 'dark'] as const) {
     await page.getByRole('row', { name: /Documents/ }).first().click({ button: 'right' })
     const menu = page.getByRole('menu', { name: 'Documents' })
     await expect(menu).toBeVisible()
-    await menu.getByRole('menuitem').filter({ hasText: 'Rename' }).click()
+    await menu.getByRole('group', { name: 'Quick actions' }).getByRole('menuitem', { name: 'Rename' }).click()
     await expect(page.getByRole('textbox', { name: /Rename Documents/ })).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`rename-inline-editor-${mode}.png`)
   })
@@ -146,7 +205,7 @@ for (const mode of ['light', 'dark'] as const) {
     await page.getByRole('row', { name: /Documents/ }).first().click({ button: 'right' })
     const menu = page.getByRole('menu', { name: 'Documents' })
     await expect(menu).toBeVisible()
-    await menu.getByRole('menuitem').filter({ hasText: 'Delete' }).click()
+    await menu.getByRole('group', { name: 'Quick actions' }).getByRole('menuitem', { name: 'Delete' }).click()
     await expect(page.getByRole('dialog', { name: 'Confirm delete' })).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`delete-confirmation-dialog-${mode}.png`)
   })

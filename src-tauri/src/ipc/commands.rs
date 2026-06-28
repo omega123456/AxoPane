@@ -1,4 +1,6 @@
+use crate::archive;
 use crate::fs;
+use crate::native_menu::NativeMenuService;
 use crate::ops::{OpSnapshot, OpsService};
 use crate::persist::PersistenceState;
 use crate::size::SizeService;
@@ -13,11 +15,13 @@ use std::time::{Duration, Instant};
 
 use super::mock;
 use super::types::{
-    AppConfig, CancelSizeRequest, CancelSizeResponse, CreateEntryRequest, DeleteEntriesRequest,
-    FolderSizeRequest, FolderSizesRequest, InitialShellResponse, ListDirRequest, ListDirResponse,
-    LogFrontendRequest, OpIdRequest, OpenPathRequest, RefreshTabRequest, RenameEntryRequest,
+    AppConfig, CancelSizeRequest, CancelSizeResponse, CompressArchiveRequest, CreateEntryRequest,
+    DeleteEntriesRequest, ExtractArchiveRequest, FolderSizeRequest, FolderSizesRequest,
+    InitialShellResponse, InvokeNativeMenuRequest, ListDirRequest, ListDirResponse,
+    LoadNativeMenuRequest, LoadNativeMenuResponse, LogFrontendRequest, MenuActionStatus,
+    OpIdRequest, OpenPathRequest, OpenWithRequest, RefreshTabRequest, RenameEntryRequest,
     ReorderOpsRequest, ResolveConflictRequest, SaveConfigRequest, SaveSessionRequest, SessionState,
-    SetTabWatchRequest, SizeStateEvent, StartOpRequest, VolumeInfo,
+    SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent, StartOpRequest, VolumeInfo,
 };
 use crate::fs::DirectoryEntry;
 use std::path::Path;
@@ -88,6 +92,48 @@ pub fn open_path(payload: OpenPathRequest) -> Result<(), String> {
         log::error!("{message}");
         message
     })
+}
+
+#[tauri::command]
+pub fn load_native_menu(
+    payload: LoadNativeMenuRequest,
+    state: State<'_, NativeMenuService>,
+) -> LoadNativeMenuResponse {
+    state.load_menu(payload)
+}
+
+#[tauri::command]
+pub fn invoke_native_menu_action(
+    payload: InvokeNativeMenuRequest,
+    state: State<'_, NativeMenuService>,
+) -> MenuActionStatus {
+    state.invoke_menu_action(payload)
+}
+
+#[tauri::command]
+pub fn show_properties(
+    payload: ShowPropertiesRequest,
+    state: State<'_, NativeMenuService>,
+) -> MenuActionStatus {
+    state.show_properties(payload)
+}
+
+#[tauri::command]
+pub fn open_with(
+    payload: OpenWithRequest,
+    state: State<'_, NativeMenuService>,
+) -> MenuActionStatus {
+    state.open_with(payload)
+}
+
+#[tauri::command]
+pub fn compress_archive(payload: CompressArchiveRequest) -> MenuActionStatus {
+    archive::compress_archive(payload)
+}
+
+#[tauri::command]
+pub fn extract_archive(payload: ExtractArchiveRequest) -> MenuActionStatus {
+    archive::extract_archive(payload)
 }
 
 #[cfg(not(feature = "test-utils"))]

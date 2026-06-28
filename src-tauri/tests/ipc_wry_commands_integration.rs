@@ -13,19 +13,20 @@ use file_explorer_lib::ops::OpsService;
 use file_explorer_lib::persist::PersistenceState;
 use file_explorer_lib::size::SizeService;
 use file_explorer_lib::watch::WatchService;
+use tauri::test::{mock_builder, mock_context, noop_assets};
 use tauri::Manager;
 use tempfile::tempdir;
 
-fn build_app() -> (tempfile::TempDir, tauri::App) {
+fn build_app() -> (tempfile::TempDir, tauri::App<tauri::test::MockRuntime>) {
     let config_dir = tempdir().expect("config dir");
     let persistence = PersistenceState::load(config_dir.path()).expect("persistence");
 
-    let app = tauri::Builder::default()
+    let app = mock_builder()
         .manage(persistence)
         .manage(SizeService::default())
         .manage(WatchService::default())
         .manage(OpsService::new(Duration::from_secs(30)))
-        .build(tauri::generate_context!())
+        .build(mock_context(noop_assets()))
         .expect("build app");
 
     (config_dir, app)
@@ -38,7 +39,7 @@ fn concrete_apphandle_commands_cover_volume_watch_and_size_wrappers() {
     let root = fixture.path();
     fs::write(root.join("before.txt"), b"before").expect("before");
 
-    let volumes = commands::list_volumes(app.handle().clone()).expect("list volumes");
+    let volumes = commands::list_volumes().expect("list volumes");
     assert!(!volumes.is_empty());
     assert_eq!(common::bootstrap_message(), "phase-1-common");
 
@@ -55,7 +56,6 @@ fn concrete_apphandle_commands_cover_volume_watch_and_size_wrappers() {
         SetTabWatchRequest {
             target: Some(watch_target.clone()),
         },
-        app.handle().clone(),
         app.state::<WatchService>(),
     )
     .expect("set watch");
@@ -67,7 +67,6 @@ fn concrete_apphandle_commands_cover_volume_watch_and_size_wrappers() {
         RefreshTabRequest {
             target: watch_target.clone(),
         },
-        app.handle().clone(),
         app.state::<WatchService>(),
     )
     .expect("refresh");
@@ -82,7 +81,6 @@ fn concrete_apphandle_commands_cover_volume_watch_and_size_wrappers() {
 
     commands::set_tab_watch(
         SetTabWatchRequest { target: None },
-        app.handle().clone(),
         app.state::<WatchService>(),
     )
     .expect("clear watch");
@@ -97,14 +95,12 @@ fn concrete_apphandle_commands_cover_volume_watch_and_size_wrappers() {
         FolderSizeRequest {
             path: size_root.to_string_lossy().into_owned(),
         },
-        app.handle().clone(),
         app.state::<SizeService>(),
     );
     commands::request_folder_sizes(
         FolderSizesRequest {
             paths: vec![size_root.to_string_lossy().into_owned()],
         },
-        app.handle().clone(),
         app.state::<SizeService>(),
     );
 }

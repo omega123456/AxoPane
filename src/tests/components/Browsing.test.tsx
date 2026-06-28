@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
@@ -7,6 +7,7 @@ import { HeaderRow } from '@/components/pane/HeaderRow'
 import { SizeValue } from '@/components/pane/SizeValue'
 import { TreeNode } from '@/components/tree/TreeNode'
 import { usePanesStore } from '@/stores/panes-store'
+import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 import { useTabsStore } from '@/stores/tabs-store'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 
@@ -32,6 +33,7 @@ beforeEach(() => {
   ipc.install()
   usePanesStore.getState().reset()
   useTabsStore.getState().reset()
+  usePropertiesDialogStore.getState().close()
 })
 
 describe('DetailsPanel', () => {
@@ -73,6 +75,11 @@ describe('DetailsPanel', () => {
 
     expect(openPath).toHaveBeenCalledWith({ path: 'C:\\Users\\Omega\\Report.txt' })
     expect(writeText).toHaveBeenCalledWith('C:\\Users\\Omega\\Report.txt')
+    await waitFor(() =>
+      expect(usePropertiesDialogStore.getState().dialog).toMatchObject({
+        items: [expect.objectContaining({ path: 'C:\\Users\\Omega\\Report.txt' })],
+      }),
+    )
   })
 
   it('navigates when opening a focused folder', async () => {

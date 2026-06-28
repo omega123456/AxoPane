@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
 import { CopyIcon, FolderOpenIcon, InfoIcon } from '@/components/icons'
-import { executeCommand } from '@/lib/commands'
 import { logFrontend } from '@/lib/app-log-commands'
+import { executeCommand } from '@/lib/commands'
+import { showPropertiesDialog, toPropertiesDialogItem } from '@/lib/properties-commands'
 import { usePanesStore } from '@/stores/panes-store'
 import type { PaneId } from '@/types/pane'
 
@@ -79,9 +80,7 @@ export function DetailsPanel({ paneId }: DetailsPanelProps) {
         </ActionButton>
         <ActionButton
           label="Properties"
-          onClick={() => {
-            logFrontend('Properties requested', { path: entry.path, attributes: entry.attributes })
-          }}
+          onClick={() => void showPropertiesDialog([toPropertiesDialogItem(entry)])}
         >
           <InfoIcon className="h-4 w-4" />
         </ActionButton>

@@ -77,6 +77,24 @@ fn manual_size_error_formats_and_converts_io_failures() {
 }
 
 #[test]
+fn manual_size_error_converts_jwalk_failures() {
+    let fixture = tempdir().expect("temp dir");
+    let missing = fixture.path().join("missing-root");
+
+    let mut iterator = jwalk::WalkDir::new(&missing)
+        .try_into_iter()
+        .expect("iterator construction");
+    let walk_error = match iterator.next() {
+        Some(Err(error)) => error,
+        other => panic!("missing root should yield a jwalk error, got {other:?}"),
+    };
+    let error: ManualSizeError = walk_error.into();
+
+    assert!(matches!(error, ManualSizeError::Walk(_)));
+    assert!(!error.to_string().is_empty());
+}
+
+#[test]
 fn manual_sizer_returns_zero_for_regular_files() {
     let fixture = tempdir().expect("temp dir");
     let file = fixture.path().join("plain.txt");

@@ -1,11 +1,14 @@
 import { beforeEach, vi } from 'vitest'
 import { waitFor } from '@testing-library/react'
+import { runCompressCommand, runExtractCommand } from '@/lib/archive-commands'
 import { ipc } from '@/tests/ipc-mock'
-import { canExecuteCommand, executeCommand } from '@/lib/commands'
+import { canExecuteCommand, executeCommand, selectedEntriesForPane } from '@/lib/commands'
+import { showPropertiesDialog, toPropertiesDialogItem } from '@/lib/properties-commands'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useClipboardStore } from '@/stores/clipboard-store'
 import { useInlineRenameStore } from '@/stores/inline-rename-store'
 import { usePanesStore } from '@/stores/panes-store'
+import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import type { DirectoryEntry } from '@/lib/types/ipc'
@@ -34,6 +37,7 @@ beforeEach(() => {
   useActionDialogStore.getState().close()
   useClipboardStore.getState().clearClipboard()
   useInlineRenameStore.getState().reset()
+  usePropertiesDialogStore.getState().close()
   useSettingsStore.getState().close()
   usePanesStore.setState((state) => ({
     panes: {
@@ -280,5 +284,62 @@ describe('executeCommand file actions', () => {
     }))
     expect(canExecuteCommand('moveToOtherPane', 'left')).toBe(true)
     expect(canExecuteCommand('showSettings', 'left')).toBe(true)
+  })
+
+  it('returns the concrete selected entries for the pane', () => {
+    useSelectionStore.getState().setSelection('left', ['Beta'], 'Beta', 'Beta')
+
+    expect(selectedEntriesForPane('left')).toEqual([
+      expect.objectContaining({
+        id: 'Beta',
+        path: 'C:\\root\\Beta',
+      }),
+    ])
+  })
+})
+
+describe('archive and properties helpers', () => {
+  it('returns handled archive responses through the centralized IPC wrapper', async () => {
+    ipc.override('compress_archive', () => ({ handled: true, message: 'C:\\root\\Alpha.zip' }))
+    ipc.override('extract_archive', () => ({ handled: true, message: 'C:\\root\\Alpha' }))
+
+    await expect(
+      runCompressCommand({
+        paths: ['C:\\root\\Alpha'],
+        destinationDir: 'C:\\root',
+      }),
+    ).resolves.toMatchObject({ handled: true, message: 'C:\\root\\Alpha.zip' })
+
+    await expect(
+      runExtractCommand({
+        paths: ['C:\\root\\Alpha.zip'],
+        destinationDir: 'C:\\root',
+      }),
+    ).resolves.toMatchObject({ handled: true, message: 'C:\\root\\Alpha' })
+  })
+
+  it('opens the fallback properties dialog when native properties are unsupported', async () => {
+    ipc.override('show_properties', () => ({ handled: false, message: 'unsupported' }))
+
+    await showPropertiesDialog([toPropertiesDialogItem(entry('Beta', false))])
+
+    expect(usePropertiesDialogStore.getState().dialog).toMatchObject({
+      items: [expect.objectContaining({ path: 'C:\\root\\Beta' })],
+    })
+  })
+
+  it('attempts native properties for multi-selection and falls back when unsupported', async () => {
+    const nativeProperties = vi.fn(() => ({ handled: true, message: 'properties-opened' }))
+    ipc.override('show_properties', nativeProperties)
+
+    await showPropertiesDialog([
+      toPropertiesDialogItem(entry('Alpha')),
+      toPropertiesDialogItem(entry('Beta', false)),
+    ])
+
+    expect(nativeProperties).toHaveBeenCalledWith({
+      paths: ['C:\\root\\Alpha', 'C:\\root\\Beta'],
+    })
+    expect(usePropertiesDialogStore.getState().dialog).toBeNull()
   })
 })

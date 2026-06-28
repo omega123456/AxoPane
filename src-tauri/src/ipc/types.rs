@@ -1,6 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 pub use crate::fs::{DirectoryEntry, ListDirOptions, ListDirResponse};
+pub use crate::native_menu::types::{
+    InvokeNativeMenuRequest, LoadNativeMenuRequest, LoadNativeMenuResponse,
+    NativeMenuCanonicalActionKind, NativeMenuIcon, NativeMenuIconKind, NativeMenuItem,
+    NativeMenuTargetKind,
+};
 pub use crate::ops::{
     ConflictInfo, ConflictResolution, OpItem, OpKind, OpProgress, OpSnapshot, OpStatus,
     StartOpRequest,
@@ -129,6 +134,55 @@ pub struct DeleteEntriesRequest {
 #[serde(rename_all = "camelCase")]
 pub struct OpenPathRequest {
     pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MenuActionStatus {
+    pub handled: bool,
+    pub message: Option<String>,
+}
+
+impl MenuActionStatus {
+    pub fn handled_with_message(message: impl Into<String>) -> Self {
+        Self {
+            handled: true,
+            message: Some(message.into()),
+        }
+    }
+
+    pub fn unsupported(message: impl Into<String>) -> Self {
+        Self {
+            handled: false,
+            message: Some(message.into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ShowPropertiesRequest {
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenWithRequest {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CompressArchiveRequest {
+    pub paths: Vec<String>,
+    pub destination_dir: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractArchiveRequest {
+    pub paths: Vec<String>,
+    pub destination_dir: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

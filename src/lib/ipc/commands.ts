@@ -1,18 +1,26 @@
 import type {
   AppConfig,
   CancelSizeResponse,
+  CompressArchiveRequest,
   CreateEntryRequest,
   DeleteEntriesRequest,
   DirectoryEntry,
   DirPatchEvent,
   EverythingStatus,
+  ExtractArchiveRequest,
   FolderSizeRequest,
   FolderSizesRequest,
   InitialShellResponse,
+  InvokeNativeMenuRequest,
   ListDirRequest,
   ListDirResponse,
+  LoadNativeMenuRequest,
+  LoadNativeMenuResponse,
+  MenuActionStatus,
+  OpenWithRequest,
   OpenPathRequest,
   RenameEntryRequest,
+  ShowPropertiesRequest,
   WatchTarget,
   SessionState,
   VolumeInfo,
@@ -45,6 +53,30 @@ export function deleteEntries(payload: DeleteEntriesRequest) {
 
 export function openPath(payload: OpenPathRequest) {
   return invokeCommand({ command: 'open_path', payload }) as Promise<void>
+}
+
+export function loadNativeMenu(payload: LoadNativeMenuRequest) {
+  return invokeCommand({ command: 'load_native_menu', payload }) as Promise<LoadNativeMenuResponse>
+}
+
+export function invokeNativeMenuAction(payload: InvokeNativeMenuRequest) {
+  return invokeCommand({ command: 'invoke_native_menu_action', payload }) as Promise<MenuActionStatus>
+}
+
+export function showProperties(payload: ShowPropertiesRequest) {
+  return invokeCommand({ command: 'show_properties', payload }) as Promise<MenuActionStatus>
+}
+
+export function openWith(payload: OpenWithRequest) {
+  return invokeCommand({ command: 'open_with', payload }) as Promise<MenuActionStatus>
+}
+
+export function compressArchive(payload: CompressArchiveRequest) {
+  return invokeCommand({ command: 'compress_archive', payload }) as Promise<MenuActionStatus>
+}
+
+export function extractArchive(payload: ExtractArchiveRequest) {
+  return invokeCommand({ command: 'extract_archive', payload }) as Promise<MenuActionStatus>
 }
 
 export function listVolumes() {

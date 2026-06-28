@@ -1,14 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
-  buildContextMenuItems,
+  buildContextMenuContent,
   describeMenuTarget,
   resolveMenuTarget,
 } from '@/components/menus/menu-definitions'
-import { useClipboardStore } from '@/stores/clipboard-store'
-import { useKeymapStore } from '@/stores/keymap-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
-import { useTabsStore } from '@/stores/tabs-store'
 
 const folderEntry = {
   id: 'docs',
@@ -36,57 +33,14 @@ const fileEntry = {
 
 describe('menu definitions', () => {
   beforeEach(() => {
-    useClipboardStore.getState().clearClipboard()
-    useSelectionStore.getState().reset()
-    useKeymapStore.getState().reset()
-    useTabsStore.getState().reset()
     usePanesStore.getState().reset()
-    usePanesStore.setState({
-      everythingStatus: { status: 'unavailable', isAvailable: false },
-      volumes: [
-        { mountRoot: 'C:\\', label: 'System', totalBytes: 1, freeBytes: 1, isNetwork: false, isRemovable: false },
-        { mountRoot: '\\\\server\\', label: 'Share', totalBytes: 1, freeBytes: 1, isNetwork: true, isRemovable: false },
-      ],
-      panes: {
-        left: {
-          ...usePanesStore.getState().panes.left,
-          path: 'C:\\Users\\Omega',
-          entries: [folderEntry, fileEntry],
-          focusedEntryId: folderEntry.id,
-        },
-        right: usePanesStore.getState().panes.right,
-      },
-    })
+    useSelectionStore.getState().reset()
   })
 
-  it('builds folder menus with enabled calculate size for manual capability', () => {
-    const items = buildContextMenuItems('left', { kind: 'folder', entry: folderEntry }, 'windows')
-    const calculate = items.find((item) => item.id === 'calculateSize')
-    const open = items.find((item) => item.id === 'open')
-    expect(calculate?.disabled).toBe(false)
-    expect(calculate?.separatorBefore).toBe(true)
-    expect(calculate?.shortcut).toBe('Space')
-    expect(open?.strong).toBe(true)
-  })
-
-  it('hides calculate size when Everything is available and disables paste without clipboard data', () => {
-    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
-    const items = buildContextMenuItems('left', { kind: 'folder', entry: folderEntry }, 'windows')
-    const calculate = items.find((item) => item.id === 'calculateSize')
-    const paste = items.find((item) => item.id === 'paste')
-    expect(calculate?.hidden).toBe(true)
-    expect(paste?.disabled).toBe(true)
-  })
-
-  it('resolves multi-select targets and keeps unsupported file actions disabled instead of hidden', () => {
+  it('resolves multi-select targets when the right-clicked entry is inside the current selection', () => {
     useSelectionStore.getState().setSelection('left', [folderEntry.id, fileEntry.id], folderEntry.id, fileEntry.id)
-    const target = resolveMenuTarget('left', folderEntry)
-    expect(target.kind).toBe('multi')
-
-    const fileItems = buildContextMenuItems('left', { kind: 'file', entry: fileEntry }, 'macos')
-    expect(fileItems.find((item) => item.id === 'openInNewTab')?.disabled).toBe(true)
-    expect(fileItems.find((item) => item.id === 'openInNewTab')?.separatorBefore).toBe(true)
-    expect(fileItems.find((item) => item.id === 'openInNewTab')?.shortcut).toBe('⌘Enter')
+    expect(resolveMenuTarget('left', folderEntry)).toEqual({ kind: 'multi' })
+    expect(resolveMenuTarget('left')).toEqual({ kind: 'multi' })
   })
 
   it('describes header metadata for file, folder, and multi-select targets', () => {
@@ -101,5 +55,56 @@ describe('menu definitions', () => {
     expect(describeMenuTarget({ kind: 'multi' })).toEqual({
       title: 'Multiple items',
     })
+  })
+
+  it('builds native enrichment requests for file, mixed multi-select, tree, and tab targets', () => {
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: {
+          ...state.panes.left,
+          path: 'C:\\Users\\Omega',
+          entries: [folderEntry, fileEntry],
+        },
+      },
+      volumes: [
+        {
+          mountRoot: 'C:\\',
+          label: 'Windows',
+          totalBytes: 1,
+          freeBytes: 1,
+          isNetwork: false,
+          isRemovable: false,
+        },
+      ],
+    }))
+    useSelectionStore
+      .getState()
+      .setSelection('left', [folderEntry.id, fileEntry.id], folderEntry.id, fileEntry.id)
+
+    expect(buildContextMenuContent('left', { kind: 'file', entry: fileEntry }, 'windows').nativeRequest).toEqual({
+      targetKind: 'file',
+      targetPath: fileEntry.path,
+      folderPath: 'C:\\Users\\Omega',
+      selectedPaths: [fileEntry.path],
+    })
+
+    expect(buildContextMenuContent('left', { kind: 'multi' }, 'windows').nativeRequest).toEqual({
+      targetKind: 'mixed',
+      targetPath: null,
+      folderPath: 'C:\\Users\\Omega',
+      selectedPaths: [folderEntry.path, fileEntry.path],
+    })
+
+    expect(
+      buildContextMenuContent('left', { kind: 'tree', path: 'C:\\' }, 'windows').nativeRequest,
+    ).toEqual({
+      targetKind: 'driveRoot',
+      targetPath: 'C:\\',
+      folderPath: 'C:\\',
+      selectedPaths: ['C:\\'],
+    })
+
+    expect(buildContextMenuContent('left', { kind: 'tab', tabId: 'tab-1' }, 'windows').nativeRequest).toBeNull()
   })
 })

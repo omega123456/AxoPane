@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { DialogShell } from '@/components/dialogs/DialogShell'
 import { AlertTriangleIcon } from '@/components/icons'
 import { log } from '@/lib/app-log-commands'
 import {
@@ -345,35 +346,3 @@ function TransferConfirmDialog({
   )
 }
 
-function DialogShell({
-  children,
-  label,
-  onDismiss,
-  onKeyDown,
-}: {
-  children: React.ReactNode
-  label: string
-  onDismiss: () => void
-  onKeyDown?: (event: React.KeyboardEvent) => void
-}) {
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={label}
-      onKeyDown={onKeyDown}
-      className="absolute inset-0 z-30 flex items-center justify-center"
-    >
-      <button
-        type="button"
-        aria-label="Dismiss dialog"
-        tabIndex={-1}
-        onClick={onDismiss}
-        className="absolute inset-0 cursor-default bg-dark-backdrop/40"
-      />
-      <div className="relative w-conflict overflow-hidden rounded-window border border-light-border-strong bg-light-surface shadow-window dark:border-dark-border-strong dark:bg-dark-surface">
-        {children}
-      </div>
-    </div>
-  )
-}

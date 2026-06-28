@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import {
-  buildContextMenuItems,
+  buildContextMenuContent,
   describeMenuTarget,
   resolveMenuTarget,
 } from '@/components/menus/menu-definitions'
@@ -246,7 +246,7 @@ export function FilePane({ paneId }: FilePaneProps) {
       chip,
       x: event.clientX,
       y: event.clientY,
-      items: buildContextMenuItems(paneId, target, os),
+      ...buildContextMenuContent(paneId, target, os),
       targetId: entryId,
     })
   }

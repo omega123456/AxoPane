@@ -1,4 +1,5 @@
 import { beforeEach, vi } from 'vitest'
+import { commandContextAction, noopContextAction } from '@/lib/context-menu/context-menu-actions'
 import { useConfigStore } from '@/stores/config-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
 import { useKeymapStore } from '@/stores/keymap-store'
@@ -126,16 +127,44 @@ describe('context-menu-store', () => {
       x: 10,
       y: 20,
       title: 'Entry',
-      items: [
-        { id: 'hidden', label: 'Hidden', hidden: true },
-        { id: 'disabled', label: 'Disabled', disabled: true },
-        { id: 'open', label: 'Open' },
+      topStrip: [
+        {
+          id: 'hidden',
+          label: 'Hidden',
+          owner: 'app',
+          icon: { kind: 'app', name: 'copy' },
+          hidden: true,
+          action: noopContextAction('hidden'),
+        },
+      ],
+      sections: [
+        {
+          id: 'primary',
+          rows: [
+            {
+              id: 'disabled',
+              kind: 'action',
+              label: 'Disabled',
+              owner: 'app',
+              disabled: true,
+              action: noopContextAction('disabled'),
+            },
+            {
+              id: 'open',
+              kind: 'action',
+              label: 'Open',
+              owner: 'app',
+              action: noopContextAction('open'),
+            },
+          ],
+        },
       ],
     })
 
     const state = useContextMenuStore.getState()
-    expect(state.menu?.items.map((item) => item.id)).toEqual(['disabled', 'open'])
-    expect(state.activeIndex).toBe(1)
+    expect(state.menu?.topStrip).toEqual([])
+    expect(state.menu?.sections[0]?.rows.map((item) => item.id)).toEqual(['disabled', 'open'])
+    expect(state.activeItemId).toBe('open')
   })
 
   it('wraps active movement across enabled items and skips disabled items', () => {
@@ -144,19 +173,45 @@ describe('context-menu-store', () => {
       x: 0,
       y: 0,
       title: 'Entry',
-      items: [
-        { id: 'open', label: 'Open' },
-        { id: 'disabled', label: 'Disabled', disabled: true },
-        { id: 'rename', label: 'Rename' },
+      topStrip: [
+        {
+          id: 'copy',
+          label: 'Copy',
+          owner: 'app',
+          icon: { kind: 'app', name: 'copy' },
+          action: noopContextAction('copy'),
+        },
+      ],
+      sections: [
+        {
+          id: 'primary',
+          rows: [
+            {
+              id: 'disabled',
+              kind: 'action',
+              label: 'Disabled',
+              owner: 'app',
+              disabled: true,
+              action: noopContextAction('disabled'),
+            },
+            {
+              id: 'rename',
+              kind: 'action',
+              label: 'Rename',
+              owner: 'app',
+              action: noopContextAction('rename'),
+            },
+          ],
+        },
       ],
     })
 
     useContextMenuStore.getState().moveActive(1)
-    expect(useContextMenuStore.getState().activeIndex).toBe(2)
+    expect(useContextMenuStore.getState().activeItemId).toBe('rename')
     useContextMenuStore.getState().moveActive(1)
-    expect(useContextMenuStore.getState().activeIndex).toBe(0)
+    expect(useContextMenuStore.getState().activeItemId).toBe('copy')
     useContextMenuStore.getState().moveActive(-1)
-    expect(useContextMenuStore.getState().activeIndex).toBe(2)
+    expect(useContextMenuStore.getState().activeItemId).toBe('rename')
   })
 
   it('does not move or activate when no enabled menu item is available', () => {
@@ -165,29 +220,84 @@ describe('context-menu-store', () => {
       x: 0,
       y: 0,
       title: 'Entry',
-      items: [{ id: 'disabled', label: 'Disabled', disabled: true }],
+      topStrip: [],
+      sections: [
+        {
+          id: 'primary',
+          rows: [
+            {
+              id: 'disabled',
+              kind: 'action',
+              label: 'Disabled',
+              owner: 'app',
+              disabled: true,
+              action: noopContextAction('disabled'),
+            },
+          ],
+        },
+      ],
     })
 
     useContextMenuStore.getState().moveActive(1)
     useContextMenuStore.getState().activateCurrent()
 
-    expect(useContextMenuStore.getState().menu?.items).toHaveLength(1)
-    expect(useContextMenuStore.getState().activeIndex).toBe(0)
+    expect(useContextMenuStore.getState().menu?.sections[0]?.rows).toHaveLength(1)
+    expect(useContextMenuStore.getState().activeItemId).toBeNull()
   })
 
-  it('activates the current item and closes the menu', () => {
-    const onSelect = vi.fn()
+  it('opens and closes one submenu branch and dispatches the current command item', () => {
     useContextMenuStore.getState().openMenu({
       paneId: 'left',
       x: 0,
       y: 0,
       title: 'Entry',
-      items: [{ id: 'open', label: 'Open', onSelect }],
+      topStrip: [],
+      sections: [
+        {
+          id: 'primary',
+          rows: [
+            {
+              id: 'tools',
+              kind: 'submenu',
+              label: 'Tools',
+              owner: 'app',
+              children: {
+                id: 'tools-panel',
+                rows: [
+                  {
+                    id: 'share-child',
+                    label: 'Share child',
+                    owner: 'app',
+                    action: noopContextAction('share'),
+                  },
+                ],
+              },
+            },
+            {
+              id: 'settings',
+              kind: 'action',
+              label: 'Settings',
+              owner: 'app',
+              action: commandContextAction('showSettings'),
+            },
+          ],
+        },
+      ],
     })
 
     useContextMenuStore.getState().activateCurrent()
+    expect(useContextMenuStore.getState().openSubmenuId).toBe('tools')
+    expect(useContextMenuStore.getState().activeItemId).toBe('share-child')
+    expect(useContextMenuStore.getState().activeSubmenuItemId).toBe('share-child')
 
-    expect(onSelect).toHaveBeenCalledOnce()
+    useContextMenuStore.getState().closeSubmenu()
+    expect(useContextMenuStore.getState().openSubmenuId).toBeNull()
+    expect(useContextMenuStore.getState().activeItemId).toBe('tools')
+    expect(useContextMenuStore.getState().activeSubmenuItemId).toBeNull()
+
+    useContextMenuStore.getState().hoverItem('settings')
+    useContextMenuStore.getState().activateCurrent()
+
     expect(useContextMenuStore.getState().menu).toBeNull()
   })
 })

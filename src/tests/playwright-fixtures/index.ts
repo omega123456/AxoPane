@@ -1,5 +1,6 @@
 import type { IpcCommandMap } from '@/lib/types/ipc'
 import { fixtures } from '../fixtures'
+import { contextMenuFixtures } from './context-menu'
 import { shellFixtures } from './shell'
 
 const registry: Partial<{
@@ -7,6 +8,7 @@ const registry: Partial<{
 }> = {
   ...fixtures,
   ...shellFixtures,
+  load_native_menu: contextMenuFixtures.emptyNativeExtras,
 }
 
 export function getFixtureResponse<CommandName extends keyof IpcCommandMap>(command: CommandName) {

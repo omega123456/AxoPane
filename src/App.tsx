@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { ActionDialog } from '@/components/dialogs/ActionDialog'
+import { PropertiesDialog } from '@/components/dialogs/PropertiesDialog'
 import { SettingsModal } from '@/components/dialogs/SettingsModal'
 import { ContextMenu } from '@/components/menus/ContextMenu'
 import { AppFrame } from '@/components/shell/AppFrame'
@@ -24,6 +25,7 @@ import { useKeymapStore } from '@/stores/keymap-store'
 import { initializePanes, usePanesStore } from '@/stores/panes-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useSelectionStore } from '@/stores/selection-store'
+import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 import { initializeTheme, useThemeStore } from '@/stores/theme-store'
 
 function isEditableTarget(target: EventTarget | null) {
@@ -55,6 +57,7 @@ function App() {
   const settingsOpen = useSettingsStore((state) => state.isOpen)
   const menuOpen = useContextMenuStore((state) => state.menu !== null)
   const actionDialogOpen = useActionDialogStore((state) => state.dialog !== null)
+  const propertiesDialogOpen = usePropertiesDialogStore((state) => state.dialog !== null)
   const updateCheckInterval = useConfigStore((state) => state.updateCheckInterval)
 
   useEffect(() => {
@@ -115,7 +118,7 @@ function App() {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (settingsOpen || menuOpen || actionDialogOpen) {
+      if (settingsOpen || menuOpen || actionDialogOpen || propertiesDialogOpen) {
         return
       }
 
@@ -142,7 +145,14 @@ function App() {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [actionDialogOpen, defaultPaneMode, keymap, menuOpen, settingsOpen])
+  }, [
+    actionDialogOpen,
+    defaultPaneMode,
+    keymap,
+    menuOpen,
+    propertiesDialogOpen,
+    settingsOpen,
+  ])
 
   useEffect(() => {
     // Mouse buttons 3 (back) and 4 (forward) drive history navigation on the
@@ -153,7 +163,7 @@ function App() {
         return
       }
 
-      if (settingsOpen || menuOpen || actionDialogOpen) {
+      if (settingsOpen || menuOpen || actionDialogOpen || propertiesDialogOpen) {
         return
       }
 
@@ -168,7 +178,7 @@ function App() {
 
     window.addEventListener('mouseup', onMouseUp)
     return () => window.removeEventListener('mouseup', onMouseUp)
-  }, [actionDialogOpen, menuOpen, settingsOpen])
+  }, [actionDialogOpen, menuOpen, propertiesDialogOpen, settingsOpen])
 
   useEffect(() => {
     const unlistenVolumesPromise = onVolumesChanged((event) => {
@@ -225,6 +235,7 @@ function App() {
       <ContextMenu />
       <SettingsModal />
       <ActionDialog />
+      <PropertiesDialog />
     </main>
   )
 }

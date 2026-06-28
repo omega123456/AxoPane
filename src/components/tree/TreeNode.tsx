@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { buildContextMenuItems } from '@/components/menus/menu-definitions'
+import { buildContextMenuContent } from '@/components/menus/menu-definitions'
 import { ChevronRightIcon } from '@/components/icons'
 import { EntryIcon } from '@/components/icons/EntryIcon'
 import { detectPlatformOs } from '@/lib/keymap'
@@ -47,7 +47,11 @@ export function TreeNode({ path, depth }: TreeNodeProps) {
             chip: 'DIR',
             x: event.clientX,
             y: event.clientY,
-            items: buildContextMenuItems(activePaneId, { kind: 'tree', path: node.path }, detectPlatformOs()),
+            ...buildContextMenuContent(
+              activePaneId,
+              { kind: 'tree', path: node.path },
+              detectPlatformOs(),
+            ),
           })
         }}
         className={`flex items-center gap-1 rounded-tab pr-2 text-row ${

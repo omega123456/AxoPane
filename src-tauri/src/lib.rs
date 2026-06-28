@@ -1,6 +1,8 @@
+pub mod archive;
 pub mod fs;
 pub mod ipc;
 pub mod launch;
+pub mod native_menu;
 pub mod ops;
 pub mod persist;
 pub mod size;
@@ -9,6 +11,8 @@ pub mod watch;
 
 #[cfg(not(feature = "test-utils"))]
 use ipc::commands;
+#[cfg(not(feature = "test-utils"))]
+use native_menu::NativeMenuService;
 #[cfg(not(feature = "test-utils"))]
 use ops::OpsService;
 #[cfg(not(feature = "test-utils"))]
@@ -52,6 +56,7 @@ pub fn run() {
                 .map_err(|error| -> Box<dyn std::error::Error> { Box::new(error) })?;
 
             app.manage(persistence);
+            app.manage(NativeMenuService::default());
             app.manage(SizeService::default());
             app.manage(WatchService::default());
 
@@ -80,6 +85,12 @@ pub fn run() {
             commands::rename_entry,
             commands::delete_entries,
             commands::open_path,
+            commands::load_native_menu,
+            commands::invoke_native_menu_action,
+            commands::show_properties,
+            commands::open_with,
+            commands::compress_archive,
+            commands::extract_archive,
             commands::list_volumes,
             commands::everything_status,
             commands::request_folder_size,

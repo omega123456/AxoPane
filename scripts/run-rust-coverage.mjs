@@ -16,10 +16,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const rustCoverageTargetDir = path.join(
-  process.env.TEMP ?? process.env.TMP ?? root,
-  'file-explorer-llvm-cov',
-)
+const rustCoverageTargetDir = path.join(root, 'src-tauri', 'target', 'llvm-cov-target')
 
 function tryReadCommand(command, args) {
   try {

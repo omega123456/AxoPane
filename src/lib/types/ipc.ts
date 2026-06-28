@@ -200,6 +200,93 @@ export type OpenPathRequest = {
   path: string
 }
 
+export type MenuActionStatus = {
+  handled: boolean
+  message?: string | null
+}
+
+export type NativeMenuTargetKind =
+  | 'file'
+  | 'folder'
+  | 'multi'
+  | 'mixed'
+  | 'driveRoot'
+  | 'background'
+  | 'tree'
+  | 'tab'
+
+export type NativeMenuCanonicalActionKind =
+  | 'open'
+  | 'openWith'
+  | 'copy'
+  | 'cut'
+  | 'paste'
+  | 'rename'
+  | 'delete'
+  | 'properties'
+  | 'share'
+  | 'compress'
+  | 'extract'
+  | 'refresh'
+  | 'newFolder'
+  | 'newFile'
+  | 'selectAll'
+
+export type NativeMenuIconKind = 'dataUrl'
+
+export type NativeMenuIcon = {
+  kind: NativeMenuIconKind
+  dataUrl: string
+  alt?: string | null
+}
+
+export type NativeMenuItem = {
+  id: string
+  label: string
+  enabled: boolean
+  danger: boolean
+  canonicalActionKind: NativeMenuCanonicalActionKind | null
+  normalizedVerb: string | null
+  invokeToken: string | null
+  icon: NativeMenuIcon | null
+  children: NativeMenuItem[]
+}
+
+export type LoadNativeMenuRequest = {
+  requestId: string
+  targetKind: NativeMenuTargetKind
+  targetPath: string | null
+  folderPath: string | null
+  selectedPaths: string[]
+}
+
+export type LoadNativeMenuResponse = {
+  requestId: string
+  items: NativeMenuItem[]
+}
+
+export type InvokeNativeMenuRequest = {
+  token: string
+}
+
+export type ShowPropertiesRequest = {
+  paths: string[]
+}
+
+export type OpenWithRequest = {
+  path: string
+}
+
+export type CompressArchiveRequest = {
+  paths: string[]
+  destinationDir: string
+}
+
+export type ExtractArchiveRequest = {
+  paths: string[]
+  destinationDir: string
+}
+
 export type WatchTarget = {
   tabId: string
   path: string
@@ -347,6 +434,30 @@ export type IpcCommandMap = {
   open_path: {
     request: OpenPathRequest
     response: void
+  }
+  load_native_menu: {
+    request: LoadNativeMenuRequest
+    response: LoadNativeMenuResponse
+  }
+  invoke_native_menu_action: {
+    request: InvokeNativeMenuRequest
+    response: MenuActionStatus
+  }
+  show_properties: {
+    request: ShowPropertiesRequest
+    response: MenuActionStatus
+  }
+  open_with: {
+    request: OpenWithRequest
+    response: MenuActionStatus
+  }
+  compress_archive: {
+    request: CompressArchiveRequest
+    response: MenuActionStatus
+  }
+  extract_archive: {
+    request: ExtractArchiveRequest
+    response: MenuActionStatus
   }
   list_volumes: {
     request: undefined
