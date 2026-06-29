@@ -160,6 +160,8 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tauriScript: pnpm tauri
           tagName: v__VERSION__
@@ -167,6 +169,7 @@ jobs:
           releaseBody: ${{ steps.release_body.outputs.body }}
           releaseDraft: false
           prerelease: false
+          uploadUpdaterJson: true
           assetNamePattern: '[name]-[version]-[platform]-[arch][setup][ext]'
           args: --target aarch64-apple-darwin --bundles dmg -- --locked
 
@@ -223,6 +226,13 @@ jobs:
 
             windows_url="$(jq -r '.platforms["windows-x86_64"]?.url // ""' "$latest_json_file")"
             windows_signature="$(jq -r '.platforms["windows-x86_64"]?.signature // ""' "$latest_json_file")"
+            macos_platform_key="$(jq -r 'if .platforms["darwin-aarch64-app"] then "darwin-aarch64-app" elif .platforms["darwin-aarch64"] then "darwin-aarch64" else "" end' "$latest_json_file")"
+            macos_url=""
+            macos_signature=""
+            if [ -n "$macos_platform_key" ]; then
+              macos_url="$(jq -r --arg key "$macos_platform_key" '.platforms[$key]?.url // ""' "$latest_json_file")"
+              macos_signature="$(jq -r --arg key "$macos_platform_key" '.platforms[$key]?.signature // ""' "$latest_json_file")"
+            fi
 
             if [ -z "$windows_url" ]; then
               echo "[validate-release] latest.json is missing a Windows x64 updater URL."
@@ -242,10 +252,34 @@ jobs:
               return 1
             fi
 
+            if [ -z "$macos_platform_key" ]; then
+              echo "[validate-release] latest.json is missing the macOS Apple Silicon updater platform entry."
+              return 1
+            fi
+
+            if [ -z "$macos_url" ]; then
+              echo "[validate-release] latest.json is missing a macOS Apple Silicon updater URL."
+              return 1
+            fi
+
+            if [ -z "$macos_signature" ]; then
+              echo "[validate-release] latest.json is missing a macOS Apple Silicon updater signature."
+              return 1
+            fi
+
+            macos_filename="${macos_url##*/}"
+            macos_filename_lower="$(printf '%s' "$macos_filename" | tr '[:upper:]' '[:lower:]')"
+            if [[ "$macos_filename_lower" != *.app.tar.gz ]]; then
+              echo "[validate-release] macOS Apple Silicon updater URL must reference the signed .app.tar.gz updater artifact."
+              echo "[validate-release] Received URL: $macos_url"
+              return 1
+            fi
+
             jq -e --arg tag "$RELEASE_TAG" '.tag_name == $tag' "$release_assets_file" > /dev/null
             jq -e '.assets | map(.name) | any(test("\\.msi$"))' "$release_assets_file" > /dev/null
             jq -e '.assets | map(.name) | any(test("nsis"; "i") or test("\\.exe$"))' "$release_assets_file" > /dev/null
             jq -e '.assets | map(.name) | any(test("\\.dmg$"))' "$release_assets_file" > /dev/null
+            jq -e '.assets | map(.name) | any(test("\\.app\\.tar\\.gz$"))' "$release_assets_file" > /dev/null
           }
 
           success=0
