@@ -31,12 +31,13 @@ export function ContextMenuSection({
   const showNativePlaceholder = Boolean(nativeState?.placeholderVisible)
   const isNativeSection = nativeState !== undefined
   const hasNativeRows = section.rows.length > 0
-  const sectionRef = useRef<HTMLDivElement | null>(null)
   const submenuRef = useRef<HTMLDivElement | null>(null)
   const [openSubmenuAnchor, setOpenSubmenuAnchor] = useState<HTMLButtonElement | null>(null)
   const [openSubmenuPosition, setOpenSubmenuPosition] = useState<{
     left: number
     top: number
+    height: number
+    maxHeight: number
   } | null>(null)
   const keepNativeSection = hasNativeRows || nativeState?.loading || nativeState?.locked
 
@@ -46,35 +47,45 @@ export function ContextMenuSection({
   )
 
   useLayoutEffect(() => {
-    if (!openSubmenuAnchor || !sectionRef.current || !submenuRef.current || !openSubmenuItem) {
+    if (!openSubmenuAnchor || !submenuRef.current || !openSubmenuItem) {
       setOpenSubmenuPosition(null)
       return
     }
+
+    submenuRef.current.style.height = ''
+    submenuRef.current.style.maxHeight = ''
 
     const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1
     const margin = 8
     const gap = 8
     const anchorRect = openSubmenuAnchor.getBoundingClientRect()
-    const sectionRect = sectionRef.current.getBoundingClientRect()
     const submenuRect = submenuRef.current.getBoundingClientRect()
-    const minLeft = margin - sectionRect.left
-    const maxLeft = window.innerWidth - margin - submenuRect.width - sectionRect.left
-    let left = anchorRect.right - sectionRect.left + gap
+    const availableHeight = Math.max(window.innerHeight - margin * 2, 0)
+    const clampedHeight = Math.min(submenuRect.height, availableHeight)
+    const maxLeft = window.innerWidth - margin - submenuRect.width
+    let left = anchorRect.right + gap
     if (anchorRect.right + gap + submenuRect.width > window.innerWidth - margin) {
-      left = anchorRect.left - sectionRect.left - submenuRect.width - gap
+      left = anchorRect.left - submenuRect.width - gap
     }
-    left = Math.max(minLeft, Math.min(left, maxLeft))
+    left = Math.max(margin, Math.min(left, maxLeft))
 
-    const minTop = margin - sectionRect.top
-    const maxTop = window.innerHeight - margin - submenuRect.height - sectionRect.top
-    const top = Math.max(minTop, Math.min(anchorRect.top - sectionRect.top, maxTop))
+    const maxTop = window.innerHeight - margin - clampedHeight
+    const top = Math.max(margin, Math.min(anchorRect.top, maxTop))
 
     setOpenSubmenuPosition((current) => {
       const next = {
         left: left / zoom,
         top: top / zoom,
+        height: clampedHeight / zoom,
+        maxHeight: availableHeight / zoom,
       }
-      if (current && current.left === next.left && current.top === next.top) {
+      if (
+        current &&
+        current.left === next.left &&
+        current.top === next.top &&
+        current.height === next.height &&
+        current.maxHeight === next.maxHeight
+      ) {
         return current
       }
       return next
@@ -86,7 +97,7 @@ export function ContextMenuSection({
   }
 
   return (
-    <div ref={sectionRef} className="relative">
+    <div>
       {showDivider ? (
         <div className="mx-1.5 my-1 h-px bg-light-border dark:bg-dark-border" />
       ) : null}
@@ -135,28 +146,34 @@ export function ContextMenuSection({
           ref={submenuRef}
           role="menu"
           aria-label={openSubmenuItem.label}
-          className="absolute z-10 w-64 rounded-menu border border-light-border-strong bg-light-surface p-1.5 shadow-menu dark:border-dark-border-strong dark:bg-dark-surface"
-          // Runtime submenu geometry mirrors the root menu logic: the panel is
-          // measured in viewport pixels, clamped to the viewport, and then
-          // translated back into the zoomed coordinate space of the menu tree.
+          className="fixed z-10 flex w-64 flex-col overflow-hidden rounded-menu border border-light-border-strong bg-light-surface p-1.5 shadow-menu dark:border-dark-border-strong dark:bg-dark-surface"
+          // Runtime submenu geometry uses viewport coordinates so nested panels
+          // are not clipped by the scrolling body of the parent menu.
           style={
             openSubmenuPosition
               ? {
                   left: `${openSubmenuPosition.left}px`,
                   top: `${openSubmenuPosition.top}px`,
+                  height: `${openSubmenuPosition.height}px`,
+                  maxHeight: `${openSubmenuPosition.maxHeight}px`,
                 }
               : { visibility: 'hidden' }
           }
         >
-          {openSubmenuItem.children.rows.map((child) => (
-            <ContextMenuRow
-              key={child.id}
-              item={child}
-              active={child.id === activeItemId}
-              onPointerEnter={() => onHoverItem(child.id)}
-              onActivate={() => onActivateItem(child.id)}
-            />
-          ))}
+          <div
+            data-testid="context-submenu-scroll-body"
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+          >
+            {openSubmenuItem.children.rows.map((child) => (
+              <ContextMenuRow
+                key={child.id}
+                item={child}
+                active={child.id === activeItemId}
+                onPointerEnter={() => onHoverItem(child.id)}
+                onActivate={() => onActivateItem(child.id)}
+              />
+            ))}
+          </div>
         </div>
       ) : null}
     </div>

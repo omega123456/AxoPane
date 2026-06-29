@@ -18,6 +18,7 @@ export function ContextMenuTopStrip({
 
   return (
     <div
+      data-context-menu-top-strip="true"
       role="group"
       aria-label="Quick actions"
       className="mx-1 mb-1 flex items-center justify-between rounded-xl border border-light-border bg-light-panel p-1 dark:border-dark-border dark:bg-dark-panel"

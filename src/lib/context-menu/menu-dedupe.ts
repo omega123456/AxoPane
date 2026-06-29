@@ -52,7 +52,8 @@ export function dedupeNativeMenuItems(items: NativeMenuItem[]): NativeMenuItem[]
 }
 
 function isAppOwnedDuplicate(item: NativeMenuItem): boolean {
-  if (item.children.length > 0) {
+  const normalizedVerb = normalizeVerb(item.normalizedVerb ?? item.label)
+  if (item.children.length > 0 && !isAlwaysAppOwnedSubmenu(item.canonicalActionKind, normalizedVerb)) {
     return false
   }
 
@@ -60,8 +61,18 @@ function isAppOwnedDuplicate(item: NativeMenuItem): boolean {
     return true
   }
 
-  const normalizedVerb = normalizeVerb(item.normalizedVerb ?? item.label)
-  return APP_OWNED_NORMALIZED_VERBS.has(normalizedVerb)
+  return isOpenWithVariant(normalizedVerb) || APP_OWNED_NORMALIZED_VERBS.has(normalizedVerb)
+}
+
+function isAlwaysAppOwnedSubmenu(
+  canonicalActionKind: NativeMenuItem['canonicalActionKind'],
+  normalizedVerb: string,
+) {
+  return canonicalActionKind === 'openWith' || isOpenWithVariant(normalizedVerb)
+}
+
+function isOpenWithVariant(normalizedVerb: string) {
+  return normalizedVerb.startsWith('openwith')
 }
 
 function normalizeVerb(value: string): string {

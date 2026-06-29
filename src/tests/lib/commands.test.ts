@@ -176,6 +176,8 @@ describe('executeCommand file actions', () => {
   })
 
   it('copies and cuts selected entries into the clipboard', () => {
+    const writeFileClipboard = vi.fn(() => undefined)
+    ipc.override('write_file_clipboard', writeFileClipboard)
     useSelectionStore.getState().setSelection('left', ['Beta'], 'Beta', 'Beta')
 
     executeCommand('copy', 'left')
@@ -184,6 +186,10 @@ describe('executeCommand file actions', () => {
       sourcePaneId: 'left',
       entries: [{ id: 'Beta' }],
     })
+    expect(writeFileClipboard).toHaveBeenNthCalledWith(1, {
+      mode: 'copy',
+      paths: ['C:\\root\\Beta'],
+    })
 
     executeCommand('cut', 'left', 'Alpha')
     expect(useClipboardStore.getState()).toMatchObject({
@@ -191,11 +197,17 @@ describe('executeCommand file actions', () => {
       sourcePaneId: 'left',
       entries: [{ id: 'Alpha' }],
     })
+    expect(writeFileClipboard).toHaveBeenNthCalledWith(2, {
+      mode: 'move',
+      paths: ['C:\\root\\Alpha'],
+    })
   })
 
   it('pastes clipboard entries through the queue and clears moved items after enqueue', async () => {
     const startOp = vi.fn(() => 'op-1')
+    const clearFileClipboard = vi.fn(() => undefined)
     ipc.override('start_op', startOp)
+    ipc.override('clear_file_clipboard', clearFileClipboard)
     useClipboardStore.getState().setClipboard('move', 'right', [entry('Beta', false)])
 
     executeCommand('paste', 'left')
@@ -207,6 +219,7 @@ describe('executeCommand file actions', () => {
       items: [{ sourcePath: 'C:\\root\\Beta', name: 'Beta', sizeBytes: 10 }],
     })
     expect(useClipboardStore.getState().entries).toEqual([])
+    expect(clearFileClipboard).toHaveBeenCalledOnce()
   })
 
   it('does not paste with an empty clipboard', () => {

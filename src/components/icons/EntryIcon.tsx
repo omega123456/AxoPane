@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react'
+import { useState, type ComponentType } from 'react'
 import type { LucideProps } from 'lucide-react'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import type { FileCategory, FolderGlyphKind } from '@/lib/file-type'
@@ -60,7 +60,7 @@ const FOLDER_GLYPHS: Record<FolderGlyphKind, IconComponent> = {
 const FOLDER_COLOR = 'text-accent-blue-light dark:text-accent-blue'
 
 type EntryIconProps = {
-  entry: Pick<DirectoryEntry, 'name' | 'isDir'>
+  entry: Pick<DirectoryEntry, 'name' | 'isDir' | 'iconDataUrl'>
   /** Tree expansion / open state — drives `FolderOpen` and the fill opacity. */
   isOpen?: boolean
   /** Size / layout utilities. Defaults to a compact 16px square. */
@@ -78,7 +78,22 @@ type EntryIconProps = {
  * Classification is pure name parsing — see {@link getFileCategory}.
  */
 export function EntryIcon({ entry, isOpen = false, className = 'h-4 w-4 shrink-0', colorClassName }: EntryIconProps) {
+  const [nativeIconFailed, setNativeIconFailed] = useState(false)
   const category = getFileCategory(entry)
+
+  if (!entry.isDir && entry.iconDataUrl && !nativeIconFailed) {
+    return (
+      <img
+        src={entry.iconDataUrl}
+        alt=""
+        aria-hidden="true"
+        className={className}
+        onError={() => {
+          setNativeIconFailed(true)
+        }}
+      />
+    )
+  }
 
   if (category === 'folder') {
     const kind = getFolderGlyphKind(entry.name, isOpen)

@@ -27,6 +27,7 @@ export function ContextMenu() {
   const activateCurrent = useContextMenuStore((state) => state.activateCurrent)
   const activateItem = useContextMenuStore((state) => state.activateItem)
   const ref = useRef<HTMLDivElement | null>(null)
+  const bodyRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (!menu) {
@@ -75,6 +76,12 @@ export function ContextMenu() {
       return
     }
 
+    // Measure from the menu's natural content height every time. Otherwise a
+    // previously clamped explicit height can get "stuck" after native rows
+    // load, leaving the body scroll-cut even when the viewport has room.
+    node.style.height = ''
+    node.style.maxHeight = ''
+
     // The app zooms the UI via CSS `zoom` on <html> (see layout-store). Pointer
     // coordinates (`menu.x/y`), `getBoundingClientRect()` and `innerWidth/
     // Height` are all in real viewport pixels, but `left`/`top` written on a
@@ -84,8 +91,10 @@ export function ContextMenu() {
     const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1
     const { width, height } = node.getBoundingClientRect()
     const margin = 8
+    const availableHeight = window.innerHeight - margin * 2
+    const clampedHeight = Math.min(height, availableHeight)
     const maxLeft = window.innerWidth - width - margin
-    const maxTop = window.innerHeight - height - margin
+    const maxTop = window.innerHeight - clampedHeight - margin
 
     // Flip the menu around the cursor when it would overflow, so a corner stays
     // pinned to the pointer instead of detaching toward the viewport edge.
@@ -103,7 +112,9 @@ export function ContextMenu() {
 
     node.style.left = `${left / zoom}px`
     node.style.top = `${top / zoom}px`
-  }, [menu])
+    node.style.height = `${clampedHeight / zoom}px`
+    node.style.maxHeight = `${availableHeight / zoom}px`
+  }, [menu, nativeFailed, nativeLoading, nativePlaceholderVisible, nativeSectionLocked])
 
   if (!menu) {
     return null
@@ -126,7 +137,7 @@ export function ContextMenu() {
         role="menu"
         aria-label={menu.title}
         tabIndex={-1}
-        className="absolute w-72 rounded-menu border border-light-border-strong bg-light-surface p-1.5 shadow-menu focus-visible:outline-none dark:border-dark-border-strong dark:bg-dark-surface"
+        className="absolute flex w-72 max-h-full flex-col overflow-hidden rounded-menu border border-light-border-strong bg-light-surface p-1.5 shadow-menu focus-visible:outline-none dark:border-dark-border-strong dark:bg-dark-surface"
         // Styling-constraint exception: runtime geometry only. The menu is
         // positioned at the cursor (continuous px coords) and clamped into the
         // viewport by the layout effect above, which no static utility or
@@ -167,56 +178,62 @@ export function ContextMenu() {
             }
           }
         }}
-      >
+        >
         <ContextMenuTopStrip
           items={menu.topStrip}
           activeItemId={activeItemId}
           onHoverItem={hoverItem}
           onActivateItem={activateItem}
         />
-        {beforeNativeSections.map((section, index) => (
-          <ContextMenuSection
-            key={section.id}
-            section={section}
-            showDivider={index > 0 || topStripVisible}
-            activeItemId={activeItemId}
-            openSubmenuId={openSubmenuId}
-            onHoverItem={hoverItem}
-            onActivateItem={activateItem}
-          />
-        ))}
-        {nativeSection ? (
-          <ContextMenuSection
-            section={nativeSection}
-            showDivider={beforeNativeSections.length > 0 || topStripVisible}
-            activeItemId={activeItemId}
-            openSubmenuId={openSubmenuId}
-            onHoverItem={hoverItem}
-            onActivateItem={activateItem}
-            nativeState={{
-              loading: nativeLoading,
-              failed: nativeFailed,
-              placeholderVisible: nativePlaceholderVisible,
-              locked: nativeSectionLocked,
-            }}
-          />
-        ) : null}
-        {afterNativeSections.map((section, index) => (
-          <ContextMenuSection
-            key={section.id}
-            section={section}
-            showDivider={
-              index > 0 ||
-              topStripVisible ||
-              beforeNativeSections.length > 0 ||
-              nativeSection !== null
-            }
-            activeItemId={activeItemId}
-            openSubmenuId={openSubmenuId}
-            onHoverItem={hoverItem}
-            onActivateItem={activateItem}
-          />
-        ))}
+        <div
+          ref={bodyRef}
+          data-testid="context-menu-scroll-body"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+        >
+          {beforeNativeSections.map((section, index) => (
+            <ContextMenuSection
+              key={section.id}
+              section={section}
+              showDivider={index > 0 || topStripVisible}
+              activeItemId={activeItemId}
+              openSubmenuId={openSubmenuId}
+              onHoverItem={hoverItem}
+              onActivateItem={activateItem}
+            />
+          ))}
+          {nativeSection ? (
+            <ContextMenuSection
+              section={nativeSection}
+              showDivider={beforeNativeSections.length > 0 || topStripVisible}
+              activeItemId={activeItemId}
+              openSubmenuId={openSubmenuId}
+              onHoverItem={hoverItem}
+              onActivateItem={activateItem}
+              nativeState={{
+                loading: nativeLoading,
+                failed: nativeFailed,
+                placeholderVisible: nativePlaceholderVisible,
+                locked: nativeSectionLocked,
+              }}
+            />
+          ) : null}
+          {afterNativeSections.map((section, index) => (
+            <ContextMenuSection
+              key={section.id}
+              section={section}
+              showDivider={
+                index > 0 ||
+                topStripVisible ||
+                beforeNativeSections.length > 0 ||
+                nativeSection !== null
+              }
+              activeItemId={activeItemId}
+              openSubmenuId={openSubmenuId}
+              onHoverItem={hoverItem}
+              onActivateItem={activateItem}
+            />
+          ))}
+        </div>
       </div>
     </div>
   )

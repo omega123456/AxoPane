@@ -1,13 +1,15 @@
 import { create } from 'zustand'
-import type { DirectoryEntry } from '@/lib/types/ipc'
-
-type ClipboardMode = 'copy' | 'move'
+import type { DirectoryEntry, FileClipboardMode } from '@/lib/types/ipc'
 
 type ClipboardStore = {
-  mode: ClipboardMode | null
+  mode: FileClipboardMode | null
   sourcePaneId: 'left' | 'right' | null
   entries: DirectoryEntry[]
-  setClipboard: (mode: ClipboardMode, sourcePaneId: 'left' | 'right', entries: DirectoryEntry[]) => void
+  setClipboard: (
+    mode: FileClipboardMode,
+    sourcePaneId: 'left' | 'right',
+    entries: DirectoryEntry[],
+  ) => void
   clearClipboard: () => void
 }
 

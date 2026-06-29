@@ -105,6 +105,39 @@ describe('dedupeNativeMenuItems', () => {
     expect(items[0]?.children.map((entry) => entry.id)).toEqual(['new-text-document'])
   })
 
+  it('drops native Open with submenus so the in-app action always wins on Windows', () => {
+    const items = dedupeNativeMenuItems([
+      item({
+        id: 'open-with-submenu',
+        label: 'Open with',
+        canonicalActionKind: 'openWith',
+        invokeToken: null,
+        children: [
+          item({
+            id: 'open-with-code',
+            label: 'Visual Studio Code',
+            normalizedVerb: 'openwithcode',
+            invokeToken: 'native:open-with-code',
+          }),
+        ],
+      }),
+    ])
+
+    expect(items).toEqual([])
+  })
+
+  it('drops native Open with label variants even without a canonical action tag', () => {
+    const items = dedupeNativeMenuItems([
+      item({
+        id: 'open-with-code',
+        label: 'Open with Code',
+        normalizedVerb: null,
+      }),
+    ])
+
+    expect(items).toEqual([])
+  })
+
   it('drops duplicate native siblings after canonical filtering runs', () => {
     const items = dedupeNativeMenuItems([
       item({

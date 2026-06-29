@@ -49,6 +49,7 @@ export type DirectoryEntry = {
   name: string
   path: string
   isDir: boolean
+  iconDataUrl?: string | null
   sizeBytes: number | null
   itemCount: number | null
   typeLabel: string
@@ -198,6 +199,13 @@ export type DeleteEntriesRequest = {
 
 export type OpenPathRequest = {
   path: string
+}
+
+export type FileClipboardMode = 'copy' | 'move'
+
+export type WriteFileClipboardRequest = {
+  mode: FileClipboardMode
+  paths: string[]
 }
 
 export type MenuActionStatus = {
@@ -433,6 +441,14 @@ export type IpcCommandMap = {
   }
   open_path: {
     request: OpenPathRequest
+    response: void
+  }
+  write_file_clipboard: {
+    request: WriteFileClipboardRequest
+    response: void
+  }
+  clear_file_clipboard: {
+    request: undefined
     response: void
   }
   load_native_menu: {

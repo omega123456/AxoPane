@@ -650,10 +650,6 @@ describe('ContextMenu', () => {
         return DOMRect.fromRect({ x: 0, y: 0, width: 256, height: 96 })
       }
 
-      if (this.className === 'relative') {
-        return DOMRect.fromRect({ x: 40, y: 20, width: 0, height: 0 })
-      }
-
       return DOMRect.fromRect({ x: 0, y: 0, width: 0, height: 0 })
     })
 
@@ -690,8 +686,11 @@ describe('ContextMenu', () => {
 
       const submenu = screen.getByRole('menu', { name: 'Tools' })
       expect(submenu.style.visibility).not.toBe('hidden')
-      expect(submenu.style.left).toBe('-32px')
-      expect(submenu.style.top).toBe('116px')
+      expect(submenu.style.left).toBe('8px')
+      expect(submenu.style.top).toBe('136px')
+      expect(submenu.style.height).toBe('96px')
+      expect(submenu.style.maxHeight).toBe('224px')
+      expect(screen.getByTestId('context-submenu-scroll-body')).toHaveClass('overflow-y-auto')
     } finally {
       rectSpy.mockRestore()
       Object.defineProperty(window, 'innerWidth', {
@@ -794,5 +793,65 @@ describe('ContextMenu', () => {
 
     expect(screen.queryByRole('menuitem', { name: 'Open in First Terminal' })).not.toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: 'Open in Second Terminal' })).toBeInTheDocument()
+  })
+
+  it('keeps the quick-action strip fixed while the rest of a tall menu scrolls', () => {
+    const originalHeight = window.innerHeight
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      writable: true,
+      value: 120,
+    })
+
+    rectSpy.mockImplementation(function mockRect(this: HTMLElement) {
+      if (this.getAttribute('role') === 'menu' && this.getAttribute('aria-label') === 'Report.txt') {
+        return DOMRect.fromRect({ x: 0, y: 0, width: 288, height: 260 })
+      }
+
+      return DOMRect.fromRect({ x: 0, y: 0, width: 0, height: 0 })
+    })
+
+    try {
+      openMenu({
+        topStrip: [
+          {
+            id: 'strip-copy',
+            label: 'Copy',
+            owner: 'app',
+            icon: { kind: 'app', name: 'copy' },
+            action: noopContextAction('copy'),
+          },
+        ],
+        sections: [
+          {
+            id: 'primary',
+            rows: Array.from({ length: 12 }, (_, index) => ({
+              id: `action-${index}`,
+              kind: 'action' as const,
+              label: `Action ${index + 1}`,
+              owner: 'app' as const,
+              action: noopContextAction(`action-${index + 1}`),
+            })),
+          },
+        ],
+      })
+
+      render(<ContextMenu />)
+
+      const menu = screen.getByRole('menu', { name: 'Report.txt' })
+      expect(menu.style.height).toBe('104px')
+      expect(menu.style.maxHeight).toBe('104px')
+      expect(screen.getByRole('group', { name: 'Quick actions' })).toBeInTheDocument()
+      expect(screen.getByTestId('context-menu-scroll-body')).toHaveClass('overflow-y-auto')
+    } finally {
+      rectSpy.mockRestore()
+      Object.defineProperty(window, 'innerHeight', {
+        configurable: true,
+        writable: true,
+        value: originalHeight,
+      })
+    }
   })
 })

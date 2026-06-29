@@ -8,7 +8,8 @@ use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::events;
 use file_explorer_lib::ipc::mock;
 use file_explorer_lib::ipc::types::{
-    CreateEntryRequest, DeleteEntriesRequest, ListDirRequest, OpenPathRequest, RenameEntryRequest,
+    CreateEntryRequest, DeleteEntriesRequest, FileClipboardMode, ListDirRequest, OpenPathRequest,
+    RenameEntryRequest, WriteFileClipboardRequest,
 };
 use tempfile::tempdir;
 
@@ -149,6 +150,31 @@ fn open_path_command_uses_safe_test_utils_fallback() {
     .expect_err("test-utils should block real app launching");
 
     assert!(error.contains("unsupported"));
+}
+
+#[cfg(feature = "test-utils")]
+#[test]
+fn file_clipboard_commands_are_safe_noops_under_test_utils() {
+    commands::write_file_clipboard(WriteFileClipboardRequest {
+        mode: FileClipboardMode::Copy,
+        paths: vec!["C:\\fixture\\Report.txt".to_string()],
+    })
+    .expect("clipboard write");
+
+    commands::clear_file_clipboard().expect("clipboard clear");
+}
+
+#[cfg(feature = "test-utils")]
+#[test]
+fn file_clipboard_command_rejects_blank_paths_before_touching_os_apis() {
+    let error = commands::write_file_clipboard(WriteFileClipboardRequest {
+        mode: FileClipboardMode::Move,
+        paths: vec!["   ".to_string()],
+    })
+    .expect_err("blank clipboard path");
+
+    assert!(error.contains("Failed to update OS clipboard"));
+    assert!(error.contains("must not be empty"));
 }
 
 #[test]

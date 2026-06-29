@@ -16,6 +16,7 @@ mod watch_src {
                 name: name.to_string(),
                 path: path.to_string(),
                 is_dir: false,
+                icon_data_url: None,
                 size_bytes: Some(1),
                 item_count: None,
                 type_label: "TXT file".to_string(),

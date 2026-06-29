@@ -389,6 +389,19 @@ describe('FilePane state rendering', () => {
     }
   })
 
+  it('dims rows whose paths are currently cut in the app clipboard', () => {
+    useClipboardStore.getState().setClipboard('move', 'left', [entry('Alpha', false)])
+    seedPane({ entries: [entry('Alpha', false), entry('Beta', false)], focusedEntryId: 'Alpha' })
+
+    render(<FilePane paneId="left" />)
+
+    const cutRow = within(screen.getByLabelText('Left pane')).getByRole('row', { name: /Alpha/ })
+    const normalRow = within(screen.getByLabelText('Left pane')).getByRole('row', { name: /Beta/ })
+
+    expect(cutRow).toHaveClass('opacity-50')
+    expect(normalRow).not.toHaveClass('opacity-50')
+  })
+
   it('requests native enrichment for the selected filesystem row without disturbing selection semantics', async () => {
     const user = userEvent.setup()
     const loadNativeMenu = vi.fn((payload: LoadNativeMenuRequest) => ({

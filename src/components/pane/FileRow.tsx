@@ -15,6 +15,7 @@ type FileRowProps = {
   onClick: (event: MouseEvent<HTMLButtonElement>) => void
   onContextMenu: (event: MouseEvent<HTMLButtonElement>) => void
   onMiddleClick: () => void
+  isCut?: boolean
   isRenaming?: boolean
   renameValue?: string
   renameBusy?: boolean
@@ -38,6 +39,7 @@ export function FileRow({
   onClick,
   onContextMenu,
   onMiddleClick,
+  isCut = false,
   isRenaming = false,
   renameValue = '',
   renameBusy = false,
@@ -62,7 +64,9 @@ export function FileRow({
 
   const rowClassName = `group flex h-row w-full items-center gap-3 border-b border-light-border px-3 text-row text-left focus-visible:outline-none dark:border-dark-border ${
     isSelected ? 'bg-accent-blue-soft' : 'bg-light-surface dark:bg-dark-surface'
-  } ${isFocused && isActivePane ? 'ring-2 ring-inset ring-accent-blue-border' : ''} hover:bg-light-hover dark:hover:bg-dark-hover`
+  } ${isFocused && isActivePane ? 'ring-2 ring-inset ring-accent-blue-border' : ''} ${
+    isCut ? 'opacity-50' : ''
+  } hover:bg-light-hover dark:hover:bg-dark-hover`
 
   function onRenameKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     event.stopPropagation()
@@ -180,12 +184,20 @@ export function FileRow({
         if (column.key === 'name') {
           return (
             <span key={column.key} className={definition.className}>
-              <span className="flex min-w-0 items-center gap-2">
-                <EntryIcon entry={entry} />
-                <span className="truncate text-light-text dark:text-dark-text">{entry.name}</span>
+                <span className="flex min-w-0 items-center gap-2">
+                  <EntryIcon entry={entry} />
+                  <span
+                    className={`truncate ${
+                      isCut
+                        ? 'text-light-text-soft dark:text-dark-text-soft'
+                        : 'text-light-text dark:text-dark-text'
+                    }`}
+                  >
+                    {entry.name}
+                  </span>
+                </span>
               </span>
-            </span>
-          )
+            )
         }
 
         if (column.key === 'size') {

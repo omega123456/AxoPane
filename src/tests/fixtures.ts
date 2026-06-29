@@ -116,6 +116,8 @@ export const fixtures: {
   },
   delete_entries: undefined,
   open_path: undefined,
+  write_file_clipboard: undefined,
+  clear_file_clipboard: undefined,
   load_native_menu: {
     requestId: 'fixture-native-request',
     items: [

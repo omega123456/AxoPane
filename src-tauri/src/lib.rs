@@ -1,4 +1,5 @@
 pub mod archive;
+mod clipboard;
 pub mod fs;
 pub mod ipc;
 pub mod launch;
@@ -6,6 +7,7 @@ pub mod native_menu;
 pub mod ops;
 pub mod persist;
 pub mod size;
+mod file_icons;
 pub mod volumes;
 pub mod watch;
 
@@ -85,6 +87,8 @@ pub fn run() {
             commands::rename_entry,
             commands::delete_entries,
             commands::open_path,
+            commands::write_file_clipboard,
+            commands::clear_file_clipboard,
             commands::load_native_menu,
             commands::invoke_native_menu_action,
             commands::show_properties,

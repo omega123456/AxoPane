@@ -17,11 +17,12 @@ use super::mock;
 use super::types::{
     AppConfig, CancelSizeRequest, CancelSizeResponse, CompressArchiveRequest, CreateEntryRequest,
     DeleteEntriesRequest, ExtractArchiveRequest, FolderSizeRequest, FolderSizesRequest,
-    InitialShellResponse, InvokeNativeMenuRequest, ListDirRequest, ListDirResponse,
-    LoadNativeMenuRequest, LoadNativeMenuResponse, LogFrontendRequest, MenuActionStatus,
-    OpIdRequest, OpenPathRequest, OpenWithRequest, RefreshTabRequest, RenameEntryRequest,
-    ReorderOpsRequest, ResolveConflictRequest, SaveConfigRequest, SaveSessionRequest, SessionState,
-    SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent, StartOpRequest, VolumeInfo,
+    FileClipboardMode, InitialShellResponse, InvokeNativeMenuRequest, ListDirRequest,
+    ListDirResponse, LoadNativeMenuRequest, LoadNativeMenuResponse, LogFrontendRequest,
+    MenuActionStatus, OpIdRequest, OpenPathRequest, OpenWithRequest, RefreshTabRequest,
+    RenameEntryRequest, ReorderOpsRequest, ResolveConflictRequest, SaveConfigRequest,
+    SaveSessionRequest, SessionState, SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent,
+    StartOpRequest, VolumeInfo, WriteFileClipboardRequest,
 };
 use crate::fs::DirectoryEntry;
 use std::path::Path;
@@ -90,6 +91,28 @@ pub fn open_path(payload: OpenPathRequest) -> Result<(), String> {
     crate::launch::open_path(Path::new(&payload.path)).map_err(|error| {
         let message = format!("Failed to open \"{}\": {error}", payload.path);
         log::error!("{message}");
+        message
+    })
+}
+
+#[tauri::command]
+pub fn write_file_clipboard(payload: WriteFileClipboardRequest) -> Result<(), String> {
+    crate::clipboard::write_paths(match payload.mode {
+        FileClipboardMode::Copy => crate::clipboard::ClipboardMode::Copy,
+        FileClipboardMode::Move => crate::clipboard::ClipboardMode::Move,
+    }, &payload.paths)
+    .map_err(|error| {
+        let message = format!("Failed to update OS clipboard: {error}");
+        log::warn!("{message}");
+        message
+    })
+}
+
+#[tauri::command]
+pub fn clear_file_clipboard() -> Result<(), String> {
+    crate::clipboard::clear().map_err(|error| {
+        let message = format!("Failed to clear OS clipboard: {error}");
+        log::warn!("{message}");
         message
     })
 }

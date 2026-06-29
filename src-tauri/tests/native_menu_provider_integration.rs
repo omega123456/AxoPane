@@ -315,6 +315,54 @@ fn provider_dedupe_preserves_submenu_containers_that_hold_non_duplicate_children
 }
 
 #[test]
+fn provider_dedupe_drops_open_with_submenus_so_the_app_owned_action_takes_priority() {
+    let items = dedupe_provider_items(vec![ProviderNativeMenuItem {
+        id: "open-with-submenu".to_string(),
+        label: "Open with".to_string(),
+        enabled: true,
+        danger: false,
+        canonical_action_kind: Some(NativeMenuCanonicalActionKind::OpenWith),
+        normalized_verb: Some("openwith".to_string()),
+        icon: None,
+        invocation: None,
+        children: vec![ProviderNativeMenuItem {
+            id: "open-with-code".to_string(),
+            label: "Visual Studio Code".to_string(),
+            enabled: true,
+            danger: false,
+            canonical_action_kind: None,
+            normalized_verb: Some("openwithcode".to_string()),
+            icon: None,
+            invocation: Some(ProviderInvocation::Fake {
+                action_id: "fake.openWithCode".to_string(),
+            }),
+            children: Vec::new(),
+        }],
+    }]);
+
+    assert!(items.is_empty());
+}
+
+#[test]
+fn provider_dedupe_drops_open_with_label_variants_without_needing_a_canonical_tag() {
+    let items = dedupe_provider_items(vec![ProviderNativeMenuItem {
+        id: "open-with-code".to_string(),
+        label: "Open with Code".to_string(),
+        enabled: true,
+        danger: false,
+        canonical_action_kind: None,
+        normalized_verb: None,
+        icon: None,
+        invocation: Some(ProviderInvocation::Fake {
+            action_id: "fake.openWithCode".to_string(),
+        }),
+        children: Vec::new(),
+    }]);
+
+    assert!(items.is_empty());
+}
+
+#[test]
 fn provider_dedupe_omits_duplicate_native_siblings_before_renderer_guardrails() {
     let items = dedupe_provider_items(vec![
         ProviderNativeMenuItem {

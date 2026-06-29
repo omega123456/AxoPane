@@ -24,6 +24,7 @@ import type {
   WatchTarget,
   SessionState,
   VolumeInfo,
+  WriteFileClipboardRequest,
 } from '@/lib/types/ipc'
 import { invokeCommand } from './client'
 
@@ -53,6 +54,14 @@ export function deleteEntries(payload: DeleteEntriesRequest) {
 
 export function openPath(payload: OpenPathRequest) {
   return invokeCommand({ command: 'open_path', payload }) as Promise<void>
+}
+
+export function writeFileClipboard(payload: WriteFileClipboardRequest) {
+  return invokeCommand({ command: 'write_file_clipboard', payload }) as Promise<void>
+}
+
+export function clearFileClipboard() {
+  return invokeCommand({ command: 'clear_file_clipboard' }) as Promise<void>
 }
 
 export function loadNativeMenu(payload: LoadNativeMenuRequest) {

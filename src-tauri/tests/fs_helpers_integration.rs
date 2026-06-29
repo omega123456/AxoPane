@@ -18,6 +18,7 @@ fn entry(name: &str, is_dir: bool) -> DirectoryEntry {
         name: name.to_string(),
         path: name.to_string(),
         is_dir,
+        icon_data_url: None,
         size_bytes: (!is_dir).then_some(name.len() as u64),
         item_count: is_dir.then_some(name.len() as u64),
         type_label: infer_type_label(name, is_dir),

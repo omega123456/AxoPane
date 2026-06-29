@@ -26,6 +26,7 @@ import { useInlineRenameStore } from '@/stores/inline-rename-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { activeConflict, useQueueStore } from '@/stores/queue-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
+import { useClipboardStore } from '@/stores/clipboard-store'
 import { useKeymapStore } from '@/stores/keymap-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import type { PaneId } from '@/types/pane'
@@ -66,6 +67,8 @@ export function FilePane({ paneId }: FilePaneProps) {
   const conflict = useQueueStore(activeConflict)
   const resolveConflict = useQueueStore((state) => state.resolve)
   const setSelection = useSelectionStore((state) => state.setSelection)
+  const clipboardMode = useClipboardStore((state) => state.mode)
+  const clipboardEntries = useClipboardStore((state) => state.entries)
   const openMenu = useContextMenuStore((state) => state.openMenu)
   const rename = useInlineRenameStore((state) =>
     state.rename?.paneId === paneId ? state.rename : null,
@@ -88,6 +91,13 @@ export function FilePane({ paneId }: FilePaneProps) {
   const hasParent = getParentPath(pane.path) !== null
   const parentOffset = hasParent ? 1 : 0
   const rowCount = pane.entries.length + parentOffset
+  const cutEntryPaths = useMemo(
+    () =>
+      clipboardMode === 'move'
+        ? new Set(clipboardEntries.map((entry) => entry.path.toLowerCase()))
+        : new Set<string>(),
+    [clipboardEntries, clipboardMode],
+  )
 
   const rowVirtualizer = useElementVirtualizer({
     count: rowCount,
@@ -369,6 +379,7 @@ export function FilePane({ paneId }: FilePaneProps) {
                     isActivePane={isActivePane}
                     isFocused={pane.focusedEntryId === entry.id}
                     isSelected={selection.selectedIds.includes(entry.id)}
+                    isCut={cutEntryPaths.has(entry.path.toLowerCase())}
                     isRenaming={rename?.entryId === entry.id}
                     renameValue={rename?.entryId === entry.id ? rename.value : ''}
                     renameBusy={rename?.entryId === entry.id ? rename.busy : false}

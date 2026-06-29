@@ -84,7 +84,7 @@ pub fn dedupe_provider_items(items: Vec<ProviderNativeMenuItem>) -> Vec<Provider
 fn dedupe_provider_item(mut item: ProviderNativeMenuItem) -> Option<ProviderNativeMenuItem> {
     item.children = dedupe_provider_items(item.children);
 
-    if item.children.is_empty() && is_app_owned_duplicate(&item) {
+    if is_app_owned_duplicate(&item) {
         return None;
     }
 
@@ -92,6 +92,19 @@ fn dedupe_provider_item(mut item: ProviderNativeMenuItem) -> Option<ProviderNati
 }
 
 fn is_app_owned_duplicate(item: &ProviderNativeMenuItem) -> bool {
+    let normalized_verb = item
+        .normalized_verb
+        .as_deref()
+        .map(normalize_verb)
+        .unwrap_or_else(|| normalize_verb(&item.label));
+    let always_remove_submenu = item.canonical_action_kind
+        == Some(NativeMenuCanonicalActionKind::OpenWith)
+        || is_open_with_variant(&normalized_verb);
+
+    if !item.children.is_empty() && !always_remove_submenu {
+        return false;
+    }
+
     item.canonical_action_kind
         .as_ref()
         .is_some_and(|kind| APP_OWNED_CANONICAL_ACTION_KINDS.contains(kind))
@@ -99,7 +112,9 @@ fn is_app_owned_duplicate(item: &ProviderNativeMenuItem) -> bool {
             .normalized_verb
             .as_deref()
             .map(normalize_verb)
-            .is_some_and(|verb| APP_OWNED_NORMALIZED_VERBS.contains(&verb.as_str()))
+            .is_some_and(|verb| is_open_with_variant(&verb) || APP_OWNED_NORMALIZED_VERBS.contains(&verb.as_str()))
+        || is_open_with_variant(&normalized_verb)
+        || APP_OWNED_NORMALIZED_VERBS.contains(&normalized_verb.as_str())
 }
 
 fn normalize_verb(value: &str) -> String {
@@ -127,6 +142,10 @@ fn dedupe_key(item: &ProviderNativeMenuItem) -> String {
             "submenu"
         }
     )
+}
+
+fn is_open_with_variant(value: &str) -> bool {
+    value.starts_with("openwith")
 }
 
 fn canonical_action_key(kind: &NativeMenuCanonicalActionKind) -> &'static str {

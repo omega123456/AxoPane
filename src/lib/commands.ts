@@ -1,6 +1,6 @@
 import { startOp } from '@/lib/queue-commands'
 import { log } from '@/lib/app-log-commands'
-import { openPath } from '@/lib/ipc/commands'
+import { clearFileClipboard, openPath, writeFileClipboard } from '@/lib/ipc/commands'
 import type { CommandId, DirectoryEntry } from '@/lib/types/ipc'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useClipboardStore } from '@/stores/clipboard-store'
@@ -132,9 +132,21 @@ export function executeCommand(
     case 'copy':
     case 'cut': {
       if (effectiveEntries.length > 0) {
+        const mode = commandId === 'copy' ? 'copy' : 'move'
         useClipboardStore
           .getState()
-          .setClipboard(commandId === 'copy' ? 'copy' : 'move', paneId, effectiveEntries)
+          .setClipboard(mode, paneId, effectiveEntries)
+        void writeFileClipboard({
+          mode,
+          paths: effectiveEntries.map((item) => item.path),
+        }).catch((error) => {
+          log.warn('write file clipboard failed', {
+            paneId,
+            mode,
+            paths: effectiveEntries.map((item) => item.path),
+            error,
+          })
+        })
       }
       break
     }
@@ -155,6 +167,12 @@ export function executeCommand(
       }).then(() => {
         if (clipboard.mode === 'move') {
           useClipboardStore.getState().clearClipboard()
+          void clearFileClipboard().catch((error) => {
+            log.warn('clear file clipboard failed', {
+              paneId,
+              error,
+            })
+          })
         }
       })
       break

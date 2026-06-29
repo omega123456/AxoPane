@@ -520,6 +520,9 @@ mod real {
             _ => {
                 let normalized_label = normalize_verb(label);
                 match normalized_label.as_str() {
+                    value if value.starts_with("openwith") => {
+                        Some(NativeMenuCanonicalActionKind::OpenWith)
+                    }
                     "delete" => Some(NativeMenuCanonicalActionKind::Delete),
                     "properties" => Some(NativeMenuCanonicalActionKind::Properties),
                     "copy" => Some(NativeMenuCanonicalActionKind::Copy),

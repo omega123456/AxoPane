@@ -81,4 +81,19 @@ describe('EntryIcon', () => {
     const svg = svgFor('main.ts')
     expect(svg).not.toHaveAttribute('fill', 'currentColor')
   })
+
+  it('renders a native icon image when the entry provides one', () => {
+    const { container } = render(
+      <EntryIcon
+        entry={{
+          name: 'installer.exe',
+          isDir: false,
+          iconDataUrl: 'data:image/png;base64,RkFLRQ==',
+        }}
+      />,
+    )
+    const image = container.querySelector('img')
+    expect(image).toHaveAttribute('src', 'data:image/png;base64,RkFLRQ==')
+    expect(container.querySelector('svg')).toBeNull()
+  })
 })
