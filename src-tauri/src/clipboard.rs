@@ -95,7 +95,7 @@ mod cross_platform_impl {
             .map_err(clipboard_error)
     }
 
-    fn clipboard_error(error: Box<dyn std::error::Error>) -> ClipboardError {
+    fn clipboard_error(error: Box<dyn std::error::Error + Send + Sync>) -> ClipboardError {
         ClipboardError::new(error.to_string())
     }
 }
