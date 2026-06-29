@@ -27,16 +27,22 @@ export function summarizeUpdate(update: AppUpdate): UpdateSummary {
   }
 }
 
-function canUseNativeUpdater() {
+function isTauriRuntime() {
   if (import.meta.env.VITE_PLAYWRIGHT) {
     return false
   }
 
-  return (
-    typeof window !== 'undefined' &&
-    '__TAURI_INTERNALS__' in window &&
-    navigator.userAgent.includes('Windows')
-  )
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+}
+
+function isWindowsRuntime() {
+  return typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows')
+}
+
+// The native updater works on every desktop target (Windows, macOS, Linux), so
+// availability hinges only on running inside the Tauri runtime — not on the OS.
+function canUseNativeUpdater() {
+  return isTauriRuntime()
 }
 
 /**
@@ -87,10 +93,13 @@ export async function downloadAndInstallAppUpdate(update?: AppUpdate | null): Pr
 
   // On Windows the NSIS passive installer (see `tauri.conf.json` →
   // plugins.updater.windows.installMode) restarts the app after applying the
-  // update, so no explicit relaunch is needed here.
-  //
-  // TODO(release): for an explicit cross-platform relaunch, add the
-  // `@tauri-apps/plugin-process` dependency + `tauri-plugin-process` crate +
-  // `process:default` capability, then call its `relaunch()` here.
+  // update. On macOS/Linux nothing restarts the process for us, so the freshly
+  // installed binary only takes effect on the next launch unless we relaunch
+  // explicitly here.
+  if (isTauriRuntime() && !isWindowsRuntime()) {
+    const { relaunch } = await import('@tauri-apps/plugin-process')
+    await relaunch()
+  }
+
   return true
 }

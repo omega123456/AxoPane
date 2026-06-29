@@ -7,18 +7,17 @@ pub fn open_with(path: &str) -> MenuActionStatus {
         return MenuActionStatus::unsupported("unsupported");
     }
 
-    // `choose application` returns an application *object* (e.g. application
-    // "TextEdit"), but Finder's `open ... using` expects a file/alias pointing
-    // at the `.app` bundle. Passing the object silently does nothing, so we ask
-    // for the chosen app `as alias` to get a real file reference and launch it
-    // with that.
+    // We ask for the chosen app `as alias` to get a real file reference to the
+    // `.app` bundle, then resolve its POSIX path and launch via the `open -a`
+    // CLI. Driving Finder's `open ... using (POSIX file ...)` instead fails with
+    // `-1728` ("Can't get POSIX file …"), particularly for paths with spaces, so
+    // we bypass Finder entirely and let `open` handle the file path.
     let script = r#"
 on run argv
   set targetPath to item 1 of argv
   set chosenApp to choose application as alias with prompt "Open With"
-  tell application "Finder"
-    open (POSIX file targetPath) using chosenApp
-  end tell
+  set appPath to POSIX path of chosenApp
+  do shell script "open -a " & quoted form of appPath & " " & quoted form of targetPath
 end run
 "#;
 

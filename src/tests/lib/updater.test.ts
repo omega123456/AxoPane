@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   checkForAppUpdate,
   downloadAndInstallAppUpdate,
@@ -6,6 +6,29 @@ import {
   summarizeUpdate,
   type AppUpdate,
 } from '@/lib/updater'
+
+const relaunch = vi.fn(() => Promise.resolve())
+vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: () => relaunch() }))
+
+async function withRuntime(userAgent: string, run: () => Promise<void>) {
+  const win = window as unknown as Record<string, unknown>
+  const internals = win.__TAURI_INTERNALS__
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true })
+  const userAgentSpy = vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(userAgent)
+  try {
+    await run()
+  } finally {
+    userAgentSpy.mockRestore()
+    if (internals === undefined) {
+      delete win.__TAURI_INTERNALS__
+    } else {
+      Object.defineProperty(window, '__TAURI_INTERNALS__', {
+        value: internals,
+        configurable: true,
+      })
+    }
+  }
+}
 
 function fakeUpdate(overrides: Partial<AppUpdate> = {}): AppUpdate {
   return {
@@ -19,6 +42,27 @@ function fakeUpdate(overrides: Partial<AppUpdate> = {}): AppUpdate {
 }
 
 describe('updater', () => {
+  afterEach(() => {
+    relaunch.mockClear()
+  })
+
+  it('relaunches after installing on a non-Windows Tauri runtime', async () => {
+    const update = fakeUpdate()
+    await withRuntime('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)', async () => {
+      expect(await downloadAndInstallAppUpdate(update)).toBe(true)
+    })
+    expect(update.downloadAndInstall).toHaveBeenCalledOnce()
+    expect(relaunch).toHaveBeenCalledOnce()
+  })
+
+  it('does not relaunch after installing on a Windows Tauri runtime', async () => {
+    const update = fakeUpdate()
+    await withRuntime('Mozilla/5.0 (Windows NT 10.0; Win64; x64)', async () => {
+      expect(await downloadAndInstallAppUpdate(update)).toBe(true)
+    })
+    expect(relaunch).not.toHaveBeenCalled()
+  })
+
   it('summarizes an update handle', () => {
     expect(summarizeUpdate(fakeUpdate())).toEqual({
       currentVersion: '0.1.0',
