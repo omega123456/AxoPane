@@ -67,7 +67,7 @@ export function BreadcrumbBar({ pane, isActive }: BreadcrumbBarProps) {
               setPathDraft(pane.path)
             }
           }}
-          className="min-w-0 flex-1 rounded-tab border border-accent-blue-border bg-light-panel px-2 py-1 font-mono text-row text-light-text outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:bg-dark-panel dark:text-dark-text"
+          className="min-w-0 flex-1 select-text rounded-tab border border-accent-blue-border bg-light-panel px-2 py-1 font-mono text-row text-light-text outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:bg-dark-panel dark:text-dark-text"
         />
       ) : (
         <nav
@@ -124,7 +124,7 @@ export function BreadcrumbBar({ pane, isActive }: BreadcrumbBarProps) {
             }
           }}
           placeholder="Filter current folder"
-          className="min-w-0 flex-1 bg-transparent text-row text-light-text outline-none placeholder:text-light-text-faint dark:text-dark-text dark:placeholder:text-dark-text-faint"
+          className="min-w-0 flex-1 select-text bg-transparent text-row text-light-text outline-none placeholder:text-light-text-faint dark:text-dark-text dark:placeholder:text-dark-text-faint"
         />
       </label>
     </div>

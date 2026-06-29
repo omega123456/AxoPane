@@ -99,7 +99,7 @@ function PromptDialog({
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={onKeyDown}
           aria-label={copy.label}
-          className="mt-2 h-9 w-full rounded-tab border border-accent-blue-border bg-light-window px-3 font-mono text-xs text-light-text outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:bg-dark-window dark:text-dark-text"
+          className="mt-2 h-9 w-full select-text rounded-tab border border-accent-blue-border bg-light-window px-3 font-mono text-xs text-light-text outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:bg-dark-window dark:text-dark-text"
         />
         {error ? (
           <p className="mt-2 flex items-center gap-2 text-uxs text-accent-amber">

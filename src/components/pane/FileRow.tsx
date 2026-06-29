@@ -105,7 +105,7 @@ export function FileRow({
                     onBlur={onRenameBlur}
                     onChange={(event) => onRenameChange?.(event.target.value)}
                     onKeyDown={onRenameKeyDown}
-                    className="min-w-0 flex-1 rounded-tab border border-accent-blue-border bg-light-window px-2 py-1 font-mono text-uxs text-light-text outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:bg-dark-window dark:text-dark-text"
+                    className="min-w-0 flex-1 select-text rounded-tab border border-accent-blue-border bg-light-window px-2 py-1 font-mono text-uxs text-light-text outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:bg-dark-window dark:text-dark-text"
                   />
                 </span>
               </span>

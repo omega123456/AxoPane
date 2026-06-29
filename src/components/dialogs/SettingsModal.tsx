@@ -396,7 +396,7 @@ function SettingsModalContent() {
                       aria-label="Search keybindings"
                       value={search}
                       onChange={(event) => setSearch(event.target.value)}
-                      className="w-full bg-transparent text-row text-light-text focus-visible:outline-none dark:text-dark-text"
+                      className="w-full select-text bg-transparent text-row text-light-text focus-visible:outline-none dark:text-dark-text"
                     />
                   </label>
                   <table className="w-full table-fixed">

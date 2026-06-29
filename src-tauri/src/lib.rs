@@ -67,10 +67,52 @@ fn log_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
         .build()
 }
 
+// Disables default browser behaviours (native right-click menu, text selection,
+// drag-and-drop of links/images, browser accelerator keys, reload/zoom, etc.) so
+// the webview behaves like a native desktop app rather than a web page. Our own
+// React `onContextMenu` handlers still fire — only the built-in webview menu is
+// suppressed.
+#[cfg(not(feature = "test-utils"))]
+fn prevent_default_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    use tauri_plugin_prevent_default::Flags;
+
+    // Keep DevTools shortcuts working in debug builds; block everything otherwise.
+    let flags = if cfg!(debug_assertions) {
+        Flags::all().difference(Flags::DEV_TOOLS)
+    } else {
+        Flags::all()
+    };
+
+    #[cfg(target_os = "windows")]
+    {
+        use tauri_plugin_prevent_default::PlatformOptions;
+
+        tauri_plugin_prevent_default::Builder::new()
+            .with_flags(flags)
+            .platform(
+                PlatformOptions::new()
+                    .general_autofill(false)
+                    .password_autosave(false)
+                    // WebView2 disables F12/Ctrl+Shift+I when false; keep enabled in
+                    // debug so DevTools stay reachable under `tauri dev`.
+                    .browser_accelerator_keys(cfg!(debug_assertions)),
+            )
+            .build()
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        tauri_plugin_prevent_default::Builder::new()
+            .with_flags(flags)
+            .build()
+    }
+}
+
 #[cfg(not(feature = "test-utils"))]
 pub fn run() {
     tauri::Builder::default()
         .plugin(log_plugin())
+        .plugin(prevent_default_plugin())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())

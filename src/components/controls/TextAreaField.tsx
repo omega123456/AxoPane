@@ -25,7 +25,7 @@ export function TextAreaField({
         rows={rows}
         spellCheck={false}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full resize-y rounded-tab border border-light-border-strong bg-light-surface p-3 font-mono text-uxs leading-relaxed text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border-strong dark:bg-dark-surface dark:text-dark-text-soft"
+        className="w-full resize-y select-text rounded-tab border border-light-border-strong bg-light-surface p-3 font-mono text-uxs leading-relaxed text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border-strong dark:bg-dark-surface dark:text-dark-text-soft"
       />
     </div>
   )

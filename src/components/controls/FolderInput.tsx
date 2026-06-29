@@ -20,7 +20,7 @@ export function FolderInput({
         value={value}
         readOnly={readOnly}
         onChange={onChange ? (event) => onChange(event.target.value) : undefined}
-        className="min-w-0 flex-1 bg-transparent font-mono text-row text-light-text focus-visible:outline-none dark:text-dark-text"
+        className="min-w-0 flex-1 select-text bg-transparent font-mono text-row text-light-text focus-visible:outline-none dark:text-dark-text"
       />
     </div>
   )

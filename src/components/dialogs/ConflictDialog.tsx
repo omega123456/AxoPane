@@ -126,7 +126,7 @@ export function ConflictDialog({ conflict, onResolve }: ConflictDialogProps) {
               value={renameValue}
               onChange={(event) => setRenameValue(event.target.value)}
               aria-label="New name"
-              className="mt-3 h-9 w-full rounded-tab border border-accent-blue-border bg-light-window px-3 font-mono text-xs text-light-text outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:bg-dark-window dark:text-dark-text"
+              className="mt-3 h-9 w-full select-text rounded-tab border border-accent-blue-border bg-light-window px-3 font-mono text-xs text-light-text outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:bg-dark-window dark:text-dark-text"
             />
           ) : null}
 

@@ -305,7 +305,15 @@ export function FilePane({ paneId }: FilePaneProps) {
         } else if (event.key === 'ArrowUp') {
           event.preventDefault()
           focusByRowIndex(focusedRowIndex - 1)
-        } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        } else if (
+          event.key.length === 1 &&
+          // Space is a bound command (Calculate size), not a typeahead-to-filter
+          // character — let it fall through to the command resolver below.
+          event.key !== ' ' &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey
+        ) {
           const target = document.querySelector<HTMLInputElement>(
             `input[aria-label="${pane.title} filter"]`,
           )
