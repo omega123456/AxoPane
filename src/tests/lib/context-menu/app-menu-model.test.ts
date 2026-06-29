@@ -96,6 +96,10 @@ describe('buildAppContextMenuContent', () => {
       'Open in other pane',
       'Open with',
     ])
+    const appRows = content.sections
+      .flatMap((section) => section.rows)
+      .filter((row) => row.owner === 'app')
+    expect(appRows.every((row) => row.icon?.kind === 'app')).toBe(true)
     expect(content.sections[0]?.rows[0]?.strong).toBe(true)
     expect(content.sections[1]?.rows.find((row) => row.label === 'Calculate size')?.disabled).toBe(
       false,

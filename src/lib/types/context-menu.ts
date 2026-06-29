@@ -17,12 +17,18 @@ export type ContextMenuNativeRequest = Omit<LoadNativeMenuRequest, 'requestId'> 
 
 export type ContextMenuAppIconName =
   | 'archive'
+  | 'calculate-size'
+  | 'close-tab'
   | 'copy'
   | 'cut'
   | 'delete'
+  | 'extract'
   | 'new-file'
   | 'new-folder'
   | 'open'
+  | 'open-in-new-tab'
+  | 'open-in-other-pane'
+  | 'open-with'
   | 'paste'
   | 'properties'
   | 'refresh'

@@ -17,6 +17,7 @@ import {
 import type {
   ContextMenuActionRow,
   ContextMenuContent,
+  ContextMenuIcon,
   ContextMenuRowItem,
   ContextMenuSection,
   ContextMenuStripItem,
@@ -34,6 +35,23 @@ import type { PaneId } from '@/types/pane'
 function shortcutFor(commandId: CommandId, os: PlatformOs) {
   const binding = useKeymapStore.getState().bindings[commandId][0]
   return binding ? formatShortcutLabel(binding, os) : undefined
+}
+
+const commandIcons: Partial<Record<CommandId, ContextMenuIcon>> = {
+  calculateSize: { kind: 'app', name: 'calculate-size' },
+  copy: { kind: 'app', name: 'copy' },
+  cut: { kind: 'app', name: 'cut' },
+  delete: { kind: 'app', name: 'delete' },
+  deletePermanent: { kind: 'app', name: 'delete' },
+  newFile: { kind: 'app', name: 'new-file' },
+  newFolder: { kind: 'app', name: 'new-folder' },
+  open: { kind: 'app', name: 'open' },
+  openInNewTab: { kind: 'app', name: 'open-in-new-tab' },
+  openInOtherPane: { kind: 'app', name: 'open-in-other-pane' },
+  paste: { kind: 'app', name: 'paste' },
+  refresh: { kind: 'app', name: 'refresh' },
+  rename: { kind: 'app', name: 'rename' },
+  selectAll: { kind: 'app', name: 'select-all' },
 }
 
 function stripCommand(
@@ -75,6 +93,7 @@ function commandRow(
     kind: 'action',
     label: commandLabels[commandId],
     owner: 'app',
+    icon: commandIcons[commandId],
     shortcut: shortcutFor(commandId, os),
     disabled: options?.disabled,
     danger: options?.danger,
@@ -94,6 +113,7 @@ function customRow(
     hidden?: boolean
     strong?: boolean
     shortcut?: string
+    icon?: ContextMenuIcon
   },
 ): ContextMenuActionRow {
   return {
@@ -106,6 +126,7 @@ function customRow(
     hidden: options?.hidden,
     strong: options?.strong,
     shortcut: options?.shortcut,
+    icon: options?.icon,
     action,
   }
 }
@@ -215,7 +236,7 @@ function buildFileOrFolderContent(
           `open-with-${target.entry.id}`,
           'Open with',
           openWithContextAction(target.entry.path),
-          { disabled: target.kind === 'folder' },
+          { disabled: target.kind === 'folder', icon: { kind: 'app', name: 'open-with' } },
         ),
       ]),
       section('secondary', [
@@ -224,12 +245,13 @@ function buildFileOrFolderContent(
           `compress-${target.entry.id}`,
           'Compress',
           compressContextAction([target.entry.path], usePanesStore.getState().panes[paneId].path),
+          { icon: { kind: 'app', name: 'archive' } },
         ),
         customRow(
           `extract-${target.entry.id}`,
           'Extract',
           extractContextAction([target.entry.path], usePanesStore.getState().panes[paneId].path),
-          { disabled: !canExtract },
+          { disabled: !canExtract, icon: { kind: 'app', name: 'extract' } },
         ),
         ...(target.kind === 'folder' ? [calculateSizeRow(target.entry, os)] : []),
         commandRow('deletePermanent', os, { targetEntryId, danger: true }),
@@ -240,6 +262,7 @@ function buildFileOrFolderContent(
           `properties-${target.entry.id}`,
           'Properties',
           propertiesContextAction([targetItem]),
+          { icon: { kind: 'app', name: 'properties' } },
         ),
       ]),
     ],
@@ -271,7 +294,7 @@ function buildMultiContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
             selectedEntries.map((entry) => entry.path),
             pane.path,
           ),
-          { disabled: selectedEntries.length === 0 },
+          { disabled: selectedEntries.length === 0, icon: { kind: 'app', name: 'archive' } },
         ),
         customRow(
           'extract-selection',
@@ -280,7 +303,7 @@ function buildMultiContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
             selectedEntries.map((entry) => entry.path),
             pane.path,
           ),
-          { disabled: !canExtract },
+          { disabled: !canExtract, icon: { kind: 'app', name: 'extract' } },
         ),
         commandRow('paste', os, { disabled: clipboard.entries.length === 0 }),
         commandRow('deletePermanent', os, {
@@ -297,7 +320,7 @@ function buildMultiContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
           'properties-selection',
           'Properties',
           propertiesContextAction(selectedEntries.map(toPropertiesDialogItem)),
-          { disabled: selectedEntries.length === 0 },
+          { disabled: selectedEntries.length === 0, icon: { kind: 'app', name: 'properties' } },
         ),
       ]),
     ],
@@ -327,6 +350,7 @@ function buildEmptyContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
           `properties-empty-${pane.path}`,
           'Properties',
           propertiesContextAction([createPathPropertiesDialogItem(pane.path)]),
+          { icon: { kind: 'app', name: 'properties' } },
         ),
       ]),
     ],
@@ -354,6 +378,7 @@ function buildTreeContent(
           {
             shortcut: shortcutFor('open', os),
             strong: true,
+            icon: { kind: 'app', name: 'open' },
           },
         ),
         customRow(
@@ -362,6 +387,7 @@ function buildTreeContent(
           openPathInNewTabContextAction(target.path),
           {
             shortcut: shortcutFor('openInNewTab', os),
+            icon: { kind: 'app', name: 'open-in-new-tab' },
           },
         ),
         customRow(
@@ -370,6 +396,7 @@ function buildTreeContent(
           navigateContextAction(target.path, 'other-pane'),
           {
             shortcut: shortcutFor('openInOtherPane', os),
+            icon: { kind: 'app', name: 'open-in-other-pane' },
           },
         ),
       ]),
@@ -382,6 +409,7 @@ function buildTreeContent(
             shortcut: shortcutFor('calculateSize', os),
             hidden: usePanesStore.getState().everythingStatus?.isAvailable ?? false,
             disabled: Boolean(networkNode),
+            icon: { kind: 'app', name: 'calculate-size' },
           },
         ),
         commandRow('refresh', os),
@@ -391,6 +419,7 @@ function buildTreeContent(
           `properties-tree-${target.path}`,
           'Properties',
           propertiesContextAction([createPathPropertiesDialogItem(target.path)]),
+          { icon: { kind: 'app', name: 'properties' } },
         ),
       ]),
     ],
@@ -414,6 +443,7 @@ function buildTabContent(
           `open-tab-other-${target.tabId}`,
           commandLabels.openInOtherPane,
           navigateContextAction(path, 'other-pane'),
+          { icon: { kind: 'app', name: 'open-in-other-pane' } },
         ),
       ]),
       section('footer', [
@@ -424,6 +454,7 @@ function buildTabContent(
           {
             disabled: tabs.tabs.length <= 1,
             danger: true,
+            icon: { kind: 'app', name: 'close-tab' },
           },
         ),
       ]),

@@ -40,6 +40,8 @@ import {
   Lock,
   MoonStar,
   Network,
+  Package,
+  PackageOpen,
   PanelLeft,
   Pause,
   Play,
@@ -107,6 +109,8 @@ export const LoaderCircleIcon = withDefaults(LoaderCircle)
 export const LockIcon = withDefaults(Lock)
 export const MoonStarIcon = withDefaults(MoonStar)
 export const NetworkIcon = withDefaults(Network)
+export const PackageIcon = withDefaults(Package)
+export const PackageOpenIcon = withDefaults(PackageOpen)
 export const PanelLeftIcon = withDefaults(PanelLeft)
 export const PauseIcon = withDefaults(Pause)
 export const PlayIcon = withDefaults(Play)
