@@ -14,6 +14,8 @@ import type {
   InvokeNativeMenuRequest,
   ListDirRequest,
   ListDirResponse,
+  ListTreeChildrenRequest,
+  ListTreeChildrenResponse,
   LoadNativeMenuRequest,
   LoadNativeMenuResponse,
   MenuActionStatus,
@@ -34,6 +36,13 @@ export function getInitialShell() {
 
 export function listDir(payload: ListDirRequest) {
   return invokeCommand({ command: 'list_dir', payload }) as Promise<ListDirResponse>
+}
+
+export function listTreeChildren(payload: ListTreeChildrenRequest) {
+  return invokeCommand({
+    command: 'list_tree_children',
+    payload,
+  }) as Promise<ListTreeChildrenResponse>
 }
 
 export function createFolder(payload: CreateEntryRequest) {
@@ -69,7 +78,10 @@ export function loadNativeMenu(payload: LoadNativeMenuRequest) {
 }
 
 export function invokeNativeMenuAction(payload: InvokeNativeMenuRequest) {
-  return invokeCommand({ command: 'invoke_native_menu_action', payload }) as Promise<MenuActionStatus>
+  return invokeCommand({
+    command: 'invoke_native_menu_action',
+    payload,
+  }) as Promise<MenuActionStatus>
 }
 
 export function showProperties(payload: ShowPropertiesRequest) {

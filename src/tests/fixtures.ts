@@ -72,6 +72,21 @@ export const fixtures: {
       },
     ],
   },
+  list_tree_children: {
+    path: 'C:\\Users\\Omega',
+    children: [
+      {
+        name: 'Documents',
+        path: 'C:\\Users\\Omega\\Documents',
+        hasChildren: true,
+      },
+      {
+        name: 'Media',
+        path: 'C:\\Users\\Omega\\Media',
+        hasChildren: false,
+      },
+    ],
+  },
   create_folder: {
     id: 'C:\\Users\\Omega\\New folder',
     name: 'New folder',

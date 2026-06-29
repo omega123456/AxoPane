@@ -1018,6 +1018,7 @@ dependencies = [
  "notify",
  "notify-debouncer-full",
  "png 0.17.16",
+ "rayon",
  "roxmltree",
  "serde",
  "serde_json",

@@ -11,9 +11,9 @@ use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::types::{
     AppConfig, CancelSizeResponse, ConflictResolution, CreateEntryRequest, DeleteEntriesRequest,
     FolderSizeRequest, FolderSizesRequest, InitialShellResponse, ListDirRequest, ListDirResponse,
-    OpIdRequest, OpSnapshot, OpenPathRequest, RefreshTabRequest, ReorderOpsRequest,
-    ResolveConflictRequest, SaveConfigRequest, SaveSessionRequest, SessionState,
-    SetTabWatchRequest, WatchDirPatch, WatchTarget,
+    ListTreeChildrenRequest, ListTreeChildrenResponse, OpIdRequest, OpSnapshot, OpenPathRequest,
+    RefreshTabRequest, ReorderOpsRequest, ResolveConflictRequest, SaveConfigRequest,
+    SaveSessionRequest, SessionState, SetTabWatchRequest, WatchDirPatch, WatchTarget,
 };
 use file_explorer_lib::ops::{OpItem, OpKind, OpStatus, OpsService, StartOpRequest};
 use file_explorer_lib::persist::{Config, PersistenceState, Session};
@@ -22,12 +22,12 @@ use file_explorer_lib::watch::WatchService;
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
-use tauri::{ipc::InvokeBody, Manager, Runtime, WebviewWindow};
+use tauri::{ipc::InvokeBody, Runtime, WebviewWindow};
 use tempfile::tempdir;
 
 struct TestApp<R: Runtime> {
     _config_dir: tempfile::TempDir,
-    app: tauri::App<R>,
+    _app: tauri::App<R>,
     webview: WebviewWindow<R>,
 }
 
@@ -44,6 +44,7 @@ impl TestApp<tauri::test::MockRuntime> {
             .invoke_handler(tauri::generate_handler![
                 commands::get_initial_shell,
                 commands::list_dir,
+                commands::list_tree_children,
                 commands::create_folder,
                 commands::create_file,
                 commands::rename_entry,
@@ -79,7 +80,7 @@ impl TestApp<tauri::test::MockRuntime> {
 
         Self {
             _config_dir: config_dir,
-            app,
+            _app: app,
             webview,
         }
     }
@@ -265,6 +266,18 @@ fn ipc_commands_cover_shell_filesystem_and_persistence_flows() {
         )
         .expect("list dir");
     assert_eq!(listing.entries.len(), 2);
+
+    let tree_children: ListTreeChildrenResponse = test_app
+        .invoke_payload(
+            "list_tree_children",
+            ListTreeChildrenRequest {
+                path: root.to_string_lossy().into_owned(),
+                show_hidden: true,
+            },
+        )
+        .expect("list tree children");
+    assert_eq!(tree_children.children.len(), 1);
+    assert_eq!(tree_children.children[0].name, "Docs");
 
     let renamed = test_app
         .invoke_payload::<Value, _>(

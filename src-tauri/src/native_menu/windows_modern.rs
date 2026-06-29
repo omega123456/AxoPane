@@ -226,7 +226,15 @@ fn build_item_for_command(
         .unwrap_or(false);
 
     let children = if has_subcommands && depth < MAX_SUBMENU_DEPTH {
-        enumerate_subcommands(command, array, clsid, packaged, request, &command_path, depth)
+        enumerate_subcommands(
+            command,
+            array,
+            clsid,
+            packaged,
+            request,
+            &command_path,
+            depth,
+        )
     } else {
         Vec::new()
     };
@@ -287,9 +295,9 @@ fn enumerate_subcommands(
 
         let mut path = parent_path.to_vec();
         path.push(index);
-        if let Some(item) = build_item_for_command(
-            &child, array, clsid, packaged, request, path, depth + 1,
-        ) {
+        if let Some(item) =
+            build_item_for_command(&child, array, clsid, packaged, request, path, depth + 1)
+        {
             items.push(item);
             index += 1;
         }
@@ -311,7 +319,11 @@ struct ShellItemArray(IShellItemArray, #[allow(dead_code)] Vec<OwnedPidl>);
 
 fn build_item_array(request: &LoadNativeMenuRequest) -> Option<ShellItemArray> {
     let paths = if matches!(request.target_kind, NativeMenuTargetKind::Background) {
-        match request.folder_path.as_deref().or(request.target_path.as_deref()) {
+        match request
+            .folder_path
+            .as_deref()
+            .or(request.target_path.as_deref())
+        {
             Some(folder) => vec![folder.to_string()],
             None => return None,
         }
@@ -371,7 +383,9 @@ fn discover_handlers() -> Vec<HandlerRegistration> {
 fn merge_handler(map: &mut HashMap<u128, HandlerRegistration>, handler: HandlerRegistration) {
     map.entry(handler.clsid)
         .and_modify(|existing| {
-            existing.item_types.extend(handler.item_types.iter().cloned());
+            existing
+                .item_types
+                .extend(handler.item_types.iter().cloned());
             existing.packaged = existing.packaged || handler.packaged;
         })
         .or_insert(handler);
@@ -561,7 +575,10 @@ fn per_query_extension_handlers(request: &LoadNativeMenuRequest) -> Vec<HandlerR
 
     let mut extensions: HashSet<String> = HashSet::new();
     for path in selected_paths(request) {
-        if let Some(extension) = Path::new(&path).extension().and_then(|value| value.to_str()) {
+        if let Some(extension) = Path::new(&path)
+            .extension()
+            .and_then(|value| value.to_str())
+        {
             extensions.insert(format!(".{}", extension.to_lowercase()));
         }
     }
@@ -623,7 +640,13 @@ impl RegKey {
         let wide = path_to_wide(sub);
         let mut handle = HKEY(null_mut());
         let result = unsafe {
-            RegOpenKeyExW(self.0, PCWSTR(wide.as_ptr()), Some(0), KEY_READ, &mut handle)
+            RegOpenKeyExW(
+                self.0,
+                PCWSTR(wide.as_ptr()),
+                Some(0),
+                KEY_READ,
+                &mut handle,
+            )
         };
         if result == ERROR_SUCCESS {
             Some(Self(handle))

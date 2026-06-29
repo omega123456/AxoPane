@@ -138,6 +138,56 @@ fn watcher_coalesces_changes_and_emits_patch() {
 }
 
 #[test]
+fn watcher_emits_targeted_removal_patch() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    fs::write(root.join("gone.txt"), "gone").expect("seed");
+
+    let patches = Arc::new(Mutex::new(Vec::<DirPatch>::new()));
+    let service = WatchService::default();
+    let patches_for_callback = patches.clone();
+    service
+        .set_tab_watch(
+            Some(WatchTarget {
+                tab_id: String::from("left-1"),
+                path: root.to_string_lossy().into_owned(),
+                sort_key: SortKey::Name,
+                sort_direction: SortDirection::Asc,
+                filter: String::new(),
+                show_hidden: true,
+            }),
+            Arc::new(move |patch| {
+                patches_for_callback
+                    .lock()
+                    .expect("patches lock")
+                    .push(patch);
+            }),
+            Arc::new(|_, _| {}),
+        )
+        .expect("set watch");
+
+    fs::remove_file(root.join("gone.txt")).expect("remove");
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        if patches
+            .lock()
+            .expect("patches lock")
+            .iter()
+            .any(|patch| patch.removed.iter().any(|path| path.ends_with("gone.txt")))
+        {
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+
+    let recorded = patches.lock().expect("patches lock").clone();
+    assert!(recorded
+        .iter()
+        .any(|patch| { patch.removed.iter().any(|path| path.ends_with("gone.txt")) }));
+}
+
+#[test]
 fn replacing_a_pane_watch_discards_the_previous_tab_watch() {
     let fixture = tempdir().expect("temp dir");
     let left_a = fixture.path().join("left-a");

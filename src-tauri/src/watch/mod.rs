@@ -3,8 +3,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use notify::event::{EventKind, ModifyKind, RenameMode};
 use notify::RecursiveMode;
-use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, FileIdMap};
+use notify_debouncer_full::{
+    new_debouncer, DebounceEventResult, DebouncedEvent, Debouncer, FileIdMap,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::fs::{self, DirectoryEntry, ListDirOptions, SortDirection, SortKey};
@@ -184,18 +187,29 @@ pub fn create_runtime(
                         continue;
                     }
 
-                    match snapshot_for_target(&watched.target) {
-                        Ok(next_snapshot) => {
-                            let patch = diff_entries(
-                                &watched.target.tab_id,
-                                &watched.target.path,
-                                "watch",
-                                &watched.snapshot,
-                                &next_snapshot,
-                            );
-                            watched.snapshot = next_snapshot;
+                    match patch_for_events(&watched.target, &watched.snapshot, &events) {
+                        Ok(PatchResult::Targeted { patch, snapshot }) => {
+                            watched.snapshot = snapshot;
                             if !patch.changed.is_empty() || !patch.removed.is_empty() {
                                 patch_emitter(patch);
+                            }
+                        }
+                        Ok(PatchResult::NeedsResnapshot) => {
+                            match snapshot_for_target(&watched.target) {
+                                Ok(next_snapshot) => {
+                                    let patch = diff_entries(
+                                        &watched.target.tab_id,
+                                        &watched.target.path,
+                                        "watch",
+                                        &watched.snapshot,
+                                        &next_snapshot,
+                                    );
+                                    watched.snapshot = next_snapshot;
+                                    if !patch.changed.is_empty() || !patch.removed.is_empty() {
+                                        patch_emitter(patch);
+                                    }
+                                }
+                                Err(error) => error_emitter(watched.target.path.clone(), error),
                             }
                         }
                         Err(error) => error_emitter(watched.target.path.clone(), error),
@@ -235,6 +249,150 @@ fn matches_watched_parent(changed_paths: &HashSet<PathBuf>, watched_path: &str) 
         }
     }
     false
+}
+
+enum PatchResult {
+    Targeted {
+        patch: DirPatch,
+        snapshot: HashMap<String, DirectoryEntry>,
+    },
+    NeedsResnapshot,
+}
+
+fn patch_for_events(
+    target: &WatchTarget,
+    previous: &HashMap<String, DirectoryEntry>,
+    events: &[DebouncedEvent],
+) -> Result<PatchResult, String> {
+    let watched_parent = Path::new(&target.path);
+    let mut next = previous.clone();
+    let mut changed = Vec::new();
+    let mut removed = Vec::new();
+
+    for event in events {
+        if event.need_rescan() {
+            return Ok(PatchResult::NeedsResnapshot);
+        }
+
+        match event.kind {
+            EventKind::Access(_) => {}
+            EventKind::Any | EventKind::Other => return Ok(PatchResult::NeedsResnapshot),
+            EventKind::Create(_) => {
+                for path in event
+                    .paths
+                    .iter()
+                    .filter(|path| is_direct_child(path, watched_parent))
+                {
+                    patch_changed_path(target, &mut next, &mut changed, &mut removed, path)?;
+                }
+            }
+            EventKind::Remove(_) => {
+                for path in event
+                    .paths
+                    .iter()
+                    .filter(|path| is_direct_child(path, watched_parent))
+                {
+                    remove_path(&mut next, &mut removed, path);
+                }
+            }
+            EventKind::Modify(ModifyKind::Data(_) | ModifyKind::Metadata(_)) => {
+                for path in event
+                    .paths
+                    .iter()
+                    .filter(|path| is_direct_child(path, watched_parent))
+                {
+                    patch_changed_path(target, &mut next, &mut changed, &mut removed, path)?;
+                }
+            }
+            EventKind::Modify(ModifyKind::Name(RenameMode::Both)) => {
+                if event.paths.len() < 2 {
+                    return Ok(PatchResult::NeedsResnapshot);
+                }
+                let from = &event.paths[0];
+                let to = &event.paths[1];
+                if is_direct_child(from, watched_parent) {
+                    remove_path(&mut next, &mut removed, from);
+                }
+                if is_direct_child(to, watched_parent) {
+                    patch_changed_path(target, &mut next, &mut changed, &mut removed, to)?;
+                }
+            }
+            EventKind::Modify(ModifyKind::Name(_)) | EventKind::Modify(ModifyKind::Any) => {
+                return Ok(PatchResult::NeedsResnapshot);
+            }
+            EventKind::Modify(ModifyKind::Other) => return Ok(PatchResult::NeedsResnapshot),
+        }
+    }
+
+    Ok(PatchResult::Targeted {
+        patch: DirPatch {
+            tab_id: target.tab_id.clone(),
+            path: target.path.clone(),
+            reason: "watch".to_string(),
+            changed,
+            removed,
+        },
+        snapshot: next,
+    })
+}
+
+fn is_direct_child(path: &Path, watched_parent: &Path) -> bool {
+    path.parent() == Some(watched_parent)
+}
+
+fn remove_path(next: &mut HashMap<String, DirectoryEntry>, removed: &mut Vec<String>, path: &Path) {
+    let display_path = fs::display_path_from_path(path);
+    next.remove(&display_path);
+    if !removed.contains(&display_path) {
+        removed.push(display_path);
+    }
+}
+
+fn patch_changed_path(
+    target: &WatchTarget,
+    next: &mut HashMap<String, DirectoryEntry>,
+    changed: &mut Vec<DirEntryPatch>,
+    removed: &mut Vec<String>,
+    path: &Path,
+) -> Result<(), String> {
+    let display_path = fs::display_path_from_path(path);
+
+    if !path.exists() {
+        next.remove(&display_path);
+        if !removed.contains(&display_path) {
+            removed.push(display_path);
+        }
+        return Ok(());
+    }
+
+    let entry = fs::directory_entry_from_path(path).map_err(|error| error.to_string())?;
+    if !matches_target_filter(&entry, target) {
+        next.remove(&display_path);
+        if !removed.contains(&display_path) {
+            removed.push(display_path);
+        }
+        return Ok(());
+    }
+
+    next.insert(entry.path.clone(), entry.clone());
+    changed.push(DirEntryPatch {
+        path: entry.path.clone(),
+        entry: Some(entry),
+    });
+    removed.retain(|removed_path| removed_path != &display_path);
+    Ok(())
+}
+
+fn matches_target_filter(entry: &DirectoryEntry, target: &WatchTarget) -> bool {
+    if !target.show_hidden && (entry.is_hidden || entry.is_system) {
+        return false;
+    }
+
+    target.filter.is_empty()
+        || entry
+            .name
+            .to_lowercase()
+            .contains(&target.filter.to_lowercase())
 }
 
 fn first_error_path(error: &notify::Error) -> String {

@@ -16,13 +16,14 @@ use std::time::{Duration, Instant};
 use super::mock;
 use super::types::{
     AppConfig, CancelSizeRequest, CancelSizeResponse, CompressArchiveRequest, CreateEntryRequest,
-    DeleteEntriesRequest, ExtractArchiveRequest, FolderSizeRequest, FolderSizesRequest,
-    FileClipboardMode, InitialShellResponse, InvokeNativeMenuRequest, ListDirRequest,
-    ListDirResponse, LoadNativeMenuRequest, LoadNativeMenuResponse, LogFrontendRequest,
-    MenuActionStatus, OpIdRequest, OpenPathRequest, OpenWithRequest, RefreshTabRequest,
-    RenameEntryRequest, ReorderOpsRequest, ResolveConflictRequest, SaveConfigRequest,
-    SaveSessionRequest, SessionState, SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent,
-    StartOpRequest, VolumeInfo, WriteFileClipboardRequest,
+    DeleteEntriesRequest, ExtractArchiveRequest, FileClipboardMode, FolderSizeRequest,
+    FolderSizesRequest, InitialShellResponse, InvokeNativeMenuRequest, ListDirRequest,
+    ListDirResponse, ListTreeChildrenRequest, ListTreeChildrenResponse, LoadNativeMenuRequest,
+    LoadNativeMenuResponse, LogFrontendRequest, MenuActionStatus, OpIdRequest, OpenPathRequest,
+    OpenWithRequest, RefreshTabRequest, RenameEntryRequest, ReorderOpsRequest,
+    ResolveConflictRequest, SaveConfigRequest, SaveSessionRequest, SessionState,
+    SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent, StartOpRequest, VolumeInfo,
+    WriteFileClipboardRequest,
 };
 use crate::fs::DirectoryEntry;
 use std::path::Path;
@@ -45,6 +46,20 @@ pub fn get_initial_shell() -> InitialShellResponse {
 pub fn list_dir(payload: ListDirRequest) -> Result<ListDirResponse, String> {
     fs::list_dir(&payload).map_err(|error| {
         let message = format!("Failed to load \"{}\": {error}", payload.path);
+        log::error!("{message}");
+        message
+    })
+}
+
+#[tauri::command]
+pub fn list_tree_children(
+    payload: ListTreeChildrenRequest,
+) -> Result<ListTreeChildrenResponse, String> {
+    fs::list_tree_children(&payload).map_err(|error| {
+        let message = format!(
+            "Failed to load tree children for \"{}\": {error}",
+            payload.path
+        );
         log::error!("{message}");
         message
     })
@@ -97,10 +112,13 @@ pub fn open_path(payload: OpenPathRequest) -> Result<(), String> {
 
 #[tauri::command]
 pub fn write_file_clipboard(payload: WriteFileClipboardRequest) -> Result<(), String> {
-    crate::clipboard::write_paths(match payload.mode {
-        FileClipboardMode::Copy => crate::clipboard::ClipboardMode::Copy,
-        FileClipboardMode::Move => crate::clipboard::ClipboardMode::Move,
-    }, &payload.paths)
+    crate::clipboard::write_paths(
+        match payload.mode {
+            FileClipboardMode::Copy => crate::clipboard::ClipboardMode::Copy,
+            FileClipboardMode::Move => crate::clipboard::ClipboardMode::Move,
+        },
+        &payload.paths,
+    )
     .map_err(|error| {
         let message = format!("Failed to update OS clipboard: {error}");
         log::warn!("{message}");

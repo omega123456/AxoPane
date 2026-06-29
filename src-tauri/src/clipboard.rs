@@ -75,10 +75,7 @@ mod cross_platform_impl {
     use super::{ClipboardError, ClipboardMode};
     use clipboard_rs::{Clipboard, ClipboardContext};
 
-    pub(super) fn write_paths(
-        mode: ClipboardMode,
-        paths: &[String],
-    ) -> Result<(), ClipboardError> {
+    pub(super) fn write_paths(mode: ClipboardMode, paths: &[String]) -> Result<(), ClipboardError> {
         let _ = mode;
 
         // macOS/Linux file clipboards are represented as file lists. The app's
@@ -121,10 +118,7 @@ mod windows_impl {
     const DROPEFFECT_COPY: u32 = 1;
     const DROPEFFECT_MOVE: u32 = 2;
 
-    pub(super) fn write_paths(
-        mode: ClipboardMode,
-        paths: &[String],
-    ) -> Result<(), ClipboardError> {
+    pub(super) fn write_paths(mode: ClipboardMode, paths: &[String]) -> Result<(), ClipboardError> {
         let clipboard = ClipboardSession::open()?;
         clipboard.empty()?;
 

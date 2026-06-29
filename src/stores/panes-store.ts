@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import {
+  listTreeChildren,
   listDir,
   refreshTab,
   requestFolderSize,
@@ -436,6 +437,7 @@ function patchEntries(
   pane: PaneState,
   event: DirPatchEvent,
   sizeStates: Record<string, EntrySizeState>,
+  showHiddenFiles: boolean,
 ): DirectoryEntry[] | null {
   if (pane.path !== event.path) {
     return null
@@ -448,7 +450,7 @@ function patchEntries(
   }
 
   for (const change of event.changed) {
-    if (change.entry) {
+    if (change.entry && entryMatchesPane(change.entry, pane, showHiddenFiles)) {
       byId.set(change.entry.path, change.entry)
     } else {
       byId.delete(change.path)
@@ -456,6 +458,16 @@ function patchEntries(
   }
 
   return sortEntries([...byId.values()], pane.sortKey, pane.sortDirection, sizeStates)
+}
+
+function entryMatchesPane(entry: DirectoryEntry, pane: PaneState, showHiddenFiles: boolean) {
+  if (!showHiddenFiles && (entry.isHidden || entry.isSystem)) {
+    return false
+  }
+
+  return (
+    pane.filterApplied === '' || entry.name.toLowerCase().includes(pane.filterApplied.toLowerCase())
+  )
 }
 
 export const usePanesStore = create<PanesStore>((set, get) => ({
@@ -880,7 +892,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         return state
       }
 
-      const nextEntries = patchEntries(pane, event, state.sizeStates)
+      const nextEntries = patchEntries(pane, event, state.sizeStates, state.showHiddenFiles)
       if (!nextEntries) {
         log.debug('applyDirPatch skipped (path mismatch)', {
           paneId,
@@ -1114,15 +1126,12 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     }
 
     try {
-      const response = await listDir({
+      const response = await listTreeChildren({
         path,
-        sortKey: 'name',
-        sortDirection: 'asc',
-        filter: '',
         showHidden: get().showHiddenFiles,
       })
 
-      const directoryChildren = response.entries.filter((entry) => entry.isDir)
+      const directoryChildren = response.children
       set((state) => ({
         treeNodes: {
           ...state.treeNodes,

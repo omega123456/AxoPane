@@ -700,30 +700,7 @@ fn run_operation(
         }
     }
 
-    // Directory items arrive with size 0 from the frontend; measure their real
-    // byte totals on the worker thread so progress tracks bytes copied rather
-    // than whole items (a single folder otherwise jumps straight from 0% to
-    // 100%). Files keep their frontend-provided size.
-    let cancel = op_arc.lock().expect("op lock").cancel.clone();
-    let mut items = op_arc.lock().expect("op lock").items.clone();
-    let mut total_bytes: u64 = 0;
-    for item in &mut items {
-        if item.size_bytes == 0 {
-            let path = Path::new(&item.source_path);
-            if path.is_dir() {
-                item.size_bytes = measure_tree_size(path, &cancel);
-            }
-        }
-        total_bytes = total_bytes.saturating_add(item.size_bytes);
-    }
-    {
-        let mut op = op_arc.lock().expect("op lock");
-        op.items = items.clone();
-        op.total_bytes = total_bytes;
-        if let Some(emitter) = &progress {
-            emitter(op.progress());
-        }
-    }
+    let items = op_arc.lock().expect("op lock").items.clone();
 
     let start = instant_now();
 
@@ -810,6 +787,7 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
         let resolution = resolve_or_park(ctx, item, &target, conflict);
         match resolution {
             Some((ConflictResolution::Skip, _)) => {
+                count_skipped_bytes(ctx, item.size_bytes);
                 advance_item(ctx, item);
                 return;
             }
@@ -839,20 +817,11 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
         return;
     }
 
-    {
-        let mut op = op_arc.lock().expect("op lock");
-        op.current_file_name = Some(item.name.clone());
-        op.current_file_copied = 0;
-        op.current_file_total = item.size_bytes;
-        if let Some(emitter) = ctx.progress {
-            emitter(op.progress());
-        }
-    }
-
+    let add_discovered_totals = item.size_bytes == 0 && source.is_dir();
     let result = if matches!(kind, OpKind::Move) {
-        move_path(&source, &target, ctx)
+        move_path_with_total_discovery(&source, &target, add_discovered_totals, ctx)
     } else {
-        copy_path(&source, &target, ctx)
+        copy_path_with_total_discovery(&source, &target, add_discovered_totals, ctx)
     };
 
     match result {
@@ -929,10 +898,9 @@ fn wait_while_paused(op_arc: &Arc<Mutex<OpState>>, resolver: &Arc<Condvar>) {
     }
 }
 
-fn advance_item(ctx: &WorkerCtx<'_>, item: &OpItem) {
+fn advance_item(ctx: &WorkerCtx<'_>, _item: &OpItem) {
     let mut op = ctx.op_arc.lock().expect("op lock");
     op.completed_items += 1;
-    op.copied_bytes = op.copied_bytes.saturating_add(item.size_bytes);
     op.current_file_name = None;
     op.current_file_copied = 0;
     op.current_file_total = 0;
@@ -943,9 +911,57 @@ fn advance_item(ctx: &WorkerCtx<'_>, item: &OpItem) {
     }
 }
 
+fn count_skipped_bytes(ctx: &WorkerCtx<'_>, skipped_bytes: u64) {
+    if skipped_bytes == 0 {
+        return;
+    }
+    let mut op = ctx.op_arc.lock().expect("op lock");
+    op.copied_bytes = op.copied_bytes.saturating_add(skipped_bytes);
+    if let Some(emitter) = ctx.progress {
+        emitter(op.progress());
+    }
+}
+
 fn report_chunk_progress(ctx: &WorkerCtx<'_>, copied_delta: u64) {
     let mut op = ctx.op_arc.lock().expect("op lock");
     op.current_file_copied = op.current_file_copied.saturating_add(copied_delta);
+    refresh_rate_locked_with_now(&mut op, ctx.start, ctx.rate_window, (ctx.instant_now)());
+    if let Some(emitter) = ctx.progress {
+        emitter(op.progress());
+    }
+}
+
+fn add_discovered_total(ctx: &WorkerCtx<'_>, discovered_bytes: u64) {
+    if discovered_bytes == 0 {
+        return;
+    }
+    let mut op = ctx.op_arc.lock().expect("op lock");
+    op.total_bytes = op.total_bytes.saturating_add(discovered_bytes);
+    if let Some(emitter) = ctx.progress {
+        emitter(op.progress());
+    }
+}
+
+fn begin_file_progress(ctx: &WorkerCtx<'_>, source: &Path, total_bytes: u64) {
+    let mut op = ctx.op_arc.lock().expect("op lock");
+    op.current_file_name = source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(ToOwned::to_owned)
+        .or_else(|| Some(source.to_string_lossy().into_owned()));
+    op.current_file_copied = 0;
+    op.current_file_total = total_bytes;
+    if let Some(emitter) = ctx.progress {
+        emitter(op.progress());
+    }
+}
+
+fn finish_file_progress(ctx: &WorkerCtx<'_>) {
+    let mut op = ctx.op_arc.lock().expect("op lock");
+    op.copied_bytes = op.copied_bytes.saturating_add(op.current_file_copied);
+    op.current_file_name = None;
+    op.current_file_copied = 0;
+    op.current_file_total = 0;
     refresh_rate_locked_with_now(&mut op, ctx.start, ctx.rate_window, (ctx.instant_now)());
     if let Some(emitter) = ctx.progress {
         emitter(op.progress());
@@ -1157,12 +1173,28 @@ pub fn measure_tree_size(path: &Path, cancel: &Arc<AtomicBool>) -> u64 {
 }
 
 pub fn copy_path(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(), String> {
+    copy_path_with_total_discovery(source, target, false, ctx)
+}
+
+fn copy_path_with_total_discovery(
+    source: &Path,
+    target: &Path,
+    add_discovered_totals: bool,
+    ctx: &WorkerCtx<'_>,
+) -> Result<(), String> {
     if source.is_dir() {
         let root = source.canonicalize().map_err(|error| error.to_string())?;
         let mut visited = HashSet::from([root.clone()]);
-        copy_dir_recursive(source, target, &root, &mut visited, ctx)
+        copy_dir_recursive(
+            source,
+            target,
+            &root,
+            &mut visited,
+            add_discovered_totals,
+            ctx,
+        )
     } else {
-        copy_file_with_progress(source, target, ctx)
+        copy_file_with_total_discovery(source, target, add_discovered_totals, ctx)
     }
 }
 
@@ -1171,6 +1203,7 @@ pub fn copy_dir_recursive(
     target: &Path,
     root: &Path,
     visited: &mut HashSet<PathBuf>,
+    add_discovered_totals: bool,
     ctx: &WorkerCtx<'_>,
 ) -> Result<(), String> {
     fs::create_dir_all(target).map_err(|error| error.to_string())?;
@@ -1204,16 +1237,37 @@ pub fn copy_dir_recursive(
                     entry.path().display()
                 ));
             }
-            copy_dir_recursive(&entry.path(), &child_target, root, visited, ctx)?;
+            copy_dir_recursive(
+                &entry.path(),
+                &child_target,
+                root,
+                visited,
+                add_discovered_totals,
+                ctx,
+            )?;
             visited.remove(&canonical_child);
         } else {
-            copy_file_with_progress(&entry.path(), &child_target, ctx)?;
+            copy_file_with_total_discovery(
+                &entry.path(),
+                &child_target,
+                add_discovered_totals,
+                ctx,
+            )?;
         }
     }
     Ok(())
 }
 
 pub fn move_path(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(), String> {
+    move_path_with_total_discovery(source, target, false, ctx)
+}
+
+fn move_path_with_total_discovery(
+    source: &Path,
+    target: &Path,
+    add_discovered_totals: bool,
+    ctx: &WorkerCtx<'_>,
+) -> Result<(), String> {
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
@@ -1221,7 +1275,7 @@ pub fn move_path(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<()
         Ok(()) => Ok(()),
         Err(_) => {
             // Cross-volume move: copy then delete the source.
-            copy_path(source, target, ctx)?;
+            copy_path_with_total_discovery(source, target, add_discovered_totals, ctx)?;
             if ctx
                 .op_arc
                 .lock()
@@ -1241,9 +1295,26 @@ pub fn copy_file_with_progress(
     target: &Path,
     ctx: &WorkerCtx<'_>,
 ) -> Result<(), String> {
+    copy_file_with_total_discovery(source, target, false, ctx)
+}
+
+fn copy_file_with_total_discovery(
+    source: &Path,
+    target: &Path,
+    add_discovered_total_bytes: bool,
+    ctx: &WorkerCtx<'_>,
+) -> Result<(), String> {
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
+
+    let file_size = fs::metadata(source)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    if add_discovered_total_bytes {
+        add_discovered_total(ctx, file_size);
+    }
+    begin_file_progress(ctx, source, file_size);
 
     let mut reader = fs::File::open(source).map_err(|error| error.to_string())?;
     let mut writer = fs::File::create(target).map_err(|error| error.to_string())?;
@@ -1258,6 +1329,7 @@ pub fn copy_file_with_progress(
             .cancel
             .load(Ordering::Relaxed)
         {
+            finish_file_progress(ctx);
             return Ok(());
         }
 
@@ -1274,7 +1346,9 @@ pub fn copy_file_with_progress(
         report_chunk_progress(ctx, read as u64);
     }
 
-    writer.flush().map_err(|error| error.to_string())
+    writer.flush().map_err(|error| error.to_string())?;
+    finish_file_progress(ctx);
+    Ok(())
 }
 
 pub fn remove_target(target: &Path) -> Result<(), String> {

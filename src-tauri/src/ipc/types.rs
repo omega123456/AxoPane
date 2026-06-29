@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-pub use crate::fs::{DirectoryEntry, ListDirOptions, ListDirResponse};
+pub use crate::fs::{
+    DirectoryEntry, ListDirOptions, ListDirResponse, ListTreeChildrenOptions,
+    ListTreeChildrenResponse, TreeChildEntry,
+};
 pub use crate::native_menu::types::{
     InvokeNativeMenuRequest, LoadNativeMenuRequest, LoadNativeMenuResponse,
     NativeMenuCanonicalActionKind, NativeMenuIcon, NativeMenuIconKind, NativeMenuItem,
@@ -53,6 +56,7 @@ pub struct LogFrontendRequest {
 }
 
 pub type ListDirRequest = ListDirOptions;
+pub type ListTreeChildrenRequest = ListTreeChildrenOptions;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -22,7 +22,7 @@ use windows::Win32::Graphics::Gdi::{
     BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC,
 };
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
-use windows::Win32::UI::Shell::{SHDefExtractIconW, ILFree, SHParseDisplayName};
+use windows::Win32::UI::Shell::{ILFree, SHDefExtractIconW, SHParseDisplayName};
 use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON, ICONINFO};
 
 /// Encodes a wide, NUL-terminated UTF-16 buffer suitable for `PCWSTR` use.

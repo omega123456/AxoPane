@@ -40,9 +40,7 @@ mod windows_impl {
         CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, GetObjectW, BITMAP, BITMAPINFO,
         BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP,
     };
-    use windows::Win32::UI::Shell::{
-        SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON,
-    };
+    use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON};
     use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON};
 
     pub(super) fn icon_data_url_for_path(path: &Path) -> Option<String> {

@@ -39,7 +39,10 @@ fn parses_guids_in_every_common_form() {
         parse_guid_u128("B41DB860-64E4-11D2-9906-E49FADC173CA"),
         expected
     );
-    assert_eq!(parse_guid_u128("b41db86064e411d29906e49fadc173ca"), expected);
+    assert_eq!(
+        parse_guid_u128("b41db86064e411d29906e49fadc173ca"),
+        expected
+    );
 }
 
 #[test]
@@ -122,7 +125,10 @@ fn selected_paths_prefers_selection_then_falls_back_to_target() {
     assert_eq!(selected_paths(&with_selection).len(), 2);
 
     let target_only = request(NativeMenuTargetKind::File, Some("C:\\only.txt"), &[]);
-    assert_eq!(selected_paths(&target_only), vec!["C:\\only.txt".to_string()]);
+    assert_eq!(
+        selected_paths(&target_only),
+        vec!["C:\\only.txt".to_string()]
+    );
 
     let empty = request(NativeMenuTargetKind::File, None, &[]);
     assert!(selected_paths(&empty).is_empty());
@@ -155,7 +161,10 @@ fn selection_type_tokens_maps_each_selected_path() {
 fn handler_matches_requires_every_selected_item_to_be_covered() {
     let item_types = HashSet::from(["*".to_string(), "directory".to_string()]);
 
-    let files_only = vec![HashSet::from(["*".to_string(), "allfilesystemobjects".to_string()])];
+    let files_only = vec![HashSet::from([
+        "*".to_string(),
+        "allfilesystemobjects".to_string(),
+    ])];
     assert!(handler_matches(&item_types, &files_only));
 
     let mixed = vec![

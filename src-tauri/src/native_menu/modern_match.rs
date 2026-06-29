@@ -41,7 +41,10 @@ pub fn path_key(path: &[u32]) -> String {
     if path.is_empty() {
         return "root".to_string();
     }
-    path.iter().map(u32::to_string).collect::<Vec<_>>().join("-")
+    path.iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
 /// The (lower-cased) shell item-type tokens a single path can match against.

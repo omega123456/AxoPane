@@ -1,17 +1,36 @@
 import { createFile, createFolder, deleteEntries, renameEntry } from '@/lib/ipc/commands'
+import { activeTab } from '@/stores/tabs-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { clearSelectionForPane, useSelectionStore } from '@/stores/selection-store'
 import type { DeleteTarget } from '@/stores/action-dialog-store'
 import type { PaneId } from '@/types/pane'
+import type { DirectoryEntry } from '@/lib/types/ipc'
 
 /**
- * The shared post-mutation step: reload the affected pane so the new listing is
- * authoritative (the fs-watcher also patches in the real app, but an explicit
- * reload makes the change appear immediately and deterministically in tests and
- * the web build where no watcher runs).
+ * The shared post-mutation step: apply the same incremental patch shape used by
+ * the filesystem watcher so simple create/rename/delete actions do not force a
+ * full pane reload.
  */
-async function reloadAndFocus(paneId: PaneId, focusPath?: string) {
-  await usePanesStore.getState().reloadPane(paneId)
+function patchAndFocus(
+  paneId: PaneId,
+  options: {
+    changed?: DirectoryEntry[]
+    removed?: string[]
+    focusPath?: string
+  },
+) {
+  const store = usePanesStore.getState()
+  const pane = store.panes[paneId]
+
+  store.applyDirPatch({
+    tabId: activeTab(paneId).id,
+    path: pane.path,
+    reason: 'watch',
+    changed: (options.changed ?? []).map((entry) => ({ path: entry.path, entry })),
+    removed: options.removed ?? [],
+  })
+
+  const focusPath = options.focusPath
   if (!focusPath) {
     return
   }
@@ -28,22 +47,22 @@ async function reloadAndFocus(paneId: PaneId, focusPath?: string) {
 export async function createFolderInPane(paneId: PaneId, name: string) {
   const parent = usePanesStore.getState().panes[paneId].path
   const entry = await createFolder({ parent, name })
-  await reloadAndFocus(paneId, entry.path)
+  patchAndFocus(paneId, { changed: [entry], focusPath: entry.path })
 }
 
 export async function createFileInPane(paneId: PaneId, name: string) {
   const parent = usePanesStore.getState().panes[paneId].path
   const entry = await createFile({ parent, name })
-  await reloadAndFocus(paneId, entry.path)
+  patchAndFocus(paneId, { changed: [entry], focusPath: entry.path })
 }
 
 export async function renameEntryInPane(paneId: PaneId, path: string, newName: string) {
   const entry = await renameEntry({ path, newName })
-  await reloadAndFocus(paneId, entry.path)
+  patchAndFocus(paneId, { changed: [entry], removed: [path], focusPath: entry.path })
 }
 
 export async function deleteEntriesInPane(paneId: PaneId, targets: DeleteTarget[]) {
   await deleteEntries({ paths: targets.map((target) => target.path) })
   clearSelectionForPane(paneId)
-  await usePanesStore.getState().reloadPane(paneId)
+  patchAndFocus(paneId, { removed: targets.map((target) => target.path) })
 }

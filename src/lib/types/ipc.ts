@@ -76,6 +76,22 @@ export type ListDirResponse = {
   entries: DirectoryEntry[]
 }
 
+export type TreeChildEntry = {
+  name: string
+  path: string
+  hasChildren: boolean
+}
+
+export type ListTreeChildrenRequest = {
+  path: string
+  showHidden: boolean
+}
+
+export type ListTreeChildrenResponse = {
+  path: string
+  children: TreeChildEntry[]
+}
+
 export type VolumeInfo = {
   mountRoot: string
   label: string
@@ -426,6 +442,10 @@ export type IpcCommandMap = {
   list_dir: {
     request: ListDirRequest
     response: ListDirResponse
+  }
+  list_tree_children: {
+    request: ListTreeChildrenRequest
+    response: ListTreeChildrenResponse
   }
   create_folder: {
     request: CreateEntryRequest

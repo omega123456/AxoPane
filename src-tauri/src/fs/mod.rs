@@ -2,9 +2,12 @@ use std::cmp::Ordering;
 use std::ffi::OsStr;
 use std::fs::{self, DirEntry, Metadata};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::SystemTime;
 
 use lexical_sort::natural_lexical_cmp;
+use rayon::prelude::*;
+use rayon::{ThreadPool, ThreadPoolBuilder};
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
@@ -60,6 +63,28 @@ pub struct DirectoryEntry {
 pub struct ListDirResponse {
     pub path: String,
     pub entries: Vec<DirectoryEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TreeChildEntry {
+    pub name: String,
+    pub path: String,
+    pub has_children: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListTreeChildrenOptions {
+    pub path: String,
+    pub show_hidden: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListTreeChildrenResponse {
+    pub path: String,
+    pub children: Vec<TreeChildEntry>,
 }
 
 #[derive(Debug)]
@@ -199,6 +224,8 @@ pub fn list_dir(options: &ListDirOptions) -> Result<ListDirResponse, FsError> {
         entries.push(listed);
     }
 
+    populate_item_counts(&mut entries);
+
     entries.sort_by(|left, right| {
         compare_entries(left, right, options.sort_key, options.sort_direction)
     });
@@ -212,6 +239,55 @@ pub fn list_dir(options: &ListDirOptions) -> Result<ListDirResponse, FsError> {
     Ok(ListDirResponse {
         path: display_path_from_path(&directory),
         entries,
+    })
+}
+
+pub fn list_tree_children(
+    options: &ListTreeChildrenOptions,
+) -> Result<ListTreeChildrenResponse, FsError> {
+    let requested = Path::new(&options.path);
+    let directory = canonicalize_dir(requested).map_err(|error| {
+        log::warn!(
+            "list_tree_children: failed to canonicalize {:?}: {error}",
+            options.path
+        );
+        error
+    })?;
+
+    let mut children = Vec::new();
+    for entry in fs::read_dir(&directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = entry.metadata()?;
+        if !metadata.is_dir() {
+            continue;
+        }
+
+        let attributes = collect_attributes(&path, &metadata);
+        if !options.show_hidden
+            && attributes
+                .iter()
+                .any(|attribute| attribute == "hidden" || attribute == "system")
+        {
+            continue;
+        }
+
+        let name = match entry.file_name().into_string() {
+            Ok(name) => name,
+            Err(_) => return Err(FsError::InvalidFileName(path)),
+        };
+        children.push(TreeChildEntry {
+            name,
+            path: display_path_from_path(&path),
+            has_children: directory_has_visible_child_dirs(&path, options.show_hidden),
+        });
+    }
+
+    children.sort_by(|left, right| natural_name_compare(&left.name, &right.name));
+
+    Ok(ListTreeChildrenResponse {
+        path: display_path_from_path(&directory),
+        children,
     })
 }
 
@@ -346,6 +422,10 @@ fn build_entry_from_path(path: &Path) -> Result<DirectoryEntry, FsError> {
     })
 }
 
+pub fn directory_entry_from_path(path: &Path) -> Result<DirectoryEntry, FsError> {
+    build_entry_from_path(path)
+}
+
 fn build_entry(entry: &DirEntry) -> Result<DirectoryEntry, FsError> {
     let path = entry.path();
     let metadata = entry.metadata()?;
@@ -372,7 +452,7 @@ fn build_entry(entry: &DirEntry) -> Result<DirectoryEntry, FsError> {
         is_dir,
         icon_data_url: crate::file_icons::icon_data_url_for_path(&path, is_dir),
         size_bytes: (!is_dir).then_some(metadata.len()),
-        item_count: if is_dir { read_item_count(&path) } else { None },
+        item_count: None,
         type_label: infer_type_label(&name, is_dir),
         modified_at: system_time_to_rfc3339(metadata.modified().ok()),
         created_at: system_time_to_rfc3339(metadata.created().ok()),
@@ -380,6 +460,37 @@ fn build_entry(entry: &DirEntry) -> Result<DirectoryEntry, FsError> {
         is_hidden,
         is_system,
     })
+}
+
+fn item_count_pool() -> Option<&'static ThreadPool> {
+    static POOL: OnceLock<Option<ThreadPool>> = OnceLock::new();
+    POOL.get_or_init(|| {
+        ThreadPoolBuilder::new()
+            .num_threads(4)
+            .thread_name(|index| format!("fe-item-count-{index}"))
+            .build()
+            .ok()
+    })
+    .as_ref()
+}
+
+fn populate_item_counts(entries: &mut [DirectoryEntry]) {
+    if let Some(pool) = item_count_pool() {
+        pool.install(|| {
+            entries.par_iter_mut().for_each(|entry| {
+                if entry.is_dir {
+                    entry.item_count = read_item_count(Path::new(&entry.path));
+                }
+            });
+        });
+        return;
+    }
+
+    for entry in entries {
+        if entry.is_dir {
+            entry.item_count = read_item_count(Path::new(&entry.path));
+        }
+    }
 }
 
 /// Counts the immediate children of a directory for the "Items" column.
@@ -397,6 +508,34 @@ pub fn read_item_count(path: &Path) -> Option<u64> {
             None
         }
     }
+}
+
+fn directory_has_visible_child_dirs(path: &Path, show_hidden: bool) -> bool {
+    let Ok(entries) = fs::read_dir(path) else {
+        return false;
+    };
+
+    for entry in entries.flatten() {
+        let child_path = entry.path();
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if !metadata.is_dir() {
+            continue;
+        }
+        if show_hidden {
+            return true;
+        }
+        let attributes = collect_attributes(&child_path, &metadata);
+        if !attributes
+            .iter()
+            .any(|attribute| attribute == "hidden" || attribute == "system")
+        {
+            return true;
+        }
+    }
+
+    false
 }
 
 pub fn infer_type_label(name: &str, is_dir: bool) -> String {

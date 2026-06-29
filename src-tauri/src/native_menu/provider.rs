@@ -123,7 +123,9 @@ fn is_app_owned_duplicate(item: &ProviderNativeMenuItem) -> bool {
             .normalized_verb
             .as_deref()
             .map(normalize_verb)
-            .is_some_and(|verb| is_open_with_variant(&verb) || APP_OWNED_NORMALIZED_VERBS.contains(&verb.as_str()))
+            .is_some_and(|verb| {
+                is_open_with_variant(&verb) || APP_OWNED_NORMALIZED_VERBS.contains(&verb.as_str())
+            })
         || is_open_with_variant(&normalized_verb)
         || APP_OWNED_NORMALIZED_VERBS.contains(&normalized_verb.as_str())
 }

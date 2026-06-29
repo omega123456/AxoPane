@@ -170,9 +170,7 @@ mod real {
                     MenuActionStatus::unsupported("native-invoke-failed")
                 }
             },
-            ProviderInvocation::Fake { .. } => {
-                MenuActionStatus::unsupported(UNSUPPORTED_MESSAGE)
-            }
+            ProviderInvocation::Fake { .. } => MenuActionStatus::unsupported(UNSUPPORTED_MESSAGE),
         }
     }
 

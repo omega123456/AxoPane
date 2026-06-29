@@ -7,8 +7,8 @@ use std::time::SystemTime;
 
 use file_explorer_lib::fs::{
     collect_attributes, compare_entries, compare_optional_string, compare_optional_u64,
-    infer_type_label, natural_name_compare, platform_root, read_item_count, system_time_to_rfc3339,
-    validate_name, DirectoryEntry, SortDirection, SortKey,
+    directory_entry_from_path, infer_type_label, natural_name_compare, platform_root,
+    read_item_count, system_time_to_rfc3339, validate_name, DirectoryEntry, SortDirection, SortKey,
 };
 use tempfile::tempdir;
 
@@ -115,4 +115,8 @@ fn helper_metadata_collects_attributes_and_item_counts() {
     assert!(attributes.iter().any(|attribute| attribute == "hidden"));
 
     assert_eq!(read_item_count(root), Some(2));
+
+    let entry = directory_entry_from_path(&hidden).expect("entry from path");
+    assert_eq!(entry.name, ".hidden.txt");
+    assert_eq!(entry.size_bytes, Some(5));
 }

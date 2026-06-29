@@ -6,6 +6,8 @@ import type {
   DirectoryEntry,
   ListDirRequest,
   ListDirResponse,
+  ListTreeChildrenRequest,
+  ListTreeChildrenResponse,
   SaveConfigRequest,
 } from '@/lib/types/ipc'
 
@@ -43,11 +45,28 @@ function responder(payload: ListDirRequest): ListDirResponse {
   return { path: payload.path, entries: [dir('Alpha'), dir('Beta', false)] }
 }
 
+function treeResponder(payload: ListTreeChildrenRequest): ListTreeChildrenResponse {
+  if (payload.path === 'C:\\fail') {
+    throw new Error('Access is denied')
+  }
+  return {
+    path: payload.path,
+    children: [
+      {
+        name: 'Alpha',
+        path: 'C:\\root\\Alpha',
+        hasChildren: false,
+      },
+    ],
+  }
+}
+
 beforeEach(() => {
   ipc.install()
   usePanesStore.getState().reset()
   useTabsStore.getState().reset()
   ipc.override('list_dir', responder)
+  ipc.override('list_tree_children', treeResponder)
   ipc.override('set_tab_watch', () => undefined)
   ipc.override('save_session', (payload) => payload.session)
 })
@@ -397,13 +416,24 @@ describe('panes-store navigation', () => {
       'C:\\': 'C:\\Users',
       'C:\\Users': 'C:\\Users\\Omega',
     }
-    ipc.override('list_dir', (payload: ListDirRequest): ListDirResponse => {
-      const child = children[payload.path]
-      return {
-        path: payload.path,
-        entries: child ? [{ ...dir('child'), id: child, name: child, path: child }] : [],
-      }
-    })
+    ipc.override(
+      'list_tree_children',
+      (payload: ListTreeChildrenRequest): ListTreeChildrenResponse => {
+        const child = children[payload.path]
+        return {
+          path: payload.path,
+          children: child
+            ? [
+                {
+                  name: child,
+                  path: child,
+                  hasChildren: Boolean(children[child]),
+                },
+              ]
+            : [],
+        }
+      },
+    )
 
     await usePanesStore.getState().revealPath('C:\\Users\\Omega')
 
@@ -451,13 +481,24 @@ describe('panes-store navigation', () => {
       'C:\\': 'C:\\Users',
       'C:\\Users': 'C:\\Users\\Omega',
     }
-    ipc.override('list_dir', (payload: ListDirRequest): ListDirResponse => {
-      const child = children[payload.path]
-      return {
-        path: payload.path,
-        entries: child ? [{ ...dir('child'), id: child, name: child, path: child }] : [],
-      }
-    })
+    ipc.override(
+      'list_tree_children',
+      (payload: ListTreeChildrenRequest): ListTreeChildrenResponse => {
+        const child = children[payload.path]
+        return {
+          path: payload.path,
+          children: child
+            ? [
+                {
+                  name: child,
+                  path: child,
+                  hasChildren: Boolean(children[child]),
+                },
+              ]
+            : [],
+        }
+      },
+    )
 
     await usePanesStore.getState().revealPath('C:\\Users\\Omega')
 

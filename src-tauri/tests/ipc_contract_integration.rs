@@ -8,8 +8,8 @@ use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::events;
 use file_explorer_lib::ipc::mock;
 use file_explorer_lib::ipc::types::{
-    CreateEntryRequest, DeleteEntriesRequest, FileClipboardMode, ListDirRequest, OpenPathRequest,
-    RenameEntryRequest, WriteFileClipboardRequest,
+    CreateEntryRequest, DeleteEntriesRequest, FileClipboardMode, ListDirRequest,
+    ListTreeChildrenRequest, OpenPathRequest, RenameEntryRequest, WriteFileClipboardRequest,
 };
 use tempfile::tempdir;
 
@@ -99,6 +99,23 @@ fn list_dir_command_surfaces_errors_as_strings() {
 
     assert!(error.contains("Failed to load"));
     assert!(error.contains("missing"));
+}
+
+#[test]
+fn list_tree_children_command_returns_directories_only() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    fs::create_dir(root.join("Docs")).expect("docs");
+    fs::write(root.join("todo.txt"), "todo").expect("todo");
+
+    let response = commands::list_tree_children(ListTreeChildrenRequest {
+        path: root.to_string_lossy().into_owned(),
+        show_hidden: true,
+    })
+    .expect("tree children");
+
+    assert_eq!(response.children.len(), 1);
+    assert_eq!(response.children[0].name, "Docs");
 }
 
 #[test]

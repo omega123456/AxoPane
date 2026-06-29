@@ -5,8 +5,8 @@ use std::fs;
 use std::path::Path;
 
 use file_explorer_lib::fs::{
-    canonicalize_dir, default_start_dir, display_path_from_text, list_dir, ListDirOptions,
-    SortDirection, SortKey,
+    canonicalize_dir, default_start_dir, display_path_from_text, list_dir, list_tree_children,
+    ListDirOptions, ListTreeChildrenOptions, SortDirection, SortKey,
 };
 use tempfile::tempdir;
 
@@ -128,6 +128,50 @@ fn list_dir_returns_canonical_absolute_path() {
     assert!(!response.path.starts_with("\\\\?\\"));
     assert_eq!(response.entries.len(), 1);
     assert_eq!(response.entries[0].name, "child");
+}
+
+#[test]
+fn list_tree_children_returns_only_lightweight_directory_nodes() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    fs::create_dir(root.join("folder10")).expect("folder10");
+    fs::create_dir(root.join("folder2")).expect("folder2");
+    fs::create_dir(root.join("folder2").join("child")).expect("child");
+    fs::create_dir(root.join(".hidden")).expect("hidden");
+    fs::write(root.join("notes.txt"), "n").expect("notes");
+
+    let visible = list_tree_children(&ListTreeChildrenOptions {
+        path: root.to_string_lossy().into_owned(),
+        show_hidden: false,
+    })
+    .expect("tree children");
+    assert_eq!(
+        visible
+            .children
+            .iter()
+            .map(|child| child.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["folder2", "folder10"]
+    );
+    assert!(
+        visible
+            .children
+            .iter()
+            .find(|child| child.name == "folder2")
+            .expect("folder2")
+            .has_children
+    );
+    assert!(visible.children.iter().all(|child| child.name != ".hidden"));
+
+    let with_hidden = list_tree_children(&ListTreeChildrenOptions {
+        path: root.to_string_lossy().into_owned(),
+        show_hidden: true,
+    })
+    .expect("tree children with hidden");
+    assert!(with_hidden
+        .children
+        .iter()
+        .any(|child| child.name == ".hidden"));
 }
 
 #[test]

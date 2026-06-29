@@ -1,5 +1,6 @@
 pub mod archive;
 mod clipboard;
+mod file_icons;
 pub mod fs;
 pub mod ipc;
 pub mod launch;
@@ -7,7 +8,6 @@ pub mod native_menu;
 pub mod ops;
 pub mod persist;
 pub mod size;
-mod file_icons;
 pub mod volumes;
 pub mod watch;
 
@@ -102,6 +102,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_initial_shell,
             commands::list_dir,
+            commands::list_tree_children,
             commands::create_folder,
             commands::create_file,
             commands::rename_entry,
