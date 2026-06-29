@@ -52,7 +52,7 @@ export function CommandBar({ theme, setTheme }: CommandBarProps) {
         </button>
         <button
           type="button"
-          onClick={() => openSettings('keybindings')}
+          onClick={() => openSettings()}
           className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-tab border border-light-border bg-light-surface px-3 text-row text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border dark:bg-dark-surface dark:text-dark-text-soft"
         >
           <SettingsIcon className="h-4 w-4" />

@@ -56,10 +56,14 @@ describe('SettingsModal', () => {
     })
   })
 
-  it('renders reserved clipboard commands as non-remappable system defaults', () => {
+  it('renders reserved clipboard commands as non-remappable system defaults', async () => {
     useSettingsStore.getState().open('keybindings')
 
     render(<SettingsModal />)
+
+    // The footer resolves the app version asynchronously; wait for it to settle
+    // so the state update lands inside act().
+    await screen.findByText('build 0.1.0', { exact: false })
 
     // Reserved commands have no capture or reset affordance and are labelled as
     // platform defaults rather than ever flagged as conflicts.

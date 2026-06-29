@@ -33,7 +33,9 @@ export async function openSettingsSection(
   section: 'keybindings' | 'columns' | 'layout' | 'updates',
 ) {
   await page.getByRole('button', { name: 'Settings' }).click()
-  if (section === 'columns') {
+  if (section === 'keybindings') {
+    await page.getByRole('button', { name: 'Keybindings' }).click()
+  } else if (section === 'columns') {
     await page.getByRole('button', { name: 'Columns' }).click()
   } else if (section === 'layout') {
     await page.getByRole('button', { name: 'View & Layout' }).click()

@@ -11,7 +11,8 @@ type SettingsStore = {
 
 export const useSettingsStore = create<SettingsStore>((set) => ({
   isOpen: false,
-  section: 'keybindings',
-  open: (section = 'keybindings') => set({ isOpen: true, section }),
+  section: 'layout',
+  open: (section) =>
+    set((state) => ({ isOpen: true, section: section ?? state.section })),
   close: () => set({ isOpen: false }),
 }))

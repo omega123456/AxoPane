@@ -93,7 +93,7 @@ export function executeCommand(
       panes.clearFilter(paneId)
       break
     case 'showSettings':
-      useSettingsStore.getState().open('keybindings')
+      useSettingsStore.getState().open()
       break
     case 'newFolder':
       useActionDialogStore.getState().open({ kind: 'newFolder', paneId })

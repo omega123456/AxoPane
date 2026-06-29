@@ -99,6 +99,9 @@ describe('executeCommand file actions', () => {
     const clearFilter = vi.fn()
     usePanesStore.setState({ goUp, refreshEverything, clearFilter })
 
+    // showSettings reopens the section the user last viewed this session.
+    useSettingsStore.setState({ section: 'columns' })
+
     executeCommand('goUp', 'left')
     executeCommand('refresh', 'left')
     executeCommand('clearFilter', 'left')
@@ -110,7 +113,7 @@ describe('executeCommand file actions', () => {
     expect(clearFilter).toHaveBeenCalledWith('left')
     expect(useSelectionStore.getState().selections.left.selectedIds).toEqual(['Alpha', 'Beta'])
     expect(useSettingsStore.getState().isOpen).toBe(true)
-    expect(useSettingsStore.getState().section).toBe('keybindings')
+    expect(useSettingsStore.getState().section).toBe('columns')
   })
 
   it('requests manual size only for the focused directory target', () => {

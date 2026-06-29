@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangleIcon,
   GripVerticalIcon,
@@ -18,6 +18,8 @@ import { UpdatesSettings } from '@/components/dialogs/UpdatesSettings'
 import { persistAppConfig } from '@/lib/app-config'
 import { columnDefinitions } from '@/lib/columns'
 import { DEFAULT_UPDATE_INTERVAL, type UpdateInterval } from '@/lib/update-intervals'
+import { log } from '@/lib/app-log-commands'
+import { getAppVersion } from '@/lib/updater'
 import {
   captureShortcut,
   commandLabels,
@@ -114,6 +116,26 @@ function SettingsModalContent() {
   const [draft, setDraft] = useState<DraftState>(() => cloneDraft())
   const [search, setSearch] = useState('')
   const [capturing, setCapturing] = useState<CommandId | null>(null)
+  const [appVersion, setAppVersion] = useState('…')
+
+  useEffect(() => {
+    let cancelled = false
+    void getAppVersion()
+      .then((version) => {
+        if (!cancelled) {
+          setAppVersion(version)
+        }
+      })
+      .catch((cause: unknown) => {
+        log.error('failed to read app version', { error: String(cause) })
+        if (!cancelled) {
+          setAppVersion('unknown')
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const conflicts = useMemo(() => {
     const lookup = new Map<CommandId, string[]>()
@@ -220,7 +242,7 @@ function SettingsModalContent() {
             <div className="mt-auto px-3 py-2.5 font-mono text-2xs leading-relaxed text-light-text-faint dark:text-dark-text-faint">
               AxoPane
               <br />
-              build 0.1.0
+              build {appVersion}
             </div>
           </nav>
 
