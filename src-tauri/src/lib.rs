@@ -72,6 +72,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(log_plugin())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {
             let config_dir = resolved_app_config_dir(&app.path().app_config_dir()?);
             let persistence = PersistenceState::load(&config_dir)
