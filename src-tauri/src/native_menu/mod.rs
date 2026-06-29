@@ -1,6 +1,7 @@
 pub mod fake_provider;
 #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
 pub mod macos;
+pub mod menu_cache;
 pub mod modern_match;
 pub mod provider;
 pub mod shell_executor;
@@ -17,6 +18,7 @@ pub mod windows_shell;
 
 use std::sync::Arc;
 
+use menu_cache::MenuCache;
 use provider::{dedupe_provider_items, NativeMenuProvider, ProviderNativeMenuItem};
 use shell_executor::ShellExecutor;
 use token_store::NativeMenuTokenStore;
@@ -30,6 +32,7 @@ pub struct NativeMenuService {
     provider: Arc<dyn NativeMenuProvider>,
     executor: ShellExecutor,
     token_store: NativeMenuTokenStore,
+    cache: MenuCache,
 }
 
 impl Default for NativeMenuService {
@@ -44,13 +47,27 @@ impl NativeMenuService {
             provider,
             executor: ShellExecutor::default(),
             token_store: NativeMenuTokenStore::default(),
+            cache: MenuCache::default(),
         }
     }
 
     pub fn load_menu(&self, request: LoadNativeMenuRequest) -> LoadNativeMenuResponse {
         self.token_store.clear_all();
         self.token_store.replace_request(&request.request_id);
-        let items = dedupe_provider_items(self.provider.load_menu(&request, &self.executor));
+
+        // Per-file-type, in-memory cache: the first load of a given file type
+        // pays the full shell-enumeration cost; subsequent loads reuse the cached
+        // structure with their paths rebound. Fresh invoke tokens are still
+        // issued per request below, so cache hits never replay stale tokens.
+        let items = match self.cache.get(&request) {
+            Some(cached) => cached,
+            None => {
+                let fresh =
+                    dedupe_provider_items(self.provider.load_menu(&request, &self.executor));
+                self.cache.insert(&request, &fresh);
+                fresh
+            }
+        };
 
         LoadNativeMenuResponse {
             request_id: request.request_id.clone(),
