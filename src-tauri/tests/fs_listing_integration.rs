@@ -105,6 +105,37 @@ fn keeps_folders_first_and_respects_hidden_toggle() {
 }
 
 #[test]
+fn executable_icon_lookup_uses_safe_test_utils_fallback() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    fs::write(root.join("installer.exe"), "binary").expect("exe");
+    fs::write(root.join("readme"), "text").expect("readme");
+
+    let response = list_dir(&ListDirOptions {
+        path: root.to_string_lossy().into_owned(),
+        sort_key: SortKey::Name,
+        sort_direction: SortDirection::Asc,
+        filter: String::new(),
+        show_hidden: true,
+    })
+    .expect("list dir");
+
+    let installer = response
+        .entries
+        .iter()
+        .find(|entry| entry.name == "installer.exe")
+        .expect("installer");
+    let readme = response
+        .entries
+        .iter()
+        .find(|entry| entry.name == "readme")
+        .expect("readme");
+    assert_eq!(installer.type_label, "EXE file");
+    assert_eq!(installer.icon_data_url, None);
+    assert_eq!(readme.icon_data_url, None);
+}
+
+#[test]
 fn list_dir_returns_canonical_absolute_path() {
     let fixture = tempdir().expect("temp dir");
     let root = fixture.path();

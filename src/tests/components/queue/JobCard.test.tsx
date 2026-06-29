@@ -48,11 +48,7 @@ describe('JobCard', () => {
     render(
       <JobCard
         operation={progress({})}
-        throughputHistory={samples(
-          [22, 240_000_000],
-          [41, 250_000_000],
-          [63, 260_046_848],
-        )}
+        throughputHistory={samples([22, 240_000_000], [41, 250_000_000], [63, 260_046_848])}
         throughputPeak={260_046_848}
         hasConflict={false}
         reorderable={false}
@@ -64,9 +60,10 @@ describe('JobCard', () => {
     expect(screen.getByText('master-reel-final.mkv')).toBeInTheDocument()
     expect(screen.getByText('812 / 1,248 items')).toBeInTheDocument()
     expect(screen.getByTestId('throughput-chart-line')).toBeInTheDocument()
-    expect(
-      screen.getByRole('progressbar', { name: 'Copying 1,248 items' }),
-    ).toHaveAttribute('aria-valuenow', '63')
+    expect(screen.getByRole('progressbar', { name: 'Copying 1,248 items' })).toHaveAttribute(
+      'aria-valuenow',
+      '63',
+    )
     expect(
       screen.getByRole('progressbar', {
         name: 'Current file progress for master-reel-final.mkv',
@@ -126,9 +123,7 @@ describe('JobCard', () => {
       />,
     )
     expect(screen.getByText('Copying complete')).toBeInTheDocument()
-    expect(
-      screen.queryByRole('progressbar', { name: 'Copying complete' }),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('progressbar', { name: 'Copying complete' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Pause/ })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /Dismiss/ }))
     expect(handlers.onDismiss).toHaveBeenCalled()
@@ -149,9 +144,7 @@ describe('JobCard', () => {
     )
     expect(screen.getByText('Copying failed')).toBeInTheDocument()
     expect(screen.getByText('disk full')).toBeInTheDocument()
-    expect(
-      screen.queryByRole('progressbar', { name: 'Copying failed' }),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('progressbar', { name: 'Copying failed' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /Retry/ }))
     expect(handlers.onRetry).toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: /Dismiss/ }))
@@ -173,9 +166,7 @@ describe('JobCard', () => {
     )
     expect(screen.getByText('Copying cancelled')).toBeInTheDocument()
     expect(screen.getByText(/Already-copied files were kept/i)).toBeInTheDocument()
-    expect(
-      screen.queryByRole('progressbar', { name: 'Copying cancelled' }),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('progressbar', { name: 'Copying cancelled' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Pause/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Cancel/ })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /Dismiss/ }))
@@ -238,9 +229,10 @@ describe('JobCard', () => {
         {...handlers}
       />,
     )
-    expect(
-      screen.getByRole('progressbar', { name: 'Copying 1,248 items' }),
-    ).toHaveAttribute('aria-valuenow', '63')
+    expect(screen.getByRole('progressbar', { name: 'Copying 1,248 items' })).toHaveAttribute(
+      'aria-valuenow',
+      '63',
+    )
     await user.click(screen.getByRole('button', { name: /Resolve conflict/ }))
     expect(handlers.onResolve).toHaveBeenCalled()
   })
@@ -257,6 +249,20 @@ describe('JobCard', () => {
       />,
     )
     expect(screen.getByText('Moving 1,248 items')).toBeInTheDocument()
+  })
+
+  it('labels a delete operation', () => {
+    render(
+      <JobCard
+        operation={progress({ kind: 'delete', destinationDir: '' })}
+        throughputHistory={samples([63, 260_046_848])}
+        throughputPeak={260_046_848}
+        hasConflict={false}
+        reorderable={false}
+        {...noopHandlers()}
+      />,
+    )
+    expect(screen.getByText('Deleting 1,248 items')).toBeInTheDocument()
   })
 
   it('throttles live metrics announcements for five seconds on a dedicated hidden node', () => {

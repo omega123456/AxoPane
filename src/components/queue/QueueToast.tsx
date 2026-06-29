@@ -44,7 +44,11 @@ function summarize(operations: OpProgress[]) {
   const totalBytes = active.reduce((sum, operation) => sum + operation.totalBytes, 0)
   const copiedBytes = active.reduce((sum, operation) => sum + operation.copiedBytes, 0)
   const percent = totalBytes > 0 ? (copiedBytes / totalBytes) * 100 : 0
-  const verb = active.some((operation) => operation.kind === 'move') ? 'Moving' : 'Copying'
+  const verb = active.some((operation) => operation.kind === 'delete')
+    ? 'Deleting'
+    : active.some((operation) => operation.kind === 'move')
+      ? 'Moving'
+      : 'Copying'
 
   return {
     icon: 'active' as const,

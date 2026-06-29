@@ -1,8 +1,7 @@
-import { createFile, createFolder, deleteEntries, renameEntry } from '@/lib/ipc/commands'
+import { createFile, createFolder, renameEntry } from '@/lib/ipc/commands'
 import { activeTab } from '@/stores/tabs-store'
 import { usePanesStore } from '@/stores/panes-store'
-import { clearSelectionForPane, useSelectionStore } from '@/stores/selection-store'
-import type { DeleteTarget } from '@/stores/action-dialog-store'
+import { useSelectionStore } from '@/stores/selection-store'
 import type { PaneId } from '@/types/pane'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 
@@ -59,10 +58,4 @@ export async function createFileInPane(paneId: PaneId, name: string) {
 export async function renameEntryInPane(paneId: PaneId, path: string, newName: string) {
   const entry = await renameEntry({ path, newName })
   patchAndFocus(paneId, { changed: [entry], removed: [path], focusPath: entry.path })
-}
-
-export async function deleteEntriesInPane(paneId: PaneId, targets: DeleteTarget[]) {
-  await deleteEntries({ paths: targets.map((target) => target.path) })
-  clearSelectionForPane(paneId)
-  patchAndFocus(paneId, { removed: targets.map((target) => target.path) })
 }

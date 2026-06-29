@@ -8,8 +8,8 @@ use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::events;
 use file_explorer_lib::ipc::mock;
 use file_explorer_lib::ipc::types::{
-    CreateEntryRequest, DeleteEntriesRequest, FileClipboardMode, ListDirRequest,
-    ListTreeChildrenRequest, OpenPathRequest, RenameEntryRequest, WriteFileClipboardRequest,
+    CreateEntryRequest, FileClipboardMode, ListDirRequest, ListTreeChildrenRequest,
+    OpenPathRequest, RenameEntryRequest, TrashEntriesRequest, WriteFileClipboardRequest,
 };
 use tempfile::tempdir;
 
@@ -61,10 +61,10 @@ fn create_rename_delete_commands_round_trip() {
     .expect("rename");
     assert_eq!(renamed.name, "done.txt");
 
-    commands::delete_entries(DeleteEntriesRequest {
+    commands::move_to_trash(TrashEntriesRequest {
         paths: vec![renamed.path.clone(), folder.path.clone()],
     })
-    .expect("delete");
+    .expect("move to trash");
     assert!(!fixture.path().join("done.txt").exists());
     assert!(!fixture.path().join("Docs").exists());
 }
@@ -143,15 +143,15 @@ fn file_rename_and_delete_commands_surface_errors_as_strings() {
     .expect_err("rename conflict");
     assert!(rename_error.contains("Failed to rename"));
 
-    let delete_error = commands::delete_entries(DeleteEntriesRequest {
+    let delete_error = commands::move_to_trash(TrashEntriesRequest {
         paths: vec![fixture
             .path()
             .join("missing.txt")
             .to_string_lossy()
             .into_owned()],
     })
-    .expect_err("delete missing");
-    assert!(delete_error.contains("Failed to delete items"));
+    .expect_err("trash missing");
+    assert!(delete_error.contains("Failed to move items to trash"));
 }
 
 #[cfg(feature = "test-utils")]

@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use file_explorer_lib::ops::{
-    copy_file_with_progress, copy_path, move_path, ConflictInfo, ConflictResolution, OpItem,
-    OpKind, OpState, OpStatus, OpsService, WorkerCtx,
+    copy_dir_recursive, copy_file_with_progress, copy_path, delete_path_with_progress, move_path,
+    ConflictInfo, ConflictResolution, OpItem, OpKind, OpState, OpStatus, OpsService, WorkerCtx,
 };
 use file_explorer_lib::volumes::VolumeInfo;
 
@@ -168,6 +168,12 @@ fn file_operation_helpers_copy_and_move_paths_directly() {
         b"alpha"
     );
 
+    copy_path(&source_file, &dest_dir.join("copied-via-path.txt"), &ctx).expect("copy file path");
+    assert_eq!(
+        std::fs::read(dest_dir.join("copied-via-path.txt")).expect("copied file path"),
+        b"alpha"
+    );
+
     copy_path(&source_dir, &dest_dir.join("copied-tree"), &ctx).expect("copy tree");
     assert_eq!(
         std::fs::read(dest_dir.join("copied-tree").join("nested").join("beta.txt"))
@@ -180,6 +186,17 @@ fn file_operation_helpers_copy_and_move_paths_directly() {
     assert_eq!(
         std::fs::read(dest_dir.join("moved.txt")).expect("moved file"),
         b"alpha"
+    );
+
+    let source_dir_for_move = fixture.path().join("source-move");
+    std::fs::create_dir(&source_dir_for_move).expect("source move dir");
+    std::fs::write(source_dir_for_move.join("gamma.txt"), b"gamma").expect("source move file");
+    let moved_dir = dest_dir.join("moved-tree");
+    move_path(&source_dir_for_move, &moved_dir, &ctx).expect("move dir");
+    assert!(!source_dir_for_move.exists());
+    assert_eq!(
+        std::fs::read(moved_dir.join("gamma.txt")).expect("moved nested file"),
+        b"gamma"
     );
 }
 
@@ -225,6 +242,88 @@ fn file_operation_helpers_respect_cancellation_before_copying() {
     copy_path(&source_dir, &dest_dir.join("cancelled-tree"), &ctx).expect("cancelled tree copy");
     assert!(dest_dir.join("cancelled-tree").exists());
     assert!(!dest_dir.join("cancelled-tree").join("beta.txt").exists());
+}
+
+#[test]
+fn file_operation_helpers_delete_paths_with_progress_directly() {
+    let fixture = tempfile::tempdir().expect("temp dir");
+    let root = fixture.path();
+    let file = root.join("delete-file.txt");
+    let dir = root.join("delete-dir");
+    std::fs::write(&file, b"alpha").expect("file");
+    std::fs::create_dir(&dir).expect("dir");
+    std::fs::write(dir.join("child.txt"), b"beta").expect("child");
+
+    let mut delete_state = state();
+    delete_state.kind = OpKind::Delete;
+    delete_state.total_bytes = 0;
+    delete_state.copied_bytes = 0;
+    let op_arc = Arc::new(Mutex::new(delete_state));
+    let resolver = Arc::new(std::sync::Condvar::new());
+    let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
+    let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
+    let ctx = WorkerCtx {
+        op_arc: &op_arc,
+        resolver: &resolver,
+        progress: &progress,
+        start: Instant::now(),
+        rate_window: Duration::from_secs(1),
+        instant_now: &instant_now,
+    };
+
+    delete_path_with_progress(&file, true, &ctx).expect("delete file");
+    delete_path_with_progress(&dir, true, &ctx).expect("delete dir");
+
+    assert!(!file.exists());
+    assert!(!dir.exists());
+    assert_eq!(op_arc.lock().expect("op lock").copied_bytes, 9);
+}
+
+#[test]
+fn file_operation_helpers_surface_io_errors_directly() {
+    let fixture = tempfile::tempdir().expect("temp dir");
+    let root = fixture.path();
+    let dest_dir = root.join("dest");
+    std::fs::create_dir(&dest_dir).expect("dest dir");
+
+    let op_arc = Arc::new(Mutex::new(state()));
+    let resolver = Arc::new(std::sync::Condvar::new());
+    let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
+    let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
+    let ctx = WorkerCtx {
+        op_arc: &op_arc,
+        resolver: &resolver,
+        progress: &progress,
+        start: Instant::now(),
+        rate_window: Duration::from_secs(1),
+        instant_now: &instant_now,
+    };
+
+    let missing_file = root.join("missing.txt");
+    let copy_error =
+        copy_path(&missing_file, &dest_dir.join("copy.txt"), &ctx).expect_err("copy missing file");
+    assert!(!copy_error.is_empty());
+
+    let move_error =
+        move_path(&missing_file, &dest_dir.join("move.txt"), &ctx).expect_err("move missing file");
+    assert!(!move_error.is_empty());
+
+    let delete_error =
+        delete_path_with_progress(&missing_file, false, &ctx).expect_err("delete missing file");
+    assert!(!delete_error.is_empty());
+
+    let missing_dir = root.join("missing-dir");
+    let mut visited = HashSet::from([root.to_path_buf()]);
+    let copy_dir_error = copy_dir_recursive(
+        &missing_dir,
+        &dest_dir.join("tree"),
+        root,
+        &mut visited,
+        false,
+        &ctx,
+    )
+    .expect_err("copy missing dir");
+    assert!(!copy_dir_error.is_empty());
 }
 
 #[test]

@@ -10,6 +10,7 @@ use file_explorer_lib::native_menu::fake_provider::FakeNativeMenuProvider;
 use file_explorer_lib::native_menu::provider::{
     dedupe_provider_items, NativeMenuProvider, ProviderInvocation, ProviderNativeMenuItem,
 };
+use file_explorer_lib::native_menu::token_store::NativeMenuTokenStore;
 use file_explorer_lib::native_menu::types::NativeMenuCanonicalActionKind;
 use file_explorer_lib::native_menu::unsupported::{self, UnsupportedNativeMenuProvider};
 use file_explorer_lib::native_menu::NativeMenuService;
@@ -219,6 +220,43 @@ fn fake_provider_returns_an_empty_menu_for_tab_targets() {
     );
 
     assert!(items.is_empty());
+}
+
+#[test]
+fn token_store_replaces_takes_and_clears_request_tokens() {
+    let store = NativeMenuTokenStore::default();
+    let first = store.issue_token(
+        "req-a",
+        ProviderInvocation::Fake {
+            action_id: "first".to_string(),
+        },
+    );
+    let second = store.issue_token(
+        "req-a",
+        ProviderInvocation::Fake {
+            action_id: "second".to_string(),
+        },
+    );
+    let other = store.issue_token(
+        "req-b",
+        ProviderInvocation::Fake {
+            action_id: "other".to_string(),
+        },
+    );
+
+    store.replace_request("req-a");
+    assert!(store.take(&first).is_none());
+    assert!(store.take(&second).is_none());
+    assert_eq!(store.take(&other).expect("other token").request_id, "req-b");
+
+    let final_token = store.issue_token(
+        "req-c",
+        ProviderInvocation::Fake {
+            action_id: "final".to_string(),
+        },
+    );
+    store.clear_all();
+    assert!(store.take(&final_token).is_none());
 }
 
 #[test]

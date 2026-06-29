@@ -129,7 +129,7 @@ export const fixtures: {
     isHidden: false,
     isSystem: false,
   },
-  delete_entries: undefined,
+  move_to_trash: undefined,
   open_path: undefined,
   write_file_clipboard: undefined,
   clear_file_clipboard: undefined,

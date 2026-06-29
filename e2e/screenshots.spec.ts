@@ -1,7 +1,10 @@
 import { expect, test } from '@playwright/test'
 import { gotoScenario, openSettingsSection, rightClickPane } from './helpers'
 import { screenshotScenarios } from '../src/tests/playwright-fixtures/e2e'
-import { expandedQueueFinalProgressEvent } from '../src/tests/playwright-fixtures/queue'
+import {
+  deletingQueueFinalProgressEvent,
+  expandedQueueFinalProgressEvent,
+} from '../src/tests/playwright-fixtures/queue'
 
 for (const mode of ['light', 'dark'] as const) {
   test(`browsing ${mode}`, async ({ page }) => {
@@ -48,7 +51,9 @@ for (const mode of ['light', 'dark'] as const) {
 
   test(`permission ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.permission[mode])
-    await expect(page.getByText('You do not have permission to view this folder.').first()).toBeVisible()
+    await expect(
+      page.getByText('You do not have permission to view this folder.').first(),
+    ).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`permission-denied-state-${mode}.png`)
   })
 
@@ -73,14 +78,40 @@ for (const mode of ['light', 'dark'] as const) {
       page.getByRole('progressbar', {
         name: `Copying ${expandedQueueFinalProgressEvent.totalItems.toLocaleString()} items`,
       }),
-    ).toHaveAttribute('aria-valuenow', String(Math.round(expandedQueueFinalProgressEvent.progressPercent)))
+    ).toHaveAttribute(
+      'aria-valuenow',
+      String(Math.round(expandedQueueFinalProgressEvent.progressPercent)),
+    )
     // The chart is throttled, so wait until its filled extent reaches the final
     // seeded percent before capturing (condition-based, no fixed delay).
-    await expect(page.locator('[data-testid="throughput-chart-fill-extent"]').first()).toHaveAttribute(
-      'width',
-      String(expandedQueueFinalProgressEvent.progressPercent),
-    )
+    await expect(
+      page.locator('[data-testid="throughput-chart-fill-extent"]').first(),
+    ).toHaveAttribute('width', String(expandedQueueFinalProgressEvent.progressPercent))
     await expect(page.locator('main')).toHaveScreenshot(`transfer-queue-expanded-${mode}.png`)
+  })
+
+  test(`queue deleting collapsed ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.queueDeleting[mode])
+    await expect(page.getByText('Deleting 1 transfer')).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(
+      `transfer-queue-deleting-collapsed-${mode}.png`,
+    )
+  })
+
+  test(`queue deleting expanded ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.queueDeleting[mode])
+    await page.getByRole('button', { name: 'Expand transfer queue' }).click()
+    await expect(page.getByRole('region', { name: 'Transfer queue' })).toBeVisible()
+    await expect(page.getByRole('progressbar', { name: 'Deleting 84 items' })).toHaveAttribute(
+      'aria-valuenow',
+      String(Math.round(deletingQueueFinalProgressEvent.progressPercent)),
+    )
+    await expect(
+      page.locator('[data-testid="throughput-chart-fill-extent"]').first(),
+    ).toHaveAttribute('width', String(deletingQueueFinalProgressEvent.progressPercent))
+    await expect(page.locator('main')).toHaveScreenshot(
+      `transfer-queue-deleting-expanded-${mode}.png`,
+    )
   })
 
   test(`conflict modal ${mode}`, async ({ page }) => {
@@ -126,7 +157,10 @@ for (const mode of ['light', 'dark'] as const) {
 
   test(`row context menu ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.rowContextMenu[mode])
-    await page.getByRole('row', { name: /Documents/ }).first().click({ button: 'right' })
+    await page
+      .getByRole('row', { name: /Documents/ })
+      .first()
+      .click({ button: 'right' })
     const menu = page.getByRole('menu', { name: 'Documents' })
     await expect(menu).toBeVisible()
     await expect(menu.getByRole('menuitem', { name: 'Open in VS Code' })).toBeVisible()
@@ -135,7 +169,10 @@ for (const mode of ['light', 'dark'] as const) {
 
   test(`row context menu submenu ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.rowContextMenu[mode])
-    await page.getByRole('row', { name: /Documents/ }).first().click({ button: 'right' })
+    await page
+      .getByRole('row', { name: /Documents/ })
+      .first()
+      .click({ button: 'right' })
     const menu = page.getByRole('menu', { name: 'Documents' })
     await expect(menu).toBeVisible()
     const submenuParent = menu.getByRole('menuitem', { name: '7-Zip' })
@@ -183,7 +220,10 @@ for (const mode of ['light', 'dark'] as const) {
   test(`row context menu loading ${mode}`, async ({ page }) => {
     await page.clock.install()
     await gotoScenario(page, screenshotScenarios.rowContextMenuLoading[mode])
-    await page.getByRole('row', { name: /Documents/ }).first().click({ button: 'right' })
+    await page
+      .getByRole('row', { name: /Documents/ })
+      .first()
+      .click({ button: 'right' })
     await expect(page.getByRole('menu', { name: 'Documents' })).toBeVisible()
     await page.clock.fastForward(1_001)
     await expect(page.getByRole('status', { name: 'Loading native menu items' })).toBeVisible()
@@ -200,20 +240,29 @@ for (const mode of ['light', 'dark'] as const) {
 
   test(`rename inline ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
-    await page.getByRole('row', { name: /Documents/ }).first().click({ button: 'right' })
+    await page
+      .getByRole('row', { name: /Documents/ })
+      .first()
+      .click({ button: 'right' })
     const menu = page.getByRole('menu', { name: 'Documents' })
     await expect(menu).toBeVisible()
-    await menu.getByRole('group', { name: 'Quick actions' }).getByRole('menuitem', { name: 'Rename' }).click()
+    await menu
+      .getByRole('group', { name: 'Quick actions' })
+      .getByRole('menuitem', { name: 'Rename' })
+      .click()
     await expect(page.getByRole('textbox', { name: /Rename Documents/ })).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`rename-inline-editor-${mode}.png`)
   })
 
   test(`delete dialog ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
-    await page.getByRole('row', { name: /Documents/ }).first().click({ button: 'right' })
+    await page
+      .getByRole('row', { name: /Documents/ })
+      .first()
+      .click({ button: 'right' })
     const menu = page.getByRole('menu', { name: 'Documents' })
     await expect(menu).toBeVisible()
-    await menu.getByRole('group', { name: 'Quick actions' }).getByRole('menuitem', { name: 'Delete' }).click()
+    await menu.getByRole('menuitem', { name: 'Delete permanently' }).click()
     await expect(page.getByRole('dialog', { name: 'Confirm delete' })).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`delete-confirmation-dialog-${mode}.png`)
   })

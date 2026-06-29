@@ -8,7 +8,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-#[cfg(windows)]
 use file_explorer_lib::size::everything::EverythingAvailability;
 use file_explorer_lib::size::everything::{
     build_exact_folder_or_queries, escape_exact_folder_query_path, join_everything_result_path,
@@ -147,6 +146,33 @@ fn everything_stub_reports_unavailable_under_test_utils() {
         .is_err());
     assert!(handle
         .query_folder_sizes(&[fixture.path().join("folder").to_string_lossy().into_owned()])
+        .is_err());
+}
+
+#[cfg(not(windows))]
+#[test]
+fn everything_non_windows_stub_reports_unsupported_and_supports_in_memory_queries() {
+    let load_error = match EverythingHandle::load() {
+        Ok(_) => panic!("non-Windows load should be unsupported"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        load_error.to_string(),
+        "Everything is unsupported on this platform"
+    );
+
+    let mut results = HashMap::new();
+    results.insert("/tmp/known".to_string(), Some(42));
+    let handle = EverythingHandle::test_available(results);
+    assert_eq!(handle.availability(), EverythingAvailability::Available);
+    assert_eq!(
+        handle
+            .query_folder_size(std::path::Path::new("/tmp/known"))
+            .expect("query"),
+        Some(42),
+    );
+    assert!(EverythingHandle::test_available_error()
+        .query_folder_sizes(&["/tmp/known".to_string()])
         .is_err());
 }
 

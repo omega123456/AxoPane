@@ -8,6 +8,7 @@ pub mod native_menu;
 pub mod ops;
 pub mod persist;
 pub mod size;
+pub mod trash;
 pub mod volumes;
 pub mod watch;
 
@@ -150,7 +151,7 @@ pub fn run() {
             commands::create_folder,
             commands::create_file,
             commands::rename_entry,
-            commands::delete_entries,
+            commands::move_to_trash,
             commands::open_path,
             commands::write_file_clipboard,
             commands::clear_file_clipboard,

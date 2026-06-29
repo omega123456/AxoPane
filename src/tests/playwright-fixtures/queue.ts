@@ -202,6 +202,105 @@ export const expandedQueueSnapshot: OpSnapshot[] = [
   },
 ]
 
+export const deletingQueueProgressEvents: OpProgress[] = [
+  activeCopy({
+    operationId: 'op-delete',
+    kind: 'delete',
+    sourceDir: 'C:\\Users\\Omega\\Downloads',
+    itemNames: ['old-export.zip', 'scratch'],
+    destinationDir: '',
+    totalItems: 84,
+    completedItems: 8,
+    totalBytes: 1000,
+    copiedBytes: 95,
+    progressPercent: 9.5,
+    bytesPerSecond: 42_991_616,
+    etaSeconds: 86,
+    currentFileName: 'scratch\\cache.bin',
+    currentFileCopiedBytes: 95_000_000,
+    currentFileTotalBytes: 1_000_000_000,
+  }),
+  activeCopy({
+    operationId: 'op-delete',
+    kind: 'delete',
+    sourceDir: 'C:\\Users\\Omega\\Downloads',
+    itemNames: ['old-export.zip', 'scratch'],
+    destinationDir: '',
+    totalItems: 84,
+    completedItems: 17,
+    totalBytes: 1000,
+    copiedBytes: 205,
+    progressPercent: 20.5,
+    bytesPerSecond: 62_914_560,
+    etaSeconds: 69,
+    currentFileName: 'scratch\\cache.bin',
+    currentFileCopiedBytes: 205_000_000,
+    currentFileTotalBytes: 1_000_000_000,
+  }),
+  activeCopy({
+    operationId: 'op-delete',
+    kind: 'delete',
+    sourceDir: 'C:\\Users\\Omega\\Downloads',
+    itemNames: ['old-export.zip', 'scratch'],
+    destinationDir: '',
+    totalItems: 84,
+    completedItems: 28,
+    totalBytes: 1000,
+    copiedBytes: 330,
+    progressPercent: 33,
+    bytesPerSecond: 86_507_520,
+    etaSeconds: 56,
+    currentFileName: 'scratch\\cache.bin',
+    currentFileCopiedBytes: 330_000_000,
+    currentFileTotalBytes: 1_000_000_000,
+  }),
+  activeCopy({
+    operationId: 'op-delete',
+    kind: 'delete',
+    sourceDir: 'C:\\Users\\Omega\\Downloads',
+    itemNames: ['old-export.zip', 'scratch'],
+    destinationDir: '',
+    totalItems: 84,
+    completedItems: 37,
+    totalBytes: 1000,
+    copiedBytes: 440,
+    progressPercent: 44,
+    bytesPerSecond: 72_351_744,
+    etaSeconds: 48,
+    currentFileName: 'scratch\\cache.bin',
+    currentFileCopiedBytes: 440_000_000,
+    currentFileTotalBytes: 1_000_000_000,
+  }),
+]
+
+export const deletingQueueFinalProgressEvent =
+  deletingQueueProgressEvents[deletingQueueProgressEvents.length - 1]
+
+export const deletingQueueSnapshot: OpSnapshot[] = [
+  {
+    progress:
+      deletingQueueProgressEvents[0] ??
+      activeCopy({
+        operationId: 'op-delete',
+        kind: 'delete',
+        sourceDir: 'C:\\Users\\Omega\\Downloads',
+        itemNames: ['old-export.zip', 'scratch'],
+        destinationDir: '',
+        totalItems: 84,
+        completedItems: 37,
+        totalBytes: 1000,
+        copiedBytes: 440,
+        progressPercent: 44,
+        bytesPerSecond: 72_351_744,
+        etaSeconds: 48,
+        currentFileName: 'scratch\\cache.bin',
+        currentFileCopiedBytes: 440_000_000,
+        currentFileTotalBytes: 1_000_000_000,
+      }),
+    conflict: null,
+  },
+]
+
 export const expandedQueueSeedSnapshot: OpSnapshot[] = [
   {
     progress: expandedQueueProgressEvents[0],

@@ -84,13 +84,12 @@ describe('buildAppContextMenuContent', () => {
       'windows',
     )
 
-    expect(content.topStrip.map((item) => item.label)).toEqual([
-      'Cut',
-      'Copy',
-      'Rename',
-      'Delete',
+    expect(content.topStrip.map((item) => item.label)).toEqual(['Cut', 'Copy', 'Rename', 'Delete'])
+    expect(content.sections.map((section) => section.id)).toEqual([
+      'primary',
+      'secondary',
+      'footer',
     ])
-    expect(content.sections.map((section) => section.id)).toEqual(['primary', 'secondary', 'footer'])
     expect(content.sections[0]?.rows.map((row) => row.label)).toEqual([
       'Open',
       'Open in new tab',
@@ -101,6 +100,9 @@ describe('buildAppContextMenuContent', () => {
     expect(content.sections[1]?.rows.find((row) => row.label === 'Calculate size')?.disabled).toBe(
       false,
     )
+    expect(
+      content.sections[1]?.rows.find((row) => row.label === 'Delete permanently'),
+    ).toMatchObject({ danger: true })
     expect(content.sections[2]?.rows.map((row) => row.label)).toEqual(['Properties'])
   })
 
@@ -123,18 +125,18 @@ describe('buildAppContextMenuContent', () => {
       'windows',
     )
 
-    expect(folderContent.sections[1]?.rows.find((row) => row.label === 'Calculate size')?.hidden).toBe(
-      true,
-    )
+    expect(
+      folderContent.sections[1]?.rows.find((row) => row.label === 'Calculate size')?.hidden,
+    ).toBe(true)
     expect(fileContent.sections[1]?.rows.find((row) => row.label === 'Extract')?.disabled).toBe(
       true,
     )
     expect(zipContent.sections[1]?.rows.find((row) => row.label === 'Extract')?.disabled).toBe(
       false,
     )
-    expect(fileContent.sections[0]?.rows.find((row) => row.label === 'Open in new tab')?.disabled).toBe(
-      true,
-    )
+    expect(
+      fileContent.sections[0]?.rows.find((row) => row.label === 'Open in new tab')?.disabled,
+    ).toBe(true)
     expect(
       fileContent.sections[0]?.rows.find((row) => row.label === 'Open in new tab')?.shortcut,
     ).toBe('⌘Enter')
@@ -155,17 +157,16 @@ describe('buildAppContextMenuContent', () => {
       'windows',
     )
 
-    expect(multiContent.topStrip.map((item) => item.label)).toEqual([
-      'Cut',
-      'Copy',
-      'Delete',
-    ])
+    expect(multiContent.topStrip.map((item) => item.label)).toEqual(['Cut', 'Copy', 'Delete'])
+    expect(
+      multiContent.sections[0]?.rows.find((row) => row.label === 'Delete permanently'),
+    ).toMatchObject({ danger: true, disabled: false })
     expect(multiContent.sections[1]?.rows.map((row) => row.label)).toEqual(['Properties'])
     expect(treeContent.topStrip).toEqual([])
     expect(treeContent.sections[0]?.rows[0]?.label).toBe('Open')
-    expect(treeContent.sections[1]?.rows.find((row) => row.label === 'Calculate size')?.disabled).toBe(
-      true,
-    )
+    expect(
+      treeContent.sections[1]?.rows.find((row) => row.label === 'Calculate size')?.disabled,
+    ).toBe(true)
     expect(treeContent.sections[2]?.rows.map((row) => row.label)).toEqual(['Properties'])
   })
 
@@ -175,7 +176,16 @@ describe('buildAppContextMenuContent', () => {
         ...state.panes,
         left: {
           ...state.panes.left,
-          entries: [zipEntry, { ...zipEntry, id: 'archive-2', path: 'C:\\Users\\Omega\\Other.ZIP', name: 'Other.ZIP' }, fileEntry],
+          entries: [
+            zipEntry,
+            {
+              ...zipEntry,
+              id: 'archive-2',
+              path: 'C:\\Users\\Omega\\Other.ZIP',
+              name: 'Other.ZIP',
+            },
+            fileEntry,
+          ],
         },
       },
     }))

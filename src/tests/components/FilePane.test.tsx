@@ -7,6 +7,7 @@ import { ContextMenu } from '@/components/menus/ContextMenu'
 import { FilePane } from '@/components/pane/FilePane'
 import { executeCommand } from '@/lib/commands'
 import { resolveCommandForEvent } from '@/lib/keymap'
+import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useClipboardStore } from '@/stores/clipboard-store'
 import { useInlineRenameStore } from '@/stores/inline-rename-store'
 import { useKeymapStore } from '@/stores/keymap-store'
@@ -47,6 +48,7 @@ beforeEach(() => {
   useTabsStore.getState().reset()
   useSelectionStore.getState().reset()
   useInlineRenameStore.getState().reset()
+  useActionDialogStore.getState().close()
 })
 
 describe('FilePane state rendering', () => {
@@ -461,6 +463,24 @@ describe('FilePane state rendering', () => {
     } finally {
       window.removeEventListener('keydown', fallback)
     }
+  })
+
+  it('suppresses pane shortcuts while an app-modal dialog is open', async () => {
+    const user = userEvent.setup()
+    const refreshEverything = vi.fn(() => Promise.resolve())
+    usePanesStore.setState({ refreshEverything })
+    seedPane({ entries: [entry('Alpha')], focusedEntryId: 'Alpha' })
+    useActionDialogStore.getState().open({
+      kind: 'delete',
+      paneId: 'left',
+      targets: [{ id: 'Alpha', name: 'Alpha', path: 'C:\\root\\Alpha' }],
+    })
+
+    render(<FilePane paneId="left" />)
+    screen.getByLabelText('Left pane').focus()
+    await user.keyboard('{Control>}r{/Control}')
+
+    expect(refreshEverything).not.toHaveBeenCalled()
   })
 
   it('dims rows whose paths are currently cut in the app clipboard', () => {

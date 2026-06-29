@@ -41,6 +41,9 @@ const LIVE_REGION_THROTTLE_MS = 5000
 const METRICS_REFRESH_MS = 500
 
 function verb(operation: OpProgress) {
+  if (operation.kind === 'delete') {
+    return 'Deleting'
+  }
   return operation.kind === 'move' ? 'Moving' : 'Copying'
 }
 
@@ -75,10 +78,7 @@ export function JobCard({
   const roundedPercent = Math.round(percent)
   const filePercent =
     operation.currentFileTotalBytes > 0
-      ? Math.min(
-          100,
-          (operation.currentFileCopiedBytes / operation.currentFileTotalBytes) * 100,
-        )
+      ? Math.min(100, (operation.currentFileCopiedBytes / operation.currentFileTotalBytes) * 100)
       : 0
   const isCompleted = operation.status === 'completed'
   const isFailed = operation.status === 'failed'
@@ -98,8 +98,7 @@ export function JobCard({
   const metrics = useMemo(
     () => ({
       rate: formatRate(currentRate),
-      eta:
-        operation.etaSeconds !== null ? formatEta(operation.etaSeconds) : 'estimating…',
+      eta: operation.etaSeconds !== null ? formatEta(operation.etaSeconds) : 'estimating…',
       items: `${formatCount(operation.completedItems)} / ${formatCount(operation.totalItems)} items`,
     }),
     [currentRate, operation.completedItems, operation.etaSeconds, operation.totalItems],
@@ -153,10 +152,7 @@ export function JobCard({
       liveRegionTimerRef.current = null
       const nextAnnouncement = pendingLiveAnnouncementRef.current
       pendingLiveAnnouncementRef.current = null
-      if (
-        nextAnnouncement !== null &&
-        nextAnnouncement !== liveMetricsAnnouncementRef.current
-      ) {
+      if (nextAnnouncement !== null && nextAnnouncement !== liveMetricsAnnouncementRef.current) {
         setLiveMetricsAnnouncement(nextAnnouncement)
         liveMetricsAnnouncementRef.current = nextAnnouncement
       }
@@ -200,9 +196,7 @@ export function JobCard({
               {isCompleted ? (
                 <CheckCircleIcon className="h-4 w-4 shrink-0 text-accent-green" />
               ) : null}
-              {isFailed ? (
-                <XCircleIcon className="h-4 w-4 shrink-0 text-accent-red" />
-              ) : null}
+              {isFailed ? <XCircleIcon className="h-4 w-4 shrink-0 text-accent-red" /> : null}
               {isCancelled ? (
                 <XCircleIcon className="h-4 w-4 shrink-0 text-light-text-muted dark:text-dark-text-muted" />
               ) : null}
@@ -213,7 +207,7 @@ export function JobCard({
                     ? `${verb(operation)} failed`
                     : isCancelled
                       ? `${verb(operation)} cancelled`
-                    : `${verb(operation)} ${formatCount(operation.totalItems)} items`}
+                      : `${verb(operation)} ${formatCount(operation.totalItems)} items`}
               </span>
             </div>
             <div className="mt-1 truncate font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
@@ -242,7 +236,9 @@ export function JobCard({
           {liveMetricsAnnouncement}
         </span>
         <div className="flex flex-wrap items-center gap-2 font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-          <span className="text-light-text-soft dark:text-dark-text-soft">{displayMetrics.rate}</span>
+          <span className="text-light-text-soft dark:text-dark-text-soft">
+            {displayMetrics.rate}
+          </span>
           <span className="text-light-text-faint dark:text-dark-text-faint">·</span>
           <span>{displayMetrics.eta}</span>
           <span className="text-light-text-faint dark:text-dark-text-faint">·</span>

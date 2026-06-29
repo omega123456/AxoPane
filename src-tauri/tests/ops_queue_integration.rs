@@ -120,6 +120,43 @@ fn move_removes_source() {
     assert!(!source.exists());
 }
 
+#[test]
+fn delete_removes_files_and_directories_through_the_queue() {
+    let dir = tempdir().expect("temp dir");
+    let file = dir.path().join("doomed.txt");
+    let tree = dir.path().join("tree");
+    fs::create_dir(&tree).expect("tree");
+    fs::write(&file, b"doomed").expect("file");
+    fs::write(tree.join("child.txt"), b"child").expect("child");
+
+    let service = OpsService::new(Duration::from_millis(50));
+    service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
+
+    let id = service.start_op(StartOpRequest {
+        kind: OpKind::Delete,
+        destination_dir: String::new(),
+        items: vec![
+            OpItem {
+                source_path: file.to_string_lossy().into_owned(),
+                name: "doomed.txt".to_string(),
+                size_bytes: 6,
+            },
+            OpItem {
+                source_path: tree.to_string_lossy().into_owned(),
+                name: "tree".to_string(),
+                size_bytes: 0,
+            },
+        ],
+    });
+
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed && progress.copied_bytes >= 11
+    });
+
+    assert!(!file.exists());
+    assert!(!tree.exists());
+}
+
 /// Build an op whose single item conflicts with a pre-existing destination file,
 /// so the op deterministically parks in `Conflict` (and thus stays "in flight").
 fn parking_op(service: &OpsService, dir: &Path) -> String {

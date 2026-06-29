@@ -1,6 +1,6 @@
 import { startOp } from '@/lib/queue-commands'
 import { log } from '@/lib/app-log-commands'
-import { clearFileClipboard, openPath, writeFileClipboard } from '@/lib/ipc/commands'
+import { clearFileClipboard, moveToTrash, openPath, writeFileClipboard } from '@/lib/ipc/commands'
 import type { CommandId, DirectoryEntry } from '@/lib/types/ipc'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useClipboardStore } from '@/stores/clipboard-store'
@@ -116,6 +116,23 @@ export function executeCommand(
       break
     }
     case 'delete': {
+      // Default delete moves to the OS bin/Recycle Bin/Trash (reversible, no
+      // confirmation — matching Explorer/Finder). The fs watcher refreshes the
+      // listing once the items disappear.
+      if (effectiveEntries.length > 0) {
+        void moveToTrash({ paths: effectiveEntries.map((item) => item.path) }).catch((error) => {
+          log.error('move to trash failed', {
+            paneId,
+            paths: effectiveEntries.map((item) => item.path),
+            error,
+          })
+        })
+      }
+      break
+    }
+    case 'deletePermanent': {
+      // Irreversible hard delete: confirm first, then enqueue through the queue
+      // engine (shared toast/progress + per-disk lock) from the dialog.
       if (effectiveEntries.length > 0) {
         useActionDialogStore.getState().open({
           kind: 'delete',
@@ -124,6 +141,7 @@ export function executeCommand(
             id: item.id,
             name: item.name,
             path: item.path,
+            sizeBytes: item.sizeBytes,
           })),
         })
       }
@@ -234,6 +252,7 @@ export function canExecuteCommand(
     case 'cut':
     case 'rename':
     case 'delete':
+    case 'deletePermanent':
       return Boolean(entry || selection.selectedIds.length > 0)
     case 'copyToOtherPane':
     case 'moveToOtherPane':

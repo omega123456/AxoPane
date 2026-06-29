@@ -80,7 +80,7 @@ describe('SettingsModal', () => {
     expect(within(copyRow).queryByText('Conflict')).toBeNull()
   })
 
-  it('keeps theme, hidden-file, and column changes in draft on Windows until Save', async () => {
+  it('auto-saves theme, hidden-file, and column changes on Windows', async () => {
     const user = userEvent.setup()
     const saveConfig = vi.fn((payload) => payload.config)
     ipc.override('save_config', saveConfig)
@@ -94,15 +94,6 @@ describe('SettingsModal', () => {
     await user.click(screen.getByRole('button', { name: 'Columns' }))
     await user.click(screen.getByRole('switch', { name: 'Created column' }))
 
-    expect(usePanesStore.getState().showHiddenFiles).toBe(false)
-    expect(useThemeStore.getState().preference).toBe('system')
-    expect(useLayoutStore.getState().detailsVisible).toBe(false)
-    expect(
-      useLayoutStore.getState().columns.find((column) => column.key === 'created')?.visible,
-    ).toBe(false)
-
-    await user.click(screen.getByRole('button', { name: 'Save changes' }))
-
     await waitFor(() => {
       expect(usePanesStore.getState().showHiddenFiles).toBe(true)
       expect(useThemeStore.getState().preference).toBe('dark')
@@ -112,6 +103,8 @@ describe('SettingsModal', () => {
       ).toBe(true)
       expect(saveConfig).toHaveBeenCalled()
     })
+    expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument()
+    expect(screen.getByText('Changes apply immediately.')).toBeInTheDocument()
   })
 
   it('persists the update check frequency from the Updates section', async () => {
@@ -150,7 +143,7 @@ describe('SettingsModal', () => {
     setProperty.mockRestore()
   })
 
-  it('resets the draft back to defaults before saving on Windows', async () => {
+  it('resets back to defaults immediately on Windows', async () => {
     const user = userEvent.setup()
     setPlatform('Win32')
     useSettingsStore.getState().open('layout')
@@ -166,9 +159,11 @@ describe('SettingsModal', () => {
       'false',
     )
     expect(screen.getByRole('radio', { name: 'System' })).toHaveAttribute('aria-checked', 'true')
-    expect(usePanesStore.getState().showHiddenFiles).toBe(false)
-    expect(useThemeStore.getState().preference).toBe('system')
-    expect(useLayoutStore.getState().detailsVisible).toBe(false)
+    await waitFor(() => {
+      expect(usePanesStore.getState().showHiddenFiles).toBe(false)
+      expect(useThemeStore.getState().preference).toBe('system')
+      expect(useLayoutStore.getState().detailsVisible).toBe(false)
+    })
   })
 })
 

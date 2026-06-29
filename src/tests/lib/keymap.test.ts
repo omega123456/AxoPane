@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   captureShortcut,
   defaultKeymap,
@@ -11,7 +11,18 @@ import {
   resolveCommandForEvent,
 } from '@/lib/keymap'
 
+const originalPlatform = navigator.platform
+
+function setPlatform(value: string) {
+  Object.defineProperty(navigator, 'platform', { value, configurable: true })
+}
+
 describe('keymap', () => {
+  afterEach(() => {
+    setPlatform(originalPlatform)
+    vi.resetModules()
+  })
+
   it('normalizes and formats shortcuts from a shared source of truth', () => {
     expect(normalizeShortcut('cmd+,')).toBe('Meta+,')
     expect(formatShortcutLabel('Ctrl+R', 'windows')).toBe('Ctrl+R')
@@ -64,5 +75,31 @@ describe('keymap', () => {
     const conflicted = mergeKeymap({ refresh: ['F5'] })
 
     expect(resolveCommandForEvent(event, conflicted)).toBe('copyToOtherPane')
+  })
+
+  it('uses platform-aware delete defaults and resolves permanent delete shortcuts', async () => {
+    setPlatform('MacIntel')
+    vi.resetModules()
+    const macKeymap = await import('@/lib/keymap')
+    expect(macKeymap.defaultKeymap.delete).toEqual(['F8', 'Delete'])
+    expect(macKeymap.defaultKeymap.deletePermanent).toEqual(['Shift+F8', 'Shift+Delete'])
+    expect(
+      macKeymap.resolveCommandForEvent(
+        new KeyboardEvent('keydown', { key: 'F8', shiftKey: true }),
+        macKeymap.defaultKeymap,
+      ),
+    ).toBe('deletePermanent')
+
+    setPlatform('Win32')
+    vi.resetModules()
+    const windowsKeymap = await import('@/lib/keymap')
+    expect(windowsKeymap.defaultKeymap.delete).toEqual(['Delete'])
+    expect(windowsKeymap.defaultKeymap.deletePermanent).toEqual(['Shift+Delete'])
+    expect(
+      windowsKeymap.resolveCommandForEvent(
+        new KeyboardEvent('keydown', { key: 'Delete', shiftKey: true }),
+        windowsKeymap.defaultKeymap,
+      ),
+    ).toBe('deletePermanent')
   })
 })

@@ -24,9 +24,7 @@ impl MenuCache {
     pub fn get(&self, request: &LoadNativeMenuRequest) -> Option<Vec<ProviderNativeMenuItem>> {
         let key = cache_key(request);
         let entries = self.entries.lock().expect("menu cache lock");
-        entries
-            .get(&key)
-            .map(|items| rebind_items(items, request))
+        entries.get(&key).map(|items| rebind_items(items, request))
     }
 
     /// Stores the (already deduped) menu structure for the request's file type.
@@ -72,7 +70,10 @@ fn target_kind_key(kind: &NativeMenuTargetKind) -> &'static str {
 /// de-duplicated, lowercased extensions of the selected paths. Two selections of
 /// the same file type(s) share a signature regardless of their concrete paths.
 fn type_signature(selected_paths: &[String]) -> String {
-    let mut extensions: Vec<String> = selected_paths.iter().map(|path| extension_of(path)).collect();
+    let mut extensions: Vec<String> = selected_paths
+        .iter()
+        .map(|path| extension_of(path))
+        .collect();
     extensions.sort();
     extensions.dedup();
     extensions.join("|")
@@ -82,10 +83,7 @@ fn type_signature(selected_paths: &[String]) -> String {
 /// string when there is none. Leading-dot names (e.g. `.gitignore`) and paths
 /// with no dot are treated as extensionless.
 fn extension_of(path: &str) -> String {
-    let file_name = path
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(path);
+    let file_name = path.rsplit(['/', '\\']).next().unwrap_or(path);
 
     match file_name.rsplit_once('.') {
         Some((stem, extension)) if !stem.is_empty() && !extension.is_empty() => {

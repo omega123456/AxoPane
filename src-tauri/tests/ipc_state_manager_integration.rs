@@ -9,9 +9,9 @@ use std::time::{Duration, Instant};
 use file_explorer_lib::fs::{SortDirection, SortKey};
 use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::types::{
-    CancelSizeRequest, CreateEntryRequest, DeleteEntriesRequest, LogFrontendRequest, OpIdRequest,
-    OpenPathRequest, RefreshTabRequest, ReorderOpsRequest, ResolveConflictRequest,
-    SaveConfigRequest, SaveSessionRequest, SetTabWatchRequest,
+    CancelSizeRequest, CreateEntryRequest, LogFrontendRequest, OpIdRequest, OpenPathRequest,
+    RefreshTabRequest, ReorderOpsRequest, ResolveConflictRequest, SaveConfigRequest,
+    SaveSessionRequest, SetTabWatchRequest, TrashEntriesRequest,
 };
 use file_explorer_lib::ops::{
     ConflictResolution, OpItem, OpKind, OpStatus, OpsService, StartOpRequest,
@@ -152,13 +152,13 @@ fn commands_cover_filesystem_and_persistence_state() {
     .expect("rename");
     assert_eq!(renamed.name, "done.txt");
 
-    commands::delete_entries(DeleteEntriesRequest {
+    commands::move_to_trash(TrashEntriesRequest {
         paths: vec![
             root.join("Docs").to_string_lossy().into_owned(),
             root.join("done.txt").to_string_lossy().into_owned(),
         ],
     })
-    .expect("delete entries");
+    .expect("move to trash");
     assert!(!root.join("Docs").exists());
     assert!(!root.join("done.txt").exists());
 

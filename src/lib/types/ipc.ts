@@ -10,6 +10,7 @@ export type CommandId =
   | 'refresh'
   | 'rename'
   | 'delete'
+  | 'deletePermanent'
   | 'copy'
   | 'cut'
   | 'paste'
@@ -213,7 +214,7 @@ export type RenameEntryRequest = {
   newName: string
 }
 
-export type DeleteEntriesRequest = {
+export type TrashEntriesRequest = {
   paths: string[]
 }
 
@@ -336,7 +337,7 @@ export type VolumesChangedEvent = {
   volumes: VolumeInfo[]
 }
 
-export type OpKind = 'copy' | 'move'
+export type OpKind = 'copy' | 'move' | 'delete'
 
 export type OpStatus =
   | 'pending'
@@ -459,8 +460,8 @@ export type IpcCommandMap = {
     request: RenameEntryRequest
     response: DirectoryEntry
   }
-  delete_entries: {
-    request: DeleteEntriesRequest
+  move_to_trash: {
+    request: TrashEntriesRequest
     response: void
   }
   open_path: {

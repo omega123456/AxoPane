@@ -16,14 +16,14 @@ use std::time::{Duration, Instant};
 use super::mock;
 use super::types::{
     AppConfig, CancelSizeRequest, CancelSizeResponse, CompressArchiveRequest, CreateEntryRequest,
-    DeleteEntriesRequest, ExtractArchiveRequest, FileClipboardMode, FolderSizeRequest,
-    FolderSizesRequest, InitialShellResponse, InvokeNativeMenuRequest, ListDirRequest,
-    ListDirResponse, ListTreeChildrenRequest, ListTreeChildrenResponse, LoadNativeMenuRequest,
+    ExtractArchiveRequest, FileClipboardMode, FolderSizeRequest, FolderSizesRequest,
+    InitialShellResponse, InvokeNativeMenuRequest, ListDirRequest, ListDirResponse,
+    ListTreeChildrenRequest, ListTreeChildrenResponse, LoadNativeMenuRequest,
     LoadNativeMenuResponse, LogFrontendRequest, MenuActionStatus, OpIdRequest, OpenPathRequest,
     OpenWithRequest, RefreshTabRequest, RenameEntryRequest, ReorderOpsRequest,
     ResolveConflictRequest, SaveConfigRequest, SaveSessionRequest, SessionState,
-    SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent, StartOpRequest, VolumeInfo,
-    WriteFileClipboardRequest,
+    SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent, StartOpRequest, TrashEntriesRequest,
+    VolumeInfo, WriteFileClipboardRequest,
 };
 use crate::fs::DirectoryEntry;
 use std::path::Path;
@@ -93,9 +93,9 @@ pub fn rename_entry(payload: RenameEntryRequest) -> Result<DirectoryEntry, Strin
 }
 
 #[tauri::command]
-pub fn delete_entries(payload: DeleteEntriesRequest) -> Result<(), String> {
-    fs::delete_entries(&payload.paths).map_err(|error| {
-        let message = format!("Failed to delete items: {error}");
+pub fn move_to_trash(payload: TrashEntriesRequest) -> Result<(), String> {
+    crate::trash::move_to_trash(&payload.paths).map_err(|error| {
+        let message = format!("Failed to move items to trash: {error}");
         log::error!("{message}");
         message
     })

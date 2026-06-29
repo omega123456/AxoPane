@@ -2,11 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { DialogShell } from '@/components/dialogs/DialogShell'
 import { AlertTriangleIcon } from '@/components/icons'
 import { log } from '@/lib/app-log-commands'
-import {
-  createFileInPane,
-  createFolderInPane,
-  deleteEntriesInPane,
-} from '@/lib/file-actions'
+import { createFileInPane, createFolderInPane } from '@/lib/file-actions'
 import { startOp } from '@/lib/queue-commands'
 import { useActionDialogStore, type ActionDialog as ActionDialogState } from '@/stores/action-dialog-store'
 
@@ -149,7 +145,18 @@ function DeleteDialog({ dialog }: { dialog: Extract<ActionDialogState, { kind: '
     setBusy(true)
     setError(null)
     try {
-      await deleteEntriesInPane(dialog.paneId, dialog.targets)
+      // Enqueue an irreversible delete through the shared queue engine so it
+      // reuses the copy/move toast, progress and per-disk lock. Destination is
+      // unused for deletes.
+      await startOp({
+        kind: 'delete',
+        destinationDir: '',
+        items: dialog.targets.map((target) => ({
+          sourcePath: target.path,
+          name: target.name,
+          sizeBytes: target.sizeBytes ?? 0,
+        })),
+      })
       close()
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)

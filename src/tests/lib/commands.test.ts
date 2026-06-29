@@ -165,9 +165,23 @@ describe('executeCommand file actions', () => {
     expect(useInlineRenameStore.getState().rename).toBeNull()
   })
 
-  it('opens a delete confirmation for the selected entries', () => {
+  it('moves selected entries to trash without opening a dialog', async () => {
+    const moveToTrash = vi.fn(() => undefined)
+    ipc.override('move_to_trash', moveToTrash)
     useSelectionStore.getState().setSelection('left', ['Alpha', 'Beta'], 'Alpha', 'Beta')
+
     executeCommand('delete', 'left')
+
+    await waitFor(() => expect(moveToTrash).toHaveBeenCalledOnce())
+    expect(moveToTrash).toHaveBeenCalledWith({
+      paths: ['C:\\root\\Alpha', 'C:\\root\\Beta'],
+    })
+    expect(useActionDialogStore.getState().dialog).toBeNull()
+  })
+
+  it('opens a permanent delete confirmation for the selected entries', () => {
+    useSelectionStore.getState().setSelection('left', ['Alpha', 'Beta'], 'Alpha', 'Beta')
+    executeCommand('deletePermanent', 'left')
     const dialog = useActionDialogStore.getState().dialog
     expect(dialog?.kind).toBe('delete')
     expect(dialog).toMatchObject({
@@ -277,8 +291,10 @@ describe('executeCommand file actions', () => {
   it('gates rename/delete on a target or selection', () => {
     expect(canExecuteCommand('rename', 'left', 'Alpha')).toBe(true)
     expect(canExecuteCommand('delete', 'left')).toBe(false)
+    expect(canExecuteCommand('deletePermanent', 'left')).toBe(false)
     useSelectionStore.getState().setSelection('left', ['Alpha'], 'Alpha', 'Alpha')
     expect(canExecuteCommand('delete', 'left')).toBe(true)
+    expect(canExecuteCommand('deletePermanent', 'left')).toBe(true)
   })
 
   it('gates commands that require clipboard entries, directory targets, or transfer candidates', () => {

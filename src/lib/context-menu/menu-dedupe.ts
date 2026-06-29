@@ -25,6 +25,7 @@ const APP_OWNED_NORMALIZED_VERBS = new Set([
   'paste',
   'rename',
   'delete',
+  'deletepermanently',
   'properties',
   'compress',
   'extract',
@@ -53,7 +54,10 @@ export function dedupeNativeMenuItems(items: NativeMenuItem[]): NativeMenuItem[]
 
 function isAppOwnedDuplicate(item: NativeMenuItem): boolean {
   const normalizedVerb = normalizeVerb(item.normalizedVerb ?? item.label)
-  if (item.children.length > 0 && !isAlwaysAppOwnedSubmenu(item.canonicalActionKind, normalizedVerb)) {
+  if (
+    item.children.length > 0 &&
+    !isAlwaysAppOwnedSubmenu(item.canonicalActionKind, normalizedVerb)
+  ) {
     return false
   }
 

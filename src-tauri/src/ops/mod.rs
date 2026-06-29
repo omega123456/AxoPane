@@ -36,6 +36,7 @@ const ETA_STABILIZATION_SAMPLES: u64 = 3;
 pub enum OpKind {
     Copy,
     Move,
+    Delete,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -352,7 +353,10 @@ impl OpsService {
             .iter()
             .map(|item| PathBuf::from(&item.source_path))
             .collect();
-        source_paths.push(destination_dir.clone());
+        // A delete has no destination; lock only the source volume(s).
+        if !matches!(request.kind, OpKind::Delete) {
+            source_paths.push(destination_dir.clone());
+        }
         let path_refs: Vec<&Path> = source_paths.iter().map(PathBuf::as_path).collect();
         let op_volumes = self.volumes_for(&path_refs);
 
@@ -658,7 +662,12 @@ impl OpsService {
 
     /// The per-op wakeup signal, used to notify a parked worker for `id`.
     fn signal(&self, id: &str) -> Option<Arc<Condvar>> {
-        self.inner.lock().expect("ops lock").signals.get(id).cloned()
+        self.inner
+            .lock()
+            .expect("ops lock")
+            .signals
+            .get(id)
+            .cloned()
     }
 }
 
@@ -777,12 +786,47 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
     };
 
     let source = PathBuf::from(&item.source_path);
+
+    // A delete has no destination and no conflicts: remove the source in place,
+    // reporting byte progress so it shares the copy/move toast + queue UI.
+    if matches!(kind, OpKind::Delete) {
+        wait_while_paused(op_arc, ctx.resolver);
+        if op_arc
+            .lock()
+            .expect("op lock")
+            .cancel
+            .load(Ordering::Relaxed)
+        {
+            return;
+        }
+        let add_discovered_totals = item.size_bytes == 0 && source.is_dir();
+        match delete_path_with_progress(&source, add_discovered_totals, ctx) {
+            Ok(()) => {
+                if op_arc
+                    .lock()
+                    .expect("op lock")
+                    .cancel
+                    .load(Ordering::Relaxed)
+                {
+                    return;
+                }
+                advance_item(ctx, item);
+            }
+            Err(message) => {
+                op_arc.lock().expect("op lock").error_message = Some(message);
+            }
+        }
+        return;
+    }
+
     let mut target = destination_dir.join(&item.name);
 
     if source.is_dir() && is_nested_copy_target(&source, &target) {
         let action = match kind {
             OpKind::Copy => "copy",
             OpKind::Move => "move",
+            // Unreachable: delete returns earlier (no destination target).
+            OpKind::Delete => "delete",
         };
         let mut op = op_arc.lock().expect("op lock");
         op.error_message = Some(format!(
@@ -1234,6 +1278,90 @@ pub fn copy_dir_recursive(
             )?;
         }
     }
+    Ok(())
+}
+
+/// Remove `source` (file or directory tree) reporting byte progress through the
+/// shared worker context, honoring pause/cancel. When `add_discovered_totals`
+/// is set (a directory whose size was not pre-measured), each removed file's
+/// bytes are folded into the operation total as they are discovered.
+pub fn delete_path_with_progress(
+    source: &Path,
+    add_discovered_totals: bool,
+    ctx: &WorkerCtx<'_>,
+) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(source).map_err(|error| error.to_string())?;
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        delete_dir_recursive(source, add_discovered_totals, ctx)
+    } else {
+        delete_file_with_progress(source, add_discovered_totals, ctx)
+    }
+}
+
+fn delete_dir_recursive(
+    source: &Path,
+    add_discovered_totals: bool,
+    ctx: &WorkerCtx<'_>,
+) -> Result<(), String> {
+    for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
+        if ctx
+            .op_arc
+            .lock()
+            .expect("op lock")
+            .cancel
+            .load(Ordering::Relaxed)
+        {
+            return Ok(());
+        }
+
+        let entry = entry.map_err(|error| error.to_string())?;
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        if file_type.is_dir() && !file_type.is_symlink() {
+            delete_dir_recursive(&entry.path(), add_discovered_totals, ctx)?;
+        } else {
+            delete_file_with_progress(&entry.path(), add_discovered_totals, ctx)?;
+        }
+    }
+
+    if ctx
+        .op_arc
+        .lock()
+        .expect("op lock")
+        .cancel
+        .load(Ordering::Relaxed)
+    {
+        return Ok(());
+    }
+
+    fs::remove_dir(source).map_err(|error| error.to_string())
+}
+
+fn delete_file_with_progress(
+    source: &Path,
+    add_discovered_totals: bool,
+    ctx: &WorkerCtx<'_>,
+) -> Result<(), String> {
+    wait_while_paused(ctx.op_arc, ctx.resolver);
+    if ctx
+        .op_arc
+        .lock()
+        .expect("op lock")
+        .cancel
+        .load(Ordering::Relaxed)
+    {
+        return Ok(());
+    }
+
+    let file_size = fs::symlink_metadata(source)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    if add_discovered_totals {
+        add_discovered_total(ctx, file_size);
+    }
+    begin_file_progress(ctx, source, file_size);
+    fs::remove_file(source).map_err(|error| error.to_string())?;
+    report_chunk_progress(ctx, file_size);
+    finish_file_progress(ctx);
     Ok(())
 }
 

@@ -48,6 +48,11 @@ describe('dedupeNativeMenuItems', () => {
         normalizedVerb: null,
       }),
       item({
+        id: 'duplicate-delete-permanent-by-label',
+        label: 'Delete permanently',
+        normalizedVerb: null,
+      }),
+      item({
         id: 'keep-custom',
         label: 'Scan with Fixture',
         normalizedVerb: 'scanwithfixture',

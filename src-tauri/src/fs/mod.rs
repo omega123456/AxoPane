@@ -364,23 +364,6 @@ pub fn rename_entry(path: &str, new_name: &str) -> Result<DirectoryEntry, FsErro
     build_entry_from_path(&target)
 }
 
-/// Permanently deletes the items at the given paths (files or directories,
-/// recursively). Best-effort: the first failure aborts and is reported.
-pub fn delete_entries(paths: &[String]) -> Result<(), FsError> {
-    for path in paths {
-        let target = Path::new(path);
-        let metadata = fs::symlink_metadata(target)?;
-        if metadata.is_dir() && !metadata.file_type().is_symlink() {
-            fs::remove_dir_all(target)?;
-        } else {
-            fs::remove_file(target)?;
-        }
-        log::info!("delete_entries: removed {}", target.display());
-    }
-
-    Ok(())
-}
-
 /// Builds a [`DirectoryEntry`] from an absolute path (used after a mutating
 /// operation produces a new/renamed item). Mirrors [`build_entry`] but reads
 /// metadata directly from the path rather than a [`DirEntry`].

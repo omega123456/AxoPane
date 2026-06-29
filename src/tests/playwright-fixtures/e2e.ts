@@ -9,6 +9,8 @@ import type {
 import { contextMenuFixtures } from './context-menu'
 import {
   conflictQueueSnapshot,
+  deletingQueueProgressEvents,
+  deletingQueueSnapshot,
   emptyQueueSnapshot,
   expandedQueueProgressEvents,
   expandedQueueSeedSnapshot,
@@ -370,6 +372,26 @@ export const screenshotScenarios = {
       },
       events: {
         'queue://progress': expandedQueueProgressEvents,
+      },
+    },
+  },
+  queueDeleting: {
+    light: {
+      commands: {
+        load_config: lightConfig,
+        queue_snapshot: deletingQueueSnapshot,
+      },
+      events: {
+        'queue://progress': deletingQueueProgressEvents,
+      },
+    },
+    dark: {
+      commands: {
+        load_config: darkConfig,
+        queue_snapshot: deletingQueueSnapshot,
+      },
+      events: {
+        'queue://progress': deletingQueueProgressEvents,
       },
     },
   },

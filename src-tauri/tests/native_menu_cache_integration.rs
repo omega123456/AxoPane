@@ -170,7 +170,10 @@ fn second_load_of_same_file_type_hits_cache_and_rebinds_paths() {
     let fake_token = second.items[2].invoke_token.clone().expect("fake token");
     let fake_invoked = service.invoke_menu_action(InvokeNativeMenuRequest { token: fake_token });
     assert!(fake_invoked.handled);
-    assert_eq!(fake_invoked.message.as_deref(), Some("fake:fake.scriptable"));
+    assert_eq!(
+        fake_invoked.message.as_deref(),
+        Some("fake:fake.scriptable")
+    );
 }
 
 #[test]

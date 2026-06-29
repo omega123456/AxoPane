@@ -1,6 +1,6 @@
 use std::fs;
 
-use file_explorer_lib::fs::{create_directory, create_file, delete_entries, rename_entry, FsError};
+use file_explorer_lib::fs::{create_directory, create_file, rename_entry, FsError};
 use tempfile::tempdir;
 
 #[test]
@@ -98,32 +98,4 @@ fn rejects_invalid_rename_targets() {
 
     let error = rename_entry(&source.to_string_lossy(), "nested/name").expect_err("invalid");
     assert!(matches!(error, FsError::InvalidName(_)));
-}
-
-#[test]
-fn deletes_files_and_directories_recursively() {
-    let fixture = tempdir().expect("temp dir");
-    let file = fixture.path().join("doomed.txt");
-    fs::write(&file, "x").expect("seed file");
-    let dir = fixture.path().join("tree");
-    fs::create_dir(&dir).expect("seed dir");
-    fs::write(dir.join("child.txt"), "y").expect("seed child");
-
-    delete_entries(&[
-        file.to_string_lossy().into_owned(),
-        dir.to_string_lossy().into_owned(),
-    ])
-    .expect("delete");
-
-    assert!(!file.exists());
-    assert!(!dir.exists());
-}
-
-#[test]
-fn deleting_a_missing_path_is_an_error() {
-    let fixture = tempdir().expect("temp dir");
-    let missing = fixture.path().join("ghost.txt");
-
-    let error = delete_entries(&[missing.to_string_lossy().into_owned()]).expect_err("missing");
-    assert!(matches!(error, FsError::Io(_)));
 }

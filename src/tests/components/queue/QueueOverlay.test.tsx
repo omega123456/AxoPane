@@ -52,6 +52,16 @@ describe('QueueOverlay', () => {
     expect(await screen.findByRole('button', { name: 'Expand transfer queue' })).toBeInTheDocument()
   })
 
+  it('summarizes active delete operations as deleting', async () => {
+    ipc.override('queue_snapshot', [
+      { progress: progress({ kind: 'delete', destinationDir: '' }), conflict: null },
+    ])
+
+    render(<QueueOverlay />)
+
+    expect(await screen.findByText('Deleting 1 transfer')).toBeInTheDocument()
+  })
+
   it('expands the collapsed toast into the panel and collapses again', async () => {
     const user = userEvent.setup()
     ipc.override('queue_snapshot', [{ progress: progress({}), conflict: null }])
@@ -66,7 +76,9 @@ describe('QueueOverlay', () => {
   })
 
   it('applies live progress events', async () => {
-    ipc.override('queue_snapshot', [{ progress: progress({ progressPercent: 25 }), conflict: null }])
+    ipc.override('queue_snapshot', [
+      { progress: progress({ progressPercent: 25 }), conflict: null },
+    ])
     render(<QueueOverlay />)
     await screen.findByRole('button', { name: 'Expand transfer queue' })
 
@@ -97,7 +109,10 @@ describe('QueueOverlay', () => {
   it('lets the collapsed toast dismiss terminal jobs', async () => {
     const user = userEvent.setup()
     ipc.override('queue_snapshot', [
-      { progress: progress({ status: 'cancelled', currentFileName: null, bytesPerSecond: 0 }), conflict: null },
+      {
+        progress: progress({ status: 'cancelled', currentFileName: null, bytesPerSecond: 0 }),
+        conflict: null,
+      },
     ])
     render(<QueueOverlay />)
 
@@ -167,9 +182,7 @@ describe('QueueOverlay', () => {
     const user = userEvent.setup()
     ipc.override('pause_op', () => undefined)
     ipc.override('resume_op', () => undefined)
-    ipc.override('queue_snapshot', [
-      { progress: progress({ status: 'active' }), conflict: null },
-    ])
+    ipc.override('queue_snapshot', [{ progress: progress({ status: 'active' }), conflict: null }])
     render(<QueueOverlay />)
     await screen.findByRole('button', { name: 'Expand transfer queue' })
 

@@ -33,6 +33,7 @@ tauri-plugin-updater = "~2.10.1"
 tauri-plugin-window-state = "~2.4.1"
 sysinfo = "~0.37.2"
 time = { version = "~0.3.51", features = ["formatting"] }
+trash = "~5.2.2"
 zip = { version = "~4.6.1", default-features = false, features = ["deflate"] }
 clipboard-rs = "0.2.4"
 

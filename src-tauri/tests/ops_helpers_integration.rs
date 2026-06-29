@@ -101,9 +101,32 @@ fn filesystem_helpers_cover_measurement_cleanup_and_auto_names() {
     remove_target(&temp_file).expect("remove target file");
     assert!(!temp_file.exists());
 
+    let temp_target_dir = root.join("delete-target-dir");
+    fs::create_dir(&temp_target_dir).expect("temp target dir");
+    fs::write(temp_target_dir.join("child.txt"), b"x").expect("target child");
+    remove_target(&temp_target_dir).expect("remove target dir");
+    assert!(!temp_target_dir.exists());
+
+    let temp_source_file = root.join("delete-source-file.txt");
+    fs::write(&temp_source_file, b"x").expect("temp source file");
+    remove_source(&temp_source_file).expect("remove source file");
+    assert!(!temp_source_file.exists());
+
     let temp_dir = root.join("delete-dir");
     fs::create_dir(&temp_dir).expect("temp dir");
     fs::write(temp_dir.join("child.txt"), b"x").expect("child");
     remove_source(&temp_dir).expect("remove source dir");
     assert!(!temp_dir.exists());
+}
+
+#[test]
+fn filesystem_helpers_surface_cleanup_errors() {
+    let fixture = tempdir().expect("temp dir");
+    let missing_target = fixture.path().join("missing-target.txt");
+    let target_error = remove_target(&missing_target).expect_err("remove missing target");
+    assert!(!target_error.is_empty());
+
+    let missing_source = fixture.path().join("missing-source.txt");
+    let source_error = remove_source(&missing_source).expect_err("remove missing source");
+    assert!(!source_error.is_empty());
 }

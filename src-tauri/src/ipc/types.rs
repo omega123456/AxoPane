@@ -130,7 +130,7 @@ pub struct RenameEntryRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DeleteEntriesRequest {
+pub struct TrashEntriesRequest {
     pub paths: Vec<String>,
 }
 

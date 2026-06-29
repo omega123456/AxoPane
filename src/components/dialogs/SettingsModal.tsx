@@ -112,7 +112,6 @@ function SettingsModalContent() {
   const close = useSettingsStore((state) => state.close)
   const open = useSettingsStore((state) => state.open)
   const os = detectPlatformOs()
-  const isWindows = os === 'windows'
   const [draft, setDraft] = useState<DraftState>(() => cloneDraft())
   const [search, setSearch] = useState('')
   const [capturing, setCapturing] = useState<CommandId | null>(null)
@@ -160,9 +159,7 @@ function SettingsModalContent() {
   function updateDraft(updater: (current: DraftState) => DraftState) {
     setDraft((current) => {
       const next = updater(current)
-      if (!isWindows) {
-        void commit(next)
-      }
+      void commit(next)
       return next
     })
   }
@@ -171,13 +168,7 @@ function SettingsModalContent() {
     updateDraft((current) => ({ ...current, layout: { ...current.layout, [key]: value } }))
   }
 
-  async function onSave() {
-    await commit(draft)
-    close()
-  }
-
   function onCancel() {
-    setDraft(cloneDraft())
     close()
   }
 
@@ -523,18 +514,9 @@ function SettingsModalContent() {
             Reset to defaults
           </Button>
           <div className="flex-1" />
-          {isWindows ? (
-            <>
-              <Button onClick={onCancel}>Cancel</Button>
-              <Button variant="primary" onClick={() => void onSave()}>
-                Save changes
-              </Button>
-            </>
-          ) : (
-            <span className="text-uxs text-light-text-muted dark:text-dark-text-muted">
-              Changes apply immediately on macOS.
-            </span>
-          )}
+          <span className="text-uxs text-light-text-muted dark:text-dark-text-muted">
+            Changes apply immediately.
+          </span>
         </footer>
       </div>
     </div>

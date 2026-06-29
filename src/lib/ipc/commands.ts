@@ -3,7 +3,6 @@ import type {
   CancelSizeResponse,
   CompressArchiveRequest,
   CreateEntryRequest,
-  DeleteEntriesRequest,
   DirectoryEntry,
   DirPatchEvent,
   EverythingStatus,
@@ -23,6 +22,7 @@ import type {
   OpenPathRequest,
   RenameEntryRequest,
   ShowPropertiesRequest,
+  TrashEntriesRequest,
   WatchTarget,
   SessionState,
   VolumeInfo,
@@ -57,8 +57,8 @@ export function renameEntry(payload: RenameEntryRequest) {
   return invokeCommand({ command: 'rename_entry', payload }) as Promise<DirectoryEntry>
 }
 
-export function deleteEntries(payload: DeleteEntriesRequest) {
-  return invokeCommand({ command: 'delete_entries', payload }) as Promise<void>
+export function moveToTrash(payload: TrashEntriesRequest) {
+  return invokeCommand({ command: 'move_to_trash', payload }) as Promise<void>
 }
 
 export function openPath(payload: OpenPathRequest) {

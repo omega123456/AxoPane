@@ -15,6 +15,7 @@ export const commandLabels: Record<CommandId, string> = {
   refresh: 'Refresh',
   rename: 'Rename',
   delete: 'Delete',
+  deletePermanent: 'Delete permanently',
   copy: 'Copy',
   cut: 'Cut',
   paste: 'Paste',
@@ -30,12 +31,23 @@ export const commandLabels: Record<CommandId, string> = {
   showSettings: 'Settings',
 }
 
+// MacBook keyboards have no forward-delete key (the labelled "delete" key emits
+// Backspace, already bound to Go up), so macOS defaults to F8 / Shift+F8 while
+// still listening to the physical Delete keys present on full-size keyboards.
+// Windows keeps the conventional Delete / Shift+Delete. The platform-primary
+// binding is listed first so the Settings UI surfaces the right one.
+const deleteDefaults: { delete: Shortcut[]; deletePermanent: Shortcut[] } =
+  detectPlatformOs() === 'macos'
+    ? { delete: ['F8', 'Delete'], deletePermanent: ['Shift+F8', 'Shift+Delete'] }
+    : { delete: ['Delete'], deletePermanent: ['Shift+Delete'] }
+
 export const defaultKeymap: Record<CommandId, Shortcut[]> = {
   open: ['Enter'],
   goUp: ['Backspace'],
   refresh: ['Ctrl+R'],
   rename: ['F2'],
-  delete: ['Delete'],
+  delete: deleteDefaults.delete,
+  deletePermanent: deleteDefaults.deletePermanent,
   copy: ['Ctrl+C'],
   cut: ['Ctrl+X'],
   paste: ['Ctrl+V'],

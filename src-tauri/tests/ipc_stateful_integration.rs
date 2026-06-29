@@ -9,11 +9,12 @@ use std::time::{Duration, Instant};
 use file_explorer_lib::fs::{SortDirection, SortKey};
 use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::types::{
-    AppConfig, CancelSizeResponse, ConflictResolution, CreateEntryRequest, DeleteEntriesRequest,
-    FolderSizeRequest, FolderSizesRequest, InitialShellResponse, ListDirRequest, ListDirResponse,
+    AppConfig, CancelSizeResponse, ConflictResolution, CreateEntryRequest, FolderSizeRequest,
+    FolderSizesRequest, InitialShellResponse, ListDirRequest, ListDirResponse,
     ListTreeChildrenRequest, ListTreeChildrenResponse, OpIdRequest, OpSnapshot, OpenPathRequest,
     RefreshTabRequest, ReorderOpsRequest, ResolveConflictRequest, SaveConfigRequest,
-    SaveSessionRequest, SessionState, SetTabWatchRequest, WatchDirPatch, WatchTarget,
+    SaveSessionRequest, SessionState, SetTabWatchRequest, TrashEntriesRequest, WatchDirPatch,
+    WatchTarget,
 };
 use file_explorer_lib::ops::{OpItem, OpKind, OpStatus, OpsService, StartOpRequest};
 use file_explorer_lib::persist::{Config, PersistenceState, Session};
@@ -48,7 +49,7 @@ impl TestApp<tauri::test::MockRuntime> {
                 commands::create_folder,
                 commands::create_file,
                 commands::rename_entry,
-                commands::delete_entries,
+                commands::move_to_trash,
                 commands::open_path,
                 commands::list_volumes,
                 commands::everything_status,
@@ -296,15 +297,15 @@ fn ipc_commands_cover_shell_filesystem_and_persistence_flows() {
 
     test_app
         .invoke_payload::<(), _>(
-            "delete_entries",
-            DeleteEntriesRequest {
+            "move_to_trash",
+            TrashEntriesRequest {
                 paths: vec![
                     folder_path.to_string_lossy().into_owned(),
                     renamed_path.to_string_lossy().into_owned(),
                 ],
             },
         )
-        .expect("delete entries");
+        .expect("move to trash");
     assert!(!folder_path.exists());
     assert!(!renamed_path.exists());
 

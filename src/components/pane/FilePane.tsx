@@ -28,6 +28,9 @@ import { activeConflict, useQueueStore } from '@/stores/queue-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
 import { useClipboardStore } from '@/stores/clipboard-store'
 import { useKeymapStore } from '@/stores/keymap-store'
+import { useSettingsStore } from '@/stores/settings-store'
+import { useActionDialogStore } from '@/stores/action-dialog-store'
+import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import type { PaneId } from '@/types/pane'
 
@@ -53,6 +56,15 @@ type FilePaneProps = {
   paneId: PaneId
 }
 
+function useModalOpen() {
+  const settingsOpen = useSettingsStore((state) => state.isOpen)
+  const actionDialog = useActionDialogStore((state) => state.dialog)
+  const propertiesDialog = usePropertiesDialogStore((state) => state.dialog)
+  const contextMenu = useContextMenuStore((state) => state.menu)
+
+  return settingsOpen || actionDialog !== null || propertiesDialog !== null || contextMenu !== null
+}
+
 export function FilePane({ paneId }: FilePaneProps) {
   const pane = usePanesStore((state) => state.panes[paneId])
   const activePaneId = usePanesStore((state) => state.activePaneId)
@@ -71,6 +83,11 @@ export function FilePane({ paneId }: FilePaneProps) {
   const clipboardMode = useClipboardStore((state) => state.mode)
   const clipboardEntries = useClipboardStore((state) => state.entries)
   const openMenu = useContextMenuStore((state) => state.openMenu)
+  // A pane keeps its own keydown handler (it runs before the window-level
+  // fallback in App.tsx). Suppress pane shortcuts while any app-modal surface is
+  // open so a confirmation dialog blocks the whole app, not just the inactive
+  // pane.
+  const modalOpen = useModalOpen()
   const rename = useInlineRenameStore((state) =>
     state.rename?.paneId === paneId ? state.rename : null,
   )
@@ -292,6 +309,10 @@ export function FilePane({ paneId }: FilePaneProps) {
       onMouseDown={() => setActivePane(paneId)}
       onKeyDown={(event) => {
         if (!isActivePane) {
+          return
+        }
+
+        if (modalOpen) {
           return
         }
 

@@ -17,7 +17,7 @@ export function DialogShell({
       aria-modal="true"
       aria-label={label}
       onKeyDown={onKeyDown}
-      className="absolute inset-0 z-30 flex items-center justify-center"
+      className="fixed inset-0 z-40 flex items-center justify-center"
     >
       <button
         type="button"

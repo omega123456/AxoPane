@@ -28,10 +28,13 @@ beforeEach(() => {
   ipc.install()
   usePanesStore.getState().reset()
   useActionDialogStore.getState().close()
-  ipc.override('list_dir', (payload: ListDirRequest): ListDirResponse => ({
-    path: payload.path,
-    entries: [dir('Reports')],
-  }))
+  ipc.override(
+    'list_dir',
+    (payload: ListDirRequest): ListDirResponse => ({
+      path: payload.path,
+      entries: [dir('Reports')],
+    }),
+  )
   ipc.override('set_tab_watch', () => undefined)
   ipc.override('save_session', (payload) => payload.session)
   usePanesStore.setState((state) => ({
@@ -91,10 +94,10 @@ describe('ActionDialog', () => {
     expect(useActionDialogStore.getState().dialog).toBeNull()
   })
 
-  it('confirms a delete and calls the backend', async () => {
+  it('confirms a permanent delete and enqueues it through the queue', async () => {
     const user = userEvent.setup()
-    const remove = vi.fn(() => undefined)
-    ipc.override('delete_entries', remove)
+    const startOp = vi.fn(() => 'op-1')
+    ipc.override('start_op', startOp)
 
     useActionDialogStore.getState().open({
       kind: 'delete',
@@ -110,12 +113,19 @@ describe('ActionDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Delete' }))
 
     await waitFor(() => expect(useActionDialogStore.getState().dialog).toBeNull())
-    expect(remove).toHaveBeenCalledWith({ paths: ['C:\\root\\a.txt', 'C:\\root\\b.txt'] })
+    expect(startOp).toHaveBeenCalledWith({
+      kind: 'delete',
+      destinationDir: '',
+      items: [
+        { sourcePath: 'C:\\root\\a.txt', name: 'a.txt', sizeBytes: 0 },
+        { sourcePath: 'C:\\root\\b.txt', name: 'b.txt', sizeBytes: 0 },
+      ],
+    })
   })
 
   it('renders singular delete copy, handles Escape, and shows delete errors', async () => {
     const user = userEvent.setup()
-    ipc.override('delete_entries', () => {
+    ipc.override('start_op', () => {
       throw new Error('delete was denied')
     })
 

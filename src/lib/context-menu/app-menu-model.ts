@@ -232,6 +232,7 @@ function buildFileOrFolderContent(
           { disabled: !canExtract },
         ),
         ...(target.kind === 'folder' ? [calculateSizeRow(target.entry, os)] : []),
+        commandRow('deletePermanent', os, { targetEntryId, danger: true }),
         commandRow('refresh', os),
       ]),
       section('footer', [
@@ -282,6 +283,10 @@ function buildMultiContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
           { disabled: !canExtract },
         ),
         commandRow('paste', os, { disabled: clipboard.entries.length === 0 }),
+        commandRow('deletePermanent', os, {
+          danger: true,
+          disabled: selectedEntries.length === 0,
+        }),
         commandRow('refresh', os),
         commandRow('selectAll', os, {
           disabled: pane.entries.length === 0,
