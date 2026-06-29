@@ -106,10 +106,7 @@ impl SizeService {
 
     pub fn everything_status(&self) -> EverythingStatus {
         let inner = self.inner.lock().expect("size service lock");
-        let availability = match inner.everything.as_ref() {
-            Some(handle) => Some(handle.availability()),
-            None => None,
-        };
+        let availability = inner.everything.as_ref().map(|handle| handle.availability());
 
         match availability {
             Some(EverythingAvailability::Available) => EverythingStatus {

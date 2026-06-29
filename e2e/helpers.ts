@@ -9,6 +9,18 @@ async function injectScenario(page: Page, scenario: PlaywrightScenario) {
       }
     ).__PLAYWRIGHT_IPC_SCENARIO__ = value
   }, scenario)
+
+  // The app derives keyboard hints and the Windows-only native shell-extension
+  // menu section from `navigator.platform`. Pin it per scenario so platform
+  // dependent UI is deterministic regardless of the host OS the run happens on.
+  if (scenario.platform) {
+    await page.addInitScript((platform) => {
+      Object.defineProperty(navigator, 'platform', {
+        configurable: true,
+        get: () => (platform === 'macos' ? 'MacIntel' : 'Win32'),
+      })
+    }, scenario.platform)
+  }
 }
 
 export async function gotoScenario(page: Page, scenario: PlaywrightScenario) {

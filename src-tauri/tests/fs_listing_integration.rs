@@ -382,7 +382,16 @@ fn list_dir_reports_readonly_and_plain_file_type_metadata() {
         .iter()
         .any(|attribute| attribute == "readonly"));
 
+    // Restore write permission so the temp dir cleans up (Windows refuses to
+    // delete read-only files). Use an explicit mode on Unix to avoid making the
+    // file world-writable.
     let mut permissions = fs::metadata(&plain).expect("metadata").permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(0o644);
+    }
+    #[cfg(windows)]
     permissions.set_readonly(false);
     fs::set_permissions(&plain, permissions).expect("restore writable");
 }

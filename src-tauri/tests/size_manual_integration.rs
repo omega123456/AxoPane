@@ -8,9 +8,11 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[cfg(windows)]
+use file_explorer_lib::size::everything::EverythingAvailability;
 use file_explorer_lib::size::everything::{
     build_exact_folder_or_queries, escape_exact_folder_query_path, join_everything_result_path,
-    map_everything_result_sizes, normalize_result_path, EverythingAvailability, EverythingHandle,
+    map_everything_result_sizes, normalize_result_path, EverythingHandle,
     EVERYTHING_BATCH_CHUNK_SIZE,
 };
 use file_explorer_lib::size::manual::{calculate, ManualSizeError};
@@ -187,7 +189,7 @@ fn everything_query_helpers_escape_and_chunk_exact_folder_queries() {
         r#"exact:folder:"C:\root\Alpha" | exact:folder:"C:\root\Bravo""#
     );
     assert_eq!(queries[1], r#"exact:folder:"C:\root\say ""hello""""#);
-    assert!(EVERYTHING_BATCH_CHUNK_SIZE >= 1);
+    const { assert!(EVERYTHING_BATCH_CHUNK_SIZE >= 1) };
 }
 
 #[test]

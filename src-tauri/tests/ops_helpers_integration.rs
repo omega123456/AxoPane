@@ -40,18 +40,18 @@ fn path_helpers_cover_name_root_and_component_logic() {
         ("Makefile".to_string(), String::new())
     );
 
-    assert_eq!(
-        parent_dir("C:\\Users\\Omega\\report.txt"),
-        "C:\\Users\\Omega"
-    );
-    assert_eq!(parent_dir("report.txt"), String::new());
-
     if cfg!(windows) {
+        assert_eq!(
+            parent_dir("C:\\Users\\Omega\\report.txt"),
+            "C:\\Users\\Omega"
+        );
         assert_eq!(fallback_root("c:\\users\\omega"), "c:");
     } else {
+        assert_eq!(parent_dir("/home/omega/report.txt"), "/home/omega");
         assert_eq!(fallback_root("/srv/share/docs"), "/srv");
         assert_eq!(fallback_root("/"), "/");
     }
+    assert_eq!(parent_dir("report.txt"), String::new());
 
     let normalized = normalized_components(std::path::Path::new("alpha/./beta/../gamma"));
     assert_eq!(normalized.last().expect("last component"), "gamma");

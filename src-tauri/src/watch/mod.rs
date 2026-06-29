@@ -241,11 +241,25 @@ pub fn pane_scope(tab_id: &str) -> &str {
 
 fn noop_watch_error(_: String, _: String) {}
 
+/// Resolve a directory to its canonical, symlink-free form for comparison.
+///
+/// The OS watchers report event paths in canonical form (notably macOS FSEvents
+/// returns `/private/var/...` for a `/var/...` symlink), while a watched target
+/// path may still be the symlinked form the caller supplied. Canonicalizing both
+/// sides before comparing keeps parent-directory matching correct across
+/// platforms. Falls back to the lexical path when canonicalization fails (e.g. a
+/// directory that has since been removed).
+fn canonical_dir(path: &Path) -> PathBuf {
+    fs::canonicalize_dir(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 fn matches_watched_parent(changed_paths: &HashSet<PathBuf>, watched_path: &str) -> bool {
-    let watched_parent = Path::new(watched_path);
+    let watched_parent = canonical_dir(Path::new(watched_path));
     for changed_path in changed_paths {
-        if changed_path.parent() == Some(watched_parent) {
-            return true;
+        if let Some(parent) = changed_path.parent() {
+            if canonical_dir(parent) == watched_parent {
+                return true;
+            }
         }
     }
     false
@@ -336,8 +350,14 @@ fn patch_for_events(
     })
 }
 
+/// Both the event path's parent and the watched parent are canonicalized so
+/// symlinked and canonical forms of the same directory compare equal across
+/// platforms (see [`canonical_dir`]).
 fn is_direct_child(path: &Path, watched_parent: &Path) -> bool {
-    path.parent() == Some(watched_parent)
+    match path.parent() {
+        Some(parent) => canonical_dir(parent) == canonical_dir(watched_parent),
+        None => false,
+    }
 }
 
 fn remove_path(next: &mut HashMap<String, DirectoryEntry>, removed: &mut Vec<String>, path: &Path) {

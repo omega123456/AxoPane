@@ -1,3 +1,4 @@
+import type { PlatformOs } from '@/lib/keymap'
 import type {
   AppConfig,
   IpcCommandMap,
@@ -30,6 +31,11 @@ export type PlaywrightScenario = {
   commandErrors?: ErrorMap
   delaysMs?: DelayMap
   events?: EventMap
+  // Forces the app's platform detection for this scenario regardless of the
+  // host OS the Playwright run happens on. The native shell-extension menu
+  // section only exists on Windows, so the native-menu scenarios pin
+  // `'windows'` to stay deterministic on macOS CI/dev machines too.
+  platform?: PlatformOs
 }
 
 const rootSession: SessionState = {
@@ -97,7 +103,10 @@ const multiTabSession: SessionState = {
   },
 }
 
-function scenarioByTheme(commands: CommandMap): {
+function scenarioByTheme(
+  commands: CommandMap,
+  platform?: PlatformOs,
+): {
   light: PlaywrightScenario
   dark: PlaywrightScenario
 } {
@@ -107,12 +116,14 @@ function scenarioByTheme(commands: CommandMap): {
         load_config: lightConfig,
         ...commands,
       },
+      platform,
     },
     dark: {
       commands: {
         load_config: darkConfig,
         ...commands,
       },
+      platform,
     },
   }
 }
@@ -120,6 +131,7 @@ function scenarioByTheme(commands: CommandMap): {
 function delayedScenarioByTheme(
   commands: CommandMap,
   delaysMs: DelayMap,
+  platform?: PlatformOs,
 ): { light: PlaywrightScenario; dark: PlaywrightScenario } {
   return {
     light: {
@@ -128,6 +140,7 @@ function delayedScenarioByTheme(
         ...commands,
       },
       delaysMs,
+      platform,
     },
     dark: {
       commands: {
@@ -135,6 +148,7 @@ function delayedScenarioByTheme(
         ...commands,
       },
       delaysMs,
+      platform,
     },
   }
 }
@@ -142,6 +156,7 @@ function delayedScenarioByTheme(
 function errorScenarioByTheme(
   commands: CommandMap,
   commandErrors: ErrorMap,
+  platform?: PlatformOs,
 ): { light: PlaywrightScenario; dark: PlaywrightScenario } {
   return {
     light: {
@@ -150,6 +165,7 @@ function errorScenarioByTheme(
         ...commands,
       },
       commandErrors,
+      platform,
     },
     dark: {
       commands: {
@@ -157,6 +173,7 @@ function errorScenarioByTheme(
         ...commands,
       },
       commandErrors,
+      platform,
     },
   }
 }
@@ -374,10 +391,13 @@ export const screenshotScenarios = {
     queue_snapshot: emptyQueueSnapshot,
     load_native_menu: contextMenuFixtures.emptyNativeExtras,
   }),
-  rowContextMenu: scenarioByTheme({
-    queue_snapshot: emptyQueueSnapshot,
-    load_native_menu: contextMenuFixtures.nativeExtras,
-  }),
+  rowContextMenu: scenarioByTheme(
+    {
+      queue_snapshot: emptyQueueSnapshot,
+      load_native_menu: contextMenuFixtures.nativeExtras,
+    },
+    'windows',
+  ),
   rowContextMenuLoading: delayedScenarioByTheme(
     {
       queue_snapshot: emptyQueueSnapshot,
@@ -386,6 +406,7 @@ export const screenshotScenarios = {
     {
       load_native_menu: 1_500,
     },
+    'windows',
   ),
   rowContextMenuFailure: errorScenarioByTheme(
     {
@@ -395,5 +416,6 @@ export const screenshotScenarios = {
     {
       load_native_menu: contextMenuFixtures.nativeFailureMessage,
     },
+    'windows',
   ),
 } satisfies Record<string, { light: PlaywrightScenario; dark: PlaywrightScenario }>

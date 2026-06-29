@@ -234,6 +234,12 @@ impl OpState {
 
 struct Inner {
     ops: HashMap<String, Arc<Mutex<OpState>>>,
+    /// Per-operation wakeup signal. Each op owns its own `Condvar` so that a
+    /// parked worker always pairs the same `Condvar` with the same op mutex —
+    /// `Condvar` panics on platforms (e.g. macOS pthread) if a single instance
+    /// is waited on with two different mutexes, which happened when one shared
+    /// `Condvar` served every op's per-op `OpState` mutex.
+    signals: HashMap<String, Arc<Condvar>>,
     /// Submission/scheduling order (also the reorder order for pending items).
     order: VecDeque<String>,
     /// Volumes currently occupied by an active operation.
@@ -244,8 +250,6 @@ struct Inner {
 /// The queue engine. Held as Tauri managed state.
 pub struct OpsService {
     inner: Arc<Mutex<Inner>>,
-    /// Signalled whenever an operation needs resolution or the scheduler should run.
-    resolver: Arc<Condvar>,
     next_id: AtomicU64,
     progress_emitter: Mutex<Option<ProgressEmitter>>,
     conflict_emitter: Mutex<Option<ConflictEmitter>>,
@@ -271,11 +275,11 @@ impl OpsService {
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 ops: HashMap::new(),
+                signals: HashMap::new(),
                 order: VecDeque::new(),
                 busy_volumes: HashSet::new(),
                 workers: Vec::new(),
             })),
-            resolver: Arc::new(Condvar::new()),
             next_id: AtomicU64::new(1),
             progress_emitter: Mutex::new(None),
             conflict_emitter: Mutex::new(None),
@@ -388,6 +392,7 @@ impl OpsService {
             let mut inner = self.inner.lock().expect("ops lock");
             let op = Arc::new(Mutex::new(state));
             inner.ops.insert(id.clone(), op.clone());
+            inner.signals.insert(id.clone(), Arc::new(Condvar::new()));
             inner.order.push_back(id.clone());
             self.emit_progress(&op.lock().expect("op lock"));
         }
@@ -436,47 +441,30 @@ impl OpsService {
 
     fn spawn_worker(self: &OpsService, id: String) {
         let inner = self.inner.clone();
-        let resolver = self.resolver.clone();
-        let progress = self
-            .progress_emitter
-            .lock()
-            .expect("progress emitter lock")
-            .clone();
-        let conflict = self
-            .conflict_emitter
-            .lock()
-            .expect("conflict emitter lock")
-            .clone();
-        let removed = self
-            .removed_emitter
-            .lock()
-            .expect("removed emitter lock")
-            .clone();
-        let retention = self.completed_retention;
-        let rate_window = self.rate_window;
-        let instant_now = self.instant_now.clone();
+        let runtime = WorkerRuntime {
+            progress: self
+                .progress_emitter
+                .lock()
+                .expect("progress emitter lock")
+                .clone(),
+            conflict: self
+                .conflict_emitter
+                .lock()
+                .expect("conflict emitter lock")
+                .clone(),
+            removed: self
+                .removed_emitter
+                .lock()
+                .expect("removed emitter lock")
+                .clone(),
+            retention: self.completed_retention,
+            rate_window: self.rate_window,
+            instant_now: self.instant_now.clone(),
+        };
 
         let handle = thread::spawn(move || {
-            run_operation(
-                id.clone(),
-                &inner,
-                &resolver,
-                progress.clone(),
-                conflict.clone(),
-                rate_window,
-                instant_now.clone(),
-            );
-            release_and_reschedule(
-                &id,
-                &inner,
-                &resolver,
-                progress,
-                conflict,
-                removed,
-                retention,
-                rate_window,
-                instant_now,
-            );
+            run_operation(id.clone(), &inner, &runtime);
+            release_and_reschedule(&id, &inner, &runtime);
         });
 
         let mut inner = self.inner.lock().expect("ops lock");
@@ -511,7 +499,9 @@ impl OpsService {
         };
 
         if resumed {
-            self.resolver.notify_all();
+            if let Some(signal) = self.signal(id) {
+                signal.notify_all();
+            }
         }
     }
 
@@ -536,7 +526,9 @@ impl OpsService {
         };
 
         if notify {
-            self.resolver.notify_all();
+            if let Some(signal) = self.signal(id) {
+                signal.notify_all();
+            }
         }
         if schedule_removal {
             self.schedule_auto_remove_for(id);
@@ -612,7 +604,9 @@ impl OpsService {
         };
 
         if notify {
-            self.resolver.notify_all();
+            if let Some(signal) = self.signal(id) {
+                signal.notify_all();
+            }
         }
     }
 
@@ -661,6 +655,11 @@ impl OpsService {
     fn op(&self, id: &str) -> Option<Arc<Mutex<OpState>>> {
         self.inner.lock().expect("ops lock").ops.get(id).cloned()
     }
+
+    /// The per-op wakeup signal, used to notify a parked worker for `id`.
+    fn signal(&self, id: &str) -> Option<Arc<Condvar>> {
+        self.inner.lock().expect("ops lock").signals.get(id).cloned()
+    }
 }
 
 pub fn requested_pop(requested: &mut Vec<String>) -> Option<String> {
@@ -671,24 +670,35 @@ pub fn requested_pop(requested: &mut Vec<String>) -> Option<String> {
     }
 }
 
-/// Run a single operation to completion / failure / cancel. Blocks the worker
-/// thread; conflicts park here on the condvar until resolved.
-fn run_operation(
-    id: String,
-    inner: &Arc<Mutex<Inner>>,
-    resolver: &Arc<Condvar>,
+/// Cloneable bundle of the emitters and timing config a worker thread needs.
+/// Bundling keeps `run_operation` / `release_and_reschedule` signatures small
+/// (no `too_many_arguments`), mirroring how [`WorkerCtx`] bundles per-item state.
+#[derive(Clone)]
+struct WorkerRuntime {
     progress: Option<ProgressEmitter>,
     conflict: Option<ConflictEmitter>,
+    removed: Option<RemovedEmitter>,
+    retention: Duration,
     rate_window: Duration,
     instant_now: InstantNow,
-) {
-    let op_arc = {
+}
+
+/// Run a single operation to completion / failure / cancel. Blocks the worker
+/// thread; conflicts park here on the condvar until resolved.
+fn run_operation(id: String, inner: &Arc<Mutex<Inner>>, runtime: &WorkerRuntime) {
+    let progress = runtime.progress.clone();
+    let conflict = runtime.conflict.clone();
+    let rate_window = runtime.rate_window;
+    let instant_now = runtime.instant_now.clone();
+
+    let (op_arc, signal) = {
         let guard = inner.lock().expect("ops lock");
-        guard.ops.get(&id).cloned()
+        (guard.ops.get(&id).cloned(), guard.signals.get(&id).cloned())
     };
-    let Some(op_arc) = op_arc else {
+    let (Some(op_arc), Some(signal)) = (op_arc, signal) else {
         return;
     };
+    let resolver = &signal;
 
     {
         let mut op = op_arc.lock().expect("op lock");
@@ -999,17 +1009,7 @@ fn refresh_rate_locked_with_now(
 }
 
 /// Once a worker finishes, free its volumes and try to schedule waiting work.
-fn release_and_reschedule(
-    id: &str,
-    inner: &Arc<Mutex<Inner>>,
-    resolver: &Arc<Condvar>,
-    progress: Option<ProgressEmitter>,
-    conflict: Option<ConflictEmitter>,
-    removed: Option<RemovedEmitter>,
-    retention: Duration,
-    rate_window: Duration,
-    instant_now: InstantNow,
-) {
+fn release_and_reschedule(id: &str, inner: &Arc<Mutex<Inner>>, runtime: &WorkerRuntime) {
     let volumes = {
         let guard = inner.lock().expect("ops lock");
         guard
@@ -1030,37 +1030,15 @@ fn release_and_reschedule(
     let to_start = collect_startable(inner);
     for next in to_start {
         let inner = inner.clone();
-        let resolver = resolver.clone();
-        let progress = progress.clone();
-        let conflict = conflict.clone();
-        let removed = removed.clone();
-        let instant_now = instant_now.clone();
+        let runtime = runtime.clone();
         thread::spawn(move || {
-            run_operation(
-                next.clone(),
-                &inner,
-                &resolver,
-                progress.clone(),
-                conflict.clone(),
-                rate_window,
-                instant_now.clone(),
-            );
-            release_and_reschedule(
-                &next,
-                &inner,
-                &resolver,
-                progress,
-                conflict,
-                removed,
-                retention,
-                rate_window,
-                instant_now,
-            );
+            run_operation(next.clone(), &inner, &runtime);
+            release_and_reschedule(&next, &inner, &runtime);
         });
     }
 
     // Auto-remove completed/cancelled operations after the retention window.
-    schedule_auto_remove(id, inner, removed, retention);
+    schedule_auto_remove(id, inner, runtime.removed.clone(), runtime.retention);
 }
 
 fn collect_startable(inner: &Arc<Mutex<Inner>>) -> Vec<String> {
@@ -1134,6 +1112,7 @@ fn schedule_auto_remove(
             .unwrap_or(false);
         if still_terminal {
             guard.ops.remove(&id);
+            guard.signals.remove(&id);
             guard.order.retain(|entry| entry != &id);
             drop(guard);
             // Tell the UI to prune the card now that the backend forgot the op.

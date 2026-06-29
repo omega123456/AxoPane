@@ -34,7 +34,14 @@ fn state() -> OpState {
         id: "op-1".to_string(),
         kind: OpKind::Copy,
         destination_dir: PathBuf::from("dest"),
-        items: vec![item("C:\\src\\alpha.txt", "alpha.txt")],
+        items: vec![item(
+            if cfg!(windows) {
+                "C:\\src\\alpha.txt"
+            } else {
+                "/src/alpha.txt"
+            },
+            "alpha.txt",
+        )],
         volumes: HashSet::from(["c:".to_string()]),
         status: OpStatus::Active,
         total_items: 1,
@@ -70,7 +77,10 @@ fn op_state_helpers_report_progress_snapshot_and_terminal_status() {
     let mut state = state();
     let progress = state.progress();
     assert_eq!(progress.operation_id, "op-1");
-    assert_eq!(progress.source_dir, "C:\\src");
+    assert_eq!(
+        progress.source_dir,
+        if cfg!(windows) { "C:\\src" } else { "/src" }
+    );
     assert_eq!(progress.copied_bytes, 45);
     assert!(progress.progress_percent > 0.0);
 

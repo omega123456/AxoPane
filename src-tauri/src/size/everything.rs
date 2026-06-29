@@ -101,11 +101,6 @@ fn is_windows_root_like(path: &str) -> bool {
         || (lower.starts_with("\\\\") && lower.matches('\\').count() <= 3)
 }
 
-#[cfg(not(windows))]
-fn is_windows_root_like(_path: &str) -> bool {
-    false
-}
-
 #[cfg(all(windows, not(feature = "test-utils")))]
 mod platform {
     use super::{
