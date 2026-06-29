@@ -68,7 +68,7 @@ export function TabBar({ paneId, title, currentPath, isActive }: TabBarProps) {
               aria-selected={tabIsActive}
               aria-label={`Tab ${tabLabel(tab)} in ${title}`}
               onClick={() => void switchTab(paneId, tab.id)}
-              className="max-w-popover truncate rounded-tab px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
+              className="max-w-popover cursor-pointer truncate rounded-tab px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
             >
               {tabLabel(tab)}
             </button>
@@ -77,7 +77,7 @@ export function TabBar({ paneId, title, currentPath, isActive }: TabBarProps) {
                 type="button"
                 aria-label={`Close tab ${tabLabel(tab)} in ${title}`}
                 onClick={(event) => onCloseClick(event, tab.id)}
-                className="inline-flex h-4 w-4 items-center justify-center rounded-tab text-light-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:text-dark-text-muted dark:hover:bg-dark-hover"
+                className="inline-flex h-4 w-4 cursor-pointer items-center justify-center rounded-tab text-light-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:text-dark-text-muted dark:hover:bg-dark-hover"
               >
                 <XIcon className="h-3 w-3" />
               </button>
@@ -89,7 +89,7 @@ export function TabBar({ paneId, title, currentPath, isActive }: TabBarProps) {
         type="button"
         aria-label={`New tab in ${title}`}
         onClick={() => void openTabFromPath(paneId, currentPath)}
-        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-tab border border-light-border bg-light-surface text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border dark:bg-dark-surface dark:text-dark-text-soft"
+        className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab border border-light-border bg-light-surface text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border dark:bg-dark-surface dark:text-dark-text-soft"
       >
         <PlusIcon className="h-4 w-4" />
       </button>

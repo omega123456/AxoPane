@@ -3,6 +3,7 @@ import { columnDefinitions } from '@/lib/columns'
 import { AlertTriangleIcon } from '@/components/icons'
 import { EntryIcon } from '@/components/icons/EntryIcon'
 import { useLayoutStore } from '@/stores/layout-store'
+import { columnFlexStyle } from './HeaderRow'
 import { SizeValue } from './SizeValue'
 
 type FileRowProps = {
@@ -50,6 +51,7 @@ export function FileRow({
   onRenameBlur,
 }: FileRowProps) {
   const columns = useLayoutStore((state) => state.columns)
+  const columnWidths = useLayoutStore((state) => state.columnWidths)
   const visibleColumns = useMemo(() => columns.filter((column) => column.visible), [columns])
   const renameInputRef = useRef<HTMLInputElement>(null)
 
@@ -81,17 +83,17 @@ export function FileRow({
 
   if (isRenaming) {
     return (
-      <div
-        role="row"
-        data-entry-id={entry.id}
-        className={rowClassName}
-      >
+      <div role="row" data-entry-id={entry.id} className={rowClassName}>
         {visibleColumns.map((column) => {
           const definition = columnDefinitions[column.key]
 
           if (column.key === 'name') {
             return (
-              <span key={column.key} className={definition.className}>
+              <span
+                key={column.key}
+                style={columnFlexStyle(column.key, columnWidths)}
+                className={definition.className}
+              >
                 <span className="flex min-w-0 items-center gap-2">
                   <EntryIcon entry={entry} />
                   <input
@@ -112,7 +114,11 @@ export function FileRow({
 
           if (column.key === 'size') {
             return (
-              <span key={column.key} className={definition.className}>
+              <span
+                key={column.key}
+                style={columnFlexStyle(column.key, columnWidths)}
+                className={definition.className}
+              >
                 <span className="font-mono text-uxs text-light-text-soft dark:text-dark-text-soft">
                   <SizeValue entry={entry} />
                 </span>
@@ -122,7 +128,11 @@ export function FileRow({
 
           if (column.key === 'items') {
             return (
-              <span key={column.key} className={definition.className}>
+              <span
+                key={column.key}
+                style={columnFlexStyle(column.key, columnWidths)}
+                className={definition.className}
+              >
                 <span className="font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
                   {entry.isDir ? (entry.itemCount ?? '—') : '—'}
                 </span>
@@ -132,7 +142,11 @@ export function FileRow({
 
           if (column.key === 'type') {
             return (
-              <span key={column.key} className={definition.className}>
+              <span
+                key={column.key}
+                style={columnFlexStyle(column.key, columnWidths)}
+                className={definition.className}
+              >
                 {renameError ? (
                   <span className="flex items-center gap-1 text-uxs text-accent-amber">
                     <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" />
@@ -147,10 +161,17 @@ export function FileRow({
             )
           }
 
-          const value = column.key === 'created' ? formatDate(entry.createdAt) : formatDate(entry.modifiedAt)
+          const value =
+            column.key === 'created' ? formatDate(entry.createdAt) : formatDate(entry.modifiedAt)
           return (
-            <span key={column.key} className={definition.className}>
-              <span className="font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">{value}</span>
+            <span
+              key={column.key}
+              style={columnFlexStyle(column.key, columnWidths)}
+              className={definition.className}
+            >
+              <span className="font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
+                {value}
+              </span>
             </span>
           )
         })}
@@ -176,33 +197,41 @@ export function FileRow({
           onMiddleClick()
         }
       }}
-      className={rowClassName}
+      className={`${rowClassName} cursor-pointer`}
     >
       {visibleColumns.map((column) => {
         const definition = columnDefinitions[column.key]
 
         if (column.key === 'name') {
           return (
-            <span key={column.key} className={definition.className}>
-                <span className="flex min-w-0 items-center gap-2">
-                  <EntryIcon entry={entry} />
-                  <span
-                    className={`truncate ${
-                      isCut
-                        ? 'text-light-text-soft dark:text-dark-text-soft'
-                        : 'text-light-text dark:text-dark-text'
-                    }`}
-                  >
-                    {entry.name}
-                  </span>
+            <span
+              key={column.key}
+              style={columnFlexStyle(column.key, columnWidths)}
+              className={definition.className}
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <EntryIcon entry={entry} />
+                <span
+                  className={`truncate ${
+                    isCut
+                      ? 'text-light-text-soft dark:text-dark-text-soft'
+                      : 'text-light-text dark:text-dark-text'
+                  }`}
+                >
+                  {entry.name}
                 </span>
               </span>
-            )
+            </span>
+          )
         }
 
         if (column.key === 'size') {
           return (
-            <span key={column.key} className={definition.className}>
+            <span
+              key={column.key}
+              style={columnFlexStyle(column.key, columnWidths)}
+              className={definition.className}
+            >
               <span className="font-mono text-uxs text-light-text-soft dark:text-dark-text-soft">
                 <SizeValue entry={entry} />
               </span>
@@ -212,7 +241,11 @@ export function FileRow({
 
         if (column.key === 'items') {
           return (
-            <span key={column.key} className={definition.className}>
+            <span
+              key={column.key}
+              style={columnFlexStyle(column.key, columnWidths)}
+              className={definition.className}
+            >
               <span className="font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
                 {entry.isDir ? (entry.itemCount ?? '—') : '—'}
               </span>
@@ -222,7 +255,11 @@ export function FileRow({
 
         if (column.key === 'type') {
           return (
-            <span key={column.key} className={definition.className}>
+            <span
+              key={column.key}
+              style={columnFlexStyle(column.key, columnWidths)}
+              className={definition.className}
+            >
               <span className="truncate text-usm text-light-text-muted dark:text-dark-text-muted">
                 {entry.typeLabel}
               </span>
@@ -230,10 +267,17 @@ export function FileRow({
           )
         }
 
-        const value = column.key === 'created' ? formatDate(entry.createdAt) : formatDate(entry.modifiedAt)
+        const value =
+          column.key === 'created' ? formatDate(entry.createdAt) : formatDate(entry.modifiedAt)
         return (
-          <span key={column.key} className={definition.className}>
-            <span className="font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">{value}</span>
+          <span
+            key={column.key}
+            style={columnFlexStyle(column.key, columnWidths)}
+            className={definition.className}
+          >
+            <span className="font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
+              {value}
+            </span>
           </span>
         )
       })}

@@ -1,6 +1,12 @@
 import { create } from 'zustand'
 import { columnOrder } from '@/lib/columns'
-import type { ColumnConfig, ColumnKey, LayoutConfig, ZoomLevel } from '@/lib/types/ipc'
+import type {
+  ColumnConfig,
+  ColumnKey,
+  ColumnWidths,
+  LayoutConfig,
+  ZoomLevel,
+} from '@/lib/types/ipc'
 
 export const zoomLevels: ZoomLevel[] = ['80', '90', '100', '110', '120', '125', '150']
 
@@ -34,12 +40,23 @@ export const defaultColumns: ColumnConfig[] = [
   { key: 'created', visible: false },
 ]
 
+export const defaultColumnWidths: Record<ColumnKey, number> = {
+  name: 320,
+  size: 96,
+  items: 72,
+  type: 136,
+  modified: 128,
+  created: 128,
+}
+
 /** Folder-tree sidebar drag bounds, in pixels. */
 export const TREE_WIDTH_MIN = 160
 export const TREE_WIDTH_MAX = 480
 /** Dual-pane split drag bounds, as the fraction allotted to the left pane. */
 export const PANE_SPLIT_MIN = 0.2
 export const PANE_SPLIT_MAX = 0.8
+export const COLUMN_WIDTH_MIN = 56
+export const COLUMN_WIDTH_MAX = 520
 
 export function clampTreeWidth(width: number) {
   return Math.min(TREE_WIDTH_MAX, Math.max(TREE_WIDTH_MIN, width))
@@ -49,10 +66,15 @@ export function clampPaneSplit(split: number) {
   return Math.min(PANE_SPLIT_MAX, Math.max(PANE_SPLIT_MIN, split))
 }
 
+export function clampColumnWidth(width: number) {
+  return Math.min(COLUMN_WIDTH_MAX, Math.max(COLUMN_WIDTH_MIN, width))
+}
+
 export const defaultLayout: LayoutConfig = {
   detailsVisible: false,
   treeWidthPx: 204,
   paneSplit: 0.5,
+  columnWidths: defaultColumnWidths,
   defaultPaneMode: 'dual',
   restoreSession: true,
   zoom: '100',
@@ -67,6 +89,7 @@ type LayoutStore = LayoutConfig & {
   setDefaultPaneMode: (mode: LayoutConfig['defaultPaneMode']) => void
   setRestoreSession: (restoreSession: boolean) => void
   setZoom: (zoom: ZoomLevel) => void
+  setColumnWidth: (key: ColumnKey, width: number) => void
   setColumns: (columns: ColumnConfig[]) => void
   moveColumn: (fromKey: ColumnKey, toKey: ColumnKey) => void
   toggleColumn: (key: ColumnKey) => void
@@ -96,6 +119,22 @@ function normalizeColumns(columns: ColumnConfig[]) {
   return ordered
 }
 
+function normalizeColumnWidths(widths: ColumnWidths | undefined) {
+  const normalized = { ...defaultColumnWidths }
+  if (!widths) {
+    return normalized
+  }
+
+  for (const key of columnOrder) {
+    const value = widths[key]
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      normalized[key] = clampColumnWidth(value)
+    }
+  }
+
+  return normalized
+}
+
 export const useLayoutStore = create<LayoutStore>((set) => ({
   ...defaultLayout,
   columns: defaultColumns,
@@ -105,6 +144,7 @@ export const useLayoutStore = create<LayoutStore>((set) => ({
       ...layout,
       treeWidthPx: clampTreeWidth(layout.treeWidthPx),
       paneSplit: clampPaneSplit(layout.paneSplit),
+      columnWidths: normalizeColumnWidths(layout.columnWidths),
       columns: normalizeColumns(columns),
     })
   },
@@ -117,6 +157,13 @@ export const useLayoutStore = create<LayoutStore>((set) => ({
     applyZoom(zoom)
     set({ zoom })
   },
+  setColumnWidth: (key, width) =>
+    set((state) => ({
+      columnWidths: {
+        ...state.columnWidths,
+        [key]: clampColumnWidth(width),
+      },
+    })),
   setColumns: (columns) => set({ columns: normalizeColumns(columns) }),
   moveColumn: (fromKey, toKey) => {
     set((state) => {

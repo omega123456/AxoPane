@@ -1,11 +1,12 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { DetailsPanel } from '@/components/details/DetailsPanel'
-import { HeaderRow } from '@/components/pane/HeaderRow'
+import { HeaderRow, columnFlexStyle } from '@/components/pane/HeaderRow'
 import { SizeValue } from '@/components/pane/SizeValue'
 import { TreeNode } from '@/components/tree/TreeNode'
+import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 import { useTabsStore } from '@/stores/tabs-store'
@@ -31,6 +32,7 @@ function entry(overrides: Partial<DirectoryEntry> = {}): DirectoryEntry {
 
 beforeEach(() => {
   ipc.install()
+  useLayoutStore.getState().reset()
   usePanesStore.getState().reset()
   useTabsStore.getState().reset()
   usePropertiesDialogStore.getState().close()
@@ -137,8 +139,38 @@ describe('HeaderRow', () => {
     const pane = usePanesStore.getState().panes.left
 
     render(<HeaderRow pane={{ ...pane, sortKey: 'size', sortDirection: 'desc' }} />)
-    await user.click(screen.getByRole('button', { name: /Name/ }))
+    const nameHeader = screen.getByRole('button', { name: /Name/ })
+    const sizeHeader = screen.getByRole('button', { name: /Size/ })
+
+    expect(nameHeader).toHaveClass('w-full')
+    expect(sizeHeader).not.toHaveClass('justify-end')
+    expect(sizeHeader.querySelector('svg')).toHaveClass('ml-auto')
+
+    await user.click(nameHeader)
     expect(setSort).toHaveBeenCalledWith('left', 'name')
+  })
+
+  it('keeps every column fixed-width so resizing one column leaves the others alone', () => {
+    expect(columnFlexStyle('name', { name: 384 })).toEqual({
+      flex: '0 0 384px',
+      width: '384px',
+    })
+    expect(columnFlexStyle('type', { type: 184 })).toEqual({
+      flex: '0 0 184px',
+      width: '184px',
+    })
+  })
+
+  it('resizes a column by dragging its header divider', () => {
+    const pane = usePanesStore.getState().panes.left
+    render(<HeaderRow pane={{ ...pane, sortKey: 'type', sortDirection: 'asc' }} />)
+
+    const divider = screen.getByRole('separator', { name: 'Resize Type column' })
+    fireEvent.pointerDown(divider, { button: 0, clientX: 100, pointerId: 1 })
+    fireEvent.pointerMove(divider, { clientX: 140, pointerId: 1 })
+    fireEvent.pointerUp(divider, { pointerId: 1 })
+
+    expect(useLayoutStore.getState().columnWidths.type).toBe(176)
   })
 })
 

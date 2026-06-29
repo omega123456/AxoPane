@@ -1,4 +1,8 @@
+import { useMemo } from 'react'
 import { ArrowUpIcon, FolderIcon } from '@/components/icons'
+import { columnDefinitions } from '@/lib/columns'
+import { useLayoutStore } from '@/stores/layout-store'
+import { columnFlexStyle } from './HeaderRow'
 
 type ParentRowProps = {
   isActivePane: boolean
@@ -14,7 +18,17 @@ type ParentRowProps = {
  * navigates to the parent directory. It is intentionally never selectable for
  * copy/move or folder-size operations — it carries no entry id.
  */
-export function ParentRow({ isActivePane, isFocused, onPointerDown, onActivate, onFocus }: ParentRowProps) {
+export function ParentRow({
+  isActivePane,
+  isFocused,
+  onPointerDown,
+  onActivate,
+  onFocus,
+}: ParentRowProps) {
+  const columns = useLayoutStore((state) => state.columns)
+  const columnWidths = useLayoutStore((state) => state.columnWidths)
+  const visibleColumns = useMemo(() => columns.filter((column) => column.visible), [columns])
+
   return (
     <button
       type="button"
@@ -33,29 +47,56 @@ export function ParentRow({ isActivePane, isFocused, onPointerDown, onActivate, 
           onActivate()
         }
       }}
-      className={`group flex h-row w-full items-center gap-3 border-b border-light-border px-3 text-row text-left focus-visible:outline-none dark:border-dark-border bg-light-surface dark:bg-dark-surface ${
+      className={`group flex h-row w-full cursor-pointer items-center gap-3 border-b border-light-border bg-light-surface px-3 text-row text-left focus-visible:outline-none dark:border-dark-border dark:bg-dark-surface ${
         isFocused && isActivePane ? 'ring-2 ring-inset ring-accent-blue-border' : ''
       } hover:bg-light-hover dark:hover:bg-dark-hover`}
     >
-      <span className="min-w-0 flex flex-1 items-center gap-2">
-        <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
-          <FolderIcon className="h-4 w-4 text-light-text-muted dark:text-dark-text-muted" />
-          <ArrowUpIcon className="absolute h-2.5 w-2.5 text-accent-blue-light dark:text-accent-blue" />
-        </span>
-        <span className="truncate text-light-text-soft dark:text-dark-text-soft">..</span>
-      </span>
-      <span className="w-sizecol shrink-0 text-right font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-        —
-      </span>
-      <span className="w-itemcol shrink-0 text-right font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-        —
-      </span>
-      <span className="w-typecol shrink-0 truncate text-usm text-light-text-muted dark:text-dark-text-muted">
-        Parent folder
-      </span>
-      <span className="w-modcol shrink-0 font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-        —
-      </span>
+      {visibleColumns.map((column) => {
+        const definition = columnDefinitions[column.key]
+        if (column.key === 'name') {
+          return (
+            <span
+              key={column.key}
+              style={columnFlexStyle(column.key, columnWidths)}
+              className={definition.className}
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
+                  <FolderIcon className="h-4 w-4 text-light-text-muted dark:text-dark-text-muted" />
+                  <ArrowUpIcon className="absolute h-2.5 w-2.5 text-accent-blue-light dark:text-accent-blue" />
+                </span>
+                <span className="truncate text-light-text-soft dark:text-dark-text-soft">..</span>
+              </span>
+            </span>
+          )
+        }
+
+        if (column.key === 'type') {
+          return (
+            <span
+              key={column.key}
+              style={columnFlexStyle(column.key, columnWidths)}
+              className={definition.className}
+            >
+              <span className="truncate text-usm text-light-text-muted dark:text-dark-text-muted">
+                Parent folder
+              </span>
+            </span>
+          )
+        }
+
+        return (
+          <span
+            key={column.key}
+            style={columnFlexStyle(column.key, columnWidths)}
+            className={definition.className}
+          >
+            <span className="font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
+              -
+            </span>
+          </span>
+        )
+      })}
     </button>
   )
 }

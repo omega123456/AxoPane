@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import {
   buildContextMenuContent,
   describeMenuTarget,
@@ -62,6 +62,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   const openTabFromPath = usePanesStore((state) => state.openTabFromPath)
   const reloadPane = usePanesStore((state) => state.reloadPane)
   const requestVisibleRange = usePanesStore((state) => state.setVisibleRange)
+  const setScrollPosition = usePanesStore((state) => state.setScrollPosition)
   const selection = useSelectionStore((state) => state.selections[paneId])
   const keymap = useKeymapStore((state) => state.bindings)
   const conflict = useQueueStore(activeConflict)
@@ -79,6 +80,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   const setRenameValue = useInlineRenameStore((state) => state.setValue)
   const paneRef = useRef<HTMLElement | null>(null)
   const parentRef = useRef<HTMLDivElement | null>(null)
+  const scrollPathRef = useRef(pane.path)
   const renameSubmittingRef = useRef(false)
   const ignoreNextRenameBlurRef = useRef(false)
   const isActivePane = activePaneId === paneId
@@ -115,6 +117,24 @@ export function FilePane({ paneId }: FilePaneProps) {
           start: index * 30,
         }))
   const totalHeight = virtualItems.length > 0 ? rowVirtualizer.getTotalSize() : rowCount * 30
+  const savedScrollTop = pane.scrollPositions[pane.path] ?? 0
+
+  useLayoutEffect(() => {
+    const scrollElement = parentRef.current
+    if (!scrollElement) {
+      return
+    }
+
+    const previousPath = scrollPathRef.current
+    if (previousPath !== pane.path) {
+      setScrollPosition(paneId, previousPath, scrollElement.scrollTop)
+      scrollPathRef.current = pane.path
+    }
+
+    if (scrollElement.scrollTop !== savedScrollTop) {
+      scrollElement.scrollTop = savedScrollTop
+    }
+  }, [pane.path, paneId, savedScrollTop, setScrollPosition, totalHeight])
 
   useEffect(() => {
     const items = itemsToRender
@@ -334,6 +354,7 @@ export function FilePane({ paneId }: FilePaneProps) {
           ref={parentRef}
           className="min-h-0 flex-1 overflow-auto"
           onMouseDown={() => focusPaneShell()}
+          onScroll={(event) => setScrollPosition(paneId, pane.path, event.currentTarget.scrollTop)}
           onContextMenu={(event) => showMenu(event)}
         >
           {/*

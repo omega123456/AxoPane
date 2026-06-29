@@ -60,6 +60,7 @@ type PaneState = {
   error: string | null
   visibleStartIndex: number
   visibleEndIndex: number
+  scrollPositions: Record<string, number>
   history: string[]
   historyIndex: number
 }
@@ -101,6 +102,7 @@ type PanesStore = {
   clearFilter: (paneId: PaneId) => void
   setFocusedEntry: (paneId: PaneId, entryId: string | null) => void
   setVisibleRange: (paneId: PaneId, startIndex: number, endIndex: number) => void
+  setScrollPosition: (paneId: PaneId, path: string, scrollTop: number) => void
   applySizeState: (event: SizeStateEvent) => void
   setEverythingStatus: (status: EverythingStatus) => void
   setVolumes: (volumes: VolumeInfo[]) => void
@@ -130,6 +132,7 @@ function createPane(id: PaneId, title: string, path = '.'): PaneState {
     error: null,
     visibleStartIndex: 0,
     visibleEndIndex: 40,
+    scrollPositions: {},
     history: [],
     historyIndex: -1,
   }
@@ -286,7 +289,7 @@ function sortEntries(
       return 1 * direction
     }
 
-    return compareEntryNames(left, right)
+    return compareEntryNames(left, right) * direction
   })
 }
 
@@ -635,6 +638,11 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
   },
   navigatePane: async (paneId, path, options = {}) => {
     log.debug('navigatePane', { paneId, path, viaHistory: options.viaHistory ?? false })
+    const timer = get().filterTimers[paneId]
+    if (timer && !options.viaHistory) {
+      window.clearTimeout(timer)
+    }
+
     set((state) => {
       const pane = state.panes[paneId]
       let { history, historyIndex } = pane
@@ -654,10 +662,25 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           [paneId]: {
             ...pane,
             path,
+            filterDraft: options.viaHistory ? pane.filterDraft : '',
+            filterApplied: options.viaHistory ? pane.filterApplied : '',
+            typing: options.viaHistory ? pane.typing : false,
+            visibleStartIndex: 0,
+            visibleEndIndex: 40,
             history,
             historyIndex,
+            scrollPositions: options.viaHistory
+              ? pane.scrollPositions
+              : Object.fromEntries(
+                  Object.entries(pane.scrollPositions).filter(
+                    ([storedPath]) => storedPath !== path,
+                  ),
+                ),
           },
         },
+        filterTimers: options.viaHistory
+          ? state.filterTimers
+          : { ...state.filterTimers, [paneId]: undefined },
       }
     })
     await get().reloadPane(paneId)
@@ -727,6 +750,9 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           typing: false,
           entries: [],
           focusedEntryId: null,
+          visibleStartIndex: 0,
+          visibleEndIndex: 40,
+          scrollPositions: {},
           history: [],
           historyIndex: -1,
         },
@@ -763,6 +789,9 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           typing: false,
           entries: [],
           focusedEntryId: null,
+          visibleStartIndex: 0,
+          visibleEndIndex: 40,
+          scrollPositions: {},
           history: [],
           historyIndex: -1,
         },
@@ -796,6 +825,9 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           typing: false,
           entries: [],
           focusedEntryId: null,
+          visibleStartIndex: 0,
+          visibleEndIndex: 40,
+          scrollPositions: {},
           history: [],
           historyIndex: -1,
         },
@@ -999,6 +1031,25 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           ...state.panes[paneId],
           visibleStartIndex: startIndex,
           visibleEndIndex: endIndex,
+        },
+      },
+    }))
+  },
+  setScrollPosition: (paneId, path, scrollTop) => {
+    const previous = get().panes[paneId].scrollPositions[path]
+    if (previous === scrollTop) {
+      return
+    }
+
+    set((state) => ({
+      panes: {
+        ...state.panes,
+        [paneId]: {
+          ...state.panes[paneId],
+          scrollPositions: {
+            ...state.panes[paneId].scrollPositions,
+            [path]: scrollTop,
+          },
         },
       },
     }))

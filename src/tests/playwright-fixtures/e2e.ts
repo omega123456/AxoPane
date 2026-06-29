@@ -56,6 +56,14 @@ const lightConfig: AppConfig = {
     detailsVisible: false,
     treeWidthPx: 204,
     paneSplit: 0.5,
+    columnWidths: {
+      name: 320,
+      size: 96,
+      items: 72,
+      type: 136,
+      modified: 128,
+      created: 128,
+    },
     defaultPaneMode: 'dual',
     restoreSession: true,
     zoom: '100',
@@ -72,7 +80,10 @@ const emptyRootListDir: ListDirResponse = {
   entries: [],
 }
 
-function scenarioByTheme(commands: CommandMap): { light: PlaywrightScenario; dark: PlaywrightScenario } {
+function scenarioByTheme(commands: CommandMap): {
+  light: PlaywrightScenario
+  dark: PlaywrightScenario
+} {
   return {
     light: {
       commands: {

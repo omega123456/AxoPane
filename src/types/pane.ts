@@ -17,4 +17,5 @@ export type PaneState = {
   error: string | null
   visibleStartIndex: number
   visibleEndIndex: number
+  scrollPositions: Record<string, number>
 }

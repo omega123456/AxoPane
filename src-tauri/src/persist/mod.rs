@@ -45,6 +45,8 @@ pub struct LayoutConfig {
     pub tree_width_px: f64,
     #[serde(default = "default_pane_split")]
     pub pane_split: f64,
+    #[serde(default = "default_column_widths")]
+    pub column_widths: HashMap<String, f64>,
     pub default_pane_mode: String,
     pub restore_session: bool,
     #[serde(default = "default_zoom")]
@@ -63,12 +65,24 @@ pub fn default_pane_split() -> f64 {
     0.5
 }
 
+pub fn default_column_widths() -> HashMap<String, f64> {
+    HashMap::from([
+        ("name".to_string(), 320.0),
+        ("size".to_string(), 96.0),
+        ("items".to_string(), 72.0),
+        ("type".to_string(), 136.0),
+        ("modified".to_string(), 128.0),
+        ("created".to_string(), 128.0),
+    ])
+}
+
 impl Default for LayoutConfig {
     fn default() -> Self {
         Self {
             details_visible: true,
             tree_width_px: default_tree_width_px(),
             pane_split: default_pane_split(),
+            column_widths: default_column_widths(),
             default_pane_mode: "dual".to_string(),
             restore_session: true,
             zoom: default_zoom(),

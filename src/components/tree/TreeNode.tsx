@@ -55,7 +55,9 @@ export function TreeNode({ path, depth }: TreeNodeProps) {
           })
         }}
         className={`flex items-center gap-1 rounded-tab pr-2 text-row ${
-          isCurrent ? 'bg-accent-blue-soft text-accent-blue-light dark:text-accent-blue' : 'text-light-text-soft dark:text-dark-text-soft'
+          isCurrent
+            ? 'bg-accent-blue-soft text-accent-blue-light dark:text-accent-blue'
+            : 'text-light-text-soft dark:text-dark-text-soft'
         }`}
         // Styling-constraint exception: runtime geometry only. Indentation is a
         // function of the (unbounded) tree depth, so it cannot be a static
@@ -66,7 +68,7 @@ export function TreeNode({ path, depth }: TreeNodeProps) {
           type="button"
           aria-label={`${node.expanded ? 'Collapse' : 'Expand'} ${node.name}`}
           onClick={() => void toggleTreeNode(node.path)}
-          className="inline-flex h-6 w-6 items-center justify-center rounded-tab focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:hover:bg-dark-hover"
+          className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-tab focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:hover:bg-dark-hover"
         >
           <ChevronRightIcon className={`h-3.5 w-3.5 ${node.expanded ? 'rotate-90' : ''}`} />
         </button>
@@ -79,7 +81,7 @@ export function TreeNode({ path, depth }: TreeNodeProps) {
               void openTabFromPath(activePaneId, node.path)
             }
           }}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-tab py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-tab py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
         >
           <EntryIcon
             entry={{ name: node.name, isDir: true }}

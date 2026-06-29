@@ -98,12 +98,16 @@ export type ColumnConfig = {
   visible: boolean
 }
 
+export type ColumnWidths = Partial<Record<ColumnKey, number>>
+
 export type LayoutConfig = {
   detailsVisible: boolean
   /** Folder-tree sidebar width in pixels (user-draggable). */
   treeWidthPx: number
   /** Fraction of the dual-pane area allotted to the left pane (0..1, user-draggable). */
   paneSplit: number
+  /** Per-column widths in CSS pixels. Missing keys fall back to app defaults. */
+  columnWidths: ColumnWidths
   defaultPaneMode: PaneMode
   restoreSession: boolean
   zoom: ZoomLevel

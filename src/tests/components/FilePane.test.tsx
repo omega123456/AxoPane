@@ -190,6 +190,80 @@ describe('FilePane state rendering', () => {
     expect(useTabsStore.getState().panes.left.tabs.length).toBeGreaterThan(1)
   })
 
+  it('restores history scroll after returning from a folder too short to scroll', () => {
+    const longEntries = Array.from({ length: 40 }, (_, index) => entry(`Item ${index}`))
+    seedPane({
+      path: 'C:\\root',
+      entries: longEntries,
+      scrollPositions: { 'C:\\root': 180 },
+    })
+
+    const view = render(<FilePane paneId="left" />)
+    const scroller = screen.getByLabelText('Left pane').querySelector<HTMLElement>('.overflow-auto')
+    if (!scroller) {
+      throw new Error('scroll container missing')
+    }
+
+    let canScroll = true
+    let scrollTop = 180
+    Object.defineProperty(scroller, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value: number) => {
+        scrollTop = canScroll ? value : 0
+      },
+    })
+
+    act(() => {
+      canScroll = false
+      usePanesStore.setState((state) => ({
+        panes: {
+          ...state.panes,
+          left: {
+            ...state.panes.left,
+            path: 'C:\\root\\short',
+            entries: [entry('Only child')],
+            scrollPositions: { 'C:\\root': 180, 'C:\\root\\short': 0 },
+          },
+        },
+      }))
+      view.rerender(<FilePane paneId="left" />)
+    })
+    expect(scroller.scrollTop).toBe(0)
+
+    act(() => {
+      usePanesStore.setState((state) => ({
+        panes: {
+          ...state.panes,
+          left: {
+            ...state.panes.left,
+            path: 'C:\\root',
+            entries: [entry('Only child')],
+            scrollPositions: { 'C:\\root': 180, 'C:\\root\\short': 0 },
+          },
+        },
+      }))
+      view.rerender(<FilePane paneId="left" />)
+    })
+    expect(scroller.scrollTop).toBe(0)
+
+    act(() => {
+      canScroll = true
+      usePanesStore.setState((state) => ({
+        panes: {
+          ...state.panes,
+          left: {
+            ...state.panes.left,
+            entries: longEntries,
+          },
+        },
+      }))
+      view.rerender(<FilePane paneId="left" />)
+    })
+
+    expect(scroller.scrollTop).toBe(180)
+  })
+
   it('opens non-folder items with the OS default application on activation', async () => {
     const user = userEvent.setup()
     const openPath = vi.fn(() => undefined)

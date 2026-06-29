@@ -99,11 +99,13 @@ describe('layout-store', () => {
     useLayoutStore.getState().setDefaultPaneMode('single')
     useLayoutStore.getState().setRestoreSession(false)
     useLayoutStore.getState().setZoom('125')
+    useLayoutStore.getState().setColumnWidth('type', 188)
     useLayoutStore.getState().toggleColumn('created')
 
     expect(useLayoutStore.getState()).toMatchObject({
       treeWidthPx: 320,
       paneSplit: 0.35,
+      columnWidths: expect.objectContaining({ type: 188 }),
       defaultPaneMode: 'single',
       restoreSession: false,
       zoom: '125',

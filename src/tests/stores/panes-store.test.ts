@@ -94,6 +94,30 @@ describe('panes-store navigation', () => {
     }
   })
 
+  it('clears the active filter when entering a fresh folder', async () => {
+    const listDir = vi.fn(responder)
+    ipc.override('list_dir', listDir)
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: {
+          ...state.panes.left,
+          path: 'C:\\root',
+          filterDraft: 'report',
+          filterApplied: 'report',
+          typing: true,
+        },
+      },
+    }))
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root\\child')
+
+    expect(usePanesStore.getState().panes.left.filterDraft).toBe('')
+    expect(usePanesStore.getState().panes.left.filterApplied).toBe('')
+    expect(usePanesStore.getState().panes.left.typing).toBe(false)
+    expect(listDir).toHaveBeenCalledWith(expect.objectContaining({ filter: '' }))
+  })
+
   it('requests a manual size for a focused folder only', async () => {
     const request = vi.fn(() => undefined)
     ipc.override('request_folder_size', request)
@@ -134,6 +158,33 @@ describe('panes-store navigation', () => {
     expect(listDir).not.toHaveBeenCalled()
     expect(setTabWatch).not.toHaveBeenCalled()
     expect(requestFolderSizes).not.toHaveBeenCalled()
+  })
+
+  it('sorts by type in both directions locally', async () => {
+    ipc.override('list_dir', () => ({
+      path: 'C:\\root',
+      entries: [
+        { ...dirAt('C:\\root\\notes.txt', false), typeLabel: 'TXT file' },
+        { ...dirAt('C:\\root\\archive.zip', false), typeLabel: 'ZIP file' },
+        { ...dirAt('C:\\root\\app.exe', false), typeLabel: 'EXE file' },
+      ],
+    }))
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    await usePanesStore.getState().setSort('left', 'type')
+
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'app.exe',
+      'notes.txt',
+      'archive.zip',
+    ])
+
+    await usePanesStore.getState().setSort('left', 'type')
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'archive.zip',
+      'notes.txt',
+      'app.exe',
+    ])
   })
 
   it('keeps size-sorted panes stable while folder sizes stream in, then re-sorts on demand', async () => {
@@ -256,6 +307,20 @@ describe('panes-store navigation', () => {
     await usePanesStore.getState().goForward('left')
     expect(usePanesStore.getState().panes.left.path).toBe('C:\\root\\child')
     expect(usePanesStore.getState().panes.left.historyIndex).toBe(1)
+  })
+
+  it('keeps scroll offsets for history navigation but clears fresh targets', async () => {
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    usePanesStore.getState().setScrollPosition('left', 'C:\\root', 120)
+    await usePanesStore.getState().navigatePane('left', 'C:\\root\\child')
+    usePanesStore.getState().setScrollPosition('left', 'C:\\root\\child', 240)
+
+    await usePanesStore.getState().goBack('left')
+    expect(usePanesStore.getState().panes.left.scrollPositions['C:\\root']).toBe(120)
+
+    await usePanesStore.getState().goForward('left')
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    expect(usePanesStore.getState().panes.left.scrollPositions['C:\\root']).toBeUndefined()
   })
 
   it('treats back at the start and forward at the end as no-ops', async () => {

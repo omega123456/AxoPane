@@ -37,6 +37,7 @@ export function buildAppConfig(): AppConfig {
       detailsVisible: false,
       treeWidthPx: layout.treeWidthPx,
       paneSplit: layout.paneSplit,
+      columnWidths: layout.columnWidths,
       defaultPaneMode: layout.defaultPaneMode,
       restoreSession: layout.restoreSession,
       zoom: layout.zoom,

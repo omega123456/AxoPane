@@ -2,8 +2,9 @@
 mod common;
 
 use file_explorer_lib::persist::{
-    default_columns, default_pane_split, default_sort_direction, default_sort_key,
-    default_tree_width_px, default_update_check_interval, default_zoom, Config, LayoutConfig,
+    default_column_widths, default_columns, default_pane_split, default_sort_direction,
+    default_sort_key, default_tree_width_px, default_update_check_interval, default_zoom, Config,
+    LayoutConfig,
 };
 
 #[test]
@@ -12,6 +13,8 @@ fn persistence_defaults_match_the_frontend_contract() {
     assert_eq!(default_zoom(), "100");
     assert_eq!(default_tree_width_px(), 204.0);
     assert_eq!(default_pane_split(), 0.5);
+    assert_eq!(default_column_widths().get("name"), Some(&320.0));
+    assert_eq!(default_column_widths().get("type"), Some(&136.0));
     assert_eq!(default_sort_key(), "name");
     assert_eq!(default_sort_direction(), "asc");
 

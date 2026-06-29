@@ -23,6 +23,7 @@ function pane(path: string): PaneState {
     error: null,
     visibleStartIndex: 0,
     visibleEndIndex: 40,
+    scrollPositions: {},
   }
 }
 
@@ -97,5 +98,34 @@ describe('BreadcrumbBar navigation', () => {
 
     expect(navigatePane).toHaveBeenNthCalledWith(1, 'left', '\\\\raspberry.pi\\share')
     expect(navigatePane).toHaveBeenNthCalledWith(2, 'left', '\\\\raspberry.pi\\share\\TV')
+  })
+
+  it('turns the breadcrumbs into a full-path editor from the trailing empty area', async () => {
+    const user = userEvent.setup()
+    const navigatePane = vi.fn(() => Promise.resolve())
+    usePanesStore.setState({ navigatePane })
+
+    render(<BreadcrumbBar pane={pane('C:\\Users\\Omega')} isActive />)
+    await user.dblClick(screen.getByRole('navigation', { name: 'Left pane path' }))
+
+    const input = screen.getByRole('textbox', { name: 'Left pane path' })
+    expect(input).toHaveValue('C:\\Users\\Omega')
+
+    await user.clear(input)
+    await user.type(input, 'D:\\Media{Enter}')
+
+    expect(navigatePane).toHaveBeenCalledWith('left', 'D:\\Media')
+  })
+
+  it('opens the full-path editor from a right-click on any breadcrumb', async () => {
+    const user = userEvent.setup()
+
+    render(<BreadcrumbBar pane={pane('C:\\Users\\Omega')} isActive />)
+    await user.pointer({
+      keys: '[MouseRight]',
+      target: screen.getByRole('button', { name: 'Users' }),
+    })
+
+    expect(screen.getByRole('textbox', { name: 'Left pane path' })).toHaveValue('C:\\Users\\Omega')
   })
 })

@@ -11,6 +11,26 @@ mod file_icons;
 pub mod volumes;
 pub mod watch;
 
+use std::path::{Path, PathBuf};
+
+/// Directory for config/session persistence.
+///
+/// Debug builds use a sibling `{identifier}-dev` folder so development and
+/// release installs do not read or write the same state.
+pub fn resolved_app_config_dir(base: &Path) -> PathBuf {
+    #[cfg(debug_assertions)]
+    {
+        match base.file_name().and_then(|name| name.to_str()) {
+            Some(name) => base.with_file_name(format!("{name}-dev")),
+            None => base.to_path_buf(),
+        }
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        base.to_path_buf()
+    }
+}
+
 #[cfg(not(feature = "test-utils"))]
 use ipc::commands;
 #[cfg(not(feature = "test-utils"))]
@@ -53,7 +73,7 @@ pub fn run() {
         .plugin(log_plugin())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
-            let config_dir = app.path().app_config_dir()?;
+            let config_dir = resolved_app_config_dir(&app.path().app_config_dir()?);
             let persistence = PersistenceState::load(&config_dir)
                 .map_err(|error| -> Box<dyn std::error::Error> { Box::new(error) })?;
 

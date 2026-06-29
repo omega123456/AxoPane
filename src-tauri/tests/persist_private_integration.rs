@@ -15,6 +15,7 @@ mod persist_src {
             assert_eq!(default_zoom(), "100");
             assert_eq!(default_tree_width_px(), 204.0);
             assert_eq!(default_pane_split(), 0.5);
+            assert_eq!(default_column_widths().get("name"), Some(&320.0));
             assert_eq!(default_sort_key(), "name");
             assert_eq!(default_sort_direction(), "asc");
             assert_eq!(default_columns().len(), 6);

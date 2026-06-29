@@ -41,7 +41,7 @@ export function CommandBar({ theme, setTheme }: CommandBarProps) {
           type="button"
           aria-pressed={showHiddenFiles}
           onClick={() => void setShowHiddenFiles(!showHiddenFiles)}
-          className={`inline-flex h-8 items-center gap-2 rounded-tab border px-3 text-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border ${
+          className={`inline-flex h-8 cursor-pointer items-center gap-2 rounded-tab border px-3 text-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border ${
             showHiddenFiles
               ? 'border-accent-blue-border bg-accent-blue-soft text-accent-blue-light dark:text-accent-blue'
               : 'border-light-border bg-light-surface text-light-text-soft dark:border-dark-border dark:bg-dark-surface dark:text-dark-text-soft'
@@ -53,7 +53,7 @@ export function CommandBar({ theme, setTheme }: CommandBarProps) {
         <button
           type="button"
           onClick={() => openSettings('keybindings')}
-          className="inline-flex h-8 items-center gap-2 rounded-tab border border-light-border bg-light-surface px-3 text-row text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border dark:bg-dark-surface dark:text-dark-text-soft"
+          className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-tab border border-light-border bg-light-surface px-3 text-row text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border dark:bg-dark-surface dark:text-dark-text-soft"
         >
           <SettingsIcon className="h-4 w-4" />
           Settings
@@ -61,7 +61,7 @@ export function CommandBar({ theme, setTheme }: CommandBarProps) {
         <button
           type="button"
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          className="inline-flex h-8 items-center gap-2 rounded-tab border border-light-border bg-light-surface px-3 text-row text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border dark:bg-dark-surface dark:text-dark-text-soft"
+          className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-tab border border-light-border bg-light-surface px-3 text-row text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border dark:bg-dark-surface dark:text-dark-text-soft"
         >
           {theme === 'dark' ? (
             <SunIcon className="h-4 w-4" />
@@ -91,7 +91,7 @@ function ToolbarButton({ children, disabled = false, label, onClick }: ToolbarBu
       aria-label={label}
       onClick={onClick}
       disabled={disabled}
-      className="inline-flex h-8 w-8 items-center justify-center rounded-tab text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border disabled:opacity-40 dark:text-dark-text-soft hover:bg-light-hover dark:hover:bg-dark-hover"
+      className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-tab text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border disabled:cursor-default disabled:opacity-40 dark:text-dark-text-soft hover:bg-light-hover dark:hover:bg-dark-hover"
     >
       {children}
     </button>

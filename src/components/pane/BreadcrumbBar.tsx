@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import type { PaneState } from '@/types/pane'
 import { ChevronRightIcon, RefreshIcon, SearchIcon } from '@/components/icons'
 import { usePanesStore } from '@/stores/panes-store'
@@ -12,28 +13,89 @@ export function BreadcrumbBar({ pane, isActive }: BreadcrumbBarProps) {
   const setFilterDraft = usePanesStore((state) => state.setFilterDraft)
   const clearFilter = usePanesStore((state) => state.clearFilter)
   const refreshEverything = usePanesStore((state) => state.refreshEverything)
+  const [editingPath, setEditingPath] = useState(false)
+  const [pathDraft, setPathDraft] = useState(pane.path)
+  const pathInputRef = useRef<HTMLInputElement>(null)
 
   const segments = splitPath(pane.path)
 
+  useEffect(() => {
+    if (!editingPath) {
+      return
+    }
+
+    pathInputRef.current?.focus()
+    pathInputRef.current?.select()
+  }, [editingPath])
+
+  function startPathEdit() {
+    setPathDraft(pane.path)
+    setEditingPath(true)
+  }
+
+  function submitPathEdit() {
+    const trimmed = pathDraft.trim()
+    setEditingPath(false)
+    if (trimmed && trimmed !== pane.path) {
+      void navigatePane(pane.id, trimmed)
+    }
+  }
+
   return (
-    <div className="flex h-crumb items-center gap-2 border-b border-light-border bg-light-surface px-3 dark:border-dark-border dark:bg-dark-surface">
-      <nav aria-label={`${pane.title} path`} className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
-        {segments.map((segment, index) => (
-          <button
-            key={segment.path}
-            type="button"
-            onClick={() => void navigatePane(pane.id, segment.path)}
-            className={`inline-flex shrink-0 items-center gap-1 rounded-tab px-2 py-1 text-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border ${
-              index === segments.length - 1
-                ? 'bg-accent-blue-soft text-accent-blue-light dark:text-accent-blue'
-                : 'text-light-text-soft hover:bg-light-hover dark:text-dark-text-soft dark:hover:bg-dark-hover'
-            }`}
-          >
-            <span className="truncate">{segment.label}</span>
-            {index < segments.length - 1 ? <ChevronRightIcon className="h-3.5 w-3.5" /> : null}
-          </button>
-        ))}
-      </nav>
+    <div
+      className="flex h-crumb items-center gap-2 border-b border-light-border bg-light-surface px-3 dark:border-dark-border dark:bg-dark-surface"
+      onContextMenu={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        startPathEdit()
+      }}
+    >
+      {editingPath ? (
+        <input
+          ref={pathInputRef}
+          aria-label={`${pane.title} path`}
+          value={pathDraft}
+          onChange={(event) => setPathDraft(event.target.value)}
+          onBlur={submitPathEdit}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              submitPathEdit()
+            } else if (event.key === 'Escape') {
+              event.preventDefault()
+              setEditingPath(false)
+              setPathDraft(pane.path)
+            }
+          }}
+          className="min-w-0 flex-1 rounded-tab border border-accent-blue-border bg-light-panel px-2 py-1 font-mono text-row text-light-text outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:bg-dark-panel dark:text-dark-text"
+        />
+      ) : (
+        <nav
+          aria-label={`${pane.title} path`}
+          className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden"
+          onDoubleClick={(event) => {
+            if (event.target === event.currentTarget) {
+              startPathEdit()
+            }
+          }}
+        >
+          {segments.map((segment, index) => (
+            <button
+              key={segment.path}
+              type="button"
+              onClick={() => void navigatePane(pane.id, segment.path)}
+              className={`inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-tab px-2 py-1 text-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border ${
+                index === segments.length - 1
+                  ? 'bg-accent-blue-soft text-accent-blue-light dark:text-accent-blue'
+                  : 'text-light-text-soft hover:bg-light-hover dark:text-dark-text-soft dark:hover:bg-dark-hover'
+              }`}
+            >
+              <span className="truncate">{segment.label}</span>
+              {index < segments.length - 1 ? <ChevronRightIcon className="h-3.5 w-3.5" /> : null}
+            </button>
+          ))}
+        </nav>
+      )}
       <span className="shrink-0 font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
         {pane.entries.length} items
       </span>
@@ -41,13 +103,15 @@ export function BreadcrumbBar({ pane, isActive }: BreadcrumbBarProps) {
         type="button"
         aria-label={`Refresh ${pane.title}`}
         onClick={() => void refreshEverything(pane.id)}
-        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-tab text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:text-dark-text-soft dark:hover:bg-dark-hover"
+        className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:text-dark-text-soft dark:hover:bg-dark-hover"
       >
         <RefreshIcon className="h-3.5 w-3.5" />
       </button>
-      <label className={`flex h-8 w-search items-center gap-2 rounded-tab border px-2 ${
-        isActive ? 'border-accent-blue-border' : 'border-light-border dark:border-dark-border'
-      } bg-light-panel dark:bg-dark-panel`}>
+      <label
+        className={`flex h-8 w-search items-center gap-2 rounded-tab border px-2 ${
+          isActive ? 'border-accent-blue-border' : 'border-light-border dark:border-dark-border'
+        } bg-light-panel dark:bg-dark-panel`}
+      >
         <SearchIcon className="h-3.5 w-3.5 text-light-text-muted dark:text-dark-text-muted" />
         <input
           aria-label={`${pane.title} filter`}
