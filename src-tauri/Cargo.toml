@@ -1,6 +1,6 @@
 [package]
 name = "file-explorer"
-version = "0.1.0"
+version = "1.0.0"
 description = "Phase 1 scaffold for the file explorer"
 authors = ["OpenAI"]
 edition = "2021"
