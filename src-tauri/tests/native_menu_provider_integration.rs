@@ -248,6 +248,34 @@ fn fake_provider_rejects_windows_shell_invocations_in_test_utils() {
 }
 
 #[test]
+fn fake_provider_rejects_modern_windows_invocations_in_test_utils() {
+    let provider = FakeNativeMenuProvider;
+    let executor = file_explorer_lib::native_menu::shell_executor::ShellExecutor::default();
+
+    let status = provider.invoke(
+        &ProviderInvocation::WindowsModern {
+            clsid: 0xB41DB860_64E4_11D2_9906_E49FADC173CA,
+            packaged: true,
+            request: load_request(
+                "req-modern",
+                NativeMenuTargetKind::File,
+                Some("C:\\fixture\\report.txt"),
+                Some("C:\\fixture"),
+                &["C:\\fixture\\report.txt"],
+            ),
+            command_path: vec![0],
+        },
+        &executor,
+    );
+
+    assert!(!status.handled);
+    assert_eq!(
+        status.message.as_deref(),
+        Some("fake-provider-does-not-run-windows-shell")
+    );
+}
+
+#[test]
 fn unsupported_provider_returns_safe_statuses() {
     let provider = UnsupportedNativeMenuProvider;
     let executor = file_explorer_lib::native_menu::shell_executor::ShellExecutor::default();
@@ -395,6 +423,43 @@ fn provider_dedupe_omits_duplicate_native_siblings_before_renderer_guardrails() 
 
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].id, "first-terminal");
+}
+
+#[test]
+fn provider_dedupe_collapses_same_label_command_from_classic_and_modern_paths() {
+    let items = dedupe_provider_items(vec![
+        ProviderNativeMenuItem {
+            id: "classic-notepadpp".to_string(),
+            label: "Edit with Notepad++".to_string(),
+            enabled: true,
+            danger: false,
+            canonical_action_kind: None,
+            // Classic path reports the shell verb string.
+            normalized_verb: Some("nppshellverb".to_string()),
+            icon: None,
+            invocation: Some(ProviderInvocation::Fake {
+                action_id: "fake.classicNotepadpp".to_string(),
+            }),
+            children: Vec::new(),
+        },
+        ProviderNativeMenuItem {
+            id: "modern-notepadpp".to_string(),
+            label: "Edit with Notepad++".to_string(),
+            enabled: true,
+            danger: false,
+            canonical_action_kind: None,
+            // Modern path derives its verb from the label.
+            normalized_verb: Some("editwithnotepad".to_string()),
+            icon: None,
+            invocation: Some(ProviderInvocation::Fake {
+                action_id: "fake.modernNotepadpp".to_string(),
+            }),
+            children: Vec::new(),
+        },
+    ]);
+
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].id, "classic-notepadpp");
 }
 
 #[test]

@@ -80,9 +80,13 @@ function normalizeVerb(value: string): string {
 }
 
 function dedupeKey(item: NativeMenuItem): string {
+  // Key on the visible label (not the verb): the same command surfaced by both
+  // the classic IContextMenu and modern IExplorerCommand paths (e.g. "Edit with
+  // Notepad++") carries different verbs but an identical label, and is a
+  // duplicate from the user's perspective.
   return [
     item.canonicalActionKind ?? '',
-    normalizeVerb(item.normalizedVerb ?? item.label),
+    normalizeVerb(item.label),
     item.children.length > 0 ? 'submenu' : 'leaf',
   ].join(':')
 }

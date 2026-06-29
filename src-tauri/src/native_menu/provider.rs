@@ -46,6 +46,17 @@ pub enum ProviderInvocation {
         request: LoadNativeMenuRequest,
         command_path: Vec<u32>,
     },
+    /// A Windows 11 modern (`IExplorerCommand`) shell extension command. The
+    /// `clsid` identifies the handler to re-instantiate at invoke time (stored
+    /// as a `u128` so the enum stays `Eq`/`Clone`); `packaged` records whether
+    /// it came from a packaged (sparse-MSIX) registration; `command_path` is the
+    /// index path used to walk `EnumSubCommands` back down to the leaf command.
+    WindowsModern {
+        clsid: u128,
+        packaged: bool,
+        request: LoadNativeMenuRequest,
+        command_path: Vec<u32>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,16 +137,17 @@ fn normalize_verb(value: &str) -> String {
 }
 
 fn dedupe_key(item: &ProviderNativeMenuItem) -> String {
+    // Key on the visible label (not the verb): the same command surfaced by both
+    // the classic `IContextMenu` and modern `IExplorerCommand` paths (e.g.
+    // "Edit with Notepad++") carries different verbs but an identical label, and
+    // is a duplicate from the user's perspective.
     format!(
         "{}:{}:{}",
         item.canonical_action_kind
             .as_ref()
             .map(canonical_action_key)
             .unwrap_or_default(),
-        item.normalized_verb
-            .as_deref()
-            .map(normalize_verb)
-            .unwrap_or_else(|| normalize_verb(&item.label)),
+        normalize_verb(&item.label),
         if item.children.is_empty() {
             "leaf"
         } else {

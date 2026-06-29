@@ -138,6 +138,25 @@ describe('dedupeNativeMenuItems', () => {
     expect(items).toEqual([])
   })
 
+  it('collapses the same labelled command from the classic and modern paths despite differing verbs', () => {
+    const items = dedupeNativeMenuItems([
+      item({
+        id: 'classic-notepadpp',
+        label: 'Edit with Notepad++',
+        normalizedVerb: 'nppshellverb',
+        invokeToken: 'native:classic',
+      }),
+      item({
+        id: 'modern-notepadpp',
+        label: 'Edit with Notepad++',
+        normalizedVerb: 'editwithnotepad',
+        invokeToken: 'native:modern',
+      }),
+    ])
+
+    expect(items.map((entry) => entry.id)).toEqual(['classic-notepadpp'])
+  })
+
   it('drops duplicate native siblings after canonical filtering runs', () => {
     const items = dedupeNativeMenuItems([
       item({

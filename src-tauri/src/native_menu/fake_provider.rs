@@ -162,6 +162,9 @@ impl NativeMenuProvider for FakeNativeMenuProvider {
             ProviderInvocation::Windows { .. } => {
                 MenuActionStatus::unsupported("fake-provider-does-not-run-windows-shell")
             }
+            ProviderInvocation::WindowsModern { .. } => {
+                MenuActionStatus::unsupported("fake-provider-does-not-run-windows-shell")
+            }
         })
     }
 }

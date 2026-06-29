@@ -78,8 +78,6 @@ fn invoke_impl(invocation: ProviderInvocation) -> MenuActionStatus {
 
 #[cfg(not(feature = "test-utils"))]
 mod real {
-    use base64::Engine;
-    use png::{BitDepth, ColorType, Encoder};
     use std::path::{Path, PathBuf};
     use std::ptr::null_mut;
 
@@ -87,19 +85,19 @@ mod real {
     use crate::native_menu::types::{
         NativeMenuCanonicalActionKind, NativeMenuIcon, NativeMenuIconKind,
     };
+    use crate::native_menu::windows_shell::{
+        bitmap_to_data_url, classify_canonical_action, is_background_target, normalize_verb,
+        parent_directory, path_to_wide, sanitize_menu_label, selected_target_paths, OwnedPidl,
+    };
     use windows::core::{Interface, PCWSTR};
     use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-    use windows::Win32::Graphics::Gdi::{
-        CreateCompatibleDC, DeleteDC, GetDIBits, GetObjectW, BITMAP, BITMAPINFO, BITMAPINFOHEADER,
-        BI_RGB, DIB_RGB_COLORS, HBITMAP,
-    };
     use windows::Win32::System::Com::IBindCtx;
     use windows::Win32::UI::Shell::{
-        Common::ITEMIDLIST, IContextMenu, IContextMenu2, IContextMenu3, ILFree, IShellFolder,
-        SHBindToObject, SHBindToParent, SHGetDesktopFolder, SHOpenWithDialog, SHParseDisplayName,
-        ShellExecuteW, CMF_CANRENAME, CMF_EXPLORE, CMF_EXTENDEDVERBS, CMF_INCLUDESTATIC,
-        CMF_ITEMMENU, CMF_NODEFAULT, CMF_NORMAL, CMF_SYNCCASCADEMENU, CMINVOKECOMMANDINFO,
-        GCS_VERBW, OAIF_ALLOW_REGISTRATION, OAIF_EXEC, OPENASINFO,
+        Common::ITEMIDLIST, IContextMenu, IContextMenu2, IContextMenu3, IShellFolder,
+        SHBindToObject, SHBindToParent, SHGetDesktopFolder, SHOpenWithDialog, ShellExecuteW,
+        CMF_CANRENAME, CMF_EXPLORE, CMF_EXTENDEDVERBS, CMF_INCLUDESTATIC, CMF_ITEMMENU,
+        CMF_NODEFAULT, CMF_NORMAL, CMF_SYNCCASCADEMENU, CMINVOKECOMMANDINFO, GCS_VERBW,
+        OAIF_ALLOW_REGISTRATION, OAIF_EXEC, OPENASINFO,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         CreatePopupMenu, DestroyMenu, GetMenuItemCount, GetMenuItemInfoW, MENUITEMINFOW,
@@ -112,7 +110,7 @@ mod real {
     const MAX_SUBMENU_DEPTH: usize = 1;
 
     pub(super) fn load_menu_impl(request: &LoadNativeMenuRequest) -> Vec<ProviderNativeMenuItem> {
-        match enumerate_menu(request) {
+        let mut items = match enumerate_menu(request) {
             Ok(items) => items,
             Err(error) => {
                 log::warn!(
@@ -122,28 +120,58 @@ mod real {
                 );
                 Vec::new()
             }
-        }
+        };
+
+        // Append Windows 11 modern (IExplorerCommand) items; the shared dedupe in
+        // `provider::dedupe_provider_items` removes any classic/app duplicates.
+        items.extend(crate::native_menu::windows_modern::enumerate_modern_items(
+            request,
+        ));
+        items
     }
 
     pub(super) fn invoke_impl(invocation: ProviderInvocation) -> MenuActionStatus {
-        let ProviderInvocation::Windows {
-            request,
-            command_path,
-        } = invocation
-        else {
-            return MenuActionStatus::unsupported(UNSUPPORTED_MESSAGE);
-        };
-
-        match invoke_command(&request, &command_path) {
-            Ok(()) => MenuActionStatus::handled_with_message("invoked"),
-            Err(error) => {
-                log::warn!(
-                    "native menu invocation failed for request {} at path {:?}: {}",
-                    request.request_id,
-                    command_path,
-                    error
-                );
-                MenuActionStatus::unsupported("native-invoke-failed")
+        match invocation {
+            ProviderInvocation::Windows {
+                request,
+                command_path,
+            } => match invoke_command(&request, &command_path) {
+                Ok(()) => MenuActionStatus::handled_with_message("invoked"),
+                Err(error) => {
+                    log::warn!(
+                        "native menu invocation failed for request {} at path {:?}: {}",
+                        request.request_id,
+                        command_path,
+                        error
+                    );
+                    MenuActionStatus::unsupported("native-invoke-failed")
+                }
+            },
+            ProviderInvocation::WindowsModern {
+                clsid,
+                packaged,
+                request,
+                command_path,
+            } => match crate::native_menu::windows_modern::invoke_modern(
+                clsid,
+                packaged,
+                &request,
+                &command_path,
+            ) {
+                Ok(()) => MenuActionStatus::handled_with_message("invoked"),
+                Err(error) => {
+                    log::warn!(
+                        "modern menu invocation failed for request {} clsid {:032x} at path {:?}: {}",
+                        request.request_id,
+                        clsid,
+                        command_path,
+                        error
+                    );
+                    MenuActionStatus::unsupported("native-invoke-failed")
+                }
+            },
+            ProviderInvocation::Fake { .. } => {
+                MenuActionStatus::unsupported(UNSUPPORTED_MESSAGE)
             }
         }
     }
@@ -497,71 +525,6 @@ mod real {
         }
     }
 
-    fn classify_canonical_action(
-        normalized_verb: Option<&str>,
-        label: &str,
-    ) -> Option<NativeMenuCanonicalActionKind> {
-        let verb = normalized_verb.unwrap_or_default();
-        match verb {
-            "open" => Some(NativeMenuCanonicalActionKind::Open),
-            "openwith" => Some(NativeMenuCanonicalActionKind::OpenWith),
-            "copy" => Some(NativeMenuCanonicalActionKind::Copy),
-            "cut" => Some(NativeMenuCanonicalActionKind::Cut),
-            "paste" => Some(NativeMenuCanonicalActionKind::Paste),
-            "rename" => Some(NativeMenuCanonicalActionKind::Rename),
-            "delete" => Some(NativeMenuCanonicalActionKind::Delete),
-            "properties" => Some(NativeMenuCanonicalActionKind::Properties),
-            "share" => Some(NativeMenuCanonicalActionKind::Share),
-            "compress" | "windowscompresszipfile" => Some(NativeMenuCanonicalActionKind::Compress),
-            "extract" => Some(NativeMenuCanonicalActionKind::Extract),
-            "refresh" => Some(NativeMenuCanonicalActionKind::Refresh),
-            "new" | "newfolder" => Some(NativeMenuCanonicalActionKind::NewFolder),
-            "selectall" => Some(NativeMenuCanonicalActionKind::SelectAll),
-            _ => {
-                let normalized_label = normalize_verb(label);
-                match normalized_label.as_str() {
-                    value if value.starts_with("openwith") => {
-                        Some(NativeMenuCanonicalActionKind::OpenWith)
-                    }
-                    "delete" => Some(NativeMenuCanonicalActionKind::Delete),
-                    "properties" => Some(NativeMenuCanonicalActionKind::Properties),
-                    "copy" => Some(NativeMenuCanonicalActionKind::Copy),
-                    "cut" => Some(NativeMenuCanonicalActionKind::Cut),
-                    "paste" => Some(NativeMenuCanonicalActionKind::Paste),
-                    "rename" => Some(NativeMenuCanonicalActionKind::Rename),
-                    "refresh" => Some(NativeMenuCanonicalActionKind::Refresh),
-                    "selectall" => Some(NativeMenuCanonicalActionKind::SelectAll),
-                    _ => None,
-                }
-            }
-        }
-    }
-
-    fn normalize_verb(value: &str) -> String {
-        value
-            .chars()
-            .filter(|character| character.is_ascii_alphanumeric())
-            .flat_map(char::to_lowercase)
-            .collect()
-    }
-
-    fn sanitize_menu_label(raw: String) -> String {
-        let without_shortcut = raw.split('\t').next().unwrap_or_default();
-        let mut label = String::with_capacity(without_shortcut.len());
-        let mut chars = without_shortcut.chars().peekable();
-        while let Some(character) = chars.next() {
-            if character == '&' {
-                if matches!(chars.peek(), Some('&')) {
-                    label.push('&');
-                    chars.next();
-                }
-                continue;
-            }
-            label.push(character);
-        }
-        label.trim().to_string()
-    }
-
     fn extract_menu_icon(info: &MENUITEMINFOW) -> Option<NativeMenuIcon> {
         let bitmap = info.hbmpItem;
         if bitmap.0.is_null() {
@@ -573,86 +536,6 @@ mod real {
             data_url,
             alt: None,
         })
-    }
-
-    fn bitmap_to_data_url(bitmap: HBITMAP) -> Option<String> {
-        let bitmap_bytes = bitmap_to_png_bytes(bitmap)?;
-        Some(format!(
-            "data:image/png;base64,{}",
-            base64::engine::general_purpose::STANDARD.encode(bitmap_bytes)
-        ))
-    }
-
-    fn bitmap_to_png_bytes(bitmap: HBITMAP) -> Option<Vec<u8>> {
-        let mut object = BITMAP::default();
-        let object_size = i32::try_from(std::mem::size_of::<BITMAP>()).ok()?;
-        let copied = unsafe {
-            GetObjectW(
-                bitmap.into(),
-                object_size,
-                Some((&mut object as *mut BITMAP).cast()),
-            )
-        };
-        if copied == 0 {
-            return None;
-        }
-
-        let width = u32::try_from(object.bmWidth).ok()?;
-        let height = u32::try_from(object.bmHeight.abs()).ok()?;
-        if width == 0 || height == 0 {
-            return None;
-        }
-
-        let stride = width.checked_mul(4)?;
-        let pixel_bytes_len = stride.checked_mul(height)?;
-        let pixel_bytes_len = usize::try_from(pixel_bytes_len).ok()?;
-
-        let header = BITMAPINFOHEADER {
-            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: i32::try_from(width).ok()?,
-            biHeight: -i32::try_from(height).ok()?,
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: BI_RGB.0,
-            biSizeImage: u32::try_from(pixel_bytes_len).ok()?,
-            ..Default::default()
-        };
-        let mut info = BITMAPINFO {
-            bmiHeader: header,
-            ..Default::default()
-        };
-        let mut pixels = vec![0u8; pixel_bytes_len];
-
-        let device_context = unsafe { CreateCompatibleDC(None) };
-        if device_context.0.is_null() {
-            return None;
-        }
-        let dc_guard = DeviceContextGuard(device_context);
-
-        let scan_lines = unsafe {
-            GetDIBits(
-                dc_guard.0,
-                bitmap,
-                0,
-                height,
-                Some(pixels.as_mut_ptr().cast()),
-                &mut info,
-                DIB_RGB_COLORS,
-            )
-        };
-        if scan_lines == 0 {
-            return None;
-        }
-
-        let rgba_pixels = bgra_to_rgba(&pixels)?;
-        let mut bytes = Vec::new();
-        let mut encoder = Encoder::new(&mut bytes, width, height);
-        encoder.set_color(ColorType::Rgba);
-        encoder.set_depth(BitDepth::Eight);
-        let mut writer = encoder.write_header().ok()?;
-        writer.write_image_data(&rgba_pixels).ok()?;
-        drop(writer);
-        Some(bytes)
     }
 
     fn single_target_path(paths: &[String]) -> Option<&str> {
@@ -741,99 +624,12 @@ mod real {
         )
     }
 
-    fn is_background_target(request: &LoadNativeMenuRequest) -> bool {
-        matches!(
-            request.target_kind,
-            super::super::types::NativeMenuTargetKind::Background
-        )
-    }
-
-    fn selected_target_paths(request: &LoadNativeMenuRequest) -> Vec<String> {
-        if !request.selected_paths.is_empty() {
-            return request.selected_paths.clone();
-        }
-
-        request.target_path.iter().cloned().collect()
-    }
-
-    fn parent_directory(path: &str) -> Option<PathBuf> {
-        let path = Path::new(path);
-        path.parent().map(Path::to_path_buf)
-    }
-
-    struct OwnedPidl(*mut ITEMIDLIST);
-
-    impl OwnedPidl {
-        fn from_path(path: &str) -> windows::core::Result<Self> {
-            let wide = path_to_wide(path);
-            let mut pidl = null_mut();
-            unsafe {
-                SHParseDisplayName(PCWSTR(wide.as_ptr()), None, &mut pidl, 0, None)?;
-            }
-            Ok(Self(pidl))
-        }
-
-        fn as_ptr(&self) -> *const ITEMIDLIST {
-            self.0
-        }
-    }
-
-    impl Drop for OwnedPidl {
-        fn drop(&mut self) {
-            if !self.0.is_null() {
-                unsafe {
-                    ILFree(Some(self.0.cast_const()));
-                }
-            }
-        }
-    }
-
     struct MenuGuard(windows::Win32::UI::WindowsAndMessaging::HMENU);
 
     impl Drop for MenuGuard {
         fn drop(&mut self) {
             let _ = unsafe { DestroyMenu(self.0) };
         }
-    }
-
-    struct DeviceContextGuard(windows::Win32::Graphics::Gdi::HDC);
-
-    impl Drop for DeviceContextGuard {
-        fn drop(&mut self) {
-            let _ = unsafe { DeleteDC(self.0) };
-        }
-    }
-
-    fn path_to_wide(path: &str) -> Vec<u16> {
-        path.encode_utf16().chain(std::iter::once(0)).collect()
-    }
-
-    fn bgra_to_rgba(pixels: &[u8]) -> Option<Vec<u8>> {
-        if pixels.len() % 4 != 0 {
-            return None;
-        }
-
-        let mut rgba = Vec::with_capacity(pixels.len());
-        for chunk in pixels.chunks_exact(4) {
-            let blue = u32::from(chunk[0]);
-            let green = u32::from(chunk[1]);
-            let red = u32::from(chunk[2]);
-            let alpha = u32::from(chunk[3]);
-
-            if alpha == 0 {
-                rgba.extend_from_slice(&[0, 0, 0, 0]);
-                continue;
-            }
-
-            let unpremultiply =
-                |channel: u32| -> u8 { ((channel * 255 + (alpha / 2)) / alpha).min(255) as u8 };
-
-            rgba.push(unpremultiply(red));
-            rgba.push(unpremultiply(green));
-            rgba.push(unpremultiply(blue));
-            rgba.push(alpha as u8);
-        }
-        Some(rgba)
     }
 
     fn invoke_canonical_action_for_paths(

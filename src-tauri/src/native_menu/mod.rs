@@ -1,6 +1,7 @@
 pub mod fake_provider;
 #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
 pub mod macos;
+pub mod modern_match;
 pub mod provider;
 pub mod shell_executor;
 pub mod token_store;
@@ -9,6 +10,10 @@ pub mod types;
 pub mod unsupported;
 #[cfg(target_os = "windows")]
 pub mod windows;
+#[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
+pub mod windows_modern;
+#[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
+pub mod windows_shell;
 
 use std::sync::Arc;
 
