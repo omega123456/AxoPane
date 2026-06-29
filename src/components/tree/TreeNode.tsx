@@ -2,16 +2,20 @@ import { useEffect, useRef } from 'react'
 import { buildContextMenuContent } from '@/components/menus/menu-definitions'
 import { ChevronRightIcon } from '@/components/icons'
 import { EntryIcon } from '@/components/icons/EntryIcon'
+import { VolumeIcon } from '@/components/icons/VolumeIcon'
 import { detectPlatformOs } from '@/lib/keymap'
+import type { VolumeInfo } from '@/lib/types/ipc'
 import { useContextMenuStore } from '@/stores/context-menu-store'
 import { usePanesStore } from '@/stores/panes-store'
 
 type TreeNodeProps = {
   path: string
   depth: number
+  /** Set for volume roots; switches the row glyph from a folder to a drive icon. */
+  volume?: VolumeInfo
 }
 
-export function TreeNode({ path, depth }: TreeNodeProps) {
+export function TreeNode({ path, depth, volume }: TreeNodeProps) {
   const node = usePanesStore((state) => state.treeNodes[path])
   const activePaneId = usePanesStore((state) => state.activePaneId)
   const activePath = usePanesStore((state) => state.panes[activePaneId].path)
@@ -75,6 +79,14 @@ export function TreeNode({ path, depth }: TreeNodeProps) {
         <button
           type="button"
           onClick={() => void navigatePane(activePaneId, node.path)}
+          onMouseDown={(event) => {
+            // Suppress the browser's middle-click autoscroll, which would
+            // otherwise swallow the subsequent auxclick and prevent the
+            // open-in-new-tab gesture from firing.
+            if (event.button === 1) {
+              event.preventDefault()
+            }
+          }}
           onAuxClick={(event) => {
             if (event.button === 1) {
               event.preventDefault()
@@ -83,11 +95,11 @@ export function TreeNode({ path, depth }: TreeNodeProps) {
           }}
           className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-tab py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
         >
-          <EntryIcon
-            entry={{ name: node.name, isDir: true }}
-            isOpen={node.expanded}
-            colorClassName=""
-          />
+          {volume ? (
+            <VolumeIcon volume={volume} />
+          ) : (
+            <EntryIcon entry={{ name: node.name, isDir: true }} isOpen={node.expanded} />
+          )}
           <span className="truncate">{node.name}</span>
         </button>
       </div>

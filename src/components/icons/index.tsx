@@ -34,10 +34,12 @@ import {
   FolderPlus,
   FolderOpen,
   GripVertical,
+  HardDrive,
   Info,
   LoaderCircle,
   Lock,
   MoonStar,
+  Network,
   PanelLeft,
   Pause,
   Play,
@@ -54,6 +56,7 @@ import {
   Sun,
   Trash2,
   Type,
+  Usb,
   X,
   XCircle,
 } from 'lucide-react'
@@ -98,10 +101,12 @@ export const FolderGit2Icon = withDefaults(FolderGit2)
 export const FolderPlusIcon = withDefaults(FolderPlus)
 export const FolderOpenIcon = withDefaults(FolderOpen)
 export const GripVerticalIcon = withDefaults(GripVertical)
+export const HardDriveIcon = withDefaults(HardDrive)
 export const InfoIcon = withDefaults(Info)
 export const LoaderCircleIcon = withDefaults(LoaderCircle)
 export const LockIcon = withDefaults(Lock)
 export const MoonStarIcon = withDefaults(MoonStar)
+export const NetworkIcon = withDefaults(Network)
 export const PanelLeftIcon = withDefaults(PanelLeft)
 export const PauseIcon = withDefaults(Pause)
 export const PlayIcon = withDefaults(Play)
@@ -118,5 +123,6 @@ export const SkipForwardIcon = withDefaults(SkipForward)
 export const SunIcon = withDefaults(Sun)
 export const Trash2Icon = withDefaults(Trash2)
 export const TypeIcon = withDefaults(Type)
+export const UsbIcon = withDefaults(Usb)
 export const XIcon = withDefaults(X)
 export const XCircleIcon = withDefaults(XCircle)

@@ -33,7 +33,7 @@ export function FolderTree() {
             </p>
             <ul className="space-y-1">
               {group.volumes.map((volume) => (
-                <TreeNode key={volume.mountRoot} path={volume.mountRoot} depth={0} />
+                <TreeNode key={volume.mountRoot} path={volume.mountRoot} depth={0} volume={volume} />
               ))}
             </ul>
           </section>

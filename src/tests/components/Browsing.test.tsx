@@ -246,4 +246,65 @@ describe('TreeNode', () => {
     await user.pointer({ keys: '[MouseMiddle]', target: screen.getByText('root') })
     expect(openTab).toHaveBeenCalledWith('right', 'C:\\root')
   })
+
+  it('opens a node in a new tab when middle-clicking its icon', async () => {
+    const user = userEvent.setup()
+    const openTab = vi.fn(() => Promise.resolve())
+    usePanesStore.setState({
+      activePaneId: 'right',
+      openTabFromPath: openTab,
+      treeNodes: {
+        'C:\\root': {
+          id: 'C:\\root',
+          name: 'root',
+          path: 'C:\\root',
+          parentPath: null,
+          children: [],
+          expanded: true,
+          loaded: true,
+        },
+      },
+    })
+
+    render(
+      <ul>
+        <TreeNode path={'C:\\root'} depth={0} />
+      </ul>,
+    )
+
+    const icon = screen.getByText('root').closest('button')!.querySelector('svg')!
+    await user.pointer({ keys: '[MouseMiddle]', target: icon })
+    expect(openTab).toHaveBeenCalledWith('right', 'C:\\root')
+  })
+
+  it('suppresses middle-click autoscroll so the auxclick gesture can fire', () => {
+    usePanesStore.setState({
+      activePaneId: 'right',
+      treeNodes: {
+        'C:\\root': {
+          id: 'C:\\root',
+          name: 'root',
+          path: 'C:\\root',
+          parentPath: null,
+          children: [],
+          expanded: true,
+          loaded: true,
+        },
+      },
+    })
+
+    render(
+      <ul>
+        <TreeNode path={'C:\\root'} depth={0} />
+      </ul>,
+    )
+
+    const label = screen.getByText('root').closest('button')!
+    const prevented = !fireEvent.mouseDown(label, { button: 1 })
+    expect(prevented).toBe(true)
+
+    // Left-button mousedown must not be prevented (preserves focus/click).
+    const leftAllowed = fireEvent.mouseDown(label, { button: 0 })
+    expect(leftAllowed).toBe(true)
+  })
 })
