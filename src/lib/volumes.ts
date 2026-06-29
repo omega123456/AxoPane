@@ -32,6 +32,34 @@ function normalizeExtendedWindowsPath(path: string) {
   return path
 }
 
+/** Strip trailing separators and lowercase, for root-equality comparisons. */
+function normalizeRoot(path: string) {
+  return normalizeExtendedWindowsPath(path).replace(/[\\/]+$/, '').toLowerCase()
+}
+
+/**
+ * The volume a path lives in, or `null` when none match. When several volumes
+ * contain the path (e.g. a mounted volume nested under another), the deepest
+ * mount root wins.
+ */
+export function findVolumeForPath(path: string, volumes: VolumeInfo[]): VolumeInfo | null {
+  let match: VolumeInfo | null = null
+  for (const volume of volumes) {
+    if (!isPathInsideVolume(path, volume.mountRoot)) {
+      continue
+    }
+    if (!match || volume.mountRoot.length > match.mountRoot.length) {
+      match = volume
+    }
+  }
+  return match
+}
+
+/** True when `path` is itself a volume's mount root (not a folder inside it). */
+export function isVolumeRoot(path: string, volume: VolumeInfo) {
+  return normalizeRoot(path) === normalizeRoot(volume.mountRoot)
+}
+
 export function sortVolumesForTree(volumes: VolumeInfo[]) {
   return [...volumes].sort((left, right) =>
     left.mountRoot.localeCompare(right.mountRoot, undefined, {

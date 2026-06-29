@@ -11,6 +11,14 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`dual-pane-browsing-${mode}.png`)
   })
 
+  test(`tabs ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.tabs[mode])
+    const leftPane = page.getByRole('region', { name: 'Left pane' })
+    await expect(leftPane).toBeVisible()
+    await expect(leftPane.getByRole('tab')).toHaveCount(4)
+    await expect(page.locator('main')).toHaveScreenshot(`pane-tabs-${mode}.png`)
+  })
+
   test(`file types ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.fileTypes[mode])
     await expect(page.getByRole('region', { name: 'Left pane' })).toBeVisible()

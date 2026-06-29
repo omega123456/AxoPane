@@ -80,6 +80,23 @@ const emptyRootListDir: ListDirResponse = {
   entries: [],
 }
 
+// A left pane with several tabs whose locations exercise every LocationIcon
+// branch: an active folder tab plus inactive fixed / removable / network roots.
+const multiTabSession: SessionState = {
+  activePane: 'left',
+  leftPath: 'C:\\Users\\Omega',
+  rightPath: 'D:\\projects',
+  left: {
+    activeTabIndex: 0,
+    tabs: [
+      { path: 'C:\\Users\\Omega', sortKey: 'name', sortDirection: 'asc', filter: '' },
+      { path: 'C:\\', sortKey: 'name', sortDirection: 'asc', filter: '' },
+      { path: 'E:\\', sortKey: 'name', sortDirection: 'asc', filter: '' },
+      { path: 'Z:\\', sortKey: 'name', sortDirection: 'asc', filter: '' },
+    ],
+  },
+}
+
 function scenarioByTheme(commands: CommandMap): {
   light: PlaywrightScenario
   dark: PlaywrightScenario
@@ -155,6 +172,22 @@ export const screenshotScenarios = {
     dark: {
       commands: {
         load_config: darkConfig,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+    },
+  },
+  tabs: {
+    light: {
+      commands: {
+        load_config: lightConfig,
+        load_session: multiTabSession,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+    },
+    dark: {
+      commands: {
+        load_config: darkConfig,
+        load_session: multiTabSession,
         queue_snapshot: emptyQueueSnapshot,
       },
     },

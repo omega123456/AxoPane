@@ -1,4 +1,9 @@
-import { groupVolumesByCategory, volumeCategory } from '@/lib/volumes'
+import {
+  findVolumeForPath,
+  groupVolumesByCategory,
+  isVolumeRoot,
+  volumeCategory,
+} from '@/lib/volumes'
 import type { VolumeInfo } from '@/lib/types/ipc'
 
 function volume(overrides: Partial<VolumeInfo> = {}): VolumeInfo {
@@ -50,5 +55,39 @@ describe('groupVolumesByCategory', () => {
 
   it('returns nothing for an empty volume list', () => {
     expect(groupVolumesByCategory([])).toEqual([])
+  })
+})
+
+describe('findVolumeForPath', () => {
+  const c = volume({ mountRoot: 'C:\\', label: 'Windows' })
+  const mount = volume({ mountRoot: 'C:\\Mounted\\', label: 'Nested' })
+
+  it('returns the volume containing a path', () => {
+    expect(findVolumeForPath('C:\\Users\\me', [c])).toBe(c)
+  })
+
+  it('prefers the deepest mount root when volumes are nested', () => {
+    expect(findVolumeForPath('C:\\Mounted\\data', [c, mount])).toBe(mount)
+    expect(findVolumeForPath('C:\\Users', [c, mount])).toBe(c)
+  })
+
+  it('returns null when no volume matches', () => {
+    expect(findVolumeForPath('D:\\x', [c])).toBeNull()
+  })
+})
+
+describe('isVolumeRoot', () => {
+  it('matches a drive root regardless of trailing separator or case', () => {
+    const c = volume({ mountRoot: 'C:\\' })
+    expect(isVolumeRoot('C:\\', c)).toBe(true)
+    expect(isVolumeRoot('c:', c)).toBe(true)
+    expect(isVolumeRoot('C:\\Users', c)).toBe(false)
+  })
+
+  it('matches a posix and network root', () => {
+    expect(isVolumeRoot('/', volume({ mountRoot: '/' }))).toBe(true)
+    const share = volume({ mountRoot: '\\\\server\\share', isNetwork: true })
+    expect(isVolumeRoot('\\\\server\\share\\', share)).toBe(true)
+    expect(isVolumeRoot('\\\\server\\share\\sub', share)).toBe(false)
   })
 })
