@@ -49,7 +49,7 @@ describe('QueueOverlay', () => {
     ipc.override('queue_snapshot', snapshot)
 
     render(<QueueOverlay />)
-    expect(await screen.findByRole('button', { name: 'Expand transfer queue' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Expand job queue' })).toBeInTheDocument()
   })
 
   it('summarizes active delete operations as deleting', async () => {
@@ -59,7 +59,17 @@ describe('QueueOverlay', () => {
 
     render(<QueueOverlay />)
 
-    expect(await screen.findByText('Deleting 1 transfer')).toBeInTheDocument()
+    expect(await screen.findByText('Deleting 1 job')).toBeInTheDocument()
+  })
+
+  it('summarizes active archive operations by their job kind', async () => {
+    ipc.override('queue_snapshot', [
+      { progress: progress({ kind: 'extract', itemNames: ['Archive.zip'] }), conflict: null },
+    ])
+
+    render(<QueueOverlay />)
+
+    expect(await screen.findByText('Extracting 1 job')).toBeInTheDocument()
   })
 
   it('expands the collapsed toast into the panel and collapses again', async () => {
@@ -67,12 +77,12 @@ describe('QueueOverlay', () => {
     ipc.override('queue_snapshot', [{ progress: progress({}), conflict: null }])
     render(<QueueOverlay />)
 
-    const toast = await screen.findByRole('button', { name: 'Expand transfer queue' })
+    const toast = await screen.findByRole('button', { name: 'Expand job queue' })
     await user.click(toast)
 
-    expect(await screen.findByRole('region', { name: 'Transfer queue' })).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: 'Job queue' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /Fewer details/ }))
-    expect(screen.queryByRole('region', { name: 'Transfer queue' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Job queue' })).not.toBeInTheDocument()
   })
 
   it('applies live progress events', async () => {
@@ -80,7 +90,7 @@ describe('QueueOverlay', () => {
       { progress: progress({ progressPercent: 25 }), conflict: null },
     ])
     render(<QueueOverlay />)
-    await screen.findByRole('button', { name: 'Expand transfer queue' })
+    await screen.findByRole('button', { name: 'Expand job queue' })
 
     act(() => {
       ipc.emit('queue://progress', progress({ progressPercent: 75, copiedBytes: 750 }))
@@ -94,7 +104,7 @@ describe('QueueOverlay', () => {
   it('prunes a transfer card when the backend emits a removed event', async () => {
     ipc.override('queue_snapshot', [{ progress: progress({}), conflict: null }])
     render(<QueueOverlay />)
-    await screen.findByRole('button', { name: 'Expand transfer queue' })
+    await screen.findByRole('button', { name: 'Expand job queue' })
 
     act(() => {
       ipc.emit('queue://removed', 'op-1')
@@ -116,13 +126,13 @@ describe('QueueOverlay', () => {
     ])
     render(<QueueOverlay />)
 
-    await screen.findByRole('button', { name: 'Expand transfer queue' })
-    await user.click(screen.getByRole('button', { name: 'Dismiss transfer queue' }))
+    await screen.findByRole('button', { name: 'Expand job queue' })
+    await user.click(screen.getByRole('button', { name: 'Dismiss job queue' }))
 
     await waitFor(() => {
       expect(useQueueStore.getState().order).toEqual([])
     })
-    expect(screen.queryByRole('button', { name: 'Expand transfer queue' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Expand job queue' })).not.toBeInTheDocument()
   })
 
   it('surfaces a conflict in the active pane only and keeps Enter mapped to Skip', async () => {
@@ -164,12 +174,12 @@ describe('QueueOverlay', () => {
     ipc.override('cancel_op', cancelSpy)
     ipc.override('queue_snapshot', [{ progress: progress({}), conflict: null }])
     render(<QueueOverlay />)
-    await screen.findByRole('button', { name: 'Expand transfer queue' })
+    await screen.findByRole('button', { name: 'Expand job queue' })
 
     act(() => {
       useQueueStore.getState().setExpanded(true)
     })
-    await screen.findByRole('region', { name: 'Transfer queue' })
+    await screen.findByRole('region', { name: 'Job queue' })
 
     await user.keyboard('{Escape}')
     await waitFor(() => {
@@ -184,12 +194,12 @@ describe('QueueOverlay', () => {
     ipc.override('resume_op', () => undefined)
     ipc.override('queue_snapshot', [{ progress: progress({ status: 'active' }), conflict: null }])
     render(<QueueOverlay />)
-    await screen.findByRole('button', { name: 'Expand transfer queue' })
+    await screen.findByRole('button', { name: 'Expand job queue' })
 
     act(() => {
       useQueueStore.getState().setExpanded(true)
     })
-    await screen.findByRole('region', { name: 'Transfer queue' })
+    await screen.findByRole('region', { name: 'Job queue' })
 
     await user.keyboard(' ')
     await waitFor(() => {
@@ -210,12 +220,12 @@ describe('QueueOverlay', () => {
       { progress: progress({ status: 'failed', errorMessage: 'boom' }), conflict: null },
     ])
     render(<QueueOverlay />)
-    await screen.findByRole('button', { name: 'Expand transfer queue' })
+    await screen.findByRole('button', { name: 'Expand job queue' })
 
     act(() => {
       useQueueStore.getState().setExpanded(true)
     })
-    await screen.findByRole('region', { name: 'Transfer queue' })
+    await screen.findByRole('region', { name: 'Job queue' })
 
     await user.keyboard('{Delete}')
     expect(cancelSpy).toHaveBeenCalled()
@@ -235,12 +245,12 @@ describe('QueueOverlay', () => {
       { progress: progress({ operationId: 'op-2', status: 'pending' }), conflict: null },
     ])
     render(<QueueOverlay />)
-    await screen.findByRole('button', { name: 'Expand transfer queue' })
+    await screen.findByRole('button', { name: 'Expand job queue' })
 
     act(() => {
       useQueueStore.getState().setExpanded(true)
     })
-    await screen.findByRole('region', { name: 'Transfer queue' })
+    await screen.findByRole('region', { name: 'Job queue' })
 
     const downButtons = screen.getAllByRole('button', { name: 'Move job down' })
     await user.click(downButtons[0])
@@ -268,12 +278,12 @@ describe('QueueOverlay', () => {
       },
     ])
     render(<QueueOverlay />)
-    await screen.findByRole('button', { name: 'Expand transfer queue' })
+    await screen.findByRole('button', { name: 'Expand job queue' })
 
     act(() => {
       useQueueStore.getState().setExpanded(true)
     })
-    await screen.findByRole('region', { name: 'Transfer queue' })
+    await screen.findByRole('region', { name: 'Job queue' })
 
     await user.click(screen.getAllByRole('button', { name: /Cancel/ })[1])
     expect(cancelSpy).toHaveBeenCalledWith({ id: 'op-2' })

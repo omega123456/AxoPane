@@ -6,7 +6,7 @@ import { queueSnapshot } from '@/lib/queue-commands'
 import { orderedOperations, useQueueStore } from '@/stores/queue-store'
 
 /**
- * Bottom-right transfer queue surface: a collapsed toast that expands into the
+ * Bottom-right job queue surface: a collapsed toast that expands into the
  * TransferCard-faithful panel. Owns the
  * `queue://*` event wiring and the queue keyboard model.
  */

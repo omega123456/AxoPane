@@ -19,7 +19,7 @@ function summarize(operations: OpProgress[]) {
   if (failed.length > 0) {
     return {
       icon: 'failed' as const,
-      label: `${formatCount(failed.length)} transfer${failed.length === 1 ? '' : 's'} failed`,
+      label: `${formatCount(failed.length)} job${failed.length === 1 ? '' : 's'} failed`,
       percent: 100,
       dismissible: active.length === 0,
     }
@@ -27,7 +27,7 @@ function summarize(operations: OpProgress[]) {
   if (cancelled.length > 0 && active.length === 0) {
     return {
       icon: 'cancelled' as const,
-      label: `${formatCount(cancelled.length)} transfer${cancelled.length === 1 ? '' : 's'} cancelled`,
+      label: `${formatCount(cancelled.length)} job${cancelled.length === 1 ? '' : 's'} cancelled`,
       percent: 100,
       dismissible: true,
     }
@@ -35,7 +35,7 @@ function summarize(operations: OpProgress[]) {
   if (allDone) {
     return {
       icon: 'done' as const,
-      label: 'Transfers complete',
+      label: 'Jobs complete',
       percent: 100,
       dismissible: true,
     }
@@ -46,13 +46,17 @@ function summarize(operations: OpProgress[]) {
   const percent = totalBytes > 0 ? (copiedBytes / totalBytes) * 100 : 0
   const verb = active.some((operation) => operation.kind === 'delete')
     ? 'Deleting'
-    : active.some((operation) => operation.kind === 'move')
-      ? 'Moving'
-      : 'Copying'
+    : active.some((operation) => operation.kind === 'extract')
+      ? 'Extracting'
+      : active.some((operation) => operation.kind === 'compress')
+        ? 'Compressing'
+        : active.some((operation) => operation.kind === 'move')
+          ? 'Moving'
+          : 'Copying'
 
   return {
     icon: 'active' as const,
-    label: `${verb} ${formatCount(active.length)} transfer${active.length === 1 ? '' : 's'}`,
+    label: `${verb} ${formatCount(active.length)} job${active.length === 1 ? '' : 's'}`,
     percent,
     dismissible: false,
   }
@@ -84,7 +88,7 @@ export function QueueToast() {
     <div className="flex w-copycard items-center gap-2 rounded-window border border-light-border-strong bg-light-surface px-3 py-2.5 shadow-float dark:border-dark-border-strong dark:bg-dark-surface">
       <button
         type="button"
-        aria-label="Expand transfer queue"
+        aria-label="Expand job queue"
         onClick={() => expand(true)}
         className="flex min-w-0 flex-1 items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
       >
@@ -124,7 +128,7 @@ export function QueueToast() {
         {summary.dismissible ? (
           <button
             type="button"
-            aria-label="Dismiss transfer queue"
+            aria-label="Dismiss job queue"
             onClick={dismissTerminal}
             className="flex h-7 w-7 items-center justify-center rounded-md text-light-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:text-dark-text-muted dark:hover:bg-dark-hover"
           >

@@ -44,6 +44,12 @@ function verb(operation: OpProgress) {
   if (operation.kind === 'delete') {
     return 'Deleting'
   }
+  if (operation.kind === 'compress') {
+    return 'Compressing'
+  }
+  if (operation.kind === 'extract') {
+    return 'Extracting'
+  }
   return operation.kind === 'move' ? 'Moving' : 'Copying'
 }
 
@@ -279,7 +285,7 @@ export function JobCard({
         </div>
       ) : isCancelled ? (
         <div className="mt-3 rounded-tab border border-light-border px-3 py-2 text-uxs text-light-text-muted dark:border-dark-border dark:text-dark-text-muted">
-          Transfer cancelled. Already-copied files were kept.
+          Job cancelled. Any completed file changes were kept.
         </div>
       ) : showChart ? (
         <div

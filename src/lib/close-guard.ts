@@ -35,7 +35,7 @@ function defaultConfirm(message: string): boolean {
 }
 
 /**
- * Install a guard that prevents the window from closing while copy/move jobs are
+ * Install a guard that prevents the window from closing while queue jobs are
  * active or pending, requiring an explicit confirmation. Returns an unlisten
  * function. `acquireWindow` and `confirmClose` are injectable for testing.
  */
@@ -54,7 +54,7 @@ export async function installCloseGuard(
       return
     }
     const proceed = confirmClose(
-      'Transfers are still in progress. Closing now will stop them. Close anyway?',
+      'Jobs are still in progress. Closing now will stop them. Close anyway?',
     )
     if (!proceed) {
       event.preventDefault()

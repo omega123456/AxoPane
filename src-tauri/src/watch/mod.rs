@@ -10,7 +10,7 @@ use notify_debouncer_full::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::fs::{self, DirectoryEntry, ListDirOptions, SortDirection, SortKey};
+use crate::fs::{self, DirectoryEntry, ListDirOptions, ListDirResponse, SortDirection, SortKey};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -173,54 +173,8 @@ pub fn create_runtime(
     let debouncer = new_debouncer(
         Duration::from_millis(150),
         None,
-        move |result: DebounceEventResult| match result {
-            Ok(events) => {
-                let changed_paths: HashSet<PathBuf> = events
-                    .iter()
-                    .flat_map(|event| event.paths.iter().cloned())
-                    .filter(|path| path.parent().is_some())
-                    .collect();
-
-                let mut tabs = tabs_for_callback.lock().expect("watch tabs lock");
-                for watched in tabs.values_mut() {
-                    if !matches_watched_parent(&changed_paths, &watched.target.path) {
-                        continue;
-                    }
-
-                    match patch_for_events(&watched.target, &watched.snapshot, &events) {
-                        Ok(PatchResult::Targeted { patch, snapshot }) => {
-                            watched.snapshot = snapshot;
-                            if !patch.changed.is_empty() || !patch.removed.is_empty() {
-                                patch_emitter(patch);
-                            }
-                        }
-                        Ok(PatchResult::NeedsResnapshot) => {
-                            match snapshot_for_target(&watched.target) {
-                                Ok(next_snapshot) => {
-                                    let patch = diff_entries(
-                                        &watched.target.tab_id,
-                                        &watched.target.path,
-                                        "watch",
-                                        &watched.snapshot,
-                                        &next_snapshot,
-                                    );
-                                    watched.snapshot = next_snapshot;
-                                    if !patch.changed.is_empty() || !patch.removed.is_empty() {
-                                        patch_emitter(patch);
-                                    }
-                                }
-                                Err(error) => error_emitter(watched.target.path.clone(), error),
-                            }
-                        }
-                        Err(error) => error_emitter(watched.target.path.clone(), error),
-                    }
-                }
-            }
-            Err(errors) => {
-                for error in errors {
-                    error_emitter(first_error_path(&error), error.to_string());
-                }
-            }
+        move |result: DebounceEventResult| {
+            handle_debounce_result(&tabs_for_callback, result, &patch_emitter, &error_emitter)
         },
     )
     .map_err(|error| error.to_string())?;
@@ -239,7 +193,106 @@ pub fn pane_scope(tab_id: &str) -> &str {
     }
 }
 
+#[inline(never)]
 fn noop_watch_error(_: String, _: String) {}
+
+fn handle_debounce_result(
+    tabs: &Arc<Mutex<HashMap<String, WatchedTab>>>,
+    result: DebounceEventResult,
+    patch_emitter: &Arc<dyn Fn(DirPatch) + Send + Sync>,
+    error_emitter: &Arc<dyn Fn(String, String) + Send + Sync>,
+) {
+    match result {
+        Ok(events) => {
+            let changed_paths: HashSet<PathBuf> = events
+                .iter()
+                .flat_map(|event| event.paths.iter().cloned())
+                .filter(|path| path.parent().is_some())
+                .collect();
+
+            let mut tabs = tabs.lock().expect("watch tabs lock");
+            for watched in tabs.values_mut() {
+                if !matches_watched_parent(&changed_paths, &watched.target.path) {
+                    continue;
+                }
+
+                match patch_for_events(&watched.target, &watched.snapshot, &events) {
+                    Ok(PatchResult::Targeted { patch, snapshot }) => {
+                        watched.snapshot = snapshot;
+                        if !patch.changed.is_empty() || !patch.removed.is_empty() {
+                            patch_emitter(patch);
+                        }
+                    }
+                    Ok(PatchResult::NeedsResnapshot) => match snapshot_for_target(&watched.target) {
+                        Ok(next_snapshot) => {
+                            let patch = diff_entries(
+                                &watched.target.tab_id,
+                                &watched.target.path,
+                                "watch",
+                                &watched.snapshot,
+                                &next_snapshot,
+                            );
+                            watched.snapshot = next_snapshot;
+                            if !patch.changed.is_empty() || !patch.removed.is_empty() {
+                                patch_emitter(patch);
+                            }
+                        }
+                        Err(error) => error_emitter(watched.target.path.clone(), error),
+                    },
+                    Err(error) => error_emitter(watched.target.path.clone(), error),
+                }
+            }
+        }
+        Err(errors) => {
+            for error in errors {
+                error_emitter(first_error_path(&error), error.to_string());
+            }
+        }
+    }
+}
+
+#[cfg(feature = "test-utils")]
+#[allow(dead_code)]
+pub fn insert_tab_for_tests(
+    runtime: &mut WatchRuntime,
+    target: WatchTarget,
+    snapshot: HashMap<String, DirectoryEntry>,
+) {
+    runtime
+        .tabs
+        .lock()
+        .expect("watch tabs lock")
+        .insert(target.tab_id.clone(), WatchedTab { target, snapshot });
+}
+
+#[cfg(feature = "test-utils")]
+#[allow(dead_code)]
+pub fn handle_debounce_result_for_tests(
+    runtime: &WatchRuntime,
+    result: DebounceEventResult,
+    emit_patch: Arc<dyn Fn(DirPatch) + Send + Sync>,
+    emit_error: Arc<dyn Fn(String, String) + Send + Sync>,
+) {
+    handle_debounce_result(&runtime.tabs, result, &emit_patch, &emit_error);
+}
+
+#[cfg(feature = "test-utils")]
+#[allow(dead_code)]
+pub fn noop_watch_error_for_tests(path: String, error: String) {
+    noop_watch_error(path, error);
+}
+
+#[cfg(feature = "test-utils")]
+#[allow(dead_code)]
+pub fn canonical_dir_for_tests(path: &Path) -> PathBuf {
+    canonical_dir(path)
+}
+
+#[cfg(feature = "test-utils")]
+#[allow(dead_code)]
+pub fn first_error_path_for_tests(error: &notify::Error) -> String {
+    first_error_path(error)
+}
 
 /// Resolve a directory to its canonical, symlink-free form for comparison.
 ///
@@ -250,7 +303,10 @@ fn noop_watch_error(_: String, _: String) {}
 /// platforms. Falls back to the lexical path when canonicalization fails (e.g. a
 /// directory that has since been removed).
 fn canonical_dir(path: &Path) -> PathBuf {
-    fs::canonicalize_dir(path).unwrap_or_else(|_| path.to_path_buf())
+    match fs::canonicalize_dir(path) {
+        Ok(path) => path,
+        Err(_) => path.to_path_buf(),
+    }
 }
 
 fn matches_watched_parent(changed_paths: &HashSet<PathBuf>, watched_path: &str) -> bool {
@@ -399,7 +455,13 @@ fn patch_changed_path(
         path: entry.path.clone(),
         entry: Some(entry),
     });
-    removed.retain(|removed_path| removed_path != &display_path);
+    let mut retained = Vec::with_capacity(removed.len());
+    for removed_path in removed.drain(..) {
+        if removed_path != display_path {
+            retained.push(removed_path);
+        }
+    }
+    *removed = retained;
     Ok(())
 }
 
@@ -415,6 +477,7 @@ fn matches_target_filter(entry: &DirectoryEntry, target: &WatchTarget) -> bool {
             .contains(&target.filter.to_lowercase())
 }
 
+#[inline(never)]
 fn first_error_path(error: &notify::Error) -> String {
     match error.paths.first() {
         Some(path) => path.to_string_lossy().into_owned(),
@@ -429,10 +492,7 @@ pub fn add_watch(runtime: &mut WatchRuntime, path: &Path) -> Result<(), String> 
             Ok(())
         }
         None => {
-            runtime
-                .debouncer
-                .watch(path, RecursiveMode::NonRecursive)
-                .map_err(|error| error.to_string())?;
+            watch_path(&mut runtime.debouncer, path)?;
             runtime.watch_counts.insert(path.to_path_buf(), 1);
             Ok(())
         }
@@ -449,10 +509,7 @@ pub fn remove_watch(runtime: &mut WatchRuntime, path: &Path) -> Result<(), Strin
         return Ok(());
     }
 
-    runtime
-        .debouncer
-        .unwatch(path)
-        .map_err(|error| error.to_string())?;
+    unwatch_path(&mut runtime.debouncer, path)?;
     runtime.watch_counts.remove(path);
     Ok(())
 }
@@ -460,20 +517,36 @@ pub fn remove_watch(runtime: &mut WatchRuntime, path: &Path) -> Result<(), Strin
 pub fn snapshot_for_target(
     target: &WatchTarget,
 ) -> Result<HashMap<String, DirectoryEntry>, String> {
-    let response = fs::list_dir(&ListDirOptions {
+    let response = list_dir_for_snapshot(&ListDirOptions {
         path: target.path.clone(),
         sort_key: target.sort_key,
         sort_direction: target.sort_direction,
         filter: target.filter.clone(),
         show_hidden: target.show_hidden,
-    })
-    .map_err(|error| error.to_string())?;
+    })?;
 
     Ok(response
         .entries
         .into_iter()
         .map(|entry| (entry.path.clone(), entry))
         .collect())
+}
+
+fn list_dir_for_snapshot(options: &ListDirOptions) -> Result<ListDirResponse, String> {
+    fs::list_dir(options).map_err(|error| error.to_string())
+}
+
+fn watch_path(debouncer: &mut Debouncer<notify::RecommendedWatcher, FileIdMap>, path: &Path) -> Result<(), String> {
+    debouncer
+        .watch(path, RecursiveMode::NonRecursive)
+        .map_err(|error| error.to_string())
+}
+
+fn unwatch_path(
+    debouncer: &mut Debouncer<notify::RecommendedWatcher, FileIdMap>,
+    path: &Path,
+) -> Result<(), String> {
+    debouncer.unwatch(path).map_err(|error| error.to_string())
 }
 
 pub fn diff_entries(

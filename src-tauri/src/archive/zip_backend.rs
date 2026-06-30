@@ -73,9 +73,16 @@ fn extract_archive_impl(payload: &ExtractArchiveRequest) -> Result<PathBuf, Arch
     }
 
     let destination_dir = Path::new(&payload.destination_dir);
-    if !destination_dir.is_dir() {
+    if destination_dir.exists() && !destination_dir.is_dir() {
         return Err(ArchiveError::status(INVALID_DESTINATION_MESSAGE));
     }
+    fs::create_dir_all(destination_dir).map_err(|source| {
+        ArchiveError::with_source(
+            ARCHIVE_EXTRACT_FAILED_MESSAGE,
+            destination_dir.to_path_buf(),
+            source,
+        )
+    })?;
 
     let archive_paths = collect_source_paths(&payload.paths)?;
     let mut first_output_root: Option<PathBuf> = None;

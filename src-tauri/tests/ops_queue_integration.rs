@@ -157,6 +157,105 @@ fn delete_removes_files_and_directories_through_the_queue() {
     assert!(!tree.exists());
 }
 
+#[test]
+fn archive_jobs_compress_and_extract_through_the_queue() {
+    let dir = tempdir().expect("temp dir");
+    let archive_dir = dir.path().join("archives");
+    let extract_dir = dir.path().join("extracted");
+    fs::create_dir(&archive_dir).expect("archive dir");
+    let source = dir.path().join("payload");
+    fs::create_dir(&source).expect("source dir");
+    fs::write(source.join("inside.txt"), b"queued archive").expect("source");
+
+    let service = OpsService::new(Duration::from_secs(5));
+    service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
+
+    let compress_id = service.start_op(StartOpRequest {
+        kind: OpKind::Compress,
+        destination_dir: archive_dir
+            .join("payload.zip")
+            .to_string_lossy()
+            .into_owned(),
+        items: vec![OpItem {
+            source_path: source.to_string_lossy().into_owned(),
+            name: "payload".to_string(),
+            size_bytes: 0,
+        }],
+    });
+    wait_for(&service, &compress_id, |progress| {
+        progress.status == OpStatus::Completed && progress.total_bytes == 14
+    });
+
+    let archive_path = archive_dir.join("payload.zip");
+    assert!(archive_path.exists());
+
+    let extract_id = service.start_op(StartOpRequest {
+        kind: OpKind::Extract,
+        destination_dir: extract_dir.to_string_lossy().into_owned(),
+        items: vec![OpItem {
+            source_path: archive_path.to_string_lossy().into_owned(),
+            name: "payload.zip".to_string(),
+            size_bytes: 0,
+        }],
+    });
+    wait_for(&service, &extract_id, |progress| {
+        progress.status == OpStatus::Completed && progress.progress_percent == 100.0
+    });
+
+    assert_eq!(
+        fs::read(extract_dir.join("payload").join("inside.txt")).unwrap(),
+        b"queued archive"
+    );
+    assert!(extract_dir.is_dir());
+    assert!(!extract_dir
+        .join("payload")
+        .join("payload")
+        .join("inside.txt")
+        .exists());
+}
+
+#[test]
+fn archive_jobs_share_the_same_volume_lock_as_transfers() {
+    let dir = tempdir().expect("temp dir");
+    let archive_dir = dir.path().join("archives");
+    fs::create_dir(&archive_dir).expect("archive dir");
+    let source = dir.path().join("payload.txt");
+    fs::write(&source, b"queued archive").expect("source");
+
+    let service = OpsService::new(Duration::from_secs(30));
+    service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
+
+    let blocker = parking_op(&service, &dir.path().join("blocker"));
+    wait_for(&service, &blocker, |progress| {
+        progress.status == OpStatus::Conflict
+    });
+
+    let archive_id = service.start_op(StartOpRequest {
+        kind: OpKind::Compress,
+        destination_dir: archive_dir
+            .join("payload.zip")
+            .to_string_lossy()
+            .into_owned(),
+        items: vec![OpItem {
+            source_path: source.to_string_lossy().into_owned(),
+            name: "payload.txt".to_string(),
+            size_bytes: 14,
+        }],
+    });
+    let queued = service
+        .snapshot()
+        .into_iter()
+        .find(|snapshot| snapshot.progress.operation_id == archive_id)
+        .expect("archive op present");
+    assert_eq!(queued.progress.status, OpStatus::Pending);
+
+    service.resolve_conflict(&blocker, ConflictResolution::Skip, false, None);
+    wait_for(&service, &archive_id, |progress| {
+        progress.status == OpStatus::Completed
+    });
+    assert!(archive_dir.join("payload.zip").exists());
+}
+
 /// Build an op whose single item conflicts with a pre-existing destination file,
 /// so the op deterministically parks in `Conflict` (and thus stays "in flight").
 fn parking_op(service: &OpsService, dir: &Path) -> String {

@@ -246,6 +246,96 @@ describe('ActionDialog', () => {
     expect(useActionDialogStore.getState().dialog).toBeNull()
   })
 
+  it('confirms archive jobs with an editable archive path or base folder', async () => {
+    const user = userEvent.setup()
+    const startOp = vi.fn(() => 'op-1')
+    ipc.override('start_op', startOp)
+
+    useActionDialogStore.getState().open({
+      kind: 'archiveConfirm',
+      paneId: 'left',
+      operation: 'compress',
+      destinationDir: 'C:\\root',
+      targets: [
+        { id: 'a', name: 'a.txt', path: 'C:\\root\\a.txt', sizeBytes: 10 },
+        { id: 'b', name: 'b.txt', path: 'C:\\root\\b.txt', sizeBytes: null },
+      ],
+    })
+    const { unmount } = render(<ActionDialog />)
+
+    expect(screen.getByText('Compress 2 items?')).toBeInTheDocument()
+    expect(screen.queryByText('Items')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Archive path')).toHaveValue('C:\\root\\Archive.zip')
+    await user.clear(screen.getByLabelText('Archive path'))
+    await user.type(screen.getByLabelText('Archive path'), 'D:\\archives\\Bundle')
+    await user.click(screen.getByRole('button', { name: 'Compress' }))
+
+    await waitFor(() => expect(useActionDialogStore.getState().dialog).toBeNull())
+    expect(startOp).toHaveBeenCalledWith({
+      kind: 'compress',
+      destinationDir: 'D:\\archives\\Bundle.zip',
+      items: [
+        { sourcePath: 'C:\\root\\a.txt', name: 'a.txt', sizeBytes: 10 },
+        { sourcePath: 'C:\\root\\b.txt', name: 'b.txt', sizeBytes: 0 },
+      ],
+    })
+
+    unmount()
+    startOp.mockClear()
+    useActionDialogStore.getState().open({
+      kind: 'archiveConfirm',
+      paneId: 'left',
+      operation: 'extract',
+      destinationDir: 'C:\\root',
+      targets: [{ id: 'zip', name: 'Archive.zip', path: 'C:\\root\\Archive.zip', sizeBytes: 900 }],
+    })
+    render(<ActionDialog />)
+
+    expect(screen.getByText('Extract 1 item?')).toBeInTheDocument()
+    expect(screen.queryByText('Items')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Base folder')).toHaveValue('C:\\root')
+    await user.keyboard('{Enter}')
+
+    await waitFor(() => expect(useActionDialogStore.getState().dialog).toBeNull())
+    expect(startOp).toHaveBeenCalledWith({
+      kind: 'extract',
+      destinationDir: 'C:\\root',
+      items: [{ sourcePath: 'C:\\root\\Archive.zip', name: 'Archive.zip', sizeBytes: 0 }],
+    })
+  })
+
+  it('keeps archive confirmation open on queue errors and closes on Escape', async () => {
+    const user = userEvent.setup()
+    ipc.override('start_op', () => {
+      throw new Error('archive queue failed')
+    })
+
+    useActionDialogStore.getState().open({
+      kind: 'archiveConfirm',
+      paneId: 'left',
+      operation: 'extract',
+      destinationDir: 'C:\\root',
+      targets: [{ id: 'zip', name: 'Archive.zip', path: 'C:\\root\\Archive.zip' }],
+    })
+    const { unmount } = render(<ActionDialog />)
+
+    await user.click(screen.getByRole('button', { name: 'Extract' }))
+    expect(await screen.findByText('archive queue failed')).toBeInTheDocument()
+    expect(useActionDialogStore.getState().dialog).not.toBeNull()
+
+    unmount()
+    useActionDialogStore.getState().open({
+      kind: 'archiveConfirm',
+      paneId: 'left',
+      operation: 'compress',
+      destinationDir: 'C:\\root',
+      targets: [{ id: 'a', name: 'a.txt', path: 'C:\\root\\a.txt' }],
+    })
+    render(<ActionDialog />)
+    await user.keyboard('{Escape}')
+    expect(useActionDialogStore.getState().dialog).toBeNull()
+  })
+
   it('dismisses on cancel without calling the backend', async () => {
     const user = userEvent.setup()
     const create = vi.fn(() => dir('x'))

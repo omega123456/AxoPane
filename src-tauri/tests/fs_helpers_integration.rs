@@ -87,6 +87,38 @@ fn helper_validation_and_sorting_cover_private_branches() {
         compare_entries(&small, &large, SortKey::Created, SortDirection::Desc),
         Ordering::Greater
     );
+    let mut left = entry("alpha.txt", false);
+    let mut right = entry("beta.txt", false);
+    left.modified_at = Some("2026-01-01T00:00:00Z".to_string());
+    right.modified_at = Some("2026-01-01T00:00:00Z".to_string());
+    assert_eq!(
+        compare_entries(&left, &right, SortKey::Modified, SortDirection::Asc),
+        Ordering::Less
+    );
+    left.created_at = Some("2025-01-01T00:00:00Z".to_string());
+    right.created_at = Some("2025-01-01T00:00:00Z".to_string());
+    assert_eq!(
+        compare_entries(&left, &right, SortKey::Created, SortDirection::Asc),
+        Ordering::Less
+    );
+
+    // Equal primary keys force the `then_with` name tiebreak closures to run for
+    // the Size and Items sort keys (names are equal length, so sizes/item counts
+    // match and the comparison falls through to the natural-name ordering).
+    let size_a = entry("aaa.txt", false);
+    let size_b = entry("bbb.txt", false);
+    assert_eq!(size_a.size_bytes, size_b.size_bytes);
+    assert_eq!(
+        compare_entries(&size_a, &size_b, SortKey::Size, SortDirection::Asc),
+        Ordering::Less
+    );
+    let items_a = entry("one", true);
+    let items_b = entry("two", true);
+    assert_eq!(items_a.item_count, items_b.item_count);
+    assert_eq!(
+        compare_entries(&items_a, &items_b, SortKey::Items, SortDirection::Asc),
+        Ordering::Less
+    );
 
     assert!(system_time_to_rfc3339(Some(SystemTime::UNIX_EPOCH))
         .expect("timestamp")

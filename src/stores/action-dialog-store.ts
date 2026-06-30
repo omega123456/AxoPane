@@ -14,6 +14,13 @@ export type ActionDialog =
   | { kind: 'newFile'; paneId: PaneId }
   | { kind: 'delete'; paneId: PaneId; targets: DeleteTarget[] }
   | {
+      kind: 'archiveConfirm'
+      paneId: PaneId
+      operation: Extract<OpKind, 'compress' | 'extract'>
+      destinationDir: string
+      targets: DeleteTarget[]
+    }
+  | {
       kind: 'transferConfirm'
       paneId: PaneId
       operation: OpKind

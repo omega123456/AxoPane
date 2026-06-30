@@ -313,5 +313,121 @@ mod watch_src {
 
             remove_watch(&mut runtime, root).expect("missing remove is noop");
         }
+
+        #[test]
+        fn watch_service_reuses_runtime_and_replaces_same_pane_paths() {
+            let fixture = tempdir().expect("temp dir");
+            let left_a = fixture.path().join("left-a");
+            let left_b = fixture.path().join("left-b");
+            let left_c = fixture.path().join("left-c");
+            std::fs::create_dir_all(&left_a).expect("left a");
+            std::fs::create_dir_all(&left_b).expect("left b");
+            std::fs::create_dir_all(&left_c).expect("left c");
+
+            let service = WatchService::default();
+            let base = WatchTarget {
+                tab_id: "left-1".to_string(),
+                path: left_a.to_string_lossy().into_owned(),
+                sort_key: SortKey::Name,
+                sort_direction: SortDirection::Asc,
+                filter: String::new(),
+                show_hidden: true,
+            };
+
+            service
+                .set_tab_watch(Some(base.clone()), Arc::new(|_| {}), Arc::new(|_, _| {}))
+                .expect("set first watch");
+            service
+                .set_tab_watch(Some(base.clone()), Arc::new(|_| {}), Arc::new(|_, _| {}))
+                .expect("refresh same watch");
+
+            {
+                let guard = service.inner.lock().expect("service lock");
+                let runtime = guard.as_ref().expect("runtime");
+                assert_eq!(runtime.watch_counts.get(&left_a), Some(&1));
+                assert_eq!(runtime.tabs.lock().expect("tabs lock").len(), 1);
+            }
+
+            service
+                .set_tab_watch(
+                    Some(WatchTarget {
+                        path: left_b.to_string_lossy().into_owned(),
+                        ..base.clone()
+                    }),
+                    Arc::new(|_| {}),
+                    Arc::new(|_, _| {}),
+                )
+                .expect("switch same tab path");
+
+            {
+                let guard = service.inner.lock().expect("service lock");
+                let runtime = guard.as_ref().expect("runtime");
+                assert!(!runtime.watch_counts.contains_key(&left_a));
+                assert_eq!(runtime.watch_counts.get(&left_b), Some(&1));
+            }
+
+            service
+                .set_tab_watch(
+                    Some(WatchTarget {
+                        tab_id: "left-2".to_string(),
+                        path: left_c.to_string_lossy().into_owned(),
+                        ..base
+                    }),
+                    Arc::new(|_| {}),
+                    Arc::new(|_, _| {}),
+                )
+                .expect("replace stale pane watch");
+
+            let guard = service.inner.lock().expect("service lock");
+            let runtime = guard.as_ref().expect("runtime");
+            assert!(!runtime.watch_counts.contains_key(&left_b));
+            assert_eq!(runtime.watch_counts.get(&left_c), Some(&1));
+            let tabs = runtime.tabs.lock().expect("tabs lock");
+            assert_eq!(tabs.len(), 1);
+            assert!(tabs.contains_key("left-2"));
+        }
+
+        #[test]
+        fn patch_helpers_cover_missing_and_filtered_paths() {
+            let fixture = tempdir().expect("temp dir");
+            let root = fixture.path();
+            let visible = root.join("visible.txt");
+            let hidden = root.join(".hidden.txt");
+            std::fs::write(&visible, b"visible").expect("visible");
+            std::fs::write(&hidden, b"hidden").expect("hidden");
+
+            let target = WatchTarget {
+                tab_id: "left-1".to_string(),
+                path: root.to_string_lossy().into_owned(),
+                sort_key: SortKey::Name,
+                sort_direction: SortDirection::Asc,
+                filter: "visible".to_string(),
+                show_hidden: false,
+            };
+
+            let mut next = HashMap::new();
+            let mut changed = Vec::new();
+            let mut removed = Vec::new();
+
+            patch_changed_path(&target, &mut next, &mut changed, &mut removed, &visible)
+                .expect("visible patch");
+            assert_eq!(changed.len(), 1);
+
+            patch_changed_path(&target, &mut next, &mut changed, &mut removed, &hidden)
+                .expect("hidden filtered");
+            assert!(removed
+                .iter()
+                .any(|path| path.ends_with(".hidden.txt")));
+
+            std::fs::remove_file(&visible).expect("remove visible");
+            patch_changed_path(&target, &mut next, &mut changed, &mut removed, &visible)
+                .expect("missing visible");
+            assert!(removed.iter().any(|path| path.ends_with("visible.txt")));
+
+            let direct = fs::display_path_from_path(&hidden);
+            next.insert(direct.clone(), fs::directory_entry_from_path(&hidden).expect("entry"));
+            remove_path(&mut next, &mut removed, &hidden);
+            assert!(!next.contains_key(&direct));
+        }
     }
 }

@@ -165,7 +165,7 @@ describe('JobCard', () => {
       />,
     )
     expect(screen.getByText('Copying cancelled')).toBeInTheDocument()
-    expect(screen.getByText(/Already-copied files were kept/i)).toBeInTheDocument()
+    expect(screen.getByText(/Any completed file changes were kept/i)).toBeInTheDocument()
     expect(screen.queryByRole('progressbar', { name: 'Copying cancelled' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Pause/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Cancel/ })).not.toBeInTheDocument()
@@ -263,6 +263,32 @@ describe('JobCard', () => {
       />,
     )
     expect(screen.getByText('Deleting 1,248 items')).toBeInTheDocument()
+  })
+
+  it('labels archive operations', () => {
+    const { rerender } = render(
+      <JobCard
+        operation={progress({ kind: 'compress' })}
+        throughputHistory={samples([63, 260_046_848])}
+        throughputPeak={260_046_848}
+        hasConflict={false}
+        reorderable={false}
+        {...noopHandlers()}
+      />,
+    )
+    expect(screen.getByText('Compressing 1,248 items')).toBeInTheDocument()
+
+    rerender(
+      <JobCard
+        operation={progress({ kind: 'extract' })}
+        throughputHistory={samples([63, 260_046_848])}
+        throughputPeak={260_046_848}
+        hasConflict={false}
+        reorderable={false}
+        {...noopHandlers()}
+      />,
+    )
+    expect(screen.getByText('Extracting 1,248 items')).toBeInTheDocument()
   })
 
   it('throttles live metrics announcements for five seconds on a dedicated hidden node', () => {

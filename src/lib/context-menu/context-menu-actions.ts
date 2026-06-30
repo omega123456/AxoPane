@@ -1,4 +1,3 @@
-import { runCompressCommand, runExtractCommand } from '@/lib/archive-commands'
 import { log } from '@/lib/app-log-commands'
 import { executeCommand } from '@/lib/commands'
 import {
@@ -7,6 +6,7 @@ import {
 } from '@/lib/context-menu/native-menu-commands'
 import { requestFolderSize } from '@/lib/ipc/commands'
 import { showPropertiesDialog } from '@/lib/properties-commands'
+import { useActionDialogStore } from '@/stores/action-dialog-store'
 import type { PropertiesDialogItem } from '@/stores/properties-dialog-store'
 import type { CommandId } from '@/lib/types/ipc'
 import { usePanesStore } from '@/stores/panes-store'
@@ -123,6 +123,11 @@ export function noopContextAction(debugId: string): ContextMenuAction {
   return { kind: 'noop', debugId }
 }
 
+function pathName(path: string) {
+  const normalized = path.replace(/\\/g, '/')
+  return normalized.split('/').filter(Boolean).pop() ?? path
+}
+
 export function dispatchContextMenuAction(paneId: PaneId, action: ContextMenuAction) {
   switch (action.kind) {
     case 'command':
@@ -164,10 +169,31 @@ export function dispatchContextMenuAction(paneId: PaneId, action: ContextMenuAct
       void showPropertiesDialog(action.items)
       return
     case 'compress':
-      void runCompressCommand(action)
+      useActionDialogStore.getState().open({
+        kind: 'archiveConfirm',
+        paneId,
+        operation: 'compress',
+        destinationDir: action.destinationDir,
+        targets: action.paths.map((path) => ({
+          id: path,
+          name: pathName(path),
+          path,
+        })),
+      })
       return
     case 'extract':
-      void runExtractCommand(action)
+      useActionDialogStore.getState().open({
+        kind: 'archiveConfirm',
+        paneId,
+        operation: 'extract',
+        destinationDir: action.destinationDir,
+        targets: action.paths.map((path) => ({
+          id: path,
+          name: pathName(path),
+          path,
+          sizeBytes: 0,
+        })),
+      })
       return
     case 'share':
       log.info('share command unavailable', {

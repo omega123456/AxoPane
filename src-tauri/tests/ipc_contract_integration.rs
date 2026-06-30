@@ -179,6 +179,14 @@ fn file_clipboard_commands_are_safe_noops_under_test_utils() {
     .expect("clipboard write");
 
     commands::clear_file_clipboard().expect("clipboard clear");
+    commands::noop_dir_patch(file_explorer_lib::watch::DirPatch {
+        tab_id: String::new(),
+        path: String::new(),
+        reason: String::new(),
+        changed: Vec::new(),
+        removed: Vec::new(),
+    });
+    commands::noop_watch_error(String::new(), String::new());
 }
 
 #[cfg(feature = "test-utils")]
@@ -205,4 +213,18 @@ fn open_path_command_reports_missing_path_before_launching() {
     .expect_err("missing path");
 
     assert!(error.contains("Failed to open"));
+}
+
+#[test]
+fn list_tree_children_command_surfaces_errors_as_strings() {
+    let fixture = tempdir().expect("temp dir");
+    let missing = fixture.path().join("missing");
+
+    let error = commands::list_tree_children(ListTreeChildrenRequest {
+        path: missing.to_string_lossy().into_owned(),
+        show_hidden: false,
+    })
+    .expect_err("missing tree path");
+
+    assert!(error.contains("Failed to load tree children"));
 }

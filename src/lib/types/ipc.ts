@@ -350,7 +350,7 @@ export type VolumesChangedEvent = {
   volumes: VolumeInfo[]
 }
 
-export type OpKind = 'copy' | 'move' | 'delete'
+export type OpKind = 'copy' | 'move' | 'delete' | 'compress' | 'extract'
 
 export type OpStatus =
   | 'pending'

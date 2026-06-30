@@ -2,6 +2,7 @@ import { waitFor } from '@testing-library/react'
 import { beforeEach, vi } from 'vitest'
 import { dispatchContextMenuAction } from '@/lib/context-menu/context-menu-actions'
 import { ipc } from '@/tests/ipc-mock'
+import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 import type { DirectoryEntry } from '@/lib/types/ipc'
@@ -26,6 +27,7 @@ function entry(overrides: Partial<DirectoryEntry> = {}): DirectoryEntry {
 
 beforeEach(() => {
   ipc.install()
+  useActionDialogStore.getState().close()
   usePanesStore.getState().reset()
   usePropertiesDialogStore.getState().close()
   usePanesStore.setState((state) => ({
@@ -92,30 +94,29 @@ describe('dispatchContextMenuAction', () => {
     })
   })
 
-  it('routes compress and extract through the archive IPC wrappers', async () => {
-    const compress = vi.fn(() => ({ handled: true }))
-    const extract = vi.fn(() => ({ handled: true }))
-    ipc.override('compress_archive', compress)
-    ipc.override('extract_archive', extract)
-
+  it('opens archive confirmation dialogs for compress and extract actions', () => {
     dispatchContextMenuAction('left', {
       kind: 'compress',
       paths: ['C:\\root\\Report.txt'],
       destinationDir: 'C:\\root',
     })
+    expect(useActionDialogStore.getState().dialog).toMatchObject({
+      kind: 'archiveConfirm',
+      operation: 'compress',
+      destinationDir: 'C:\\root',
+      targets: [{ name: 'Report.txt', path: 'C:\\root\\Report.txt' }],
+    })
+
     dispatchContextMenuAction('left', {
       kind: 'extract',
       paths: ['C:\\root\\Archive.zip'],
       destinationDir: 'C:\\root',
     })
-
-    expect(compress).toHaveBeenCalledWith({
-      paths: ['C:\\root\\Report.txt'],
+    expect(useActionDialogStore.getState().dialog).toMatchObject({
+      kind: 'archiveConfirm',
+      operation: 'extract',
       destinationDir: 'C:\\root',
-    })
-    expect(extract).toHaveBeenCalledWith({
-      paths: ['C:\\root\\Archive.zip'],
-      destinationDir: 'C:\\root',
+      targets: [{ name: 'Archive.zip', path: 'C:\\root\\Archive.zip', sizeBytes: 0 }],
     })
   })
 

@@ -48,16 +48,17 @@ export function QueuePanel() {
   const setExpanded = useQueueStore((state) => state.setExpanded)
 
   const activeCount = operations.filter((operation) => !isTerminal(operation.status)).length
+  const activeLabel = activeCount === 1 ? '1 active job' : `${activeCount} active jobs`
 
   return (
     <section
       role="region"
-      aria-label="Transfer queue"
+      aria-label="Job queue"
       className="w-copycard overflow-hidden rounded-window border border-light-border-strong bg-light-surface shadow-float dark:border-dark-border-strong dark:bg-dark-surface"
     >
       <header className="flex items-center justify-between gap-2 border-b border-light-border px-4 py-2.5 dark:border-dark-border">
         <span className="text-xs font-semibold text-light-text dark:text-dark-text">
-          {activeCount > 0 ? `${activeCount} active transfers` : 'Transfers'}
+          {activeCount > 0 ? activeLabel : 'Jobs'}
         </span>
         <button
           type="button"

@@ -75,6 +75,29 @@ impl NativeMenuTokenStore {
         }
         Some(stored)
     }
+
+    #[cfg(feature = "test-utils")]
+    pub fn insert_expired_for_tests(
+        &self,
+        request_id: &str,
+        token: &str,
+        invocation: ProviderInvocation,
+    ) {
+        let mut state = self.state.lock().expect("native menu token store lock");
+        state
+            .tokens_by_request
+            .entry(request_id.to_string())
+            .or_default()
+            .push(token.to_string());
+        state.invocations_by_token.insert(
+            token.to_string(),
+            StoredInvocation {
+                request_id: request_id.to_string(),
+                invocation,
+                expires_at: Instant::now() - Duration::from_secs(1),
+            },
+        );
+    }
 }
 
 fn prune_expired(state: &mut TokenStoreState) {

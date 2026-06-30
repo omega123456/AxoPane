@@ -255,6 +255,14 @@ fn token_store_replaces_takes_and_clears_request_tokens() {
             action_id: "final".to_string(),
         },
     );
+    store.insert_expired_for_tests(
+        "req-expired",
+        "native:req-expired:stale",
+        ProviderInvocation::Fake {
+            action_id: "stale".to_string(),
+        },
+    );
+    assert!(store.take("native:req-expired:stale").is_none());
     store.clear_all();
     assert!(store.take(&final_token).is_none());
 }

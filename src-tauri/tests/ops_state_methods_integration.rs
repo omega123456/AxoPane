@@ -5,8 +5,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use file_explorer_lib::ops::{
+    archive_root_name_for_tests, archive_stem_for_item_for_tests, begin_file_progress_for_tests,
     copy_dir_recursive, copy_file_with_progress, copy_path, delete_path_with_progress, move_path,
-    ConflictInfo, ConflictResolution, OpItem, OpKind, OpState, OpStatus, OpsService, WorkerCtx,
+    process_item_for_tests, ConflictInfo, ConflictResolution, OpItem, OpKind, OpState, OpStatus,
+    OpsService, WorkerCtx,
 };
 use file_explorer_lib::volumes::VolumeInfo;
 
@@ -72,6 +74,35 @@ fn state() -> OpState {
     }
 }
 
+fn worker_ctx(
+    state: OpState,
+) -> (
+    Arc<Mutex<OpState>>,
+    Arc<std::sync::Condvar>,
+    WorkerCtx<'static>,
+) {
+    let op_arc = Arc::new(Mutex::new(state));
+    let resolver = Arc::new(std::sync::Condvar::new());
+    let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
+    let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
+
+    let op_arc_ref = Box::leak(Box::new(op_arc.clone()));
+    let resolver_ref = Box::leak(Box::new(resolver.clone()));
+    let progress_ref = Box::leak(Box::new(progress));
+    let instant_now_ref = Box::leak(Box::new(instant_now));
+
+    let ctx = WorkerCtx {
+        op_arc: op_arc_ref,
+        resolver: resolver_ref,
+        progress: progress_ref,
+        start: Instant::now(),
+        rate_window: Duration::from_secs(1),
+        instant_now: instant_now_ref,
+    };
+
+    (op_arc, resolver, ctx)
+}
+
 #[test]
 fn op_state_helpers_report_progress_snapshot_and_terminal_status() {
     let mut state = state();
@@ -129,6 +160,9 @@ fn ops_service_helpers_cover_default_emitters_and_volume_mapping() {
     }));
     service.emit_progress(&state());
     assert_eq!(seen.lock().expect("seen lock").as_slice(), ["op-1"]);
+
+    service.set_conflict_emitter(Arc::new(|_conflict| {}));
+    service.set_removed_emitter(Arc::new(|_operation_id| {}));
 
     service.schedule_auto_remove_for("missing-op");
     std::thread::sleep(Duration::from_millis(10));
@@ -324,6 +358,592 @@ fn file_operation_helpers_surface_io_errors_directly() {
     )
     .expect_err("copy missing dir");
     assert!(!copy_dir_error.is_empty());
+}
+
+#[test]
+fn process_item_test_hook_covers_queue_private_paths() {
+    let fixture = tempfile::tempdir().expect("temp dir");
+
+    let delete_source = fixture.path().join("delete.txt");
+    std::fs::write(&delete_source, b"delete").expect("delete source");
+    let mut delete_state = state();
+    delete_state.kind = OpKind::Delete;
+    delete_state.items = vec![OpItem {
+        source_path: delete_source.to_string_lossy().into_owned(),
+        name: "delete.txt".to_string(),
+        size_bytes: 6,
+    }];
+    let (delete_op, _delete_resolver, delete_ctx) = worker_ctx(delete_state);
+    let delete_item = delete_op.lock().expect("delete lock").items[0].clone();
+    process_item_for_tests(&delete_ctx, &delete_item, None);
+    assert!(!delete_source.exists());
+    assert_eq!(delete_op.lock().expect("delete lock").completed_items, 1);
+
+    let source_dir = fixture.path().join("payload");
+    std::fs::create_dir_all(&source_dir).expect("source dir");
+    std::fs::write(source_dir.join("inside.txt"), b"payload").expect("inside");
+    let archive_path = fixture.path().join("payload.zip");
+    let mut compress_state = state();
+    compress_state.kind = OpKind::Compress;
+    compress_state.destination_dir = archive_path.clone();
+    compress_state.items = vec![OpItem {
+        source_path: source_dir.to_string_lossy().into_owned(),
+        name: "payload".to_string(),
+        size_bytes: 0,
+    }];
+    let (compress_op, _compress_resolver, compress_ctx) = worker_ctx(compress_state);
+    let compress_item = compress_op.lock().expect("compress lock").items[0].clone();
+    process_item_for_tests(&compress_ctx, &compress_item, None);
+    assert!(archive_path.exists());
+    assert_eq!(compress_op.lock().expect("compress lock").completed_items, 1);
+
+    let extract_root = fixture.path().join("extract");
+    let mut extract_state = state();
+    extract_state.kind = OpKind::Extract;
+    extract_state.destination_dir = extract_root.clone();
+    extract_state.items = vec![OpItem {
+        source_path: archive_path.to_string_lossy().into_owned(),
+        name: "payload.zip".to_string(),
+        size_bytes: 0,
+    }];
+    let (extract_op, _extract_resolver, extract_ctx) = worker_ctx(extract_state);
+    let extract_item = extract_op.lock().expect("extract lock").items[0].clone();
+    process_item_for_tests(&extract_ctx, &extract_item, None);
+    assert_eq!(
+        std::fs::read(extract_root.join("payload").join("inside.txt")).expect("extract"),
+        b"payload"
+    );
+    assert_eq!(extract_op.lock().expect("extract lock").completed_items, 1);
+
+    let source_tree = fixture.path().join("tree");
+    let nested_dest = source_tree.join("nested");
+    std::fs::create_dir_all(&nested_dest).expect("nested");
+    std::fs::write(source_tree.join("top.txt"), b"top").expect("top");
+    let mut move_state = state();
+    move_state.kind = OpKind::Move;
+    move_state.destination_dir = nested_dest.clone();
+    move_state.items = vec![OpItem {
+        source_path: source_tree.to_string_lossy().into_owned(),
+        name: "tree".to_string(),
+        size_bytes: 3,
+    }];
+    let (move_op, _move_resolver, move_ctx) = worker_ctx(move_state);
+    let move_item = move_op.lock().expect("move lock").items[0].clone();
+    process_item_for_tests(&move_ctx, &move_item, None);
+    assert!(move_op
+        .lock()
+        .expect("move lock")
+        .error_message
+        .as_deref()
+        .is_some_and(|message| message.contains("Cannot move")));
+}
+
+#[test]
+fn ops_service_test_hooks_cover_private_worker_paths() {
+    let fixture = tempfile::tempdir().expect("temp dir");
+
+    let done_source = fixture.path().join("done.txt");
+    std::fs::write(&done_source, b"done").expect("done");
+    let failed_source = fixture.path().join("missing.txt");
+    let cancelled_source = fixture.path().join("cancelled.txt");
+    std::fs::write(&cancelled_source, b"cancelled").expect("cancelled");
+
+    let service = OpsService::new(Duration::from_millis(10));
+    service.insert_op_for_tests(OpState {
+        id: "op-1".to_string(),
+        kind: OpKind::Delete,
+        destination_dir: PathBuf::new(),
+        items: vec![OpItem {
+            source_path: done_source.to_string_lossy().into_owned(),
+            name: "done.txt".to_string(),
+            size_bytes: 4,
+        }],
+        volumes: HashSet::from(["alpha".to_string()]),
+        status: OpStatus::Pending,
+        total_items: 1,
+        completed_items: 0,
+        total_bytes: 4,
+        copied_bytes: 0,
+        bytes_per_second: 0,
+        eta_seconds: None,
+        sample_count: 0,
+        rate_sample_at: None,
+        rate_sample_bytes: 0,
+        current_file_name: None,
+        current_file_copied: 0,
+        current_file_total: 0,
+        error_message: None,
+        completed_at: None,
+        cancel: Arc::new(AtomicBool::new(false)),
+        pause: Arc::new(AtomicBool::new(false)),
+        conflict: None,
+        conflict_resolution: None,
+        apply_to_all: None,
+        rename_to: None,
+    });
+    service.insert_op_for_tests(OpState {
+        id: "op-2".to_string(),
+        kind: OpKind::Copy,
+        destination_dir: fixture.path().join("dest"),
+        items: vec![OpItem {
+            source_path: failed_source.to_string_lossy().into_owned(),
+            name: "missing.txt".to_string(),
+            size_bytes: 7,
+        }],
+        volumes: HashSet::from(["beta".to_string()]),
+        status: OpStatus::Pending,
+        total_items: 1,
+        completed_items: 0,
+        total_bytes: 7,
+        copied_bytes: 0,
+        bytes_per_second: 0,
+        eta_seconds: None,
+        sample_count: 0,
+        rate_sample_at: None,
+        rate_sample_bytes: 0,
+        current_file_name: None,
+        current_file_copied: 0,
+        current_file_total: 0,
+        error_message: None,
+        completed_at: None,
+        cancel: Arc::new(AtomicBool::new(false)),
+        pause: Arc::new(AtomicBool::new(false)),
+        conflict: None,
+        conflict_resolution: None,
+        apply_to_all: None,
+        rename_to: None,
+    });
+    let cancelled = Arc::new(AtomicBool::new(true));
+    service.insert_op_for_tests(OpState {
+        id: "op-3".to_string(),
+        kind: OpKind::Delete,
+        destination_dir: PathBuf::new(),
+        items: vec![OpItem {
+            source_path: cancelled_source.to_string_lossy().into_owned(),
+            name: "cancelled.txt".to_string(),
+            size_bytes: 9,
+        }],
+        volumes: HashSet::from(["gamma".to_string()]),
+        status: OpStatus::Pending,
+        total_items: 1,
+        completed_items: 0,
+        total_bytes: 9,
+        copied_bytes: 0,
+        bytes_per_second: 0,
+        eta_seconds: None,
+        sample_count: 0,
+        rate_sample_at: None,
+        rate_sample_bytes: 0,
+        current_file_name: None,
+        current_file_copied: 0,
+        current_file_total: 0,
+        error_message: None,
+        completed_at: None,
+        cancel: cancelled,
+        pause: Arc::new(AtomicBool::new(false)),
+        conflict: None,
+        conflict_resolution: None,
+        apply_to_all: None,
+        rename_to: None,
+    });
+
+    service.run_operation_for_tests("op-1");
+    service.run_operation_for_tests("op-2");
+    service.run_operation_for_tests("op-3");
+
+    let snapshots = service.snapshot();
+    assert_eq!(
+        snapshots
+            .iter()
+            .find(|snapshot| snapshot.progress.operation_id == "op-1")
+            .expect("op-1")
+            .progress
+            .status,
+        OpStatus::Completed
+    );
+    assert_eq!(
+        snapshots
+            .iter()
+            .find(|snapshot| snapshot.progress.operation_id == "op-2")
+            .expect("op-2")
+            .progress
+            .status,
+        OpStatus::Failed
+    );
+    assert_eq!(
+        snapshots
+            .iter()
+            .find(|snapshot| snapshot.progress.operation_id == "op-3")
+            .expect("op-3")
+            .progress
+            .status,
+        OpStatus::Cancelled
+    );
+
+    let reschedule_service = OpsService::new(Duration::from_millis(10));
+    let removed = Arc::new(Mutex::new(Vec::<String>::new()));
+    let removed_sink = removed.clone();
+    reschedule_service.set_removed_emitter(Arc::new(move |id| {
+        removed_sink.lock().expect("removed lock").push(id);
+    }));
+
+    let completed_file = fixture.path().join("completed.txt");
+    let pending_file = fixture.path().join("pending.txt");
+    std::fs::write(&completed_file, b"done").expect("completed");
+    std::fs::write(&pending_file, b"wait").expect("pending");
+    reschedule_service.insert_op_for_tests(OpState {
+        id: "done-op".to_string(),
+        kind: OpKind::Delete,
+        destination_dir: PathBuf::new(),
+        items: vec![OpItem {
+            source_path: completed_file.to_string_lossy().into_owned(),
+            name: "completed.txt".to_string(),
+            size_bytes: 4,
+        }],
+        volumes: HashSet::from(["delta".to_string()]),
+        status: OpStatus::Completed,
+        total_items: 1,
+        completed_items: 1,
+        total_bytes: 4,
+        copied_bytes: 4,
+        bytes_per_second: 0,
+        eta_seconds: None,
+        sample_count: 0,
+        rate_sample_at: None,
+        rate_sample_bytes: 0,
+        current_file_name: None,
+        current_file_copied: 0,
+        current_file_total: 0,
+        error_message: None,
+        completed_at: Some(Instant::now()),
+        cancel: Arc::new(AtomicBool::new(false)),
+        pause: Arc::new(AtomicBool::new(false)),
+        conflict: None,
+        conflict_resolution: None,
+        apply_to_all: None,
+        rename_to: None,
+    });
+    reschedule_service.insert_op_for_tests(OpState {
+        id: "pending-op".to_string(),
+        kind: OpKind::Delete,
+        destination_dir: PathBuf::new(),
+        items: vec![OpItem {
+            source_path: pending_file.to_string_lossy().into_owned(),
+            name: "pending.txt".to_string(),
+            size_bytes: 4,
+        }],
+        volumes: HashSet::from(["epsilon".to_string()]),
+        status: OpStatus::Pending,
+        total_items: 1,
+        completed_items: 0,
+        total_bytes: 4,
+        copied_bytes: 0,
+        bytes_per_second: 0,
+        eta_seconds: None,
+        sample_count: 0,
+        rate_sample_at: None,
+        rate_sample_bytes: 0,
+        current_file_name: None,
+        current_file_copied: 0,
+        current_file_total: 0,
+        error_message: None,
+        completed_at: None,
+        cancel: Arc::new(AtomicBool::new(false)),
+        pause: Arc::new(AtomicBool::new(false)),
+        conflict: None,
+        conflict_resolution: None,
+        apply_to_all: None,
+        rename_to: None,
+    });
+
+    reschedule_service.release_and_reschedule_for_tests("done-op");
+    std::thread::sleep(Duration::from_millis(40));
+    assert!(!pending_file.exists());
+    assert!(removed
+        .lock()
+        .expect("removed lock")
+        .iter()
+        .any(|id| id == "done-op"));
+}
+
+#[test]
+fn process_item_test_hook_covers_conflict_skip_and_replace_paths() {
+    let fixture = tempfile::tempdir().expect("temp dir");
+    let dest = fixture.path().join("dest");
+    std::fs::create_dir_all(&dest).expect("dest");
+
+    let source_skip = fixture.path().join("skip.txt");
+    std::fs::write(&source_skip, b"incoming").expect("source skip");
+    std::fs::write(dest.join("skip.txt"), b"existing").expect("dest skip");
+
+    let mut skip_state = state();
+    skip_state.kind = OpKind::Copy;
+    skip_state.destination_dir = dest.clone();
+    skip_state.conflict = None;
+    skip_state.conflict_resolution = None;
+    skip_state.apply_to_all = None;
+    skip_state.rename_to = None;
+    skip_state.items = vec![OpItem {
+        source_path: source_skip.to_string_lossy().into_owned(),
+        name: "skip.txt".to_string(),
+        size_bytes: 8,
+    }];
+    let (skip_op, skip_resolver, skip_ctx) = worker_ctx(skip_state);
+    let skip_item = skip_op.lock().expect("skip lock").items[0].clone();
+    let skip_signal = skip_resolver.clone();
+    let skip_state_arc = skip_op.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(10));
+        let mut guard = skip_state_arc.lock().expect("skip lock");
+        guard.conflict_resolution = Some(ConflictResolution::Skip);
+        drop(guard);
+        skip_signal.notify_all();
+    });
+    process_item_for_tests(&skip_ctx, &skip_item, None);
+    assert_eq!(skip_op.lock().expect("skip lock").completed_items, 1);
+    assert_eq!(std::fs::read(dest.join("skip.txt")).expect("skip dest"), b"existing");
+
+    let source_replace = fixture.path().join("replace.txt");
+    std::fs::write(&source_replace, b"fresh").expect("source replace");
+    std::fs::write(dest.join("replace.txt"), b"stale").expect("dest replace");
+    let mut replace_state = state();
+    replace_state.kind = OpKind::Copy;
+    replace_state.destination_dir = dest.clone();
+    replace_state.conflict = None;
+    replace_state.conflict_resolution = None;
+    replace_state.apply_to_all = None;
+    replace_state.rename_to = None;
+    replace_state.items = vec![OpItem {
+        source_path: source_replace.to_string_lossy().into_owned(),
+        name: "replace.txt".to_string(),
+        size_bytes: 5,
+    }];
+    let (replace_op, replace_resolver, replace_ctx) = worker_ctx(replace_state);
+    let replace_item = replace_op.lock().expect("replace lock").items[0].clone();
+    let replace_signal = replace_resolver.clone();
+    let replace_state_arc = replace_op.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(10));
+        let mut guard = replace_state_arc.lock().expect("replace lock");
+        guard.conflict_resolution = Some(ConflictResolution::Replace);
+        drop(guard);
+        replace_signal.notify_all();
+    });
+    process_item_for_tests(&replace_ctx, &replace_item, None);
+    assert_eq!(replace_op.lock().expect("replace lock").completed_items, 1);
+    assert_eq!(std::fs::read(dest.join("replace.txt")).expect("replace dest"), b"fresh");
+}
+
+#[test]
+fn ops_service_methods_cover_terminal_and_noop_paths() {
+    let service = OpsService::new(Duration::from_millis(10));
+
+    service.cancel_op("missing");
+    service.retry_op("missing");
+    service.resolve_conflict("missing", ConflictResolution::Skip, false, None);
+    service.run_operation_for_tests("missing");
+    service.release_and_reschedule_for_tests("missing");
+
+    service.insert_op_for_tests(OpState {
+        id: "completed".to_string(),
+        status: OpStatus::Completed,
+        completed_at: Some(Instant::now()),
+        ..state()
+    });
+    service.insert_op_for_tests(OpState {
+        id: "active".to_string(),
+        status: OpStatus::Active,
+        ..state()
+    });
+    service.insert_op_for_tests(OpState {
+        id: "pending".to_string(),
+        status: OpStatus::Pending,
+        ..state()
+    });
+
+    service.cancel_op("completed");
+    service.resolve_conflict("active", ConflictResolution::Skip, false, None);
+    service.retry_op("pending");
+
+    let snapshots = service.snapshot();
+    assert_eq!(
+        snapshots
+            .iter()
+            .find(|snapshot| snapshot.progress.operation_id == "completed")
+            .expect("completed")
+            .progress
+            .status,
+        OpStatus::Completed
+    );
+    assert_eq!(
+        snapshots
+            .iter()
+            .find(|snapshot| snapshot.progress.operation_id == "active")
+            .expect("active")
+            .progress
+            .status,
+        OpStatus::Active
+    );
+    assert_eq!(
+        snapshots
+            .iter()
+            .find(|snapshot| snapshot.progress.operation_id == "pending")
+            .expect("pending")
+            .progress
+            .status,
+        OpStatus::Pending
+    );
+}
+
+#[test]
+fn process_item_test_hook_covers_cancelled_and_error_paths() {
+    let fixture = tempfile::tempdir().expect("temp dir");
+
+    let delete_source = fixture.path().join("delete.txt");
+    std::fs::write(&delete_source, b"delete").expect("delete source");
+    let mut cancelled_delete = state();
+    cancelled_delete.kind = OpKind::Delete;
+    cancelled_delete.cancel = Arc::new(AtomicBool::new(true));
+    cancelled_delete.items = vec![OpItem {
+        source_path: delete_source.to_string_lossy().into_owned(),
+        name: "delete.txt".to_string(),
+        size_bytes: 6,
+    }];
+    let (delete_op, _delete_resolver, delete_ctx) = worker_ctx(cancelled_delete);
+    let delete_item = delete_op.lock().expect("delete lock").items[0].clone();
+    process_item_for_tests(&delete_ctx, &delete_item, None);
+    assert!(delete_source.exists());
+    assert_eq!(delete_op.lock().expect("delete lock").completed_items, 0);
+
+    let source_dir = fixture.path().join("source");
+    std::fs::create_dir_all(&source_dir).expect("source dir");
+    std::fs::write(source_dir.join("inside.txt"), b"payload").expect("inside");
+
+    let mut bad_compress = state();
+    bad_compress.kind = OpKind::Compress;
+    bad_compress.destination_dir = fixture.path().join("archive.txt");
+    bad_compress.items = vec![OpItem {
+        source_path: source_dir.to_string_lossy().into_owned(),
+        name: "source".to_string(),
+        size_bytes: 0,
+    }];
+    let (compress_op, _compress_resolver, compress_ctx) = worker_ctx(bad_compress);
+    let compress_item = compress_op.lock().expect("compress lock").items[0].clone();
+    process_item_for_tests(&compress_ctx, &compress_item, None);
+    assert!(compress_op
+        .lock()
+        .expect("compress lock")
+        .error_message
+        .as_deref()
+        .is_some_and(|message| message.contains(".zip")));
+
+    let source_text = fixture.path().join("plain.txt");
+    std::fs::write(&source_text, b"plain").expect("plain");
+    let mut bad_extract = state();
+    bad_extract.kind = OpKind::Extract;
+    bad_extract.destination_dir = fixture.path().join("extract");
+    bad_extract.items = vec![OpItem {
+        source_path: source_text.to_string_lossy().into_owned(),
+        name: "plain.txt".to_string(),
+        size_bytes: 0,
+    }];
+    let (extract_op, _extract_resolver, extract_ctx) = worker_ctx(bad_extract);
+    let extract_item = extract_op.lock().expect("extract lock").items[0].clone();
+    process_item_for_tests(&extract_ctx, &extract_item, None);
+    assert!(extract_op
+        .lock()
+        .expect("extract lock")
+        .error_message
+        .as_deref()
+        .is_some_and(|message| message.contains(".zip")));
+}
+
+#[test]
+fn process_item_test_hook_covers_conflict_emitter_and_apply_to_all() {
+    let fixture = tempfile::tempdir().expect("temp dir");
+    let dest = fixture.path().join("dest");
+    std::fs::create_dir_all(&dest).expect("dest");
+
+    let emitted = Arc::new(Mutex::new(Vec::<ConflictInfo>::new()));
+    let source_emit = fixture.path().join("emit.txt");
+    std::fs::write(&source_emit, b"fresh").expect("source");
+    std::fs::write(dest.join("emit.txt"), b"existing").expect("dest");
+
+    let mut emit_state = state();
+    emit_state.kind = OpKind::Copy;
+    emit_state.destination_dir = dest.clone();
+    emit_state.conflict = None;
+    emit_state.conflict_resolution = None;
+    emit_state.apply_to_all = None;
+    emit_state.rename_to = None;
+    emit_state.items = vec![OpItem {
+        source_path: source_emit.to_string_lossy().into_owned(),
+        name: "emit.txt".to_string(),
+        size_bytes: 5,
+    }];
+    let (emit_op, emit_resolver, emit_ctx) = worker_ctx(emit_state);
+    let emit_item = emit_op.lock().expect("emit lock").items[0].clone();
+    let emit_signal = emit_resolver.clone();
+    let emit_state_arc = emit_op.clone();
+    let emitted_sink = emitted.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(10));
+        let mut guard = emit_state_arc.lock().expect("emit lock");
+        guard.conflict_resolution = Some(ConflictResolution::Replace);
+        drop(guard);
+        emit_signal.notify_all();
+    });
+    process_item_for_tests(
+        &emit_ctx,
+        &emit_item,
+        Some(Arc::new(move |info| {
+            emitted_sink.lock().expect("emitted lock").push(info);
+        })),
+    );
+    assert_eq!(emitted.lock().expect("emitted lock").len(), 1);
+    assert_eq!(std::fs::read(dest.join("emit.txt")).expect("emit dest"), b"fresh");
+
+    let source_skip = fixture.path().join("blanket.txt");
+    std::fs::write(&source_skip, b"skip").expect("blanket source");
+    std::fs::write(dest.join("blanket.txt"), b"existing").expect("blanket dest");
+    let mut blanket_state = state();
+    blanket_state.kind = OpKind::Copy;
+    blanket_state.destination_dir = dest.clone();
+    blanket_state.apply_to_all = Some(ConflictResolution::Skip);
+    blanket_state.conflict = None;
+    blanket_state.conflict_resolution = None;
+    blanket_state.rename_to = None;
+    blanket_state.items = vec![OpItem {
+        source_path: source_skip.to_string_lossy().into_owned(),
+        name: "blanket.txt".to_string(),
+        size_bytes: 0,
+    }];
+    let (blanket_op, _blanket_resolver, blanket_ctx) = worker_ctx(blanket_state);
+    let blanket_item = blanket_op.lock().expect("blanket lock").items[0].clone();
+    process_item_for_tests(&blanket_ctx, &blanket_item, None);
+    assert_eq!(blanket_op.lock().expect("blanket lock").completed_items, 1);
+    assert_eq!(
+        std::fs::read(dest.join("blanket.txt")).expect("blanket dest"),
+        b"existing"
+    );
+}
+
+#[test]
+fn ops_test_hooks_cover_archive_name_fallback_paths() {
+    let state = state();
+    let (op_arc, _resolver, ctx) = worker_ctx(state);
+
+    assert_eq!(archive_stem_for_item_for_tests(PathBuf::from("/").as_path()), "Archive");
+    assert_eq!(
+        archive_root_name_for_tests(PathBuf::from("/").as_path()),
+        PathBuf::from("Archive")
+    );
+
+    begin_file_progress_for_tests(&ctx, PathBuf::from("/").as_path(), 0);
+    assert_eq!(
+        op_arc.lock().expect("op lock").current_file_name.as_deref(),
+        Some("/")
+    );
 }
 
 #[test]

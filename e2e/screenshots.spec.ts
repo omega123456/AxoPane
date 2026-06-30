@@ -66,14 +66,14 @@ for (const mode of ['light', 'dark'] as const) {
 
   test(`queue collapsed ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.queueCollapsed[mode])
-    await expect(page.getByRole('button', { name: 'Expand transfer queue' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Expand job queue' })).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`transfer-queue-collapsed-${mode}.png`)
   })
 
   test(`queue expanded ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.queueExpanded[mode])
-    await page.getByRole('button', { name: 'Expand transfer queue' }).click()
-    await expect(page.getByRole('region', { name: 'Transfer queue' })).toBeVisible()
+    await page.getByRole('button', { name: 'Expand job queue' }).click()
+    await expect(page.getByRole('region', { name: 'Job queue' })).toBeVisible()
     await expect(
       page.getByRole('progressbar', {
         name: `Copying ${expandedQueueFinalProgressEvent.totalItems.toLocaleString()} items`,
@@ -92,7 +92,7 @@ for (const mode of ['light', 'dark'] as const) {
 
   test(`queue deleting collapsed ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.queueDeleting[mode])
-    await expect(page.getByText('Deleting 1 transfer')).toBeVisible()
+    await expect(page.getByText('Deleting 1 job')).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(
       `transfer-queue-deleting-collapsed-${mode}.png`,
     )
@@ -100,8 +100,8 @@ for (const mode of ['light', 'dark'] as const) {
 
   test(`queue deleting expanded ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.queueDeleting[mode])
-    await page.getByRole('button', { name: 'Expand transfer queue' }).click()
-    await expect(page.getByRole('region', { name: 'Transfer queue' })).toBeVisible()
+    await page.getByRole('button', { name: 'Expand job queue' }).click()
+    await expect(page.getByRole('region', { name: 'Job queue' })).toBeVisible()
     await expect(page.getByRole('progressbar', { name: 'Deleting 84 items' })).toHaveAttribute(
       'aria-valuenow',
       String(Math.round(deletingQueueFinalProgressEvent.progressPercent)),
@@ -275,5 +275,31 @@ for (const mode of ['light', 'dark'] as const) {
     await menu.getByRole('menuitem', { name: 'Delete permanently' }).click()
     await expect(page.getByRole('dialog', { name: 'Confirm delete' })).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`delete-confirmation-dialog-${mode}.png`)
+  })
+
+  test(`archive dialog ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.browsing[mode])
+    await page
+      .getByRole('row', { name: /Documents/ })
+      .first()
+      .click({ button: 'right' })
+    const menu = page.getByRole('menu', { name: 'Documents' })
+    await expect(menu).toBeVisible()
+    await menu.getByRole('menuitem', { name: 'Compress' }).click()
+    await expect(page.getByRole('dialog', { name: 'Confirm compress' })).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`archive-confirmation-dialog-${mode}.png`)
+  })
+
+  test(`extract dialog ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.fileTypes[mode])
+    await page
+      .getByRole('row', { name: /bundle\.zip/ })
+      .first()
+      .click({ button: 'right' })
+    const menu = page.getByRole('menu', { name: 'bundle.zip' })
+    await expect(menu).toBeVisible()
+    await menu.getByRole('menuitem', { name: 'Extract' }).click()
+    await expect(page.getByRole('dialog', { name: 'Confirm extract' })).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`extract-confirmation-dialog-${mode}.png`)
   })
 }

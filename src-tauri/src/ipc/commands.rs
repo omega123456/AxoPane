@@ -32,10 +32,12 @@ use tauri::State;
 use tauri::{AppHandle, Emitter};
 
 #[cfg(feature = "test-utils")]
-fn noop_dir_patch(_: crate::watch::DirPatch) {}
+#[inline(never)]
+pub fn noop_dir_patch(_: crate::watch::DirPatch) {}
 
 #[cfg(feature = "test-utils")]
-fn noop_watch_error(_: String, _: String) {}
+#[inline(never)]
+pub fn noop_watch_error(_: String, _: String) {}
 
 #[tauri::command]
 pub fn get_initial_shell() -> InitialShellResponse {

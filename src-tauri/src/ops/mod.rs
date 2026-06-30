@@ -1,13 +1,13 @@
-//! Resource-aware copy/move queue engine.
-//!
-//! One [`Operation`] is created per user action. The scheduler enforces a single
-//! active operation per participating volume (the source *and* destination mount
-//! roots), while operations on disjoint volume sets run in parallel. A conflict
-//! pauses only the operation that hit it; sibling operations keep running.
-//!
-//! The engine performs ordinary filesystem copy/move work via [`std::fs`], so it
-//! is fully exercisable in integration tests against temp directories without
-//! touching any machine-global API.
+// Resource-aware copy/move queue engine.
+//
+// One operation is created per user action. The scheduler enforces a single
+// active operation per participating volume (the source and destination mount
+// roots), while operations on disjoint volume sets run in parallel. A conflict
+// pauses only the operation that hit it; sibling operations keep running.
+//
+// The engine performs ordinary filesystem copy/move work via `std::fs`, so it
+// is fully exercisable in integration tests against temp directories without
+// touching any machine-global API.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
@@ -19,8 +19,10 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+use zip::write::SimpleFileOptions;
+use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
-use crate::volumes::{self, VolumeInfo};
+use crate::volumes::VolumeInfo;
 
 /// How long a completed or cancelled operation lingers in the queue before being auto-removed.
 pub const DEFAULT_COMPLETED_RETENTION: Duration = Duration::from_secs(4);
@@ -37,6 +39,8 @@ pub enum OpKind {
     Copy,
     Move,
     Delete,
+    Compress,
+    Extract,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -288,7 +292,7 @@ impl OpsService {
             completed_retention,
             rate_window,
             instant_now: Arc::new(Instant::now),
-            volumes: Mutex::new(volumes::list_volumes()),
+            volumes: Mutex::new(crate::volumes::list_volumes()),
         }
     }
 
@@ -669,6 +673,65 @@ impl OpsService {
             .get(id)
             .cloned()
     }
+
+    #[cfg(feature = "test-utils")]
+    pub fn insert_op_for_tests(&self, state: OpState) {
+        let id = state.id.clone();
+        let mut inner = self.inner.lock().expect("ops lock");
+        inner.ops.insert(id.clone(), Arc::new(Mutex::new(state)));
+        inner.signals.insert(id.clone(), Arc::new(Condvar::new()));
+        inner.order.push_back(id);
+    }
+
+    #[cfg(feature = "test-utils")]
+    pub fn run_operation_for_tests(&self, id: &str) {
+        let runtime = WorkerRuntime {
+            progress: self
+                .progress_emitter
+                .lock()
+                .expect("progress emitter lock")
+                .clone(),
+            conflict: self
+                .conflict_emitter
+                .lock()
+                .expect("conflict emitter lock")
+                .clone(),
+            removed: self
+                .removed_emitter
+                .lock()
+                .expect("removed emitter lock")
+                .clone(),
+            retention: self.completed_retention,
+            rate_window: self.rate_window,
+            instant_now: self.instant_now.clone(),
+        };
+        run_operation(id.to_string(), &self.inner, &runtime);
+    }
+
+    #[cfg(feature = "test-utils")]
+    pub fn release_and_reschedule_for_tests(&self, id: &str) {
+        let runtime = WorkerRuntime {
+            progress: self
+                .progress_emitter
+                .lock()
+                .expect("progress emitter lock")
+                .clone(),
+            conflict: self
+                .conflict_emitter
+                .lock()
+                .expect("conflict emitter lock")
+                .clone(),
+            removed: self
+                .removed_emitter
+                .lock()
+                .expect("removed emitter lock")
+                .clone(),
+            retention: self.completed_retention,
+            rate_window: self.rate_window,
+            instant_now: self.instant_now.clone(),
+        };
+        release_and_reschedule(id, &self.inner, &runtime);
+    }
 }
 
 pub fn requested_pop(requested: &mut Vec<String>) -> Option<String> {
@@ -787,8 +850,7 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
 
     let source = PathBuf::from(&item.source_path);
 
-    // A delete has no destination and no conflicts: remove the source in place,
-    // reporting byte progress so it shares the copy/move toast + queue UI.
+    // Queue-native operations that do not use copy/move conflict handling.
     if matches!(kind, OpKind::Delete) {
         wait_while_paused(op_arc, ctx.resolver);
         if op_arc
@@ -819,14 +881,74 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
         return;
     }
 
+    if matches!(kind, OpKind::Compress) {
+        wait_while_paused(op_arc, ctx.resolver);
+        if op_arc
+            .lock()
+            .expect("op lock")
+            .cancel
+            .load(Ordering::Relaxed)
+        {
+            return;
+        }
+        match compress_item_with_progress(&source, &destination_dir, item, ctx) {
+            Ok(()) => {
+                if op_arc
+                    .lock()
+                    .expect("op lock")
+                    .cancel
+                    .load(Ordering::Relaxed)
+                {
+                    return;
+                }
+                advance_item(ctx, item);
+            }
+            Err(message) => {
+                op_arc.lock().expect("op lock").error_message = Some(message);
+            }
+        }
+        return;
+    }
+
+    if matches!(kind, OpKind::Extract) {
+        wait_while_paused(op_arc, ctx.resolver);
+        if op_arc
+            .lock()
+            .expect("op lock")
+            .cancel
+            .load(Ordering::Relaxed)
+        {
+            return;
+        }
+        match extract_item_with_progress(&source, &destination_dir, item, ctx) {
+            Ok(()) => {
+                if op_arc
+                    .lock()
+                    .expect("op lock")
+                    .cancel
+                    .load(Ordering::Relaxed)
+                {
+                    return;
+                }
+                advance_item(ctx, item);
+            }
+            Err(message) => {
+                op_arc.lock().expect("op lock").error_message = Some(message);
+            }
+        }
+        return;
+    }
+
     let mut target = destination_dir.join(&item.name);
 
     if source.is_dir() && is_nested_copy_target(&source, &target) {
         let action = match kind {
             OpKind::Copy => "copy",
             OpKind::Move => "move",
-            // Unreachable: delete returns earlier (no destination target).
+            // Unreachable: non-transfer kinds return earlier.
             OpKind::Delete => "delete",
+            OpKind::Compress => "compress",
+            OpKind::Extract => "extract",
         };
         let mut op = op_arc.lock().expect("op lock");
         op.error_message = Some(format!(
@@ -871,7 +993,7 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
         return;
     }
 
-    let add_discovered_totals = item.size_bytes == 0 && source.is_dir();
+    let add_discovered_totals = item.size_bytes == 0;
     let result = if matches!(kind, OpKind::Move) {
         move_path_with_total_discovery(&source, &target, add_discovered_totals, ctx)
     } else {
@@ -895,6 +1017,31 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
             op.error_message = Some(message);
         }
     }
+}
+
+#[cfg(feature = "test-utils")]
+pub fn process_item_for_tests(
+    ctx: &WorkerCtx<'_>,
+    item: &OpItem,
+    conflict: Option<Arc<dyn Fn(ConflictInfo) + Send + Sync>>,
+) {
+    let conflict: Option<ConflictEmitter> = conflict;
+    process_item(ctx, item, &conflict);
+}
+
+#[cfg(feature = "test-utils")]
+pub fn archive_stem_for_item_for_tests(source: &Path) -> String {
+    archive_stem_for_item(source)
+}
+
+#[cfg(feature = "test-utils")]
+pub fn archive_root_name_for_tests(source: &Path) -> PathBuf {
+    archive_root_name(source)
+}
+
+#[cfg(feature = "test-utils")]
+pub fn begin_file_progress_for_tests(ctx: &WorkerCtx<'_>, source: &Path, total_bytes: u64) {
+    begin_file_progress(ctx, source, total_bytes);
 }
 
 /// Surface a conflict and block until the user resolves it (or it is cancelled).
@@ -1165,6 +1312,356 @@ fn schedule_auto_remove(
             }
         }
     });
+}
+
+fn compress_item_with_progress(
+    source: &Path,
+    archive_path: &Path,
+    item: &OpItem,
+    ctx: &WorkerCtx<'_>,
+) -> Result<(), String> {
+    if !is_zip_archive_path(archive_path) {
+        return Err("Archive output must end in .zip.".to_string());
+    }
+    if !source.exists() {
+        return Err(format!(
+            "Archive source does not exist: {}",
+            source.display()
+        ));
+    }
+    if archive_path.exists() {
+        return Err(format!(
+            "Archive already exists: {}",
+            archive_path.display()
+        ));
+    }
+
+    let parent = archive_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let archive_file = fs::File::create_new(archive_path).map_err(|error| error.to_string())?;
+    let mut writer = ZipWriter::new(archive_file);
+    let add_discovered_totals = item.size_bytes == 0;
+    let root_name = archive_root_name(source);
+    append_archive_path(&mut writer, source, &root_name, add_discovered_totals, ctx)?;
+    writer.finish().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn extract_item_with_progress(
+    source: &Path,
+    destination_dir: &Path,
+    item: &OpItem,
+    ctx: &WorkerCtx<'_>,
+) -> Result<(), String> {
+    if destination_dir.exists() {
+        if !destination_dir.is_dir() {
+            return Err(format!(
+                "Extract destination is not a folder: {}",
+                destination_dir.display()
+            ));
+        }
+    } else {
+        fs::create_dir_all(destination_dir).map_err(|error| error.to_string())?;
+    }
+    if !is_zip_archive_path(source) {
+        return Err("Only .zip archives can be extracted.".to_string());
+    }
+
+    let output_root =
+        unique_archive_directory_path(destination_dir, &archive_stem_for_item(source));
+    let discovered_total = zip_uncompressed_size(source)?;
+    if item.size_bytes == 0 {
+        add_discovered_total(ctx, discovered_total);
+    }
+
+    fs::create_dir_all(&output_root).map_err(|error| error.to_string())?;
+    let file = fs::File::open(source).map_err(|error| error.to_string())?;
+    let mut archive = ZipArchive::new(file).map_err(|error| error.to_string())?;
+    let wrapper_root = detect_redundant_wrapper_root(&mut archive, &archive_stem_for_item(source))?;
+
+    for index in 0..archive.len() {
+        wait_while_paused(ctx.op_arc, ctx.resolver);
+        if ctx
+            .op_arc
+            .lock()
+            .expect("op lock")
+            .cancel
+            .load(Ordering::Relaxed)
+        {
+            return Ok(());
+        }
+
+        let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
+        let enclosed_name = entry
+            .enclosed_name()
+            .map(PathBuf::from)
+            .ok_or_else(|| "Archive contains an unsafe entry path.".to_string())?;
+        let relative_name = strip_wrapper_root(&enclosed_name, wrapper_root.as_deref());
+        let output_path = output_root.join(relative_name);
+
+        if entry.is_dir() {
+            fs::create_dir_all(&output_path).map_err(|error| error.to_string())?;
+            continue;
+        }
+
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+
+        let entry_size = entry.size();
+        begin_file_progress(ctx, &output_path, entry_size);
+        let mut output_file = fs::File::create(&output_path).map_err(|error| error.to_string())?;
+        copy_reader_with_progress(&mut entry, &mut output_file, ctx)?;
+        output_file.flush().map_err(|error| error.to_string())?;
+        finish_file_progress(ctx);
+    }
+
+    Ok(())
+}
+
+fn append_archive_path(
+    writer: &mut ZipWriter<fs::File>,
+    source: &Path,
+    archive_path: &Path,
+    add_discovered_totals: bool,
+    ctx: &WorkerCtx<'_>,
+) -> Result<(), String> {
+    wait_while_paused(ctx.op_arc, ctx.resolver);
+    if ctx
+        .op_arc
+        .lock()
+        .expect("op lock")
+        .cancel
+        .load(Ordering::Relaxed)
+    {
+        return Ok(());
+    }
+
+    if source.is_dir() {
+        let mut directory_name = to_zip_path(archive_path)?;
+        if !directory_name.ends_with('/') {
+            directory_name.push('/');
+        }
+        writer
+            .add_directory(directory_name, zip_dir_options())
+            .map_err(|error| error.to_string())?;
+
+        let mut children = fs::read_dir(source)
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        children.sort_by_key(|entry| entry.file_name());
+
+        for child in children {
+            let child_source = child.path();
+            let child_archive_path = archive_path.join(child.file_name());
+            append_archive_path(
+                writer,
+                &child_source,
+                &child_archive_path,
+                add_discovered_totals,
+                ctx,
+            )?;
+        }
+        return Ok(());
+    }
+
+    let file_size = fs::metadata(source)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    if add_discovered_totals {
+        add_discovered_total(ctx, file_size);
+    }
+    begin_file_progress(ctx, source, file_size);
+    writer
+        .start_file(to_zip_path(archive_path)?, zip_file_options())
+        .map_err(|error| error.to_string())?;
+    let mut input_file = fs::File::open(source).map_err(|error| error.to_string())?;
+    copy_reader_with_progress(&mut input_file, writer, ctx)?;
+    finish_file_progress(ctx);
+    Ok(())
+}
+
+fn copy_reader_with_progress<R, W>(
+    reader: &mut R,
+    writer: &mut W,
+    ctx: &WorkerCtx<'_>,
+) -> Result<(), String>
+where
+    R: Read,
+    W: Write,
+{
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        wait_while_paused(ctx.op_arc, ctx.resolver);
+        if ctx
+            .op_arc
+            .lock()
+            .expect("op lock")
+            .cancel
+            .load(Ordering::Relaxed)
+        {
+            return Ok(());
+        }
+
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|error| error.to_string())?;
+        if read == 0 {
+            break;
+        }
+        writer
+            .write_all(&buffer[..read])
+            .map_err(|error| error.to_string())?;
+        report_chunk_progress(ctx, read as u64);
+    }
+    Ok(())
+}
+
+fn zip_uncompressed_size(path: &Path) -> Result<u64, String> {
+    let file = fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut archive = ZipArchive::new(file).map_err(|error| error.to_string())?;
+    let mut total = 0_u64;
+    for index in 0..archive.len() {
+        let entry = archive.by_index(index).map_err(|error| error.to_string())?;
+        if !entry.is_dir() {
+            total = total.saturating_add(entry.size());
+        }
+    }
+    Ok(total)
+}
+
+fn detect_redundant_wrapper_root(
+    archive: &mut ZipArchive<fs::File>,
+    archive_stem: &str,
+) -> Result<Option<String>, String> {
+    let normalized_stem = archive_stem.trim();
+    if normalized_stem.is_empty() {
+        return Ok(None);
+    }
+
+    let mut candidate_root: Option<String> = None;
+    let mut saw_nested_entry = false;
+
+    for index in 0..archive.len() {
+        let entry = archive.by_index(index).map_err(|error| error.to_string())?;
+        let Some(enclosed_name) = entry.enclosed_name() else {
+            return Err("Archive contains an unsafe entry path.".to_string());
+        };
+
+        let mut components = enclosed_name.components();
+        let Some(first) = components.next() else {
+            continue;
+        };
+        let Some(first_name) = first.as_os_str().to_str() else {
+            return Ok(None);
+        };
+        if candidate_root
+            .as_deref()
+            .is_some_and(|current| current != first_name)
+        {
+            return Ok(None);
+        }
+        candidate_root.get_or_insert_with(|| first_name.to_string());
+        if components.next().is_some() {
+            saw_nested_entry = true;
+        } else if !entry.is_dir() {
+            return Ok(None);
+        }
+    }
+
+    Ok(
+        candidate_root
+            .filter(|root| saw_nested_entry && root.eq_ignore_ascii_case(normalized_stem)),
+    )
+}
+
+fn strip_wrapper_root<'a>(path: &'a Path, wrapper_root: Option<&str>) -> &'a Path {
+    let Some(wrapper_root) = wrapper_root else {
+        return path;
+    };
+
+    let mut components = path.components();
+    let Some(first) = components.next() else {
+        return path;
+    };
+    if !first
+        .as_os_str()
+        .to_string_lossy()
+        .eq_ignore_ascii_case(wrapper_root)
+    {
+        return path;
+    }
+
+    components.as_path()
+}
+
+fn archive_stem_for_item(source: &Path) -> String {
+    source
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            source
+                .file_name()
+                .and_then(|value| value.to_str())
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or("Archive")
+        .to_string()
+}
+
+fn archive_root_name(source: &Path) -> PathBuf {
+    source
+        .file_name()
+        .map(PathBuf::from)
+        .filter(|value| !value.as_os_str().is_empty())
+        .unwrap_or_else(|| PathBuf::from("Archive"))
+}
+
+fn is_zip_archive_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("zip"))
+}
+
+fn unique_archive_directory_path(destination_dir: &Path, stem: &str) -> PathBuf {
+    let mut attempt = 0usize;
+    loop {
+        let file_name = if attempt == 0 {
+            stem.to_string()
+        } else {
+            format!("{stem} ({attempt})")
+        };
+        let candidate = destination_dir.join(file_name);
+        if !candidate.exists() {
+            return candidate;
+        }
+        attempt += 1;
+    }
+}
+
+fn to_zip_path(path: &Path) -> Result<String, String> {
+    let value = path.to_string_lossy().replace('\\', "/");
+    if value.is_empty() {
+        return Err("Archive entry path is empty.".to_string());
+    }
+    Ok(value)
+}
+
+fn zip_file_options() -> SimpleFileOptions {
+    SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Deflated)
+        .unix_permissions(0o644)
+}
+
+fn zip_dir_options() -> SimpleFileOptions {
+    SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Stored)
+        .unix_permissions(0o755)
 }
 
 // --- Filesystem helpers --------------------------------------------------------

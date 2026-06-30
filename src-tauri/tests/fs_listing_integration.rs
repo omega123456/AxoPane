@@ -206,6 +206,72 @@ fn list_tree_children_returns_only_lightweight_directory_nodes() {
 }
 
 #[test]
+fn list_tree_children_handles_hidden_only_and_missing_directories() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    fs::create_dir(root.join(".hidden-only")).expect("hidden only");
+
+    let visible = list_tree_children(&ListTreeChildrenOptions {
+        path: root.to_string_lossy().into_owned(),
+        show_hidden: false,
+    })
+    .expect("tree children");
+    assert!(visible.children.is_empty());
+
+    let missing = root.join("missing");
+    let error = list_tree_children(&ListTreeChildrenOptions {
+        path: missing.to_string_lossy().into_owned(),
+        show_hidden: false,
+    })
+    .expect_err("missing directory");
+    assert!(!error.to_string().is_empty());
+}
+
+#[test]
+fn list_tree_children_reports_no_children_when_only_grandchild_is_hidden() {
+    // `parent` has a single subdirectory whose name starts with a dot, which
+    // counts as hidden on both Windows and POSIX. With hidden entries excluded,
+    // `directory_has_visible_child_dirs` must walk that grandchild, see its
+    // "hidden" attribute, and conclude `parent` has no *visible* child folders.
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    let parent = root.join("parent");
+    fs::create_dir(&parent).expect("parent");
+    fs::create_dir(parent.join(".secret")).expect("hidden grandchild");
+
+    let visible = list_tree_children(&ListTreeChildrenOptions {
+        path: root.to_string_lossy().into_owned(),
+        show_hidden: false,
+    })
+    .expect("tree children");
+    let parent_node = visible
+        .children
+        .iter()
+        .find(|child| child.name == "parent")
+        .expect("parent node present");
+    assert!(
+        !parent_node.has_children,
+        "a lone hidden grandchild must not count as a visible child folder"
+    );
+
+    // When hidden entries are shown, the same grandchild now counts and the
+    // function short-circuits to `true`.
+    let with_hidden = list_tree_children(&ListTreeChildrenOptions {
+        path: root.to_string_lossy().into_owned(),
+        show_hidden: true,
+    })
+    .expect("tree children with hidden");
+    assert!(
+        with_hidden
+            .children
+            .iter()
+            .find(|child| child.name == "parent")
+            .expect("parent node present")
+            .has_children
+    );
+}
+
+#[test]
 fn list_dir_rejects_relative_dot_without_real_directory() {
     let fixture = tempdir().expect("temp dir");
     let missing = fixture.path().join("does-not-exist");

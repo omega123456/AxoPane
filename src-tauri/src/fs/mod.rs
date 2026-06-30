@@ -246,13 +246,7 @@ pub fn list_tree_children(
     options: &ListTreeChildrenOptions,
 ) -> Result<ListTreeChildrenResponse, FsError> {
     let requested = Path::new(&options.path);
-    let directory = canonicalize_dir(requested).map_err(|error| {
-        log::warn!(
-            "list_tree_children: failed to canonicalize {:?}: {error}",
-            options.path
-        );
-        error
-    })?;
+    let directory = canonicalize_tree_dir(requested, &options.path)?;
 
     let mut children = Vec::new();
     for entry in fs::read_dir(&directory)? {
@@ -510,10 +504,7 @@ fn directory_has_visible_child_dirs(path: &Path, show_hidden: bool) -> bool {
             return true;
         }
         let attributes = collect_attributes(&child_path, &metadata);
-        if !attributes
-            .iter()
-            .any(|attribute| attribute == "hidden" || attribute == "system")
-        {
+        if !attributes.iter().any(|attribute| is_hidden_or_system_attribute(attribute)) {
             return true;
         }
     }
@@ -554,18 +545,45 @@ pub fn compare_entries(
         SortKey::Type => natural_name_compare(&left.type_label, &right.type_label)
             .then_with(|| natural_name_compare(&left.name, &right.name)),
         SortKey::Modified => {
-            compare_optional_string(left.modified_at.as_deref(), right.modified_at.as_deref())
-                .then_with(|| natural_name_compare(&left.name, &right.name))
+            compare_with_name_tiebreak(
+                compare_optional_string(left.modified_at.as_deref(), right.modified_at.as_deref()),
+                &left.name,
+                &right.name,
+            )
         }
         SortKey::Created => {
-            compare_optional_string(left.created_at.as_deref(), right.created_at.as_deref())
-                .then_with(|| natural_name_compare(&left.name, &right.name))
+            compare_with_name_tiebreak(
+                compare_optional_string(left.created_at.as_deref(), right.created_at.as_deref()),
+                &left.name,
+                &right.name,
+            )
         }
     };
 
     match sort_direction {
         SortDirection::Asc => base_order,
         SortDirection::Desc => base_order.reverse(),
+    }
+}
+
+fn canonicalize_tree_dir(requested: &Path, display_path: &str) -> Result<PathBuf, FsError> {
+    canonicalize_dir(requested).map_err(|error| {
+        log::warn!(
+            "list_tree_children: failed to canonicalize {:?}: {error}",
+            display_path
+        );
+        error
+    })
+}
+
+fn is_hidden_or_system_attribute(attribute: &str) -> bool {
+    attribute == "hidden" || attribute == "system"
+}
+
+fn compare_with_name_tiebreak(base: Ordering, left_name: &str, right_name: &str) -> Ordering {
+    match base {
+        Ordering::Equal => natural_name_compare(left_name, right_name),
+        other => other,
     }
 }
 

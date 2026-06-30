@@ -55,6 +55,8 @@ fn path_helpers_cover_name_root_and_component_logic() {
 
     let normalized = normalized_components(std::path::Path::new("alpha/./beta/../gamma"));
     assert_eq!(normalized.last().expect("last component"), "gamma");
+    let parent_heavy = normalized_components(std::path::Path::new("../alpha/../../gamma"));
+    assert!(parent_heavy.contains(&"..".to_string()));
     assert!(is_nested_copy_target(
         std::path::Path::new("alpha/beta"),
         std::path::Path::new("alpha/beta/nested"),
