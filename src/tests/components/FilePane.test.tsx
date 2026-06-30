@@ -156,18 +156,22 @@ describe('FilePane state rendering', () => {
       const view = render(<FilePane paneId="left" />)
       fireEvent.doubleClick(screen.getByRole('row', { name: 'Go to parent folder' }))
 
-      usePanesStore.setState((state) => ({
-        panes: {
-          ...state.panes,
-          left: { ...state.panes.left, path: 'C:\\root', entries: [] },
-        },
-      }))
+      act(() => {
+        usePanesStore.setState((state) => ({
+          panes: {
+            ...state.panes,
+            left: { ...state.panes.left, path: 'C:\\root', entries: [] },
+          },
+        }))
+      })
       view.rerender(<FilePane paneId="left" />)
 
       fireEvent.doubleClick(screen.getByRole('row', { name: 'Go to parent folder' }))
       expect(goUp).toHaveBeenCalledOnce()
     } finally {
-      usePanesStore.setState({ goUp: originalGoUp })
+      act(() => {
+        usePanesStore.setState({ goUp: originalGoUp })
+      })
     }
   })
 
@@ -240,24 +244,28 @@ describe('FilePane state rendering', () => {
       const view = render(<FilePane paneId="left" />)
       fireEvent.doubleClick(screen.getByRole('row', { name: /Alpha/ }))
 
-      usePanesStore.setState((state) => ({
-        panes: {
-          ...state.panes,
-          left: {
-            ...state.panes.left,
-            path: 'C:\\root\\Alpha',
-            entries: [entry('Alpha')],
-            focusedEntryId: 'Alpha',
+      act(() => {
+        usePanesStore.setState((state) => ({
+          panes: {
+            ...state.panes,
+            left: {
+              ...state.panes.left,
+              path: 'C:\\root\\Alpha',
+              entries: [entry('Alpha')],
+              focusedEntryId: 'Alpha',
+            },
           },
-        },
-      }))
+        }))
+      })
       view.rerender(<FilePane paneId="left" />)
 
       fireEvent.doubleClick(screen.getByRole('row', { name: /Alpha/ }))
       expect(navigatePane).toHaveBeenCalledOnce()
       expect(navigatePane).toHaveBeenCalledWith('left', 'C:\\root\\Alpha')
     } finally {
-      usePanesStore.setState({ navigatePane: originalNavigatePane })
+      act(() => {
+        usePanesStore.setState({ navigatePane: originalNavigatePane })
+      })
     }
   })
 

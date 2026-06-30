@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach } from 'vitest'
 import { DefaultAppDialog } from '@/components/dialogs/DefaultAppDialog'
@@ -14,9 +14,11 @@ afterEach(() => {
 })
 
 function openDialog() {
-  useDefaultAppDialogStore.getState().open({
-    filePath: '/Users/example/Report.pdf',
-    fileName: 'Report.pdf',
+  act(() => {
+    useDefaultAppDialogStore.getState().open({
+      filePath: '/Users/example/Report.pdf',
+      fileName: 'Report.pdf',
+    })
   })
 }
 

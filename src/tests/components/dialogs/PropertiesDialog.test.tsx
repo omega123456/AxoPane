@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, vi } from 'vitest'
 import { DefaultAppDialog } from '@/components/dialogs/DefaultAppDialog'
@@ -214,13 +214,14 @@ const macFile = {
 }
 
 describe('PropertiesDialog set-default-application button', () => {
-  it('shows the button on macOS for a single file with an extension', () => {
+  it('shows the button on macOS for a single file with an extension', async () => {
     setPlatform('MacIntel')
     usePropertiesDialogStore.getState().open({ items: [macFile] })
 
     render(<PropertiesDialog />)
 
     expect(screen.getByRole('button', { name: 'Set Default Application…' })).toBeInTheDocument()
+    await screen.findByText('Fixture Preview')
   })
 
   it('hides the button on Windows', () => {
@@ -333,15 +334,19 @@ describe('PropertiesDialog default application row', () => {
     expect(screen.queryByText('Default App')).not.toBeInTheDocument()
 
     setPlatform('MacIntel')
-    usePropertiesDialogStore.getState().open({ items: [{ ...macFile, isDir: true }] })
+    act(() => {
+      usePropertiesDialogStore.getState().open({ items: [{ ...macFile, isDir: true }] })
+    })
     rerender(<PropertiesDialog />)
     expect(screen.queryByText('Default App')).not.toBeInTheDocument()
 
-    usePropertiesDialogStore.getState().open({
-      items: [
-        macFile,
-        { ...macFile, id: 'other', name: 'Other.pdf', path: '/Users/example/Other.pdf' },
-      ],
+    act(() => {
+      usePropertiesDialogStore.getState().open({
+        items: [
+          macFile,
+          { ...macFile, id: 'other', name: 'Other.pdf', path: '/Users/example/Other.pdf' },
+        ],
+      })
     })
     rerender(<PropertiesDialog />)
     expect(screen.queryByText('Default App')).not.toBeInTheDocument()
