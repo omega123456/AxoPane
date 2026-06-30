@@ -410,6 +410,7 @@ function SettingsModalContent() {
                         }
                         onDragOver={(event) => event.preventDefault()}
                         onDrop={(event) => {
+                          event.preventDefault()
                           const fromKey = event.dataTransfer.getData(
                             'text/column',
                           ) as ColumnConfig['key']
