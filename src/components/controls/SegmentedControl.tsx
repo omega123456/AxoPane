@@ -26,7 +26,7 @@ export function SegmentedControl<T extends string>({
             role="radio"
             aria-checked={active}
             onClick={() => onChange(option.value)}
-            className={`rounded-md px-4 py-1.5 text-usm capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-blue-border ${
+            className={`cursor-pointer rounded-md px-4 py-1.5 text-usm capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-blue-border ${
               active
                 ? 'bg-accent-blue-strong font-semibold text-accent-blue-light dark:text-accent-blue'
                 : 'text-light-text-muted dark:text-dark-text-muted'

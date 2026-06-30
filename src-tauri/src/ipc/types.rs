@@ -64,6 +64,13 @@ pub struct SaveConfigRequest {
     pub config: AppConfig,
 }
 
+/// Request to change the backend's minimum capture level.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetLogLevelRequest {
+    pub level: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveSessionRequest {

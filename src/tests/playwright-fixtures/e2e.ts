@@ -51,6 +51,7 @@ const lightConfig: AppConfig = {
   showHiddenFiles: false,
   dismissedEverythingBanner: false,
   updateCheckInterval: '1d',
+  logLevel: 'info',
   keybindings: {},
   columns: [
     { key: 'name', visible: true },

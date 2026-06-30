@@ -2,7 +2,7 @@ use crate::archive;
 use crate::fs;
 use crate::native_menu::NativeMenuService;
 use crate::ops::{OpSnapshot, OpsService};
-use crate::persist::PersistenceState;
+use crate::persist::{PersistedStore, PersistenceState};
 use crate::size::SizeService;
 use crate::volumes;
 use crate::watch::WatchService;
@@ -22,8 +22,8 @@ use super::types::{
     LoadNativeMenuResponse, LogFrontendRequest, MenuActionStatus, OpIdRequest, OpenPathRequest,
     OpenWithRequest, RefreshTabRequest, RenameEntryRequest, ReorderOpsRequest,
     ResolveConflictRequest, SaveConfigRequest, SaveSessionRequest, SessionState,
-    SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent, StartOpRequest, TrashEntriesRequest,
-    VolumeInfo, WriteFileClipboardRequest,
+    SetLogLevelRequest, SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent, StartOpRequest,
+    TrashEntriesRequest, VolumeInfo, WriteFileClipboardRequest,
 };
 use crate::fs::DirectoryEntry;
 use std::path::Path;
@@ -516,7 +516,8 @@ pub fn format_frontend_log(category: Option<&str>, message: &str, details: Optio
     }
 }
 
-/// Forward a frontend log line into the application logger (`tauri-plugin-log`).
+/// Forward a frontend log line into the application logger (the custom file sink
+/// in [`crate::logging`]).
 ///
 /// The frontend logger (`app-log-commands.ts`) routes every line here so test
 /// runs stay quiet (the line goes to the IPC sink, not the test console) and so
@@ -529,4 +530,37 @@ pub fn log_frontend(payload: LogFrontendRequest) {
         payload.details.as_deref(),
     );
     log::log!(frontend_log_level(&payload.level), "{line}");
+}
+
+/// Apply a new minimum capture level: update the live logger and persist the
+/// choice into the app config so it survives restarts. Pure core shared by the
+/// command wrapper and tests.
+pub fn apply_log_level(
+    config: &PersistedStore<crate::persist::Config>,
+    logger: &crate::logging::FileLogger,
+    level: crate::logging::LogLevel,
+) {
+    logger.set_level(level);
+    let mut current = config.current();
+    current.log_level = level.as_str().to_string();
+    config.replace(current);
+}
+
+/// Read and parse the current day's log file for the in-app log viewer.
+#[tauri::command]
+pub fn read_logs(logging: State<'_, crate::logging::LoggingState>) -> Vec<crate::logging::LogEntry> {
+    crate::logging::read_current_day_logs(&logging.dir, crate::logging::current_local_date())
+}
+
+/// Set the minimum backend capture level (applied immediately and persisted).
+#[tauri::command]
+pub fn set_log_level(
+    payload: SetLogLevelRequest,
+    logging: State<'_, crate::logging::LoggingState>,
+    persistence: State<'_, PersistenceState>,
+) -> Result<(), String> {
+    let parsed = crate::logging::LogLevel::parse(&payload.level)
+        .ok_or_else(|| format!("invalid log level: {}", payload.level))?;
+    apply_log_level(&persistence.config, &logging.logger, parsed);
+    Ok(())
 }

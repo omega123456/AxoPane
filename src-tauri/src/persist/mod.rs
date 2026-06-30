@@ -24,10 +24,16 @@ pub struct Config {
     pub layout: LayoutConfig,
     #[serde(default = "default_update_check_interval")]
     pub update_check_interval: String,
+    #[serde(default = "default_log_level")]
+    pub log_level: String,
 }
 
 pub fn default_update_check_interval() -> String {
     "1d".to_string()
+}
+
+pub fn default_log_level() -> String {
+    "info".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -129,6 +135,7 @@ impl Default for Config {
             columns: default_columns(),
             layout: LayoutConfig::default(),
             update_check_interval: default_update_check_interval(),
+            log_level: default_log_level(),
         }
     }
 }

@@ -88,6 +88,7 @@ fn commands_cover_filesystem_and_persistence_state() {
         columns: initial_config.columns.clone(),
         layout: initial_config.layout.clone(),
         update_check_interval: "12h".to_string(),
+        log_level: "debug".to_string(),
     };
     assert_eq!(
         commands::save_config(

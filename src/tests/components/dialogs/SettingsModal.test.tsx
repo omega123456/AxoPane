@@ -165,6 +165,24 @@ describe('SettingsModal', () => {
       expect(useLayoutStore.getState().detailsVisible).toBe(false)
     })
   })
+  it('shows the logs tab with the capture level and viewer', async () => {
+    const user = userEvent.setup()
+    const setLogLevel = vi.fn(() => undefined)
+    ipc.override('set_log_level', setLogLevel)
+    ipc.override('read_logs', [])
+    useSettingsStore.getState().open('logs')
+
+    render(<SettingsModal />)
+
+    expect(await screen.findByTestId('log-viewer')).toBeInTheDocument()
+    const captureSelect = screen.getByLabelText('Capture level')
+    expect(captureSelect).toHaveValue('info')
+
+    await user.selectOptions(captureSelect, 'debug')
+
+    expect(setLogLevel).toHaveBeenCalledWith({ level: 'debug' })
+    await waitFor(() => expect(useConfigStore.getState().logLevel).toBe('debug'))
+  })
 })
 
 afterAll(() => {

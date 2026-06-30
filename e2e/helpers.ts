@@ -30,7 +30,7 @@ export async function gotoScenario(page: Page, scenario: PlaywrightScenario) {
 
 export async function openSettingsSection(
   page: Page,
-  section: 'keybindings' | 'columns' | 'layout' | 'updates',
+  section: 'keybindings' | 'columns' | 'layout' | 'updates' | 'logs',
 ) {
   await page.getByRole('button', { name: 'Settings' }).click()
   if (section === 'keybindings') {
@@ -41,6 +41,8 @@ export async function openSettingsSection(
     await page.getByRole('button', { name: 'View & Layout' }).click()
   } else if (section === 'updates') {
     await page.getByRole('button', { name: 'Updates' }).click()
+  } else if (section === 'logs') {
+    await page.getByRole('button', { name: 'Logs' }).click()
   }
 }
 

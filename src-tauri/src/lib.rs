@@ -4,6 +4,7 @@ mod file_icons;
 pub mod fs;
 pub mod ipc;
 pub mod launch;
+pub mod logging;
 pub mod native_menu;
 pub mod ops;
 pub mod persist;
@@ -49,25 +50,6 @@ use tauri::{Emitter, Manager};
 #[cfg(not(feature = "test-utils"))]
 use watch::WatchService;
 
-#[cfg(not(feature = "test-utils"))]
-fn log_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
-    use tauri_plugin_log::{Target, TargetKind};
-
-    let level = if cfg!(debug_assertions) {
-        log::LevelFilter::Debug
-    } else {
-        log::LevelFilter::Info
-    };
-
-    tauri_plugin_log::Builder::new()
-        .level(level)
-        .targets([
-            Target::new(TargetKind::Stdout),
-            Target::new(TargetKind::Webview),
-        ])
-        .build()
-}
-
 // Disables default browser behaviours (native right-click menu, text selection,
 // drag-and-drop of links/images, browser accelerator keys, reload/zoom, etc.) so
 // the webview behaves like a native desktop app rather than a web page. Our own
@@ -112,7 +94,6 @@ fn prevent_default_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 #[cfg(not(feature = "test-utils"))]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(log_plugin())
         .plugin(prevent_default_plugin())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -121,6 +102,17 @@ pub fn run() {
             let config_dir = resolved_app_config_dir(&app.path().app_config_dir()?);
             let persistence = PersistenceState::load(&config_dir)
                 .map_err(|error| -> Box<dyn std::error::Error> { Box::new(error) })?;
+
+            let log_dir = config_dir.join("logs");
+            let initial_level = logging::LogLevel::parse(&persistence.config.current().log_level)
+                .unwrap_or(logging::LogLevel::Info);
+            let logger = logging::FileLogger::new(&log_dir, initial_level)
+                .map_err(|error| -> Box<dyn std::error::Error> { Box::new(error) })?;
+            logging::logger::install_global(Arc::clone(&logger), initial_level);
+            app.manage(logging::LoggingState {
+                dir: log_dir,
+                logger,
+            });
 
             app.manage(persistence);
             app.manage(NativeMenuService::default());
@@ -181,7 +173,9 @@ pub fn run() {
             commands::retry_op,
             commands::queue_snapshot,
             commands::has_unfinished_ops,
-            commands::log_frontend
+            commands::log_frontend,
+            commands::read_logs,
+            commands::set_log_level
         ])
         .run(tauri::generate_context!())
         .expect("error while running file explorer application")

@@ -17,6 +17,8 @@ import type {
   ListTreeChildrenResponse,
   LoadNativeMenuRequest,
   LoadNativeMenuResponse,
+  LogEntry,
+  LogLevel,
   MenuActionStatus,
   OpenWithRequest,
   OpenPathRequest,
@@ -142,4 +144,12 @@ export function loadSession() {
 
 export function saveSession(session: SessionState) {
   return invokeCommand({ command: 'save_session', payload: { session } }) as Promise<SessionState>
+}
+
+export function readLogs() {
+  return invokeCommand({ command: 'read_logs' }) as Promise<LogEntry[]>
+}
+
+export function setLogLevel(level: LogLevel) {
+  return invokeCommand({ command: 'set_log_level', payload: { level } }) as Promise<void>
 }

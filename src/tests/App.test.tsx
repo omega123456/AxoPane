@@ -147,6 +147,7 @@ describe('App', () => {
       showHiddenFiles: false,
       dismissedEverythingBanner: false,
       updateCheckInterval: '1d',
+      logLevel: 'info',
       keybindings: {
         refresh: ['F5'],
       },

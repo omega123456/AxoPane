@@ -1,5 +1,5 @@
 import { saveConfig } from '@/lib/ipc/commands'
-import type { AppConfig, ThemePreference } from '@/lib/types/ipc'
+import type { AppConfig, LogLevel, ThemePreference } from '@/lib/types/ipc'
 import {
   DEFAULT_UPDATE_INTERVAL,
   isUpdateInterval,
@@ -19,7 +19,14 @@ export function defaultAppConfig(): AppConfig {
     columns: defaultColumns,
     layout: defaultLayout,
     updateCheckInterval: DEFAULT_UPDATE_INTERVAL,
+    logLevel: 'info',
   }
+}
+
+const LOG_LEVELS: readonly LogLevel[] = ['error', 'warn', 'info', 'debug', 'trace']
+
+export function isLogLevel(value: string): value is LogLevel {
+  return (LOG_LEVELS as readonly string[]).includes(value)
 }
 
 export function buildAppConfig(): AppConfig {
@@ -43,6 +50,7 @@ export function buildAppConfig(): AppConfig {
       zoom: layout.zoom,
     },
     updateCheckInterval: config.updateCheckInterval,
+    logLevel: config.logLevel,
   }
 }
 
@@ -51,6 +59,7 @@ export function hydrateAppConfig(config: AppConfig) {
   const updateCheckInterval: UpdateInterval = isUpdateInterval(config.updateCheckInterval ?? '')
     ? config.updateCheckInterval
     : DEFAULT_UPDATE_INTERVAL
+  const logLevel: LogLevel = isLogLevel(config.logLevel ?? '') ? config.logLevel : 'info'
   const next = {
     ...defaultAppConfig(),
     ...config,
@@ -58,6 +67,7 @@ export function hydrateAppConfig(config: AppConfig) {
     layout: { ...defaultLayout, ...config.layout, detailsVisible: false },
     columns: config.columns?.length ? config.columns : defaultColumns,
     updateCheckInterval,
+    logLevel,
   }
 
   useConfigStore.getState().hydrate({
@@ -65,6 +75,7 @@ export function hydrateAppConfig(config: AppConfig) {
     showHiddenFiles: next.showHiddenFiles,
     dismissedEverythingBanner: next.dismissedEverythingBanner,
     updateCheckInterval: next.updateCheckInterval,
+    logLevel: next.logLevel,
   })
   useLayoutStore.getState().hydrate(next.layout, next.columns)
   useKeymapStore.getState().hydrate(next.keybindings)

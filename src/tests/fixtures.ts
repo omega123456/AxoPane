@@ -285,6 +285,7 @@ export const fixtures: {
     showHiddenFiles: false,
     dismissedEverythingBanner: false,
     updateCheckInterval: '1d',
+    logLevel: 'info',
     keybindings: {},
     columns: [
       { key: 'name', visible: true },
@@ -316,6 +317,7 @@ export const fixtures: {
     showHiddenFiles: false,
     dismissedEverythingBanner: false,
     updateCheckInterval: '1d',
+    logLevel: 'info',
     keybindings: {},
     columns: [
       { key: 'name', visible: true },
@@ -362,4 +364,35 @@ export const fixtures: {
   queue_snapshot: [],
   has_unfinished_ops: false,
   log_frontend: undefined,
+  read_logs: [
+    {
+      id: 0,
+      timestamp: '2026-06-30T09:15:04Z',
+      level: 'info',
+      target: 'file_explorer_lib::ipc',
+      message: 'listed directory C:\\Users\\Omega (128 entries)',
+    },
+    {
+      id: 1,
+      timestamp: '2026-06-30T09:15:07Z',
+      level: 'warn',
+      target: 'file_explorer_lib::watch',
+      message: 'watch backlog draining slowly for D:\\projects',
+    },
+    {
+      id: 2,
+      timestamp: '2026-06-30T09:15:09Z',
+      level: 'error',
+      target: 'file_explorer_lib::ops',
+      message: 'copy failed: permission denied (E:\\backup\\report.pdf)',
+    },
+    {
+      id: 3,
+      timestamp: '2026-06-30T09:15:12Z',
+      level: 'debug',
+      target: 'file_explorer_lib::frontend',
+      message: '[frontend] settings modal opened',
+    },
+  ],
+  set_log_level: undefined,
 }

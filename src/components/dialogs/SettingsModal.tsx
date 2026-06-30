@@ -15,6 +15,7 @@ import {
   ToggleSwitch,
 } from '@/components/controls'
 import { UpdatesSettings } from '@/components/dialogs/UpdatesSettings'
+import { LogViewer } from '@/components/dialogs/LogViewer'
 import { persistAppConfig } from '@/lib/app-config'
 import { columnDefinitions } from '@/lib/columns'
 import { DEFAULT_UPDATE_INTERVAL, type UpdateInterval } from '@/lib/update-intervals'
@@ -34,6 +35,7 @@ import type {
   ColumnConfig,
   CommandId,
   LayoutConfig,
+  LogLevel,
   Shortcut,
   ThemePreference,
 } from '@/lib/types/ipc'
@@ -44,13 +46,22 @@ import { usePanesStore } from '@/stores/panes-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useThemeStore } from '@/stores/theme-store'
 
-type Section = 'layout' | 'columns' | 'keybindings' | 'updates'
+type Section = 'layout' | 'columns' | 'keybindings' | 'updates' | 'logs'
 
 const sectionNav: { key: Section; label: string }[] = [
   { key: 'layout', label: 'View & Layout' },
   { key: 'columns', label: 'Columns' },
   { key: 'keybindings', label: 'Keybindings' },
   { key: 'updates', label: 'Updates' },
+  { key: 'logs', label: 'Logs' },
+]
+
+const LOG_LEVEL_OPTIONS: { value: LogLevel; label: string }[] = [
+  { value: 'error', label: 'Error' },
+  { value: 'warn', label: 'Warn' },
+  { value: 'info', label: 'Info' },
+  { value: 'debug', label: 'Debug' },
+  { value: 'trace', label: 'Trace' },
 ]
 
 type DraftState = {
@@ -112,6 +123,8 @@ function SettingsModalContent() {
   const close = useSettingsStore((state) => state.close)
   const open = useSettingsStore((state) => state.open)
   const os = detectPlatformOs()
+  const logLevel = useConfigStore((state) => state.logLevel)
+  const setLogLevel = useConfigStore((state) => state.setLogLevel)
   const [draft, setDraft] = useState<DraftState>(() => cloneDraft())
   const [search, setSearch] = useState('')
   const [capturing, setCapturing] = useState<CommandId | null>(null)
@@ -199,7 +212,7 @@ function SettingsModalContent() {
             type="button"
             aria-label="Close settings"
             onClick={onCancel}
-            className="ml-auto flex size-7 items-center justify-center rounded-md text-light-text-muted hover:bg-accent-red hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-muted"
+            className="ml-auto flex size-7 cursor-pointer items-center justify-center rounded-md text-light-text-muted hover:bg-accent-red hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-muted"
           >
             <XIcon className="size-4" />
           </button>
@@ -217,7 +230,7 @@ function SettingsModalContent() {
                   key={item.key}
                   type="button"
                   onClick={() => open(item.key)}
-                  className={`relative flex h-8.5 items-center rounded-tab px-3 text-usm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-blue-border ${
+                  className={`relative flex h-8.5 cursor-pointer items-center rounded-tab px-3 text-usm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-blue-border ${
                     active
                       ? 'bg-accent-blue-soft font-semibold text-accent-blue-light dark:text-accent-blue'
                       : 'text-light-text-soft hover:bg-light-hover hover:text-light-text dark:text-dark-text-soft dark:hover:bg-dark-hover dark:hover:text-dark-text'
@@ -352,7 +365,7 @@ function SettingsModalContent() {
                             return { ...current, columns }
                           })
                         }}
-                        className="flex items-center justify-between rounded-tab border border-light-border bg-light-surface px-3 py-2.5 dark:border-dark-border dark:bg-dark-surface"
+                        className="flex cursor-grab items-center justify-between rounded-tab border border-light-border bg-light-surface px-3 py-2.5 dark:border-dark-border dark:bg-dark-surface"
                       >
                         <span className="inline-flex items-center gap-3 text-row text-light-text dark:text-dark-text">
                           <GripVerticalIcon className="size-4 text-light-text-muted dark:text-dark-text-muted" />
@@ -451,7 +464,7 @@ function SettingsModalContent() {
                                         },
                                       }))
                                     }}
-                                    className="w-36 rounded-tab border border-light-border-strong bg-light-surface px-3 py-2 text-left font-mono text-row text-light-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border-strong dark:bg-dark-surface dark:text-dark-text"
+                                    className="w-36 cursor-pointer rounded-tab border border-light-border-strong bg-light-surface px-3 py-2 text-left font-mono text-row text-light-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border-strong dark:bg-dark-surface dark:text-dark-text"
                                   >
                                     {capturing === commandId
                                       ? 'Press keys...'
@@ -482,7 +495,7 @@ function SettingsModalContent() {
                                         },
                                       }))
                                     }
-                                    className="rounded-tab px-3 py-2 text-row text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-soft"
+                                    className="cursor-pointer rounded-tab px-3 py-2 text-row text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-soft"
                                   >
                                     Reset
                                   </button>
@@ -504,6 +517,26 @@ function SettingsModalContent() {
                     updateDraft((current) => ({ ...current, updateCheckInterval: value }))
                   }
                 />
+              ) : null}
+
+              {section === 'logs' ? (
+                <div>
+                  <SectionLabel className="mb-3">Logging</SectionLabel>
+                  <SettingRow
+                    fixedCopy
+                    title="Capture level"
+                    description="Minimum severity written to the daily log file"
+                    control={
+                      <SelectField
+                        ariaLabel="Capture level"
+                        value={logLevel}
+                        onChange={(value) => void setLogLevel(value)}
+                        options={LOG_LEVEL_OPTIONS}
+                      />
+                    }
+                  />
+                  <LogViewer />
+                </div>
               ) : null}
             </div>
           </div>

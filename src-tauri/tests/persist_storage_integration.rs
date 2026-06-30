@@ -52,6 +52,7 @@ fn config_and_session_round_trip_through_atomic_storage() {
             zoom: "150".to_string(),
         },
         update_check_interval: "5h".to_string(),
+        log_level: "info".to_string(),
     });
     session_store.replace(Session {
         active_pane: "right".to_string(),
@@ -95,6 +96,7 @@ fn config_and_session_round_trip_through_atomic_storage() {
                 zoom: "150".to_string(),
             },
             update_check_interval: "5h".to_string(),
+            log_level: "info".to_string(),
         }
     );
     assert_eq!(

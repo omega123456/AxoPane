@@ -14,6 +14,7 @@ describe('config-store', () => {
       showHiddenFiles: true,
       dismissedEverythingBanner: true,
       updateCheckInterval: '1d',
+      logLevel: 'info',
     })
 
     const state = useConfigStore.getState()
@@ -36,12 +37,32 @@ describe('config-store', () => {
     )
   })
 
+  it('hydrates the log level and applies + persists a new level', async () => {
+    useConfigStore.getState().hydrate({
+      theme: 'light',
+      showHiddenFiles: false,
+      dismissedEverythingBanner: false,
+      updateCheckInterval: '1d',
+      logLevel: 'warn',
+    })
+    expect(useConfigStore.getState().logLevel).toBe('warn')
+
+    const setLogLevel = vi.fn(() => undefined)
+    ipc.override('set_log_level', setLogLevel)
+
+    await useConfigStore.getState().setLogLevel('debug')
+
+    expect(useConfigStore.getState().logLevel).toBe('debug')
+    expect(setLogLevel).toHaveBeenCalledWith({ level: 'debug' })
+  })
+
   it('persists the dismissed banner flag through save_config', () => {
     const saveConfig = vi.fn(() => ({
       theme: 'system' as const,
       showHiddenFiles: false,
       dismissedEverythingBanner: true,
       updateCheckInterval: '1d' as const,
+      logLevel: 'info' as const,
       keybindings: {},
       columns: [],
       layout: {

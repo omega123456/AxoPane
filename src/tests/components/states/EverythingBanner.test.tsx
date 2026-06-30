@@ -33,6 +33,7 @@ describe('EverythingBanner', () => {
       showHiddenFiles: false,
       dismissedEverythingBanner: true,
       updateCheckInterval: '1d' as const,
+      logLevel: 'info' as const,
       keybindings: {},
       columns: [],
       layout: {

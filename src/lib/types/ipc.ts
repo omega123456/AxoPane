@@ -130,6 +130,18 @@ export type LayoutConfig = {
   zoom: ZoomLevel
 }
 
+export type LogLevel = 'error' | 'warn' | 'info' | 'debug' | 'trace'
+
+export type LogDisplayFilter = 'all' | LogLevel
+
+export type LogEntry = {
+  id: number
+  timestamp: string
+  level: string
+  target: string
+  message: string
+}
+
 export type AppConfig = {
   theme: ThemePreference
   showHiddenFiles: boolean
@@ -138,6 +150,7 @@ export type AppConfig = {
   columns: ColumnConfig[]
   layout: LayoutConfig
   updateCheckInterval: UpdateInterval
+  logLevel: LogLevel
 }
 
 export type SessionTab = {
@@ -582,6 +595,14 @@ export type IpcCommandMap = {
   }
   log_frontend: {
     request: LogFrontendRequest
+    response: void
+  }
+  read_logs: {
+    request: undefined
+    response: LogEntry[]
+  }
+  set_log_level: {
+    request: { level: LogLevel }
     response: void
   }
 }

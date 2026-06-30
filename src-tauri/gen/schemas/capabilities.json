@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default capability set for the file explorer core services","local":true,"windows":["main"],"permissions":["core:default","log:default","updater:default","process:default","process:allow-restart","window-state:default"]}}
+{"default":{"identifier":"default","description":"Default capability set for the file explorer core services","local":true,"windows":["main"],"permissions":["core:default","updater:default","process:default","process:allow-restart","window-state:default"]}}

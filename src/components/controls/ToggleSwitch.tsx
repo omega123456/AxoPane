@@ -14,7 +14,7 @@ export function ToggleSwitch({
       aria-checked={checked}
       aria-label={label}
       onClick={() => onChange(!checked)}
-      className={`relative h-switch-h w-switch-w shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border ${
+      className={`relative h-switch-h w-switch-w shrink-0 cursor-pointer rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border ${
         checked
           ? 'bg-accent-blue-light dark:bg-accent-blue'
           : 'bg-light-border-strong dark:bg-dark-border-strong'

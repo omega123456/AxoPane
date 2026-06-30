@@ -148,6 +148,16 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`settings-updates-${mode}.png`)
   })
 
+  test(`settings logs ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.browsing[mode])
+    await openSettingsSection(page, 'logs')
+    await expect(page.getByLabel('Capture level')).toBeVisible()
+    await expect(
+      page.getByText('copy failed: permission denied (E:\\backup\\report.pdf)'),
+    ).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`settings-logs-${mode}.png`)
+  })
+
   test(`pane context menu ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.paneContextMenu[mode])
     await rightClickPane(page, 'Left pane')

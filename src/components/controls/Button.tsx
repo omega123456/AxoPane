@@ -20,7 +20,7 @@ export function Button({
   return (
     <button
       type="button"
-      className={`rounded-tab text-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border ${variants[variant]} ${className}`}
+      className={`cursor-pointer rounded-tab text-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border disabled:cursor-default ${variants[variant]} ${className}`}
       {...props}
     >
       {children}

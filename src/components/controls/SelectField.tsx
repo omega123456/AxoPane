@@ -19,7 +19,7 @@ export function SelectField<T extends string>({
         aria-label={ariaLabel}
         value={value}
         onChange={(event) => onChange(event.target.value as T)}
-        className="h-9 w-50 appearance-none rounded-tab border border-light-border-strong bg-light-surface pl-3 pr-9 text-row text-light-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border-strong dark:bg-dark-surface dark:text-dark-text"
+        className="h-9 w-50 cursor-pointer appearance-none rounded-tab border border-light-border-strong bg-light-surface pl-3 pr-9 text-row text-light-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border-strong dark:bg-dark-surface dark:text-dark-text"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>

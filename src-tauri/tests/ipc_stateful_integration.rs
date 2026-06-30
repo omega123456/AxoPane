@@ -197,6 +197,7 @@ fn ipc_commands_cover_shell_filesystem_and_persistence_flows() {
         columns: initial_config.columns.clone(),
         layout: initial_config.layout.clone(),
         update_check_interval: "12h".to_string(),
+        log_level: "info".to_string(),
     };
     let echoed_config: AppConfig = test_app
         .invoke_payload(
