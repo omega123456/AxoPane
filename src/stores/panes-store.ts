@@ -22,6 +22,7 @@ import { activeTab, fromSessionPane, toSessionPane, useTabsStore } from '@/store
 import { useConfigStore } from '@/stores/config-store'
 import { log } from '@/lib/app-log-commands'
 import { formatVolumeTreeName, isPathInsideVolume, sortVolumesForTree } from '@/lib/volumes'
+import { useSelectionStore } from '@/stores/selection-store'
 
 type PaneId = 'left' | 'right'
 type SizeStateKind = SizeStateEvent['state']
@@ -155,6 +156,16 @@ function defaultState() {
     treeRoots: [] as string[],
     filterTimers: {} as Partial<Record<PaneId, number>>,
   }
+}
+
+function findMatchingEntryId(entries: DirectoryEntry[], candidates: Array<string | null | undefined>) {
+  for (const candidate of candidates) {
+    if (candidate && entries.some((entry) => entry.id === candidate)) {
+      return candidate
+    }
+  }
+
+  return null
 }
 
 export function getParentPath(path: string): string | null {
@@ -555,6 +566,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     }
 
     const pane = get().panes[paneId]
+    const selection = useSelectionStore.getState().selections[paneId]
     set((state) => ({
       panes: {
         ...state.panes,
@@ -580,6 +592,11 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
 
       set((state) => {
         const previous = state.panes[paneId]
+        const restoredFocusId = findMatchingEntryId(sortedEntries, [
+          selection.focusedId,
+          previous.focusedEntryId,
+          ...selection.selectedIds,
+        ])
         // Seed the back/forward stack the first time a pane resolves a real path
         // (initial load, or after a tab switch reset its history to empty).
         const seeded =
@@ -594,7 +611,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
               ...previous,
               path: response.path,
               entries: sortedEntries,
-              focusedEntryId: sortedEntries[0]?.id ?? null,
+              focusedEntryId: restoredFocusId ?? sortedEntries[0]?.id ?? null,
               loading: false,
               ...seeded,
             },

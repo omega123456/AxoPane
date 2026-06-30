@@ -1,6 +1,7 @@
 import { beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { getParentPath, schedulePersistSession, usePanesStore } from '@/stores/panes-store'
+import { useSelectionStore } from '@/stores/selection-store'
 import { useTabsStore } from '@/stores/tabs-store'
 import type {
   DirectoryEntry,
@@ -64,6 +65,7 @@ function treeResponder(payload: ListTreeChildrenRequest): ListTreeChildrenRespon
 beforeEach(() => {
   ipc.install()
   usePanesStore.getState().reset()
+  useSelectionStore.getState().reset()
   useTabsStore.getState().reset()
   ipc.override('list_dir', responder)
   ipc.override('list_tree_children', treeResponder)
@@ -93,6 +95,43 @@ describe('panes-store navigation', () => {
     await usePanesStore.getState().navigatePane('left', 'C:\\root\\child')
     await usePanesStore.getState().goUp('left')
     expect(usePanesStore.getState().panes.left.path).toBe('C:\\root')
+  })
+
+  it('restores the previously selected folder as the keyboard focus when returning to its parent', async () => {
+    ipc.override('list_dir', (payload) => {
+      if (payload.path === 'C:\\root') {
+        return {
+          path: payload.path,
+          entries: [
+            dirAt('C:\\root\\Alpha'),
+            dirAt('C:\\root\\Beta'),
+            dirAt('C:\\root\\Gamma'),
+            dirAt('C:\\root\\Delta'),
+          ],
+        }
+      }
+
+      if (payload.path === 'C:\\root\\Gamma') {
+        return {
+          path: payload.path,
+          entries: [dirAt('C:\\root\\Gamma\\Nested A'), dirAt('C:\\root\\Gamma\\Nested B')],
+        }
+      }
+
+      return responder(payload)
+    })
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    useSelectionStore
+      .getState()
+      .setSelection('left', ['C:\\root\\Gamma'], 'C:\\root\\Gamma', 'C:\\root\\Gamma')
+    usePanesStore.getState().setFocusedEntry('left', 'C:\\root\\Gamma')
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root\\Gamma')
+    expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('C:\\root\\Gamma\\Nested A')
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('C:\\root\\Gamma')
   })
 
   it('debounces filter draft then applies it', async () => {
