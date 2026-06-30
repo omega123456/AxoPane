@@ -109,7 +109,7 @@ export function PropertiesDialog() {
             <div className="text-uxs uppercase tracking-wide text-light-text-muted dark:text-dark-text-muted">
               Selected paths
             </div>
-            <ul className="mt-2 max-h-56 space-y-1 overflow-auto rounded-tab border border-light-border bg-light-window p-3 font-mono text-uxs text-light-text dark:border-dark-border dark:bg-dark-window dark:text-dark-text">
+            <ul className="mt-2 max-h-56 space-y-1 overflow-auto rounded-tab border border-light-border bg-light-window p-3 font-mono text-uxs text-light-text scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:border-dark-border dark:bg-dark-window dark:text-dark-text dark:scrollbar-thumb-dark-text-faint">
               {dialog.items.map((item) => (
                 <li key={item.path} className="break-all">
                   {item.path}

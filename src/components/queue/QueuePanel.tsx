@@ -69,7 +69,7 @@ export function QueuePanel() {
           <ChevronDownIcon className="h-3.5 w-3.5" />
         </button>
       </header>
-      <div className="max-h-queue-list overflow-auto">
+      <div className="max-h-queue-list overflow-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint">
         {operations.map((operation) => {
           const reorderable = operation.status === 'pending'
           const samples = (throughputHistory[operation.operationId] ?? []) as ThroughputSample[]

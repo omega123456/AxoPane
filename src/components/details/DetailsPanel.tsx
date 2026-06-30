@@ -29,7 +29,7 @@ export function DetailsPanel({ paneId }: DetailsPanelProps) {
           Details
         </p>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-4">
+      <div className="min-h-0 flex-1 overflow-auto p-4 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint">
         <div className="flex h-36 items-center justify-center rounded-window border border-dashed border-light-border-strong bg-light-surface dark:border-dark-border-strong dark:bg-dark-surface">
           <span className="rounded-tab bg-light-header px-3 py-1 font-mono text-uxs text-light-text-muted dark:bg-dark-header dark:text-dark-text-muted">
             Preview placeholder

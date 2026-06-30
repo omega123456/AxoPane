@@ -250,7 +250,7 @@ export function LogViewer() {
           No log entries to show.
         </div>
       ) : (
-        <div className="overflow-auto">
+        <div className="overflow-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint">
           <table className="w-full table-fixed border-collapse">
             <thead className="bg-light-titlebar dark:bg-dark-titlebar">
               <tr className="text-left text-2xs uppercase tracking-wide text-light-text-muted dark:text-dark-text-muted">

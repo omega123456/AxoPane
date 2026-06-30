@@ -250,7 +250,7 @@ function SettingsModalContent() {
             </div>
           </nav>
 
-          <div className="min-h-0 flex-1 overflow-auto px-8 py-6">
+          <div className="min-h-0 flex-1 overflow-auto px-8 py-6 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint">
             <div className="mx-auto w-full max-w-settings-content">
               {section === 'layout' ? (
                 <div>

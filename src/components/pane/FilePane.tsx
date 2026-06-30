@@ -384,7 +384,7 @@ export function FilePane({ paneId }: FilePaneProps) {
       <BreadcrumbBar pane={pane} isActive={isActivePane} />
       <HeaderRow pane={pane} />
       {showSkeleton ? (
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div className="min-h-0 flex-1 overflow-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint">
           <LoadingSkeleton />
         </div>
       ) : permissionDenied ? (
@@ -401,7 +401,7 @@ export function FilePane({ paneId }: FilePaneProps) {
       ) : (
         <div
           ref={parentRef}
-          className="min-h-0 flex-1 overflow-auto"
+          className="min-h-0 flex-1 overflow-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint"
           onMouseDown={() => focusPaneShell()}
           onScroll={(event) => setScrollPosition(paneId, pane.path, event.currentTarget.scrollTop)}
           onContextMenu={(event) => showMenu(event)}

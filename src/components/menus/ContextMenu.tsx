@@ -186,7 +186,7 @@ export function ContextMenu() {
         <div
           ref={bodyRef}
           data-testid="context-menu-scroll-body"
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint"
         >
           {beforeNativeSections.map((section, index) => (
             <ContextMenuSection
