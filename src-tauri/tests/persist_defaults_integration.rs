@@ -2,14 +2,15 @@
 mod common;
 
 use file_explorer_lib::persist::{
-    default_column_widths, default_columns, default_pane_split, default_sort_direction,
-    default_sort_key, default_tree_width_px, default_update_check_interval, default_zoom, Config,
-    LayoutConfig,
+    default_column_widths, default_columns, default_date_format, default_pane_split,
+    default_sort_direction, default_sort_key, default_tree_width_px, default_update_check_interval,
+    default_zoom, Config, LayoutConfig,
 };
 
 #[test]
 fn persistence_defaults_match_the_frontend_contract() {
     assert_eq!(default_update_check_interval(), "1d");
+    assert_eq!(default_date_format(), "ymd");
     assert_eq!(default_zoom(), "100");
     assert_eq!(default_tree_width_px(), 204.0);
     assert_eq!(default_pane_split(), 0.5);
@@ -28,6 +29,10 @@ fn persistence_defaults_match_the_frontend_contract() {
     let config = Config::default();
     assert_eq!(config.theme, "system");
     assert!(!config.show_hidden_files);
+    assert_eq!(config.date_format, "ymd");
+    assert!(!config.show_time);
+    assert!(!config.show_seconds);
+    assert!(!config.relative_dates);
     assert_eq!(config.columns, columns);
     assert_eq!(config.layout, LayoutConfig::default());
     assert_eq!(common::bootstrap_message(), "phase-1-common");

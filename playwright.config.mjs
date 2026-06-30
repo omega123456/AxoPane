@@ -20,6 +20,9 @@ export default defineConfig({
   use: {
     baseURL,
     trace: 'on-first-retry',
+    // Pin the browser timezone so local-time date formatting renders
+    // deterministically regardless of the host machine's timezone.
+    timezoneId: 'UTC',
   },
   projects: [
     {

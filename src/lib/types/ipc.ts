@@ -1,3 +1,4 @@
+import type { DateFormat } from '@/lib/date-format'
 import type { UpdateInterval } from '@/lib/update-intervals'
 
 export type ThemePreference = 'system' | 'light' | 'dark'
@@ -151,6 +152,10 @@ export type AppConfig = {
   layout: LayoutConfig
   updateCheckInterval: UpdateInterval
   logLevel: LogLevel
+  dateFormat: DateFormat
+  showTime: boolean
+  showSeconds: boolean
+  relativeDates: boolean
 }
 
 export type SessionTab = {

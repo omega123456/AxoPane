@@ -286,6 +286,10 @@ export const fixtures: {
     dismissedEverythingBanner: false,
     updateCheckInterval: '1d',
     logLevel: 'info',
+    dateFormat: 'ymd',
+    showTime: false,
+    showSeconds: false,
+    relativeDates: false,
     keybindings: {},
     columns: [
       { key: 'name', visible: true },
@@ -318,6 +322,10 @@ export const fixtures: {
     dismissedEverythingBanner: false,
     updateCheckInterval: '1d',
     logLevel: 'info',
+    dateFormat: 'ymd',
+    showTime: false,
+    showSeconds: false,
+    relativeDates: false,
     keybindings: {},
     columns: [
       { key: 'name', visible: true },

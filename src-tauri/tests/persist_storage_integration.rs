@@ -53,6 +53,10 @@ fn config_and_session_round_trip_through_atomic_storage() {
         },
         update_check_interval: "5h".to_string(),
         log_level: "info".to_string(),
+        date_format: "dmy".to_string(),
+        show_time: true,
+        show_seconds: true,
+        relative_dates: true,
     });
     session_store.replace(Session {
         active_pane: "right".to_string(),
@@ -97,6 +101,10 @@ fn config_and_session_round_trip_through_atomic_storage() {
             },
             update_check_interval: "5h".to_string(),
             log_level: "info".to_string(),
+            date_format: "dmy".to_string(),
+            show_time: true,
+            show_seconds: true,
+            relative_dates: true,
         }
     );
     assert_eq!(
@@ -239,6 +247,10 @@ fn legacy_config_without_layout_fields_gets_defaults() {
     assert_eq!(loaded.columns.len(), 6);
     assert_eq!(loaded.layout, LayoutConfig::default());
     assert_eq!(loaded.update_check_interval, "1d");
+    assert_eq!(loaded.date_format, "ymd");
+    assert!(!loaded.show_time);
+    assert!(!loaded.show_seconds);
+    assert!(!loaded.relative_dates);
 }
 
 #[test]

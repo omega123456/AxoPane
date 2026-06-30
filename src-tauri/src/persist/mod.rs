@@ -26,6 +26,14 @@ pub struct Config {
     pub update_check_interval: String,
     #[serde(default = "default_log_level")]
     pub log_level: String,
+    #[serde(default = "default_date_format")]
+    pub date_format: String,
+    #[serde(default)]
+    pub show_time: bool,
+    #[serde(default)]
+    pub show_seconds: bool,
+    #[serde(default)]
+    pub relative_dates: bool,
 }
 
 pub fn default_update_check_interval() -> String {
@@ -34,6 +42,10 @@ pub fn default_update_check_interval() -> String {
 
 pub fn default_log_level() -> String {
     "info".to_string()
+}
+
+pub fn default_date_format() -> String {
+    "ymd".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -136,6 +148,10 @@ impl Default for Config {
             layout: LayoutConfig::default(),
             update_check_interval: default_update_check_interval(),
             log_level: default_log_level(),
+            date_format: default_date_format(),
+            show_time: false,
+            show_seconds: false,
+            relative_dates: false,
         }
     }
 }

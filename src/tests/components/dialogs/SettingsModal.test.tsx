@@ -127,6 +127,37 @@ describe('SettingsModal', () => {
     })
   })
 
+  it('persists the date format, time, seconds, and relative toggles from the Dates section', async () => {
+    const user = userEvent.setup()
+    const saveConfig = vi.fn((payload) => payload.config)
+    ipc.override('save_config', saveConfig)
+    useSettingsStore.getState().open('dates')
+
+    render(<SettingsModal />)
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Date format' }), '30th Jun 2026')
+    await user.click(screen.getByRole('switch', { name: 'Show time' }))
+    await user.click(screen.getByRole('switch', { name: 'Show seconds' }))
+    await user.click(screen.getByRole('switch', { name: 'Relative dates' }))
+
+    await waitFor(() => {
+      expect(useConfigStore.getState().dateFormat).toBe('dme')
+      expect(useConfigStore.getState().showTime).toBe(true)
+      expect(useConfigStore.getState().showSeconds).toBe(true)
+      expect(useConfigStore.getState().relativeDates).toBe(true)
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({
+            dateFormat: 'dme',
+            showTime: true,
+            showSeconds: true,
+            relativeDates: true,
+          }),
+        }),
+      )
+    })
+  })
+
   it('applies a zoom selection immediately on macOS', async () => {
     const user = userEvent.setup()
     useSettingsStore.getState().open('layout')

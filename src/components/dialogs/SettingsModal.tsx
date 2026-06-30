@@ -18,6 +18,12 @@ import { UpdatesSettings } from '@/components/dialogs/UpdatesSettings'
 import { LogViewer } from '@/components/dialogs/LogViewer'
 import { persistAppConfig } from '@/lib/app-config'
 import { columnDefinitions } from '@/lib/columns'
+import {
+  DATE_FORMATS,
+  type DateFormat,
+  dateFormatLabels,
+  DEFAULT_DATE_FORMAT,
+} from '@/lib/date-format'
 import { DEFAULT_UPDATE_INTERVAL, type UpdateInterval } from '@/lib/update-intervals'
 import { log } from '@/lib/app-log-commands'
 import { getAppVersion } from '@/lib/updater'
@@ -46,15 +52,21 @@ import { usePanesStore } from '@/stores/panes-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useThemeStore } from '@/stores/theme-store'
 
-type Section = 'layout' | 'columns' | 'keybindings' | 'updates' | 'logs'
+type Section = 'layout' | 'columns' | 'keybindings' | 'dates' | 'updates' | 'logs'
 
 const sectionNav: { key: Section; label: string }[] = [
   { key: 'layout', label: 'View & Layout' },
   { key: 'columns', label: 'Columns' },
+  { key: 'dates', label: 'Dates' },
   { key: 'keybindings', label: 'Keybindings' },
   { key: 'updates', label: 'Updates' },
   { key: 'logs', label: 'Logs' },
 ]
+
+const DATE_FORMAT_OPTIONS: { value: DateFormat; label: string }[] = DATE_FORMATS.map((format) => ({
+  value: format,
+  label: dateFormatLabels[format],
+}))
 
 const LOG_LEVEL_OPTIONS: { value: LogLevel; label: string }[] = [
   { value: 'error', label: 'Error' },
@@ -71,6 +83,10 @@ type DraftState = {
   theme: ThemePreference
   showHiddenFiles: boolean
   updateCheckInterval: UpdateInterval
+  dateFormat: DateFormat
+  showTime: boolean
+  showSeconds: boolean
+  relativeDates: boolean
 }
 
 function cloneDraft(): DraftState {
@@ -92,6 +108,10 @@ function cloneDraft(): DraftState {
     theme: config.theme,
     showHiddenFiles: config.showHiddenFiles,
     updateCheckInterval: config.updateCheckInterval,
+    dateFormat: config.dateFormat,
+    showTime: config.showTime,
+    showSeconds: config.showSeconds,
+    relativeDates: config.relativeDates,
   }
 }
 
@@ -104,6 +124,10 @@ function applyDraft(draft: DraftState) {
     theme: draft.theme,
     showHiddenFiles: draft.showHiddenFiles,
     updateCheckInterval: draft.updateCheckInterval,
+    dateFormat: draft.dateFormat,
+    showTime: draft.showTime,
+    showSeconds: draft.showSeconds,
+    relativeDates: draft.relativeDates,
   })
   useThemeStore.getState().setThemePreference(draft.theme)
   usePanesStore.setState({ showHiddenFiles: draft.showHiddenFiles })
@@ -193,6 +217,10 @@ function SettingsModalContent() {
       theme: 'system',
       showHiddenFiles: false,
       updateCheckInterval: DEFAULT_UPDATE_INTERVAL,
+      dateFormat: DEFAULT_DATE_FORMAT,
+      showTime: false,
+      showSeconds: false,
+      relativeDates: false,
     }))
   }
 
@@ -388,6 +416,66 @@ function SettingsModalContent() {
                       </li>
                     ))}
                   </ul>
+                </div>
+              ) : null}
+
+              {section === 'dates' ? (
+                <div>
+                  <SectionLabel className="mb-3">Date display</SectionLabel>
+                  <SettingRow
+                    fixedCopy
+                    title="Date format"
+                    description="How modified and created dates are written in lists and properties"
+                    control={
+                      <SelectField
+                        ariaLabel="Date format"
+                        value={draft.dateFormat}
+                        onChange={(value) =>
+                          updateDraft((current) => ({ ...current, dateFormat: value }))
+                        }
+                        options={DATE_FORMAT_OPTIONS}
+                      />
+                    }
+                  />
+                  <SettingRow
+                    title="Show time"
+                    description="Append the time of day (HH:MM) to the date"
+                    control={
+                      <ToggleSwitch
+                        label="Show time"
+                        checked={draft.showTime}
+                        onChange={(value) =>
+                          updateDraft((current) => ({ ...current, showTime: value }))
+                        }
+                      />
+                    }
+                  />
+                  <SettingRow
+                    title="Show seconds"
+                    description="Include seconds (HH:MM:SS) when the time is shown"
+                    control={
+                      <ToggleSwitch
+                        label="Show seconds"
+                        checked={draft.showSeconds}
+                        onChange={(value) =>
+                          updateDraft((current) => ({ ...current, showSeconds: value }))
+                        }
+                      />
+                    }
+                  />
+                  <SettingRow
+                    title="Relative dates"
+                    description="Show colour-coded phrases like “15 minutes ago” for items changed within the last 2 days, then fall back to the format above"
+                    control={
+                      <ToggleSwitch
+                        label="Relative dates"
+                        checked={draft.relativeDates}
+                        onChange={(value) =>
+                          updateDraft((current) => ({ ...current, relativeDates: value }))
+                        }
+                      />
+                    }
+                  />
                 </div>
               ) : null}
 

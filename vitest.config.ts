@@ -11,6 +11,9 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // Pin the timezone so local-time date formatting is deterministic across
+    // machines (production still renders in the user's real local timezone).
+    env: { TZ: 'UTC' },
     setupFiles: ['./src/tests/setup.ts'],
     include: ['src/tests/**/*.{test,spec}.{ts,tsx}'],
     globals: true,

@@ -17,6 +17,7 @@ import {
   expandedQueueSnapshot,
 } from './queue'
 import { fileTypesListDir } from './file-types'
+import { relativeDatesListDir } from './relative-dates'
 
 type CommandMap = Partial<{
   [CommandName in keyof IpcCommandMap]: IpcCommandMap[CommandName]['response']
@@ -52,6 +53,10 @@ const lightConfig: AppConfig = {
   dismissedEverythingBanner: false,
   updateCheckInterval: '1d',
   logLevel: 'info',
+  dateFormat: 'ymd',
+  showTime: false,
+  showSeconds: false,
+  relativeDates: false,
   keybindings: {},
   columns: [
     { key: 'name', visible: true },
@@ -81,6 +86,26 @@ const lightConfig: AppConfig = {
 
 const darkConfig: AppConfig = {
   ...lightConfig,
+  theme: 'dark',
+}
+
+// Only Name + Modified are shown so the colour-coded relative dates are not
+// pushed off-screen by the dual-pane split.
+const relativeDatesLightConfig: AppConfig = {
+  ...lightConfig,
+  relativeDates: true,
+  columns: [
+    { key: 'name', visible: true },
+    { key: 'size', visible: false },
+    { key: 'items', visible: false },
+    { key: 'type', visible: false },
+    { key: 'modified', visible: true },
+    { key: 'created', visible: false },
+  ],
+}
+
+const relativeDatesDarkConfig: AppConfig = {
+  ...relativeDatesLightConfig,
   theme: 'dark',
 }
 
@@ -224,6 +249,22 @@ export const screenshotScenarios = {
       commands: {
         load_config: darkConfig,
         list_dir: fileTypesListDir,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+    },
+  },
+  relativeDates: {
+    light: {
+      commands: {
+        load_config: relativeDatesLightConfig,
+        list_dir: relativeDatesListDir,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+    },
+    dark: {
+      commands: {
+        load_config: relativeDatesDarkConfig,
+        list_dir: relativeDatesListDir,
         queue_snapshot: emptyQueueSnapshot,
       },
     },

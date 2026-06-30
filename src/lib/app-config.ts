@@ -1,5 +1,6 @@
 import { saveConfig } from '@/lib/ipc/commands'
 import type { AppConfig, LogLevel, ThemePreference } from '@/lib/types/ipc'
+import { DEFAULT_DATE_FORMAT, type DateFormat, isDateFormat } from '@/lib/date-format'
 import {
   DEFAULT_UPDATE_INTERVAL,
   isUpdateInterval,
@@ -20,6 +21,10 @@ export function defaultAppConfig(): AppConfig {
     layout: defaultLayout,
     updateCheckInterval: DEFAULT_UPDATE_INTERVAL,
     logLevel: 'info',
+    dateFormat: DEFAULT_DATE_FORMAT,
+    showTime: false,
+    showSeconds: false,
+    relativeDates: false,
   }
 }
 
@@ -51,7 +56,29 @@ export function buildAppConfig(): AppConfig {
     },
     updateCheckInterval: config.updateCheckInterval,
     logLevel: config.logLevel,
+    dateFormat: config.dateFormat,
+    showTime: config.showTime,
+    showSeconds: config.showSeconds,
+    relativeDates: config.relativeDates,
   }
+}
+
+// Earlier builds folded the full time (`HH:MM:SS`) into the format key (e.g.
+// `ymd_his`). Split those legacy values into a base format plus the standalone
+// `showTime`/`showSeconds` flags so the user's preference survives the move to
+// separate toggles.
+function migrateDateSettings(config: AppConfig): {
+  dateFormat: DateFormat
+  showTime: boolean
+  showSeconds: boolean
+} {
+  const raw = config.dateFormat ?? ''
+  const legacyTime = raw.endsWith('_his')
+  const base = legacyTime ? raw.slice(0, -'_his'.length) : raw
+  const dateFormat: DateFormat = isDateFormat(base) ? base : DEFAULT_DATE_FORMAT
+  const showTime = legacyTime || (config.showTime ?? false)
+  const showSeconds = legacyTime || (config.showSeconds ?? false)
+  return { dateFormat, showTime, showSeconds }
 }
 
 export function hydrateAppConfig(config: AppConfig) {
@@ -60,6 +87,7 @@ export function hydrateAppConfig(config: AppConfig) {
     ? config.updateCheckInterval
     : DEFAULT_UPDATE_INTERVAL
   const logLevel: LogLevel = isLogLevel(config.logLevel ?? '') ? config.logLevel : 'info'
+  const { dateFormat, showTime, showSeconds } = migrateDateSettings(config)
   const next = {
     ...defaultAppConfig(),
     ...config,
@@ -68,6 +96,10 @@ export function hydrateAppConfig(config: AppConfig) {
     columns: config.columns?.length ? config.columns : defaultColumns,
     updateCheckInterval,
     logLevel,
+    dateFormat,
+    showTime,
+    showSeconds,
+    relativeDates: config.relativeDates ?? false,
   }
 
   useConfigStore.getState().hydrate({
@@ -76,6 +108,10 @@ export function hydrateAppConfig(config: AppConfig) {
     dismissedEverythingBanner: next.dismissedEverythingBanner,
     updateCheckInterval: next.updateCheckInterval,
     logLevel: next.logLevel,
+    dateFormat: next.dateFormat,
+    showTime: next.showTime,
+    showSeconds: next.showSeconds,
+    relativeDates: next.relativeDates,
   })
   useLayoutStore.getState().hydrate(next.layout, next.columns)
   useKeymapStore.getState().hydrate(next.keybindings)

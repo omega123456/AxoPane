@@ -46,3 +46,63 @@ describe('app-config log level', () => {
     expect(buildAppConfig().logLevel).toBe('trace')
   })
 })
+
+describe('app-config date display', () => {
+  it('defaults the date format, time, seconds, and relative toggles', () => {
+    expect(defaultAppConfig().dateFormat).toBe('ymd')
+    expect(defaultAppConfig().showTime).toBe(false)
+    expect(defaultAppConfig().showSeconds).toBe(false)
+    expect(defaultAppConfig().relativeDates).toBe(false)
+  })
+
+  it('hydrates date format, time, seconds, and relative toggles into the store', () => {
+    hydrateAppConfig(
+      baseConfig({ dateFormat: 'med', showTime: true, showSeconds: true, relativeDates: true }),
+    )
+    expect(useConfigStore.getState().dateFormat).toBe('med')
+    expect(useConfigStore.getState().showTime).toBe(true)
+    expect(useConfigStore.getState().showSeconds).toBe(true)
+    expect(useConfigStore.getState().relativeDates).toBe(true)
+  })
+
+  it('falls back to the default for an invalid persisted date format', () => {
+    hydrateAppConfig(baseConfig({ dateFormat: 'iso8601' as AppConfig['dateFormat'] }))
+    expect(useConfigStore.getState().dateFormat).toBe('ymd')
+  })
+
+  it('migrates a legacy combined format (e.g. dmy_his) into format + showTime + showSeconds', () => {
+    hydrateAppConfig(
+      baseConfig({
+        dateFormat: 'dmy_his' as AppConfig['dateFormat'],
+        showTime: false,
+        showSeconds: false,
+      }),
+    )
+    expect(useConfigStore.getState().dateFormat).toBe('dmy')
+    expect(useConfigStore.getState().showTime).toBe(true)
+    expect(useConfigStore.getState().showSeconds).toBe(true)
+  })
+
+  it('treats missing time, seconds, and relative toggles as disabled', () => {
+    hydrateAppConfig(
+      baseConfig({
+        showTime: undefined as unknown as boolean,
+        showSeconds: undefined as unknown as boolean,
+        relativeDates: undefined as unknown as boolean,
+      }),
+    )
+    expect(useConfigStore.getState().showTime).toBe(false)
+    expect(useConfigStore.getState().showSeconds).toBe(false)
+    expect(useConfigStore.getState().relativeDates).toBe(false)
+  })
+
+  it('round-trips the date settings through buildAppConfig', () => {
+    hydrateAppConfig(
+      baseConfig({ dateFormat: 'dme', showTime: true, showSeconds: true, relativeDates: true }),
+    )
+    expect(buildAppConfig().dateFormat).toBe('dme')
+    expect(buildAppConfig().showTime).toBe(true)
+    expect(buildAppConfig().showSeconds).toBe(true)
+    expect(buildAppConfig().relativeDates).toBe(true)
+  })
+})

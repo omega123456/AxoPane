@@ -87,6 +87,10 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
         dismissedEverythingBanner: false,
         updateCheckInterval: '1d',
         logLevel: 'info',
+        dateFormat: 'ymd',
+        showTime: false,
+        showSeconds: false,
+        relativeDates: false,
         keybindings: {},
         columns: [],
         layout: {

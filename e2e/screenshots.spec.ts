@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { gotoScenario, openSettingsSection, rightClickPane } from './helpers'
 import { screenshotScenarios } from '../src/tests/playwright-fixtures/e2e'
+import { RELATIVE_DATES_NOW } from '../src/tests/playwright-fixtures/relative-dates'
 import {
   deletingQueueFinalProgressEvent,
   expandedQueueFinalProgressEvent,
@@ -27,6 +28,16 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.getByRole('region', { name: 'Left pane' })).toBeVisible()
     await expect(page.getByRole('row', { name: /installer\.exe/ }).first()).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`mixed-file-types-${mode}.png`)
+  })
+
+  test(`relative dates ${mode}`, async ({ page }) => {
+    // Pin the wall clock so each entry's age — and therefore its colour-coded
+    // relative phrase — is deterministic regardless of when the run happens.
+    await page.clock.setFixedTime(new Date(RELATIVE_DATES_NOW))
+    await gotoScenario(page, screenshotScenarios.relativeDates[mode])
+    await expect(page.getByText('15 minutes ago').first()).toBeVisible()
+    await expect(page.getByText('1 day ago').first()).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`relative-dates-${mode}.png`)
   })
 
   test(`loading ${mode}`, async ({ page }) => {
@@ -139,6 +150,13 @@ for (const mode of ['light', 'dark'] as const) {
     await openSettingsSection(page, 'layout')
     await expect(page.getByText('Default pane mode')).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`settings-layout-${mode}.png`)
+  })
+
+  test(`settings dates ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.browsing[mode])
+    await openSettingsSection(page, 'dates')
+    await expect(page.getByRole('combobox', { name: 'Date format' })).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`settings-dates-${mode}.png`)
   })
 
   test(`settings updates ${mode}`, async ({ page }) => {

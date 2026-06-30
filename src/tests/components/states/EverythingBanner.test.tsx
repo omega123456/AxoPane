@@ -34,6 +34,10 @@ describe('EverythingBanner', () => {
       dismissedEverythingBanner: true,
       updateCheckInterval: '1d' as const,
       logLevel: 'info' as const,
+      dateFormat: 'ymd' as const,
+      showTime: false,
+      showSeconds: false,
+      relativeDates: false,
       keybindings: {},
       columns: [],
       layout: {

@@ -1,7 +1,9 @@
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import { columnDefinitions } from '@/lib/columns'
+import { dateToneClassName, formatEntryDate } from '@/lib/date-format'
 import { AlertTriangleIcon } from '@/components/icons'
 import { EntryIcon } from '@/components/icons/EntryIcon'
+import { useConfigStore } from '@/stores/config-store'
 import { useLayoutStore } from '@/stores/layout-store'
 import { columnFlexStyle } from './HeaderRow'
 import { SizeValue } from './SizeValue'
@@ -52,6 +54,10 @@ export function FileRow({
 }: FileRowProps) {
   const columns = useLayoutStore((state) => state.columns)
   const columnWidths = useLayoutStore((state) => state.columnWidths)
+  const dateFormat = useConfigStore((state) => state.dateFormat)
+  const showTime = useConfigStore((state) => state.showTime)
+  const showSeconds = useConfigStore((state) => state.showSeconds)
+  const relativeDates = useConfigStore((state) => state.relativeDates)
   const visibleColumns = useMemo(() => columns.filter((column) => column.visible), [columns])
   const renameInputRef = useRef<HTMLInputElement>(null)
 
@@ -161,16 +167,18 @@ export function FileRow({
             )
           }
 
-          const value =
-            column.key === 'created' ? formatDate(entry.createdAt) : formatDate(entry.modifiedAt)
+          const formatted = formatEntryDate(
+            column.key === 'created' ? entry.createdAt : entry.modifiedAt,
+            { format: dateFormat, showTime, showSeconds, relative: relativeDates },
+          )
           return (
             <span
               key={column.key}
               style={columnFlexStyle(column.key, columnWidths)}
               className={definition.className}
             >
-              <span className="font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-                {value}
+              <span className={`font-mono text-uxs ${dateToneClassName[formatted.tone]}`}>
+                {formatted.text}
               </span>
             </span>
           )
@@ -267,28 +275,22 @@ export function FileRow({
           )
         }
 
-        const value =
-          column.key === 'created' ? formatDate(entry.createdAt) : formatDate(entry.modifiedAt)
+        const formatted = formatEntryDate(
+          column.key === 'created' ? entry.createdAt : entry.modifiedAt,
+          { format: dateFormat, showTime, showSeconds, relative: relativeDates },
+        )
         return (
           <span
             key={column.key}
             style={columnFlexStyle(column.key, columnWidths)}
             className={definition.className}
           >
-            <span className="font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-              {value}
+            <span className={`font-mono text-uxs ${dateToneClassName[formatted.tone]}`}>
+              {formatted.text}
             </span>
           </span>
         )
       })}
     </button>
   )
-}
-
-function formatDate(value: string | null) {
-  if (!value) {
-    return '—'
-  }
-
-  return value.slice(0, 10)
 }

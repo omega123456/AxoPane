@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, type KeyboardEvent } from 'react'
 import { DialogShell } from '@/components/dialogs/DialogShell'
+import { dateToneClassName, type DateFormat, formatEntryDate } from '@/lib/date-format'
 import { formatBytes, formatCount } from '@/lib/format'
+import { useConfigStore } from '@/stores/config-store'
 import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 
 function formatItemSize(sizeBytes: number | null, itemCount: number | null, isDir: boolean) {
@@ -26,6 +28,9 @@ function formatContains(itemCount: number | null, isDir: boolean) {
 export function PropertiesDialog() {
   const dialog = usePropertiesDialogStore((state) => state.dialog)
   const close = usePropertiesDialogStore((state) => state.close)
+  const dateFormat = useConfigStore((state) => state.dateFormat)
+  const showTime = useConfigStore((state) => state.showTime)
+  const showSeconds = useConfigStore((state) => state.showSeconds)
   const closeRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -91,8 +96,20 @@ export function PropertiesDialog() {
               label="Contains"
               value={formatContains(summary.singleItem.itemCount, summary.singleItem.isDir)}
             />
-            <PropertyRow label="Modified" value={summary.singleItem.modifiedAt ?? '—'} />
-            <PropertyRow label="Created" value={summary.singleItem.createdAt ?? '—'} />
+            <DatePropertyRow
+              label="Modified"
+              value={summary.singleItem.modifiedAt}
+              dateFormat={dateFormat}
+              showTime={showTime}
+              showSeconds={showSeconds}
+            />
+            <DatePropertyRow
+              label="Created"
+              value={summary.singleItem.createdAt}
+              dateFormat={dateFormat}
+              showTime={showTime}
+              showSeconds={showSeconds}
+            />
             <PropertyRow
               label="Attributes"
               value={
@@ -137,16 +154,18 @@ function PropertyRow({
   label,
   value,
   monospace = false,
+  valueClassName,
 }: {
   label: string
   value: string
   monospace?: boolean
+  valueClassName?: string
 }) {
   return (
     <div className="flex justify-between gap-4 border-b border-light-border py-2 dark:border-dark-border">
       <dt className="shrink-0 text-light-text-muted dark:text-dark-text-muted">{label}</dt>
       <dd
-        className={`text-right text-light-text-soft dark:text-dark-text-soft ${
+        className={`text-right ${valueClassName ?? 'text-light-text-soft dark:text-dark-text-soft'} ${
           monospace ? 'break-all font-mono text-uxs' : ''
         }`}
       >
@@ -154,4 +173,29 @@ function PropertyRow({
       </dd>
     </div>
   )
+}
+
+function DatePropertyRow({
+  label,
+  value,
+  dateFormat,
+  showTime,
+  showSeconds,
+}: {
+  label: string
+  value: string | null
+  dateFormat: DateFormat
+  showTime: boolean
+  showSeconds: boolean
+}) {
+  const formatted = formatEntryDate(value, {
+    format: dateFormat,
+    showTime,
+    showSeconds,
+    relative: false,
+  })
+  // The default (un-coloured) tone keeps the dialog's standard value styling.
+  const valueClassName =
+    formatted.tone === 'default' ? undefined : dateToneClassName[formatted.tone]
+  return <PropertyRow label={label} value={formatted.text} valueClassName={valueClassName} />
 }
