@@ -38,7 +38,10 @@ pub fn ensure_fake_trash_dir_for_tests(path: &std::path::Path) -> Result<(), Str
 
 #[cfg(feature = "test-utils")]
 #[inline(never)]
-fn move_to_fake_trash_path(source: &std::path::Path, target: &std::path::Path) -> Result<(), String> {
+fn move_to_fake_trash_path(
+    source: &std::path::Path,
+    target: &std::path::Path,
+) -> Result<(), String> {
     std::fs::rename(source, target).map_err(|error| error.to_string())
 }
 

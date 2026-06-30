@@ -61,14 +61,14 @@ mod tests {
         }
     }
 
-    fn make_ctx(
-        state: OpState,
-    ) -> (
+    type OpCtx = (
         Arc<Mutex<OpState>>,
         Arc<Condvar>,
         Arc<Mutex<Vec<OpProgress>>>,
         WorkerCtx<'static>,
-    ) {
+    );
+
+    fn make_ctx(state: OpState) -> OpCtx {
         let op_arc = Arc::new(Mutex::new(state));
         let resolver = Arc::new(Condvar::new());
         let progress_log = Arc::new(Mutex::new(Vec::<OpProgress>::new()));
@@ -80,8 +80,7 @@ mod tests {
                     .expect("progress log lock")
                     .push(progress);
             }));
-        let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> =
-            Arc::new(Instant::now);
+        let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
 
         let op_arc_ref = Box::leak(Box::new(op_arc.clone()));
         let resolver_ref = Box::leak(Box::new(resolver.clone()));
@@ -112,8 +111,7 @@ mod tests {
         let extract_root = fixture.path().join("extract");
         let source_item = item(&source_dir, 0);
         let archive_item = item(&archive_path, 0);
-        let (_op_arc, _resolver, progress_log, ctx) =
-            make_ctx(op_state(OpStatus::Active, &["/"]));
+        let (_op_arc, _resolver, progress_log, ctx) = make_ctx(op_state(OpStatus::Active, &["/"]));
 
         compress_item_with_progress(&source_dir, &archive_path, &source_item, &ctx)
             .expect("compress");
@@ -137,17 +135,27 @@ mod tests {
         extract_item_with_progress(&archive_path, &extract_root, &archive_item, &ctx)
             .expect("extract");
         assert_eq!(
-            std::fs::read(extract_root.join("payload").join("nested").join("inside.txt"))
-                .expect("extracted file"),
+            std::fs::read(
+                extract_root
+                    .join("payload")
+                    .join("nested")
+                    .join("inside.txt")
+            )
+            .expect("extracted file"),
             b"payload"
         );
 
         let next_extract_dir = unique_archive_directory_path(&extract_root, "payload");
-        assert_eq!(next_extract_dir.file_name().expect("file name"), "payload (1)");
+        assert_eq!(
+            next_extract_dir.file_name().expect("file name"),
+            "payload (1)"
+        );
 
         let progress = progress_log.lock().expect("progress log lock");
         assert!(!progress.is_empty());
-        assert!(progress.iter().any(|entry| entry.current_file_total_bytes == 7));
+        assert!(progress
+            .iter()
+            .any(|entry| entry.current_file_total_bytes == 7));
     }
 
     #[test]
@@ -161,8 +169,7 @@ mod tests {
         std::fs::write(&destination_file, b"x").expect("destination file");
 
         let bad_archive_item = item(&source_file, 0);
-        let (_op_arc, _resolver, _progress_log, ctx) =
-            make_ctx(op_state(OpStatus::Active, &["/"]));
+        let (_op_arc, _resolver, _progress_log, ctx) = make_ctx(op_state(OpStatus::Active, &["/"]));
 
         assert!(compress_item_with_progress(
             &source_file,
@@ -197,7 +204,9 @@ mod tests {
         )
         .expect_err("extract destination file")
         .contains("not a folder"));
-        assert!(to_zip_path(Path::new("")).expect_err("empty zip path").contains("empty"));
+        assert!(to_zip_path(Path::new(""))
+            .expect_err("empty zip path")
+            .contains("empty"));
         assert_eq!(archive_stem_for_item(Path::new("")), "Archive");
         assert_eq!(archive_root_name(Path::new("")), PathBuf::from("Archive"));
     }
@@ -223,11 +232,7 @@ mod tests {
                 ("op-2".to_string(), Arc::new(Condvar::new())),
                 ("op-3".to_string(), Arc::new(Condvar::new())),
             ]),
-            order: VecDeque::from([
-                "op-1".to_string(),
-                "op-2".to_string(),
-                "op-3".to_string(),
-            ]),
+            order: VecDeque::from(["op-1".to_string(), "op-2".to_string(), "op-3".to_string()]),
             busy_volumes: HashSet::from(["alpha".to_string()]),
             workers: Vec::new(),
         }));
@@ -263,21 +268,14 @@ mod tests {
 
     #[test]
     fn progress_helpers_update_state_and_cancelled_copies_short_circuit() {
-        let (op_arc, resolver, progress_log, ctx) =
-            make_ctx(op_state(OpStatus::Active, &["/"]));
+        let (op_arc, resolver, progress_log, ctx) = make_ctx(op_state(OpStatus::Active, &["/"]));
 
         add_discovered_total(&ctx, 12);
         begin_file_progress(&ctx, Path::new("/tmp/example.txt"), 12);
         report_chunk_progress(&ctx, 5);
         count_skipped_bytes(&ctx, 2);
         finish_file_progress(&ctx);
-        let tracked_item = {
-            ctx.op_arc
-                .lock()
-                .expect("op lock")
-                .items[0]
-                .clone()
-        };
+        let tracked_item = { ctx.op_arc.lock().expect("op lock").items[0].clone() };
         advance_item(&ctx, &tracked_item);
 
         {
@@ -331,7 +329,11 @@ mod tests {
         let resolution = resolve_or_park(
             &ctx,
             &OpItem {
-                source_path: fixture.path().join("source.txt").to_string_lossy().into_owned(),
+                source_path: fixture
+                    .path()
+                    .join("source.txt")
+                    .to_string_lossy()
+                    .into_owned(),
                 name: "target.txt".to_string(),
                 size_bytes: 8,
             },
@@ -455,11 +457,7 @@ mod tests {
                 ("op-2".to_string(), Arc::new(Condvar::new())),
                 ("op-3".to_string(), Arc::new(Condvar::new())),
             ]),
-            order: VecDeque::from([
-                "op-1".to_string(),
-                "op-2".to_string(),
-                "op-3".to_string(),
-            ]),
+            order: VecDeque::from(["op-1".to_string(), "op-2".to_string(), "op-3".to_string()]),
             busy_volumes: HashSet::new(),
             workers: Vec::new(),
         }));
@@ -527,10 +525,7 @@ mod tests {
             progress: None,
             conflict: None,
             removed: Some(Arc::new(move |id| {
-                removed_for_emitter
-                    .lock()
-                    .expect("removed lock")
-                    .push(id);
+                removed_for_emitter.lock().expect("removed lock").push(id);
             })),
             retention: Duration::from_millis(10),
             rate_window: Duration::ZERO,
@@ -541,7 +536,10 @@ mod tests {
         std::thread::sleep(Duration::from_millis(40));
 
         assert!(!pending_file.exists());
-        assert_eq!(pending_op.lock().expect("pending lock").status, OpStatus::Completed);
+        assert_eq!(
+            pending_op.lock().expect("pending lock").status,
+            OpStatus::Completed
+        );
         assert!(removed
             .lock()
             .expect("removed lock")

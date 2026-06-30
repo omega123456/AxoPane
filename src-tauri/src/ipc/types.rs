@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+pub use crate::app_picker::types::{
+    GetDefaultApplicationRequest, GetDefaultApplicationResponse, ListApplicationsResponse, MacApp,
+    SetDefaultApplicationRequest,
+};
 pub use crate::fs::{
     DirectoryEntry, ListDirOptions, ListDirResponse, ListTreeChildrenOptions,
     ListTreeChildrenResponse, TreeChildEntry,

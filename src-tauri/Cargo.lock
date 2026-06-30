@@ -881,6 +881,7 @@ version = "1.4.0"
 dependencies = [
  "base64 0.22.1",
  "clipboard-rs",
+ "core-foundation",
  "dunce",
  "jwalk",
  "lexical-sort",

@@ -9,8 +9,11 @@ import type {
   ExtractArchiveRequest,
   FolderSizeRequest,
   FolderSizesRequest,
+  GetDefaultApplicationRequest,
+  GetDefaultApplicationResponse,
   InitialShellResponse,
   InvokeNativeMenuRequest,
+  ListApplicationsResponse,
   ListDirRequest,
   ListDirResponse,
   ListTreeChildrenRequest,
@@ -23,6 +26,7 @@ import type {
   OpenWithRequest,
   OpenPathRequest,
   RenameEntryRequest,
+  SetDefaultApplicationRequest,
   ShowPropertiesRequest,
   TrashEntriesRequest,
   WatchTarget,
@@ -92,6 +96,21 @@ export function showProperties(payload: ShowPropertiesRequest) {
 
 export function openWith(payload: OpenWithRequest) {
   return invokeCommand({ command: 'open_with', payload }) as Promise<MenuActionStatus>
+}
+
+export function listApplications() {
+  return invokeCommand({ command: 'list_applications' }) as Promise<ListApplicationsResponse>
+}
+
+export function setDefaultApplication(payload: SetDefaultApplicationRequest) {
+  return invokeCommand({ command: 'set_default_application', payload }) as Promise<MenuActionStatus>
+}
+
+export function getDefaultApplication(payload: GetDefaultApplicationRequest) {
+  return invokeCommand({
+    command: 'get_default_application',
+    payload,
+  }) as Promise<GetDefaultApplicationResponse>
 }
 
 export function compressArchive(payload: CompressArchiveRequest) {

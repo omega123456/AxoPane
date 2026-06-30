@@ -50,11 +50,17 @@ fn deterministic_instants(offsets_ms: &[u64]) -> impl Fn() -> Instant + Send + S
 }
 
 /// Wait for a predicate over the latest progress snapshot, polling quickly.
+///
+/// The deadline is a safety-net ceiling, not the expected runtime (passing
+/// runs settle in well under 100ms) — it's set generously above that so the
+/// background worker thread has headroom to get scheduled under the CPU
+/// contention of a full parallel `cargo nextest` run, rather than spuriously
+/// timing out under load while still failing fast on a genuine hang.
 fn wait_for<F>(service: &OpsService, id: &str, predicate: F)
 where
     F: Fn(&OpProgress) -> bool,
 {
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if let Some(snapshot) = service
             .snapshot()

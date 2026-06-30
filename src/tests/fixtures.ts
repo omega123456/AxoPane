@@ -221,6 +221,34 @@ export const fixtures: {
     handled: false,
     message: 'unsupported',
   },
+  list_applications: {
+    apps: [
+      {
+        name: 'Fixture Preview',
+        bundlePath: '/Applications/Fixture Preview.app',
+        bundleId: 'com.example.fixture-preview',
+        iconDataUrl: 'data:image/png;base64,RkFLRQ==',
+      },
+      {
+        name: 'Fixture Text Edit',
+        bundlePath: '/Applications/Fixture Text Edit.app',
+        bundleId: 'com.example.fixture-textedit',
+        iconDataUrl: null,
+      },
+    ],
+  },
+  set_default_application: {
+    handled: true,
+    message: 'default-application-set',
+  },
+  get_default_application: {
+    app: {
+      name: 'Fixture Preview',
+      bundlePath: '/Applications/Fixture Preview.app',
+      bundleId: 'com.example.fixture-preview',
+      iconDataUrl: 'data:image/png;base64,RkFLRQ==',
+    },
+  },
   compress_archive: {
     handled: false,
     message: 'unsupported',

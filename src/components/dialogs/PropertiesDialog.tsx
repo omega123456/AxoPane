@@ -1,9 +1,16 @@
-import { useEffect, useMemo, useRef, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { DialogShell } from '@/components/dialogs/DialogShell'
+import { EntryIcon } from '@/components/icons/EntryIcon'
+import { canSetDefaultApplication, getDefaultApplication } from '@/lib/app-picker-commands'
 import { dateToneClassName, type DateFormat, formatEntryDate } from '@/lib/date-format'
 import { formatBytes, formatCount } from '@/lib/format'
 import { useConfigStore } from '@/stores/config-store'
-import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
+import { useDefaultAppDialogStore } from '@/stores/default-app-dialog-store'
+import {
+  usePropertiesDialogStore,
+  type PropertiesDialogState,
+} from '@/stores/properties-dialog-store'
+import type { MacApp } from '@/lib/types/ipc'
 
 function formatItemSize(sizeBytes: number | null, itemCount: number | null, isDir: boolean) {
   if (typeof sizeBytes === 'number') {
@@ -32,6 +39,20 @@ export function PropertiesDialog() {
   const showTime = useConfigStore((state) => state.showTime)
   const showSeconds = useConfigStore((state) => state.showSeconds)
   const closeRef = useRef<HTMLButtonElement>(null)
+  const defaultAppDialogClosed = useDefaultAppDialogStore((state) => state.dialog === null)
+  const [defaultApp, setDefaultApp] = useState<MacApp | null>(null)
+  const [defaultAppLoaded, setDefaultAppLoaded] = useState(false)
+  const [prevDialogForDefaultApp, setPrevDialogForDefaultApp] =
+    useState<PropertiesDialogState | null>(dialog)
+
+  // Reset render-derived state synchronously when Properties re-opens for a
+  // different selection, rather than in an effect (avoids a cascading-render
+  // setState-in-effect, since this only fires when `dialog` identity changes).
+  if (dialog !== prevDialogForDefaultApp) {
+    setPrevDialogForDefaultApp(dialog)
+    setDefaultApp(null)
+    setDefaultAppLoaded(false)
+  }
 
   useEffect(() => {
     if (!dialog) {
@@ -40,6 +61,28 @@ export function PropertiesDialog() {
 
     closeRef.current?.focus()
   }, [dialog])
+
+  useEffect(() => {
+    if (!dialog || !canSetDefaultApplication(dialog.items)) {
+      return
+    }
+
+    let cancelled = false
+    void getDefaultApplication(dialog.items[0].path).then((app) => {
+      if (cancelled) {
+        return
+      }
+      setDefaultApp(app)
+      setDefaultAppLoaded(true)
+    })
+
+    return () => {
+      cancelled = true
+    }
+    // Re-run when the Set Default Application picker closes so a freshly
+    // chosen app is reflected here without requiring the user to reopen
+    // Properties.
+  }, [dialog, defaultAppDialogClosed])
 
   const summary = useMemo(() => {
     if (!dialog) {
@@ -58,11 +101,23 @@ export function PropertiesDialog() {
     return null
   }
 
+  const singleItem = summary.singleItem
+
   function onKeyDown(event: KeyboardEvent) {
     if (event.key === 'Escape' || event.key === 'Enter') {
       event.preventDefault()
       close()
     }
+  }
+
+  function openDefaultAppDialog() {
+    if (!singleItem) {
+      return
+    }
+    useDefaultAppDialogStore.getState().open({
+      filePath: singleItem.path,
+      fileName: singleItem.name,
+    })
   }
 
   return (
@@ -83,6 +138,9 @@ export function PropertiesDialog() {
         {summary.singleItem ? (
           <dl className="space-y-2 text-row">
             <PropertyRow label="Type" value={summary.singleItem.typeLabel} />
+            {canSetDefaultApplication(dialog.items) ? (
+              <DefaultAppRow loaded={defaultAppLoaded} app={defaultApp} />
+            ) : null}
             <PropertyRow label="Path" value={summary.singleItem.path} monospace />
             <PropertyRow
               label="Size"
@@ -136,7 +194,16 @@ export function PropertiesDialog() {
           </div>
         )}
       </div>
-      <div className="flex justify-end border-t border-light-border p-4 dark:border-dark-border">
+      <div className="flex justify-end gap-2 border-t border-light-border p-4 dark:border-dark-border">
+        {canSetDefaultApplication(dialog.items) ? (
+          <button
+            type="button"
+            onClick={openDefaultAppDialog}
+            className="rounded-md border border-light-border px-4 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
+          >
+            Set Default Application…
+          </button>
+        ) : null}
         <button
           ref={closeRef}
           type="button"
@@ -170,6 +237,29 @@ function PropertyRow({
         }`}
       >
         {value}
+      </dd>
+    </div>
+  )
+}
+
+function DefaultAppRow({ loaded, app }: { loaded: boolean; app: MacApp | null }) {
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-light-border py-2 dark:border-dark-border">
+      <dt className="shrink-0 text-light-text-muted dark:text-dark-text-muted">Default App</dt>
+      <dd className="flex min-w-0 items-center justify-end gap-2 text-right text-light-text-soft dark:text-dark-text-soft">
+        {!loaded ? (
+          'Loading…'
+        ) : app ? (
+          <>
+            <EntryIcon
+              entry={{ name: app.name, isDir: false, iconDataUrl: app.iconDataUrl }}
+              className="h-4 w-4 shrink-0"
+            />
+            <span className="truncate">{app.name}</span>
+          </>
+        ) : (
+          'Not set'
+        )}
       </dd>
     </div>
   )

@@ -504,7 +504,10 @@ fn directory_has_visible_child_dirs(path: &Path, show_hidden: bool) -> bool {
             return true;
         }
         let attributes = collect_attributes(&child_path, &metadata);
-        if !attributes.iter().any(|attribute| is_hidden_or_system_attribute(attribute)) {
+        if !attributes
+            .iter()
+            .any(|attribute| is_hidden_or_system_attribute(attribute))
+        {
             return true;
         }
     }
@@ -544,20 +547,16 @@ pub fn compare_entries(
             .then_with(|| natural_name_compare(&left.name, &right.name)),
         SortKey::Type => natural_name_compare(&left.type_label, &right.type_label)
             .then_with(|| natural_name_compare(&left.name, &right.name)),
-        SortKey::Modified => {
-            compare_with_name_tiebreak(
-                compare_optional_string(left.modified_at.as_deref(), right.modified_at.as_deref()),
-                &left.name,
-                &right.name,
-            )
-        }
-        SortKey::Created => {
-            compare_with_name_tiebreak(
-                compare_optional_string(left.created_at.as_deref(), right.created_at.as_deref()),
-                &left.name,
-                &right.name,
-            )
-        }
+        SortKey::Modified => compare_with_name_tiebreak(
+            compare_optional_string(left.modified_at.as_deref(), right.modified_at.as_deref()),
+            &left.name,
+            &right.name,
+        ),
+        SortKey::Created => compare_with_name_tiebreak(
+            compare_optional_string(left.created_at.as_deref(), right.created_at.as_deref()),
+            &left.name,
+            &right.name,
+        ),
     };
 
     match sort_direction {

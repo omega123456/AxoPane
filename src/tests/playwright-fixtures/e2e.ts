@@ -482,4 +482,11 @@ export const screenshotScenarios = {
     },
     'windows',
   ),
+  defaultAppDialog: scenarioByTheme(
+    {
+      list_dir: fileTypesListDir,
+      queue_snapshot: emptyQueueSnapshot,
+    },
+    'macos',
+  ),
 } satisfies Record<string, { light: PlaywrightScenario; dark: PlaywrightScenario }>

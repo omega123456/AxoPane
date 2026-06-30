@@ -1,3 +1,4 @@
+use crate::app_picker;
 use crate::archive;
 use crate::fs;
 use crate::native_menu::NativeMenuService;
@@ -17,13 +18,14 @@ use super::mock;
 use super::types::{
     AppConfig, CancelSizeRequest, CancelSizeResponse, CompressArchiveRequest, CreateEntryRequest,
     ExtractArchiveRequest, FileClipboardMode, FolderSizeRequest, FolderSizesRequest,
-    InitialShellResponse, InvokeNativeMenuRequest, ListDirRequest, ListDirResponse,
+    GetDefaultApplicationRequest, GetDefaultApplicationResponse, InitialShellResponse,
+    InvokeNativeMenuRequest, ListApplicationsResponse, ListDirRequest, ListDirResponse,
     ListTreeChildrenRequest, ListTreeChildrenResponse, LoadNativeMenuRequest,
     LoadNativeMenuResponse, LogFrontendRequest, MenuActionStatus, OpIdRequest, OpenPathRequest,
     OpenWithRequest, RefreshTabRequest, RenameEntryRequest, ReorderOpsRequest,
     ResolveConflictRequest, SaveConfigRequest, SaveSessionRequest, SessionState,
-    SetLogLevelRequest, SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent, StartOpRequest,
-    TrashEntriesRequest, VolumeInfo, WriteFileClipboardRequest,
+    SetDefaultApplicationRequest, SetLogLevelRequest, SetTabWatchRequest, ShowPropertiesRequest,
+    SizeStateEvent, StartOpRequest, TrashEntriesRequest, VolumeInfo, WriteFileClipboardRequest,
 };
 use crate::fs::DirectoryEntry;
 use std::path::Path;
@@ -167,6 +169,23 @@ pub fn open_with(
     state: State<'_, NativeMenuService>,
 ) -> MenuActionStatus {
     state.open_with(payload)
+}
+
+#[tauri::command]
+pub fn list_applications() -> ListApplicationsResponse {
+    app_picker::list_applications()
+}
+
+#[tauri::command]
+pub fn set_default_application(payload: SetDefaultApplicationRequest) -> MenuActionStatus {
+    app_picker::set_default_application(payload)
+}
+
+#[tauri::command]
+pub fn get_default_application(
+    payload: GetDefaultApplicationRequest,
+) -> GetDefaultApplicationResponse {
+    app_picker::get_default_application(payload)
 }
 
 #[tauri::command]
@@ -550,7 +569,9 @@ pub fn apply_log_level(
 
 /// Read and parse the current day's log file for the in-app log viewer.
 #[tauri::command]
-pub fn read_logs(logging: State<'_, crate::logging::LoggingState>) -> Vec<crate::logging::LogEntry> {
+pub fn read_logs(
+    logging: State<'_, crate::logging::LoggingState>,
+) -> Vec<crate::logging::LogEntry> {
     crate::logging::read_current_day_logs(&logging.dir, crate::logging::current_local_date())
 }
 

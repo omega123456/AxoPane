@@ -6,12 +6,36 @@ use file_explorer_lib::trash::{
 };
 use tempfile::tempdir;
 
+/// `fake_trash_dir()` is one fixed directory shared by every test process
+/// that exercises trash behavior (this file, `trash_fake_edges_integration`,
+/// and several `ipc_*_integration` files), and nextest runs test binaries —
+/// and tests within a binary — concurrently by default. The previous version
+/// of these tests called `fs::remove_dir_all(fake_trash_dir())` and then
+/// asserted on fixed file names ("report.txt", "duplicate.txt"), which raced
+/// against any other test concurrently writing into (or wiping) that same
+/// directory: one test's wipe could delete another's in-flight fixture, or
+/// two tests' identically-named fixtures could collide. Deriving a
+/// per-test-run unique name from `tempdir()`'s own randomized path (instead
+/// of wiping the shared directory or using fixed names) makes every
+/// assertion identify only files this test instance created, so concurrent
+/// runs can never interfere with each other.
+fn unique_token(fixture: &tempfile::TempDir) -> String {
+    fixture
+        .path()
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("tempdir yields a named path")
+        .to_string()
+}
+
 #[test]
 fn fake_trash_relocates_sources_under_test_utils() {
-    let _ = fs::remove_dir_all(fake_trash_dir());
     let fixture = tempdir().expect("temp dir");
-    let file = fixture.path().join("report.txt");
-    let dir = fixture.path().join("folder");
+    let token = unique_token(&fixture);
+    let file_name = format!("report-{token}.txt");
+    let dir_name = format!("folder-{token}");
+    let file = fixture.path().join(&file_name);
+    let dir = fixture.path().join(&dir_name);
     fs::write(&file, b"report").expect("file");
     fs::create_dir(&dir).expect("dir");
 
@@ -23,29 +47,31 @@ fn fake_trash_relocates_sources_under_test_utils() {
 
     assert!(!file.exists());
     assert!(!dir.exists());
-    assert!(fake_trash_dir().join("report.txt").exists());
-    assert!(fake_trash_dir().join("folder").exists());
+    assert!(fake_trash_dir().join(&file_name).exists());
+    assert!(fake_trash_dir().join(&dir_name).exists());
 }
 
 #[test]
 fn fake_trash_noops_empty_requests_and_resolves_name_collisions() {
-    let _ = fs::remove_dir_all(fake_trash_dir());
     move_to_trash(&[]).expect("empty trash request");
 
     let fixture = tempdir().expect("temp dir");
-    let first = fixture.path().join("duplicate.txt");
+    let duplicate_name = format!("duplicate-{}.txt", unique_token(&fixture));
+
+    let first = fixture.path().join(&duplicate_name);
     fs::write(&first, b"first").expect("first");
     move_to_trash(&[first.to_string_lossy().into_owned()]).expect("first move");
 
-    let second = fixture.path().join("duplicate.txt");
+    let second = fixture.path().join(&duplicate_name);
     fs::write(&second, b"second").expect("second");
     move_to_trash(&[second.to_string_lossy().into_owned()]).expect("second move");
 
+    let collision_suffix = format!("{duplicate_name}.");
     let duplicate_entries = fs::read_dir(fake_trash_dir())
         .expect("fake trash entries")
         .filter_map(Result::ok)
         .filter_map(|entry| entry.file_name().into_string().ok())
-        .filter(|name| name == "duplicate.txt" || name.starts_with("duplicate.txt."))
+        .filter(|name| *name == duplicate_name || name.starts_with(&collision_suffix))
         .count();
     assert!(duplicate_entries >= 2);
 }

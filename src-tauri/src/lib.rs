@@ -1,3 +1,4 @@
+pub mod app_picker;
 pub mod archive;
 mod clipboard;
 mod file_icons;
@@ -151,6 +152,9 @@ pub fn run() {
             commands::invoke_native_menu_action,
             commands::show_properties,
             commands::open_with,
+            commands::list_applications,
+            commands::set_default_application,
+            commands::get_default_application,
             commands::compress_archive,
             commands::extract_archive,
             commands::list_volumes,

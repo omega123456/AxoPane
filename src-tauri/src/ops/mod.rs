@@ -1397,7 +1397,6 @@ fn extract_item_with_progress(
         let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
         let enclosed_name = entry
             .enclosed_name()
-            .map(PathBuf::from)
             .ok_or_else(|| "Archive contains an unsafe entry path.".to_string())?;
         let relative_name = strip_wrapper_root(&enclosed_name, wrapper_root.as_deref());
         let output_path = output_root.join(relative_name);

@@ -223,22 +223,24 @@ fn handle_debounce_result(
                             patch_emitter(patch);
                         }
                     }
-                    Ok(PatchResult::NeedsResnapshot) => match snapshot_for_target(&watched.target) {
-                        Ok(next_snapshot) => {
-                            let patch = diff_entries(
-                                &watched.target.tab_id,
-                                &watched.target.path,
-                                "watch",
-                                &watched.snapshot,
-                                &next_snapshot,
-                            );
-                            watched.snapshot = next_snapshot;
-                            if !patch.changed.is_empty() || !patch.removed.is_empty() {
-                                patch_emitter(patch);
+                    Ok(PatchResult::NeedsResnapshot) => {
+                        match snapshot_for_target(&watched.target) {
+                            Ok(next_snapshot) => {
+                                let patch = diff_entries(
+                                    &watched.target.tab_id,
+                                    &watched.target.path,
+                                    "watch",
+                                    &watched.snapshot,
+                                    &next_snapshot,
+                                );
+                                watched.snapshot = next_snapshot;
+                                if !patch.changed.is_empty() || !patch.removed.is_empty() {
+                                    patch_emitter(patch);
+                                }
                             }
+                            Err(error) => error_emitter(watched.target.path.clone(), error),
                         }
-                        Err(error) => error_emitter(watched.target.path.clone(), error),
-                    },
+                    }
                     Err(error) => error_emitter(watched.target.path.clone(), error),
                 }
             }
@@ -536,7 +538,10 @@ fn list_dir_for_snapshot(options: &ListDirOptions) -> Result<ListDirResponse, St
     fs::list_dir(options).map_err(|error| error.to_string())
 }
 
-fn watch_path(debouncer: &mut Debouncer<notify::RecommendedWatcher, FileIdMap>, path: &Path) -> Result<(), String> {
+fn watch_path(
+    debouncer: &mut Debouncer<notify::RecommendedWatcher, FileIdMap>,
+    path: &Path,
+) -> Result<(), String> {
     debouncer
         .watch(path, RecursiveMode::NonRecursive)
         .map_err(|error| error.to_string())

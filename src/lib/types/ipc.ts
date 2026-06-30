@@ -324,6 +324,30 @@ export type OpenWithRequest = {
   path: string
 }
 
+export type MacApp = {
+  name: string
+  bundlePath: string
+  bundleId: string | null
+  iconDataUrl: string | null
+}
+
+export type ListApplicationsResponse = {
+  apps: MacApp[]
+}
+
+export type SetDefaultApplicationRequest = {
+  path: string
+  bundlePath: string
+}
+
+export type GetDefaultApplicationRequest = {
+  path: string
+}
+
+export type GetDefaultApplicationResponse = {
+  app: MacApp | null
+}
+
 export type CompressArchiveRequest = {
   paths: string[]
   destinationDir: string
@@ -509,6 +533,18 @@ export type IpcCommandMap = {
   open_with: {
     request: OpenWithRequest
     response: MenuActionStatus
+  }
+  list_applications: {
+    request: undefined
+    response: ListApplicationsResponse
+  }
+  set_default_application: {
+    request: SetDefaultApplicationRequest
+    response: MenuActionStatus
+  }
+  get_default_application: {
+    request: GetDefaultApplicationRequest
+    response: GetDefaultApplicationResponse
   }
   compress_archive: {
     request: CompressArchiveRequest

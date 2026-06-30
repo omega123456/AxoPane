@@ -320,4 +320,44 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.getByRole('dialog', { name: 'Confirm extract' })).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`extract-confirmation-dialog-${mode}.png`)
   })
+
+  test(`properties dialog ${mode}`, async ({ page }) => {
+    // `defaultAppDialog` pins `platform: 'macos'` regardless of the host OS
+    // actually running Playwright, so the macOS-only "Default App" row and
+    // "Set Default Application…" button render deterministically here even
+    // when this suite runs on Windows CI.
+    await gotoScenario(page, screenshotScenarios.defaultAppDialog[mode])
+    await page
+      .getByRole('row', { name: /report\.pdf/ })
+      .first()
+      .click({ button: 'right' })
+    const menu = page.getByRole('menu', { name: 'report.pdf' })
+    await expect(menu).toBeVisible()
+    await menu.getByRole('menuitem', { name: 'Properties' }).click()
+    await expect(page.getByRole('dialog', { name: 'Properties' })).toBeVisible()
+    await expect(page.getByText('Default App', { exact: true })).toBeVisible()
+    await expect(page.getByText('Fixture Preview')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Set Default Application…' })).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`properties-dialog-${mode}.png`)
+  })
+
+  test(`set default application dialog ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.defaultAppDialog[mode])
+    await page
+      .getByRole('row', { name: /report\.pdf/ })
+      .first()
+      .click({ button: 'right' })
+    const menu = page.getByRole('menu', { name: 'report.pdf' })
+    await expect(menu).toBeVisible()
+    await menu.getByRole('menuitem', { name: 'Properties' }).click()
+    await expect(page.getByRole('dialog', { name: 'Properties' })).toBeVisible()
+    await expect(page.getByText('Default App', { exact: true })).toBeVisible()
+    await expect(page.getByText('Fixture Preview')).toBeVisible()
+    await page.getByRole('button', { name: 'Set Default Application…' }).click()
+    await expect(page.getByRole('dialog', { name: 'Set Default Application' })).toBeVisible()
+    await expect(page.getByRole('option', { name: 'Fixture Preview' })).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(
+      `set-default-application-dialog-${mode}.png`,
+    )
+  })
 }

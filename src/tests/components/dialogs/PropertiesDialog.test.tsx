@@ -1,17 +1,28 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, vi } from 'vitest'
+import { DefaultAppDialog } from '@/components/dialogs/DefaultAppDialog'
 import { PropertiesDialog } from '@/components/dialogs/PropertiesDialog'
 import { useConfigStore } from '@/stores/config-store'
+import { useDefaultAppDialogStore } from '@/stores/default-app-dialog-store'
 import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
+import { ipc } from '@/tests/ipc-mock'
+
+const originalPlatform = navigator.platform
+
+function setPlatform(value: string) {
+  Object.defineProperty(navigator, 'platform', { value, configurable: true })
+}
 
 beforeEach(() => {
   usePropertiesDialogStore.getState().close()
+  useDefaultAppDialogStore.getState().close()
   useConfigStore.getState().reset()
 })
 
 afterEach(() => {
   vi.useRealTimers()
+  setPlatform(originalPlatform)
 })
 
 describe('PropertiesDialog', () => {
@@ -184,5 +195,185 @@ describe('PropertiesDialog', () => {
     expect(screen.getByText('Projects')).toBeInTheDocument()
     expect(screen.getAllByText('5 items')).toHaveLength(2)
     expect(screen.getByText('Folder')).toBeInTheDocument()
+  })
+})
+
+const macFile = {
+  id: 'report',
+  name: 'Report.pdf',
+  path: '/Users/example/Report.pdf',
+  isDir: false,
+  sizeBytes: 100,
+  itemCount: null,
+  typeLabel: 'PDF document',
+  modifiedAt: null,
+  createdAt: null,
+  attributes: [],
+  isHidden: false,
+  isSystem: false,
+}
+
+describe('PropertiesDialog set-default-application button', () => {
+  it('shows the button on macOS for a single file with an extension', () => {
+    setPlatform('MacIntel')
+    usePropertiesDialogStore.getState().open({ items: [macFile] })
+
+    render(<PropertiesDialog />)
+
+    expect(screen.getByRole('button', { name: 'Set Default Application…' })).toBeInTheDocument()
+  })
+
+  it('hides the button on Windows', () => {
+    setPlatform('Win32')
+    usePropertiesDialogStore.getState().open({ items: [macFile] })
+
+    render(<PropertiesDialog />)
+
+    expect(
+      screen.queryByRole('button', { name: 'Set Default Application…' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('hides the button for a folder selection', () => {
+    setPlatform('MacIntel')
+    usePropertiesDialogStore.getState().open({ items: [{ ...macFile, isDir: true }] })
+
+    render(<PropertiesDialog />)
+
+    expect(
+      screen.queryByRole('button', { name: 'Set Default Application…' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('hides the button for a multi-selection', () => {
+    setPlatform('MacIntel')
+    usePropertiesDialogStore.getState().open({
+      items: [
+        macFile,
+        { ...macFile, id: 'other', name: 'Other.pdf', path: '/Users/example/Other.pdf' },
+      ],
+    })
+
+    render(<PropertiesDialog />)
+
+    expect(
+      screen.queryByRole('button', { name: 'Set Default Application…' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('opens the default-app dialog store with the selected file on click', async () => {
+    const user = userEvent.setup()
+    setPlatform('MacIntel')
+    usePropertiesDialogStore.getState().open({ items: [macFile] })
+
+    render(<PropertiesDialog />)
+
+    await user.click(screen.getByRole('button', { name: 'Set Default Application…' }))
+
+    expect(useDefaultAppDialogStore.getState().dialog).toEqual({
+      filePath: '/Users/example/Report.pdf',
+      fileName: 'Report.pdf',
+    })
+  })
+})
+
+describe('PropertiesDialog default application row', () => {
+  afterEach(() => {
+    ipc.reset()
+  })
+
+  it('shows the current default app once loaded, on macOS for a file with an extension', async () => {
+    setPlatform('MacIntel')
+    usePropertiesDialogStore.getState().open({ items: [macFile] })
+
+    render(<PropertiesDialog />)
+
+    expect(screen.getByText('Default App')).toBeInTheDocument()
+    expect(screen.getByText('Loading…')).toBeInTheDocument()
+    expect(await screen.findByText('Fixture Preview')).toBeInTheDocument()
+    const icon = screen.getByText('Fixture Preview').closest('dd')?.querySelector('img')
+    expect(icon).toHaveAttribute('src', 'data:image/png;base64,RkFLRQ==')
+  })
+
+  it('falls back to a generic glyph when the default app has no icon', async () => {
+    ipc.override('get_default_application', {
+      app: {
+        name: 'Fixture Text Edit',
+        bundlePath: '/Applications/Fixture Text Edit.app',
+        bundleId: 'com.example.fixture-textedit',
+        iconDataUrl: null,
+      },
+    })
+    setPlatform('MacIntel')
+    usePropertiesDialogStore.getState().open({ items: [macFile] })
+
+    render(<PropertiesDialog />)
+
+    await screen.findByText('Fixture Text Edit')
+    const dd = screen.getByText('Fixture Text Edit').closest('dd')
+    expect(dd?.querySelector('img')).not.toBeInTheDocument()
+    expect(dd?.querySelector('svg')).toBeInTheDocument()
+  })
+
+  it('shows "Not set" when there is no registered default app', async () => {
+    ipc.override('get_default_application', { app: null })
+    setPlatform('MacIntel')
+    usePropertiesDialogStore.getState().open({ items: [macFile] })
+
+    render(<PropertiesDialog />)
+
+    expect(await screen.findByText('Not set')).toBeInTheDocument()
+  })
+
+  it('does not render the row on Windows, for folders, or for multi-selections', () => {
+    setPlatform('Win32')
+    usePropertiesDialogStore.getState().open({ items: [macFile] })
+
+    const { rerender } = render(<PropertiesDialog />)
+    expect(screen.queryByText('Default App')).not.toBeInTheDocument()
+
+    setPlatform('MacIntel')
+    usePropertiesDialogStore.getState().open({ items: [{ ...macFile, isDir: true }] })
+    rerender(<PropertiesDialog />)
+    expect(screen.queryByText('Default App')).not.toBeInTheDocument()
+
+    usePropertiesDialogStore.getState().open({
+      items: [
+        macFile,
+        { ...macFile, id: 'other', name: 'Other.pdf', path: '/Users/example/Other.pdf' },
+      ],
+    })
+    rerender(<PropertiesDialog />)
+    expect(screen.queryByText('Default App')).not.toBeInTheDocument()
+  })
+
+  it('refreshes after the Set Default Application picker closes', async () => {
+    const user = userEvent.setup()
+    setPlatform('MacIntel')
+    usePropertiesDialogStore.getState().open({ items: [macFile] })
+
+    render(<PropertiesDialog />)
+    render(<DefaultAppDialog />)
+
+    expect(await screen.findByText('Fixture Preview')).toBeInTheDocument()
+
+    ipc.override('get_default_application', {
+      app: {
+        name: 'Fixture Text Edit',
+        bundlePath: '/Applications/Fixture Text Edit.app',
+        bundleId: 'com.example.fixture-textedit',
+        iconDataUrl: null,
+      },
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Set Default Application…' }))
+    const option = await screen.findByRole('option', { name: 'Fixture Text Edit' })
+    await user.click(option)
+    await user.click(screen.getByRole('button', { name: 'Change All…' }))
+
+    await waitFor(() => {
+      expect(useDefaultAppDialogStore.getState().dialog).toBeNull()
+    })
+    expect(await screen.findByText('Fixture Text Edit')).toBeInTheDocument()
   })
 })
