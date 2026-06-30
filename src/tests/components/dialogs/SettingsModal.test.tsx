@@ -29,7 +29,7 @@ describe('SettingsModal', () => {
     setPlatform('MacIntel')
   })
 
-  it('captures shortcuts, detects conflicts, and applies immediately on macOS', async () => {
+  it('captures shortcuts from the window, detects conflicts, and applies immediately on macOS', async () => {
     const user = userEvent.setup()
     useSettingsStore.getState().open('keybindings')
 
@@ -37,7 +37,7 @@ describe('SettingsModal', () => {
 
     const renameButton = screen.getByRole('button', { name: 'Capture Rename shortcut' })
     await user.click(renameButton)
-    fireEvent.keyDown(renameButton, { key: 'r', ctrlKey: true })
+    fireEvent.keyDown(window, { key: 'r', metaKey: true })
 
     await waitFor(() => {
       expect(useKeymapStore.getState().bindings.rename).toEqual(['Ctrl+R'])

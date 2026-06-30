@@ -24,7 +24,9 @@ describe('keymap', () => {
   })
 
   it('normalizes and formats shortcuts from a shared source of truth', () => {
-    expect(normalizeShortcut('cmd+,')).toBe('Meta+,')
+    setPlatform('MacIntel')
+    expect(normalizeShortcut('command+,')).toBe('Ctrl+,')
+    expect(normalizeShortcut('meta+,')).toBe('Meta+,')
     expect(formatShortcutLabel('Ctrl+R', 'windows')).toBe('Ctrl+R')
     // The stored primary modifier (Ctrl) renders as ⌘ on macOS.
     expect(formatShortcutLabel('Ctrl+,', 'macos')).toBe('⌘,')
@@ -42,6 +44,14 @@ describe('keymap', () => {
 
     const copyToClipboard = new KeyboardEvent('keydown', { key: 'c', ctrlKey: true })
     expect(resolveCommandForEvent(copyToClipboard, defaultKeymap)).toBe('copy')
+  })
+
+  it('treats Command as the primary modifier on macOS', () => {
+    setPlatform('MacIntel')
+    const event = new KeyboardEvent('keydown', { key: 'a', metaKey: true })
+
+    expect(captureShortcut(event)).toBe('Ctrl+A')
+    expect(resolveCommandForEvent(event, defaultKeymap)).toBe('selectAll')
   })
 
   it('merges defaults and detects conflicts', () => {

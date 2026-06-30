@@ -118,6 +118,7 @@ export function detectPlatformOs(): PlatformOs {
 }
 
 export function normalizeShortcut(value: string): Shortcut {
+  const os = detectPlatformOs()
   const parts = value
     .split('+')
     .map((part) => part.trim())
@@ -134,7 +135,9 @@ export function normalizeShortcut(value: string): Shortcut {
     const lower = part.toLowerCase()
     if (lower === 'control' || lower === 'ctrl') {
       modifiers.add('Ctrl')
-    } else if (lower === 'cmd' || lower === 'command' || lower === 'meta') {
+    } else if (lower === 'cmd' || lower === 'command') {
+      modifiers.add(os === 'macos' ? 'Ctrl' : 'Meta')
+    } else if (lower === 'meta') {
       modifiers.add('Meta')
     } else if (lower === 'option' || lower === 'alt') {
       modifiers.add('Alt')
@@ -166,7 +169,7 @@ function isModifierOnly(value: string) {
   return value === 'Ctrl' || value === 'Meta' || value === 'Alt' || value === 'Shift'
 }
 
-function normalizeEventKey(value: string) {
+function normalizeEventKey(value: string, os: PlatformOs) {
   if (value === ' ') {
     return 'Space'
   }
@@ -174,10 +177,10 @@ function normalizeEventKey(value: string) {
     return 'Escape'
   }
   if (value === 'Control') {
-    return 'Ctrl'
+    return os === 'macos' ? 'Meta' : 'Ctrl'
   }
   if (value === 'Meta') {
-    return 'Meta'
+    return os === 'macos' ? 'Ctrl' : 'Meta'
   }
   if (value === 'Alt') {
     return 'Alt'
@@ -186,7 +189,7 @@ function normalizeEventKey(value: string) {
     return 'Shift'
   }
   if (value === 'OS') {
-    return 'Meta'
+    return os === 'macos' ? 'Ctrl' : 'Meta'
   }
   if (value.length === 1) {
     return value.toUpperCase()
@@ -194,23 +197,25 @@ function normalizeEventKey(value: string) {
   return value
 }
 
-export function captureShortcut(event: KeyboardEvent): Shortcut | null {
-  if (event.key === 'Tab') {
-    return null
-  }
-
-  const key = normalizeEventKey(event.key)
-  if (!key) {
-    return null
-  }
-
+function eventModifierParts(event: KeyboardEvent, os: PlatformOs) {
   const parts: string[] = []
-  if (event.ctrlKey) {
-    parts.push('Ctrl')
+
+  if (os === 'macos') {
+    if (event.metaKey) {
+      parts.push('Ctrl')
+    }
+    if (event.ctrlKey) {
+      parts.push('Meta')
+    }
+  } else {
+    if (event.ctrlKey) {
+      parts.push('Ctrl')
+    }
+    if (event.metaKey) {
+      parts.push('Meta')
+    }
   }
-  if (event.metaKey) {
-    parts.push('Meta')
-  }
+
   if (event.altKey) {
     parts.push('Alt')
   }
@@ -218,10 +223,25 @@ export function captureShortcut(event: KeyboardEvent): Shortcut | null {
     parts.push('Shift')
   }
 
-  if (parts.length === 0 && isModifierOnly(key)) {
+  return parts
+}
+
+export function captureShortcut(event: KeyboardEvent): Shortcut | null {
+  const os = detectPlatformOs()
+  if (event.key === 'Tab') {
     return null
   }
 
+  const key = normalizeEventKey(event.key, os)
+  if (!key) {
+    return null
+  }
+
+  if (isModifierOnly(key)) {
+    return null
+  }
+
+  const parts = eventModifierParts(event, os)
   return normalizeShortcut([...parts, key].join('+'))
 }
 

@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, vi } from 'vitest'
+import { afterEach, beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { ActionDialog } from '@/components/dialogs/ActionDialog'
 import { ContextMenu } from '@/components/menus/ContextMenu'
@@ -15,6 +15,12 @@ import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useTabsStore } from '@/stores/tabs-store'
 import type { DirectoryEntry, LoadNativeMenuRequest } from '@/lib/types/ipc'
+
+const originalPlatform = navigator.platform
+
+function setPlatform(value: string) {
+  Object.defineProperty(navigator, 'platform', { value, configurable: true })
+}
 
 function entry(name: string, isDir = true): DirectoryEntry {
   return {
@@ -49,6 +55,10 @@ beforeEach(() => {
   useSelectionStore.getState().reset()
   useInlineRenameStore.getState().reset()
   useActionDialogStore.getState().close()
+})
+
+afterEach(() => {
+  setPlatform(originalPlatform)
 })
 
 describe('FilePane state rendering', () => {
@@ -545,6 +555,19 @@ describe('FilePane state rendering', () => {
     } finally {
       window.removeEventListener('keydown', fallback)
     }
+  })
+
+  it('selects every entry with Command+A on macOS', () => {
+    setPlatform('MacIntel')
+    seedPane({ entries: [entry('Alpha', false), entry('Beta', false)], focusedEntryId: 'Alpha' })
+
+    render(<FilePane paneId="left" />)
+    const pane = screen.getByLabelText('Left pane')
+    pane.focus()
+
+    fireEvent.keyDown(pane, { key: 'a', metaKey: true })
+
+    expect(useSelectionStore.getState().selections.left.selectedIds).toEqual(['Alpha', 'Beta'])
   })
 
   it('suppresses pane shortcuts while an app-modal dialog is open', async () => {

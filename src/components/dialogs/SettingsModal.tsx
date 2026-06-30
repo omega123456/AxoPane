@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useEffectEvent, useMemo, useState } from 'react'
 import {
   AlertTriangleIcon,
   GripVerticalIcon,
@@ -182,6 +182,38 @@ function SettingsModalContent() {
     }
     return lookup
   }, [draft.bindings])
+
+  const onCaptureKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    if (!capturing) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+
+    const shortcutValue = captureShortcut(event)
+    if (!shortcutValue) {
+      return
+    }
+
+    setCapturing(null)
+    updateDraft((current) => ({
+      ...current,
+      bindings: {
+        ...current.bindings,
+        [capturing]: [shortcutValue],
+      },
+    }))
+  })
+
+  useEffect(() => {
+    if (!capturing) {
+      return
+    }
+
+    window.addEventListener('keydown', onCaptureKeyDown, true)
+    return () => window.removeEventListener('keydown', onCaptureKeyDown, true)
+  }, [capturing])
 
   async function commit(nextDraft: DraftState) {
     const previousShowHiddenFiles = usePanesStore.getState().showHiddenFiles
@@ -532,26 +564,6 @@ function SettingsModalContent() {
                                     type="button"
                                     aria-label={`Capture ${commandLabels[commandId]} shortcut`}
                                     onClick={() => setCapturing(commandId)}
-                                    onKeyDown={(event) => {
-                                      if (capturing !== commandId) {
-                                        return
-                                      }
-
-                                      event.preventDefault()
-                                      const shortcutValue = captureShortcut(event.nativeEvent)
-                                      if (!shortcutValue) {
-                                        return
-                                      }
-
-                                      setCapturing(null)
-                                      updateDraft((current) => ({
-                                        ...current,
-                                        bindings: {
-                                          ...current.bindings,
-                                          [commandId]: [shortcutValue],
-                                        },
-                                      }))
-                                    }}
                                     className="w-36 cursor-pointer rounded-tab border border-light-border-strong bg-light-surface px-3 py-2 text-left font-mono text-row text-light-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border-strong dark:bg-dark-surface dark:text-dark-text"
                                   >
                                     {capturing === commandId
