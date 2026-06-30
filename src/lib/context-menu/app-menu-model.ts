@@ -255,7 +255,6 @@ function buildFileOrFolderContent(
         ),
         ...(target.kind === 'folder' ? [calculateSizeRow(target.entry, os)] : []),
         commandRow('deletePermanent', os, { targetEntryId, danger: true }),
-        commandRow('refresh', os),
       ]),
       section('footer', [
         customRow(
@@ -310,7 +309,6 @@ function buildMultiContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
           danger: true,
           disabled: selectedEntries.length === 0,
         }),
-        commandRow('refresh', os),
         commandRow('selectAll', os, {
           disabled: pane.entries.length === 0,
         }),
@@ -412,7 +410,6 @@ function buildTreeContent(
             icon: { kind: 'app', name: 'calculate-size' },
           },
         ),
-        commandRow('refresh', os),
       ]),
       section('properties', [
         customRow(
@@ -429,7 +426,6 @@ function buildTreeContent(
 function buildTabContent(
   paneId: PaneId,
   target: Extract<ContextMenuTarget, { kind: 'tab' }>,
-  os: PlatformOs,
 ): ContextMenuContent {
   const tabs = useTabsStore.getState().panes[paneId]
   const path = usePanesStore.getState().panes[paneId].path
@@ -438,12 +434,11 @@ function buildTabContent(
     topStrip: [],
     sections: [
       section('primary', [
-        commandRow('refresh', os, { strong: true }),
         customRow(
           `open-tab-other-${target.tabId}`,
           commandLabels.openInOtherPane,
           navigateContextAction(path, 'other-pane'),
-          { icon: { kind: 'app', name: 'open-in-other-pane' } },
+          { strong: true, icon: { kind: 'app', name: 'open-in-other-pane' } },
         ),
       ]),
       section('footer', [
@@ -478,6 +473,6 @@ export function buildAppContextMenuContent(
     case 'tree':
       return buildTreeContent(target, os)
     case 'tab':
-      return buildTabContent(paneId, target, os)
+      return buildTabContent(paneId, target)
   }
 }
