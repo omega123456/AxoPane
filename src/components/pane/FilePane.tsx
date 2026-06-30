@@ -316,7 +316,16 @@ export function FilePane({ paneId }: FilePaneProps) {
           return
         }
 
-        if (isEditableTarget(event.target)) {
+        // The filter input is the one editable target inside the pane that still
+        // wants list navigation: pressing Up/Down/Enter should drive the filtered
+        // list (and open the focused entry) while keeping the cursor in the input
+        // so the user can keep refining the filter. Every other editable target
+        // (e.g. an inline rename) keeps swallowing keys as before.
+        const targetIsFilter =
+          event.target instanceof HTMLInputElement &&
+          event.target.getAttribute('aria-label') === `${pane.title} filter`
+
+        if (isEditableTarget(event.target) && !targetIsFilter) {
           return
         }
 
@@ -326,6 +335,17 @@ export function FilePane({ paneId }: FilePaneProps) {
         } else if (event.key === 'ArrowUp') {
           event.preventDefault()
           focusByRowIndex(focusedRowIndex - 1)
+        } else if (targetIsFilter) {
+          // Open the focused entry on Enter; let every other key reach the input
+          // so typing into the filter is unaffected.
+          if (event.key === 'Enter' && pane.focusedEntryId) {
+            event.preventDefault()
+            // Hand focus back to the pane shell so navigating into the new folder
+            // resumes arrow-key control instead of leaving the cursor trapped in
+            // the filter input.
+            focusPaneShell()
+            void activateEntry(pane.focusedEntryId)
+          }
         } else if (
           event.key.length === 1 &&
           // Space is a bound command (Calculate size), not a typeahead-to-filter

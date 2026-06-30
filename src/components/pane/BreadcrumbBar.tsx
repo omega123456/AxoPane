@@ -121,6 +121,10 @@ export function BreadcrumbBar({ pane, isActive }: BreadcrumbBarProps) {
             if (event.key === 'Escape') {
               event.preventDefault()
               clearFilter(pane.id)
+              // Hand keyboard focus back to the pane shell so arrow keys resume
+              // driving the list directly instead of staying trapped in the
+              // (now empty) filter input.
+              document.querySelector<HTMLElement>(`[data-pane-id="${pane.id}"]`)?.focus()
             }
           }}
           placeholder="Filter current folder"

@@ -322,6 +322,88 @@ describe('FilePane state rendering', () => {
     })
   })
 
+  it('navigates and opens the filtered list while keeping focus in the filter input', async () => {
+    const user = userEvent.setup()
+    ipc.override('list_dir', (payload) => {
+      if (payload.path === 'C:\\root\\Beta') {
+        return { path: payload.path, entries: [entry('Nested')] }
+      }
+
+      return { path: payload.path, entries: [entry('Alpha'), entry('Beta')] }
+    })
+    ipc.override('set_tab_watch', () => undefined)
+    ipc.override('save_session', (payload) => payload.session)
+    seedPane({
+      path: 'C:\\root',
+      entries: [entry('Alpha'), entry('Beta')],
+      focusedEntryId: 'Alpha',
+    })
+
+    render(<FilePane paneId="left" />)
+    const filter = screen.getByRole('textbox', { name: 'Left pane filter' })
+    await user.click(filter)
+
+    await user.keyboard('{ArrowDown}')
+    expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('Beta')
+    // Arrow navigation must not steal focus away from the filter input.
+    expect(document.activeElement).toBe(filter)
+
+    await user.keyboard('{ArrowUp}')
+    expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('Alpha')
+    expect(document.activeElement).toBe(filter)
+
+    await user.keyboard('{ArrowDown}')
+    await user.keyboard('{Enter}')
+    await waitFor(() => {
+      expect(usePanesStore.getState().panes.left.path).toBe('C:\\root\\Beta')
+    })
+    // Opening the folder returns focus to the pane shell so arrow keys keep working.
+    expect(document.activeElement).toBe(screen.getByLabelText('Left pane'))
+  })
+
+  it('clears the filter and returns focus to the pane on Escape', async () => {
+    const user = userEvent.setup()
+    // Clearing the filter reloads the folder; pin the result so the post-clear
+    // list is deterministic.
+    ipc.override('list_dir', (payload) => ({ path: payload.path, entries: [entry('Alpha')] }))
+    seedPane({
+      path: 'C:\\root\\dir',
+      entries: [entry('Alpha')],
+      filterDraft: 'Media',
+      filterApplied: 'Media',
+    })
+
+    render(<FilePane paneId="left" />)
+    const pane = screen.getByLabelText('Left pane')
+    const filter = screen.getByRole('textbox', { name: 'Left pane filter' })
+
+    await user.click(filter)
+    await user.keyboard('{Escape}')
+
+    expect(filter).toHaveValue('')
+    // Focus is back on the pane shell, so arrow keys resume driving the list.
+    expect(document.activeElement).toBe(pane)
+  })
+
+  it('still types ordinary characters into the focused filter input', async () => {
+    const user = userEvent.setup()
+    ipc.override('list_dir', (payload) => ({ path: payload.path, entries: [entry('Alpha')] }))
+    seedPane({ entries: [entry('Alpha')], filterDraft: 'Me', filterApplied: 'Me' })
+
+    render(<FilePane paneId="left" />)
+    const filter = screen.getByRole('textbox', { name: 'Left pane filter' })
+
+    await user.click(filter)
+    await user.keyboard('dia')
+
+    expect(filter).toHaveValue('Media')
+    // Let the debounced filter settle so its reload timer doesn't leak into the
+    // next test.
+    await waitFor(() => {
+      expect(usePanesStore.getState().panes.left.filterApplied).toBe('Media')
+    })
+  })
+
   it('renames inline instead of opening a modal', async () => {
     const rename = vi.fn((payload: { path: string; newName: string }) => ({
       ...entry(payload.newName, false),
