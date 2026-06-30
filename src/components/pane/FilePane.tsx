@@ -43,6 +43,7 @@ function isPermissionError(message: string | null) {
 }
 
 const PARENT_ROW_ID = '..'
+const pointerNavigationCooldownMs = 400
 
 function isEditableTarget(target: EventTarget | null) {
   return (
@@ -98,6 +99,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   const paneRef = useRef<HTMLElement | null>(null)
   const parentRef = useRef<HTMLDivElement | null>(null)
   const scrollPathRef = useRef(pane.path)
+  const lastPointerActivationRef = useRef<{ path: string; activatedAt: number } | null>(null)
   const renameSubmittingRef = useRef(false)
   const ignoreNextRenameBlurRef = useRef(false)
   const isActivePane = activePaneId === paneId
@@ -239,6 +241,26 @@ export function FilePane({ paneId }: FilePaneProps) {
 
   async function activateEntry(entryId: string) {
     executeCommand('open', paneId, entryId)
+  }
+
+  function activateEntryFromPointer(entryId: string, eventTimeStamp?: number) {
+    const lastActivation = lastPointerActivationRef.current
+    const activationTime = eventTimeStamp ?? Number.POSITIVE_INFINITY
+
+    // Mouse-macro double-clicks can keep firing after the pane has already
+    // navigated and re-rendered a different row under the pointer. Ignore one
+    // immediate follow-up activation across a path change so the gesture opens
+    // exactly one level.
+    if (
+      lastActivation &&
+      lastActivation.path !== pane.path &&
+      activationTime - lastActivation.activatedAt < pointerNavigationCooldownMs
+    ) {
+      return
+    }
+
+    lastPointerActivationRef.current = { path: pane.path, activatedAt: activationTime }
+    void activateEntry(entryId)
   }
 
   function selectWithModifiers(entryId: string, event: React.MouseEvent<HTMLButtonElement>) {
@@ -430,7 +452,9 @@ export function FilePane({ paneId }: FilePaneProps) {
                       isActivePane={isActivePane}
                       isFocused={pane.focusedEntryId === PARENT_ROW_ID}
                       onPointerDown={focusPaneShell}
-                      onActivate={() => void activateEntry(PARENT_ROW_ID)}
+                      onActivate={(eventTimeStamp) =>
+                        activateEntryFromPointer(PARENT_ROW_ID, eventTimeStamp)
+                      }
                       onFocus={() => focusByRowIndex(0)}
                     />
                   </div>
@@ -455,7 +479,9 @@ export function FilePane({ paneId }: FilePaneProps) {
                     renameBusy={rename?.entryId === entry.id ? rename.busy : false}
                     renameError={rename?.entryId === entry.id ? rename.error : null}
                     onPointerDown={focusPaneShell}
-                    onActivate={() => void activateEntry(entry.id)}
+                    onActivate={(eventTimeStamp) =>
+                      activateEntryFromPointer(entry.id, eventTimeStamp)
+                    }
                     onClick={(event) => selectWithModifiers(entry.id, event)}
                     onMiddleClick={() => void openTabFromPath(paneId, entry.path)}
                     onContextMenu={(event) => showMenu(event, entry.id)}

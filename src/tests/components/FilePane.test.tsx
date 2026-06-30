@@ -146,6 +146,31 @@ describe('FilePane state rendering', () => {
     expect(goUp).toHaveBeenCalledWith('left')
   })
 
+  it('ignores an immediate follow-up parent-row double-click after the pane path changes', () => {
+    const originalGoUp = usePanesStore.getState().goUp
+    const goUp = vi.fn(() => Promise.resolve())
+    try {
+      usePanesStore.setState({ goUp })
+      seedPane({ path: 'C:\\root\\dir', entries: [] })
+
+      const view = render(<FilePane paneId="left" />)
+      fireEvent.doubleClick(screen.getByRole('row', { name: 'Go to parent folder' }))
+
+      usePanesStore.setState((state) => ({
+        panes: {
+          ...state.panes,
+          left: { ...state.panes.left, path: 'C:\\root', entries: [] },
+        },
+      }))
+      view.rerender(<FilePane paneId="left" />)
+
+      fireEvent.doubleClick(screen.getByRole('row', { name: 'Go to parent folder' }))
+      expect(goUp).toHaveBeenCalledOnce()
+    } finally {
+      usePanesStore.setState({ goUp: originalGoUp })
+    }
+  })
+
   it('omits the parent row at a drive root', () => {
     seedPane({ path: 'C:\\', entries: [entry('Alpha')] })
     render(<FilePane paneId="left" />)
@@ -200,6 +225,40 @@ describe('FilePane state rendering', () => {
 
     await user.pointer({ keys: '[MouseMiddle]', target: row })
     expect(useTabsStore.getState().panes.left.tabs.length).toBeGreaterThan(1)
+  })
+
+  it('ignores an immediate follow-up folder double-click after a fast path change', () => {
+    const originalNavigatePane = usePanesStore.getState().navigatePane
+    const navigatePane = vi.fn(() => Promise.resolve())
+    try {
+      usePanesStore.setState({ navigatePane })
+      seedPane({
+        entries: [entry('Alpha')],
+        focusedEntryId: 'Alpha',
+      })
+
+      const view = render(<FilePane paneId="left" />)
+      fireEvent.doubleClick(screen.getByRole('row', { name: /Alpha/ }))
+
+      usePanesStore.setState((state) => ({
+        panes: {
+          ...state.panes,
+          left: {
+            ...state.panes.left,
+            path: 'C:\\root\\Alpha',
+            entries: [entry('Alpha')],
+            focusedEntryId: 'Alpha',
+          },
+        },
+      }))
+      view.rerender(<FilePane paneId="left" />)
+
+      fireEvent.doubleClick(screen.getByRole('row', { name: /Alpha/ }))
+      expect(navigatePane).toHaveBeenCalledOnce()
+      expect(navigatePane).toHaveBeenCalledWith('left', 'C:\\root\\Alpha')
+    } finally {
+      usePanesStore.setState({ navigatePane: originalNavigatePane })
+    }
   })
 
   it('restores history scroll after returning from a folder too short to scroll', () => {

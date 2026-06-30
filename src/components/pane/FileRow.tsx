@@ -14,7 +14,7 @@ type FileRowProps = {
   isFocused: boolean
   isSelected: boolean
   onPointerDown: () => void
-  onActivate: () => void
+  onActivate: (eventTimeStamp: number) => void
   onClick: (event: MouseEvent<HTMLButtonElement>) => void
   onContextMenu: (event: MouseEvent<HTMLButtonElement>) => void
   onMiddleClick: () => void
@@ -196,7 +196,7 @@ export function FileRow({
         event.preventDefault()
         onPointerDown()
       }}
-      onDoubleClick={onActivate}
+      onDoubleClick={(event) => onActivate(event.timeStamp)}
       onClick={onClick}
       onContextMenu={onContextMenu}
       onAuxClick={(event) => {
