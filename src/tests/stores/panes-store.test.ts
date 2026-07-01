@@ -901,6 +901,31 @@ describe('panes-store icons', () => {
     expect(usePanesStore.getState().pendingIconRequests['C:\\root\\installer.exe']).toBeUndefined()
   })
 
+  it('hydrates a later pane from the resolved icon cache for the same path', async () => {
+    const request = vi.fn(() => undefined)
+    ipc.override('request_icons', request)
+    ipc.override('list_dir', (payload) => ({
+      path: payload.path,
+      entries: [dirAt(`${payload.path}\\installer.exe`, false)],
+    }))
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    usePanesStore.getState().applyIconState({
+      path: 'C:\\root\\installer.exe',
+      iconDataUrl: 'data:image/png;base64,abc',
+    })
+
+    await usePanesStore.getState().navigatePane('right', 'C:\\root')
+
+    const rightEntry = usePanesStore
+      .getState()
+      .panes.right.entries.find((item) => item.path === 'C:\\root\\installer.exe')
+    expect(rightEntry?.iconDataUrl).toBe('data:image/png;base64,abc')
+
+    await usePanesStore.getState().requestVisibleIcons('right', ['C:\\root\\installer.exe'])
+    expect(request).not.toHaveBeenCalled()
+  })
+
   it('requests icons only for visible, iconless files and dedupes pending requests', async () => {
     const request = vi.fn(() => undefined)
     ipc.override('request_icons', request)

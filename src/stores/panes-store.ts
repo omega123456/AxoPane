@@ -74,12 +74,14 @@ type PaneState = {
 
 type PendingSizeRequests = Record<string, true>
 type PendingIconRequests = Record<string, true>
-// Paths that have received a `request_icons` response, whether or not it
-// carried an icon. Most files never resolve to an icon (non-Windows, or a
-// Windows extension outside the native-icon allowlist), so "no icon yet"
-// cannot mean "still needs a request" — without this permanent record the
-// dedup below would re-request the same never-resolving files forever.
-type ResolvedIconPaths = Record<string, true>
+// Paths that have received a `request_icons` response, keyed to the resolved
+// data URL or `null` when the backend deliberately found no native icon. Most
+// files never resolve to an icon (non-Windows, or a Windows extension outside
+// the native-icon allowlist), so "no icon yet" cannot mean "still needs a
+// request": without this permanent record the dedup below would re-request
+// the same never-resolving files forever. Keeping the value also lets panes
+// opened after the first response hydrate their rows from the cache.
+type ResolvedIconPaths = Record<string, string | null>
 
 type InitializePayload = {
   session: SessionState
@@ -402,10 +404,34 @@ function collectPendingIconRequests(
     return (
       entry != null &&
       !entry.isDir &&
-      !resolvedIconPaths[path] &&
+      entry.iconDataUrl == null &&
+      !hasResolvedIconPath(resolvedIconPaths, path) &&
       !pendingIconRequests[path]
     )
   })
+}
+
+function hasResolvedIconPath(resolvedIconPaths: ResolvedIconPaths, path: string) {
+  return Object.prototype.hasOwnProperty.call(resolvedIconPaths, path)
+}
+
+function withResolvedIcons(entries: DirectoryEntry[], resolvedIconPaths: ResolvedIconPaths) {
+  let changed = false
+  const nextEntries = entries.map((entry) => {
+    if (entry.isDir || !hasResolvedIconPath(resolvedIconPaths, entry.path)) {
+      return entry
+    }
+
+    const iconDataUrl = resolvedIconPaths[entry.path]
+    if (entry.iconDataUrl === iconDataUrl) {
+      return entry
+    }
+
+    changed = true
+    return { ...entry, iconDataUrl }
+  })
+
+  return changed ? nextEntries : entries
 }
 
 function withPendingIconRequests(
@@ -653,6 +679,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
 
         set((state) => {
           const previous = state.panes[paneId]
+          const entries = withResolvedIcons(sortedEntries, state.resolvedIconPaths)
           const restoredFocusId = findMatchingEntryId(sortedEntries, [
             selection.focusedId,
             previous.focusedEntryId,
@@ -669,7 +696,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
               [paneId]: {
                 ...previous,
                 path: pane.path,
-                entries: sortedEntries,
+                entries,
                 focusedEntryId: restoredFocusId ?? sortedEntries[0]?.id ?? null,
                 loading: false,
                 ...seeded,
@@ -712,6 +739,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
 
       set((state) => {
         const previous = state.panes[paneId]
+        const entries = withResolvedIcons(sortedEntries, state.resolvedIconPaths)
         const restoredFocusId = findMatchingEntryId(sortedEntries, [
           selection.focusedId,
           previous.focusedEntryId,
@@ -730,7 +758,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
             [paneId]: {
               ...previous,
               path: response.path,
-              entries: sortedEntries,
+              entries,
               focusedEntryId: restoredFocusId ?? sortedEntries[0]?.id ?? null,
               loading: false,
               ...seeded,
@@ -1047,17 +1075,18 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         removed: event.removed.length,
       })
 
-      const focusedStillPresent = nextEntries.some((entry) => entry.id === pane.focusedEntryId)
+      const entries = withResolvedIcons(nextEntries, state.resolvedIconPaths)
+      const focusedStillPresent = entries.some((entry) => entry.id === pane.focusedEntryId)
 
       return {
         panes: {
           ...state.panes,
           [paneId]: {
             ...pane,
-            entries: nextEntries,
+            entries,
             focusedEntryId: focusedStillPresent
               ? pane.focusedEntryId
-              : (nextEntries[0]?.id ?? null),
+              : (entries[0]?.id ?? null),
           },
         },
       }
@@ -1270,7 +1299,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         pendingIconRequests: withPendingIconRequests(state.pendingIconRequests, [event.path], false),
         // Recorded even when `iconDataUrl` is null: a resolved-to-nothing
         // result must stop future requests just as much as a real icon does.
-        resolvedIconPaths: { ...state.resolvedIconPaths, [event.path]: true },
+        resolvedIconPaths: { ...state.resolvedIconPaths, [event.path]: event.iconDataUrl },
       }
     }),
   setEverythingStatus: (everythingStatus) => set({ everythingStatus }),

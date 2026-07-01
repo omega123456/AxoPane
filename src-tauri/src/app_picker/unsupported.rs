@@ -1,4 +1,6 @@
-use super::types::{GetDefaultApplicationResponse, ListApplicationsResponse, MacApp};
+use super::types::{GetDefaultApplicationResponse, ListApplicationsResponse};
+#[cfg(feature = "test-utils")]
+use super::types::MacApp;
 use crate::ipc::types::MenuActionStatus;
 
 /// Under `feature = "test-utils"` the app list is a small, deterministic fake
