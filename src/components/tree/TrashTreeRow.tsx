@@ -42,7 +42,7 @@ export function TrashTreeRow() {
             ),
           })
         }}
-        className={`flex items-center gap-1 rounded-tab pr-2 text-row ${
+        className={`flex items-center gap-1 rounded-tab pr-2 text-row hover:bg-light-hover dark:hover:bg-dark-hover ${
           isCurrent
             ? 'bg-accent-blue-soft text-accent-blue-light dark:text-accent-blue'
             : 'text-light-text-soft dark:text-dark-text-soft'
