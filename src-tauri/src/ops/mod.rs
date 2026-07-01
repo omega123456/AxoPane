@@ -28,6 +28,8 @@ use crate::volumes::VolumeInfo;
 pub const DEFAULT_COMPLETED_RETENTION: Duration = Duration::from_secs(4);
 /// How often active operations recompute their short-window instantaneous rate.
 pub const DEFAULT_RATE_WINDOW: Duration = Duration::from_millis(250);
+/// Minimum spacing between progress emissions while deleting individual files.
+const DELETE_EMIT_INTERVAL: Duration = Duration::from_millis(90);
 
 /// Number of progress samples required before an ETA is considered stable enough
 /// to surface to the UI.
@@ -128,6 +130,20 @@ type ConflictEmitter = Arc<dyn Fn(ConflictInfo) + Send + Sync>;
 /// Emits the id of an operation once it has been auto-removed from the queue.
 type RemovedEmitter = Arc<dyn Fn(String) + Send + Sync>;
 type InstantNow = Arc<dyn Fn() -> Instant + Send + Sync>;
+
+struct DeleteThrottle {
+    last_emit: Instant,
+    interval: Duration,
+}
+
+impl DeleteThrottle {
+    fn new(last_emit: Instant, interval: Duration) -> Self {
+        Self {
+            last_emit,
+            interval,
+        }
+    }
+}
 
 /// Shared, mutable per-operation control + state.
 pub struct OpState {
@@ -783,6 +799,7 @@ fn run_operation(id: String, inner: &Arc<Mutex<Inner>>, runtime: &WorkerRuntime)
     }
 
     let items = op_arc.lock().expect("op lock").items.clone();
+    measure_delete_totals_up_front(&items, &op_arc, &progress);
 
     let start = instant_now();
 
@@ -861,8 +878,7 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
         {
             return;
         }
-        let add_discovered_totals = item.size_bytes == 0 && source.is_dir();
-        match delete_path_with_progress(&source, add_discovered_totals, ctx) {
+        match delete_path_with_progress(&source, false, ctx) {
             Ok(()) => {
                 if op_arc
                     .lock()
@@ -1042,6 +1058,41 @@ pub fn archive_root_name_for_tests(source: &Path) -> PathBuf {
 #[cfg(feature = "test-utils")]
 pub fn begin_file_progress_for_tests(ctx: &WorkerCtx<'_>, source: &Path, total_bytes: u64) {
     begin_file_progress(ctx, source, total_bytes);
+}
+
+fn measure_delete_totals_up_front(
+    items: &[OpItem],
+    op_arc: &Arc<Mutex<OpState>>,
+    progress: &Option<ProgressEmitter>,
+) {
+    let (kind, cancel) = {
+        let op = op_arc.lock().expect("op lock");
+        (op.kind, op.cancel.clone())
+    };
+    if !matches!(kind, OpKind::Delete) {
+        return;
+    }
+
+    let mut discovered_bytes = 0_u64;
+    for item in items.iter().filter(|item| item.size_bytes == 0) {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        discovered_bytes = discovered_bytes.saturating_add(measure_delete_size(
+            &PathBuf::from(&item.source_path),
+            &cancel,
+        ));
+    }
+
+    if discovered_bytes == 0 || cancel.load(Ordering::Relaxed) {
+        return;
+    }
+
+    let mut op = op_arc.lock().expect("op lock");
+    op.total_bytes = op.total_bytes.saturating_add(discovered_bytes);
+    if let Some(emitter) = progress {
+        emitter(op.progress());
+    }
 }
 
 /// Surface a conflict and block until the user resolves it (or it is cancelled).
@@ -1691,6 +1742,16 @@ pub fn measure_tree_size(path: &Path, cancel: &Arc<AtomicBool>) -> u64 {
     total
 }
 
+fn measure_delete_size(path: &Path, cancel: &Arc<AtomicBool>) -> u64 {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+            measure_tree_size(path, cancel)
+        }
+        Ok(metadata) => metadata.len(),
+        Err(_) => 0,
+    }
+}
+
 pub fn copy_path(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(), String> {
     copy_path_with_total_discovery(source, target, false, ctx)
 }
@@ -1786,11 +1847,21 @@ pub fn delete_path_with_progress(
     add_discovered_totals: bool,
     ctx: &WorkerCtx<'_>,
 ) -> Result<(), String> {
+    let mut throttle = DeleteThrottle::new((ctx.instant_now)(), DELETE_EMIT_INTERVAL);
+    delete_path_with_progress_throttled(source, add_discovered_totals, ctx, &mut throttle)
+}
+
+fn delete_path_with_progress_throttled(
+    source: &Path,
+    add_discovered_totals: bool,
+    ctx: &WorkerCtx<'_>,
+    throttle: &mut DeleteThrottle,
+) -> Result<(), String> {
     let metadata = fs::symlink_metadata(source).map_err(|error| error.to_string())?;
     if metadata.is_dir() && !metadata.file_type().is_symlink() {
-        delete_dir_recursive(source, add_discovered_totals, ctx)
+        delete_dir_recursive(source, add_discovered_totals, ctx, throttle)
     } else {
-        delete_file_with_progress(source, add_discovered_totals, ctx)
+        delete_file_with_progress(source, add_discovered_totals, ctx, throttle)
     }
 }
 
@@ -1798,6 +1869,7 @@ fn delete_dir_recursive(
     source: &Path,
     add_discovered_totals: bool,
     ctx: &WorkerCtx<'_>,
+    throttle: &mut DeleteThrottle,
 ) -> Result<(), String> {
     for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
         if ctx
@@ -1813,9 +1885,9 @@ fn delete_dir_recursive(
         let entry = entry.map_err(|error| error.to_string())?;
         let file_type = entry.file_type().map_err(|error| error.to_string())?;
         if file_type.is_dir() && !file_type.is_symlink() {
-            delete_dir_recursive(&entry.path(), add_discovered_totals, ctx)?;
+            delete_dir_recursive(&entry.path(), add_discovered_totals, ctx, throttle)?;
         } else {
-            delete_file_with_progress(&entry.path(), add_discovered_totals, ctx)?;
+            delete_file_with_progress(&entry.path(), add_discovered_totals, ctx, throttle)?;
         }
     }
 
@@ -1836,6 +1908,7 @@ fn delete_file_with_progress(
     source: &Path,
     add_discovered_totals: bool,
     ctx: &WorkerCtx<'_>,
+    throttle: &mut DeleteThrottle,
 ) -> Result<(), String> {
     wait_while_paused(ctx.op_arc, ctx.resolver);
     if ctx
@@ -1851,14 +1924,34 @@ fn delete_file_with_progress(
     let file_size = fs::symlink_metadata(source)
         .map(|metadata| metadata.len())
         .unwrap_or(0);
-    if add_discovered_totals {
-        add_discovered_total(ctx, file_size);
-    }
-    begin_file_progress(ctx, source, file_size);
     fs::remove_file(source).map_err(|error| error.to_string())?;
-    report_chunk_progress(ctx, file_size);
-    finish_file_progress(ctx);
+
+    {
+        let mut op = ctx.op_arc.lock().expect("op lock");
+        if add_discovered_totals {
+            op.total_bytes = op.total_bytes.saturating_add(file_size);
+        }
+        op.copied_bytes = op.copied_bytes.saturating_add(file_size);
+        op.current_file_name = None;
+        op.current_file_copied = 0;
+        op.current_file_total = 0;
+        refresh_rate_locked_with_now(&mut op, ctx.start, ctx.rate_window, (ctx.instant_now)());
+    }
+    maybe_emit_delete(ctx, throttle);
     Ok(())
+}
+
+fn maybe_emit_delete(ctx: &WorkerCtx<'_>, throttle: &mut DeleteThrottle) {
+    let now = (ctx.instant_now)();
+    if now.saturating_duration_since(throttle.last_emit) < throttle.interval {
+        return;
+    }
+
+    throttle.last_emit = now;
+    let op = ctx.op_arc.lock().expect("op lock");
+    if let Some(emitter) = ctx.progress {
+        emitter(op.progress());
+    }
 }
 
 pub fn move_path(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(), String> {

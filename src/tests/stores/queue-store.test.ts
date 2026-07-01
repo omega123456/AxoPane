@@ -157,6 +157,63 @@ describe('queue store', () => {
     expect(useQueueStore.getState().throughputPeak['op-1']).toBe(90)
   })
 
+  it('keeps delete throughput history when progress is monotonic', () => {
+    useQueueStore.getState().applyProgress(
+      progress({
+        operationId: 'delete-1',
+        kind: 'delete',
+        itemNames: ['folder'],
+        totalItems: 1,
+        completedItems: 0,
+        totalBytes: 100,
+        copiedBytes: 0,
+        progressPercent: 0,
+        bytesPerSecond: 0,
+        currentFileName: null,
+        currentFileCopiedBytes: 0,
+        currentFileTotalBytes: 0,
+      }),
+    )
+    useQueueStore.getState().applyProgress(
+      progress({
+        operationId: 'delete-1',
+        kind: 'delete',
+        itemNames: ['folder'],
+        totalItems: 1,
+        completedItems: 0,
+        totalBytes: 100,
+        copiedBytes: 40,
+        progressPercent: 40,
+        bytesPerSecond: 400,
+        currentFileName: null,
+        currentFileCopiedBytes: 0,
+        currentFileTotalBytes: 0,
+      }),
+    )
+    useQueueStore.getState().applyProgress(
+      progress({
+        operationId: 'delete-1',
+        kind: 'delete',
+        itemNames: ['folder'],
+        totalItems: 1,
+        completedItems: 1,
+        totalBytes: 100,
+        copiedBytes: 100,
+        progressPercent: 100,
+        bytesPerSecond: 100,
+        currentFileName: null,
+        currentFileCopiedBytes: 0,
+        currentFileTotalBytes: 0,
+      }),
+    )
+
+    expect(useQueueStore.getState().throughputHistory['delete-1']).toEqual([
+      sample(0, 0),
+      sample(40, 100),
+      sample(100, 100),
+    ])
+  })
+
   it('preserves existing throughput history when hydrate runs again', () => {
     useQueueStore.getState().applyProgress(progress({ operationId: 'op-1', progressPercent: 40 }))
     useQueueStore

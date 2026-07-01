@@ -1,7 +1,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use file_explorer_lib::ops::{
-    ConflictResolution, OpItem, OpKind, OpProgress, OpStatus, OpsService, StartOpRequest,
+    ConflictResolution, OpItem, OpKind, OpProgress, OpState, OpStatus, OpsService, StartOpRequest,
 };
 use file_explorer_lib::volumes::VolumeInfo;
 use tempfile::tempdir;
@@ -46,6 +46,39 @@ fn deterministic_instants(offsets_ms: &[u64]) -> impl Fn() -> Instant + Send + S
     move || {
         let mut guard = instants.lock().expect("instant queue lock");
         guard.pop_front().unwrap_or(last)
+    }
+}
+
+fn pending_delete_state(id: &str, items: Vec<OpItem>) -> OpState {
+    let total_items = items.len() as u64;
+    let total_bytes = items.iter().map(|item| item.size_bytes).sum();
+    OpState {
+        id: id.to_string(),
+        kind: OpKind::Delete,
+        destination_dir: Path::new("").to_path_buf(),
+        items,
+        volumes: HashSet::from(["test-volume".to_string()]),
+        status: OpStatus::Pending,
+        total_items,
+        completed_items: 0,
+        total_bytes,
+        copied_bytes: 0,
+        bytes_per_second: 0,
+        eta_seconds: None,
+        sample_count: 0,
+        rate_sample_at: None,
+        rate_sample_bytes: 0,
+        current_file_name: None,
+        current_file_copied: 0,
+        current_file_total: 0,
+        error_message: None,
+        completed_at: None,
+        cancel: Arc::new(AtomicBool::new(false)),
+        pause: Arc::new(AtomicBool::new(false)),
+        conflict: None,
+        conflict_resolution: None,
+        apply_to_all: None,
+        rename_to: None,
     }
 }
 
@@ -161,6 +194,60 @@ fn delete_removes_files_and_directories_through_the_queue() {
 
     assert!(!file.exists());
     assert!(!tree.exists());
+}
+
+#[test]
+fn delete_directory_progress_is_monotonic_and_coalesced() {
+    let dir = tempdir().expect("temp dir");
+    let tree = dir.path().join("many");
+    fs::create_dir(&tree).expect("tree");
+    for index in 0..25 {
+        fs::write(tree.join(format!("file-{index}.txt")), b"abcd").expect("child");
+    }
+
+    let emitted = Arc::new(Mutex::new(Vec::<OpProgress>::new()));
+    let emitted_sink = emitted.clone();
+    let mut service = OpsService::new(Duration::from_millis(50));
+    service.set_instant_now_for_tests(Arc::new(deterministic_instants(&[0, 0, 0, 0, 100])));
+    service.set_progress_emitter(Arc::new(move |progress| {
+        emitted_sink.lock().expect("progress lock").push(progress);
+    }));
+    service.insert_op_for_tests(pending_delete_state(
+        "delete-many",
+        vec![OpItem {
+            source_path: tree.to_string_lossy().into_owned(),
+            name: "many".to_string(),
+            size_bytes: 0,
+        }],
+    ));
+
+    service.run_operation_for_tests("delete-many");
+
+    assert!(!tree.exists());
+    let progress = emitted.lock().expect("progress lock");
+    assert!(
+        progress.len() <= 6,
+        "too many delete progress events: {progress:?}"
+    );
+    assert!(progress
+        .iter()
+        .any(|snapshot| snapshot.status == OpStatus::Active && snapshot.total_bytes == 100));
+
+    for pair in progress.windows(2) {
+        assert!(
+            pair[1].progress_percent >= pair[0].progress_percent,
+            "delete progress regressed from {} to {}",
+            pair[0].progress_percent,
+            pair[1].progress_percent
+        );
+    }
+
+    let final_progress = progress.last().expect("final progress");
+    assert_eq!(final_progress.status, OpStatus::Completed);
+    assert_eq!(final_progress.total_items, 1);
+    assert_eq!(final_progress.completed_items, 1);
+    assert_eq!(final_progress.total_bytes, 100);
+    assert_eq!(final_progress.copied_bytes, 100);
 }
 
 #[test]
