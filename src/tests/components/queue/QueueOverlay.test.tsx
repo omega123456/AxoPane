@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { QueueOverlay } from '@/components/queue/QueueOverlay'
 import type { OpProgress, OpSnapshot } from '@/lib/types/ipc'
+import { useConfigStore } from '@/stores/config-store'
 import { useQueueStore } from '@/stores/queue-store'
 
 function progress(overrides: Partial<OpProgress>): OpProgress {
@@ -30,10 +31,11 @@ function progress(overrides: Partial<OpProgress>): OpProgress {
   }
 }
 
-beforeEach(() => {
-  ipc.install()
-  useQueueStore.getState().reset()
-})
+  beforeEach(() => {
+    ipc.install()
+    useConfigStore.getState().reset()
+    useQueueStore.getState().reset()
+  })
 
 describe('QueueOverlay', () => {
   it('renders nothing when there is no queue work', async () => {
@@ -83,6 +85,48 @@ describe('QueueOverlay', () => {
     expect(await screen.findByRole('region', { name: 'Job queue' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /Fewer details/ }))
     expect(screen.queryByRole('region', { name: 'Job queue' })).not.toBeInTheDocument()
+  })
+
+  it('auto-expands when a new active queue job appears and the preference is enabled', async () => {
+    act(() => {
+      useConfigStore.setState({ autoExpandActiveQueueToasts: true })
+    })
+    ipc.override('queue_snapshot', [])
+    render(<QueueOverlay />)
+
+    await waitFor(() => {
+      expect(screen.queryByRole('region', { name: 'Job queue' })).not.toBeInTheDocument()
+    })
+
+    act(() => {
+      ipc.emit('queue://progress', progress({}))
+    })
+
+    expect(await screen.findByRole('region', { name: 'Job queue' })).toBeInTheDocument()
+  })
+
+  it('does not auto-reopen a queue the user manually collapsed while work remains active', async () => {
+    const user = userEvent.setup()
+    act(() => {
+      useConfigStore.setState({ autoExpandActiveQueueToasts: true })
+    })
+    ipc.override('queue_snapshot', [{ progress: progress({}), conflict: null }])
+    render(<QueueOverlay />)
+
+    expect(await screen.findByRole('region', { name: 'Job queue' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /Fewer details/ }))
+    expect(screen.queryByRole('region', { name: 'Job queue' })).not.toBeInTheDocument()
+
+    act(() => {
+      ipc.emit('queue://progress', progress({ progressPercent: 50, copiedBytes: 500 }))
+    })
+
+    await waitFor(() => {
+      expect(useQueueStore.getState().operations['op-1'].progressPercent).toBe(50)
+    })
+    expect(screen.queryByRole('region', { name: 'Job queue' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Expand job queue' })).toBeInTheDocument()
   })
 
   it('applies live progress events', async () => {

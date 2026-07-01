@@ -164,6 +164,7 @@ export type AppConfig = {
   showSeconds: boolean
   relativeDates: boolean
   autoFolderSize: boolean
+  autoExpandActiveQueueToasts: boolean
 }
 
 export type SessionTab = {

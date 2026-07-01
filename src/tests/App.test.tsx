@@ -153,6 +153,7 @@ describe('App', () => {
       showSeconds: false,
       relativeDates: false,
       autoFolderSize: true,
+      autoExpandActiveQueueToasts: false,
       keybindings: {
         refresh: ['F5'],
       },

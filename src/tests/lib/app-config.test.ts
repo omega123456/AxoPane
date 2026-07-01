@@ -53,16 +53,24 @@ describe('app-config date display', () => {
     expect(defaultAppConfig().showTime).toBe(false)
     expect(defaultAppConfig().showSeconds).toBe(false)
     expect(defaultAppConfig().relativeDates).toBe(false)
+    expect(defaultAppConfig().autoExpandActiveQueueToasts).toBe(false)
   })
 
-  it('hydrates date format, time, seconds, and relative toggles into the store', () => {
+  it('hydrates date format, time, seconds, relative toggles, and queue toast expansion into the store', () => {
     hydrateAppConfig(
-      baseConfig({ dateFormat: 'med', showTime: true, showSeconds: true, relativeDates: true }),
+      baseConfig({
+        dateFormat: 'med',
+        showTime: true,
+        showSeconds: true,
+        relativeDates: true,
+        autoExpandActiveQueueToasts: true,
+      }),
     )
     expect(useConfigStore.getState().dateFormat).toBe('med')
     expect(useConfigStore.getState().showTime).toBe(true)
     expect(useConfigStore.getState().showSeconds).toBe(true)
     expect(useConfigStore.getState().relativeDates).toBe(true)
+    expect(useConfigStore.getState().autoExpandActiveQueueToasts).toBe(true)
   })
 
   it('falls back to the default for an invalid persisted date format', () => {
@@ -89,20 +97,29 @@ describe('app-config date display', () => {
         showTime: undefined as unknown as boolean,
         showSeconds: undefined as unknown as boolean,
         relativeDates: undefined as unknown as boolean,
+        autoExpandActiveQueueToasts: undefined as unknown as boolean,
       }),
     )
     expect(useConfigStore.getState().showTime).toBe(false)
     expect(useConfigStore.getState().showSeconds).toBe(false)
     expect(useConfigStore.getState().relativeDates).toBe(false)
+    expect(useConfigStore.getState().autoExpandActiveQueueToasts).toBe(false)
   })
 
   it('round-trips the date settings through buildAppConfig', () => {
     hydrateAppConfig(
-      baseConfig({ dateFormat: 'dme', showTime: true, showSeconds: true, relativeDates: true }),
+      baseConfig({
+        dateFormat: 'dme',
+        showTime: true,
+        showSeconds: true,
+        relativeDates: true,
+        autoExpandActiveQueueToasts: true,
+      }),
     )
     expect(buildAppConfig().dateFormat).toBe('dme')
     expect(buildAppConfig().showTime).toBe(true)
     expect(buildAppConfig().showSeconds).toBe(true)
     expect(buildAppConfig().relativeDates).toBe(true)
+    expect(buildAppConfig().autoExpandActiveQueueToasts).toBe(true)
   })
 })

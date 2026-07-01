@@ -39,6 +39,7 @@ describe('EverythingBanner', () => {
       showSeconds: false,
       relativeDates: false,
       autoFolderSize: true,
+      autoExpandActiveQueueToasts: false,
       keybindings: {},
       columns: [],
       layout: {

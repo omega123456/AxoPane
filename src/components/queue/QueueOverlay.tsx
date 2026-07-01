@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { QueuePanel } from '@/components/queue/QueuePanel'
 import { QueueToast } from '@/components/queue/QueueToast'
 import { onQueueConflict, onQueueProgress, onQueueRemoved } from '@/lib/ipc/events'
 import { queueSnapshot } from '@/lib/queue-commands'
-import { orderedOperations, useQueueStore } from '@/stores/queue-store'
+import { useConfigStore } from '@/stores/config-store'
+import { isTerminal, orderedOperations, useQueueStore } from '@/stores/queue-store'
 
 /**
  * Bottom-right job queue surface: a collapsed toast that expands into the
@@ -39,6 +40,10 @@ export function QueueOverlay() {
   const resume = useQueueStore((state) => state.resume)
   const cancel = useQueueStore((state) => state.cancel)
   const retry = useQueueStore((state) => state.retry)
+  const autoExpandActiveQueueToasts = useConfigStore(
+    (state) => state.autoExpandActiveQueueToasts,
+  )
+  const hadActiveWorkRef = useRef(false)
 
   useEffect(() => {
     void queueSnapshot().then(hydrate)
@@ -106,6 +111,20 @@ export function QueueOverlay() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onKeyDown])
+
+  const hasActiveWork = operations.some((operation) => !isTerminal(operation.status))
+
+  useEffect(() => {
+    if (
+      autoExpandActiveQueueToasts &&
+      !expanded &&
+      hasActiveWork &&
+      !hadActiveWorkRef.current
+    ) {
+      setExpanded(true)
+    }
+    hadActiveWorkRef.current = hasActiveWork
+  }, [autoExpandActiveQueueToasts, expanded, hasActiveWork, setExpanded])
 
   if (operations.length === 0 && !conflict) {
     return null

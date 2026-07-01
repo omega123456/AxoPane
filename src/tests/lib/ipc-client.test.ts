@@ -93,6 +93,7 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
         showSeconds: false,
         relativeDates: false,
         autoFolderSize: true,
+        autoExpandActiveQueueToasts: false,
         keybindings: {},
         columns: [],
         layout: {

@@ -107,6 +107,30 @@ describe('SettingsModal', () => {
     expect(screen.getByText('Changes apply immediately.')).toBeInTheDocument()
   })
 
+  it('auto-saves the active queue toast expansion toggle', async () => {
+    const user = userEvent.setup()
+    const saveConfig = vi.fn((payload) => payload.config)
+    ipc.override('save_config', saveConfig)
+    useSettingsStore.getState().open('layout')
+
+    render(<SettingsModal />)
+    await screen.findByText('build 0.1.0', { exact: false })
+
+    const toggle = screen.getByRole('switch', { name: 'Auto-expand active queue toasts' })
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+
+    await user.click(toggle)
+
+    await waitFor(() => {
+      expect(useConfigStore.getState().autoExpandActiveQueueToasts).toBe(true)
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({ autoExpandActiveQueueToasts: true }),
+        }),
+      )
+    })
+  })
+
   it('hides the auto folder size toggle on macOS even when Everything is available', async () => {
     useSettingsStore.getState().open('layout')
     setPlatform('MacIntel')

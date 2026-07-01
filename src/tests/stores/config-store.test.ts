@@ -20,6 +20,7 @@ describe('config-store', () => {
       showSeconds: false,
       relativeDates: true,
       autoFolderSize: false,
+      autoExpandActiveQueueToasts: true,
     })
 
     const state = useConfigStore.getState()
@@ -29,6 +30,7 @@ describe('config-store', () => {
     expect(state.dateFormat).toBe('dmy')
     expect(state.relativeDates).toBe(true)
     expect(state.autoFolderSize).toBe(false)
+    expect(state.autoExpandActiveQueueToasts).toBe(true)
   })
 
   it('persists the update check interval through save_config', async () => {
@@ -115,6 +117,20 @@ describe('config-store', () => {
     )
   })
 
+  it('persists the auto-expand-active-queue-toasts toggle through save_config', async () => {
+    const saveConfig = vi.fn((payload) => payload.config)
+    ipc.override('save_config', saveConfig)
+
+    await useConfigStore.getState().setAutoExpandActiveQueueToasts(true)
+
+    expect(useConfigStore.getState().autoExpandActiveQueueToasts).toBe(true)
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({ autoExpandActiveQueueToasts: true }),
+      }),
+    )
+  })
+
   it('hydrates the log level and applies + persists a new level', async () => {
     useConfigStore.getState().hydrate({
       theme: 'light',
@@ -127,6 +143,7 @@ describe('config-store', () => {
       showSeconds: false,
       relativeDates: false,
       autoFolderSize: true,
+      autoExpandActiveQueueToasts: false,
     })
     expect(useConfigStore.getState().logLevel).toBe('warn')
 
@@ -151,6 +168,7 @@ describe('config-store', () => {
       showSeconds: false,
       relativeDates: false,
       autoFolderSize: true,
+      autoExpandActiveQueueToasts: false,
       keybindings: {},
       columns: [],
       layout: {

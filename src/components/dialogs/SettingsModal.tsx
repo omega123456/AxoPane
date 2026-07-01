@@ -88,6 +88,7 @@ type DraftState = {
   showSeconds: boolean
   relativeDates: boolean
   autoFolderSize: boolean
+  autoExpandActiveQueueToasts: boolean
 }
 
 function cloneDraft(): DraftState {
@@ -114,6 +115,7 @@ function cloneDraft(): DraftState {
     showSeconds: config.showSeconds,
     relativeDates: config.relativeDates,
     autoFolderSize: config.autoFolderSize,
+    autoExpandActiveQueueToasts: config.autoExpandActiveQueueToasts,
   }
 }
 
@@ -131,6 +133,7 @@ function applyDraft(draft: DraftState) {
     showSeconds: draft.showSeconds,
     relativeDates: draft.relativeDates,
     autoFolderSize: draft.autoFolderSize,
+    autoExpandActiveQueueToasts: draft.autoExpandActiveQueueToasts,
   })
   useThemeStore.getState().setThemePreference(draft.theme)
   usePanesStore.setState({ showHiddenFiles: draft.showHiddenFiles })
@@ -258,6 +261,7 @@ function SettingsModalContent() {
       showSeconds: false,
       relativeDates: false,
       autoFolderSize: true,
+      autoExpandActiveQueueToasts: false,
     }))
   }
 
@@ -385,6 +389,22 @@ function SettingsModalContent() {
                           { value: 'dual', label: 'Dual' },
                           { value: 'single', label: 'Single' },
                         ]}
+                      />
+                    }
+                  />
+                  <SettingRow
+                    title="Auto-expand active queue toasts"
+                    description="Open the full job queue automatically when new active work starts"
+                    control={
+                      <ToggleSwitch
+                        label="Auto-expand active queue toasts"
+                        checked={draft.autoExpandActiveQueueToasts}
+                        onChange={(value) =>
+                          updateDraft((current) => ({
+                            ...current,
+                            autoExpandActiveQueueToasts: value,
+                          }))
+                        }
                       />
                     }
                   />

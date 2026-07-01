@@ -343,6 +343,7 @@ export const fixtures: {
     showSeconds: false,
     relativeDates: false,
     autoFolderSize: true,
+    autoExpandActiveQueueToasts: false,
     keybindings: {},
     columns: [
       { key: 'name', visible: true },
@@ -380,6 +381,7 @@ export const fixtures: {
     showSeconds: false,
     relativeDates: false,
     autoFolderSize: true,
+    autoExpandActiveQueueToasts: false,
     keybindings: {},
     columns: [
       { key: 'name', visible: true },

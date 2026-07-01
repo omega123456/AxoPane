@@ -36,6 +36,8 @@ pub struct Config {
     pub relative_dates: bool,
     #[serde(default = "default_true")]
     pub auto_folder_size: bool,
+    #[serde(default)]
+    pub auto_expand_active_queue_toasts: bool,
 }
 
 pub fn default_true() -> bool {
@@ -159,6 +161,7 @@ impl Default for Config {
             show_seconds: false,
             relative_dates: false,
             auto_folder_size: true,
+            auto_expand_active_queue_toasts: false,
         }
     }
 }

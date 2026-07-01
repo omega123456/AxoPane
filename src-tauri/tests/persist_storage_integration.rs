@@ -58,6 +58,7 @@ fn config_and_session_round_trip_through_atomic_storage() {
         show_seconds: true,
         relative_dates: true,
         auto_folder_size: true,
+        auto_expand_active_queue_toasts: true,
     });
     session_store.replace(Session {
         active_pane: "right".to_string(),
@@ -107,6 +108,7 @@ fn config_and_session_round_trip_through_atomic_storage() {
             show_seconds: true,
             relative_dates: true,
             auto_folder_size: true,
+            auto_expand_active_queue_toasts: true,
         }
     );
     assert_eq!(
@@ -253,6 +255,7 @@ fn legacy_config_without_layout_fields_gets_defaults() {
     assert!(!loaded.show_time);
     assert!(!loaded.show_seconds);
     assert!(!loaded.relative_dates);
+    assert!(!loaded.auto_expand_active_queue_toasts);
 }
 
 #[test]
