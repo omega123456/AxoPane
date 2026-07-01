@@ -5,7 +5,7 @@ import {
   listApplications as listApplicationsIpc,
   setDefaultApplication as setDefaultApplicationIpc,
 } from '@/lib/ipc/commands'
-import type { MacApp } from '@/lib/types/ipc'
+import type { MacApp, MenuActionStatus } from '@/lib/types/ipc'
 import type { PropertiesDialogItem } from '@/stores/properties-dialog-store'
 
 /**
@@ -43,7 +43,10 @@ export async function listApplications(): Promise<MacApp[]> {
   }
 }
 
-export async function setDefaultApplication(filePath: string, app: MacApp): Promise<boolean> {
+export async function setDefaultApplication(
+  filePath: string,
+  app: MacApp,
+): Promise<MenuActionStatus> {
   try {
     const response = await setDefaultApplicationIpc({ path: filePath, bundlePath: app.bundlePath })
     if (!response.handled) {
@@ -53,13 +56,13 @@ export async function setDefaultApplication(filePath: string, app: MacApp): Prom
         message: response.message ?? null,
       })
     }
-    return response.handled
+    return response
   } catch (error) {
     log.warn('set_default_application IPC failed', {
       path: filePath,
       bundlePath: app.bundlePath,
       error,
     })
-    return false
+    return { handled: false, message: null }
   }
 }

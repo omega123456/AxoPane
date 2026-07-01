@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { DialogShell } from '@/components/dialogs/DialogShell'
 import { EntryIcon } from '@/components/icons/EntryIcon'
-import { canSetDefaultApplication, getDefaultApplication } from '@/lib/app-picker-commands'
+import { LoaderCircleIcon } from '@/components/icons'
+import {
+  canSetDefaultApplication,
+  getDefaultApplication,
+  listApplications,
+} from '@/lib/app-picker-commands'
 import { dateToneClassName, type DateFormat, formatEntryDate } from '@/lib/date-format'
 import { formatBytes, formatCount } from '@/lib/format'
 import { useConfigStore } from '@/stores/config-store'
@@ -39,9 +44,11 @@ export function PropertiesDialog() {
   const showTime = useConfigStore((state) => state.showTime)
   const showSeconds = useConfigStore((state) => state.showSeconds)
   const closeRef = useRef<HTMLButtonElement>(null)
+  const defaultAppPickerGuardRef = useRef<{ cancelled: boolean } | null>(null)
   const defaultAppDialogClosed = useDefaultAppDialogStore((state) => state.dialog === null)
   const [defaultApp, setDefaultApp] = useState<MacApp | null>(null)
   const [defaultAppLoaded, setDefaultAppLoaded] = useState(false)
+  const [isLoadingDefaultAppPicker, setIsLoadingDefaultAppPicker] = useState(false)
   const [prevDialogForDefaultApp, setPrevDialogForDefaultApp] =
     useState<PropertiesDialogState | null>(dialog)
 
@@ -52,6 +59,7 @@ export function PropertiesDialog() {
     setPrevDialogForDefaultApp(dialog)
     setDefaultApp(null)
     setDefaultAppLoaded(false)
+    setIsLoadingDefaultAppPicker(false)
   }
 
   useEffect(() => {
@@ -60,6 +68,15 @@ export function PropertiesDialog() {
     }
 
     closeRef.current?.focus()
+
+    // Cancel any in-flight "Set Default Application…" app-list fetch when
+    // Properties closes or re-opens for a different selection, matching the
+    // cancelled-flag pattern used below for the default-app lookup.
+    return () => {
+      if (defaultAppPickerGuardRef.current) {
+        defaultAppPickerGuardRef.current.cancelled = true
+      }
+    }
   }, [dialog])
 
   useEffect(() => {
@@ -110,14 +127,25 @@ export function PropertiesDialog() {
     }
   }
 
-  function openDefaultAppDialog() {
+  async function openDefaultAppDialog() {
     if (!singleItem) {
       return
     }
-    useDefaultAppDialogStore.getState().open({
-      filePath: singleItem.path,
-      fileName: singleItem.name,
-    })
+
+    const filePath = singleItem.path
+    const fileName = singleItem.name
+    const guard = { cancelled: false }
+    defaultAppPickerGuardRef.current = guard
+
+    setIsLoadingDefaultAppPicker(true)
+    const apps = await listApplications()
+
+    if (guard.cancelled) {
+      return
+    }
+
+    setIsLoadingDefaultAppPicker(false)
+    useDefaultAppDialogStore.getState().open({ filePath, fileName, apps })
   }
 
   return (
@@ -198,10 +226,18 @@ export function PropertiesDialog() {
         {canSetDefaultApplication(dialog.items) ? (
           <button
             type="button"
-            onClick={openDefaultAppDialog}
-            className="rounded-md border border-light-border px-4 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
+            disabled={isLoadingDefaultAppPicker}
+            onClick={() => void openDefaultAppDialog()}
+            className="rounded-md border border-light-border px-4 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover disabled:opacity-40 dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
           >
-            Set Default Application…
+            {isLoadingDefaultAppPicker ? (
+              <span className="inline-flex items-center gap-2">
+                <LoaderCircleIcon className="size-4 animate-spin" />
+                Loading…
+              </span>
+            ) : (
+              'Set Default Application…'
+            )}
           </button>
         ) : null}
         <button

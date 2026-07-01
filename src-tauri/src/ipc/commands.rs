@@ -213,13 +213,13 @@ pub fn open_with(
 }
 
 #[tauri::command]
-pub fn list_applications() -> ListApplicationsResponse {
-    app_picker::list_applications()
+pub async fn list_applications() -> ListApplicationsResponse {
+    app_picker::list_applications().await
 }
 
 #[tauri::command]
-pub fn set_default_application(payload: SetDefaultApplicationRequest) -> MenuActionStatus {
-    app_picker::set_default_application(payload)
+pub async fn set_default_application(payload: SetDefaultApplicationRequest) -> MenuActionStatus {
+    app_picker::set_default_application(payload).await
 }
 
 #[tauri::command]

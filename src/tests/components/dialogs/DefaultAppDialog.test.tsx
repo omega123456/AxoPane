@@ -4,6 +4,22 @@ import { afterEach, beforeEach } from 'vitest'
 import { DefaultAppDialog } from '@/components/dialogs/DefaultAppDialog'
 import { useDefaultAppDialogStore } from '@/stores/default-app-dialog-store'
 import { ipc } from '@/tests/ipc-mock'
+import type { MacApp } from '@/lib/types/ipc'
+
+const fixtureApps: MacApp[] = [
+  {
+    name: 'Fixture Preview',
+    bundlePath: '/Applications/Fixture Preview.app',
+    bundleId: 'com.example.fixture-preview',
+    iconDataUrl: 'data:image/png;base64,RkFLRQ==',
+  },
+  {
+    name: 'Fixture Text Edit',
+    bundlePath: '/Applications/Fixture Text Edit.app',
+    bundleId: 'com.example.fixture-textedit',
+    iconDataUrl: null,
+  },
+]
 
 beforeEach(() => {
   useDefaultAppDialogStore.getState().close()
@@ -13,11 +29,12 @@ afterEach(() => {
   ipc.reset()
 })
 
-function openDialog() {
+function openDialog(apps: MacApp[] = fixtureApps) {
   act(() => {
     useDefaultAppDialogStore.getState().open({
       filePath: '/Users/example/Report.pdf',
       fileName: 'Report.pdf',
+      apps,
     })
   })
 }
@@ -40,9 +57,8 @@ describe('DefaultAppDialog', () => {
   })
 
   it('shows an empty state when no applications are found', async () => {
-    ipc.override('list_applications', { apps: [] })
     render(<DefaultAppDialog />)
-    openDialog()
+    openDialog([])
 
     expect(await screen.findByText('No applications were found.')).toBeInTheDocument()
   })
@@ -71,6 +87,59 @@ describe('DefaultAppDialog', () => {
     expect(receivedPayload).toEqual({
       path: '/Users/example/Report.pdf',
       bundlePath: '/Applications/Fixture Preview.app',
+    })
+  })
+
+  it('shows the mapped inline error and stays open when the backend reports a failure', async () => {
+    const user = userEvent.setup()
+    ipc.override('set_default_application', {
+      handled: false,
+      message: 'default-application-rejected-dynamic-type',
+    })
+
+    render(<DefaultAppDialog />)
+    openDialog()
+
+    const option = await screen.findByRole('option', { name: 'Fixture Preview' })
+    await user.click(option)
+    await user.click(screen.getByRole('button', { name: 'Change All…' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Fixture Preview')
+    expect(alert).toHaveTextContent('.pdf')
+    expect(alert).toHaveAttribute('aria-live', 'assertive')
+
+    // Dialog stays open and the confirm button is re-enabled for a retry.
+    expect(screen.getByRole('dialog', { name: 'Set Default Application' })).toBeInTheDocument()
+    expect(useDefaultAppDialogStore.getState().dialog).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Change All…' })).toBeEnabled()
+  })
+
+  it('clears the inline error when a different app is selected, and can then succeed', async () => {
+    const user = userEvent.setup()
+    ipc.override('set_default_application', {
+      handled: false,
+      message: 'default-application-write-failed',
+    })
+
+    render(<DefaultAppDialog />)
+    openDialog()
+
+    const firstOption = await screen.findByRole('option', { name: 'Fixture Preview' })
+    await user.click(firstOption)
+    await user.click(screen.getByRole('button', { name: 'Change All…' }))
+    await screen.findByRole('alert')
+
+    ipc.override('set_default_application', { handled: true, message: 'default-application-set' })
+
+    const secondOption = screen.getByRole('option', { name: 'Fixture Text Edit' })
+    await user.click(secondOption)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Change All…' }))
+
+    await waitFor(() => {
+      expect(useDefaultAppDialogStore.getState().dialog).toBeNull()
     })
   })
 

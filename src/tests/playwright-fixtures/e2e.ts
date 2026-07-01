@@ -520,6 +520,17 @@ export const screenshotScenarios = {
     },
     'macos',
   ),
+  defaultAppDialogError: scenarioByTheme(
+    {
+      list_dir: fileTypesListDir,
+      queue_snapshot: emptyQueueSnapshot,
+      set_default_application: {
+        handled: false,
+        message: 'default-application-rejected-dynamic-type',
+      },
+    },
+    'macos',
+  ),
   trash: scenarioByTheme({
     load_session: trashSession,
     queue_snapshot: emptyQueueSnapshot,

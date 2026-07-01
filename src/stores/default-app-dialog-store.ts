@@ -1,8 +1,10 @@
 import { create } from 'zustand'
+import type { MacApp } from '@/lib/types/ipc'
 
 export type DefaultAppDialogState = {
   filePath: string
   fileName: string
+  apps: MacApp[]
 }
 
 type Store = {

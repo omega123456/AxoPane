@@ -10,7 +10,7 @@ use file_explorer_lib::ipc::types::{GetDefaultApplicationRequest, SetDefaultAppl
 
 #[test]
 fn list_applications_returns_the_deterministic_test_utils_fake() {
-    let response = commands::list_applications();
+    let response = tauri::async_runtime::block_on(commands::list_applications());
 
     assert_eq!(response.apps.len(), 1);
     assert_eq!(response.apps[0].name, "Fake Preview");
@@ -22,10 +22,12 @@ fn list_applications_returns_the_deterministic_test_utils_fake() {
 
 #[test]
 fn set_default_application_never_writes_real_launch_services_state_under_test_utils() {
-    let response = commands::set_default_application(SetDefaultApplicationRequest {
-        path: "/Users/example/report.pdf".to_string(),
-        bundle_path: "/Applications/Fake Preview.app".to_string(),
-    });
+    let response = tauri::async_runtime::block_on(commands::set_default_application(
+        SetDefaultApplicationRequest {
+            path: "/Users/example/report.pdf".to_string(),
+            bundle_path: "/Applications/Fake Preview.app".to_string(),
+        },
+    ));
 
     assert!(
         !response.handled,

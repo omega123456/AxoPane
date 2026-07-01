@@ -1,22 +1,28 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { DialogShell } from '@/components/dialogs/DialogShell'
 import { EntryIcon } from '@/components/icons/EntryIcon'
-import { listApplications, setDefaultApplication } from '@/lib/app-picker-commands'
+import { XCircleIcon } from '@/components/icons'
+import { setDefaultApplication } from '@/lib/app-picker-commands'
+import { getDefaultAppErrorMessage } from '@/lib/default-app-errors'
 import {
   useDefaultAppDialogStore,
   type DefaultAppDialogState,
 } from '@/stores/default-app-dialog-store'
-import type { MacApp } from '@/lib/types/ipc'
 
-type LoadState = 'loading' | 'loaded' | 'error'
+/** Extracts the extension (without the leading dot) from a file name, e.g. "sql" for "query.sql". */
+function extensionFromFileName(fileName: string): string {
+  const dotIndex = fileName.lastIndexOf('.')
+  return dotIndex > 0 ? fileName.slice(dotIndex + 1) : ''
+}
+
+type LoadState = 'loaded' | 'error'
 
 export function DefaultAppDialog() {
   const dialog = useDefaultAppDialogStore((state) => state.dialog)
   const close = useDefaultAppDialogStore((state) => state.close)
-  const [loadState, setLoadState] = useState<LoadState>('loading')
-  const [apps, setApps] = useState<MacApp[]>([])
   const [selectedBundlePath, setSelectedBundlePath] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const cancelRef = useRef<HTMLButtonElement>(null)
   const [prevDialog, setPrevDialog] = useState<DefaultAppDialogState | null>(dialog)
 
@@ -26,30 +32,16 @@ export function DefaultAppDialog() {
   if (dialog !== prevDialog) {
     setPrevDialog(dialog)
     if (dialog) {
-      setLoadState('loading')
-      setApps([])
       setSelectedBundlePath(null)
+      setErrorMessage(null)
     }
   }
 
-  useEffect(() => {
-    if (!dialog) {
-      return
-    }
-
-    let cancelled = false
-    void listApplications().then((found) => {
-      if (cancelled) {
-        return
-      }
-      setApps(found)
-      setLoadState(found.length > 0 ? 'loaded' : 'error')
-    })
-
-    return () => {
-      cancelled = true
-    }
-  }, [dialog])
+  // The app list is preloaded by the caller (see PropertiesDialog) before
+  // this dialog is opened, so it can render fully populated immediately
+  // instead of showing its own internal loading flash.
+  const apps = dialog?.apps ?? []
+  const loadState: LoadState = apps.length > 0 ? 'loaded' : 'error'
 
   useEffect(() => {
     if (dialog) {
@@ -68,6 +60,11 @@ export function DefaultAppDialog() {
     }
   }
 
+  function selectApp(bundlePath: string) {
+    setSelectedBundlePath(bundlePath)
+    setErrorMessage(null)
+  }
+
   async function confirm() {
     const app = apps.find((candidate) => candidate.bundlePath === selectedBundlePath)
     if (!app || busy || !dialog) {
@@ -75,9 +72,21 @@ export function DefaultAppDialog() {
     }
 
     setBusy(true)
-    await setDefaultApplication(dialog.filePath, app)
+    setErrorMessage(null)
+    const status = await setDefaultApplication(dialog.filePath, app)
     setBusy(false)
-    close()
+
+    if (status.handled) {
+      close()
+      return
+    }
+
+    setErrorMessage(
+      getDefaultAppErrorMessage(status.message, {
+        appName: app.name,
+        extension: extensionFromFileName(dialog.fileName),
+      }),
+    )
   }
 
   return (
@@ -91,11 +100,6 @@ export function DefaultAppDialog() {
         </div>
       </div>
       <div className="p-4">
-        {loadState === 'loading' ? (
-          <p className="text-row text-light-text-muted dark:text-dark-text-muted">
-            Loading applications…
-          </p>
-        ) : null}
         {loadState === 'error' ? (
           <p className="text-row text-light-text-muted dark:text-dark-text-muted">
             No applications were found.
@@ -115,7 +119,7 @@ export function DefaultAppDialog() {
                     type="button"
                     role="option"
                     aria-selected={selected}
-                    onClick={() => setSelectedBundlePath(app.bundlePath)}
+                    onClick={() => selectApp(app.bundlePath)}
                     onDoubleClick={() => void confirm()}
                     className={`flex w-full items-center gap-2 rounded-tab px-2 py-1.5 text-left text-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border ${
                       selected
@@ -132,6 +136,16 @@ export function DefaultAppDialog() {
               )
             })}
           </ul>
+        ) : null}
+        {errorMessage ? (
+          <div
+            role="alert"
+            aria-live="assertive"
+            className="mt-3 flex items-start gap-2 rounded-tab border border-accent-red bg-accent-red-soft px-3 py-2"
+          >
+            <XCircleIcon className="mt-0.5 h-5 w-5 shrink-0 text-accent-red" />
+            <p className="text-row text-light-text dark:text-dark-text">{errorMessage}</p>
+          </div>
         ) : null}
       </div>
       <div className="flex justify-end gap-2 border-t border-light-border p-4 dark:border-dark-border">

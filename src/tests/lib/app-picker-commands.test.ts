@@ -97,27 +97,33 @@ describe('setDefaultApplication', () => {
     iconDataUrl: null,
   }
 
-  it('resolves true when the backend reports handled', async () => {
-    ipc.override('set_default_application', { handled: true, message: 'ok' })
+  it('resolves the handled status when the backend reports handled', async () => {
+    ipc.override('set_default_application', { handled: true, message: 'default-application-set' })
 
     const result = await setDefaultApplication('/Users/example/Report.pdf', app)
-    expect(result).toBe(true)
+    expect(result).toEqual({ handled: true, message: 'default-application-set' })
   })
 
-  it('resolves false when the backend reports unhandled', async () => {
-    ipc.override('set_default_application', { handled: false, message: 'unsupported' })
+  it('resolves the unhandled status when the backend reports unhandled', async () => {
+    ipc.override('set_default_application', {
+      handled: false,
+      message: 'default-application-rejected-dynamic-type',
+    })
 
     const result = await setDefaultApplication('/Users/example/Report.pdf', app)
-    expect(result).toBe(false)
+    expect(result).toEqual({
+      handled: false,
+      message: 'default-application-rejected-dynamic-type',
+    })
   })
 
-  it('resolves false when the IPC call throws', async () => {
+  it('resolves an unhandled status with no message when the IPC call throws', async () => {
     ipc.override('set_default_application', () => {
       throw new Error('boom')
     })
 
     const result = await setDefaultApplication('/Users/example/Report.pdf', app)
-    expect(result).toBe(false)
+    expect(result).toEqual({ handled: false, message: null })
   })
 })
 

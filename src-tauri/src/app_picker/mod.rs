@@ -18,15 +18,21 @@ use types::{
 /// configuration (Windows, or any target under `feature = "test-utils"`)
 /// resolves to a safe stub so tests never depend on the real `/Applications`
 /// folder and Windows never gains this macOS-only surface.
-pub fn list_applications() -> ListApplicationsResponse {
+///
+/// `async` so the genuinely-async `list_applications` Tauri command can await
+/// the macOS implementation without ever blocking the calling
+/// (potentially main/UI) thread - see `macos::list_applications` for how the
+/// underlying blocking enumeration/icon-resolution work is dispatched
+/// off-thread.
+pub async fn list_applications() -> ListApplicationsResponse {
     #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
     {
-        return macos::list_applications();
+        return macos::list_applications().await;
     }
 
     #[cfg(any(feature = "test-utils", not(target_os = "macos")))]
     {
-        unsupported::list_applications()
+        unsupported::list_applications().await
     }
 }
 
@@ -34,16 +40,21 @@ pub fn list_applications() -> ListApplicationsResponse {
 /// LaunchServices. Real writes only ever happen on macOS outside test
 /// builds, so this never touches a real machine-global LaunchServices
 /// database during tests, and never runs at all on Windows.
-pub fn set_default_application(request: SetDefaultApplicationRequest) -> MenuActionStatus {
+///
+/// `async` so the genuinely-async `set_default_application` Tauri command can
+/// await the macOS implementation without ever blocking the calling
+/// (potentially main/UI) thread - see `macos::set_default_application` for
+/// how the underlying blocking `NSWorkspace` wait is dispatched off-thread.
+pub async fn set_default_application(request: SetDefaultApplicationRequest) -> MenuActionStatus {
     #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
     {
-        return macos::set_default_application(&request);
+        return macos::set_default_application(&request).await;
     }
 
     #[cfg(any(feature = "test-utils", not(target_os = "macos")))]
     {
         let _ = request;
-        unsupported::set_default_application()
+        unsupported::set_default_application().await
     }
 }
 

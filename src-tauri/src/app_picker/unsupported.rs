@@ -4,8 +4,13 @@ use crate::ipc::types::MenuActionStatus;
 /// Under `feature = "test-utils"` the app list is a small, deterministic fake
 /// so IPC-contract tests have a non-empty, stable response without ever
 /// scanning the real `/Applications` folder.
+///
+/// `async` to keep an identical signature to `macos::list_applications`
+/// across both `cfg`-gated implementations `app_picker::list_applications`
+/// dispatches between. No actual asynchronous work happens here - this is a
+/// fixed fake - so this resolves immediately.
 #[cfg(feature = "test-utils")]
-pub fn list_applications() -> ListApplicationsResponse {
+pub async fn list_applications() -> ListApplicationsResponse {
     ListApplicationsResponse {
         apps: vec![MacApp {
             name: "Fake Preview".to_string(),
@@ -17,12 +22,22 @@ pub fn list_applications() -> ListApplicationsResponse {
 }
 
 /// On real, non-macOS builds (e.g. Windows) there is no app picker at all.
+///
+/// `async` to keep an identical signature to `macos::list_applications`
+/// across both `cfg`-gated implementations `app_picker::list_applications`
+/// dispatches between. No actual asynchronous work happens here - Windows has
+/// no real enumeration to perform - so this resolves immediately.
 #[cfg(not(feature = "test-utils"))]
-pub fn list_applications() -> ListApplicationsResponse {
+pub async fn list_applications() -> ListApplicationsResponse {
     ListApplicationsResponse { apps: Vec::new() }
 }
 
-pub fn set_default_application() -> MenuActionStatus {
+/// `async` to keep an identical signature to `macos::set_default_application`
+/// across both `cfg`-gated implementations `app_picker::set_default_application`
+/// dispatches between. No actual asynchronous work happens here - Windows and
+/// `test-utils` builds have no real write to perform - so this resolves
+/// immediately.
+pub async fn set_default_application() -> MenuActionStatus {
     MenuActionStatus::unsupported("unsupported")
 }
 

@@ -425,4 +425,22 @@ for (const mode of ['light', 'dark'] as const) {
       `set-default-application-dialog-${mode}.png`,
     )
   })
+
+  test(`set default application error ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.defaultAppDialogError[mode])
+    await page
+      .getByRole('row', { name: /report\.pdf/ })
+      .first()
+      .click({ button: 'right' })
+    const menu = page.getByRole('menu', { name: 'report.pdf' })
+    await expect(menu).toBeVisible()
+    await menu.getByRole('menuitem', { name: 'Properties' }).click()
+    await expect(page.getByRole('dialog', { name: 'Properties' })).toBeVisible()
+    await page.getByRole('button', { name: 'Set Default Application…' }).click()
+    await expect(page.getByRole('dialog', { name: 'Set Default Application' })).toBeVisible()
+    await page.getByRole('option', { name: 'Fixture Preview' }).click()
+    await page.getByRole('button', { name: 'Change All…' }).click()
+    await expect(page.getByRole('alert')).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`set-default-application-error-${mode}.png`)
+  })
 }

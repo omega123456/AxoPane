@@ -7,6 +7,15 @@ import { useConfigStore } from '@/stores/config-store'
 import { useDefaultAppDialogStore } from '@/stores/default-app-dialog-store'
 import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 import { ipc } from '@/tests/ipc-mock'
+import type { ListApplicationsResponse } from '@/lib/types/ipc'
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve
+  })
+  return { promise, resolve }
+}
 
 const originalPlatform = navigator.platform
 
@@ -271,10 +280,53 @@ describe('PropertiesDialog set-default-application button', () => {
 
     await user.click(screen.getByRole('button', { name: 'Set Default Application…' }))
 
-    expect(useDefaultAppDialogStore.getState().dialog).toEqual({
-      filePath: '/Users/example/Report.pdf',
-      fileName: 'Report.pdf',
+    await waitFor(() => {
+      expect(useDefaultAppDialogStore.getState().dialog).toEqual({
+        filePath: '/Users/example/Report.pdf',
+        fileName: 'Report.pdf',
+        apps: [
+          {
+            name: 'Fixture Preview',
+            bundlePath: '/Applications/Fixture Preview.app',
+            bundleId: 'com.example.fixture-preview',
+            iconDataUrl: 'data:image/png;base64,RkFLRQ==',
+          },
+          {
+            name: 'Fixture Text Edit',
+            bundlePath: '/Applications/Fixture Text Edit.app',
+            bundleId: 'com.example.fixture-textedit',
+            iconDataUrl: null,
+          },
+        ],
+      })
     })
+  })
+
+  it('disables the button and shows a spinner while apps are being fetched, and does not open the picker until they resolve', async () => {
+    const user = userEvent.setup()
+    const deferred = createDeferred<ListApplicationsResponse>()
+    ipc.override('list_applications', () => deferred.promise as never)
+    setPlatform('MacIntel')
+    usePropertiesDialogStore.getState().open({ items: [macFile] })
+
+    render(<PropertiesDialog />)
+
+    const button = screen.getByRole('button', { name: 'Set Default Application…' })
+    await user.click(button)
+
+    const loadingButton = await screen.findByRole('button', { name: 'Loading…' })
+    expect(loadingButton).toBeDisabled()
+    expect(useDefaultAppDialogStore.getState().dialog).toBeNull()
+
+    await act(async () => {
+      deferred.resolve({ apps: [] })
+      await deferred.promise
+    })
+
+    await waitFor(() => {
+      expect(useDefaultAppDialogStore.getState().dialog).not.toBeNull()
+    })
+    expect(screen.getByRole('button', { name: 'Set Default Application…' })).toBeInTheDocument()
   })
 })
 
