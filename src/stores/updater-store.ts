@@ -33,6 +33,31 @@ function clearUpToDateTimer() {
   }
 }
 
+function scheduleUpToDateReset() {
+  clearUpToDateTimer()
+  upToDateTimer = setTimeout(() => {
+    upToDateTimer = null
+    if (useUpdaterStore.getState().status === 'up-to-date') {
+      useUpdaterStore.setState({ status: 'idle' })
+    }
+  }, UP_TO_DATE_RESET_MS)
+}
+
+function settleNoAvailableUpdate(
+  set: (partial: Partial<UpdaterStore>) => void,
+  acknowledge: boolean,
+) {
+  clearUpToDateTimer()
+
+  if (acknowledge) {
+    set({ update: null, summary: null, status: 'up-to-date', error: null })
+    scheduleUpToDateReset()
+    return
+  }
+
+  set({ update: null, summary: null, status: 'idle', error: null })
+}
+
 function toErrorMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
 }
@@ -68,15 +93,14 @@ export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
   },
 
   checkForUpdate: async (manual) => {
-    const { status } = get()
+    const { status, update: currentUpdate } = get()
     if (status === 'checking' || status === 'installing') {
       return
     }
 
-    const wasAvailable = status === 'available'
     clearUpToDateTimer()
 
-    if (!wasAvailable) {
+    if (manual || !currentUpdate) {
       set({ status: 'checking', error: null })
     }
 
@@ -88,51 +112,41 @@ export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
         return
       }
 
-      // A previously surfaced update is gone (or this was a background poll
-      // that found nothing) — keep the existing banner rather than clobbering
-      // it on a transient null.
-      if (wasAvailable) {
-        return
-      }
-
-      if (manual) {
-        set({ update: null, summary: null, status: 'up-to-date', error: null })
-        upToDateTimer = setTimeout(() => {
-          upToDateTimer = null
-          if (useUpdaterStore.getState().status === 'up-to-date') {
-            useUpdaterStore.setState({ status: 'idle' })
-          }
-        }, UP_TO_DATE_RESET_MS)
-        return
-      }
-
-      set({ update: null, summary: null, status: 'idle', error: null })
+      settleNoAvailableUpdate(set, manual)
     } catch (cause) {
       const message = toErrorMessage(cause)
       log.error('app update check failed', { manual, error: message })
-
-      if (wasAvailable) {
-        return
-      }
 
       if (manual) {
         set({ update: null, summary: null, status: 'error', error: message })
         return
       }
 
-      set({ update: null, summary: null, status: 'idle', error: null })
+      settleNoAvailableUpdate(set, false)
     }
   },
 
   downloadAndInstall: async () => {
     const { update, status } = get()
-    if (!update || status === 'installing') {
+    if (!update || status === 'checking' || status === 'installing') {
       return
     }
 
     set({ status: 'installing', error: null })
     try {
-      await downloadAndInstallAppUpdate(update)
+      const latestUpdate = await checkForAppUpdate()
+      if (!latestUpdate) {
+        settleNoAvailableUpdate(set, true)
+        return
+      }
+
+      set({
+        update: latestUpdate,
+        summary: summarizeUpdate(latestUpdate),
+        status: 'installing',
+        error: null,
+      })
+      await downloadAndInstallAppUpdate(latestUpdate)
       // On Windows the NSIS passive installer relaunches the app, so reaching
       // this point usually means the process is on its way out.
     } catch (cause) {

@@ -72,14 +72,30 @@ describe('updater-store', () => {
     expect(useUpdaterStore.getState().status).toBe('idle')
   })
 
-  it('keeps an already-surfaced update when a background check returns null', async () => {
+  it('clears an already-surfaced update when a background check returns null', async () => {
     const update = fakeUpdate()
     useUpdaterStore.getState().setAvailable(update, { currentVersion: '0.1.0', version: '0.2.0' })
     checkForAppUpdate.mockResolvedValue(null)
 
     await useUpdaterStore.getState().checkForUpdate(false)
-    expect(useUpdaterStore.getState().status).toBe('available')
-    expect(useUpdaterStore.getState().update).toBe(update)
+    expect(useUpdaterStore.getState()).toMatchObject({
+      status: 'idle',
+      update: null,
+      summary: null,
+    })
+  })
+
+  it('clears an already-surfaced update on a manual recheck when nothing is available', async () => {
+    const update = fakeUpdate()
+    useUpdaterStore.getState().setAvailable(update, { currentVersion: '0.1.0', version: '0.2.0' })
+    checkForAppUpdate.mockResolvedValue(null)
+
+    await useUpdaterStore.getState().checkForUpdate(true)
+    expect(useUpdaterStore.getState()).toMatchObject({
+      status: 'up-to-date',
+      update: null,
+      summary: null,
+    })
   })
 
   it('surfaces an error from a manual check but swallows background failures', async () => {
@@ -100,22 +116,47 @@ describe('updater-store', () => {
     expect(checkForAppUpdate).not.toHaveBeenCalled()
   })
 
-  it('installs the available update', async () => {
-    const update = fakeUpdate()
-    useUpdaterStore.getState().setAvailable(update, { currentVersion: '0.1.0', version: '0.2.0' })
+  it('rechecks and installs the latest available update', async () => {
+    const cachedUpdate = fakeUpdate()
+    const latestUpdate = fakeUpdate({ version: '0.3.0' })
+    useUpdaterStore
+      .getState()
+      .setAvailable(cachedUpdate, { currentVersion: '0.1.0', version: '0.2.0' })
+    checkForAppUpdate.mockResolvedValue(latestUpdate)
 
     await useUpdaterStore.getState().downloadAndInstall()
-    expect(downloadAndInstallAppUpdate).toHaveBeenCalledWith(update)
+    expect(downloadAndInstallAppUpdate).toHaveBeenCalledWith(latestUpdate)
+    expect(useUpdaterStore.getState()).toMatchObject({
+      update: latestUpdate,
+      summary: { currentVersion: '0.1.0', version: '0.3.0', notes: 'Fixes', date: '2026-06-24' },
+      status: 'installing',
+    })
   })
 
-  it('reports an install failure', async () => {
+  it('reports an install failure after rechecking', async () => {
     const update = fakeUpdate()
     useUpdaterStore.getState().setAvailable(update, { currentVersion: '0.1.0', version: '0.2.0' })
+    checkForAppUpdate.mockResolvedValue(update)
     downloadAndInstallAppUpdate.mockRejectedValue(new Error('disk full'))
 
     await useUpdaterStore.getState().downloadAndInstall()
     expect(useUpdaterStore.getState().status).toBe('error')
     expect(useUpdaterStore.getState().error).toBe('disk full')
+  })
+
+  it('drops a stale banner when install-time recheck finds nothing newer to install', async () => {
+    const update = fakeUpdate()
+    useUpdaterStore.getState().setAvailable(update, { currentVersion: '0.1.0', version: '0.2.0' })
+    checkForAppUpdate.mockResolvedValue(null)
+
+    await useUpdaterStore.getState().downloadAndInstall()
+
+    expect(downloadAndInstallAppUpdate).not.toHaveBeenCalled()
+    expect(useUpdaterStore.getState()).toMatchObject({
+      status: 'up-to-date',
+      update: null,
+      summary: null,
+    })
   })
 
   it('does nothing when installing without an available update', async () => {

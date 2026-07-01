@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, vi } from 'vitest'
 import { UpdateBanner } from '@/components/states/UpdateBanner'
@@ -28,6 +28,8 @@ describe('UpdateBanner', () => {
 
   it('shows the available version and installs on click', async () => {
     const user = userEvent.setup()
+    const downloadAndInstall = vi.fn(() => Promise.resolve())
+    vi.spyOn(useUpdaterStore.getState(), 'downloadAndInstall').mockImplementation(downloadAndInstall)
     const update = fakeUpdate()
     useUpdaterStore.getState().setAvailable(update, {
       currentVersion: '0.1.0',
@@ -39,20 +41,16 @@ describe('UpdateBanner', () => {
     expect(screen.getByText(/Update available: 0\.2\.0/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /install & restart/i }))
-    expect(update.downloadAndInstall).toHaveBeenCalledOnce()
+    expect(downloadAndInstall).toHaveBeenCalledOnce()
   })
 
-  it('surfaces an install failure', async () => {
-    const user = userEvent.setup()
-    const update = fakeUpdate({
-      downloadAndInstall: vi.fn(() => Promise.reject(new Error('network down'))),
-    })
+  it('renders an install failure message', () => {
+    const update = fakeUpdate()
     useUpdaterStore.getState().setAvailable(update, { currentVersion: '0.1.0', version: '0.2.0' })
+    useUpdaterStore.setState({ status: 'error', error: 'network down' })
 
     render(<UpdateBanner />)
-    await user.click(screen.getByRole('button', { name: /install & restart/i }))
-
-    await waitFor(() => expect(screen.getByText(/Update failed: network down/)).toBeInTheDocument())
+    expect(screen.getByText(/Update failed: network down/)).toBeInTheDocument()
     expect(useUpdaterStore.getState().status).toBe('error')
   })
 

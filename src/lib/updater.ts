@@ -84,8 +84,8 @@ export async function checkForAppUpdate(): Promise<AppUpdate | null> {
 
 /**
  * Downloads and applies an update, then relaunches the app. Accepts an already
- * fetched handle (from {@link checkForAppUpdate}) so the prompt flow does not
- * re-query the endpoint; falls back to checking when called without one.
+ * fetched handle when the caller wants to install a specific fresh result, and
+ * falls back to checking when called without one.
  */
 export async function downloadAndInstallAppUpdate(update?: AppUpdate | null): Promise<boolean> {
   const target = update ?? (await checkForAppUpdate())
