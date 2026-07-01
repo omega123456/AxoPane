@@ -15,6 +15,28 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`dual-pane-browsing-${mode}.png`)
   })
 
+  test(`marquee selection ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.browsing[mode])
+    await expect(page.getByRole('region', { name: 'Left pane' })).toBeVisible()
+    await expect(page.getByRole('row', { name: /Documents/ }).first()).toBeVisible()
+
+    const scroller = page.getByTestId('file-pane-scroll-left')
+    const box = await scroller.boundingBox()
+    if (!box) {
+      throw new Error('missing scroll container bounding box')
+    }
+
+    // Start below the (short) fixture list, in genuinely empty background, and
+    // drag up over the rows — starting a mousedown on a row selects just that
+    // row instead, matching Explorer.
+    await page.mouse.move(box.x + 20, box.y + 150)
+    await page.mouse.down()
+    await page.mouse.move(box.x + 240, box.y + 10, { steps: 10 })
+    await expect(page.getByTestId('marquee-selection')).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`marquee-selection-${mode}.png`)
+    await page.mouse.up()
+  })
+
   test(`sticky tree ${mode}`, async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 520 })
     await gotoScenario(page, screenshotScenarios.stickyTree[mode])

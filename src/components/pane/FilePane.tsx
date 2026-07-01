@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   buildContextMenuContent,
   describeMenuTarget,
@@ -44,6 +44,16 @@ function isPermissionError(message: string | null) {
 
 const PARENT_ROW_ID = '..'
 const pointerNavigationCooldownMs = 400
+const rowHeightPx = 30
+const marqueeDragThresholdPx = 4
+
+type MarqueeRect = { left: number; top: number; width: number; height: number }
+type MarqueeDragState = {
+  startX: number
+  startY: number
+  additive: boolean
+  baseSelectedIds: string[]
+}
 
 function isEditableTarget(target: EventTarget | null) {
   return (
@@ -102,6 +112,8 @@ export function FilePane({ paneId }: FilePaneProps) {
   const lastPointerActivationRef = useRef<{ path: string; activatedAt: number } | null>(null)
   const renameSubmittingRef = useRef(false)
   const ignoreNextRenameBlurRef = useRef(false)
+  const detachMarqueeListenersRef = useRef<(() => void) | null>(null)
+  const [marqueeRect, setMarqueeRect] = useState<MarqueeRect | null>(null)
   const isActivePane = activePaneId === paneId
   const os = detectPlatformOs()
   // Suppress the loading skeleton on fast loads: it only appears once loading
@@ -123,7 +135,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   const rowVirtualizer = useElementVirtualizer({
     count: rowCount,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 30,
+    estimateSize: () => rowHeightPx,
     overscan: 10,
   })
   const virtualItems = rowVirtualizer.getVirtualItems()
@@ -133,9 +145,9 @@ export function FilePane({ paneId }: FilePaneProps) {
       : Array.from({ length: rowCount }, (_, index) => ({
           key: `row-${index}`,
           index,
-          start: index * 30,
+          start: index * rowHeightPx,
         }))
-  const totalHeight = virtualItems.length > 0 ? rowVirtualizer.getTotalSize() : rowCount * 30
+  const totalHeight = virtualItems.length > 0 ? rowVirtualizer.getTotalSize() : rowCount * rowHeightPx
   const savedScrollTop = pane.scrollPositions[pane.path] ?? 0
 
   useLayoutEffect(() => {
@@ -285,6 +297,112 @@ export function FilePane({ paneId }: FilePaneProps) {
     setFocusedEntry(paneId, entryId)
   }
 
+  // Windows-Explorer-style rubber-band selection. A mousedown on the empty
+  // background of the row list (not on a row button) starts tracking; rows
+  // whose row-span vertically overlaps the drawn rectangle become selected.
+  // Because every row is a fixed `rowHeightPx` tall and rendered in
+  // `pane.entries` order, the intersecting rows are always a contiguous
+  // index range, so no per-row hit-testing loop is needed.
+  function contentPoint(clientX: number, clientY: number) {
+    const container = parentRef.current
+    if (!container) {
+      return null
+    }
+    const bounds = container.getBoundingClientRect()
+    return {
+      x: clientX - bounds.left + container.scrollLeft,
+      y: clientY - bounds.top + container.scrollTop,
+    }
+  }
+
+  function applyMarqueeSelection(drag: MarqueeDragState, rectTop: number, rectBottom: number) {
+    const firstRow = Math.max(0, Math.floor(rectTop / rowHeightPx))
+    const lastRow = Math.min(rowCount - 1, Math.ceil(rectBottom / rowHeightPx) - 1)
+    const entryStart = Math.max(0, firstRow - parentOffset)
+    const entryEnd = lastRow - parentOffset
+    const rangeIds =
+      lastRow >= firstRow && entryEnd >= entryStart
+        ? pane.entries.slice(entryStart, entryEnd + 1).map((entry) => entry.id)
+        : []
+
+    const selectedIds = drag.additive
+      ? Array.from(new Set([...drag.baseSelectedIds, ...rangeIds]))
+      : rangeIds
+    const anchorId = selectedIds[0] ?? null
+    const focusedId = rangeIds[rangeIds.length - 1] ?? selectedIds[selectedIds.length - 1] ?? null
+
+    setSelection(paneId, selectedIds, anchorId, focusedId)
+    if (focusedId) {
+      setFocusedEntry(paneId, focusedId)
+    }
+  }
+
+  function handleContainerMouseDown(event: React.MouseEvent<HTMLDivElement>) {
+    focusPaneShell()
+
+    if (event.button !== 0) {
+      return
+    }
+    if (event.target instanceof Element && event.target.closest('[role="row"]')) {
+      return
+    }
+
+    const point = contentPoint(event.clientX, event.clientY)
+    if (!point) {
+      return
+    }
+
+    if (!(event.ctrlKey || event.metaKey)) {
+      setSelection(paneId, [], null, null)
+    }
+
+    const drag: MarqueeDragState = {
+      startX: point.x,
+      startY: point.y,
+      additive: event.ctrlKey || event.metaKey,
+      baseSelectedIds: selection.selectedIds,
+    }
+
+    // Closures are created fresh per drag and captured by reference below, so
+    // the same function identities are used for both add and remove — safe
+    // even across the re-renders that `applyMarqueeSelection` triggers.
+    function onMouseMove(moveEvent: globalThis.MouseEvent) {
+      const point = contentPoint(moveEvent.clientX, moveEvent.clientY)
+      if (!point) {
+        return
+      }
+
+      const left = Math.min(drag.startX, point.x)
+      const top = Math.min(drag.startY, point.y)
+      const width = Math.abs(point.x - drag.startX)
+      const height = Math.abs(point.y - drag.startY)
+
+      if (width < marqueeDragThresholdPx && height < marqueeDragThresholdPx) {
+        setMarqueeRect(null)
+        return
+      }
+
+      setMarqueeRect({ left, top, width, height })
+      applyMarqueeSelection(drag, top, top + height)
+    }
+
+    function onMouseUp() {
+      setMarqueeRect(null)
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+      detachMarqueeListenersRef.current = null
+    }
+
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+    detachMarqueeListenersRef.current = () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+  }
+
+  useEffect(() => () => detachMarqueeListenersRef.current?.(), [])
+
   const canGoUp = hasParent
   const permissionDenied = isPermissionError(pane.error)
   // An empty folder still shows the synthetic ".." row when a parent exists, so
@@ -423,8 +541,9 @@ export function FilePane({ paneId }: FilePaneProps) {
       ) : (
         <div
           ref={parentRef}
+          data-testid={`file-pane-scroll-${paneId}`}
           className="min-h-0 flex-1 overflow-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint"
-          onMouseDown={() => focusPaneShell()}
+          onMouseDown={handleContainerMouseDown}
           onScroll={(event) => setScrollPosition(paneId, pane.path, event.currentTarget.scrollTop)}
           onContextMenu={(event) => showMenu(event)}
         >
@@ -504,6 +623,18 @@ export function FilePane({ paneId }: FilePaneProps) {
                 </div>
               )
             })}
+            {marqueeRect ? (
+              <div
+                data-testid="marquee-selection"
+                className="pointer-events-none absolute border border-accent-blue-border bg-accent-blue-soft"
+                style={{
+                  left: `${marqueeRect.left}px`,
+                  top: `${marqueeRect.top}px`,
+                  width: `${marqueeRect.width}px`,
+                  height: `${marqueeRect.height}px`,
+                }}
+              />
+            ) : null}
           </div>
         </div>
       )}

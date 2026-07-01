@@ -637,6 +637,88 @@ describe('FilePane state rendering', () => {
     expect(useSelectionStore.getState().selections.left.selectedIds).toEqual(['Alpha', 'Beta'])
   })
 
+  it('rubber-band selects rows the drag rectangle overlaps, showing the marquee while dragging', () => {
+    seedPane({
+      path: 'C:\\',
+      entries: [entry('Alpha', false), entry('Beta', false), entry('Gamma', false)],
+    })
+
+    render(<FilePane paneId="left" />)
+    const scroller = screen.getByTestId('file-pane-scroll-left')
+
+    expect(screen.queryByTestId('marquee-selection')).not.toBeInTheDocument()
+
+    fireEvent.mouseDown(scroller, { button: 0, clientX: 10, clientY: 5 })
+    fireEvent.mouseMove(document, { clientX: 10, clientY: 65 })
+
+    expect(screen.getByTestId('marquee-selection')).toBeInTheDocument()
+    expect(useSelectionStore.getState().selections.left.selectedIds).toEqual([
+      'Alpha',
+      'Beta',
+      'Gamma',
+    ])
+
+    fireEvent.mouseUp(document)
+
+    expect(screen.queryByTestId('marquee-selection')).not.toBeInTheDocument()
+    expect(useSelectionStore.getState().selections.left.selectedIds).toEqual([
+      'Alpha',
+      'Beta',
+      'Gamma',
+    ])
+  })
+
+  it('unions a Ctrl-drag marquee with the pre-existing selection instead of replacing it', () => {
+    seedPane({
+      path: 'C:\\',
+      entries: [entry('Alpha', false), entry('Beta', false), entry('Gamma', false)],
+    })
+    useSelectionStore.getState().setSelection('left', ['Alpha'], 'Alpha', 'Alpha')
+
+    render(<FilePane paneId="left" />)
+    const scroller = screen.getByTestId('file-pane-scroll-left')
+
+    // Drag over Gamma only (row 2, y in [60, 90)); Alpha (pre-selected) is
+    // outside the rectangle and must survive because Ctrl was held.
+    fireEvent.mouseDown(scroller, { button: 0, ctrlKey: true, clientX: 10, clientY: 65 })
+    fireEvent.mouseMove(document, { ctrlKey: true, clientX: 10, clientY: 85 })
+    fireEvent.mouseUp(document)
+
+    expect(useSelectionStore.getState().selections.left.selectedIds).toEqual(['Alpha', 'Gamma'])
+  })
+
+  it('clears the selection on a plain background click that does not drag', () => {
+    seedPane({
+      path: 'C:\\root',
+      entries: [entry('Alpha', false), entry('Beta', false)],
+    })
+    useSelectionStore.getState().setSelection('left', ['Alpha'], 'Alpha', 'Alpha')
+
+    render(<FilePane paneId="left" />)
+    const scroller = screen.getByTestId('file-pane-scroll-left')
+
+    fireEvent.mouseDown(scroller, { button: 0, clientX: 10, clientY: 5 })
+    fireEvent.mouseUp(document)
+
+    expect(screen.queryByTestId('marquee-selection')).not.toBeInTheDocument()
+    expect(useSelectionStore.getState().selections.left.selectedIds).toEqual([])
+  })
+
+  it('ignores a marquee drag started on a row so normal row click-selection still applies', () => {
+    seedPane({
+      path: 'C:\\root',
+      entries: [entry('Alpha', false), entry('Beta', false)],
+    })
+
+    render(<FilePane paneId="left" />)
+    const row = within(screen.getByLabelText('Left pane')).getByRole('row', { name: /Alpha/ })
+
+    fireEvent.mouseDown(row, { button: 0, clientX: 10, clientY: 5 })
+    fireEvent.mouseMove(document, { clientX: 10, clientY: 65 })
+
+    expect(screen.queryByTestId('marquee-selection')).not.toBeInTheDocument()
+  })
+
   it('suppresses pane shortcuts while an app-modal dialog is open', async () => {
     const user = userEvent.setup()
     const refreshEverything = vi.fn(() => Promise.resolve())
