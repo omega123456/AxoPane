@@ -1,15 +1,38 @@
 import { startOp } from '@/lib/queue-commands'
 import { log } from '@/lib/app-log-commands'
-import { clearFileClipboard, moveToTrash, openPath, writeFileClipboard } from '@/lib/ipc/commands'
+import {
+  clearFileClipboard,
+  moveToTrash,
+  openPath,
+  restoreFromTrash,
+  writeFileClipboard,
+} from '@/lib/ipc/commands'
 import type { CommandId, DirectoryEntry } from '@/lib/types/ipc'
+import { isTrashPath } from '@/lib/trash'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useClipboardStore } from '@/stores/clipboard-store'
+import { useErrorToastStore } from '@/stores/error-toast-store'
 import { useInlineRenameStore } from '@/stores/inline-rename-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useSettingsStore } from '@/stores/settings-store'
 
 const PARENT_ROW_ID = '..'
+
+// The trash browser has no real filesystem entries backing it (see
+// `trashEntryToDirectoryEntry`), so most file commands (rename, cut/copy,
+// paste, new folder/file, open, calculate size, …) can't act on it. Only
+// these make sense there.
+const trashPaneCommands = new Set<CommandId>([
+  'restore',
+  'emptyTrash',
+  'delete',
+  'deletePermanent',
+  'refresh',
+  'selectAll',
+  'clearFilter',
+  'showSettings',
+])
 
 export function executeCommand(
   commandId: CommandId,
@@ -18,6 +41,15 @@ export function executeCommand(
 ) {
   const panes = usePanesStore.getState()
   const pane = panes.panes[paneId]
+  const inTrashPane = isTrashPath(pane.path)
+  const isTrashOnlyCommand = commandId === 'restore' || commandId === 'emptyTrash'
+  if (inTrashPane && !trashPaneCommands.has(commandId)) {
+    return
+  }
+  if (!inTrashPane && isTrashOnlyCommand) {
+    return
+  }
+
   const selection = useSelectionStore.getState().selections[paneId]
   const entry = targetEntryId ? pane.entries.find((item) => item.id === targetEntryId) : undefined
   const selectedEntries = pane.entries.filter((item) => selection.selectedIds.includes(item.id))
@@ -116,6 +148,23 @@ export function executeCommand(
       break
     }
     case 'delete': {
+      // Items already sitting in the trash have nowhere softer to go, so
+      // Delete permanently removes them (confirmed first, like Shift+Delete).
+      if (inTrashPane) {
+        if (effectiveEntries.length > 0) {
+          useActionDialogStore.getState().open({
+            kind: 'deleteFromTrash',
+            paneId,
+            targets: effectiveEntries.map((item) => ({
+              id: item.id,
+              name: item.name,
+              path: item.path,
+              sizeBytes: item.sizeBytes,
+            })),
+          })
+        }
+        break
+      }
       // Default delete moves to the OS bin/Recycle Bin/Trash (reversible, no
       // confirmation — matching Explorer/Finder). The fs watcher refreshes the
       // listing once the items disappear.
@@ -131,18 +180,59 @@ export function executeCommand(
       break
     }
     case 'deletePermanent': {
-      // Irreversible hard delete: confirm first, then enqueue through the queue
-      // engine (shared toast/progress + per-disk lock) from the dialog.
-      if (effectiveEntries.length > 0) {
+      if (effectiveEntries.length === 0) {
+        break
+      }
+      // Irreversible hard delete: confirm first. Real files go through the
+      // queue engine (shared toast/progress + per-disk lock); trash entries
+      // have no real filesystem path to hand it, so they use their own
+      // dialog kind that calls the trash-specific delete command directly.
+      useActionDialogStore.getState().open(
+        inTrashPane
+          ? {
+              kind: 'deleteFromTrash',
+              paneId,
+              targets: effectiveEntries.map((item) => ({
+                id: item.id,
+                name: item.name,
+                path: item.path,
+                sizeBytes: item.sizeBytes,
+              })),
+            }
+          : {
+              kind: 'delete',
+              paneId,
+              targets: effectiveEntries.map((item) => ({
+                id: item.id,
+                name: item.name,
+                path: item.path,
+                sizeBytes: item.sizeBytes,
+              })),
+            },
+      )
+      break
+    }
+    case 'restore': {
+      const ids = effectiveEntries
+        .map((item) => item.trashId)
+        .filter((id): id is string => Boolean(id))
+      if (ids.length > 0) {
+        void restoreFromTrash({ ids })
+          .then(() => panes.reloadPane(paneId))
+          .catch((error) => {
+            const message = error instanceof Error ? error.message : String(error)
+            log.error('restore from trash failed', { paneId, ids, error })
+            useErrorToastStore.getState().show(message)
+          })
+      }
+      break
+    }
+    case 'emptyTrash': {
+      if (pane.entries.length > 0) {
         useActionDialogStore.getState().open({
-          kind: 'delete',
+          kind: 'emptyTrash',
           paneId,
-          targets: effectiveEntries.map((item) => ({
-            id: item.id,
-            name: item.name,
-            path: item.path,
-            sizeBytes: item.sizeBytes,
-          })),
+          count: pane.entries.length,
         })
       }
       break
@@ -238,6 +328,14 @@ export function canExecuteCommand(
   const selection = useSelectionStore.getState().selections[paneId]
   const clipboard = useClipboardStore.getState()
   const entry = targetEntryId ? pane.entries.find((item) => item.id === targetEntryId) : undefined
+  const inTrashPane = isTrashPath(pane.path)
+
+  if (inTrashPane && !trashPaneCommands.has(commandId)) {
+    return false
+  }
+  if (!inTrashPane && (commandId === 'restore' || commandId === 'emptyTrash')) {
+    return false
+  }
 
   switch (commandId) {
     case 'paste':
@@ -254,6 +352,12 @@ export function canExecuteCommand(
     case 'delete':
     case 'deletePermanent':
       return Boolean(entry || selection.selectedIds.length > 0)
+    case 'restore': {
+      const effectiveEntries = entry ? [entry] : selectedEntriesForPane(paneId)
+      return effectiveEntries.length > 0 && effectiveEntries.every((item) => item.originalPath)
+    }
+    case 'emptyTrash':
+      return pane.entries.length > 0
     case 'copyToOtherPane':
     case 'moveToOtherPane':
       return Boolean(entry || selection.selectedIds.length > 0 || pane.focusedEntryId)

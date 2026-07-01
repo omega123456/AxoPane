@@ -3,6 +3,7 @@ import type {
   CancelSizeResponse,
   CompressArchiveRequest,
   CreateEntryRequest,
+  DeleteFromTrashRequest,
   DirectoryEntry,
   DirPatchEvent,
   EverythingStatus,
@@ -18,6 +19,7 @@ import type {
   ListDirResponse,
   ListTreeChildrenRequest,
   ListTreeChildrenResponse,
+  ListTrashResponse,
   LoadNativeMenuRequest,
   LoadNativeMenuResponse,
   LogEntry,
@@ -26,6 +28,7 @@ import type {
   OpenWithRequest,
   OpenPathRequest,
   RenameEntryRequest,
+  RestoreTrashRequest,
   SetDefaultApplicationRequest,
   ShowPropertiesRequest,
   TrashEntriesRequest,
@@ -65,6 +68,22 @@ export function renameEntry(payload: RenameEntryRequest) {
 
 export function moveToTrash(payload: TrashEntriesRequest) {
   return invokeCommand({ command: 'move_to_trash', payload }) as Promise<void>
+}
+
+export function listTrash() {
+  return invokeCommand({ command: 'list_trash' }) as Promise<ListTrashResponse>
+}
+
+export function restoreFromTrash(payload: RestoreTrashRequest) {
+  return invokeCommand({ command: 'restore_from_trash', payload }) as Promise<void>
+}
+
+export function emptyTrash() {
+  return invokeCommand({ command: 'empty_trash' }) as Promise<void>
+}
+
+export function deleteFromTrash(payload: DeleteFromTrashRequest) {
+  return invokeCommand({ command: 'delete_from_trash', payload }) as Promise<void>
 }
 
 export function openPath(payload: OpenPathRequest) {

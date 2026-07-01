@@ -13,6 +13,7 @@ import {
   PanelLeftIcon,
   PlusIcon,
   RefreshIcon,
+  RotateCcwIcon,
   ScissorsIcon,
   Share2Icon,
   SquareCheckIcon,
@@ -35,6 +36,7 @@ const appIconMap = {
   copy: CopyIcon,
   cut: ScissorsIcon,
   delete: Trash2Icon,
+  'empty-trash': Trash2Icon,
   extract: PackageOpenIcon,
   'new-file': FilePlusIcon,
   'new-folder': FolderPlusIcon,
@@ -46,6 +48,7 @@ const appIconMap = {
   properties: InfoIcon,
   refresh: RefreshIcon,
   rename: TypeIcon,
+  restore: RotateCcwIcon,
   'select-all': SquareCheckIcon,
   share: Share2Icon,
 } satisfies Record<NonNullable<Extract<ContextMenuIcon, { kind: 'app' }>['name']>, IconComponent>

@@ -200,7 +200,7 @@ export function FileRow({
       onClick={onClick}
       onContextMenu={onContextMenu}
       onAuxClick={(event) => {
-        if (event.button === 1 && entry.isDir) {
+        if (event.button === 1 && entry.isDir && !entry.trashId) {
           event.preventDefault()
           onMiddleClick()
         }
@@ -220,6 +220,7 @@ export function FileRow({
               <span className="flex min-w-0 items-center gap-2">
                 <EntryIcon entry={entry} />
                 <span
+                  title={entry.originalPath ? `Original location: ${entry.originalPath}` : undefined}
                   className={`truncate ${
                     isCut
                       ? 'text-light-text-soft dark:text-dark-text-soft'

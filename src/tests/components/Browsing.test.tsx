@@ -6,6 +6,7 @@ import { DetailsPanel } from '@/components/details/DetailsPanel'
 import { HeaderRow, columnFlexStyle } from '@/components/pane/HeaderRow'
 import { SizeValue } from '@/components/pane/SizeValue'
 import { TreeNode } from '@/components/tree/TreeNode'
+import { TRASH_PATH } from '@/lib/trash'
 import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
@@ -171,6 +172,15 @@ describe('HeaderRow', () => {
     fireEvent.pointerUp(divider, { pointerId: 1 })
 
     expect(useLayoutStore.getState().columnWidths.type).toBe(176)
+  })
+
+  it('relabels the Modified column to Deleted when browsing the trash pane', () => {
+    const pane = usePanesStore.getState().panes.left
+    render(<HeaderRow pane={{ ...pane, path: TRASH_PATH, sortKey: 'modified', sortDirection: 'asc' }} />)
+
+    expect(screen.getByRole('button', { name: /Deleted/ })).toBeInTheDocument()
+    expect(screen.getByRole('separator', { name: 'Resize Deleted column' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Modified/ })).not.toBeInTheDocument()
   })
 })
 

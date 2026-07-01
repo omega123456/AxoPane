@@ -12,6 +12,8 @@ export type CommandId =
   | 'rename'
   | 'delete'
   | 'deletePermanent'
+  | 'restore'
+  | 'emptyTrash'
   | 'copy'
   | 'cut'
   | 'paste'
@@ -60,6 +62,10 @@ export type DirectoryEntry = {
   attributes: string[]
   isHidden: boolean
   isSystem: boolean
+  /** Set only for rows synthesized from a trash listing: the opaque id used to restore/purge this item. */
+  trashId?: string
+  /** Set only for rows synthesized from a trash listing, when the original location is known. */
+  originalPath?: string | null
 }
 
 export type SortDirection = 'asc' | 'desc'
@@ -234,6 +240,27 @@ export type RenameEntryRequest = {
 
 export type TrashEntriesRequest = {
   paths: string[]
+}
+
+export type TrashEntry = {
+  id: string
+  name: string
+  originalPath: string | null
+  sizeBytes: number | null
+  isDir: boolean
+  deletedAt: number | null
+}
+
+export type ListTrashResponse = {
+  entries: TrashEntry[]
+}
+
+export type RestoreTrashRequest = {
+  ids: string[]
+}
+
+export type DeleteFromTrashRequest = {
+  ids: string[]
 }
 
 export type OpenPathRequest = {
@@ -504,6 +531,22 @@ export type IpcCommandMap = {
   }
   move_to_trash: {
     request: TrashEntriesRequest
+    response: void
+  }
+  list_trash: {
+    request: undefined
+    response: ListTrashResponse
+  }
+  restore_from_trash: {
+    request: RestoreTrashRequest
+    response: void
+  }
+  empty_trash: {
+    request: undefined
+    response: void
+  }
+  delete_from_trash: {
+    request: DeleteFromTrashRequest
     response: void
   }
   open_path: {

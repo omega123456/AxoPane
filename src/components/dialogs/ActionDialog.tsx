@@ -3,8 +3,10 @@ import { DialogShell } from '@/components/dialogs/DialogShell'
 import { AlertTriangleIcon } from '@/components/icons'
 import { log } from '@/lib/app-log-commands'
 import { createFileInPane, createFolderInPane } from '@/lib/file-actions'
+import { deleteFromTrash, emptyTrash } from '@/lib/ipc/commands'
 import { startOp } from '@/lib/queue-commands'
 import { useActionDialogStore, type ActionDialog as ActionDialogState } from '@/stores/action-dialog-store'
+import { usePanesStore } from '@/stores/panes-store'
 
 export function ActionDialog() {
   const dialog = useActionDialogStore((state) => state.dialog)
@@ -14,6 +16,14 @@ export function ActionDialog() {
 
   if (dialog.kind === 'delete') {
     return <DeleteDialog dialog={dialog} />
+  }
+
+  if (dialog.kind === 'emptyTrash') {
+    return <EmptyTrashDialog dialog={dialog} />
+  }
+
+  if (dialog.kind === 'deleteFromTrash') {
+    return <DeleteFromTrashDialog dialog={dialog} />
   }
 
   if (dialog.kind === 'transferConfirm') {
@@ -228,6 +238,180 @@ function DeleteDialog({ dialog }: { dialog: Extract<ActionDialogState, { kind: '
       <div className="p-4">
         <p className="text-row text-light-text-soft dark:text-dark-text-soft">
           This permanently deletes the selected {count === 1 ? 'item' : 'items'}. This cannot be undone.
+        </p>
+        {error ? (
+          <p className="mt-2 flex items-center gap-2 text-uxs text-accent-amber">
+            <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" />
+            {error}
+          </p>
+        ) : null}
+      </div>
+      <div className="flex justify-end gap-2 border-t border-light-border p-4 dark:border-dark-border">
+        <button
+          type="button"
+          onClick={close}
+          className="rounded-md border border-light-border px-4 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
+        >
+          Cancel
+        </button>
+        <button
+          ref={confirmRef}
+          type="button"
+          disabled={busy}
+          onClick={() => void confirm()}
+          className="rounded-md bg-accent-red-soft px-4 py-2 text-xs font-semibold text-accent-red focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-red disabled:opacity-40"
+        >
+          Delete
+        </button>
+      </div>
+    </DialogShell>
+  )
+}
+
+function EmptyTrashDialog({
+  dialog,
+}: {
+  dialog: Extract<ActionDialogState, { kind: 'emptyTrash' }>
+}) {
+  const close = useActionDialogStore((state) => state.close)
+  const busy = useActionDialogStore((state) => state.busy)
+  const error = useActionDialogStore((state) => state.error)
+  const setBusy = useActionDialogStore((state) => state.setBusy)
+  const setError = useActionDialogStore((state) => state.setError)
+  const confirmRef = useRef<HTMLButtonElement>(null)
+  const count = dialog.count
+
+  useEffect(() => {
+    confirmRef.current?.focus()
+  }, [])
+
+  async function confirm() {
+    if (busy) {
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      await emptyTrash()
+      await usePanesStore.getState().reloadPane(dialog.paneId)
+      close()
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      log.error('empty trash failed', { error: message })
+      setError(message)
+      setBusy(false)
+    }
+  }
+
+  function onKeyDown(event: React.KeyboardEvent) {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      close()
+    }
+  }
+
+  return (
+    <DialogShell label="Confirm empty trash" onDismiss={close} onKeyDown={onKeyDown}>
+      <div className="flex items-start gap-3 border-b border-light-border p-4 dark:border-dark-border">
+        <AlertTriangleIcon className="mt-0.5 h-5 w-5 shrink-0 text-accent-amber" />
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-light-text dark:text-dark-text">
+            Empty trash ({count === 1 ? '1 item' : `${count} items`})?
+          </div>
+        </div>
+      </div>
+      <div className="p-4">
+        <p className="text-row text-light-text-soft dark:text-dark-text-soft">
+          This permanently deletes everything currently in the trash. This cannot be undone.
+        </p>
+        {error ? (
+          <p className="mt-2 flex items-center gap-2 text-uxs text-accent-amber">
+            <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" />
+            {error}
+          </p>
+        ) : null}
+      </div>
+      <div className="flex justify-end gap-2 border-t border-light-border p-4 dark:border-dark-border">
+        <button
+          type="button"
+          onClick={close}
+          className="rounded-md border border-light-border px-4 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
+        >
+          Cancel
+        </button>
+        <button
+          ref={confirmRef}
+          type="button"
+          disabled={busy}
+          onClick={() => void confirm()}
+          className="rounded-md bg-accent-red-soft px-4 py-2 text-xs font-semibold text-accent-red focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-red disabled:opacity-40"
+        >
+          Empty trash
+        </button>
+      </div>
+    </DialogShell>
+  )
+}
+
+function DeleteFromTrashDialog({
+  dialog,
+}: {
+  dialog: Extract<ActionDialogState, { kind: 'deleteFromTrash' }>
+}) {
+  const close = useActionDialogStore((state) => state.close)
+  const busy = useActionDialogStore((state) => state.busy)
+  const error = useActionDialogStore((state) => state.error)
+  const setBusy = useActionDialogStore((state) => state.setBusy)
+  const setError = useActionDialogStore((state) => state.setError)
+  const confirmRef = useRef<HTMLButtonElement>(null)
+  const count = dialog.targets.length
+
+  useEffect(() => {
+    confirmRef.current?.focus()
+  }, [])
+
+  async function confirm() {
+    if (busy) {
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      await deleteFromTrash({ ids: dialog.targets.map((target) => target.id) })
+      await usePanesStore.getState().reloadPane(dialog.paneId)
+      close()
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      log.error('delete from trash failed', { error: message })
+      setError(message)
+      setBusy(false)
+    }
+  }
+
+  function onKeyDown(event: React.KeyboardEvent) {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      close()
+    }
+  }
+
+  return (
+    <DialogShell label="Confirm delete from trash" onDismiss={close} onKeyDown={onKeyDown}>
+      <div className="flex items-start gap-3 border-b border-light-border p-4 dark:border-dark-border">
+        <AlertTriangleIcon className="mt-0.5 h-5 w-5 shrink-0 text-accent-amber" />
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-light-text dark:text-dark-text">
+            Delete {count === 1 ? '1 item' : `${count} items`} from trash?
+          </div>
+          <div className="mt-1 break-all font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
+            {count === 1 ? dialog.targets[0].name : `${dialog.targets[0].name} and ${count - 1} more`}
+          </div>
+        </div>
+      </div>
+      <div className="p-4">
+        <p className="text-row text-light-text-soft dark:text-dark-text-soft">
+          This permanently deletes the selected {count === 1 ? 'item' : 'items'} from the trash. This
+          cannot be undone.
         </p>
         {error ? (
           <p className="mt-2 flex items-center gap-2 text-uxs text-accent-amber">

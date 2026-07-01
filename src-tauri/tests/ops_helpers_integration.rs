@@ -132,3 +132,42 @@ fn filesystem_helpers_surface_cleanup_errors() {
     let source_error = remove_source(&missing_source).expect_err("remove missing source");
     assert!(!source_error.is_empty());
 }
+
+/// `remove_target(_)`/`remove_source(_)`'s `is_dir()` branch calls
+/// `fs::remove_dir_all`, which fails when the directory's parent forbids
+/// unlinking the entry — distinct from the "missing path" case above, which
+/// only exercises the `remove_file` (non-directory) branch.
+#[cfg(unix)]
+#[test]
+fn filesystem_helpers_surface_remove_dir_all_errors_for_directories() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = tempdir().expect("temp dir");
+    let locked_parent = fixture.path().join("locked-parent");
+    fs::create_dir_all(&locked_parent).expect("locked parent");
+
+    let target_dir = locked_parent.join("target-dir");
+    fs::create_dir(&target_dir).expect("target dir");
+    let source_dir = locked_parent.join("source-dir");
+    fs::create_dir(&source_dir).expect("source dir");
+
+    let locked = fs::set_permissions(&locked_parent, fs::Permissions::from_mode(0o555)).is_ok();
+    if !locked {
+        return;
+    }
+
+    let target_error = remove_target(&target_dir);
+    let source_error = remove_source(&source_dir);
+
+    fs::set_permissions(&locked_parent, fs::Permissions::from_mode(0o755))
+        .expect("restore parent permissions");
+
+    assert!(
+        target_error.is_err(),
+        "removing a dir needs write access on its parent"
+    );
+    assert!(
+        source_error.is_err(),
+        "removing a dir needs write access on its parent"
+    );
+}

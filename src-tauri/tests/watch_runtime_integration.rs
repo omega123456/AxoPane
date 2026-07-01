@@ -1,8 +1,8 @@
 use file_explorer_lib::fs::{SortDirection, SortKey};
 use file_explorer_lib::watch::{
-    add_watch, canonical_dir_for_tests, create_runtime, handle_debounce_result_for_tests,
-    insert_tab_for_tests, noop_watch_error_for_tests, remove_watch, snapshot_for_target,
-    first_error_path_for_tests, DirPatch, WatchTarget,
+    add_watch, canonical_dir_for_tests, create_runtime, first_error_path_for_tests,
+    handle_debounce_result_for_tests, insert_tab_for_tests, noop_watch_error_for_tests,
+    remove_watch, snapshot_for_target, DirPatch, WatchTarget,
 };
 use notify::event::{CreateKind, DataChange, EventKind, ModifyKind, RemoveKind, RenameMode};
 use notify::Event;
@@ -83,7 +83,10 @@ fn watch_runtime_test_hooks_drive_targeted_and_rescan_callbacks() {
         .lock()
         .expect("patches lock")
         .iter()
-        .any(|patch| patch.changed.iter().any(|entry| entry.path.ends_with("created.txt"))));
+        .any(|patch| patch
+            .changed
+            .iter()
+            .any(|entry| entry.path.ends_with("created.txt"))));
     assert!(errors.lock().expect("errors lock").is_empty());
 
     std::fs::remove_file(&before).expect("remove before");
@@ -98,10 +101,7 @@ fn watch_runtime_test_hooks_drive_targeted_and_rescan_callbacks() {
             Instant::now(),
         )]),
         Arc::new(move |patch| {
-            patches_for_rescan
-                .lock()
-                .expect("patches lock")
-                .push(patch);
+            patches_for_rescan.lock().expect("patches lock").push(patch);
         }),
         Arc::new(move |path, error| {
             errors_for_rescan
@@ -111,12 +111,14 @@ fn watch_runtime_test_hooks_drive_targeted_and_rescan_callbacks() {
         }),
     );
     let patches = patches.lock().expect("patches lock");
-    assert!(patches
+    assert!(patches.iter().any(|patch| patch
+        .removed
         .iter()
-        .any(|patch| patch.removed.iter().any(|path| path.ends_with("before.txt"))));
-    assert!(patches
+        .any(|path| path.ends_with("before.txt"))));
+    assert!(patches.iter().any(|patch| patch
+        .changed
         .iter()
-        .any(|patch| patch.changed.iter().any(|entry| entry.path.ends_with("after.txt"))));
+        .any(|entry| entry.path.ends_with("after.txt"))));
 }
 
 #[test]
@@ -167,11 +169,16 @@ fn watch_runtime_test_hook_surfaces_errors_and_removals() {
         .lock()
         .expect("patches lock")
         .iter()
-        .any(|patch| patch.removed.iter().any(|path| path.ends_with("doomed.txt"))));
+        .any(|patch| patch
+            .removed
+            .iter()
+            .any(|path| path.ends_with("doomed.txt"))));
 
     handle_debounce_result_for_tests(
         &runtime,
-        Err(vec![notify::Error::generic("boom").add_path(root.join("broken.txt"))]),
+        Err(vec![
+            notify::Error::generic("boom").add_path(root.join("broken.txt"))
+        ]),
         Arc::new(|_| {}),
         Arc::new({
             let errors = errors.clone();
@@ -249,9 +256,10 @@ fn watch_runtime_test_hook_covers_modify_and_rename_filters() {
     assert!(patches
         .iter()
         .any(|patch| patch.removed.iter().any(|path| path.ends_with("old.txt"))));
-    assert!(!patches
+    assert!(!patches.iter().any(|patch| patch
+        .changed
         .iter()
-        .any(|patch| patch.changed.iter().any(|entry| entry.path.ends_with("new.txt"))));
+        .any(|entry| entry.path.ends_with("new.txt"))));
 }
 
 #[test]
@@ -333,7 +341,10 @@ fn watch_runtime_test_hooks_cover_filtered_nonmatching_and_error_branches() {
         .lock()
         .expect("patches lock")
         .iter()
-        .any(|patch| patch.removed.iter().any(|path| path.ends_with(".hidden.txt"))));
+        .any(|patch| patch
+            .removed
+            .iter()
+            .any(|path| path.ends_with(".hidden.txt"))));
 
     std::fs::remove_dir_all(root).expect("remove watched dir");
     handle_debounce_result_for_tests(

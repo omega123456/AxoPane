@@ -6,6 +6,7 @@ import type {
   ListDirResponse,
   SessionState,
 } from '@/lib/types/ipc'
+import { TRASH_PATH } from '@/lib/trash'
 import { contextMenuFixtures } from './context-menu'
 import {
   conflictQueueSnapshot,
@@ -112,6 +113,12 @@ const relativeDatesDarkConfig: AppConfig = {
 const emptyRootListDir: ListDirResponse = {
   path: 'C:\\',
   entries: [],
+}
+
+const trashSession: SessionState = {
+  activePane: 'left',
+  leftPath: TRASH_PATH,
+  rightPath: 'D:\\projects',
 }
 
 // A left pane with several tabs whose locations exercise every LocationIcon
@@ -489,4 +496,8 @@ export const screenshotScenarios = {
     },
     'macos',
   ),
+  trash: scenarioByTheme({
+    load_session: trashSession,
+    queue_snapshot: emptyQueueSnapshot,
+  }),
 } satisfies Record<string, { light: PlaywrightScenario; dark: PlaywrightScenario }>

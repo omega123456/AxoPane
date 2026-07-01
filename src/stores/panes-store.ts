@@ -2,12 +2,14 @@ import { create } from 'zustand'
 import {
   listTreeChildren,
   listDir,
+  listTrash,
   refreshTab,
   requestFolderSize,
   requestFolderSizes,
   saveSession,
   setTabWatch,
 } from '@/lib/ipc/commands'
+import { isTrashPath, trashEntryToDirectoryEntry } from '@/lib/trash'
 import type {
   DirectoryEntry,
   DirPatchEvent,
@@ -575,6 +577,56 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     }))
 
     try {
+      // The trash browser is a virtual location backed by list_trash, not a
+      // real directory: no fs watcher, tree-children lookup, or size requests
+      // apply to it.
+      if (isTrashPath(pane.path)) {
+        const response = await listTrash()
+        const sortedEntries = sortEntries(
+          response.entries.map(trashEntryToDirectoryEntry),
+          pane.sortKey,
+          pane.sortDirection,
+          get().sizeStates,
+        )
+
+        set((state) => {
+          const previous = state.panes[paneId]
+          const restoredFocusId = findMatchingEntryId(sortedEntries, [
+            selection.focusedId,
+            previous.focusedEntryId,
+            ...selection.selectedIds,
+          ])
+          const seeded =
+            previous.historyIndex === -1
+              ? { history: [pane.path], historyIndex: 0 }
+              : { history: previous.history, historyIndex: previous.historyIndex }
+
+          return {
+            panes: {
+              ...state.panes,
+              [paneId]: {
+                ...previous,
+                path: pane.path,
+                entries: sortedEntries,
+                focusedEntryId: restoredFocusId ?? sortedEntries[0]?.id ?? null,
+                loading: false,
+                ...seeded,
+              },
+            },
+          }
+        })
+
+        const nextTrashPane = get().panes[paneId]
+        useTabsStore.getState().patchActiveTab(paneId, {
+          path: nextTrashPane.path,
+          sortKey: nextTrashPane.sortKey,
+          sortDirection: nextTrashPane.sortDirection,
+          filter: nextTrashPane.filterApplied,
+        })
+        schedulePersistSession(get().activePaneId)
+        return
+      }
+
       const response = await listDir({
         path: pane.path,
         sortKey: pane.sortKey,

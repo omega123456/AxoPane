@@ -6,6 +6,7 @@ import type {
 } from '@/lib/types/context-menu'
 import type { PlatformOs } from '@/lib/keymap'
 import type { DirectoryEntry } from '@/lib/types/ipc'
+import { isTrashPath } from '@/lib/trash'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import type { PaneId } from '@/types/pane'
@@ -76,6 +77,13 @@ function buildNativeMenuRequest(
 ): ContextMenuNativeRequest | null {
   const pane = usePanesStore.getState().panes[paneId]
   const selection = useSelectionStore.getState().selections[paneId]
+
+  // Trash entries have no real filesystem path (their `path` is an opaque
+  // trash id), and the trash pane's own path isn't a real folder either, so
+  // the native OS shell menu has nothing valid to operate on here.
+  if (isTrashPath(pane.path) || (target.kind === 'tree' && isTrashPath(target.path))) {
+    return null
+  }
 
   switch (target.kind) {
     case 'file':

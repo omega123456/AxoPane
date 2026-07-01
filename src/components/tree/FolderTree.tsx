@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { TreeNode } from './TreeNode'
+import { TrashTreeRow } from './TrashTreeRow'
 import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { groupVolumesByCategory } from '@/lib/volumes'
@@ -35,6 +36,7 @@ export function FolderTree() {
               {group.volumes.map((volume) => (
                 <TreeNode key={volume.mountRoot} path={volume.mountRoot} depth={0} volume={volume} />
               ))}
+              {group.category === 'fixed' && <TrashTreeRow />}
             </ul>
           </section>
         ))}

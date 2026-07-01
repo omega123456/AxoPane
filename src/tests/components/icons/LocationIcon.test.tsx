@@ -1,5 +1,6 @@
 import { render } from '@testing-library/react'
 import { LocationIcon } from '@/components/icons/LocationIcon'
+import { TRASH_PATH } from '@/lib/trash'
 import type { VolumeInfo } from '@/lib/types/ipc'
 
 function volume(overrides: Partial<VolumeInfo> = {}): VolumeInfo {
@@ -49,6 +50,10 @@ describe('LocationIcon', () => {
 
   it('falls back to a plain folder when no volume is known', () => {
     expect(iconClass('C:\\anywhere', [])).toContain('lucide-folder')
+  })
+
+  it('shows the trash glyph for the trash pane, regardless of volumes', () => {
+    expect(iconClass(TRASH_PATH, [volume()])).toContain('lucide-trash-2')
   })
 
   it('colors icons to match the folder tree', () => {

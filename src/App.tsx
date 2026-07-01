@@ -9,6 +9,7 @@ import { CommandBar } from '@/components/shell/CommandBar'
 import { StatusBar } from '@/components/shell/StatusBar'
 import { WorkspaceLayout } from '@/components/shell/WorkspaceLayout'
 import { QueueOverlay } from '@/components/queue/QueueOverlay'
+import { ErrorToast } from '@/components/states/ErrorToast'
 import { hydrateAppConfig, persistAppConfig } from '@/lib/app-config'
 import { executeCommand } from '@/lib/commands'
 import { isPathInsideVolume } from '@/lib/volumes'
@@ -244,7 +245,12 @@ function App() {
           />
         }
         statusBar={<StatusBar activePane={activePane} summary={statusSummary} />}
-        overlay={<QueueOverlay />}
+        overlay={
+          <>
+            <QueueOverlay />
+            <ErrorToast />
+          </>
+        }
       >
         <WorkspaceLayout />
       </AppFrame>

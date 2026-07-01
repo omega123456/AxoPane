@@ -153,6 +153,44 @@ describe('ActionDialog', () => {
     expect(useActionDialogStore.getState().dialog).toBeNull()
   })
 
+  it('confirms a permanent delete from the trash pane and reloads it', async () => {
+    const user = userEvent.setup()
+    const deleteFromTrash = vi.fn(() => undefined)
+    ipc.override('delete_from_trash', deleteFromTrash)
+    ipc.override('list_trash', () => ({ entries: [] }))
+
+    useActionDialogStore.getState().open({
+      kind: 'deleteFromTrash',
+      paneId: 'left',
+      targets: [{ id: 'orphan.txt', name: 'orphan.txt', path: 'orphan.txt' }],
+    })
+    render(<ActionDialog />)
+
+    expect(screen.getByText('Delete 1 item from trash?')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+    await waitFor(() => expect(useActionDialogStore.getState().dialog).toBeNull())
+    expect(deleteFromTrash).toHaveBeenCalledWith({ ids: ['orphan.txt'] })
+  })
+
+  it('shows the backend error when deleting from trash fails', async () => {
+    const user = userEvent.setup()
+    ipc.override('delete_from_trash', () => {
+      throw new Error('item is locked')
+    })
+
+    useActionDialogStore.getState().open({
+      kind: 'deleteFromTrash',
+      paneId: 'left',
+      targets: [{ id: 'orphan.txt', name: 'orphan.txt', path: 'orphan.txt' }],
+    })
+    render(<ActionDialog />)
+
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
+    expect(await screen.findByText('item is locked')).toBeInTheDocument()
+    expect(useActionDialogStore.getState().dialog).not.toBeNull()
+  })
+
   it('confirms a transfer and shows what will move from where to where', async () => {
     const user = userEvent.setup()
     const startOp = vi.fn(() => 'op-1')

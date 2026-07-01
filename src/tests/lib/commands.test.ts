@@ -1,11 +1,13 @@
 import { beforeEach, vi } from 'vitest'
-import { waitFor } from '@testing-library/react'
+import { act, waitFor } from '@testing-library/react'
 import { runCompressCommand, runExtractCommand } from '@/lib/archive-commands'
 import { ipc } from '@/tests/ipc-mock'
 import { canExecuteCommand, executeCommand, selectedEntriesForPane } from '@/lib/commands'
 import { showPropertiesDialog, toPropertiesDialogItem } from '@/lib/properties-commands'
+import { TRASH_PATH } from '@/lib/trash'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useClipboardStore } from '@/stores/clipboard-store'
+import { useErrorToastStore } from '@/stores/error-toast-store'
 import { useInlineRenameStore } from '@/stores/inline-rename-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
@@ -27,6 +29,14 @@ function entry(name: string, isDir = true): DirectoryEntry {
     attributes: [],
     isHidden: false,
     isSystem: false,
+  }
+}
+
+function trashEntry(name: string, hasOriginalPath = true): DirectoryEntry {
+  return {
+    ...entry(name, false),
+    trashId: name,
+    originalPath: hasOriginalPath ? `C:\\root\\${name}` : undefined,
   }
 }
 
@@ -373,5 +383,84 @@ describe('archive and properties helpers', () => {
       paths: ['C:\\root\\Alpha', 'C:\\root\\Beta'],
     })
     expect(usePropertiesDialogStore.getState().dialog).toBeNull()
+  })
+})
+
+describe('trash pane commands', () => {
+  beforeEach(() => {
+    act(() => {
+      useErrorToastStore.getState().dismiss()
+    })
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: {
+          ...state.panes.left,
+          path: TRASH_PATH,
+          entries: [trashEntry('report.txt'), trashEntry('orphan.txt', false)],
+        },
+      },
+    }))
+  })
+
+  it('is a no-op outside the trash pane and gates restore/emptyTrash there', () => {
+    usePanesStore.setState((state) => ({
+      panes: { ...state.panes, left: { ...state.panes.left, path: 'C:\\root' } },
+    }))
+    expect(canExecuteCommand('restore', 'left', 'report.txt')).toBe(false)
+    expect(canExecuteCommand('emptyTrash', 'left')).toBe(false)
+  })
+
+  it('requires a known original location to allow restore', () => {
+    expect(canExecuteCommand('restore', 'left', 'report.txt')).toBe(true)
+    expect(canExecuteCommand('restore', 'left', 'orphan.txt')).toBe(false)
+    expect(canExecuteCommand('emptyTrash', 'left')).toBe(true)
+  })
+
+  it('restores the target entry and reloads the pane', async () => {
+    const restoreFromTrash = vi.fn(() => undefined)
+    ipc.override('restore_from_trash', restoreFromTrash)
+    ipc.override('list_trash', () => ({ entries: [] }))
+
+    executeCommand('restore', 'left', 'report.txt')
+
+    await waitFor(() => expect(restoreFromTrash).toHaveBeenCalledWith({ ids: ['report.txt'] }))
+    await waitFor(() => expect(usePanesStore.getState().panes.left.entries).toEqual([]))
+  })
+
+  it('shows an error toast when restore fails', async () => {
+    ipc.override('restore_from_trash', () =>
+      Promise.reject(
+        new Error("'report.txt' has no known original location and cannot be restored"),
+      ) as never,
+    )
+
+    executeCommand('restore', 'left', 'report.txt')
+
+    await waitFor(() =>
+      expect(useErrorToastStore.getState().message).toBe(
+        "'report.txt' has no known original location and cannot be restored",
+      ),
+    )
+  })
+
+  it('opens a delete-from-trash confirmation for plain delete and delete-permanent alike', () => {
+    executeCommand('delete', 'left', 'report.txt')
+    expect(useActionDialogStore.getState().dialog).toMatchObject({
+      kind: 'deleteFromTrash',
+      targets: [{ id: 'report.txt', name: 'report.txt' }],
+    })
+
+    useActionDialogStore.getState().close()
+    executeCommand('deletePermanent', 'left', 'orphan.txt')
+    expect(useActionDialogStore.getState().dialog).toMatchObject({
+      kind: 'deleteFromTrash',
+      targets: [{ id: 'orphan.txt', name: 'orphan.txt' }],
+    })
+  })
+
+  it('does not require an original location to permanently delete a trash entry', () => {
+    expect(canExecuteCommand('delete', 'left', 'orphan.txt')).toBe(true)
+    expect(canExecuteCommand('deletePermanent', 'left', 'orphan.txt')).toBe(true)
   })
 })

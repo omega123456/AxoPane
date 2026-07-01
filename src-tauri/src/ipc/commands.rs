@@ -17,15 +17,16 @@ use std::time::{Duration, Instant};
 use super::mock;
 use super::types::{
     AppConfig, CancelSizeRequest, CancelSizeResponse, CompressArchiveRequest, CreateEntryRequest,
-    ExtractArchiveRequest, FileClipboardMode, FolderSizeRequest, FolderSizesRequest,
-    GetDefaultApplicationRequest, GetDefaultApplicationResponse, InitialShellResponse,
-    InvokeNativeMenuRequest, ListApplicationsResponse, ListDirRequest, ListDirResponse,
-    ListTreeChildrenRequest, ListTreeChildrenResponse, LoadNativeMenuRequest,
-    LoadNativeMenuResponse, LogFrontendRequest, MenuActionStatus, OpIdRequest, OpenPathRequest,
-    OpenWithRequest, RefreshTabRequest, RenameEntryRequest, ReorderOpsRequest,
-    ResolveConflictRequest, SaveConfigRequest, SaveSessionRequest, SessionState,
-    SetDefaultApplicationRequest, SetLogLevelRequest, SetTabWatchRequest, ShowPropertiesRequest,
-    SizeStateEvent, StartOpRequest, TrashEntriesRequest, VolumeInfo, WriteFileClipboardRequest,
+    DeleteFromTrashRequest, ExtractArchiveRequest, FileClipboardMode, FolderSizeRequest,
+    FolderSizesRequest, GetDefaultApplicationRequest, GetDefaultApplicationResponse,
+    InitialShellResponse, InvokeNativeMenuRequest, ListApplicationsResponse, ListDirRequest,
+    ListDirResponse, ListTrashResponse, ListTreeChildrenRequest, ListTreeChildrenResponse,
+    LoadNativeMenuRequest, LoadNativeMenuResponse, LogFrontendRequest, MenuActionStatus,
+    OpIdRequest, OpenPathRequest, OpenWithRequest, RefreshTabRequest, RenameEntryRequest,
+    ReorderOpsRequest, ResolveConflictRequest, RestoreTrashRequest, SaveConfigRequest,
+    SaveSessionRequest, SessionState, SetDefaultApplicationRequest, SetLogLevelRequest,
+    SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent, StartOpRequest, TrashEntriesRequest,
+    VolumeInfo, WriteFileClipboardRequest,
 };
 use crate::fs::DirectoryEntry;
 use std::path::Path;
@@ -100,6 +101,44 @@ pub fn rename_entry(payload: RenameEntryRequest) -> Result<DirectoryEntry, Strin
 pub fn move_to_trash(payload: TrashEntriesRequest) -> Result<(), String> {
     crate::trash::move_to_trash(&payload.paths).map_err(|error| {
         let message = format!("Failed to move items to trash: {error}");
+        log::error!("{message}");
+        message
+    })
+}
+
+#[tauri::command]
+pub fn list_trash() -> Result<ListTrashResponse, String> {
+    crate::trash::list_trash()
+        .map(|entries| ListTrashResponse { entries })
+        .map_err(|error| {
+            let message = format!("Failed to list trash: {error}");
+            log::error!("{message}");
+            message
+        })
+}
+
+#[tauri::command]
+pub fn restore_from_trash(payload: RestoreTrashRequest) -> Result<(), String> {
+    crate::trash::restore_from_trash(&payload.ids).map_err(|error| {
+        let message = format!("Failed to restore items from trash: {error}");
+        log::error!("{message}");
+        message
+    })
+}
+
+#[tauri::command]
+pub fn empty_trash() -> Result<(), String> {
+    crate::trash::empty_trash().map_err(|error| {
+        let message = format!("Failed to empty trash: {error}");
+        log::error!("{message}");
+        message
+    })
+}
+
+#[tauri::command]
+pub fn delete_from_trash(payload: DeleteFromTrashRequest) -> Result<(), String> {
+    crate::trash::delete_from_trash(&payload.ids).map_err(|error| {
+        let message = format!("Failed to permanently delete items from trash: {error}");
         log::error!("{message}");
         message
     })

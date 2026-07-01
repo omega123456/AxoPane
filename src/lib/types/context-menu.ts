@@ -22,6 +22,7 @@ export type ContextMenuAppIconName =
   | 'copy'
   | 'cut'
   | 'delete'
+  | 'empty-trash'
   | 'extract'
   | 'new-file'
   | 'new-folder'
@@ -33,6 +34,7 @@ export type ContextMenuAppIconName =
   | 'properties'
   | 'refresh'
   | 'rename'
+  | 'restore'
   | 'select-all'
   | 'share'
 

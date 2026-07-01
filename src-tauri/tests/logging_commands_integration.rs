@@ -5,10 +5,10 @@ use std::fs;
 use std::sync::Arc;
 
 use file_explorer_lib::ipc::commands::{apply_log_level, read_logs, set_log_level};
+use file_explorer_lib::ipc::types::SetLogLevelRequest;
 use file_explorer_lib::logging::{
     current_local_date, daily_log_file_name, format_log_line, FileLogger, LogLevel, LoggingState,
 };
-use file_explorer_lib::ipc::types::SetLogLevelRequest;
 use file_explorer_lib::persist::PersistenceState;
 use tauri::test::{mock_builder, mock_context, noop_assets};
 use tauri::Manager;

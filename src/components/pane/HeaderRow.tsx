@@ -4,6 +4,7 @@ import { columnDefinitions } from '@/lib/columns'
 import { persistAppConfig } from '@/lib/app-config'
 import type { PaneState } from '@/types/pane'
 import { ChevronDownIcon } from '@/components/icons'
+import { isTrashPath } from '@/lib/trash'
 import { defaultColumnWidths, useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import type { ColumnKey } from '@/lib/types/ipc'
@@ -22,6 +23,7 @@ export function HeaderRow({ pane }: HeaderRowProps) {
     () => configuredColumns.filter((column) => column.visible),
     [configuredColumns],
   )
+  const isTrash = isTrashPath(pane.path)
 
   function startResize(event: ReactPointerEvent<HTMLDivElement>, key: ColumnKey) {
     event.preventDefault()
@@ -58,6 +60,7 @@ export function HeaderRow({ pane }: HeaderRowProps) {
       {columns.map((column) => {
         const active = pane.sortKey === column.key
         const definition = columnDefinitions[column.key]
+        const label = isTrash && column.key === 'modified' ? 'Deleted' : definition.label
         return (
           <div
             key={column.key}
@@ -69,7 +72,7 @@ export function HeaderRow({ pane }: HeaderRowProps) {
               onClick={() => void setSort(pane.id, column.key)}
               className="flex h-full w-full min-w-0 cursor-pointer items-center gap-1 rounded-tab text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
             >
-              <span className="truncate">{definition.label}</span>
+              <span className="truncate">{label}</span>
               {active ? (
                 <ChevronDownIcon
                   className={`ml-auto h-3.5 w-3.5 shrink-0 ${pane.sortDirection === 'asc' ? 'rotate-180' : ''} text-accent-blue-light dark:text-accent-blue`}
@@ -78,7 +81,7 @@ export function HeaderRow({ pane }: HeaderRowProps) {
             </button>
             <div
               role="separator"
-              aria-label={`Resize ${definition.label} column`}
+              aria-label={`Resize ${label} column`}
               aria-orientation="vertical"
               tabIndex={0}
               onPointerDown={(event) => startResize(event, column.key)}

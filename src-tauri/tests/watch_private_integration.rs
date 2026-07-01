@@ -415,9 +415,7 @@ mod watch_src {
 
             patch_changed_path(&target, &mut next, &mut changed, &mut removed, &hidden)
                 .expect("hidden filtered");
-            assert!(removed
-                .iter()
-                .any(|path| path.ends_with(".hidden.txt")));
+            assert!(removed.iter().any(|path| path.ends_with(".hidden.txt")));
 
             std::fs::remove_file(&visible).expect("remove visible");
             patch_changed_path(&target, &mut next, &mut changed, &mut removed, &visible)
@@ -425,7 +423,10 @@ mod watch_src {
             assert!(removed.iter().any(|path| path.ends_with("visible.txt")));
 
             let direct = fs::display_path_from_path(&hidden);
-            next.insert(direct.clone(), fs::directory_entry_from_path(&hidden).expect("entry"));
+            next.insert(
+                direct.clone(),
+                fs::directory_entry_from_path(&hidden).expect("entry"),
+            );
             remove_path(&mut next, &mut removed, &hidden);
             assert!(!next.contains_key(&direct));
         }

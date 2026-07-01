@@ -19,6 +19,7 @@ pub use crate::ops::{
 };
 pub use crate::persist::{Config as AppConfig, Session as SessionState};
 pub use crate::size::{EverythingStatus, SizeSource, SizeStateKind};
+pub use crate::trash::TrashEntry;
 pub use crate::volumes::VolumeInfo;
 pub use crate::watch::{DirPatch as WatchDirPatch, WatchTarget};
 
@@ -143,6 +144,24 @@ pub struct RenameEntryRequest {
 #[serde(rename_all = "camelCase")]
 pub struct TrashEntriesRequest {
     pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListTrashResponse {
+    pub entries: Vec<TrashEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreTrashRequest {
+    pub ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteFromTrashRequest {
+    pub ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

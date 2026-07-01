@@ -360,6 +360,104 @@ fn file_operation_helpers_surface_io_errors_directly() {
     assert!(!copy_dir_error.is_empty());
 }
 
+/// `copy_dir_recursive`'s very first step, `fs::create_dir_all(target)`, has
+/// its own error closure distinct from the "missing source" case above (which
+/// only exercises the later `fs::read_dir(source)` failure). Making the
+/// target's parent a plain file is what makes directory creation itself fail.
+#[test]
+fn copy_dir_recursive_surfaces_create_dir_all_errors_for_the_target() {
+    let fixture = tempfile::tempdir().expect("temp dir");
+    let root = fixture.path();
+    let source_dir = root.join("source");
+    std::fs::create_dir_all(&source_dir).expect("source dir");
+
+    let blocker = root.join("blocker");
+    std::fs::write(&blocker, b"not a directory").expect("blocker file");
+    let target = blocker.join("nested-target");
+
+    let op_arc = Arc::new(Mutex::new(state()));
+    let resolver = Arc::new(std::sync::Condvar::new());
+    let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
+    let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
+    let ctx = WorkerCtx {
+        op_arc: &op_arc,
+        resolver: &resolver,
+        progress: &progress,
+        start: Instant::now(),
+        rate_window: Duration::from_secs(1),
+        instant_now: &instant_now,
+    };
+
+    let mut visited = HashSet::from([source_dir.clone()]);
+    let error = copy_dir_recursive(&source_dir, &target, &source_dir, &mut visited, false, &ctx)
+        .expect_err("target parent is a file");
+    assert!(!error.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn delete_path_with_progress_surfaces_read_dir_and_remove_dir_errors_for_directories() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = tempfile::tempdir().expect("temp dir");
+    let root = fixture.path();
+
+    // `delete_dir_recursive`'s own `fs::read_dir(source)` closure: the
+    // directory itself is readable via `symlink_metadata` (which doesn't
+    // need execute/read permission) but listing its contents does.
+    let unreadable_dir = root.join("unreadable");
+    std::fs::create_dir(&unreadable_dir).expect("unreadable dir");
+    let denied =
+        std::fs::set_permissions(&unreadable_dir, std::fs::Permissions::from_mode(0o000)).is_ok();
+
+    let mut delete_state = state();
+    delete_state.kind = OpKind::Delete;
+    let op_arc = Arc::new(Mutex::new(delete_state));
+    let resolver = Arc::new(std::sync::Condvar::new());
+    let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
+    let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
+    let ctx = WorkerCtx {
+        op_arc: &op_arc,
+        resolver: &resolver,
+        progress: &progress,
+        start: Instant::now(),
+        rate_window: Duration::from_secs(1),
+        instant_now: &instant_now,
+    };
+
+    if denied {
+        let read_dir_error =
+            delete_path_with_progress(&unreadable_dir, false, &ctx).expect_err("unreadable dir");
+        assert!(!read_dir_error.is_empty());
+        std::fs::set_permissions(&unreadable_dir, std::fs::Permissions::from_mode(0o755))
+            .expect("restore unreadable dir permissions");
+    }
+
+    // `delete_dir_recursive`'s final `fs::remove_dir(source)` closure: the
+    // directory's own contents are removable, but its parent forbids
+    // unlinking the (now-empty) directory itself.
+    let locked_parent = root.join("locked-parent");
+    std::fs::create_dir(&locked_parent).expect("locked parent");
+    let target_dir = locked_parent.join("target-dir");
+    std::fs::create_dir(&target_dir).expect("target dir");
+    std::fs::write(target_dir.join("child.txt"), b"x").expect("child file");
+
+    let locked =
+        std::fs::set_permissions(&locked_parent, std::fs::Permissions::from_mode(0o555)).is_ok();
+    if !locked {
+        return;
+    }
+
+    let remove_dir_error = delete_path_with_progress(&target_dir, false, &ctx);
+    std::fs::set_permissions(&locked_parent, std::fs::Permissions::from_mode(0o755))
+        .expect("restore locked parent permissions");
+
+    assert!(
+        remove_dir_error.is_err(),
+        "removing the now-empty dir needs write access on its parent"
+    );
+}
+
 #[test]
 fn process_item_test_hook_covers_queue_private_paths() {
     let fixture = tempfile::tempdir().expect("temp dir");
@@ -395,7 +493,10 @@ fn process_item_test_hook_covers_queue_private_paths() {
     let compress_item = compress_op.lock().expect("compress lock").items[0].clone();
     process_item_for_tests(&compress_ctx, &compress_item, None);
     assert!(archive_path.exists());
-    assert_eq!(compress_op.lock().expect("compress lock").completed_items, 1);
+    assert_eq!(
+        compress_op.lock().expect("compress lock").completed_items,
+        1
+    );
 
     let extract_root = fixture.path().join("extract");
     let mut extract_state = state();
@@ -701,7 +802,10 @@ fn process_item_test_hook_covers_conflict_skip_and_replace_paths() {
     });
     process_item_for_tests(&skip_ctx, &skip_item, None);
     assert_eq!(skip_op.lock().expect("skip lock").completed_items, 1);
-    assert_eq!(std::fs::read(dest.join("skip.txt")).expect("skip dest"), b"existing");
+    assert_eq!(
+        std::fs::read(dest.join("skip.txt")).expect("skip dest"),
+        b"existing"
+    );
 
     let source_replace = fixture.path().join("replace.txt");
     std::fs::write(&source_replace, b"fresh").expect("source replace");
@@ -731,7 +835,10 @@ fn process_item_test_hook_covers_conflict_skip_and_replace_paths() {
     });
     process_item_for_tests(&replace_ctx, &replace_item, None);
     assert_eq!(replace_op.lock().expect("replace lock").completed_items, 1);
-    assert_eq!(std::fs::read(dest.join("replace.txt")).expect("replace dest"), b"fresh");
+    assert_eq!(
+        std::fs::read(dest.join("replace.txt")).expect("replace dest"),
+        b"fresh"
+    );
 }
 
 #[test]
@@ -901,7 +1008,10 @@ fn process_item_test_hook_covers_conflict_emitter_and_apply_to_all() {
         })),
     );
     assert_eq!(emitted.lock().expect("emitted lock").len(), 1);
-    assert_eq!(std::fs::read(dest.join("emit.txt")).expect("emit dest"), b"fresh");
+    assert_eq!(
+        std::fs::read(dest.join("emit.txt")).expect("emit dest"),
+        b"fresh"
+    );
 
     let source_skip = fixture.path().join("blanket.txt");
     std::fs::write(&source_skip, b"skip").expect("blanket source");
@@ -933,7 +1043,10 @@ fn ops_test_hooks_cover_archive_name_fallback_paths() {
     let state = state();
     let (op_arc, _resolver, ctx) = worker_ctx(state);
 
-    assert_eq!(archive_stem_for_item_for_tests(PathBuf::from("/").as_path()), "Archive");
+    assert_eq!(
+        archive_stem_for_item_for_tests(PathBuf::from("/").as_path()),
+        "Archive"
+    );
     assert_eq!(
         archive_root_name_for_tests(PathBuf::from("/").as_path()),
         PathBuf::from("Archive")

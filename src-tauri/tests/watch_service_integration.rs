@@ -92,11 +92,7 @@ fn watcher_coalesces_changes_and_emits_patch() {
     };
 
     service
-        .set_tab_watch(
-            Some(target.clone()),
-            Arc::new(|_| {}),
-            Arc::new(|_, _| {}),
-        )
+        .set_tab_watch(Some(target.clone()), Arc::new(|_| {}), Arc::new(|_, _| {}))
         .expect("set watch");
 
     fs::write(root.join("storm.txt"), "one").expect("storm create");

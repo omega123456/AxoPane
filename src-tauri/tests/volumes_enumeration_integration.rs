@@ -76,6 +76,9 @@ fn path_is_network_matches_longest_mount_root_across_platform_styles() {
             std::path::Path::new("/Volumes/team/project/file.txt"),
             &volumes
         ));
-        assert!(!path_is_network(std::path::Path::new("/Users/omega/file.txt"), &volumes));
+        assert!(!path_is_network(
+            std::path::Path::new("/Users/omega/file.txt"),
+            &volumes
+        ));
     }
 }

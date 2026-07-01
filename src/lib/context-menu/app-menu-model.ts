@@ -14,6 +14,7 @@ import {
   createPathPropertiesDialogItem,
   toPropertiesDialogItem,
 } from '@/lib/properties-commands'
+import { isTrashPath } from '@/lib/trash'
 import type {
   ContextMenuActionRow,
   ContextMenuContent,
@@ -43,6 +44,8 @@ const commandIcons: Partial<Record<CommandId, ContextMenuIcon>> = {
   cut: { kind: 'app', name: 'cut' },
   delete: { kind: 'app', name: 'delete' },
   deletePermanent: { kind: 'app', name: 'delete' },
+  emptyTrash: { kind: 'app', name: 'empty-trash' },
+  restore: { kind: 'app', name: 'restore' },
   newFile: { kind: 'app', name: 'new-file' },
   newFolder: { kind: 'app', name: 'new-folder' },
   open: { kind: 'app', name: 'open' },
@@ -208,11 +211,64 @@ function isZipArchiveEntry(entry: DirectoryEntry) {
   return entry.name.toLowerCase().endsWith('.zip')
 }
 
+function isTrashPane(paneId: PaneId): boolean {
+  return isTrashPath(usePanesStore.getState().panes[paneId].path)
+}
+
+function buildTrashEntryContent(
+  target: Extract<ContextMenuTarget, { kind: 'file' | 'folder' }>,
+  os: PlatformOs,
+): ContextMenuContent {
+  const targetEntryId = target.entry.id
+
+  return {
+    topStrip: [],
+    sections: [
+      section('primary', [
+        commandRow('restore', os, {
+          targetEntryId,
+          strong: true,
+          disabled: !target.entry.originalPath,
+        }),
+        commandRow('deletePermanent', os, { targetEntryId, danger: true }),
+      ]),
+    ],
+  }
+}
+
+function buildTrashMultiContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
+  const selectedEntries = selectedEntriesForPane(paneId)
+
+  return {
+    topStrip: [],
+    sections: [
+      section('primary', [
+        commandRow('restore', os, {
+          strong: true,
+          disabled: selectedEntries.some((entry) => !entry.originalPath),
+        }),
+        commandRow('deletePermanent', os, { danger: true }),
+      ]),
+    ],
+  }
+}
+
+function buildTrashEmptyContent(os: PlatformOs): ContextMenuContent {
+  return {
+    topStrip: [],
+    sections: [section('primary', [commandRow('emptyTrash', os, { danger: true, strong: true })])],
+  }
+}
+
 function buildFileOrFolderContent(
   paneId: PaneId,
   target: Extract<ContextMenuTarget, { kind: 'file' | 'folder' }>,
   os: PlatformOs,
 ): ContextMenuContent {
+  if (isTrashPane(paneId)) {
+    return buildTrashEntryContent(target, os)
+  }
+
   const clipboard = useClipboardStore.getState()
   const canPaste = clipboard.entries.length > 0
   const targetEntryId = target.entry.id
@@ -269,6 +325,10 @@ function buildFileOrFolderContent(
 }
 
 function buildMultiContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
+  if (isTrashPane(paneId)) {
+    return buildTrashMultiContent(paneId, os)
+  }
+
   const pane = usePanesStore.getState().panes[paneId]
   const clipboard = useClipboardStore.getState()
   const selectedEntries = selectedEntriesForPane(paneId)
@@ -326,6 +386,10 @@ function buildMultiContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
 }
 
 function buildEmptyContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
+  if (isTrashPane(paneId)) {
+    return buildTrashEmptyContent(os)
+  }
+
   const pane = usePanesStore.getState().panes[paneId]
   const clipboard = useClipboardStore.getState()
 
@@ -355,10 +419,23 @@ function buildEmptyContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
   }
 }
 
+function buildTrashTreeContent(os: PlatformOs): ContextMenuContent {
+  return {
+    topStrip: [],
+    sections: [
+      section('primary', [commandRow('emptyTrash', os, { danger: true, strong: true })]),
+    ],
+  }
+}
+
 function buildTreeContent(
   target: Extract<ContextMenuTarget, { kind: 'tree' }>,
   os: PlatformOs,
 ): ContextMenuContent {
+  if (isTrashPath(target.path)) {
+    return buildTrashTreeContent(os)
+  }
+
   const networkNode = usePanesStore
     .getState()
     .volumes.find((volume) =>

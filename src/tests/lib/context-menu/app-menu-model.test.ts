@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { buildAppContextMenuContent } from '@/lib/context-menu/app-menu-model'
+import { TRASH_PATH } from '@/lib/trash'
 import { useClipboardStore } from '@/stores/clipboard-store'
 import { useKeymapStore } from '@/stores/keymap-store'
 import { usePanesStore } from '@/stores/panes-store'
@@ -216,5 +217,81 @@ describe('buildAppContextMenuContent', () => {
     const content = buildAppContextMenuContent('left', { kind: 'empty' }, 'windows')
 
     expect(content.sections.at(-1)?.rows.map((row) => row.label)).toEqual(['Properties'])
+  })
+
+  describe('trash pane', () => {
+    const trashEntryWithOriginal = {
+      ...fileEntry,
+      id: 'report.txt',
+      trashId: 'report.txt',
+      originalPath: 'C:\\Users\\Omega\\Report.txt',
+    }
+    const trashEntryOrphaned = {
+      ...fileEntry,
+      id: 'orphan.txt',
+      name: 'orphan.txt',
+      trashId: 'orphan.txt',
+      originalPath: undefined,
+    }
+
+    beforeEach(() => {
+      usePanesStore.setState((state) => ({
+        panes: {
+          ...state.panes,
+          left: {
+            ...state.panes.left,
+            path: TRASH_PATH,
+            entries: [trashEntryWithOriginal, trashEntryOrphaned],
+          },
+        },
+      }))
+    })
+
+    it('offers restore and delete-permanently for a single trash entry, disabling restore without an original path', () => {
+      const restorable = buildAppContextMenuContent(
+        'left',
+        { kind: 'file', entry: trashEntryWithOriginal },
+        'windows',
+      )
+      expect(restorable.sections[0]?.rows.map((row) => row.label)).toEqual([
+        'Restore',
+        'Delete permanently',
+      ])
+      expect(restorable.sections[0]?.rows[0]).toMatchObject({ disabled: false })
+      expect(restorable.sections[0]?.rows[1]).toMatchObject({ danger: true })
+
+      const orphaned = buildAppContextMenuContent(
+        'left',
+        { kind: 'file', entry: trashEntryOrphaned },
+        'windows',
+      )
+      expect(orphaned.sections[0]?.rows[0]).toMatchObject({ disabled: true })
+    })
+
+    it('disables multi-select restore when any selected entry lacks an original path', () => {
+      useSelectionStore
+        .getState()
+        .setSelection(
+          'left',
+          [trashEntryWithOriginal.id, trashEntryOrphaned.id],
+          trashEntryWithOriginal.id,
+          trashEntryOrphaned.id,
+        )
+
+      const content = buildAppContextMenuContent('left', { kind: 'multi' }, 'windows')
+      expect(content.sections[0]?.rows.map((row) => row.label)).toEqual([
+        'Restore',
+        'Delete permanently',
+      ])
+      expect(content.sections[0]?.rows[0]).toMatchObject({ disabled: true })
+    })
+
+    it('offers a single Empty trash action for the trash tree row and the pane background', () => {
+      const treeContent = buildAppContextMenuContent('left', { kind: 'tree', path: TRASH_PATH }, 'windows')
+      expect(treeContent.sections[0]?.rows.map((row) => row.label)).toEqual(['Empty Trash'])
+
+      const emptyContent = buildAppContextMenuContent('left', { kind: 'empty' }, 'windows')
+      expect(emptyContent.sections[0]?.rows.map((row) => row.label)).toEqual(['Empty Trash'])
+    })
   })
 })

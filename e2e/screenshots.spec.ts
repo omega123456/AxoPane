@@ -68,6 +68,13 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`permission-denied-state-${mode}.png`)
   })
 
+  test(`trash ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.trash[mode])
+    await expect(page.getByRole('region', { name: 'Left pane' })).toBeVisible()
+    await expect(page.getByRole('row', { name: /report\.txt/ }).first()).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`trash-browsing-${mode}.png`)
+  })
+
   test(`size states ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.sizes[mode])
     await expect(page.getByText('941.9 MB').first()).toBeVisible()
