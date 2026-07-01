@@ -668,6 +668,45 @@ describe('FilePane state rendering', () => {
     ])
   })
 
+  it('draws and applies the marquee in unzoomed pane coordinates while app zoom is active', () => {
+    seedPane({
+      path: 'C:\\',
+      entries: [
+        entry('Alpha', false),
+        entry('Beta', false),
+        entry('Gamma', false),
+        entry('Delta', false),
+      ],
+    })
+
+    render(<FilePane paneId="left" />)
+    const scroller = screen.getByTestId('file-pane-scroll-left')
+    scroller.getBoundingClientRect = () =>
+      DOMRect.fromRect({ x: 150, y: 30, width: 600, height: 300 })
+    document.documentElement.style.setProperty('zoom', '1.5')
+
+    try {
+      fireEvent.mouseDown(scroller, { button: 0, clientX: 180, clientY: 45 })
+      fireEvent.mouseMove(document, { clientX: 240, clientY: 135 })
+
+      const marquee = screen.getByTestId('marquee-selection')
+      expect(marquee).toHaveStyle({
+        left: '20px',
+        top: '10px',
+        width: '40px',
+        height: '60px',
+      })
+      expect(useSelectionStore.getState().selections.left.selectedIds).toEqual([
+        'Alpha',
+        'Beta',
+        'Gamma',
+      ])
+    } finally {
+      fireEvent.mouseUp(document)
+      document.documentElement.style.removeProperty('zoom')
+    }
+  })
+
   it('unions a Ctrl-drag marquee with the pre-existing selection instead of replacing it', () => {
     seedPane({
       path: 'C:\\',

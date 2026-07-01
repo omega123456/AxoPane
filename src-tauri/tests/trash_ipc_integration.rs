@@ -120,3 +120,15 @@ fn delete_from_trash_surfaces_errors_for_unknown_ids() {
 
     assert!(error.contains("Failed to permanently delete items from trash"));
 }
+
+#[test]
+fn list_trash_surfaces_errors_when_the_fake_trash_override_is_a_file() {
+    let fixture = tempdir().expect("temp dir");
+    let blocker = fixture.path().join("not-a-directory");
+    fs::write(&blocker, b"blocker").expect("blocker file");
+    std::env::set_var("AXOPANE_TEST_FAKE_TRASH_DIR", &blocker);
+
+    let error = commands::list_trash().expect_err("file override should fail");
+
+    assert!(error.contains("Failed to list trash"));
+}

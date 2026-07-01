@@ -322,9 +322,10 @@ export function FilePane({ paneId }: FilePaneProps) {
       return null
     }
     const bounds = container.getBoundingClientRect()
+    const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1
     return {
-      x: clientX - bounds.left + container.scrollLeft,
-      y: clientY - bounds.top + container.scrollTop,
+      x: (clientX - bounds.left) / zoom + container.scrollLeft,
+      y: (clientY - bounds.top) / zoom + container.scrollTop,
     }
   }
 
