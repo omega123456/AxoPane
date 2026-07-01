@@ -1,7 +1,8 @@
-import { render, screen } from '@testing-library/react'
-import { beforeEach } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { FolderTree } from '@/components/tree/FolderTree'
+import { useDragStore } from '@/stores/drag-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useTabsStore } from '@/stores/tabs-store'
 
@@ -15,6 +16,7 @@ beforeEach(() => {
   ipc.install()
   usePanesStore.getState().reset()
   useTabsStore.getState().reset()
+  useDragStore.getState().end()
 })
 
 function seedVolumes() {
@@ -265,5 +267,51 @@ describe('FolderTree', () => {
     for (let i = 1; i < zIndexes.length; i += 1) {
       expect(zIndexes[i]).toBeGreaterThan(zIndexes[i - 1])
     }
+  })
+
+  it('accepts an internal drop onto a folder node and enqueues the transfer', async () => {
+    const startOp = vi.fn(() => 'op-1')
+    ipc.override('start_op', startOp)
+    seedVolumes()
+    usePanesStore.setState((state) => ({
+      treeNodes: {
+        ...state.treeNodes,
+        'C:\\': { ...state.treeNodes['C:\\'], children: ['C:\\cc'], expanded: true, loaded: true },
+        'C:\\cc': {
+          id: 'C:\\cc',
+          name: 'cc',
+          path: 'C:\\cc',
+          parentPath: 'C:\\',
+          children: [],
+          expanded: false,
+          loaded: true,
+        },
+      },
+    }))
+    // A drag originating from a different folder on the same volume.
+    useDragStore.getState().begin({
+      sourcePaneId: 'left',
+      sourceDir: 'C:\\root',
+      items: [{ id: 'a', name: 'Alpha', path: 'C:\\root\\Alpha', isDir: false, sizeBytes: 10 }],
+    })
+
+    render(<FolderTree />)
+    const row = (await screen.findByText('cc', { selector: 'span' })).closest('li')
+    if (!row) {
+      throw new Error('tree row missing')
+    }
+
+    fireEvent.dragOver(row, { dataTransfer: { dropEffect: '' } })
+    expect(row).toHaveClass('ring-accent-blue-border')
+
+    fireEvent.drop(row, { dataTransfer: { dropEffect: '' } })
+    await waitFor(() => {
+      expect(startOp).toHaveBeenCalledWith({
+        kind: 'move',
+        destinationDir: 'C:\\cc',
+        items: [{ sourcePath: 'C:\\root\\Alpha', name: 'Alpha', sizeBytes: 10 }],
+      })
+    })
+    expect(useDragStore.getState().drag).toBeNull()
   })
 })

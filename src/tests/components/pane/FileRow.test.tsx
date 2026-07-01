@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, vi } from 'vitest'
 import { FileRow } from '@/components/pane/FileRow'
 import type { DirectoryEntry } from '@/lib/types/ipc'
@@ -74,5 +74,53 @@ describe('FileRow date column', () => {
 
     const cell = screen.getByText('2 hours ago')
     expect(cell).toHaveClass('text-accent-blue-light')
+  })
+})
+
+describe('FileRow drag-and-drop', () => {
+  it('marks the row draggable and forwards the drag-start event', () => {
+    const onDragStart = vi.fn()
+    render(
+      <FileRow
+        entry={makeEntry()}
+        isActivePane
+        isFocused={false}
+        isSelected={false}
+        draggable
+        onDragStart={onDragStart}
+        {...noopHandlers}
+      />,
+    )
+
+    const row = screen.getByRole('row')
+    expect(row).toHaveAttribute('draggable', 'true')
+
+    fireEvent.dragStart(row, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } })
+    expect(onDragStart).toHaveBeenCalledOnce()
+  })
+
+  it('highlights the row while it is an active drop target', () => {
+    const { rerender } = render(
+      <FileRow
+        entry={makeEntry({ isDir: true })}
+        isActivePane
+        isFocused={false}
+        isSelected={false}
+        {...noopHandlers}
+      />,
+    )
+    expect(screen.getByRole('row')).not.toHaveClass('ring-accent-blue-border')
+
+    rerender(
+      <FileRow
+        entry={makeEntry({ isDir: true })}
+        isActivePane
+        isFocused={false}
+        isSelected={false}
+        isDropTarget
+        {...noopHandlers}
+      />,
+    )
+    expect(screen.getByRole('row')).toHaveClass('ring-accent-blue-border')
   })
 })

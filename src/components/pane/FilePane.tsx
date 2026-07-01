@@ -32,6 +32,9 @@ import { useSettingsStore } from '@/stores/settings-store'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 import { useSelectionStore } from '@/stores/selection-store'
+import { useDragStore } from '@/stores/drag-store'
+import { canDropInto, performDrop, resolveDropKind, type DragItem } from '@/lib/drag-drop'
+import type { DirectoryEntry } from '@/lib/types/ipc'
 import type { PaneId } from '@/types/pane'
 
 function isPermissionError(message: string | null) {
@@ -117,6 +120,12 @@ export function FilePane({ paneId }: FilePaneProps) {
   const detachMarqueeListenersRef = useRef<(() => void) | null>(null)
   const visibleIconRequestTimerRef = useRef<number | undefined>(undefined)
   const [marqueeRect, setMarqueeRect] = useState<MarqueeRect | null>(null)
+  const beginDrag = useDragStore((state) => state.begin)
+  const endDrag = useDragStore((state) => state.end)
+  // Highlight state for internal drag-and-drop: the directory row currently
+  // hovered by a valid drag, and whether the pane background (its own folder) is.
+  const [dropTargetEntryId, setDropTargetEntryId] = useState<string | null>(null)
+  const [isPaneDropTarget, setIsPaneDropTarget] = useState(false)
   const isActivePane = activePaneId === paneId
   const os = detectPlatformOs()
   // Suppress the loading skeleton on fast loads: it only appears once loading
@@ -288,7 +297,7 @@ export function FilePane({ paneId }: FilePaneProps) {
     void activateEntry(entryId)
   }
 
-  function selectWithModifiers(entryId: string, event: React.MouseEvent<HTMLButtonElement>) {
+  function selectWithModifiers(entryId: string, event: React.MouseEvent<HTMLDivElement>) {
     const currentIds = selection.selectedIds
     const nextIndex = pane.entries.findIndex((entry) => entry.id === entryId)
 
@@ -452,6 +461,104 @@ export function FilePane({ paneId }: FilePaneProps) {
     })
   }
 
+  // Internal drag-and-drop. Copy-vs-move follows platform convention: on Windows
+  // Ctrl forces copy and Shift forces move; on macOS Option forces copy and
+  // Cmd forces move. `resolveDropKind` reads these as generic force-copy /
+  // force-move flags so its logic stays OS-agnostic.
+  function dropModifiers(event: React.DragEvent) {
+    if (os === 'macos') {
+      return { ctrlKey: event.altKey, shiftKey: event.metaKey }
+    }
+    return { ctrlKey: event.ctrlKey, shiftKey: event.shiftKey }
+  }
+
+  function handleRowDragStart(entry: DirectoryEntry, event: React.DragEvent<HTMLDivElement>) {
+    // The synthetic parent row and trash rows have no real transferable source.
+    if (entry.trashId) {
+      event.preventDefault()
+      return
+    }
+    // Drag the whole selection when the grabbed row belongs to it; otherwise
+    // just the grabbed row.
+    const source = selection.selectedIds.includes(entry.id)
+      ? pane.entries.filter((item) => selection.selectedIds.includes(item.id))
+      : [entry]
+    const items: DragItem[] = source
+      .filter((item) => !item.trashId)
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        path: item.path,
+        isDir: item.isDir,
+        sizeBytes: item.sizeBytes,
+      }))
+    if (items.length === 0) {
+      event.preventDefault()
+      return
+    }
+    beginDrag({ sourcePaneId: paneId, sourceDir: pane.path, items })
+    event.dataTransfer.effectAllowed = 'copyMove'
+    event.dataTransfer.setData('text/plain', items.map((item) => item.path).join('\n'))
+  }
+
+  function clearDragState() {
+    endDrag()
+    setDropTargetEntryId(null)
+    setIsPaneDropTarget(false)
+  }
+
+  function handleFolderDragOver(entry: DirectoryEntry, event: React.DragEvent<HTMLDivElement>) {
+    const drag = useDragStore.getState().drag
+    if (!canDropInto(drag, entry.path, os)) {
+      return
+    }
+    // preventDefault marks this a valid drop target; stopPropagation keeps the
+    // pane-background highlight from also lighting up while over a folder row.
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = resolveDropKind(dropModifiers(event), drag!.sourceDir, entry.path, os)
+    setDropTargetEntryId(entry.id)
+  }
+
+  function handleFolderDragLeave(entry: DirectoryEntry) {
+    setDropTargetEntryId((current) => (current === entry.id ? null : current))
+  }
+
+  async function handleFolderDrop(entry: DirectoryEntry, event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault()
+    event.stopPropagation()
+    const drag = useDragStore.getState().drag
+    const modifiers = dropModifiers(event)
+    clearDragState()
+    await performDrop(drag, entry.path, modifiers, os)
+  }
+
+  function handlePaneDragOver(event: React.DragEvent<HTMLDivElement>) {
+    const drag = useDragStore.getState().drag
+    if (!canDropInto(drag, pane.path, os)) {
+      return
+    }
+    event.preventDefault()
+    event.dataTransfer.dropEffect = resolveDropKind(dropModifiers(event), drag!.sourceDir, pane.path, os)
+    setIsPaneDropTarget(true)
+  }
+
+  function handlePaneDragLeave(event: React.DragEvent<HTMLDivElement>) {
+    // Ignore leave events fired when moving onto a child row still inside the pane.
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      return
+    }
+    setIsPaneDropTarget(false)
+  }
+
+  async function handlePaneDrop(event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault()
+    const drag = useDragStore.getState().drag
+    const modifiers = dropModifiers(event)
+    clearDragState()
+    await performDrop(drag, pane.path, modifiers, os)
+  }
+
   return (
     <section
       ref={paneRef}
@@ -551,15 +658,29 @@ export function FilePane({ paneId }: FilePaneProps) {
           canGoUp={canGoUp}
         />
       ) : showEmpty ? (
-        <EmptyState />
+        <div
+          className={`min-h-0 flex-1 ${
+            isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-accent-blue-border' : ''
+          }`}
+          onDragOver={handlePaneDragOver}
+          onDragLeave={handlePaneDragLeave}
+          onDrop={(event) => void handlePaneDrop(event)}
+        >
+          <EmptyState />
+        </div>
       ) : (
         <div
           ref={parentRef}
           data-testid={`file-pane-scroll-${paneId}`}
-          className="min-h-0 flex-1 overflow-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint"
+          className={`min-h-0 flex-1 overflow-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint ${
+            isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-accent-blue-border' : ''
+          }`}
           onMouseDown={handleContainerMouseDown}
           onScroll={(event) => setScrollPosition(paneId, pane.path, event.currentTarget.scrollTop)}
           onContextMenu={(event) => showMenu(event)}
+          onDragOver={handlePaneDragOver}
+          onDragLeave={handlePaneDragLeave}
+          onDrop={(event) => void handlePaneDrop(event)}
         >
           {/*
             Styling-constraint exception: runtime geometry only. The total
@@ -607,6 +728,18 @@ export function FilePane({ paneId }: FilePaneProps) {
                     isFocused={pane.focusedEntryId === entry.id}
                     isSelected={selection.selectedIds.includes(entry.id)}
                     isCut={cutEntryPaths.has(entry.path.toLowerCase())}
+                    isDropTarget={dropTargetEntryId === entry.id}
+                    draggable={!entry.trashId}
+                    onDragStart={(event) => handleRowDragStart(entry, event)}
+                    onDragEnd={clearDragState}
+                    onDragEnter={
+                      entry.isDir ? (event) => handleFolderDragOver(entry, event) : undefined
+                    }
+                    onDragOver={
+                      entry.isDir ? (event) => handleFolderDragOver(entry, event) : undefined
+                    }
+                    onDragLeave={entry.isDir ? () => handleFolderDragLeave(entry) : undefined}
+                    onDrop={entry.isDir ? (event) => void handleFolderDrop(entry, event) : undefined}
                     isRenaming={rename?.entryId === entry.id}
                     renameValue={rename?.entryId === entry.id ? rename.value : ''}
                     renameBusy={rename?.entryId === entry.id ? rename.busy : false}

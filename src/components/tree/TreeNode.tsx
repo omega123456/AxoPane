@@ -1,11 +1,13 @@
-import { useEffect, useRef, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type DragEvent } from 'react'
 import { buildContextMenuContent } from '@/components/menus/menu-definitions'
 import { ChevronRightIcon } from '@/components/icons'
 import { EntryIcon } from '@/components/icons/EntryIcon'
 import { VolumeIcon } from '@/components/icons/VolumeIcon'
 import { detectPlatformOs } from '@/lib/keymap'
+import { canDropInto, performDrop, resolveDropKind } from '@/lib/drag-drop'
 import type { VolumeInfo } from '@/lib/types/ipc'
 import { useContextMenuStore } from '@/stores/context-menu-store'
+import { useDragStore } from '@/stores/drag-store'
 import { usePanesStore } from '@/stores/panes-store'
 
 type TreeNodeProps = {
@@ -26,7 +28,9 @@ export function TreeNode({ path, depth, volume, stickyChain = [] }: TreeNodeProp
   const navigatePane = usePanesStore((state) => state.navigatePane)
   const openTabFromPath = usePanesStore((state) => state.openTabFromPath)
   const openMenu = useContextMenuStore((state) => state.openMenu)
+  const endDrag = useDragStore((state) => state.end)
   const rowRef = useRef<HTMLLIElement>(null)
+  const [isDropTarget, setIsDropTarget] = useState(false)
 
   const isCurrent = Boolean(node) && activePath === node.path
   const chainIndex = stickyChain.indexOf(path)
@@ -76,9 +80,46 @@ export function TreeNode({ path, depth, volume, stickyChain = [] }: TreeNodeProp
       : 'hover:bg-light-tree-hover dark:hover:bg-dark-tree-hover'
     : 'hover:bg-light-hover dark:hover:bg-dark-hover'
 
+  const os = detectPlatformOs()
+  function dropModifiers(event: DragEvent) {
+    if (os === 'macos') {
+      return { ctrlKey: event.altKey, shiftKey: event.metaKey }
+    }
+    return { ctrlKey: event.ctrlKey, shiftKey: event.shiftKey }
+  }
+
+  function handleDragOver(event: DragEvent<HTMLLIElement>) {
+    const drag = useDragStore.getState().drag
+    if (!canDropInto(drag, node.path, os)) {
+      return
+    }
+    event.preventDefault()
+    event.dataTransfer.dropEffect = resolveDropKind(dropModifiers(event), drag!.sourceDir, node.path, os)
+    setIsDropTarget(true)
+  }
+
+  function handleDragLeave(event: DragEvent<HTMLLIElement>) {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      return
+    }
+    setIsDropTarget(false)
+  }
+
+  async function handleDrop(event: DragEvent<HTMLLIElement>) {
+    event.preventDefault()
+    const drag = useDragStore.getState().drag
+    const modifiers = dropModifiers(event)
+    setIsDropTarget(false)
+    endDrag()
+    await performDrop(drag, node.path, modifiers, os)
+  }
+
   return (
     <li
       ref={rowRef}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={(event) => void handleDrop(event)}
       onContextMenu={(event) => {
         event.preventDefault()
         openMenu({
@@ -94,7 +135,9 @@ export function TreeNode({ path, depth, volume, stickyChain = [] }: TreeNodeProp
           ),
         })
       }}
-      className={`flex h-tree-row items-center gap-1 rounded-tab pr-2 text-row ${rowHoverClassName} ${rowBackgroundClassName}`}
+      className={`flex h-tree-row items-center gap-1 rounded-tab pr-2 text-row ${rowHoverClassName} ${rowBackgroundClassName} ${
+        isDropTarget ? 'ring-2 ring-inset ring-accent-blue-border' : ''
+      }`}
       style={rowStyle}
     >
       <button

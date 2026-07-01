@@ -15,8 +15,8 @@ type FileRowProps = {
   isSelected: boolean
   onPointerDown: () => void
   onActivate: (eventTimeStamp: number) => void
-  onClick: (event: MouseEvent<HTMLButtonElement>) => void
-  onContextMenu: (event: MouseEvent<HTMLButtonElement>) => void
+  onClick: (event: MouseEvent<HTMLDivElement>) => void
+  onContextMenu: (event: MouseEvent<HTMLDivElement>) => void
   onMiddleClick: () => void
   isCut?: boolean
   isRenaming?: boolean
@@ -27,9 +27,18 @@ type FileRowProps = {
   onRenameSubmit?: () => void
   onRenameCancel?: () => void
   onRenameBlur?: () => void
+  /** True while a valid internal drag is hovering this (directory) row. */
+  isDropTarget?: boolean
+  draggable?: boolean
+  onDragStart?: (event: DragEvent<HTMLDivElement>) => void
+  onDragEnd?: () => void
+  onDragEnter?: (event: DragEvent<HTMLDivElement>) => void
+  onDragOver?: (event: DragEvent<HTMLDivElement>) => void
+  onDragLeave?: (event: DragEvent<HTMLDivElement>) => void
+  onDrop?: (event: DragEvent<HTMLDivElement>) => void
 }
 
-import type { KeyboardEvent, MouseEvent } from 'react'
+import type { DragEvent, KeyboardEvent, MouseEvent } from 'react'
 import { useEffect, useMemo, useRef } from 'react'
 
 export function FileRow({
@@ -51,6 +60,14 @@ export function FileRow({
   onRenameSubmit,
   onRenameCancel,
   onRenameBlur,
+  isDropTarget = false,
+  draggable = false,
+  onDragStart,
+  onDragEnd,
+  onDragEnter,
+  onDragOver,
+  onDragLeave,
+  onDrop,
 }: FileRowProps) {
   const columns = useLayoutStore((state) => state.columns)
   const columnWidths = useLayoutStore((state) => state.columnWidths)
@@ -188,14 +205,21 @@ export function FileRow({
   }
 
   return (
-    <button
-      type="button"
+    <div
       role="row"
       data-entry-id={entry.id}
-      onMouseDown={(event) => {
-        event.preventDefault()
-        onPointerDown()
-      }}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      // A non-focusable div (not a <button>) so mousedown never steals keyboard
+      // focus away from the pane <section>; that lets us skip the mousedown
+      // preventDefault a <button> needed, which would otherwise suppress the
+      // native `dragstart` and break drag-and-drop entirely.
+      onMouseDown={onPointerDown}
       onDoubleClick={(event) => onActivate(event.timeStamp)}
       onClick={onClick}
       onContextMenu={onContextMenu}
@@ -205,7 +229,9 @@ export function FileRow({
           onMiddleClick()
         }
       }}
-      className={`${rowClassName} cursor-pointer`}
+      className={`${rowClassName} cursor-pointer select-none ${
+        isDropTarget ? 'ring-2 ring-inset ring-accent-blue-border bg-accent-blue-soft' : ''
+      }`}
     >
       {visibleColumns.map((column) => {
         const definition = columnDefinitions[column.key]
@@ -292,6 +318,6 @@ export function FileRow({
           </span>
         )
       })}
-    </button>
+    </div>
   )
 }
