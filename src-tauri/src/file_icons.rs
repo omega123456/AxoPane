@@ -114,7 +114,7 @@ mod windows_impl {
         let result = unsafe {
             SHGetFileInfoW(
                 PCWSTR(wide_path.as_ptr()),
-                FILE_ATTRIBUTE_NORMAL.0,
+                FILE_ATTRIBUTE_NORMAL,
                 Some(&mut info),
                 size_of::<SHFILEINFOW>() as u32,
                 SHGFI_ICON | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES,
