@@ -19,6 +19,11 @@ use serde::{Deserialize, Serialize};
 #[cfg(any(feature = "test-utils", target_os = "macos"))]
 mod manifest;
 
+// Available under `test-utils` (any OS) so its parsing logic is unit-testable
+// and counted toward coverage, even though it's only ever wired up on macOS.
+#[cfg(any(feature = "test-utils", target_os = "macos"))]
+mod dsstore;
+
 #[cfg(all(not(feature = "test-utils"), windows))]
 mod windows_bin;
 
@@ -118,6 +123,26 @@ fn ensure_fake_trash_dir(path: &std::path::Path) -> Result<(), String> {
 #[cfg(feature = "test-utils")]
 pub fn ensure_fake_trash_dir_for_tests(path: &std::path::Path) -> Result<(), String> {
     ensure_fake_trash_dir(path)
+}
+
+#[cfg(feature = "test-utils")]
+pub use dsstore::PutBack;
+
+/// Exposes [`dsstore::parse_put_back`] to integration tests, which only see
+/// the crate's public API.
+#[cfg(feature = "test-utils")]
+pub fn parse_put_back_for_tests(bytes: &[u8]) -> std::collections::HashMap<String, PutBack> {
+    dsstore::parse_put_back(bytes)
+}
+
+/// Exposes [`dsstore::resolve_original_path`] to integration tests.
+#[cfg(feature = "test-utils")]
+pub fn resolve_original_path_for_tests(
+    volume_root: &std::path::Path,
+    dir: &str,
+    name: &str,
+) -> String {
+    dsstore::resolve_original_path(volume_root, dir, name)
 }
 
 #[cfg(feature = "test-utils")]

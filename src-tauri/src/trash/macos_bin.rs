@@ -5,12 +5,23 @@
 //! [`manifest`](super::manifest) alongside it, written whenever this app
 //! moves something to the trash.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::PathBuf;
+use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{manifest, TrashEntry};
+use super::{dsstore, manifest, TrashEntry};
+
+/// Loads and parses `trash_dir/.DS_Store` once per operation, for the
+/// [`dsstore`] fallback used when an item has no manifest entry (e.g. it was
+/// trashed via Finder directly, not through this app). Best-effort: any
+/// read/parse failure yields an empty map rather than failing the caller.
+fn put_back_index(trash_dir: &Path) -> HashMap<String, dsstore::PutBack> {
+    fs::read(trash_dir.join(".DS_Store"))
+        .map(|bytes| dsstore::parse_put_back(&bytes))
+        .unwrap_or_default()
+}
 
 pub fn home_trash_dir() -> Result<PathBuf, String> {
     std::env::var_os("HOME")
@@ -61,6 +72,7 @@ pub fn list_trash() -> Result<Vec<TrashEntry>, String> {
 
     let entries = fs::read_dir(&trash_dir).map_err(|error| error.to_string())?;
     let mut result = Vec::new();
+    let put_back_index = put_back_index(&trash_dir);
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -75,7 +87,17 @@ pub fn list_trash() -> Result<Vec<TrashEntry>, String> {
         let is_dir = metadata.is_dir();
         let (original_path, deleted_at) = match manifest::lookup(&trash_dir, name) {
             Some((original_path, deleted_at)) => (Some(original_path), Some(deleted_at)),
-            None => (None, None),
+            None => match put_back_index.get(name) {
+                Some(put_back) => (
+                    Some(dsstore::resolve_original_path(
+                        Path::new("/"),
+                        &put_back.original_dir,
+                        &put_back.original_name,
+                    )),
+                    Some(metadata.ctime()),
+                ),
+                None => (None, None),
+            },
         };
 
         result.push(TrashEntry {
@@ -93,12 +115,23 @@ pub fn list_trash() -> Result<Vec<TrashEntry>, String> {
 
 pub fn restore_from_trash(ids: &[String]) -> Result<(), String> {
     let trash_dir = home_trash_dir()?;
+    let put_back_index = put_back_index(&trash_dir);
 
     for id in ids {
-        let Some((original_path, _)) = manifest::lookup(&trash_dir, id) else {
-            return Err(format!(
-                "'{id}' has no known original location and cannot be restored"
-            ));
+        let original_path = match manifest::lookup(&trash_dir, id) {
+            Some((original_path, _)) => original_path,
+            None => match put_back_index.get(id) {
+                Some(put_back) => dsstore::resolve_original_path(
+                    Path::new("/"),
+                    &put_back.original_dir,
+                    &put_back.original_name,
+                ),
+                None => {
+                    return Err(format!(
+                        "'{id}' has no known original location and cannot be restored"
+                    ))
+                }
+            },
         };
 
         let source = trash_dir.join(id);
