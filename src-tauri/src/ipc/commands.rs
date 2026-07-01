@@ -7,6 +7,8 @@ use crate::persist::{PersistedStore, PersistenceState};
 use crate::size::SizeService;
 use crate::volumes;
 use crate::watch::WatchService;
+#[cfg(not(feature = "test-utils"))]
+use rayon::prelude::*;
 use std::sync::Arc;
 
 #[cfg(feature = "test-utils")]
@@ -19,14 +21,14 @@ use super::types::{
     AppConfig, CancelSizeRequest, CancelSizeResponse, CompressArchiveRequest, CreateEntryRequest,
     DeleteFromTrashRequest, ExtractArchiveRequest, FileClipboardMode, FolderSizeRequest,
     FolderSizesRequest, GetDefaultApplicationRequest, GetDefaultApplicationResponse,
-    InitialShellResponse, InvokeNativeMenuRequest, ListApplicationsResponse, ListDirRequest,
-    ListDirResponse, ListTrashResponse, ListTreeChildrenRequest, ListTreeChildrenResponse,
-    LoadNativeMenuRequest, LoadNativeMenuResponse, LogFrontendRequest, MenuActionStatus,
-    OpIdRequest, OpenPathRequest, OpenWithRequest, RefreshTabRequest, RenameEntryRequest,
-    ReorderOpsRequest, ResolveConflictRequest, RestoreTrashRequest, SaveConfigRequest,
-    SaveSessionRequest, SessionState, SetDefaultApplicationRequest, SetLogLevelRequest,
-    SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent, StartOpRequest, TrashEntriesRequest,
-    VolumeInfo, WriteFileClipboardRequest,
+    IconStateEvent, InitialShellResponse, InvokeNativeMenuRequest, ListApplicationsResponse,
+    ListDirRequest, ListDirResponse, ListTrashResponse, ListTreeChildrenRequest,
+    ListTreeChildrenResponse, LoadNativeMenuRequest, LoadNativeMenuResponse, LogFrontendRequest,
+    MenuActionStatus, OpIdRequest, OpenPathRequest, OpenWithRequest, RefreshTabRequest,
+    RenameEntryRequest, ReorderOpsRequest, RequestIconsRequest, ResolveConflictRequest,
+    RestoreTrashRequest, SaveConfigRequest, SaveSessionRequest, SessionState,
+    SetDefaultApplicationRequest, SetLogLevelRequest, SetTabWatchRequest, ShowPropertiesRequest,
+    SizeStateEvent, StartOpRequest, TrashEntriesRequest, VolumeInfo, WriteFileClipboardRequest,
 };
 use crate::fs::DirectoryEntry;
 use std::path::Path;
@@ -360,6 +362,50 @@ pub fn request_folder_sizes(
 
     let recorded = updates.lock().expect("size updates lock").clone();
     recorded
+}
+
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub fn request_icons(payload: RequestIconsRequest, app: AppHandle) {
+    let Some(pool) = crate::file_icons::icon_pool() else {
+        for path in payload.paths {
+            let _ = app.emit(
+                super::events::ICON_STATE,
+                IconStateEvent {
+                    path,
+                    icon_data_url: None,
+                },
+            );
+        }
+        return;
+    };
+
+    let app_handle = app.clone();
+    pool.spawn(move || {
+        payload.paths.into_par_iter().for_each(|path| {
+            let icon_data_url = crate::file_icons::resolve_icon(Path::new(&path), false);
+            let _ = app_handle.emit(
+                super::events::ICON_STATE,
+                IconStateEvent {
+                    path,
+                    icon_data_url,
+                },
+            );
+        });
+    });
+}
+
+#[cfg(feature = "test-utils")]
+#[tauri::command]
+pub fn request_icons(payload: RequestIconsRequest) -> Vec<IconStateEvent> {
+    payload
+        .paths
+        .into_iter()
+        .map(|path| IconStateEvent {
+            path,
+            icon_data_url: None,
+        })
+        .collect()
 }
 
 #[tauri::command]

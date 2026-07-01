@@ -1,7 +1,7 @@
 pub mod app_picker;
 pub mod archive;
 mod clipboard;
-mod file_icons;
+pub mod file_icons;
 pub mod fs;
 pub mod ipc;
 pub mod launch;
@@ -165,6 +165,7 @@ pub fn run() {
             commands::everything_status,
             commands::request_folder_size,
             commands::request_folder_sizes,
+            commands::request_icons,
             commands::cancel_size,
             commands::set_tab_watch,
             commands::refresh_tab,

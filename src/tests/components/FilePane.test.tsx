@@ -789,3 +789,50 @@ describe('FilePane state rendering', () => {
     expect(useSelectionStore.getState().selections.left.selectedIds).toEqual(['Alpha'])
   })
 })
+
+describe('FilePane visible-row icon requests', () => {
+  it('requests icons for visible, iconless files only, debounced', async () => {
+    const requestIcons = vi.fn(() => undefined)
+    ipc.override('request_icons', requestIcons)
+    seedPane({
+      path: 'C:\\root',
+      entries: [entry('Alpha'), entry('installer.exe', false), entry('readme.txt', false)],
+    })
+
+    render(<FilePane paneId="left" />)
+
+    await waitFor(() => {
+      expect(requestIcons).toHaveBeenCalledWith({
+        paths: ['C:\\root\\installer.exe', 'C:\\root\\readme.txt'],
+      })
+    })
+    expect(requestIcons).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not loop forever requesting icons that resolve to null (regression)', async () => {
+    // Applying a null-icon result replaces the pane's `entries` array, which
+    // re-fires the visible-window effect. Without permanent per-path
+    // resolution tracking, that re-fire would re-request the same files
+    // forever for any folder mostly made of non-native-icon files.
+    const requestIcons = vi.fn(() => undefined)
+    ipc.override('request_icons', requestIcons)
+    seedPane({
+      path: 'C:\\root',
+      entries: [entry('readme.txt', false)],
+    })
+
+    render(<FilePane paneId="left" />)
+
+    await waitFor(() => {
+      expect(requestIcons).toHaveBeenCalledTimes(1)
+    })
+
+    act(() => {
+      usePanesStore.getState().applyIconState({ path: 'C:\\root\\readme.txt', iconDataUrl: null })
+    })
+
+    // Give the debounced effect plenty of room to re-fire if the bug regresses.
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(requestIcons).toHaveBeenCalledTimes(1)
+  })
+})

@@ -37,6 +37,11 @@ function folder(name: string): DirectoryEntry {
 /**
  * One entry per icon category (plus a special and an ordinary folder) so the
  * screenshot exercises every glyph + token color in a single pane.
+ *
+ * Rust is the sort authority for `list_dir` (directories first, then
+ * natural-lexical by name), and the frontend no longer re-sorts a
+ * non-size-sorted response — so this fixture lists entries in that same
+ * pre-sorted order.
  */
 export const fileTypesListDir: ListDirResponse = {
   path: 'C:\\Users\\Omega',
@@ -44,18 +49,18 @@ export const fileTypesListDir: ListDirResponse = {
     folder('Downloads'),
     folder('Projects'),
     file('app.ts', 'TS file'),
-    file('index.html', 'HTML file'),
-    file('settings.json', 'JSON file'),
-    file('notes.txt', 'TXT file'),
-    file('report.pdf', 'PDF file'),
-    file('photo.png', 'PNG file'),
-    file('song.mp3', 'MP3 file'),
-    file('clip.mp4', 'MP4 file'),
     file('bundle.zip', 'ZIP archive'),
-    file('disk.iso', 'Disc image'),
-    file('installer.exe', 'Application'),
-    file('regular.ttf', 'Font file'),
+    file('clip.mp4', 'MP4 file'),
     file('data.sqlite', 'SQLite database'),
+    file('disk.iso', 'Disc image'),
+    file('index.html', 'HTML file'),
+    file('installer.exe', 'Application'),
     file('mystery.qwzzz', 'File'),
+    file('notes.txt', 'TXT file'),
+    file('photo.png', 'PNG file'),
+    file('regular.ttf', 'Font file'),
+    file('report.pdf', 'PDF file'),
+    file('settings.json', 'JSON file'),
+    file('song.mp3', 'MP3 file'),
   ],
 }

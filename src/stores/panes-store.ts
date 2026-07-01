@@ -6,6 +6,7 @@ import {
   refreshTab,
   requestFolderSize,
   requestFolderSizes,
+  requestIcons,
   saveSession,
   setTabWatch,
 } from '@/lib/ipc/commands'
@@ -14,6 +15,7 @@ import type {
   DirectoryEntry,
   DirPatchEvent,
   EverythingStatus,
+  IconStateEvent,
   SessionState,
   SizeStateEvent,
   SortDirection,
@@ -71,6 +73,13 @@ type PaneState = {
 }
 
 type PendingSizeRequests = Record<string, true>
+type PendingIconRequests = Record<string, true>
+// Paths that have received a `request_icons` response, whether or not it
+// carried an icon. Most files never resolve to an icon (non-Windows, or a
+// Windows extension outside the native-icon allowlist), so "no icon yet"
+// cannot mean "still needs a request" — without this permanent record the
+// dedup below would re-request the same never-resolving files forever.
+type ResolvedIconPaths = Record<string, true>
 
 type InitializePayload = {
   session: SessionState
@@ -87,6 +96,8 @@ type PanesStore = {
   volumes: VolumeInfo[]
   sizeStates: Record<string, EntrySizeState>
   pendingSizeRequests: PendingSizeRequests
+  pendingIconRequests: PendingIconRequests
+  resolvedIconPaths: ResolvedIconPaths
   treeNodes: Record<string, TreeNodeState>
   treeRoots: string[]
   filterTimers: Partial<Record<PaneId, number>>
@@ -109,6 +120,8 @@ type PanesStore = {
   setVisibleRange: (paneId: PaneId, startIndex: number, endIndex: number) => void
   setScrollPosition: (paneId: PaneId, path: string, scrollTop: number) => void
   applySizeState: (event: SizeStateEvent) => void
+  requestVisibleIcons: (paneId: PaneId, paths: string[]) => Promise<void>
+  applyIconState: (event: IconStateEvent) => void
   setEverythingStatus: (status: EverythingStatus) => void
   setVolumes: (volumes: VolumeInfo[]) => void
   setShowHiddenFiles: (showHiddenFiles: boolean) => Promise<void>
@@ -155,6 +168,8 @@ function defaultState() {
     volumes: [] as VolumeInfo[],
     sizeStates: {} as Record<string, EntrySizeState>,
     pendingSizeRequests: {} as PendingSizeRequests,
+    pendingIconRequests: {} as PendingIconRequests,
+    resolvedIconPaths: {} as ResolvedIconPaths,
     treeNodes: {} as Record<string, TreeNodeState>,
     treeRoots: [] as string[],
     filterTimers: {} as Partial<Record<PaneId, number>>,
@@ -356,6 +371,49 @@ function withPendingSizeRequests(
   value: boolean,
 ) {
   const next = { ...pendingSizeRequests }
+
+  for (const path of paths) {
+    if (value) {
+      next[path] = true
+    } else {
+      delete next[path]
+    }
+  }
+
+  return next
+}
+
+function collectPendingIconRequests(
+  entries: DirectoryEntry[],
+  paths: string[],
+  pendingIconRequests: PendingIconRequests,
+  resolvedIconPaths: ResolvedIconPaths,
+) {
+  const entryByPath = new Map(entries.map((entry) => [entry.path, entry]))
+  const seen = new Set<string>()
+
+  return paths.filter((path) => {
+    if (seen.has(path)) {
+      return false
+    }
+    seen.add(path)
+
+    const entry = entryByPath.get(path)
+    return (
+      entry != null &&
+      !entry.isDir &&
+      !resolvedIconPaths[path] &&
+      !pendingIconRequests[path]
+    )
+  })
+}
+
+function withPendingIconRequests(
+  pendingIconRequests: PendingIconRequests,
+  paths: string[],
+  value: boolean,
+) {
+  const next = { ...pendingIconRequests }
 
   for (const path of paths) {
     if (value) {
@@ -643,12 +701,14 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         includeItemCounts: itemsColumnVisible,
       })
 
-      const sortedEntries = sortEntries(
-        response.entries,
-        pane.sortKey,
-        pane.sortDirection,
-        get().sizeStates,
-      )
+      // Rust is the canonical sort authority for `list_dir`: its response is
+      // already ordered by `sortKey`/`sortDirection`, so only the size column
+      // needs a client re-sort (folder sizes resolve asynchronously after the
+      // listing returns and can reorder entries Rust couldn't know about yet).
+      const sortedEntries =
+        pane.sortKey === 'size'
+          ? sortEntries(response.entries, pane.sortKey, pane.sortDirection, get().sizeStates)
+          : response.entries
 
       set((state) => {
         const previous = state.panes[paneId]
@@ -1159,6 +1219,58 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           ? withPendingSizeRequests(state.pendingSizeRequests, [event.path], false)
           : state.pendingSizeRequests,
         sizeStates: nextSizeStates,
+      }
+    }),
+  requestVisibleIcons: async (paneId, paths) => {
+    const pane = get().panes[paneId]
+    const pending = collectPendingIconRequests(
+      pane.entries,
+      paths,
+      get().pendingIconRequests,
+      get().resolvedIconPaths,
+    )
+
+    if (pending.length === 0) {
+      return
+    }
+
+    set((state) => ({
+      pendingIconRequests: withPendingIconRequests(state.pendingIconRequests, pending, true),
+    }))
+
+    try {
+      await requestIcons({ paths: pending })
+    } catch (error) {
+      set((state) => ({
+        pendingIconRequests: withPendingIconRequests(state.pendingIconRequests, pending, false),
+      }))
+      throw error
+    }
+  },
+  applyIconState: (event) =>
+    set((state) => {
+      const nextPanes = { ...state.panes }
+      for (const paneId of Object.keys(nextPanes) as PaneId[]) {
+        const pane = nextPanes[paneId]
+        const entryIndex = pane.entries.findIndex((entry) => entry.path === event.path)
+        if (entryIndex < 0 || pane.entries[entryIndex].iconDataUrl === event.iconDataUrl) {
+          continue
+        }
+
+        const nextEntries = [...pane.entries]
+        nextEntries[entryIndex] = {
+          ...nextEntries[entryIndex],
+          iconDataUrl: event.iconDataUrl,
+        }
+        nextPanes[paneId] = { ...pane, entries: nextEntries }
+      }
+
+      return {
+        panes: nextPanes,
+        pendingIconRequests: withPendingIconRequests(state.pendingIconRequests, [event.path], false),
+        // Recorded even when `iconDataUrl` is null: a resolved-to-nothing
+        // result must stop future requests just as much as a real icon does.
+        resolvedIconPaths: { ...state.resolvedIconPaths, [event.path]: true },
       }
     }),
   setEverythingStatus: (everythingStatus) => set({ everythingStatus }),

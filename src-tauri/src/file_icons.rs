@@ -1,4 +1,19 @@
 use std::path::Path;
+use std::sync::OnceLock;
+
+use rayon::{ThreadPool, ThreadPoolBuilder};
+
+pub fn icon_pool() -> Option<&'static ThreadPool> {
+    static POOL: OnceLock<Option<ThreadPool>> = OnceLock::new();
+    POOL.get_or_init(|| {
+        ThreadPoolBuilder::new()
+            .num_threads(4)
+            .thread_name(|index| format!("fe-icon-{index}"))
+            .build()
+            .ok()
+    })
+    .as_ref()
+}
 
 pub fn icon_data_url_for_path(path: &Path, is_dir: bool) -> Option<String> {
     if is_dir || !should_use_native_icon(path) {
@@ -13,6 +28,30 @@ pub fn icon_data_url_for_path(path: &Path, is_dir: bool) -> Option<String> {
     #[cfg(any(not(windows), feature = "test-utils"))]
     {
         let _ = path;
+        None
+    }
+}
+
+/// Resolves the best available icon for a file: a real per-file extraction
+/// first, falling back to the fast per-type icon (resolved from the
+/// extension alone, without opening the file) when real extraction yields
+/// nothing.
+pub fn resolve_icon(path: &Path, is_dir: bool) -> Option<String> {
+    if is_dir || !should_use_native_icon(path) {
+        return None;
+    }
+
+    if let Some(icon) = icon_data_url_for_path(path, is_dir) {
+        return Some(icon);
+    }
+
+    #[cfg(all(windows, not(feature = "test-utils")))]
+    {
+        return windows_impl::icon_data_url_for_type(path);
+    }
+
+    #[cfg(any(not(windows), feature = "test-utils"))]
+    {
         None
     }
 }
@@ -40,7 +79,10 @@ mod windows_impl {
         CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, GetObjectW, BITMAP, BITMAPINFO,
         BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP,
     };
-    use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON};
+    use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
+    use windows::Win32::UI::Shell::{
+        SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON};
 
     pub(super) fn icon_data_url_for_path(path: &Path) -> Option<String> {
@@ -53,6 +95,29 @@ mod windows_impl {
                 Some(&mut info),
                 size_of::<SHFILEINFOW>() as u32,
                 SHGFI_ICON | SHGFI_SMALLICON,
+            )
+        };
+        if result == 0 || info.hIcon.is_invalid() {
+            return None;
+        }
+
+        let icon_guard = IconGuard(info.hIcon);
+        hicon_to_data_url(icon_guard.0)
+    }
+
+    /// Resolves an icon by extension alone (`SHGFI_USEFILEATTRIBUTES`), never
+    /// opening the underlying file. Used as a fast fallback when real
+    /// per-file extraction fails or is too slow to run inline.
+    pub(super) fn icon_data_url_for_type(path: &Path) -> Option<String> {
+        let wide_path = wide(path);
+        let mut info = SHFILEINFOW::default();
+        let result = unsafe {
+            SHGetFileInfoW(
+                PCWSTR(wide_path.as_ptr()),
+                FILE_ATTRIBUTE_NORMAL.0,
+                Some(&mut info),
+                size_of::<SHFILEINFOW>() as u32,
+                SHGFI_ICON | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES,
             )
         };
         if result == 0 || info.hIcon.is_invalid() {

@@ -222,6 +222,15 @@ export type FolderSizesRequest = {
   paths: string[]
 }
 
+export type RequestIconsRequest = {
+  paths: string[]
+}
+
+export type IconStateEvent = {
+  path: string
+  iconDataUrl: string | null
+}
+
 export type CancelSizeRequest = {
   path: string
 }
@@ -615,6 +624,10 @@ export type IpcCommandMap = {
     request: FolderSizesRequest
     response: void
   }
+  request_icons: {
+    request: RequestIconsRequest
+    response: void
+  }
   cancel_size: {
     request: CancelSizeRequest
     response: CancelSizeResponse
@@ -696,6 +709,7 @@ export type IpcCommandMap = {
 export type IpcEventMap = {
   'dir://patch': DirPatchEvent
   'size://state': SizeStateEvent
+  'icon://state': IconStateEvent
   'volumes://changed': VolumesChangedEvent
   'queue://progress': QueueProgressEvent
   'queue://conflict': QueueConflictEvent

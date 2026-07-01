@@ -15,7 +15,7 @@ import { executeCommand } from '@/lib/commands'
 import { isPathInsideVolume } from '@/lib/volumes'
 import { everythingStatus, listVolumes, loadConfig, loadSession } from '@/lib/ipc/commands'
 import { installCloseGuard } from '@/lib/close-guard'
-import { onDirPatch, onSizeState, onVolumesChanged } from '@/lib/ipc/events'
+import { onDirPatch, onIconState, onSizeState, onVolumesChanged } from '@/lib/ipc/events'
 import { resolveCommandForEvent } from '@/lib/keymap'
 import { UpdateBanner } from '@/components/states/UpdateBanner'
 import { useUpdaterStore } from '@/stores/updater-store'
@@ -44,6 +44,7 @@ function App() {
   const setEverythingStatus = usePanesStore((state) => state.setEverythingStatus)
   const setVolumes = usePanesStore((state) => state.setVolumes)
   const applySizeState = usePanesStore((state) => state.applySizeState)
+  const applyIconState = usePanesStore((state) => state.applyIconState)
   const applyDirPatch = usePanesStore((state) => state.applyDirPatch)
   const reloadPane = usePanesStore((state) => state.reloadPane)
   const panes = usePanesStore((state) => state.panes)
@@ -206,6 +207,10 @@ function App() {
       applySizeState(event)
     })
 
+    const unlistenIconsPromise = onIconState((event) => {
+      applyIconState(event)
+    })
+
     const unlistenPatchesPromise = onDirPatch((event) => {
       applyDirPatch(event)
     })
@@ -213,9 +218,10 @@ function App() {
     return () => {
       void unlistenVolumesPromise.then((unlisten) => unlisten())
       void unlistenSizesPromise.then((unlisten) => unlisten())
+      void unlistenIconsPromise.then((unlisten) => unlisten())
       void unlistenPatchesPromise.then((unlisten) => unlisten())
     }
-  }, [applyDirPatch, applySizeState, setVolumes])
+  }, [applyDirPatch, applyIconState, applySizeState, setVolumes])
 
   const statusSummary = useMemo(() => {
     const selectionCount = activeSelection?.selectedIds.length ?? 0

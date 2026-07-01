@@ -1,5 +1,6 @@
 pub const DIR_PATCH: &str = "dir://patch";
 pub const SIZE_STATE: &str = "size://state";
+pub const ICON_STATE: &str = "icon://state";
 pub const VOLUMES_CHANGED: &str = "volumes://changed";
 pub const QUEUE_PROGRESS: &str = "queue://progress";
 pub const QUEUE_CONFLICT: &str = "queue://conflict";

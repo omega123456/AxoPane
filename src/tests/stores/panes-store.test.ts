@@ -700,10 +700,12 @@ describe('panes-store navigation', () => {
     ipc.override('request_folder_sizes', request)
     ipc.override('list_dir', () => ({
       path: 'C:\\root',
+      // Rust is the sort authority for list_dir, so the fixture returns
+      // entries already in the order the backend would produce.
       entries: [
-        dirAt('C:\\root\\Charlie'),
-        dirAt('C:\\root\\Bravo'),
         dirAt('C:\\root\\Alpha'),
+        dirAt('C:\\root\\Bravo'),
+        dirAt('C:\\root\\Charlie'),
         dirAt('C:\\root\\notes.txt', false),
       ],
     }))
@@ -872,5 +874,113 @@ describe('panes-store navigation', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('panes-store icons', () => {
+  it('patches an entry with the resolved icon and clears the pending request', async () => {
+    ipc.override('list_dir', () => ({
+      path: 'C:\\root',
+      entries: [dirAt('C:\\root\\installer.exe', false)],
+    }))
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+
+    usePanesStore.setState({
+      pendingIconRequests: { 'C:\\root\\installer.exe': true },
+    })
+
+    usePanesStore.getState().applyIconState({
+      path: 'C:\\root\\installer.exe',
+      iconDataUrl: 'data:image/png;base64,abc',
+    })
+
+    const entry = usePanesStore
+      .getState()
+      .panes.left.entries.find((item) => item.path === 'C:\\root\\installer.exe')
+    expect(entry?.iconDataUrl).toBe('data:image/png;base64,abc')
+    expect(usePanesStore.getState().pendingIconRequests['C:\\root\\installer.exe']).toBeUndefined()
+  })
+
+  it('requests icons only for visible, iconless files and dedupes pending requests', async () => {
+    const request = vi.fn(() => undefined)
+    ipc.override('request_icons', request)
+    ipc.override('list_dir', () => ({
+      path: 'C:\\root',
+      entries: [
+        dirAt('C:\\root\\Alpha'),
+        dirAt('C:\\root\\installer.exe', false),
+        dirAt('C:\\root\\readme.txt', false),
+      ],
+    }))
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+
+    await usePanesStore
+      .getState()
+      .requestVisibleIcons('left', [
+        'C:\\root\\Alpha',
+        'C:\\root\\installer.exe',
+        'C:\\root\\readme.txt',
+      ])
+
+    expect(request).toHaveBeenCalledWith({
+      paths: ['C:\\root\\installer.exe', 'C:\\root\\readme.txt'],
+    })
+
+    request.mockClear()
+    await usePanesStore
+      .getState()
+      .requestVisibleIcons('left', ['C:\\root\\installer.exe', 'C:\\root\\readme.txt'])
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it('does not re-request an icon once resolved', async () => {
+    const request = vi.fn(() => undefined)
+    ipc.override('request_icons', request)
+    ipc.override('list_dir', () => ({
+      path: 'C:\\root',
+      entries: [dirAt('C:\\root\\installer.exe', false)],
+    }))
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+
+    usePanesStore.getState().applyIconState({
+      path: 'C:\\root\\installer.exe',
+      iconDataUrl: 'data:image/png;base64,abc',
+    })
+
+    await usePanesStore.getState().requestVisibleIcons('left', ['C:\\root\\installer.exe'])
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it('never re-requests a file that resolves to no icon, even repeatedly (regression: infinite request loop)', async () => {
+    // Most files never get a native icon (non-Windows, or a Windows
+    // extension outside the allowlist), so `iconDataUrl` stays null forever.
+    // Treating "still null" as "still needs a request" caused an endless
+    // request_icons loop for entire folders like Downloads.
+    const request = vi.fn(() => undefined)
+    ipc.override('request_icons', request)
+    ipc.override('list_dir', () => ({
+      path: 'C:\\root',
+      entries: [dirAt('C:\\root\\readme.txt', false)],
+    }))
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+
+    await usePanesStore.getState().requestVisibleIcons('left', ['C:\\root\\readme.txt'])
+    expect(request).toHaveBeenCalledTimes(1)
+
+    usePanesStore.getState().applyIconState({
+      path: 'C:\\root\\readme.txt',
+      iconDataUrl: null,
+    })
+    expect(
+      usePanesStore.getState().panes.left.entries.find((entry) => entry.path === 'C:\\root\\readme.txt')
+        ?.iconDataUrl,
+    ).toBeNull()
+
+    // Simulate the effect re-firing (e.g. because the entries array reference
+    // changed) any number of times: the path must stay resolved.
+    for (let i = 0; i < 5; i += 1) {
+      await usePanesStore.getState().requestVisibleIcons('left', ['C:\\root\\readme.txt'])
+    }
+    expect(request).toHaveBeenCalledTimes(1)
   })
 })

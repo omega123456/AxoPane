@@ -320,6 +320,7 @@ export const fixtures: {
   },
   request_folder_size: undefined,
   request_folder_sizes: undefined,
+  request_icons: undefined,
   cancel_size: {
     cancelled: false,
   },

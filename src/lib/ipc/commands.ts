@@ -28,6 +28,7 @@ import type {
   OpenWithRequest,
   OpenPathRequest,
   RenameEntryRequest,
+  RequestIconsRequest,
   RestoreTrashRequest,
   SetDefaultApplicationRequest,
   ShowPropertiesRequest,
@@ -154,6 +155,10 @@ export function requestFolderSize(payload: FolderSizeRequest) {
 
 export function requestFolderSizes(payload: FolderSizesRequest) {
   return invokeCommand({ command: 'request_folder_sizes', payload }) as Promise<void>
+}
+
+export function requestIcons(payload: RequestIconsRequest) {
+  return invokeCommand({ command: 'request_icons', payload }) as Promise<void>
 }
 
 export function cancelSize(path: string) {

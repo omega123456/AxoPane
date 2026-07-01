@@ -10,11 +10,11 @@ use file_explorer_lib::fs::{SortDirection, SortKey};
 use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::types::{
     AppConfig, CancelSizeResponse, ConflictResolution, CreateEntryRequest, FolderSizeRequest,
-    FolderSizesRequest, InitialShellResponse, ListDirRequest, ListDirResponse,
+    FolderSizesRequest, IconStateEvent, InitialShellResponse, ListDirRequest, ListDirResponse,
     ListTreeChildrenRequest, ListTreeChildrenResponse, OpIdRequest, OpSnapshot, OpenPathRequest,
-    RefreshTabRequest, ReorderOpsRequest, ResolveConflictRequest, SaveConfigRequest,
-    SaveSessionRequest, SessionState, SetTabWatchRequest, TrashEntriesRequest, WatchDirPatch,
-    WatchTarget,
+    RefreshTabRequest, ReorderOpsRequest, RequestIconsRequest, ResolveConflictRequest,
+    SaveConfigRequest, SaveSessionRequest, SessionState, SetTabWatchRequest, TrashEntriesRequest,
+    WatchDirPatch, WatchTarget,
 };
 use file_explorer_lib::ops::{OpItem, OpKind, OpStatus, OpsService, StartOpRequest};
 use file_explorer_lib::persist::{Config, PersistenceState, Session};
@@ -55,6 +55,7 @@ impl TestApp<tauri::test::MockRuntime> {
                 commands::everything_status,
                 commands::request_folder_size,
                 commands::request_folder_sizes,
+                commands::request_icons,
                 commands::cancel_size,
                 commands::set_tab_watch,
                 commands::refresh_tab,
@@ -436,6 +437,23 @@ fn ipc_commands_cover_watch_size_and_logging_state() {
         )
         .expect("cancel size");
     assert!(cancel_response.cancelled);
+
+    let icon_paths = vec![
+        size_root.join("file-0.txt").to_string_lossy().into_owned(),
+        size_root.join("file-1.txt").to_string_lossy().into_owned(),
+    ];
+    let icon_events: Vec<IconStateEvent> = test_app
+        .invoke_payload(
+            "request_icons",
+            RequestIconsRequest {
+                paths: icon_paths.clone(),
+            },
+        )
+        .expect("request icons");
+    assert_eq!(icon_events.len(), icon_paths.len());
+    assert!(icon_events
+        .iter()
+        .all(|event| event.icon_data_url.is_none()));
 
     test_app
         .invoke_payload::<(), _>(

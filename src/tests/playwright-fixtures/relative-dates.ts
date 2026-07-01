@@ -30,13 +30,17 @@ function file(name: string, typeLabel: string, modifiedAt: string): DirectoryEnt
  * One entry per recency tier so the screenshot captures every relative tone:
  * recent (green), today (blue), yesterday (amber), and an aged item that falls
  * back to the absolute format (default tone).
+ *
+ * Rust is the sort authority for `list_dir` (natural-lexical by name) and the
+ * frontend no longer re-sorts a non-size-sorted response, so entries are
+ * listed in that same pre-sorted order.
  */
 export const relativeDatesListDir: ListDirResponse = {
   path: 'C:\\Users\\Omega',
   entries: [
-    file('draft.txt', 'TXT file', '2026-06-30T14:45:00Z'), // 15 minutes ago
-    file('build.log', 'LOG file', '2026-06-30T12:00:00Z'), // 3 hours ago
-    file('backup.zip', 'ZIP archive', '2026-06-29T13:00:00Z'), // 1 day ago
     file('archive.pdf', 'PDF file', '2026-06-10T10:15:00Z'), // beyond cutoff → absolute
+    file('backup.zip', 'ZIP archive', '2026-06-29T13:00:00Z'), // 1 day ago
+    file('build.log', 'LOG file', '2026-06-30T12:00:00Z'), // 3 hours ago
+    file('draft.txt', 'TXT file', '2026-06-30T14:45:00Z'), // 15 minutes ago
   ],
 }

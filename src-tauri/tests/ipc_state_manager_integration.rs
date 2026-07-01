@@ -258,6 +258,24 @@ fn commands_cover_size_and_logging_state() {
         size_path_from_string(&size_root.to_string_lossy()),
         size_root
     );
+
+    let icon_paths = vec![
+        size_root.join("file-0.txt").to_string_lossy().into_owned(),
+        size_root.join("file-1.txt").to_string_lossy().into_owned(),
+    ];
+    let icon_events = commands::request_icons(file_explorer_lib::ipc::types::RequestIconsRequest {
+        paths: icon_paths.clone(),
+    });
+    assert_eq!(
+        icon_events
+            .iter()
+            .map(|event| event.path.clone())
+            .collect::<Vec<_>>(),
+        icon_paths
+    );
+    assert!(icon_events
+        .iter()
+        .all(|event| event.icon_data_url.is_none()));
     assert_eq!(commands::frontend_log_level("error"), log::Level::Error);
     assert_eq!(commands::frontend_log_level("trace"), log::Level::Debug);
     assert_eq!(

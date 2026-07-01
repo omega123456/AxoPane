@@ -9,6 +9,10 @@ export function onSizeState(handler: (payload: IpcEventMap['size://state']) => v
   return subscribeToEvent('size://state', handler)
 }
 
+export function onIconState(handler: (payload: IpcEventMap['icon://state']) => void) {
+  return subscribeToEvent('icon://state', handler)
+}
+
 export function onVolumesChanged(handler: (payload: IpcEventMap['volumes://changed']) => void) {
   return subscribeToEvent('volumes://changed', handler)
 }

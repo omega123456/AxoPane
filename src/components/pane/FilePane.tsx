@@ -46,6 +46,7 @@ const PARENT_ROW_ID = '..'
 const pointerNavigationCooldownMs = 400
 const rowHeightPx = 30
 const marqueeDragThresholdPx = 4
+const visibleIconRequestDebounceMs = 100
 
 type MarqueeRect = { left: number; top: number; width: number; height: number }
 type MarqueeDragState = {
@@ -85,6 +86,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   const openTabFromPath = usePanesStore((state) => state.openTabFromPath)
   const reloadPane = usePanesStore((state) => state.reloadPane)
   const requestVisibleRange = usePanesStore((state) => state.setVisibleRange)
+  const requestVisibleIcons = usePanesStore((state) => state.requestVisibleIcons)
   const setScrollPosition = usePanesStore((state) => state.setScrollPosition)
   const selection = useSelectionStore((state) => state.selections[paneId])
   const keymap = useKeymapStore((state) => state.bindings)
@@ -113,6 +115,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   const renameSubmittingRef = useRef(false)
   const ignoreNextRenameBlurRef = useRef(false)
   const detachMarqueeListenersRef = useRef<(() => void) | null>(null)
+  const visibleIconRequestTimerRef = useRef<number | undefined>(undefined)
   const [marqueeRect, setMarqueeRect] = useState<MarqueeRect | null>(null)
   const isActivePane = activePaneId === paneId
   const os = detectPlatformOs()
@@ -178,7 +181,17 @@ export function FilePane({ paneId }: FilePaneProps) {
     const start = Math.max(0, items[0].index - parentOffset)
     const end = Math.max(0, items[items.length - 1].index - parentOffset)
     requestVisibleRange(paneId, start, end)
-  }, [itemsToRender, paneId, parentOffset, requestVisibleRange])
+
+    // Native icons are lazy and per-visible-row: debounce so fast scrolling
+    // doesn't spam the backend with a request per frame.
+    window.clearTimeout(visibleIconRequestTimerRef.current)
+    visibleIconRequestTimerRef.current = window.setTimeout(() => {
+      const visiblePaths = pane.entries.slice(start, end + 1).map((entry) => entry.path)
+      void requestVisibleIcons(paneId, visiblePaths)
+    }, visibleIconRequestDebounceMs)
+  }, [itemsToRender, paneId, pane.entries, parentOffset, requestVisibleIcons, requestVisibleRange])
+
+  useEffect(() => () => window.clearTimeout(visibleIconRequestTimerRef.current), [])
 
   // Row indices include the synthetic parent row at position 0 when present.
   // Row 0 (with a parent) is the parent row; entry `i` is at row `i + parentOffset`.

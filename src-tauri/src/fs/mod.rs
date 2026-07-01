@@ -390,7 +390,7 @@ fn build_entry_from_path(path: &Path) -> Result<DirectoryEntry, FsError> {
         name: name.clone(),
         path: display_path_from_path(path),
         is_dir,
-        icon_data_url: crate::file_icons::icon_data_url_for_path(path, is_dir),
+        icon_data_url: None,
         size_bytes: (!is_dir).then_some(metadata.len()),
         item_count: if is_dir { read_item_count(path) } else { None },
         type_label: infer_type_label(&name, is_dir),
@@ -430,7 +430,7 @@ fn build_entry(entry: &DirEntry) -> Result<DirectoryEntry, FsError> {
         name: name.clone(),
         path: display_path_from_path(&path),
         is_dir,
-        icon_data_url: crate::file_icons::icon_data_url_for_path(&path, is_dir),
+        icon_data_url: None,
         size_bytes: (!is_dir).then_some(metadata.len()),
         item_count: None,
         type_label: infer_type_label(&name, is_dir),
@@ -590,7 +590,7 @@ fn compare_with_name_tiebreak(base: Ordering, left_name: &str, right_name: &str)
 }
 
 pub fn natural_name_compare(left: &str, right: &str) -> Ordering {
-    natural_lexical_cmp(&left.to_ascii_lowercase(), &right.to_ascii_lowercase())
+    natural_lexical_cmp(left, right)
 }
 
 pub fn compare_optional_u64(left: Option<u64>, right: Option<u64>) -> Ordering {
