@@ -13,6 +13,12 @@
   --color-dark-surface: #272727;
   --color-dark-panel: #242424;
   --color-dark-tree: #212121;
+  /* Opaque stand-in for accent-blue-soft on a pinned (sticky) tree row, where
+     the translucent selection tint would otherwise let scrolled-under rows
+     show through. */
+  --color-dark-tree-current: color-mix(in srgb, var(--color-accent-blue) 15%, var(--color-dark-tree));
+  --color-dark-tree-current-hover: color-mix(in srgb, var(--color-accent-blue) 19%, var(--color-dark-tree));
+  --color-dark-tree-hover: color-mix(in srgb, white 5.5%, var(--color-dark-tree));
   --color-dark-header: #2c2c2c;
   --color-dark-hover: rgba(255, 255, 255, 0.055);
   --color-dark-border: rgba(255, 255, 255, 0.075);
@@ -31,6 +37,11 @@
   --color-light-surface: #ffffff;
   --color-light-panel: #f6f6f6;
   --color-light-tree: #f1f1f1;
+  /* Opaque stand-in for accent-blue-soft on a pinned (sticky) tree row; see
+     --color-dark-tree-current. */
+  --color-light-tree-current: color-mix(in srgb, var(--color-accent-blue) 15%, var(--color-light-tree));
+  --color-light-tree-current-hover: color-mix(in srgb, var(--color-accent-blue) 19%, var(--color-light-tree));
+  --color-light-tree-hover: color-mix(in srgb, black 4.5%, var(--color-light-tree));
   --color-light-header: #efefef;
   --color-light-hover: rgba(0, 0, 0, 0.045);
   --color-light-border: rgba(0, 0, 0, 0.08);
@@ -101,6 +112,11 @@
   --spacing-row: 1.875rem;
   --spacing-status: 1.625rem;
   --spacing-tree: 12.75rem;
+  /* Fixed tree-row height. Sticky ancestor rows stack via `calc(var(--spacing-tree-row) * n)`,
+     so this must stay a compile-time constant rather than a measured value -
+     a JS-measured height only converges after each row's first paint, which
+     left gaps/overlaps when many ancestor levels mounted at once. */
+  --spacing-tree-row: 1.55rem;
   --spacing-details: 18.75rem;
   --spacing-window: 50.375rem;
   --spacing-window-min: 91.25rem;

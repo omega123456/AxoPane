@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type CSSProperties } from 'react'
 import { buildContextMenuContent } from '@/components/menus/menu-definitions'
 import { ChevronRightIcon } from '@/components/icons'
 import { EntryIcon } from '@/components/icons/EntryIcon'
@@ -13,9 +13,12 @@ type TreeNodeProps = {
   depth: number
   /** Set for volume roots; switches the row glyph from a folder to a drive icon. */
   volume?: VolumeInfo
+  /** Ordered ancestor chain (volume root -> active node); rows on this chain
+   *  pin to the top of the scroll area, stacked by their position in it. */
+  stickyChain?: string[]
 }
 
-export function TreeNode({ path, depth, volume }: TreeNodeProps) {
+export function TreeNode({ path, depth, volume, stickyChain = [] }: TreeNodeProps) {
   const node = usePanesStore((state) => state.treeNodes[path])
   const activePaneId = usePanesStore((state) => state.activePaneId)
   const activePath = usePanesStore((state) => state.panes[activePaneId].path)
@@ -23,9 +26,11 @@ export function TreeNode({ path, depth, volume }: TreeNodeProps) {
   const navigatePane = usePanesStore((state) => state.navigatePane)
   const openTabFromPath = usePanesStore((state) => state.openTabFromPath)
   const openMenu = useContextMenuStore((state) => state.openMenu)
-  const rowRef = useRef<HTMLDivElement>(null)
+  const rowRef = useRef<HTMLLIElement>(null)
 
   const isCurrent = Boolean(node) && activePath === node.path
+  const chainIndex = stickyChain.indexOf(path)
+  const isSticky = chainIndex !== -1
 
   // Keep the active folder visible: scroll its row into view within the tree
   // whenever this node becomes the current one.
@@ -39,77 +44,93 @@ export function TreeNode({ path, depth, volume }: TreeNodeProps) {
     return null
   }
 
+  const rowStyle: CSSProperties = {
+    // Styling-constraint exception: runtime geometry only. Indentation is a
+    // function of the (unbounded) tree depth, so it cannot be a static
+    // utility/token. Colors/spacing above remain pure Tailwind utilities.
+    paddingLeft: `${depth * 12 + 8}px`,
+  }
+  if (isSticky) {
+    rowStyle.position = 'sticky'
+    // A calc() against the fixed --spacing-tree-row token (also the row's
+    // own `h-tree-row` height below), not a JS-measured value: measuring
+    // asynchronously left gaps/overlaps whenever many ancestor rows mounted
+    // in the same render (e.g. jumping straight to a deeply nested path).
+    rowStyle.top = `calc(var(--spacing-tree-row) * ${chainIndex})`
+    rowStyle.zIndex = 10 + chainIndex
+  }
+
+  // accent-blue-soft is translucent; on a sticky row that translucency would
+  // let scrolled-under rows show through, so pinned+current rows get the
+  // opaque *-tree-current stand-in instead.
+  const rowBackgroundClassName = isCurrent
+    ? isSticky
+      ? 'bg-light-tree-current text-accent-blue-light dark:bg-dark-tree-current dark:text-accent-blue'
+      : 'bg-accent-blue-soft text-accent-blue-light dark:text-accent-blue'
+    : isSticky
+      ? 'bg-light-tree text-light-text-soft dark:bg-dark-tree dark:text-dark-text-soft'
+      : 'text-light-text-soft dark:text-dark-text-soft'
+  const rowHoverClassName = isSticky
+    ? isCurrent
+      ? 'hover:bg-light-tree-current-hover dark:hover:bg-dark-tree-current-hover'
+      : 'hover:bg-light-tree-hover dark:hover:bg-dark-tree-hover'
+    : 'hover:bg-light-hover dark:hover:bg-dark-hover'
+
   return (
-    <li>
-      <div
-        ref={rowRef}
-        onContextMenu={(event) => {
-          event.preventDefault()
-          openMenu({
-            paneId: activePaneId,
-            title: node.name,
-            chip: 'DIR',
-            x: event.clientX,
-            y: event.clientY,
-            ...buildContextMenuContent(
-              activePaneId,
-              { kind: 'tree', path: node.path },
-              detectPlatformOs(),
-            ),
-          })
-        }}
-        className={`flex items-center gap-1 rounded-tab pr-2 text-row hover:bg-light-hover dark:hover:bg-dark-hover ${
-          isCurrent
-            ? 'bg-accent-blue-soft text-accent-blue-light dark:text-accent-blue'
-            : 'text-light-text-soft dark:text-dark-text-soft'
-        }`}
-        // Styling-constraint exception: runtime geometry only. Indentation is a
-        // function of the (unbounded) tree depth, so it cannot be a static
-        // utility/token. Colors/spacing above remain pure Tailwind utilities.
-        style={{ paddingLeft: `${depth * 12 + 8}px` }}
+    <li
+      ref={rowRef}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        openMenu({
+          paneId: activePaneId,
+          title: node.name,
+          chip: 'DIR',
+          x: event.clientX,
+          y: event.clientY,
+          ...buildContextMenuContent(
+            activePaneId,
+            { kind: 'tree', path: node.path },
+            detectPlatformOs(),
+          ),
+        })
+      }}
+      className={`flex h-tree-row items-center gap-1 rounded-tab pr-2 text-row ${rowHoverClassName} ${rowBackgroundClassName}`}
+      style={rowStyle}
+    >
+      <button
+        type="button"
+        aria-label={`${node.expanded ? 'Collapse' : 'Expand'} ${node.name}`}
+        onClick={() => void toggleTreeNode(node.path)}
+        className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-tab focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:hover:bg-dark-hover"
       >
-        <button
-          type="button"
-          aria-label={`${node.expanded ? 'Collapse' : 'Expand'} ${node.name}`}
-          onClick={() => void toggleTreeNode(node.path)}
-          className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-tab focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:hover:bg-dark-hover"
-        >
-          <ChevronRightIcon className={`h-3.5 w-3.5 ${node.expanded ? 'rotate-90' : ''}`} />
-        </button>
-        <button
-          type="button"
-          onClick={() => void navigatePane(activePaneId, node.path)}
-          onMouseDown={(event) => {
-            // Suppress the browser's middle-click autoscroll, which would
-            // otherwise swallow the subsequent auxclick and prevent the
-            // open-in-new-tab gesture from firing.
-            if (event.button === 1) {
-              event.preventDefault()
-            }
-          }}
-          onAuxClick={(event) => {
-            if (event.button === 1) {
-              event.preventDefault()
-              void openTabFromPath(activePaneId, node.path)
-            }
-          }}
-          className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-tab py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
-        >
-          {volume ? (
-            <VolumeIcon volume={volume} />
-          ) : (
-            <EntryIcon entry={{ name: node.name, isDir: true }} isOpen={node.expanded} />
-          )}
-          <span className="truncate">{node.name}</span>
-        </button>
-      </div>
-      {node.expanded && node.children.length > 0 ? (
-        <ul>
-          {node.children.map((childPath) => (
-            <TreeNode key={childPath} path={childPath} depth={depth + 1} />
-          ))}
-        </ul>
-      ) : null}
+        <ChevronRightIcon className={`h-3.5 w-3.5 ${node.expanded ? 'rotate-90' : ''}`} />
+      </button>
+      <button
+        type="button"
+        onClick={() => void navigatePane(activePaneId, node.path)}
+        onMouseDown={(event) => {
+          // Suppress the browser's middle-click autoscroll, which would
+          // otherwise swallow the subsequent auxclick and prevent the
+          // open-in-new-tab gesture from firing.
+          if (event.button === 1) {
+            event.preventDefault()
+          }
+        }}
+        onAuxClick={(event) => {
+          if (event.button === 1) {
+            event.preventDefault()
+            void openTabFromPath(activePaneId, node.path)
+          }
+        }}
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-tab py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
+      >
+        {volume ? (
+          <VolumeIcon volume={volume} />
+        ) : (
+          <EntryIcon entry={{ name: node.name, isDir: true }} isOpen={node.expanded} />
+        )}
+        <span className="truncate">{node.name}</span>
+      </button>
     </li>
   )
 }

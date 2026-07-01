@@ -13,7 +13,7 @@ export function TrashTreeRow() {
   const navigatePane = usePanesStore((state) => state.navigatePane)
   const openTabFromPath = usePanesStore((state) => state.openTabFromPath)
   const openMenu = useContextMenuStore((state) => state.openMenu)
-  const rowRef = useRef<HTMLDivElement>(null)
+  const rowRef = useRef<HTMLLIElement>(null)
 
   const isCurrent = activePath === TRASH_PATH
 
@@ -24,52 +24,50 @@ export function TrashTreeRow() {
   }, [isCurrent])
 
   return (
-    <li>
-      <div
-        ref={rowRef}
-        onContextMenu={(event) => {
-          event.preventDefault()
-          openMenu({
-            paneId: activePaneId,
-            title: trashLabel,
-            chip: 'DIR',
-            x: event.clientX,
-            y: event.clientY,
-            ...buildContextMenuContent(
-              activePaneId,
-              { kind: 'tree', path: TRASH_PATH },
-              detectPlatformOs(),
-            ),
-          })
+    <li
+      ref={rowRef}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        openMenu({
+          paneId: activePaneId,
+          title: trashLabel,
+          chip: 'DIR',
+          x: event.clientX,
+          y: event.clientY,
+          ...buildContextMenuContent(
+            activePaneId,
+            { kind: 'tree', path: TRASH_PATH },
+            detectPlatformOs(),
+          ),
+        })
+      }}
+      className={`flex h-tree-row items-center gap-1 rounded-tab pr-2 text-row hover:bg-light-hover dark:hover:bg-dark-hover ${
+        isCurrent
+          ? 'bg-accent-blue-soft text-accent-blue-light dark:text-accent-blue'
+          : 'text-light-text-soft dark:text-dark-text-soft'
+      }`}
+      style={{ paddingLeft: '8px' }}
+    >
+      <span className="inline-flex h-6 w-6 flex-none items-center justify-center" aria-hidden="true" />
+      <button
+        type="button"
+        onClick={() => void navigatePane(activePaneId, TRASH_PATH)}
+        onMouseDown={(event) => {
+          if (event.button === 1) {
+            event.preventDefault()
+          }
         }}
-        className={`flex items-center gap-1 rounded-tab pr-2 text-row hover:bg-light-hover dark:hover:bg-dark-hover ${
-          isCurrent
-            ? 'bg-accent-blue-soft text-accent-blue-light dark:text-accent-blue'
-            : 'text-light-text-soft dark:text-dark-text-soft'
-        }`}
-        style={{ paddingLeft: '8px' }}
+        onAuxClick={(event) => {
+          if (event.button === 1) {
+            event.preventDefault()
+            void openTabFromPath(activePaneId, TRASH_PATH)
+          }
+        }}
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-tab py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
       >
-        <span className="inline-flex h-6 w-6 flex-none items-center justify-center" aria-hidden="true" />
-        <button
-          type="button"
-          onClick={() => void navigatePane(activePaneId, TRASH_PATH)}
-          onMouseDown={(event) => {
-            if (event.button === 1) {
-              event.preventDefault()
-            }
-          }}
-          onAuxClick={(event) => {
-            if (event.button === 1) {
-              event.preventDefault()
-              void openTabFromPath(activePaneId, TRASH_PATH)
-            }
-          }}
-          className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-tab py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
-        >
-          <Trash2Icon className="size-4 flex-none text-light-text-muted dark:text-dark-text-muted" />
-          <span className="truncate">{trashLabel}</span>
-        </button>
-      </div>
+        <Trash2Icon className="size-4 flex-none text-light-text-muted dark:text-dark-text-muted" />
+        <span className="truncate">{trashLabel}</span>
+      </button>
     </li>
   )
 }

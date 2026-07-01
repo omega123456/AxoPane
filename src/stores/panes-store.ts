@@ -33,7 +33,7 @@ type SizeStateKind = SizeStateEvent['state']
 // rewrite the pane's history stack (the index has already been moved).
 type NavigateOptions = { viaHistory?: boolean }
 
-type TreeNodeState = {
+export type TreeNodeState = {
   id: string
   name: string
   path: string
