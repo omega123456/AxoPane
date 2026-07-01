@@ -34,6 +34,12 @@ pub struct Config {
     pub show_seconds: bool,
     #[serde(default)]
     pub relative_dates: bool,
+    #[serde(default = "default_true")]
+    pub auto_folder_size: bool,
+}
+
+pub fn default_true() -> bool {
+    true
 }
 
 pub fn default_update_check_interval() -> String {
@@ -152,6 +158,7 @@ impl Default for Config {
             show_time: false,
             show_seconds: false,
             relative_dates: false,
+            auto_folder_size: true,
         }
     }
 }

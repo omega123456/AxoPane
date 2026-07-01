@@ -87,6 +87,7 @@ type DraftState = {
   showTime: boolean
   showSeconds: boolean
   relativeDates: boolean
+  autoFolderSize: boolean
 }
 
 function cloneDraft(): DraftState {
@@ -112,6 +113,7 @@ function cloneDraft(): DraftState {
     showTime: config.showTime,
     showSeconds: config.showSeconds,
     relativeDates: config.relativeDates,
+    autoFolderSize: config.autoFolderSize,
   }
 }
 
@@ -128,6 +130,7 @@ function applyDraft(draft: DraftState) {
     showTime: draft.showTime,
     showSeconds: draft.showSeconds,
     relativeDates: draft.relativeDates,
+    autoFolderSize: draft.autoFolderSize,
   })
   useThemeStore.getState().setThemePreference(draft.theme)
   usePanesStore.setState({ showHiddenFiles: draft.showHiddenFiles })
@@ -147,6 +150,7 @@ function SettingsModalContent() {
   const close = useSettingsStore((state) => state.close)
   const open = useSettingsStore((state) => state.open)
   const os = detectPlatformOs()
+  const everythingStatus = usePanesStore((state) => state.everythingStatus)
   const logLevel = useConfigStore((state) => state.logLevel)
   const setLogLevel = useConfigStore((state) => state.setLogLevel)
   const [draft, setDraft] = useState<DraftState>(() => cloneDraft())
@@ -253,6 +257,7 @@ function SettingsModalContent() {
       showTime: false,
       showSeconds: false,
       relativeDates: false,
+      autoFolderSize: true,
     }))
   }
 
@@ -394,6 +399,21 @@ function SettingsModalContent() {
                       />
                     }
                   />
+                  {os === 'windows' && everythingStatus?.isAvailable ? (
+                    <SettingRow
+                      title="Automatically calculate folder sizes"
+                      description="Uses the Everything index to size folders while browsing. Only available on Windows with Everything installed and indexed."
+                      control={
+                        <ToggleSwitch
+                          label="Automatically calculate folder sizes"
+                          checked={draft.autoFolderSize}
+                          onChange={(value) =>
+                            updateDraft((current) => ({ ...current, autoFolderSize: value }))
+                          }
+                        />
+                      }
+                    />
+                  ) : null}
                 </div>
               ) : null}
 

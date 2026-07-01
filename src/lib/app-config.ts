@@ -25,6 +25,7 @@ export function defaultAppConfig(): AppConfig {
     showTime: false,
     showSeconds: false,
     relativeDates: false,
+    autoFolderSize: true,
   }
 }
 
@@ -60,6 +61,7 @@ export function buildAppConfig(): AppConfig {
     showTime: config.showTime,
     showSeconds: config.showSeconds,
     relativeDates: config.relativeDates,
+    autoFolderSize: config.autoFolderSize,
   }
 }
 
@@ -112,6 +114,7 @@ export function hydrateAppConfig(config: AppConfig) {
     showTime: next.showTime,
     showSeconds: next.showSeconds,
     relativeDates: next.relativeDates,
+    autoFolderSize: next.autoFolderSize ?? true,
   })
   useLayoutStore.getState().hydrate(next.layout, next.columns)
   useKeymapStore.getState().hydrate(next.keybindings)

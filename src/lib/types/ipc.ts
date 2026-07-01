@@ -77,6 +77,7 @@ export type ListDirRequest = {
   sortDirection: SortDirection
   filter: string
   showHidden: boolean
+  includeItemCounts: boolean
 }
 
 export type ListDirResponse = {
@@ -162,6 +163,7 @@ export type AppConfig = {
   showTime: boolean
   showSeconds: boolean
   relativeDates: boolean
+  autoFolderSize: boolean
 }
 
 export type SessionTab = {

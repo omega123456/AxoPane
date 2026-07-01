@@ -107,6 +107,65 @@ describe('SettingsModal', () => {
     expect(screen.getByText('Changes apply immediately.')).toBeInTheDocument()
   })
 
+  it('hides the auto folder size toggle on macOS even when Everything is available', async () => {
+    useSettingsStore.getState().open('layout')
+    setPlatform('MacIntel')
+    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
+
+    render(<SettingsModal />)
+    await screen.findByText('build 0.1.0', { exact: false })
+    expect(
+      screen.queryByRole('switch', { name: 'Automatically calculate folder sizes' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('hides the auto folder size toggle on Windows when Everything is unavailable', async () => {
+    useSettingsStore.getState().open('layout')
+    setPlatform('Win32')
+    usePanesStore.setState({ everythingStatus: { status: 'unavailable', isAvailable: false } })
+
+    render(<SettingsModal />)
+    await screen.findByText('build 0.1.0', { exact: false })
+    expect(
+      screen.queryByRole('switch', { name: 'Automatically calculate folder sizes' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows the auto folder size toggle on Windows when Everything is available', async () => {
+    useSettingsStore.getState().open('layout')
+    setPlatform('Win32')
+    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
+
+    render(<SettingsModal />)
+    await screen.findByText('build 0.1.0', { exact: false })
+    expect(
+      screen.getByRole('switch', { name: 'Automatically calculate folder sizes' }),
+    ).toBeInTheDocument()
+  })
+
+  it('auto-saves the folder size toggle when Everything is available on Windows', async () => {
+    const user = userEvent.setup()
+    const saveConfig = vi.fn((payload) => payload.config)
+    ipc.override('save_config', saveConfig)
+    setPlatform('Win32')
+    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
+    useSettingsStore.getState().open('layout')
+
+    render(<SettingsModal />)
+    await screen.findByText('build 0.1.0', { exact: false })
+
+    const toggle = screen.getByRole('switch', { name: 'Automatically calculate folder sizes' })
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
+    await user.click(toggle)
+
+    await waitFor(() => {
+      expect(useConfigStore.getState().autoFolderSize).toBe(false)
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ config: expect.objectContaining({ autoFolderSize: false }) }),
+      )
+    })
+  })
+
   it('persists the update check frequency from the Updates section', async () => {
     const user = userEvent.setup()
     const saveConfig = vi.fn((payload) => payload.config)

@@ -14,3 +14,8 @@ export const everythingUnavailable: EverythingStatus = {
   status: 'unavailable',
   isAvailable: false,
 }
+
+export const everythingAvailable: EverythingStatus = {
+  status: 'available',
+  isAvailable: true,
+}

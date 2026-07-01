@@ -38,6 +38,7 @@ pub struct ListDirOptions {
     pub sort_direction: SortDirection,
     pub filter: String,
     pub show_hidden: bool,
+    pub include_item_counts: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -224,7 +225,9 @@ pub fn list_dir(options: &ListDirOptions) -> Result<ListDirResponse, FsError> {
         entries.push(listed);
     }
 
-    populate_item_counts(&mut entries);
+    if options.include_item_counts {
+        populate_item_counts(&mut entries);
+    }
 
     entries.sort_by(|left, right| {
         compare_entries(left, right, options.sort_key, options.sort_direction)

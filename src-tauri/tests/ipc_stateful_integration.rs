@@ -202,6 +202,7 @@ fn ipc_commands_cover_shell_filesystem_and_persistence_flows() {
         show_time: initial_config.show_time,
         show_seconds: initial_config.show_seconds,
         relative_dates: initial_config.relative_dates,
+        auto_folder_size: initial_config.auto_folder_size,
     };
     let echoed_config: AppConfig = test_app
         .invoke_payload(
@@ -268,6 +269,7 @@ fn ipc_commands_cover_shell_filesystem_and_persistence_flows() {
                 sort_direction: SortDirection::Asc,
                 filter: String::new(),
                 show_hidden: true,
+                include_item_counts: true,
             },
         )
         .expect("list dir");
@@ -323,6 +325,7 @@ fn ipc_commands_cover_shell_filesystem_and_persistence_flows() {
                 sort_direction: SortDirection::Asc,
                 filter: String::new(),
                 show_hidden: false,
+                include_item_counts: true,
             },
         )
         .expect_err("missing dir should fail");

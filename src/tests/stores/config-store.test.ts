@@ -19,6 +19,7 @@ describe('config-store', () => {
       showTime: false,
       showSeconds: false,
       relativeDates: true,
+      autoFolderSize: false,
     })
 
     const state = useConfigStore.getState()
@@ -27,6 +28,7 @@ describe('config-store', () => {
     expect(state.dismissedEverythingBanner).toBe(true)
     expect(state.dateFormat).toBe('dmy')
     expect(state.relativeDates).toBe(true)
+    expect(state.autoFolderSize).toBe(false)
   })
 
   it('persists the update check interval through save_config', async () => {
@@ -99,6 +101,20 @@ describe('config-store', () => {
     )
   })
 
+  it('persists the auto-folder-size toggle through save_config', async () => {
+    const saveConfig = vi.fn((payload) => payload.config)
+    ipc.override('save_config', saveConfig)
+
+    await useConfigStore.getState().setAutoFolderSize(false)
+
+    expect(useConfigStore.getState().autoFolderSize).toBe(false)
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({ autoFolderSize: false }),
+      }),
+    )
+  })
+
   it('hydrates the log level and applies + persists a new level', async () => {
     useConfigStore.getState().hydrate({
       theme: 'light',
@@ -110,6 +126,7 @@ describe('config-store', () => {
       showTime: false,
       showSeconds: false,
       relativeDates: false,
+      autoFolderSize: true,
     })
     expect(useConfigStore.getState().logLevel).toBe('warn')
 
@@ -133,6 +150,7 @@ describe('config-store', () => {
       showTime: false,
       showSeconds: false,
       relativeDates: false,
+      autoFolderSize: true,
       keybindings: {},
       columns: [],
       layout: {

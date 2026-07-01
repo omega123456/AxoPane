@@ -61,6 +61,7 @@ const lightConfig: AppConfig = {
   showTime: false,
   showSeconds: false,
   relativeDates: false,
+  autoFolderSize: true,
   keybindings: {},
   columns: [
     { key: 'name', visible: true },

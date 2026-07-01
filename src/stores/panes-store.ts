@@ -22,6 +22,7 @@ import type {
 } from '@/lib/types/ipc'
 import { activeTab, fromSessionPane, toSessionPane, useTabsStore } from '@/stores/tabs-store'
 import { useConfigStore } from '@/stores/config-store'
+import { useLayoutStore } from '@/stores/layout-store'
 import { log } from '@/lib/app-log-commands'
 import { formatVolumeTreeName, isPathInsideVolume, sortVolumesForTree } from '@/lib/volumes'
 import { useSelectionStore } from '@/stores/selection-store'
@@ -372,8 +373,11 @@ function withPendingSizeRequests(
 // On macOS and on Windows without Everything, sizes are strictly manual
 // (Space / "Calculate size") — see plan FR7 / M4. Network paths are handled by
 // the Rust size layer (always N/A); we never pre-gate on those here.
-function eagerSizesEnabled(everythingStatus: EverythingStatus | null): boolean {
-  return everythingStatus?.isAvailable ?? false
+function eagerSizesEnabled(
+  everythingStatus: EverythingStatus | null,
+  autoFolderSize: boolean,
+): boolean {
+  return (everythingStatus?.isAvailable ?? false) && autoFolderSize
 }
 
 function paneIdFromTabId(tabId: string): PaneId {
@@ -542,7 +546,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
   },
   reloadPane: async (paneId) => {
     const requestDirectorySizes = async (paths: string[]) => {
-      if (!eagerSizesEnabled(get().everythingStatus)) {
+      if (!eagerSizesEnabled(get().everythingStatus, useConfigStore.getState().autoFolderSize)) {
         return []
       }
 
@@ -627,12 +631,16 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         return
       }
 
+      const itemsColumnVisible =
+        useLayoutStore.getState().columns.find((column) => column.key === 'items')?.visible ?? true
+
       const response = await listDir({
         path: pane.path,
         sortKey: pane.sortKey,
         sortDirection: pane.sortDirection,
         filter: pane.filterApplied,
         showHidden: get().showHiddenFiles,
+        includeItemCounts: itemsColumnVisible,
       })
 
       const sortedEntries = sortEntries(

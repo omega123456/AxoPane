@@ -93,6 +93,7 @@ fn commands_cover_filesystem_and_persistence_state() {
         show_time: initial_config.show_time,
         show_seconds: initial_config.show_seconds,
         relative_dates: initial_config.relative_dates,
+        auto_folder_size: initial_config.auto_folder_size,
     };
     assert_eq!(
         commands::save_config(
@@ -146,6 +147,7 @@ fn commands_cover_filesystem_and_persistence_state() {
         sort_direction: SortDirection::Asc,
         filter: String::new(),
         show_hidden: true,
+        include_item_counts: true,
     })
     .expect("list dir");
     assert_eq!(listing.entries.len(), 2);
@@ -173,6 +175,7 @@ fn commands_cover_filesystem_and_persistence_state() {
         sort_direction: SortDirection::Asc,
         filter: String::new(),
         show_hidden: false,
+        include_item_counts: true,
     })
     .expect_err("missing directory");
     assert!(missing_dir_error.contains("Failed to load"));

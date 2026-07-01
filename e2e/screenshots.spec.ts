@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import { gotoScenario, openSettingsSection, rightClickPane } from './helpers'
 import { screenshotScenarios } from '../src/tests/playwright-fixtures/e2e'
 import { RELATIVE_DATES_NOW } from '../src/tests/playwright-fixtures/relative-dates'
+import { everythingAvailable } from '../src/tests/playwright-fixtures/states'
 import {
   deletingQueueFinalProgressEvent,
   expandedQueueFinalProgressEvent,
@@ -187,10 +188,33 @@ for (const mode of ['light', 'dark'] as const) {
   })
 
   test(`settings layout ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.browsing[mode])
+    // Pinned to macOS so the Windows+Everything-only "Automatically calculate
+    // folder sizes" row never renders here, keeping this baseline stable
+    // regardless of the host OS the suite runs on.
+    await gotoScenario(page, { ...screenshotScenarios.browsing[mode], platform: 'macos' })
     await openSettingsSection(page, 'layout')
     await expect(page.getByText('Default pane mode')).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`settings-layout-${mode}.png`)
+  })
+
+  test(`settings layout with auto folder size toggle ${mode}`, async ({ page }) => {
+    // Pinned to Windows with Everything available so the auto folder size
+    // toggle renders deterministically regardless of the host OS.
+    await gotoScenario(page, {
+      ...screenshotScenarios.browsing[mode],
+      platform: 'windows',
+      commands: {
+        ...screenshotScenarios.browsing[mode].commands,
+        everything_status: everythingAvailable,
+      },
+    })
+    await openSettingsSection(page, 'layout')
+    await expect(
+      page.getByRole('switch', { name: 'Automatically calculate folder sizes' }),
+    ).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(
+      `settings-layout-auto-folder-size-${mode}.png`,
+    )
   })
 
   test(`settings dates ${mode}`, async ({ page }) => {

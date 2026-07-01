@@ -15,6 +15,7 @@ type ConfigSnapshot = {
   showTime: boolean
   showSeconds: boolean
   relativeDates: boolean
+  autoFolderSize: boolean
 }
 
 type ConfigStore = ConfigSnapshot & {
@@ -27,6 +28,7 @@ type ConfigStore = ConfigSnapshot & {
   setShowTime: (showTime: boolean) => Promise<void>
   setShowSeconds: (showSeconds: boolean) => Promise<void>
   setRelativeDates: (relativeDates: boolean) => Promise<void>
+  setAutoFolderSize: (autoFolderSize: boolean) => Promise<void>
   dismissEverythingBanner: () => Promise<void>
   reset: () => void
 }
@@ -42,6 +44,7 @@ function defaultState(): ConfigSnapshot {
     showTime: false,
     showSeconds: false,
     relativeDates: false,
+    autoFolderSize: true,
   }
 }
 
@@ -74,6 +77,10 @@ export const useConfigStore = create<ConfigStore>((set) => ({
   },
   setRelativeDates: async (relativeDates) => {
     set({ relativeDates })
+    await persistAppConfig()
+  },
+  setAutoFolderSize: async (autoFolderSize) => {
+    set({ autoFolderSize })
     await persistAppConfig()
   },
   setLogLevel: async (logLevel) => {

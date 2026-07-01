@@ -27,6 +27,7 @@ fn lists_sorted_filtered_entries_with_metadata() {
         sort_direction: SortDirection::Asc,
         filter: "file".to_string(),
         show_hidden: false,
+        include_item_counts: true,
     })
     .expect("list dir");
 
@@ -63,6 +64,7 @@ fn keeps_folders_first_and_respects_hidden_toggle() {
         sort_direction: SortDirection::Asc,
         filter: String::new(),
         show_hidden: false,
+        include_item_counts: true,
     })
     .expect("list dir without hidden");
 
@@ -84,6 +86,7 @@ fn keeps_folders_first_and_respects_hidden_toggle() {
         sort_direction: SortDirection::Asc,
         filter: String::new(),
         show_hidden: true,
+        include_item_counts: true,
     })
     .expect("list dir with hidden");
 
@@ -117,6 +120,7 @@ fn executable_icon_lookup_uses_safe_test_utils_fallback() {
         sort_direction: SortDirection::Asc,
         filter: String::new(),
         show_hidden: true,
+        include_item_counts: true,
     })
     .expect("list dir");
 
@@ -150,6 +154,7 @@ fn list_dir_returns_canonical_absolute_path() {
         sort_direction: SortDirection::Asc,
         filter: String::new(),
         show_hidden: false,
+        include_item_counts: true,
     })
     .expect("list dir");
 
@@ -282,6 +287,7 @@ fn list_dir_rejects_relative_dot_without_real_directory() {
         sort_direction: SortDirection::Asc,
         filter: String::new(),
         show_hidden: false,
+        include_item_counts: true,
     })
     .expect_err("missing directory should error");
 
@@ -315,6 +321,7 @@ fn lists_parent_even_when_a_subdirectory_is_unreadable() {
         sort_direction: SortDirection::Asc,
         filter: String::new(),
         show_hidden: false,
+        include_item_counts: true,
     });
 
     restore_read(&locked);
@@ -465,6 +472,7 @@ fn list_dir_reports_readonly_and_plain_file_type_metadata() {
         sort_direction: SortDirection::Asc,
         filter: String::new(),
         show_hidden: false,
+        include_item_counts: true,
     })
     .expect("list dir");
 
@@ -493,6 +501,38 @@ fn list_dir_reports_readonly_and_plain_file_type_metadata() {
     fs::set_permissions(&plain, permissions).expect("restore writable");
 }
 
+#[test]
+fn list_dir_skips_item_counts_when_disabled() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    fs::create_dir(root.join("subfolder")).expect("subfolder");
+
+    let response = list_dir(&ListDirOptions {
+        path: root.to_string_lossy().into_owned(),
+        sort_key: SortKey::Name,
+        sort_direction: SortDirection::Asc,
+        filter: String::new(),
+        show_hidden: false,
+        include_item_counts: false,
+    })
+    .expect("list dir without item counts");
+    let entry = &response.entries[0];
+    assert!(entry.is_dir);
+    assert_eq!(entry.item_count, None);
+
+    let response = list_dir(&ListDirOptions {
+        path: root.to_string_lossy().into_owned(),
+        sort_key: SortKey::Name,
+        sort_direction: SortDirection::Asc,
+        filter: String::new(),
+        show_hidden: false,
+        include_item_counts: true,
+    })
+    .expect("list dir with item counts");
+    let entry = &response.entries[0];
+    assert_eq!(entry.item_count, Some(0));
+}
+
 fn list_names(root: &Path, sort_key: SortKey, sort_direction: SortDirection) -> Vec<String> {
     list_dir(&ListDirOptions {
         path: root.to_string_lossy().into_owned(),
@@ -500,6 +540,7 @@ fn list_names(root: &Path, sort_key: SortKey, sort_direction: SortDirection) -> 
         sort_direction,
         filter: String::new(),
         show_hidden: true,
+        include_item_counts: true,
     })
     .expect("list dir")
     .entries

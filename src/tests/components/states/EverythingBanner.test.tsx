@@ -38,6 +38,7 @@ describe('EverythingBanner', () => {
       showTime: false,
       showSeconds: false,
       relativeDates: false,
+      autoFolderSize: true,
       keybindings: {},
       columns: [],
       layout: {

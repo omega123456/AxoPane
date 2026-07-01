@@ -54,6 +54,7 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
         sortDirection: 'asc',
         filter: '',
         showHidden: false,
+        includeItemCounts: true,
       }),
     ).resolves.toEqual({ path: 'C:\\x', entries: [] })
 
@@ -91,6 +92,7 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
         showTime: false,
         showSeconds: false,
         relativeDates: false,
+        autoFolderSize: true,
         keybindings: {},
         columns: [],
         layout: {
@@ -130,6 +132,7 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
         sortDirection: 'asc',
         filter: '',
         showHidden: false,
+        includeItemCounts: true,
       }),
     ).rejects.toThrow('boom')
   })

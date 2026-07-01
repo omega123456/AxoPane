@@ -94,6 +94,7 @@ fn list_dir_command_surfaces_errors_as_strings() {
         sort_direction: SortDirection::Asc,
         filter: String::new(),
         show_hidden: false,
+        include_item_counts: true,
     })
     .expect_err("missing directory");
 

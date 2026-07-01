@@ -57,6 +57,7 @@ fn config_and_session_round_trip_through_atomic_storage() {
         show_time: true,
         show_seconds: true,
         relative_dates: true,
+        auto_folder_size: true,
     });
     session_store.replace(Session {
         active_pane: "right".to_string(),
@@ -105,6 +106,7 @@ fn config_and_session_round_trip_through_atomic_storage() {
             show_time: true,
             show_seconds: true,
             relative_dates: true,
+            auto_folder_size: true,
         }
     );
     assert_eq!(

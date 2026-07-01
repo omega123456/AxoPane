@@ -152,6 +152,7 @@ describe('App', () => {
       showTime: false,
       showSeconds: false,
       relativeDates: false,
+      autoFolderSize: true,
       keybindings: {
         refresh: ['F5'],
       },

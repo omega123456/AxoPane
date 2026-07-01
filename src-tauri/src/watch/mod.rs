@@ -525,6 +525,7 @@ pub fn snapshot_for_target(
         sort_direction: target.sort_direction,
         filter: target.filter.clone(),
         show_hidden: target.show_hidden,
+        include_item_counts: true,
     })?;
 
     Ok(response

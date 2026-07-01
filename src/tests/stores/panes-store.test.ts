@@ -3,6 +3,8 @@ import { ipc } from '@/tests/ipc-mock'
 import { getParentPath, schedulePersistSession, usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useTabsStore } from '@/stores/tabs-store'
+import { useConfigStore } from '@/stores/config-store'
+import { useLayoutStore } from '@/stores/layout-store'
 import type {
   DirectoryEntry,
   ListDirRequest,
@@ -216,6 +218,33 @@ describe('panes-store navigation', () => {
     expect(listDir).not.toHaveBeenCalled()
     expect(setTabWatch).not.toHaveBeenCalled()
     expect(requestFolderSizes).not.toHaveBeenCalled()
+  })
+
+  it('requests item counts only when the items column is visible', async () => {
+    const listDir = vi.fn(() => ({
+      path: 'C:\\root',
+      entries: [dirAt('C:\\root\\Alpha')],
+    }))
+    ipc.override('list_dir', listDir)
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    expect(listDir).toHaveBeenLastCalledWith(expect.objectContaining({ includeItemCounts: true }))
+
+    useLayoutStore.setState((state) => ({
+      columns: state.columns.map((column) =>
+        column.key === 'items' ? { ...column, visible: false } : column,
+      ),
+    }))
+    listDir.mockClear()
+
+    await usePanesStore.getState().reloadPane('left')
+    expect(listDir).toHaveBeenLastCalledWith(expect.objectContaining({ includeItemCounts: false }))
+
+    useLayoutStore.setState((state) => ({
+      columns: state.columns.map((column) =>
+        column.key === 'items' ? { ...column, visible: true } : column,
+      ),
+    }))
   })
 
   it('sorts by type in both directions locally', async () => {
@@ -705,6 +734,22 @@ describe('panes-store navigation', () => {
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
 
     expect(request).not.toHaveBeenCalled()
+  })
+
+  it('does not eager-request sizes when auto folder size is disabled, even with Everything available', async () => {
+    const request = vi.fn(() => undefined)
+    ipc.override('request_folder_sizes', request)
+    ipc.override('list_dir', () => ({
+      path: 'C:\\root',
+      entries: [dirAt('C:\\root\\Alpha'), dirAt('C:\\root\\Beta')],
+    }))
+    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
+    useConfigStore.getState().hydrate({ ...useConfigStore.getState(), autoFolderSize: false })
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+
+    expect(request).not.toHaveBeenCalled()
+    useConfigStore.getState().hydrate({ ...useConfigStore.getState(), autoFolderSize: true })
   })
 
   it('never requests folder sizes when the visible range changes', async () => {
