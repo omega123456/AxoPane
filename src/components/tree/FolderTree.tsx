@@ -36,7 +36,10 @@ export function FolderTree() {
       style={{ width: `${treeWidthPx}px` }}
       className="flex min-h-0 shrink-0 flex-col border-r border-light-border bg-light-tree dark:border-dark-border dark:bg-dark-tree"
     >
-      <div className="min-h-0 flex-1 overflow-auto pb-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint">
+      <div
+        data-testid="folder-tree-scroll"
+        className="min-h-0 flex-1 overflow-auto pb-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint"
+      >
         {/* A real (scrollable) spacer, not container padding: a sticky row's
             `top: 0` is measured from the scroll container's padding edge, so
             top padding here would leave a band where already-scrolled rows

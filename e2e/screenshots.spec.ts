@@ -15,6 +15,18 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`dual-pane-browsing-${mode}.png`)
   })
 
+  test(`sticky tree ${mode}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 520 })
+    await gotoScenario(page, screenshotScenarios.stickyTree[mode])
+    const treeScroll = page.getByTestId('folder-tree-scroll')
+    await expect(treeScroll).toBeVisible()
+    await expect(treeScroll.getByRole('button', { name: 'Designs', exact: true })).toBeVisible()
+    await treeScroll.evaluate((element) => {
+      element.scrollTop = 420
+    })
+    await expect(page.locator('aside').first()).toHaveScreenshot(`sticky-tree-items-${mode}.png`)
+  })
+
   test(`tabs ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.tabs[mode])
     const leftPane = page.getByRole('region', { name: 'Left pane' })

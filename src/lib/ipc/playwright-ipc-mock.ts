@@ -1,6 +1,7 @@
 import type { IpcCommandMap, IpcEventMap } from '@/lib/types/ipc'
 import { getFixtureResponse } from '@/tests/playwright-fixtures'
 import type { PlaywrightScenario } from '@/tests/playwright-fixtures/e2e'
+import type { TreeChildrenByPath } from '@/tests/playwright-fixtures/tree-states'
 
 type ListenerMap = {
   [eventName: string]: Set<(payload: unknown) => void> | undefined
@@ -35,6 +36,10 @@ function readDelay<CommandName extends keyof IpcCommandMap>(command: CommandName
   return readScenario()?.delaysMs?.[command] ?? 0
 }
 
+function readTreeChildrenOverride(path: string, treeChildrenByPath: TreeChildrenByPath) {
+  return treeChildrenByPath[path]
+}
+
 function withLiveNativeRequestId<CommandName extends keyof IpcCommandMap>(
   command: CommandName,
   payload: IpcCommandMap[CommandName]['request'],
@@ -62,6 +67,19 @@ export async function invokePlaywrightCommand<CommandName extends keyof IpcComma
   const message = readCommandError(command)
   if (message) {
     throw new Error(message)
+  }
+
+  if (command === 'list_tree_children') {
+    const treeChildrenByPath = readScenario()?.treeChildrenByPath
+    if (treeChildrenByPath) {
+      const response = readTreeChildrenOverride(
+        (payload as IpcCommandMap['list_tree_children']['request']).path,
+        treeChildrenByPath,
+      )
+      if (response) {
+        return response as IpcCommandMap[CommandName]['response']
+      }
+    }
   }
 
   const override = readCommandOverride(command)

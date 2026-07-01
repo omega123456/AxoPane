@@ -19,6 +19,8 @@ import {
 } from './queue'
 import { fileTypesListDir } from './file-types'
 import { relativeDatesListDir } from './relative-dates'
+import { stickyTreeChildrenByPath, stickyTreeListDir, stickyTreeSession } from './tree'
+import type { TreeChildrenByPath } from './tree-states'
 
 type CommandMap = Partial<{
   [CommandName in keyof IpcCommandMap]: IpcCommandMap[CommandName]['response']
@@ -35,6 +37,7 @@ export type PlaywrightScenario = {
   commandErrors?: ErrorMap
   delaysMs?: DelayMap
   events?: EventMap
+  treeChildrenByPath?: TreeChildrenByPath
   // Forces the app's platform detection for this scenario regardless of the
   // host OS the Playwright run happens on. The native shell-extension menu
   // section only exists on Windows, so the native-menu scenarios pin
@@ -226,6 +229,26 @@ export const screenshotScenarios = {
         load_config: darkConfig,
         queue_snapshot: emptyQueueSnapshot,
       },
+    },
+  },
+  stickyTree: {
+    light: {
+      commands: {
+        load_config: lightConfig,
+        load_session: stickyTreeSession,
+        list_dir: stickyTreeListDir,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+      treeChildrenByPath: stickyTreeChildrenByPath,
+    },
+    dark: {
+      commands: {
+        load_config: darkConfig,
+        load_session: stickyTreeSession,
+        list_dir: stickyTreeListDir,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+      treeChildrenByPath: stickyTreeChildrenByPath,
     },
   },
   tabs: {
