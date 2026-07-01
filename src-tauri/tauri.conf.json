@@ -19,7 +19,6 @@
         "minHeight": 720,
         "decorations": true,
         "resizable": true,
-        "scrollBarStyle": "fluentOverlay",
         "dragDropEnabled": false
       }
     ],

@@ -94,6 +94,26 @@ fn prevent_default_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 
 #[cfg(not(feature = "test-utils"))]
 pub fn run() {
+    // WebView2 bakes `scrollBarStyle` into the profile it was first created with
+    // and refuses to start if a later launch requests a different value (see the
+    // ScrollBarStyle docs: "must be given the same value for all webviews that
+    // target the same data directory"). We switched from the auto-hiding
+    // `fluentOverlay` style to the always-visible default, so upgraders whose
+    // existing `EBWebView` profile was created under `fluentOverlay` would hit a
+    // mismatch and the window would close instantly on launch. Move them onto a
+    // fresh profile folder by overriding the data directory once. Bump the suffix
+    // if a profile-baked browser argument ever changes again. Windows-only:
+    // WKWebView (macOS) has no such invariant.
+    #[cfg(target_os = "windows")]
+    if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_none() {
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            let data_dir = std::path::Path::new(&local)
+                .join("com.axopane.app")
+                .join("EBWebView-v2");
+            std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", data_dir);
+        }
+    }
+
     tauri::Builder::default()
         .plugin(prevent_default_plugin())
         .plugin(tauri_plugin_updater::Builder::new().build())
