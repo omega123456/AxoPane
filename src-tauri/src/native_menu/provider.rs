@@ -37,6 +37,17 @@ const APP_OWNED_NORMALIZED_VERBS: &[&str] = &[
     "selectall",
 ];
 
+/// Windows-native menu labels that we always suppress when they appear in the
+/// shell-provided menu. Extend this list as we discover more commands that do
+/// not fit the in-app experience.
+const ALWAYS_EXCLUDED_NORMALIZED_LABELS: &[&str] = &[
+    "copytofolder",
+    "movetofolder",
+    "sendto",
+    "pintostart",
+    "includeinlibrary",
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderInvocation {
     Fake {
@@ -95,11 +106,28 @@ pub fn dedupe_provider_items(items: Vec<ProviderNativeMenuItem>) -> Vec<Provider
 fn dedupe_provider_item(mut item: ProviderNativeMenuItem) -> Option<ProviderNativeMenuItem> {
     item.children = dedupe_provider_items(item.children);
 
+    if is_always_excluded_item(&item) {
+        return None;
+    }
+
     if is_app_owned_duplicate(&item) {
         return None;
     }
 
     Some(item)
+}
+
+fn is_always_excluded_item(item: &ProviderNativeMenuItem) -> bool {
+    let normalized_label = normalize_verb(&item.label);
+    let normalized_verb = item
+        .normalized_verb
+        .as_deref()
+        .map(normalize_verb)
+        .unwrap_or_default();
+
+    ALWAYS_EXCLUDED_NORMALIZED_LABELS.contains(&normalized_label.as_str())
+        || (!normalized_verb.is_empty()
+            && ALWAYS_EXCLUDED_NORMALIZED_LABELS.contains(&normalized_verb.as_str()))
 }
 
 fn is_app_owned_duplicate(item: &ProviderNativeMenuItem) -> bool {

@@ -528,6 +528,95 @@ fn provider_dedupe_preserves_depth_limited_submenu_parents_without_children_or_i
     assert!(items[0].invocation.is_none());
 }
 
+#[test]
+fn provider_dedupe_drops_always_excluded_windows_commands() {
+    let items = dedupe_provider_items(vec![
+        ProviderNativeMenuItem {
+            id: "copy-to-folder".to_string(),
+            label: "Copy to folder...".to_string(),
+            enabled: true,
+            danger: false,
+            canonical_action_kind: None,
+            normalized_verb: None,
+            icon: None,
+            invocation: Some(ProviderInvocation::Fake {
+                action_id: "fake.copyToFolder".to_string(),
+            }),
+            children: Vec::new(),
+        },
+        ProviderNativeMenuItem {
+            id: "move-to-folder".to_string(),
+            label: "Move to folder...".to_string(),
+            enabled: true,
+            danger: false,
+            canonical_action_kind: None,
+            normalized_verb: None,
+            icon: None,
+            invocation: Some(ProviderInvocation::Fake {
+                action_id: "fake.moveToFolder".to_string(),
+            }),
+            children: Vec::new(),
+        },
+        ProviderNativeMenuItem {
+            id: "pin-to-start".to_string(),
+            label: "Pin to Start".to_string(),
+            enabled: true,
+            danger: false,
+            canonical_action_kind: None,
+            normalized_verb: Some("pintostart".to_string()),
+            icon: None,
+            invocation: Some(ProviderInvocation::Fake {
+                action_id: "fake.pinToStart".to_string(),
+            }),
+            children: Vec::new(),
+        },
+        ProviderNativeMenuItem {
+            id: "include-in-library".to_string(),
+            label: "Include in library".to_string(),
+            enabled: true,
+            danger: false,
+            canonical_action_kind: None,
+            normalized_verb: Some("includeinlibrary".to_string()),
+            icon: None,
+            invocation: Some(ProviderInvocation::Fake {
+                action_id: "fake.includeInLibrary".to_string(),
+            }),
+            children: Vec::new(),
+        },
+    ]);
+
+    assert!(items.is_empty());
+}
+
+#[test]
+fn provider_dedupe_drops_always_excluded_windows_submenus() {
+    let items = dedupe_provider_items(vec![ProviderNativeMenuItem {
+        id: "send-to".to_string(),
+        label: "Send to".to_string(),
+        enabled: true,
+        danger: false,
+        canonical_action_kind: None,
+        normalized_verb: Some("sendto".to_string()),
+        icon: None,
+        invocation: None,
+        children: vec![ProviderNativeMenuItem {
+            id: "send-to-desktop".to_string(),
+            label: "Desktop (create shortcut)".to_string(),
+            enabled: true,
+            danger: false,
+            canonical_action_kind: None,
+            normalized_verb: None,
+            icon: None,
+            invocation: Some(ProviderInvocation::Fake {
+                action_id: "fake.sendToDesktop".to_string(),
+            }),
+            children: Vec::new(),
+        }],
+    }]);
+
+    assert!(items.is_empty());
+}
+
 fn load_request(
     request_id: &str,
     target_kind: NativeMenuTargetKind,
