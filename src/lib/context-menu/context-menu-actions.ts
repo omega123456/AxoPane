@@ -29,6 +29,11 @@ export type ContextMenuAction =
       path: string
     }
   | {
+      kind: 'open-path-in-explicit-pane'
+      path: string
+      paneId: PaneId
+    }
+  | {
       kind: 'close-tab'
       tabId: string
     }
@@ -89,6 +94,13 @@ export function openPathInNewTabContextAction(path: string): ContextMenuAction {
   return { kind: 'open-path-in-new-tab', path }
 }
 
+export function openPathInExplicitPaneContextAction(
+  path: string,
+  paneId: PaneId,
+): ContextMenuAction {
+  return { kind: 'open-path-in-explicit-pane', path, paneId }
+}
+
 export function closeTabContextAction(tabId: string): ContextMenuAction {
   return { kind: 'close-tab', tabId }
 }
@@ -143,16 +155,19 @@ export function dispatchContextMenuAction(paneId: PaneId, action: ContextMenuAct
       executeCommand(action.commandId, paneId, action.targetEntryId)
       return
     case 'navigate': {
-      const destinationPaneId = action.destination === 'other-pane'
-        ? paneId === 'left'
-          ? 'right'
-          : 'left'
-        : paneId
-      void usePanesStore.getState().navigatePane(destinationPaneId, action.path)
+      if (action.destination === 'other-pane') {
+        const destinationPaneId = paneId === 'left' ? 'right' : 'left'
+        void usePanesStore.getState().openTabFromPath(destinationPaneId, action.path)
+        return
+      }
+      void usePanesStore.getState().navigatePane(paneId, action.path)
       return
     }
     case 'open-path-in-new-tab':
       void usePanesStore.getState().openTabFromPath(paneId, action.path)
+      return
+    case 'open-path-in-explicit-pane':
+      void usePanesStore.getState().openTabFromPath(action.paneId, action.path)
       return
     case 'close-tab':
       void usePanesStore.getState().closeTab(paneId, action.tabId)

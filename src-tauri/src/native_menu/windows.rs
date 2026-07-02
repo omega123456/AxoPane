@@ -674,7 +674,14 @@ mod real {
         }
 
         let first_path_buf = PathBuf::from(first_path);
-        let folder_path = parent_directory(first_path)?;
+        // Roots (drive letters like `D:\`, UNC shares like `\\server\share`) have
+        // no parent per `Path::parent`. `folder_path` is only consulted by
+        // `MenuBinding::from_request`'s background branch, which this
+        // item-targeted request never takes, so a missing parent must not abort
+        // the whole canonical-action attempt (that used to skip straight past
+        // the real COM properties dialog to the less reliable ShellExecuteW
+        // fallback for every drive/share root).
+        let folder_path = parent_directory(first_path);
         let target_kind = if paths.len() > 1 {
             let all_dirs = paths.iter().all(|path| Path::new(path).is_dir());
             let all_files = paths.iter().all(|path| Path::new(path).is_file());
@@ -693,7 +700,7 @@ mod real {
             request_id: "properties".to_string(),
             target_kind,
             target_path: Some(first_path.to_string()),
-            folder_path: Some(folder_path.to_string_lossy().into_owned()),
+            folder_path: folder_path.map(|path| path.to_string_lossy().into_owned()),
             selected_paths: paths.to_vec(),
         })
     }

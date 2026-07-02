@@ -43,6 +43,47 @@ beforeEach(() => {
 })
 
 describe('dispatchContextMenuAction', () => {
+  it('navigates the current pane in place for the current-pane destination', () => {
+    const navigatePane = vi.fn()
+    usePanesStore.setState({ navigatePane })
+
+    dispatchContextMenuAction('left', {
+      kind: 'navigate',
+      path: 'C:\\root\\Sub',
+      destination: 'current-pane',
+    })
+
+    expect(navigatePane).toHaveBeenCalledWith('left', 'C:\\root\\Sub')
+  })
+
+  it('opens a new tab in the opposite pane for the other-pane destination', () => {
+    const openTabFromPath = vi.fn()
+    const navigatePane = vi.fn()
+    usePanesStore.setState({ openTabFromPath, navigatePane })
+
+    dispatchContextMenuAction('left', {
+      kind: 'navigate',
+      path: 'C:\\root\\Sub',
+      destination: 'other-pane',
+    })
+
+    expect(openTabFromPath).toHaveBeenCalledWith('right', 'C:\\root\\Sub')
+    expect(navigatePane).not.toHaveBeenCalled()
+  })
+
+  it('opens a new tab in an explicitly targeted pane', () => {
+    const openTabFromPath = vi.fn()
+    usePanesStore.setState({ openTabFromPath })
+
+    dispatchContextMenuAction('left', {
+      kind: 'open-path-in-explicit-pane',
+      path: 'C:\\root\\Sub',
+      paneId: 'right',
+    })
+
+    expect(openTabFromPath).toHaveBeenCalledWith('right', 'C:\\root\\Sub')
+  })
+
   it('copies newline-delimited paths to the text clipboard for Copy as path', async () => {
     const writeText = vi.fn(() => Promise.resolve())
     Object.defineProperty(navigator, 'clipboard', {

@@ -50,6 +50,21 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('aside').first()).toHaveScreenshot(`sticky-tree-items-${mode}.png`)
   })
 
+  test(`tree context menu dual pane ${mode}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 520 })
+    await gotoScenario(page, screenshotScenarios.stickyTree[mode])
+    const treeScroll = page.getByTestId('folder-tree-scroll')
+    const designsRow = treeScroll.getByRole('button', { name: 'Designs', exact: true })
+    await expect(designsRow).toBeVisible()
+
+    await designsRow.click({ button: 'right' })
+    const menu = page.getByRole('menu', { name: 'Designs' })
+    await expect(menu).toBeVisible()
+    await expect(menu.getByRole('menuitem', { name: 'Open in right pane' })).toBeVisible()
+    await expect(menu.getByRole('menuitem', { name: 'Open in left pane' })).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`tree-context-menu-dual-pane-${mode}.png`)
+  })
+
   test(`tabs ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.tabs[mode])
     const leftPane = page.getByRole('region', { name: 'Left pane' })

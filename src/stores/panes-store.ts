@@ -92,6 +92,11 @@ type InitializePayload = {
 
 type PanesStore = {
   activePaneId: PaneId
+  // Bumped whenever a pane should claim real DOM keyboard focus (not just
+  // become the "active" pane in state), e.g. when the tree view opens a path
+  // into a specific pane as a new tab.
+  focusRequestId: number
+  focusRequestPaneId: PaneId | null
   panes: Record<PaneId, PaneState>
   showHiddenFiles: boolean
   everythingStatus: EverythingStatus | null
@@ -162,6 +167,8 @@ function createPane(id: PaneId, title: string, path = '.'): PaneState {
 function defaultState() {
   return {
     activePaneId: 'left' as PaneId,
+    focusRequestId: 0,
+    focusRequestPaneId: null as PaneId | null,
     panes: {
       left: createPane('left', 'Left pane'),
       right: createPane('right', 'Right pane'),
@@ -916,6 +923,8 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
 
     set((state) => ({
       activePaneId: paneId,
+      focusRequestId: state.focusRequestId + 1,
+      focusRequestPaneId: paneId,
       panes: {
         ...state.panes,
         [paneId]: {

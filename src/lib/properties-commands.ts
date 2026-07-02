@@ -1,8 +1,15 @@
 import { log } from '@/lib/app-log-commands'
 import { showNativeProperties } from '@/lib/context-menu/native-menu-commands'
+import { TRASH_PATH } from '@/lib/trash'
 import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import type { PropertiesDialogItem } from '@/stores/properties-dialog-store'
+import type { PlatformOs } from '@/lib/keymap'
+
+// Windows resolves this well-known Explorer namespace URI to the real
+// Recycle Bin shell item, letting the native Properties COM flow work even
+// though the app's trash browser has no real filesystem path backing it.
+const WINDOWS_RECYCLE_BIN_SHELL_PATH = 'shell:RecycleBinFolder'
 
 function shouldAttemptNativeProperties(items: PropertiesDialogItem[]) {
   return items.length > 0 && items.every((item) => item.path.trim().length > 0)
@@ -49,6 +56,23 @@ export function createPathPropertiesDialogItem(path: string): PropertiesDialogIt
     path,
     sizeBytes: null,
     typeLabel: 'Folder',
+  }
+}
+
+export function createTrashPropertiesDialogItem(os: PlatformOs): PropertiesDialogItem {
+  return {
+    attributes: [],
+    createdAt: null,
+    id: TRASH_PATH,
+    isDir: true,
+    isHidden: false,
+    isSystem: true,
+    itemCount: null,
+    modifiedAt: null,
+    name: 'Recycle Bin',
+    path: os === 'windows' ? WINDOWS_RECYCLE_BIN_SHELL_PATH : TRASH_PATH,
+    sizeBytes: null,
+    typeLabel: 'System Folder',
   }
 }
 

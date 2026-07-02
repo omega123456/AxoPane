@@ -3,6 +3,7 @@ import { buildAppContextMenuContent } from '@/lib/context-menu/app-menu-model'
 import { TRASH_PATH } from '@/lib/trash'
 import { useClipboardStore } from '@/stores/clipboard-store'
 import { useKeymapStore } from '@/stores/keymap-store'
+import { defaultLayout, useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useTabsStore } from '@/stores/tabs-store'
@@ -46,6 +47,7 @@ describe('buildAppContextMenuContent', () => {
     useKeymapStore.getState().reset()
     useTabsStore.getState().reset()
     usePanesStore.getState().reset()
+    useLayoutStore.setState({ defaultPaneMode: defaultLayout.defaultPaneMode })
     usePanesStore.setState({
       everythingStatus: { status: 'unavailable', isAvailable: false },
       volumes: [
@@ -178,6 +180,35 @@ describe('buildAppContextMenuContent', () => {
     expect(treeContent.sections[2]?.rows.map((row) => row.label)).toEqual(['Properties'])
   })
 
+  it('offers explicit right/left pane open rows for tree nodes in dual-pane mode', () => {
+    const treeContent = buildAppContextMenuContent(
+      'left',
+      { kind: 'tree', path: 'C:\\' },
+      'windows',
+    )
+
+    expect(treeContent.sections[0]?.rows.map((row) => row.label)).toEqual([
+      'Open',
+      'Open in right pane',
+      'Open in left pane',
+    ])
+  })
+
+  it('falls back to a single "Open in new tab" row for tree nodes in single-pane mode', () => {
+    useLayoutStore.getState().setDefaultPaneMode('single')
+
+    const treeContent = buildAppContextMenuContent(
+      'left',
+      { kind: 'tree', path: 'C:\\' },
+      'windows',
+    )
+
+    expect(treeContent.sections[0]?.rows.map((row) => row.label)).toEqual([
+      'Open',
+      'Open in new tab',
+    ])
+  })
+
   it('only enables Extract for all-ZIP multi-selections', () => {
     usePanesStore.setState((state) => ({
       panes: {
@@ -295,6 +326,39 @@ describe('buildAppContextMenuContent', () => {
 
       const emptyContent = buildAppContextMenuContent('left', { kind: 'empty' }, 'windows')
       expect(emptyContent.sections[0]?.rows.map((row) => row.label)).toEqual(['Empty Trash'])
+    })
+
+    it('offers a Properties row for the trash tree node, targeting the native Recycle Bin on Windows', () => {
+      const windowsContent = buildAppContextMenuContent(
+        'left',
+        { kind: 'tree', path: TRASH_PATH },
+        'windows',
+      )
+      const propertiesRow = windowsContent.sections
+        .flatMap((section) => section.rows)
+        .find((row) => row.label === 'Properties')
+      expect(propertiesRow).toBeDefined()
+      expect(propertiesRow).toMatchObject({
+        action: {
+          kind: 'properties',
+          items: [expect.objectContaining({ path: 'shell:RecycleBinFolder', name: 'Recycle Bin' })],
+        },
+      })
+
+      const macContent = buildAppContextMenuContent(
+        'left',
+        { kind: 'tree', path: TRASH_PATH },
+        'macos',
+      )
+      const macPropertiesRow = macContent.sections
+        .flatMap((section) => section.rows)
+        .find((row) => row.label === 'Properties')
+      expect(macPropertiesRow).toMatchObject({
+        action: {
+          kind: 'properties',
+          items: [expect.objectContaining({ path: TRASH_PATH, name: 'Recycle Bin' })],
+        },
+      })
     })
   })
 })

@@ -43,6 +43,7 @@ import {
   Package,
   PackageOpen,
   PanelLeft,
+  PanelRight,
   Pause,
   PieChart,
   Play,
@@ -113,6 +114,7 @@ export const NetworkIcon = withDefaults(Network)
 export const PackageIcon = withDefaults(Package)
 export const PackageOpenIcon = withDefaults(PackageOpen)
 export const PanelLeftIcon = withDefaults(PanelLeft)
+export const PanelRightIcon = withDefaults(PanelRight)
 export const PauseIcon = withDefaults(Pause)
 export const PlayIcon = withDefaults(Play)
 export const PlusIcon = withDefaults(Plus)

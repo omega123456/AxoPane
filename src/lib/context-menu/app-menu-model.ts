@@ -5,6 +5,7 @@ import {
   copyPathsContextAction,
   extractContextAction,
   navigateContextAction,
+  openPathInExplicitPaneContextAction,
   openPathInNewTabContextAction,
   openWithContextAction,
   propertiesContextAction,
@@ -13,6 +14,7 @@ import {
 import { getFileCategory } from '@/lib/file-type'
 import {
   createPathPropertiesDialogItem,
+  createTrashPropertiesDialogItem,
   toPropertiesDialogItem,
 } from '@/lib/properties-commands'
 import { isTrashPath } from '@/lib/trash'
@@ -29,6 +31,7 @@ import { commandLabels, formatShortcutLabel, type PlatformOs } from '@/lib/keyma
 import { selectedEntriesForPane } from '@/lib/commands'
 import { useClipboardStore } from '@/stores/clipboard-store'
 import { useKeymapStore } from '@/stores/keymap-store'
+import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useTabsStore } from '@/stores/tabs-store'
 import type { CommandId, DirectoryEntry } from '@/lib/types/ipc'
@@ -437,8 +440,41 @@ function buildTrashTreeContent(os: PlatformOs): ContextMenuContent {
     topStrip: [],
     sections: [
       section('primary', [commandRow('emptyTrash', os, { danger: true, strong: true })]),
+      section('properties', [
+        customRow(
+          'properties-tree-trash',
+          'Properties',
+          propertiesContextAction([createTrashPropertiesDialogItem(os)]),
+          { icon: { kind: 'app', name: 'properties' } },
+        ),
+      ]),
     ],
   }
+}
+
+function buildTreeOpenTargetRows(path: string): ContextMenuActionRow[] {
+  if (useLayoutStore.getState().defaultPaneMode === 'single') {
+    return [
+      customRow(`open-tree-tab-${path}`, commandLabels.openInNewTab, openPathInNewTabContextAction(path), {
+        icon: { kind: 'app', name: 'open-in-new-tab' },
+      }),
+    ]
+  }
+
+  return [
+    customRow(
+      `open-tree-right-${path}`,
+      'Open in right pane',
+      openPathInExplicitPaneContextAction(path, 'right'),
+      { icon: { kind: 'app', name: 'open-in-right-pane' } },
+    ),
+    customRow(
+      `open-tree-left-${path}`,
+      'Open in left pane',
+      openPathInExplicitPaneContextAction(path, 'left'),
+      { icon: { kind: 'app', name: 'open-in-left-pane' } },
+    ),
+  ]
 }
 
 function buildTreeContent(
@@ -469,24 +505,7 @@ function buildTreeContent(
             icon: { kind: 'app', name: 'open' },
           },
         ),
-        customRow(
-          `open-tree-tab-${target.path}`,
-          commandLabels.openInNewTab,
-          openPathInNewTabContextAction(target.path),
-          {
-            shortcut: shortcutFor('openInNewTab', os),
-            icon: { kind: 'app', name: 'open-in-new-tab' },
-          },
-        ),
-        customRow(
-          `open-tree-other-${target.path}`,
-          commandLabels.openInOtherPane,
-          navigateContextAction(target.path, 'other-pane'),
-          {
-            shortcut: shortcutFor('openInOtherPane', os),
-            icon: { kind: 'app', name: 'open-in-other-pane' },
-          },
-        ),
+        ...buildTreeOpenTargetRows(target.path),
       ]),
       section('footer', [
         customRow(

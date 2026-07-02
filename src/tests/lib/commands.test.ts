@@ -137,20 +137,18 @@ describe('executeCommand file actions', () => {
     expect(requestManualSize).toHaveBeenCalledOnce()
   })
 
-  it('opens directories in a new tab or the opposite pane', () => {
+  it('opens directories in a new tab in the current or opposite pane', () => {
     const openTabFromPath = vi.fn()
-    const navigatePane = vi.fn()
-    usePanesStore.setState({ openTabFromPath, navigatePane })
+    usePanesStore.setState({ openTabFromPath })
 
     executeCommand('openInNewTab', 'left', 'Alpha')
     executeCommand('openInNewTab', 'left', 'Beta')
     executeCommand('openInOtherPane', 'left', 'Alpha')
     executeCommand('openInOtherPane', 'left', 'Beta')
 
-    expect(openTabFromPath).toHaveBeenCalledOnce()
-    expect(openTabFromPath).toHaveBeenCalledWith('left', 'C:\\root\\Alpha')
-    expect(navigatePane).toHaveBeenCalledOnce()
-    expect(navigatePane).toHaveBeenCalledWith('right', 'C:\\root\\Alpha')
+    expect(openTabFromPath).toHaveBeenCalledTimes(2)
+    expect(openTabFromPath).toHaveBeenNthCalledWith(1, 'left', 'C:\\root\\Alpha')
+    expect(openTabFromPath).toHaveBeenNthCalledWith(2, 'right', 'C:\\root\\Alpha')
   })
 
   it('starts an inline rename seeded with the target name', () => {

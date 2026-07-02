@@ -84,6 +84,8 @@ function useModalOpen() {
 export function FilePane({ paneId }: FilePaneProps) {
   const pane = usePanesStore((state) => state.panes[paneId])
   const activePaneId = usePanesStore((state) => state.activePaneId)
+  const focusRequestId = usePanesStore((state) => state.focusRequestId)
+  const focusRequestPaneId = usePanesStore((state) => state.focusRequestPaneId)
   const setActivePane = usePanesStore((state) => state.setActivePane)
   const setFocusedEntry = usePanesStore((state) => state.setFocusedEntry)
   const goUp = usePanesStore((state) => state.goUp)
@@ -163,6 +165,12 @@ export function FilePane({ paneId }: FilePaneProps) {
         }))
   const totalHeight = virtualItems.length > 0 ? rowVirtualizer.getTotalSize() : rowCount * rowHeightPx
   const savedScrollTop = pane.scrollPositions[pane.path] ?? 0
+
+  useEffect(() => {
+    if (focusRequestId > 0 && focusRequestPaneId === paneId) {
+      paneRef.current?.focus()
+    }
+  }, [focusRequestId, focusRequestPaneId, paneId])
 
   useLayoutEffect(() => {
     const scrollElement = parentRef.current

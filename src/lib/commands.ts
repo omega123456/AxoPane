@@ -110,7 +110,7 @@ export function executeCommand(
     case 'openInOtherPane':
       if (entry?.isDir) {
         const otherPaneId = paneId === 'left' ? 'right' : 'left'
-        void panes.navigatePane(otherPaneId, entry.path)
+        void panes.openTabFromPath(otherPaneId, entry.path)
       }
       break
     case 'selectAll':

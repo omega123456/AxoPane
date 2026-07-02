@@ -29,6 +29,8 @@ export type ContextMenuAppIconName =
   | 'open'
   | 'open-in-new-tab'
   | 'open-in-other-pane'
+  | 'open-in-left-pane'
+  | 'open-in-right-pane'
   | 'open-with'
   | 'paste'
   | 'properties'

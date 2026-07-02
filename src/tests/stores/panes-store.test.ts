@@ -405,6 +405,20 @@ describe('panes-store navigation', () => {
     expect(useTabsStore.getState().panes.left.tabs).toHaveLength(1)
   })
 
+  it('bumps the focus request for the pane a new tab is opened into', async () => {
+    expect(usePanesStore.getState().focusRequestId).toBe(0)
+    expect(usePanesStore.getState().focusRequestPaneId).toBeNull()
+
+    await usePanesStore.getState().openTabFromPath('right', 'C:\\root')
+    expect(usePanesStore.getState().focusRequestId).toBe(1)
+    expect(usePanesStore.getState().focusRequestPaneId).toBe('right')
+    expect(usePanesStore.getState().activePaneId).toBe('right')
+
+    await usePanesStore.getState().openTabFromPath('left', 'C:\\root\\Alpha')
+    expect(usePanesStore.getState().focusRequestId).toBe(2)
+    expect(usePanesStore.getState().focusRequestPaneId).toBe('left')
+  })
+
   it('ignores a dir patch for a non-current path', async () => {
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
     const before = usePanesStore.getState().panes.left.entries

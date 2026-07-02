@@ -580,6 +580,29 @@ describe('FilePane state rendering', () => {
     expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('Nested B')
   })
 
+  it('moves DOM focus into a pane when a tab is opened into it via openTabFromPath', async () => {
+    ipc.override('list_dir', (payload) => ({ path: payload.path, entries: [entry('Alpha')] }))
+    ipc.override('set_tab_watch', () => undefined)
+    ipc.override('save_session', (payload) => payload.session)
+
+    render(
+      <>
+        <FilePane paneId="left" />
+        <FilePane paneId="right" />
+      </>,
+    )
+
+    const rightPane = screen.getByLabelText('Right pane')
+    expect(document.activeElement).not.toBe(rightPane)
+
+    await act(async () => {
+      await usePanesStore.getState().openTabFromPath('right', 'C:\\root')
+    })
+
+    expect(document.activeElement).toBe(rightPane)
+    expect(usePanesStore.getState().activePaneId).toBe('right')
+  })
+
   it('requires confirmation before cross-pane transfers from F5 and F6 start', async () => {
     const user = userEvent.setup()
     const startSpy = vi.fn(() => 'op-1')
