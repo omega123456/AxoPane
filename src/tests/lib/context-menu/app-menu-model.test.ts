@@ -97,6 +97,7 @@ describe('buildAppContextMenuContent', () => {
       'Open in other pane',
       'Open with',
     ])
+    expect(content.sections[1]?.rows.map((row) => row.label)).toContain('Copy as path')
     const appRows = content.sections
       .flatMap((section) => section.rows)
       .filter((row) => row.owner === 'app')
@@ -163,12 +164,14 @@ describe('buildAppContextMenuContent', () => {
     )
 
     expect(multiContent.topStrip.map((item) => item.label)).toEqual(['Cut', 'Copy', 'Delete'])
+    expect(multiContent.sections[0]?.rows.map((row) => row.label)).toContain('Copy as path')
     expect(
       multiContent.sections[0]?.rows.find((row) => row.label === 'Delete permanently'),
     ).toMatchObject({ danger: true, disabled: false })
     expect(multiContent.sections[1]?.rows.map((row) => row.label)).toEqual(['Properties'])
     expect(treeContent.topStrip).toEqual([])
     expect(treeContent.sections[0]?.rows[0]?.label).toBe('Open')
+    expect(treeContent.sections[1]?.rows.map((row) => row.label)).toContain('Copy as path')
     expect(
       treeContent.sections[1]?.rows.find((row) => row.label === 'Calculate size')?.disabled,
     ).toBe(true)

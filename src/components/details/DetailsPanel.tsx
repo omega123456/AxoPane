@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { CopyIcon, FolderOpenIcon, InfoIcon } from '@/components/icons'
-import { logFrontend } from '@/lib/app-log-commands'
 import { executeCommand } from '@/lib/commands'
+import { copyPathsToClipboard } from '@/lib/path-clipboard'
 import { showPropertiesDialog, toPropertiesDialogItem } from '@/lib/properties-commands'
 import { usePanesStore } from '@/stores/panes-store'
 import type { PaneId } from '@/types/pane'
@@ -72,8 +72,7 @@ export function DetailsPanel({ paneId }: DetailsPanelProps) {
         <ActionButton
           label="Copy path"
           onClick={async () => {
-            await navigator.clipboard?.writeText(entry.path)
-            logFrontend('Copied path', { path: entry.path })
+            await copyPathsToClipboard([entry.path])
           }}
         >
           <CopyIcon className="h-4 w-4" />

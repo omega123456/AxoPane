@@ -2,6 +2,7 @@ import {
   closeTabContextAction,
   commandContextAction,
   compressContextAction,
+  copyPathsContextAction,
   extractContextAction,
   navigateContextAction,
   openPathInNewTabContextAction,
@@ -298,6 +299,12 @@ function buildFileOrFolderContent(
       section('secondary', [
         commandRow('paste', os, { disabled: !canPaste }),
         customRow(
+          `copy-path-${target.entry.id}`,
+          'Copy as path',
+          copyPathsContextAction([target.entry.path]),
+          { icon: { kind: 'app', name: 'copy' } },
+        ),
+        customRow(
           `compress-${target.entry.id}`,
           'Compress',
           compressContextAction([target.entry.path], usePanesStore.getState().panes[paneId].path),
@@ -365,6 +372,12 @@ function buildMultiContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
           { disabled: !canExtract, icon: { kind: 'app', name: 'extract' } },
         ),
         commandRow('paste', os, { disabled: clipboard.entries.length === 0 }),
+        customRow(
+          'copy-path-selection',
+          'Copy as path',
+          copyPathsContextAction(selectedEntries.map((entry) => entry.path)),
+          { disabled: selectedEntries.length === 0, icon: { kind: 'app', name: 'copy' } },
+        ),
         commandRow('deletePermanent', os, {
           danger: true,
           disabled: selectedEntries.length === 0,
@@ -476,6 +489,12 @@ function buildTreeContent(
         ),
       ]),
       section('footer', [
+        customRow(
+          `copy-tree-path-${target.path}`,
+          'Copy as path',
+          copyPathsContextAction([target.path]),
+          { icon: { kind: 'app', name: 'copy' } },
+        ),
         customRow(
           `calculate-tree-${target.path}`,
           commandLabels.calculateSize,

@@ -305,6 +305,7 @@ export type NativeMenuCanonicalActionKind =
   | 'open'
   | 'openWith'
   | 'copy'
+  | 'copyAsPath'
   | 'cut'
   | 'paste'
   | 'rename'

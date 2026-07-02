@@ -43,6 +43,23 @@ beforeEach(() => {
 })
 
 describe('dispatchContextMenuAction', () => {
+  it('copies newline-delimited paths to the text clipboard for Copy as path', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    })
+
+    dispatchContextMenuAction('left', {
+      kind: 'copy-paths',
+      paths: ['C:\\root\\Report.txt', 'C:\\root\\Archive.zip'],
+    })
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('C:\\root\\Report.txt\nC:\\root\\Archive.zip')
+    })
+  })
+
   it('routes Open With through IPC when selected from the menu', async () => {
     const openWith = vi.fn(() => ({ handled: true }))
     ipc.override('open_with', openWith)

@@ -48,6 +48,11 @@ describe('dedupeNativeMenuItems', () => {
         normalizedVerb: null,
       }),
       item({
+        id: 'duplicate-copy-as-path-by-label',
+        label: 'Copy as path',
+        normalizedVerb: null,
+      }),
+      item({
         id: 'duplicate-delete-permanent-by-label',
         label: 'Delete permanently',
         normalizedVerb: null,
@@ -60,6 +65,23 @@ describe('dedupeNativeMenuItems', () => {
     ])
 
     expect(items.map((entry) => entry.id)).toEqual(['keep-custom'])
+  })
+
+  it('drops backend-tagged Copy as path duplicates before rendering', () => {
+    const items = dedupeNativeMenuItems([
+      item({
+        id: 'duplicate-copy-as-path',
+        label: 'Copy as path',
+        canonicalActionKind: 'copyAsPath',
+      }),
+      item({
+        id: 'keep-terminal',
+        label: 'Open in Terminal',
+        normalizedVerb: 'openinterminal',
+      }),
+    ])
+
+    expect(items.map((entry) => entry.id)).toEqual(['keep-terminal'])
   })
 
   it('retains submenu parents when only non-duplicate children remain', () => {

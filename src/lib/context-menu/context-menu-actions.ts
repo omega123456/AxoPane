@@ -1,5 +1,6 @@
 import { log } from '@/lib/app-log-commands'
 import { executeCommand } from '@/lib/commands'
+import { copyPathsToClipboard } from '@/lib/path-clipboard'
 import {
   invokeNativeMenu,
   showNativeOpenWith,
@@ -30,6 +31,10 @@ export type ContextMenuAction =
   | {
       kind: 'close-tab'
       tabId: string
+    }
+  | {
+      kind: 'copy-paths'
+      paths: string[]
     }
   | {
       kind: 'request-folder-size'
@@ -86,6 +91,10 @@ export function openPathInNewTabContextAction(path: string): ContextMenuAction {
 
 export function closeTabContextAction(tabId: string): ContextMenuAction {
   return { kind: 'close-tab', tabId }
+}
+
+export function copyPathsContextAction(paths: string[]): ContextMenuAction {
+  return { kind: 'copy-paths', paths }
 }
 
 export function requestFolderSizeContextAction(path: string): ContextMenuAction {
@@ -147,6 +156,9 @@ export function dispatchContextMenuAction(paneId: PaneId, action: ContextMenuAct
       return
     case 'close-tab':
       void usePanesStore.getState().closeTab(paneId, action.tabId)
+      return
+    case 'copy-paths':
+      void copyPathsToClipboard(action.paths)
       return
     case 'request-folder-size':
       void requestFolderSize({ path: action.path })

@@ -29,6 +29,7 @@ pub enum NativeMenuCanonicalActionKind {
     Open,
     OpenWith,
     Copy,
+    CopyAsPath,
     Cut,
     Paste,
     Rename,
