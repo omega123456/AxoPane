@@ -9,6 +9,8 @@ pub mod token_store;
 pub mod types;
 #[cfg(any(feature = "test-utils", not(target_os = "windows")))]
 pub mod unsupported;
+#[cfg(not(feature = "test-utils"))]
+pub mod warm_pool;
 #[cfg(target_os = "windows")]
 pub mod windows;
 #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
@@ -32,7 +34,11 @@ pub struct NativeMenuService {
     provider: Arc<dyn NativeMenuProvider>,
     executor: ShellExecutor,
     token_store: NativeMenuTokenStore,
-    cache: MenuCache,
+    cache: Arc<MenuCache>,
+    /// A second, dedicated COM-apartment executor for background cache
+    /// warming. Kept separate from `executor` so a live right-click's
+    /// enumeration never queues behind in-flight warm work.
+    warm_executor: ShellExecutor,
 }
 
 impl Default for NativeMenuService {
@@ -47,7 +53,20 @@ impl NativeMenuService {
             provider,
             executor: ShellExecutor::default(),
             token_store: NativeMenuTokenStore::default(),
-            cache: MenuCache::default(),
+            cache: Arc::new(MenuCache::default()),
+            warm_executor: ShellExecutor::default(),
+        }
+    }
+
+    /// Returns a cheap, `Clone`-able handle that background warm workers use
+    /// to populate the shared cache without borrowing the Tauri `State`. The
+    /// handle shares the provider and cache with the interactive path but
+    /// enumerates through the dedicated warm executor.
+    pub fn warm_handle(&self) -> NativeMenuWarmHandle {
+        NativeMenuWarmHandle {
+            provider: Arc::clone(&self.provider),
+            cache: Arc::clone(&self.cache),
+            executor: self.warm_executor.clone(),
         }
     }
 
@@ -146,6 +165,54 @@ impl NativeMenuService {
                 .map(|child| self.normalize_item(request_id, child))
                 .collect(),
         }
+    }
+}
+
+/// Background-warming handle: shares the provider and cache with
+/// [`NativeMenuService`] but carries its own dedicated warm [`ShellExecutor`]
+/// so background enumeration never delays a live right-click on the
+/// interactive executor. Cheap to `Clone` (every field is `Arc`-backed).
+#[derive(Clone)]
+pub struct NativeMenuWarmHandle {
+    provider: Arc<dyn NativeMenuProvider>,
+    cache: Arc<MenuCache>,
+    executor: ShellExecutor,
+}
+
+impl NativeMenuWarmHandle {
+    /// Cache-only warm for a single representative request: if the request's
+    /// type is already cached this is a cheap no-op (`None`); otherwise it
+    /// enumerates through the dedicated warm executor, dedupes, and inserts
+    /// into the shared cache, returning the newly-populated cache key.
+    ///
+    /// This never touches the invoke-token store and never normalizes or
+    /// issues tokens — it produces no render payload, only a cache entry.
+    pub fn warm(&self, request: &LoadNativeMenuRequest) -> Option<String> {
+        let cache_key = menu_cache::cache_key(request);
+        if self.cache.contains(request) {
+            log::debug!(
+                "native menu warm skipped for already cached key {} (target_kind={:?}, target_path={:?})",
+                cache_key,
+                request.target_kind,
+                request.target_path
+            );
+            return None;
+        }
+
+        log::debug!(
+            "native menu warm loading fresh menu for key {} (target_kind={:?}, target_path={:?})",
+            cache_key,
+            request.target_kind,
+            request.target_path
+        );
+        let fresh = dedupe_provider_items(self.provider.load_menu(request, &self.executor));
+        self.cache.insert(request, &fresh);
+        log::debug!(
+            "native menu warm cached key {} with {} root items",
+            cache_key,
+            fresh.len()
+        );
+        Some(cache_key)
     }
 }
 

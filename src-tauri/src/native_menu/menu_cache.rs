@@ -43,9 +43,20 @@ impl MenuCache {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// Cheap membership check on the request's cache key — no path-rebind
+    /// work. Used by the background warm path to skip a type that is already
+    /// cached without paying `get`'s per-item clone/rebind cost.
+    pub fn contains(&self, request: &LoadNativeMenuRequest) -> bool {
+        let key = cache_key(request);
+        self.entries
+            .lock()
+            .expect("menu cache lock")
+            .contains_key(&key)
+    }
 }
 
-fn cache_key(request: &LoadNativeMenuRequest) -> String {
+pub(crate) fn cache_key(request: &LoadNativeMenuRequest) -> String {
     format!(
         "{}::{}",
         target_kind_key(&request.target_kind),

@@ -11,10 +11,11 @@ import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useClipboardStore } from '@/stores/clipboard-store'
 import { useInlineRenameStore } from '@/stores/inline-rename-store'
 import { useKeymapStore } from '@/stores/keymap-store'
+import { useNativeMenuWarmStore } from '@/stores/native-menu-warm-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useTabsStore } from '@/stores/tabs-store'
-import type { DirectoryEntry, LoadNativeMenuRequest } from '@/lib/types/ipc'
+import type { DirectoryEntry, LoadNativeMenuRequest, WarmNativeMenusRequest } from '@/lib/types/ipc'
 
 const originalPlatform = navigator.platform
 
@@ -55,6 +56,7 @@ beforeEach(() => {
   useSelectionStore.getState().reset()
   useInlineRenameStore.getState().reset()
   useActionDialogStore.getState().close()
+  useNativeMenuWarmStore.getState().resetWarmedTypeKeys()
 })
 
 afterEach(() => {
@@ -873,5 +875,78 @@ describe('FilePane visible-row icon requests', () => {
     // Give the debounced effect plenty of room to re-fire if the bug regresses.
     await new Promise((resolve) => setTimeout(resolve, 300))
     expect(requestIcons).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('FilePane visible-row native-menu warming', () => {
+  it('fires one batched warm request for the distinct un-warmed visible types on folder open', async () => {
+    const warm = vi.fn<(payload: WarmNativeMenusRequest) => void>(() => undefined)
+    ipc.override('warm_native_menus', warm)
+    seedPane({
+      path: 'C:\\root',
+      entries: [entry('a.pdf', false), entry('b.pdf', false), entry('Documents', true)],
+    })
+
+    render(<FilePane paneId="left" />)
+
+    await waitFor(() => {
+      expect(warm).toHaveBeenCalledTimes(1)
+    })
+    const payload = warm.mock.calls[0]?.[0]
+    expect(payload?.requests).toHaveLength(2)
+    expect(payload?.requests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ targetKind: 'file', selectedPaths: ['C:\\root\\a.pdf'] }),
+        expect.objectContaining({ targetKind: 'folder', selectedPaths: ['C:\\root\\Documents'] }),
+      ]),
+    )
+  })
+
+  it('warms only newly revealed types on a visible-range update and never re-warms seen types', async () => {
+    const warm = vi.fn<(payload: WarmNativeMenusRequest) => void>(() => undefined)
+    ipc.override('warm_native_menus', warm)
+    seedPane({
+      path: 'C:\\root',
+      entries: [entry('a.pdf', false), entry('b.pdf', false)],
+    })
+
+    const view = render(<FilePane paneId="left" />)
+
+    await waitFor(() => {
+      expect(warm).toHaveBeenCalledTimes(1)
+    })
+    expect(warm.mock.calls[0]?.[0]?.requests).toEqual([
+      expect.objectContaining({ targetKind: 'file', selectedPaths: ['C:\\root\\a.pdf'] }),
+    ])
+
+    warm.mockClear()
+
+    // Reveal a new type (a folder) alongside the already-warmed pdf files.
+    act(() => {
+      usePanesStore.setState((state) => ({
+        panes: {
+          ...state.panes,
+          left: {
+            ...state.panes.left,
+            entries: [entry('a.pdf', false), entry('b.pdf', false), entry('Documents', true)],
+          },
+        },
+      }))
+    })
+    view.rerender(<FilePane paneId="left" />)
+
+    await waitFor(() => {
+      expect(warm).toHaveBeenCalledTimes(1)
+    })
+    expect(warm.mock.calls[0]?.[0]?.requests).toEqual([
+      expect.objectContaining({ targetKind: 'folder', selectedPaths: ['C:\\root\\Documents'] }),
+    ])
+
+    warm.mockClear()
+
+    // Re-revealing already-warmed types (a no-op rerender) fires nothing further.
+    view.rerender(<FilePane paneId="left" />)
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(warm).not.toHaveBeenCalled()
   })
 })

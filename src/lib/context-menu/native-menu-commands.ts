@@ -5,6 +5,7 @@ import {
   loadNativeMenu,
   openWith,
   showProperties,
+  warmNativeMenus,
 } from '@/lib/ipc/commands'
 import type {
   CompressArchiveRequest,
@@ -15,10 +16,15 @@ import type {
   MenuActionStatus,
   OpenWithRequest,
   ShowPropertiesRequest,
+  WarmNativeMenusRequest,
 } from '@/lib/types/ipc'
 
 export function requestNativeMenu(payload: LoadNativeMenuRequest): Promise<LoadNativeMenuResponse> {
   return loadNativeMenu(payload)
+}
+
+export function warmNativeMenu(payload: WarmNativeMenusRequest): Promise<void> {
+  return warmNativeMenus(payload)
 }
 
 export function invokeNativeMenu(payload: InvokeNativeMenuRequest): Promise<MenuActionStatus> {

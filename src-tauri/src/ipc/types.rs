@@ -133,6 +133,26 @@ pub struct IconStateEvent {
     pub icon_data_url: Option<String>,
 }
 
+/// Batch of representative single-item (`File`/`Folder`) requests whose
+/// derived cache keys should be background-warmed. Each element reproduces
+/// exactly the request shape a single-row right-click would build, so the
+/// warmed key equals the interactive key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WarmNativeMenusRequest {
+    pub requests: Vec<LoadNativeMenuRequest>,
+}
+
+/// The cache keys newly inserted by a `warm_native_menus` call. Returned only
+/// by the `test-utils` command variant for assertions; the production
+/// (non-`test-utils`) command is fire-and-forget and returns nothing to the
+/// frontend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WarmNativeMenusResponse {
+    pub warmed_keys: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CancelSizeRequest {

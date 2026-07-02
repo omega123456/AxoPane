@@ -232,6 +232,7 @@ export const fixtures: {
       },
     ],
   },
+  warm_native_menus: undefined,
   invoke_native_menu_action: {
     handled: true,
     message: 'invoked:fixture',

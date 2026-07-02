@@ -33,6 +33,7 @@ import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useDragStore } from '@/stores/drag-store'
+import { useNativeMenuWarmStore } from '@/stores/native-menu-warm-store'
 import { canDropInto, performDrop, resolveDropKind, type DragItem } from '@/lib/drag-drop'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import type { PaneId } from '@/types/pane'
@@ -90,6 +91,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   const reloadPane = usePanesStore((state) => state.reloadPane)
   const requestVisibleRange = usePanesStore((state) => state.setVisibleRange)
   const requestVisibleIcons = usePanesStore((state) => state.requestVisibleIcons)
+  const warmVisibleNativeMenus = useNativeMenuWarmStore((state) => state.warmVisibleNativeMenus)
   const setScrollPosition = usePanesStore((state) => state.setScrollPosition)
   const selection = useSelectionStore((state) => state.selections[paneId])
   const keymap = useKeymapStore((state) => state.bindings)
@@ -197,8 +199,21 @@ export function FilePane({ paneId }: FilePaneProps) {
     visibleIconRequestTimerRef.current = window.setTimeout(() => {
       const visiblePaths = pane.entries.slice(start, end + 1).map((entry) => entry.path)
       void requestVisibleIcons(paneId, visiblePaths)
+      // Background native-context-menu cache pre-warming reuses this same
+      // debounced visible-range trigger and the same visible paths. Unlike the
+      // icon request above, warming is not pre-filtered to non-directories:
+      // the store derives a File or Folder warm key per entry internally.
+      void warmVisibleNativeMenus(paneId, visiblePaths)
     }, visibleIconRequestDebounceMs)
-  }, [itemsToRender, paneId, pane.entries, parentOffset, requestVisibleIcons, requestVisibleRange])
+  }, [
+    itemsToRender,
+    paneId,
+    pane.entries,
+    parentOffset,
+    requestVisibleIcons,
+    requestVisibleRange,
+    warmVisibleNativeMenus,
+  ])
 
   useEffect(() => () => window.clearTimeout(visibleIconRequestTimerRef.current), [])
 

@@ -33,6 +33,7 @@ import type {
   SetDefaultApplicationRequest,
   ShowPropertiesRequest,
   TrashEntriesRequest,
+  WarmNativeMenusRequest,
   WatchTarget,
   SessionState,
   VolumeInfo,
@@ -101,6 +102,10 @@ export function clearFileClipboard() {
 
 export function loadNativeMenu(payload: LoadNativeMenuRequest) {
   return invokeCommand({ command: 'load_native_menu', payload }) as Promise<LoadNativeMenuResponse>
+}
+
+export function warmNativeMenus(payload: WarmNativeMenusRequest) {
+  return invokeCommand({ command: 'warm_native_menus', payload }) as Promise<void>
 }
 
 export function invokeNativeMenuAction(payload: InvokeNativeMenuRequest) {

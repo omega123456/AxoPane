@@ -17,6 +17,8 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use super::mock;
+#[cfg(feature = "test-utils")]
+use super::types::WarmNativeMenusResponse;
 use super::types::{
     AppConfig, CancelSizeRequest, CancelSizeResponse, CompressArchiveRequest, CreateEntryRequest,
     DeleteFromTrashRequest, ExtractArchiveRequest, FileClipboardMode, FolderSizeRequest,
@@ -28,7 +30,8 @@ use super::types::{
     RenameEntryRequest, ReorderOpsRequest, RequestIconsRequest, ResolveConflictRequest,
     RestoreTrashRequest, SaveConfigRequest, SaveSessionRequest, SessionState,
     SetDefaultApplicationRequest, SetLogLevelRequest, SetTabWatchRequest, ShowPropertiesRequest,
-    SizeStateEvent, StartOpRequest, TrashEntriesRequest, VolumeInfo, WriteFileClipboardRequest,
+    SizeStateEvent, StartOpRequest, TrashEntriesRequest, VolumeInfo, WarmNativeMenusRequest,
+    WriteFileClipboardRequest,
 };
 use crate::fs::DirectoryEntry;
 use std::path::Path;
@@ -210,6 +213,63 @@ pub fn open_with(
     state: State<'_, NativeMenuService>,
 ) -> MenuActionStatus {
     state.open_with(payload)
+}
+
+/// Background, cache-only warming of the native context-menu cache for a
+/// batch of representative single-item requests. Fire-and-forget: enumerates
+/// on a dedicated warm pool/executor so a live right-click is never delayed,
+/// never touches the invoke-token store, and emits no events.
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub fn warm_native_menus(payload: WarmNativeMenusRequest, state: State<'_, NativeMenuService>) {
+    log::debug!(
+        "received native menu warm batch with {} requests",
+        payload.requests.len()
+    );
+    let Some(pool) = crate::native_menu::warm_pool::warm_pool() else {
+        log::debug!("skipping native menu warm batch because the warm pool is unavailable");
+        return;
+    };
+
+    let handle = state.warm_handle();
+    pool.spawn(move || {
+        for request in &payload.requests {
+            handle.warm(request);
+        }
+        log::debug!(
+            "finished native menu warm batch with {} requests",
+            payload.requests.len()
+        );
+    });
+}
+
+/// Synchronous, `test-utils`-only variant of [`warm_native_menus`]: warms
+/// each request through the same shared handle the production command uses
+/// (exercising the handle's constructor/`Clone`/`warm` in the covered
+/// coverage build), against the in-memory fake provider, and returns the
+/// newly-inserted cache keys for assertions.
+#[cfg(feature = "test-utils")]
+#[tauri::command]
+pub fn warm_native_menus(
+    payload: WarmNativeMenusRequest,
+    state: State<'_, NativeMenuService>,
+) -> WarmNativeMenusResponse {
+    log::debug!(
+        "received native menu warm batch with {} requests",
+        payload.requests.len()
+    );
+    let handle = state.warm_handle();
+    let warmed_keys: Vec<String> = payload
+        .requests
+        .iter()
+        .filter_map(|request| handle.clone().warm(request))
+        .collect();
+
+    log::debug!(
+        "finished native menu warm batch; inserted {} new cache keys",
+        warmed_keys.len()
+    );
+    WarmNativeMenusResponse { warmed_keys }
 }
 
 #[tauri::command]

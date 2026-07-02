@@ -176,6 +176,7 @@ pub fn run() {
             commands::invoke_native_menu_action,
             commands::show_properties,
             commands::open_with,
+            commands::warm_native_menus,
             commands::list_applications,
             commands::set_default_application,
             commands::get_default_application,
