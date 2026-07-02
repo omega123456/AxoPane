@@ -227,6 +227,13 @@ export function FilePane({ paneId }: FilePaneProps) {
     return entryIndex < 0 ? -1 : entryIndex + parentOffset
   }, [hasParent, parentOffset, pane.entries, pane.focusedEntryId])
 
+  // Rows fully visible in the scroll viewport, used as the Page Up/Down step —
+  // matches Explorer's "jump by a screenful" behavior instead of a fixed count.
+  function visibleRowCount() {
+    const viewportHeight = parentRef.current?.clientHeight ?? 0
+    return Math.max(1, Math.floor(viewportHeight / rowHeightPx))
+  }
+
   function focusByRowIndex(nextRowIndex: number) {
     const bounded = Math.max(0, Math.min(nextRowIndex, rowCount - 1))
 
@@ -611,6 +618,18 @@ export function FilePane({ paneId }: FilePaneProps) {
         } else if (event.key === 'ArrowUp') {
           event.preventDefault()
           focusByRowIndex(focusedRowIndex - 1)
+        } else if (event.key === 'PageDown') {
+          event.preventDefault()
+          focusByRowIndex(focusedRowIndex + visibleRowCount())
+        } else if (event.key === 'PageUp') {
+          event.preventDefault()
+          focusByRowIndex(focusedRowIndex - visibleRowCount())
+        } else if (event.key === 'Home') {
+          event.preventDefault()
+          focusByRowIndex(0)
+        } else if (event.key === 'End') {
+          event.preventDefault()
+          focusByRowIndex(rowCount - 1)
         } else if (targetIsFilter) {
           // Open the focused entry on Enter; let every other key reach the input
           // so typing into the filter is unaffected.

@@ -202,6 +202,44 @@ describe('FilePane state rendering', () => {
     expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('Alpha')
   })
 
+  it('jumps to the first and last row with Home and End', async () => {
+    const user = userEvent.setup()
+    seedPane({
+      entries: [entry('Alpha'), entry('Beta'), entry('Gamma')],
+      focusedEntryId: 'Beta',
+    })
+
+    render(<FilePane paneId="left" />)
+    screen.getByLabelText('Left pane').focus()
+
+    await user.keyboard('{End}')
+    expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('Gamma')
+
+    await user.keyboard('{Home}')
+    expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('..')
+  })
+
+  it('pages up and down by the number of visible rows', async () => {
+    const user = userEvent.setup()
+    const names = Array.from({ length: 10 }, (_, index) => `Entry${index}`)
+    seedPane({
+      entries: names.map((name) => entry(name)),
+      focusedEntryId: 'Entry0',
+    })
+
+    render(<FilePane paneId="left" />)
+    const scrollContainer = screen.getByTestId('file-pane-scroll-left')
+    // Three rows tall (rowHeightPx is 30), so Page Down/Up should move by 3 rows.
+    Object.defineProperty(scrollContainer, 'clientHeight', { value: 90, configurable: true })
+    screen.getByLabelText('Left pane').focus()
+
+    await user.keyboard('{PageDown}')
+    expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('Entry3')
+
+    await user.keyboard('{PageUp}')
+    expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('Entry0')
+  })
+
   it('renders the error state', () => {
     seedPane({ error: 'Something broke' })
     render(<FilePane paneId="left" />)
