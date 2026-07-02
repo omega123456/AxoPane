@@ -22,6 +22,10 @@ export function ActionDialog() {
     return <EmptyTrashDialog dialog={dialog} />
   }
 
+  if (dialog.kind === 'calculateAllSizes') {
+    return <CalculateAllSizesDialog dialog={dialog} />
+  }
+
   if (dialog.kind === 'deleteFromTrash') {
     return <DeleteFromTrashDialog dialog={dialog} />
   }
@@ -347,6 +351,93 @@ function EmptyTrashDialog({
           className="rounded-md bg-accent-red-soft px-4 py-2 text-xs font-semibold text-accent-red focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-red disabled:opacity-40"
         >
           Empty trash
+        </button>
+      </div>
+    </DialogShell>
+  )
+}
+
+function CalculateAllSizesDialog({
+  dialog,
+}: {
+  dialog: Extract<ActionDialogState, { kind: 'calculateAllSizes' }>
+}) {
+  const close = useActionDialogStore((state) => state.close)
+  const busy = useActionDialogStore((state) => state.busy)
+  const error = useActionDialogStore((state) => state.error)
+  const setBusy = useActionDialogStore((state) => state.setBusy)
+  const setError = useActionDialogStore((state) => state.setError)
+  const confirmRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    confirmRef.current?.focus()
+  }, [])
+
+  async function confirm() {
+    if (busy) {
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      await usePanesStore.getState().calculateAllFolderSizes(dialog.paneId)
+      close()
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      log.error('calculate all folder sizes failed', { error: message })
+      setError(message)
+      setBusy(false)
+    }
+  }
+
+  function onKeyDown(event: React.KeyboardEvent) {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      void confirm()
+    } else if (event.key === 'Escape') {
+      event.preventDefault()
+      close()
+    }
+  }
+
+  return (
+    <DialogShell label="Confirm calculate all folder sizes" onDismiss={close} onKeyDown={onKeyDown}>
+      <div className="flex items-start gap-3 border-b border-light-border p-4 dark:border-dark-border">
+        <AlertTriangleIcon className="mt-0.5 h-5 w-5 shrink-0 text-accent-amber" />
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-light-text dark:text-dark-text">
+            Calculate all folder sizes?
+          </div>
+        </div>
+      </div>
+      <div className="p-4">
+        <p className="text-row text-light-text-soft dark:text-dark-text-soft">
+          This scans every folder in this pane to compute its size. It may take a while for folders
+          with many files.
+        </p>
+        {error ? (
+          <p className="mt-2 flex items-center gap-2 text-uxs text-accent-amber">
+            <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" />
+            {error}
+          </p>
+        ) : null}
+      </div>
+      <div className="flex justify-end gap-2 border-t border-light-border p-4 dark:border-dark-border">
+        <button
+          type="button"
+          onClick={close}
+          className="rounded-md border border-light-border px-4 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
+        >
+          Cancel
+        </button>
+        <button
+          ref={confirmRef}
+          type="button"
+          disabled={busy}
+          onClick={() => void confirm()}
+          className="rounded-md bg-accent-blue-soft px-4 py-2 text-xs font-semibold text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border disabled:opacity-40 dark:text-accent-blue"
+        >
+          Calculate
         </button>
       </div>
     </DialogShell>

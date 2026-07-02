@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PaneState } from '@/types/pane'
-import { ChevronRightIcon, RefreshIcon, SearchIcon } from '@/components/icons'
+import { ChevronRightIcon, PieChartIcon, RefreshIcon, SearchIcon } from '@/components/icons'
+import { useActionDialogStore } from '@/stores/action-dialog-store'
+import { useConfigStore } from '@/stores/config-store'
 import { usePanesStore } from '@/stores/panes-store'
 
 type BreadcrumbBarProps = {
@@ -13,6 +15,10 @@ export function BreadcrumbBar({ pane, isActive }: BreadcrumbBarProps) {
   const setFilterDraft = usePanesStore((state) => state.setFilterDraft)
   const clearFilter = usePanesStore((state) => state.clearFilter)
   const refreshEverything = usePanesStore((state) => state.refreshEverything)
+  const everythingAvailable = usePanesStore((state) => state.everythingStatus?.isAvailable ?? false)
+  const autoFolderSize = useConfigStore((state) => state.autoFolderSize)
+  const openActionDialog = useActionDialogStore((state) => state.open)
+  const showCalculateAllSizes = !everythingAvailable || !autoFolderSize
   const [editingPath, setEditingPath] = useState(false)
   const [pathDraft, setPathDraft] = useState(pane.path)
   const pathInputRef = useRef<HTMLInputElement>(null)
@@ -102,11 +108,23 @@ export function BreadcrumbBar({ pane, isActive }: BreadcrumbBarProps) {
       <button
         type="button"
         aria-label={`Refresh ${pane.title}`}
+        title="Refresh"
         onClick={() => void refreshEverything(pane.id)}
         className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:text-dark-text-soft dark:hover:bg-dark-hover"
       >
         <RefreshIcon className="h-3.5 w-3.5" />
       </button>
+      {showCalculateAllSizes ? (
+        <button
+          type="button"
+          aria-label={`Calculate all folder sizes in ${pane.title}`}
+          title="Calculate all folder sizes"
+          onClick={() => openActionDialog({ kind: 'calculateAllSizes', paneId: pane.id })}
+          className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:text-dark-text-soft dark:hover:bg-dark-hover"
+        >
+          <PieChartIcon className="h-3.5 w-3.5" />
+        </button>
+      ) : null}
       <label
         className={`flex h-8 w-search items-center gap-2 rounded-tab border px-2 ${
           isActive ? 'border-accent-blue-border' : 'border-light-border dark:border-dark-border'

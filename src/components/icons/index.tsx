@@ -44,6 +44,7 @@ import {
   PackageOpen,
   PanelLeft,
   Pause,
+  PieChart,
   Play,
   Plus,
   RefreshCcw,
@@ -115,6 +116,7 @@ export const PanelLeftIcon = withDefaults(PanelLeft)
 export const PauseIcon = withDefaults(Pause)
 export const PlayIcon = withDefaults(Play)
 export const PlusIcon = withDefaults(Plus)
+export const PieChartIcon = withDefaults(PieChart)
 export const RefreshIcon = withDefaults(RefreshCcw)
 export const ScissorsIcon = withDefaults(Scissors)
 export const RotateCcwIcon = withDefaults(RotateCcw)

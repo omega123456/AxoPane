@@ -13,6 +13,7 @@ export type ActionDialog =
   | { kind: 'newFolder'; paneId: PaneId }
   | { kind: 'newFile'; paneId: PaneId }
   | { kind: 'delete'; paneId: PaneId; targets: DeleteTarget[] }
+  | { kind: 'calculateAllSizes'; paneId: PaneId }
   | { kind: 'emptyTrash'; paneId: PaneId; count: number }
   | { kind: 'deleteFromTrash'; paneId: PaneId; targets: DeleteTarget[] }
   | {

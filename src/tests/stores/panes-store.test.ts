@@ -190,6 +190,43 @@ describe('panes-store navigation', () => {
     expect(request).toHaveBeenCalledOnce()
   })
 
+  it('requests sizes for every folder in the pane, skipping files and already-pending paths', async () => {
+    const request = vi.fn(() => undefined)
+    ipc.override('request_folder_sizes', request)
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+
+    usePanesStore.setState((state) => ({
+      pendingSizeRequests: { ...state.pendingSizeRequests, 'C:\\root\\Alpha': true },
+    }))
+
+    await usePanesStore.getState().calculateAllFolderSizes('left')
+
+    expect(request).not.toHaveBeenCalled()
+
+    usePanesStore.setState((state) => {
+      const rest = { ...state.pendingSizeRequests }
+      delete rest['C:\\root\\Alpha']
+      return { pendingSizeRequests: rest }
+    })
+
+    await usePanesStore.getState().calculateAllFolderSizes('left')
+
+    expect(request).toHaveBeenCalledOnce()
+    expect(request).toHaveBeenCalledWith({ paths: ['C:\\root\\Alpha'] })
+  })
+
+  it('clears pending size requests when calculating all folder sizes fails', async () => {
+    ipc.override('request_folder_sizes', () => {
+      throw new Error('request failed')
+    })
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+
+    await expect(usePanesStore.getState().calculateAllFolderSizes('left')).rejects.toThrow(
+      'request failed',
+    )
+    expect(usePanesStore.getState().pendingSizeRequests['C:\\root\\Alpha']).toBeFalsy()
+  })
+
   it('sorts locally without reloading the pane or re-requesting sizes', async () => {
     const listDir = vi.fn(() => ({
       path: 'C:\\root',

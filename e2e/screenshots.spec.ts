@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { gotoScenario, openSettingsSection, rightClickPane } from './helpers'
 import { screenshotScenarios } from '../src/tests/playwright-fixtures/e2e'
 import { RELATIVE_DATES_NOW } from '../src/tests/playwright-fixtures/relative-dates'
-import { everythingAvailable } from '../src/tests/playwright-fixtures/states'
+import { everythingAvailable, everythingUnavailable } from '../src/tests/playwright-fixtures/states'
 import {
   deletingQueueFinalProgressEvent,
   expandedQueueFinalProgressEvent,
@@ -358,6 +358,39 @@ for (const mode of ['light', 'dark'] as const) {
     await menu.getByRole('menuitem', { name: 'Delete permanently' }).click()
     await expect(page.getByRole('dialog', { name: 'Confirm delete' })).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`delete-confirmation-dialog-${mode}.png`)
+  })
+
+  test(`calculate all sizes button ${mode}`, async ({ page }) => {
+    // Everything unavailable is one of the two conditions that surfaces the
+    // toolbar button (the other is auto folder size being off).
+    await gotoScenario(page, {
+      ...screenshotScenarios.browsing[mode],
+      commands: {
+        ...screenshotScenarios.browsing[mode].commands,
+        everything_status: everythingUnavailable,
+      },
+    })
+    await expect(
+      page.getByRole('button', { name: 'Calculate all folder sizes in Left pane' }),
+    ).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`calculate-all-sizes-button-${mode}.png`)
+  })
+
+  test(`calculate all sizes confirmation dialog ${mode}`, async ({ page }) => {
+    await gotoScenario(page, {
+      ...screenshotScenarios.browsing[mode],
+      commands: {
+        ...screenshotScenarios.browsing[mode].commands,
+        everything_status: everythingUnavailable,
+      },
+    })
+    await page.getByRole('button', { name: 'Calculate all folder sizes in Left pane' }).click()
+    await expect(
+      page.getByRole('dialog', { name: 'Confirm calculate all folder sizes' }),
+    ).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(
+      `calculate-all-sizes-confirmation-dialog-${mode}.png`,
+    )
   })
 
   test(`archive dialog ${mode}`, async ({ page }) => {

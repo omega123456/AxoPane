@@ -128,6 +128,7 @@ type PanesStore = {
   setVolumes: (volumes: VolumeInfo[]) => void
   setShowHiddenFiles: (showHiddenFiles: boolean) => Promise<void>
   requestManualSize: (paneId: PaneId, entryId: string) => Promise<void>
+  calculateAllFolderSizes: (paneId: PaneId) => Promise<void>
   ensureTreeChildren: (path: string | null) => Promise<void>
   revealPath: (path: string | null) => Promise<void>
   toggleTreeNode: (path: string) => Promise<void>
@@ -1332,6 +1333,27 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     }
 
     await requestFolderSize({ path: entry.path })
+  },
+  calculateAllFolderSizes: async (paneId) => {
+    const pane = get().panes[paneId]
+    const paths = pane.entries.filter((entry) => entry.isDir).map((entry) => entry.path)
+    const pending = paths.filter((path) => !get().pendingSizeRequests[path])
+    if (pending.length === 0) {
+      return
+    }
+
+    set((state) => ({
+      pendingSizeRequests: withPendingSizeRequests(state.pendingSizeRequests, pending, true),
+    }))
+
+    try {
+      await requestFolderSizes({ paths: pending })
+    } catch (error) {
+      set((state) => ({
+        pendingSizeRequests: withPendingSizeRequests(state.pendingSizeRequests, pending, false),
+      }))
+      throw error
+    }
   },
   ensureTreeChildren: async (path) => {
     if (!path) {

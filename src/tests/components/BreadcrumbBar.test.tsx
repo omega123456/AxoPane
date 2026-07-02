@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { BreadcrumbBar, splitPath } from '@/components/pane/BreadcrumbBar'
+import { useActionDialogStore } from '@/stores/action-dialog-store'
+import { useConfigStore } from '@/stores/config-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useTabsStore } from '@/stores/tabs-store'
 import type { PaneState } from '@/types/pane'
@@ -31,6 +33,8 @@ beforeEach(() => {
   ipc.install()
   usePanesStore.getState().reset()
   useTabsStore.getState().reset()
+  useConfigStore.getState().reset()
+  useActionDialogStore.getState().close()
 })
 
 describe('splitPath', () => {
@@ -127,5 +131,57 @@ describe('BreadcrumbBar navigation', () => {
     })
 
     expect(screen.getByRole('textbox', { name: 'Left pane path' })).toHaveValue('C:\\Users\\Omega')
+  })
+
+  it('shows a hover tooltip on the refresh button', () => {
+    render(<BreadcrumbBar pane={pane('C:\\Users\\Omega')} isActive />)
+
+    expect(screen.getByRole('button', { name: 'Refresh Left pane' })).toHaveAttribute(
+      'title',
+      'Refresh',
+    )
+  })
+})
+
+describe('BreadcrumbBar calculate-all-sizes button', () => {
+  const buttonName = 'Calculate all folder sizes in Left pane'
+
+  it('shows the button when Everything is unavailable and opens the confirmation dialog', async () => {
+    const user = userEvent.setup()
+    usePanesStore.setState({
+      everythingStatus: { status: 'unavailable', isAvailable: false },
+    })
+
+    render(<BreadcrumbBar pane={pane('C:\\Users\\Omega')} isActive />)
+    const button = screen.getByRole('button', { name: buttonName })
+    expect(button).toHaveAttribute('title', 'Calculate all folder sizes')
+    await user.click(button)
+
+    expect(useActionDialogStore.getState().dialog).toEqual({
+      kind: 'calculateAllSizes',
+      paneId: 'left',
+    })
+  })
+
+  it('shows the button when Everything is available but auto folder size is off', () => {
+    usePanesStore.setState({
+      everythingStatus: { status: 'available', isAvailable: true },
+    })
+    useConfigStore.setState({ autoFolderSize: false })
+
+    render(<BreadcrumbBar pane={pane('C:\\Users\\Omega')} isActive />)
+
+    expect(screen.getByRole('button', { name: buttonName })).toBeInTheDocument()
+  })
+
+  it('hides the button when Everything is available and auto folder size is on', () => {
+    usePanesStore.setState({
+      everythingStatus: { status: 'available', isAvailable: true },
+    })
+    useConfigStore.setState({ autoFolderSize: true })
+
+    render(<BreadcrumbBar pane={pane('C:\\Users\\Omega')} isActive />)
+
+    expect(screen.queryByRole('button', { name: buttonName })).not.toBeInTheDocument()
   })
 })

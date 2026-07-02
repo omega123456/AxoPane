@@ -153,6 +153,47 @@ describe('ActionDialog', () => {
     expect(useActionDialogStore.getState().dialog).toBeNull()
   })
 
+  it('confirms calculating all folder sizes and requests sizes for every folder in the pane', async () => {
+    const user = userEvent.setup()
+    const requestFolderSizes = vi.fn(() => undefined)
+    ipc.override('request_folder_sizes', requestFolderSizes)
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: { ...state.panes.left, entries: [dir('Reports'), dir('notes.txt', false)] },
+      },
+    }))
+
+    useActionDialogStore.getState().open({ kind: 'calculateAllSizes', paneId: 'left' })
+    render(<ActionDialog />)
+
+    expect(screen.getByText('Calculate all folder sizes?')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Calculate' }))
+
+    await waitFor(() => expect(useActionDialogStore.getState().dialog).toBeNull())
+    expect(requestFolderSizes).toHaveBeenCalledWith({ paths: ['C:\\root\\Reports'] })
+  })
+
+  it('shows the backend error when calculating all folder sizes fails', async () => {
+    const user = userEvent.setup()
+    ipc.override('request_folder_sizes', () => {
+      throw new Error('scan was denied')
+    })
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: { ...state.panes.left, entries: [dir('Reports')] },
+      },
+    }))
+
+    useActionDialogStore.getState().open({ kind: 'calculateAllSizes', paneId: 'left' })
+    render(<ActionDialog />)
+
+    await user.click(screen.getByRole('button', { name: 'Calculate' }))
+    expect(await screen.findByText('scan was denied')).toBeInTheDocument()
+    expect(useActionDialogStore.getState().dialog).not.toBeNull()
+  })
+
   it('confirms a permanent delete from the trash pane and reloads it', async () => {
     const user = userEvent.setup()
     const deleteFromTrash = vi.fn(() => undefined)
