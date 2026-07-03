@@ -10,7 +10,7 @@ function progress(overrides: Partial<OpProgress>): OpProgress {
     kind: 'copy',
     status: 'active',
     sourceDir: 'C:\\src',
-    itemNames: ['master-reel-final.mkv'],
+    itemNames: ['footage'],
     destinationDir: 'D:\\dst',
     totalItems: 1248,
     completedItems: 812,
@@ -57,6 +57,7 @@ describe('JobCard', () => {
     )
     expect(screen.getByText('Copying 1,248 items')).toBeInTheDocument()
     expect(screen.getByText('63%')).toBeInTheDocument()
+    expect(screen.getByText('C:\\src\\footage')).toBeInTheDocument()
     expect(screen.getByText('master-reel-final.mkv')).toBeInTheDocument()
     expect(screen.getByText('813 / 1,248 items')).toBeInTheDocument()
     expect(screen.getByTestId('throughput-chart-line')).toBeInTheDocument()
@@ -241,7 +242,7 @@ describe('JobCard', () => {
     expect(onMoveDown).toHaveBeenCalled()
   })
 
-  it('shows queued item names separately from the source folder', () => {
+  it('appends the queued item names to both the source and destination paths', () => {
     render(
       <JobCard
         operation={progress({
@@ -258,8 +259,58 @@ describe('JobCard', () => {
       />,
     )
 
-    expect(screen.getByText('Season 01, poster.jpg, +1 more')).toBeInTheDocument()
-    expect(screen.getByText(/C:\\Downloads/)).toHaveTextContent('D:\\Sorted')
+    expect(
+      screen.getByText('C:\\Downloads\\Season 01, poster.jpg, +1 more'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('D:\\Sorted\\Season 01, poster.jpg, +1 more'),
+    ).toBeInTheDocument()
+  })
+
+  it('appends the top-level item name to both paths while the job is actively running', () => {
+    render(
+      <JobCard
+        operation={progress({
+          status: 'active',
+          sourceDir: 'D:\\projects',
+          itemNames: ['b'],
+          destinationDir: 'F:\\Download',
+          currentFileName: 'server.mjs',
+        })}
+        throughputHistory={samples([22, 240_000_000])}
+        throughputPeak={240_000_000}
+        hasConflict={false}
+        reorderable={false}
+        {...noopHandlers()}
+      />,
+    )
+
+    expect(screen.getByText('D:\\projects\\b')).toBeInTheDocument()
+    expect(screen.getByText('F:\\Download\\b')).toBeInTheDocument()
+    expect(screen.getByText('server.mjs')).toBeInTheDocument()
+  })
+
+  it('exposes the full path and current file name via title tooltips when truncated', () => {
+    render(
+      <JobCard
+        operation={progress({
+          status: 'active',
+          sourceDir: 'D:\\projects',
+          itemNames: ['b'],
+          destinationDir: 'F:\\Download',
+          currentFileName: 'server.mjs',
+        })}
+        throughputHistory={samples([22, 240_000_000])}
+        throughputPeak={240_000_000}
+        hasConflict={false}
+        reorderable={false}
+        {...noopHandlers()}
+      />,
+    )
+
+    expect(screen.getByText('D:\\projects\\b')).toHaveAttribute('title', 'D:\\projects\\b')
+    expect(screen.getByText('F:\\Download\\b')).toHaveAttribute('title', 'F:\\Download\\b')
+    expect(screen.getByText('server.mjs')).toHaveAttribute('title', 'server.mjs')
   })
 
   it('shows a resolve action while in conflict and keeps the chart progressbar', async () => {
@@ -309,7 +360,7 @@ describe('JobCard', () => {
       />,
     )
     expect(screen.getByText('Deleting 1,248 items')).toBeInTheDocument()
-    expect(screen.getByText('C:\\src')).toBeInTheDocument()
+    expect(screen.getByText('C:\\src\\footage')).toBeInTheDocument()
     expect(screen.queryByText('D:\\dst')).not.toBeInTheDocument()
   })
 

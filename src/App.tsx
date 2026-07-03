@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { ActionDialog } from '@/components/dialogs/ActionDialog'
+import { ConflictDialog } from '@/components/dialogs/ConflictDialog'
 import { DefaultAppDialog } from '@/components/dialogs/DefaultAppDialog'
 import { PropertiesDialog } from '@/components/dialogs/PropertiesDialog'
 import { SettingsModal } from '@/components/dialogs/SettingsModal'
@@ -25,6 +26,7 @@ import { useConfigStore } from '@/stores/config-store'
 import { useLayoutStore } from '@/stores/layout-store'
 import { useKeymapStore } from '@/stores/keymap-store'
 import { initializePanes, usePanesStore } from '@/stores/panes-store'
+import { activeConflict, useQueueStore } from '@/stores/queue-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
@@ -64,6 +66,8 @@ function App() {
   const propertiesDialogOpen = usePropertiesDialogStore((state) => state.dialog !== null)
   const defaultAppDialogOpen = useDefaultAppDialogStore((state) => state.dialog !== null)
   const updateCheckInterval = useConfigStore((state) => state.updateCheckInterval)
+  const conflict = useQueueStore(activeConflict)
+  const resolveConflict = useQueueStore((state) => state.resolve)
 
   useEffect(() => {
     initializeTheme()
@@ -128,7 +132,8 @@ function App() {
         menuOpen ||
         actionDialogOpen ||
         propertiesDialogOpen ||
-        defaultAppDialogOpen
+        defaultAppDialogOpen ||
+        conflict !== undefined
       ) {
         return
       }
@@ -158,6 +163,7 @@ function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [
     actionDialogOpen,
+    conflict,
     defaultAppDialogOpen,
     defaultPaneMode,
     keymap,
@@ -180,7 +186,8 @@ function App() {
         menuOpen ||
         actionDialogOpen ||
         propertiesDialogOpen ||
-        defaultAppDialogOpen
+        defaultAppDialogOpen ||
+        conflict !== undefined
       ) {
         return
       }
@@ -196,7 +203,14 @@ function App() {
 
     window.addEventListener('mouseup', onMouseUp)
     return () => window.removeEventListener('mouseup', onMouseUp)
-  }, [actionDialogOpen, defaultAppDialogOpen, menuOpen, propertiesDialogOpen, settingsOpen])
+  }, [
+    actionDialogOpen,
+    conflict,
+    defaultAppDialogOpen,
+    menuOpen,
+    propertiesDialogOpen,
+    settingsOpen,
+  ])
 
   useEffect(() => {
     const unlistenVolumesPromise = onVolumesChanged((event) => {
@@ -265,6 +279,15 @@ function App() {
       <ActionDialog />
       <PropertiesDialog />
       <DefaultAppDialog />
+      {conflict ? (
+        <ConflictDialog
+          key={conflict.operationId}
+          conflict={conflict}
+          onResolve={(resolution, applyToAll, renameTo) =>
+            resolveConflict(conflict.operationId, resolution, applyToAll, renameTo)
+          }
+        />
+      ) : null}
     </main>
   )
 }

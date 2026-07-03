@@ -12,7 +12,6 @@ import { TabBar } from './TabBar'
 import { executeCommand } from '@/lib/commands'
 import { detectPlatformOs, resolveCommandForEvent } from '@/lib/keymap'
 import { getParentPath } from '@/stores/panes-store'
-import { ConflictDialog } from '@/components/dialogs/ConflictDialog'
 import { EmptyState } from '@/components/states/EmptyState'
 import { ErrorState } from '@/components/states/ErrorState'
 import { EverythingBanner } from '@/components/states/EverythingBanner'
@@ -77,8 +76,15 @@ function useModalOpen() {
   const actionDialog = useActionDialogStore((state) => state.dialog)
   const propertiesDialog = usePropertiesDialogStore((state) => state.dialog)
   const contextMenu = useContextMenuStore((state) => state.menu)
+  const conflict = useQueueStore(activeConflict)
 
-  return settingsOpen || actionDialog !== null || propertiesDialog !== null || contextMenu !== null
+  return (
+    settingsOpen ||
+    actionDialog !== null ||
+    propertiesDialog !== null ||
+    contextMenu !== null ||
+    conflict !== undefined
+  )
 }
 
 export function FilePane({ paneId }: FilePaneProps) {
@@ -97,8 +103,6 @@ export function FilePane({ paneId }: FilePaneProps) {
   const setScrollPosition = usePanesStore((state) => state.setScrollPosition)
   const selection = useSelectionStore((state) => state.selections[paneId])
   const keymap = useKeymapStore((state) => state.bindings)
-  const conflict = useQueueStore(activeConflict)
-  const resolveConflict = useQueueStore((state) => state.resolve)
   const setSelection = useSelectionStore((state) => state.setSelection)
   const clipboardMode = useClipboardStore((state) => state.mode)
   const clipboardEntries = useClipboardStore((state) => state.entries)
@@ -827,15 +831,6 @@ export function FilePane({ paneId }: FilePaneProps) {
           </div>
         </div>
       )}
-      {isActivePane && conflict ? (
-        <ConflictDialog
-          key={conflict.operationId}
-          conflict={conflict}
-          onResolve={(resolution, applyToAll, renameTo) =>
-            resolveConflict(conflict.operationId, resolution, applyToAll, renameTo)
-          }
-        />
-      ) : null}
     </section>
   )
 }

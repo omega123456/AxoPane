@@ -85,12 +85,12 @@ export function QueueToast() {
   }
 
   return (
-    <div className="flex w-copycard items-center gap-2 rounded-window border border-light-border-strong bg-light-surface px-3 py-2.5 shadow-float dark:border-dark-border-strong dark:bg-dark-surface">
+    <div className="relative flex w-copycard items-center rounded-window border border-light-border-strong bg-light-surface shadow-float dark:border-dark-border-strong dark:bg-dark-surface">
       <button
         type="button"
         aria-label="Expand job queue"
         onClick={() => expand(true)}
-        className="flex min-w-0 flex-1 items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-window px-3 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
       >
         <span className="flex h-7 w-7 shrink-0 items-center justify-center">
           {summary.icon === 'done' ? (
@@ -122,20 +122,19 @@ export function QueueToast() {
             />
           </span>
         </span>
+        <ChevronUpIcon className="h-4 w-4 shrink-0 text-light-text-muted dark:text-dark-text-muted" />
+        {summary.dismissible ? <span className="w-7 shrink-0" aria-hidden="true" /> : null}
       </button>
-      <div className="flex shrink-0 items-center gap-1">
-        <ChevronUpIcon className="h-4 w-4 text-light-text-muted dark:text-dark-text-muted" />
-        {summary.dismissible ? (
-          <button
-            type="button"
-            aria-label="Dismiss job queue"
-            onClick={dismissTerminal}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-light-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:text-dark-text-muted dark:hover:bg-dark-hover"
-          >
-            <XIcon className="h-4 w-4" />
-          </button>
-        ) : null}
-      </div>
+      {summary.dismissible ? (
+        <button
+          type="button"
+          aria-label="Dismiss job queue"
+          onClick={dismissTerminal}
+          className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-light-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:text-dark-text-muted dark:hover:bg-dark-hover"
+        >
+          <XIcon className="h-4 w-4" />
+        </button>
+      ) : null}
     </div>
   )
 }

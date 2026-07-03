@@ -2,6 +2,7 @@ import { forwardRef } from 'react'
 import type { LucideIcon, LucideProps } from 'lucide-react'
 import {
   AlertTriangle,
+  ArrowDown,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
@@ -74,6 +75,7 @@ function withDefaults(Icon: LucideIcon) {
 
 export const AlertTriangleIcon = withDefaults(AlertTriangle)
 export const CheckIcon = withDefaults(Check)
+export const ArrowDownIcon = withDefaults(ArrowDown)
 export const ArrowLeftIcon = withDefaults(ArrowLeft)
 export const ArrowRightIcon = withDefaults(ArrowRight)
 export const ArrowUpIcon = withDefaults(ArrowUp)

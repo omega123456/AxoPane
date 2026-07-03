@@ -12,7 +12,7 @@ function activeCopy(overrides: Partial<OpProgress> = {}): OpProgress {
     kind: 'copy',
     status: 'active',
     sourceDir: 'D:\\Media\\Archives',
-    itemNames: ['master-reel-final.mkv'],
+    itemNames: ['Q3-conference-highlights'],
     destinationDir: 'E:\\Cold-Storage\\2025',
     totalItems: 1248,
     completedItems: 812,
@@ -337,4 +337,76 @@ export const conflictQueueSnapshot: OpSnapshot[] = [
       name: 'master-reel-final.mkv',
     },
   },
+]
+
+// Regression fixture: the job card appends the top-level item name to the
+// source path (e.g. `sourceDir\itemName`). Both the path and the item name
+// itself need to stay readable (truncated, not overflowing) even when they
+// are far longer than any realistic single path segment.
+export const longPathQueueSnapshot: OpSnapshot[] = [
+  {
+    progress: {
+      operationId: 'op-1',
+      kind: 'copy',
+      status: 'active',
+      sourceDir:
+        'D:\\Users\\Omega\\Documents\\Projects\\Client-Deliverables\\2025\\Q3\\Video-Production\\Raw-Footage\\Uncompressed',
+      itemNames: [
+        'Final-Master-Export-Uncompressed-ProRes-4444-Director-Approved-v12-DO-NOT-DELETE',
+      ],
+      destinationDir:
+        'F:\\Backups\\Archive\\2025\\Video-Production\\Client-Deliverables\\Cold-Storage\\Long-Term-Retention',
+      totalItems: 1,
+      completedItems: 0,
+      totalBytes: 1000,
+      copiedBytes: 630,
+      progressPercent: 63,
+      bytesPerSecond: 260_046_848,
+      etaSeconds: 180,
+      currentFileName:
+        'Final-Master-Export-Uncompressed-ProRes-4444-Director-Approved-v12-DO-NOT-DELETE.mov',
+      currentFileCopiedBytes: 12_240_000_000,
+      currentFileTotalBytes: 19_760_000_000,
+      errorMessage: null,
+    },
+    conflict: null,
+  },
+]
+
+function pendingMove(operationId: string): OpSnapshot {
+  return {
+    progress: {
+      operationId,
+      kind: 'move',
+      status: 'pending',
+      sourceDir: 'C:\\Downloads',
+      itemNames: ['Season 01', 'poster.jpg', 'notes.txt'],
+      destinationDir: 'D:\\Sorted',
+      totalItems: 32,
+      completedItems: 0,
+      totalBytes: 500,
+      copiedBytes: 0,
+      progressPercent: 0,
+      bytesPerSecond: 0,
+      etaSeconds: null,
+      currentFileName: null,
+      currentFileCopiedBytes: 0,
+      currentFileTotalBytes: 0,
+      errorMessage: null,
+    },
+    conflict: null,
+  }
+}
+
+// Regression fixture: the queued-jobs list used to only have room for a
+// single pending job below the active one before requiring a scroll. With
+// several pending jobs queued up, at least 3 should be visible without
+// scrolling on a normal-height window.
+export const manyPendingQueueSnapshot: OpSnapshot[] = [
+  { progress: activeCopy(), conflict: null },
+  pendingMove('op-2'),
+  pendingMove('op-3'),
+  pendingMove('op-4'),
+  pendingMove('op-5'),
+  pendingMove('op-6'),
 ]

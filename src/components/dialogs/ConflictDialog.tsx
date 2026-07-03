@@ -93,7 +93,7 @@ export function ConflictDialog({ conflict, onResolve }: ConflictDialogProps) {
       aria-modal="true"
       aria-label="Resolve file conflict"
       onKeyDown={onKeyDown}
-      className="absolute inset-0 z-30 flex items-center justify-center"
+      className="fixed inset-0 z-40 flex items-center justify-center"
     >
       <button
         type="button"

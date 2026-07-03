@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
-  ArrowRightIcon,
+  ArrowDownIcon,
   CheckCircleIcon,
   GripVerticalIcon,
   PauseIcon,
@@ -88,8 +88,17 @@ export function JobCard({
   const isCancelled = operation.status === 'cancelled'
   const isConflict = operation.status === 'conflict' || hasConflict
   const isPending = operation.status === 'pending'
-  const queuedItems = itemSummary(operation.itemNames)
-  const showQueuedItems = isPending && queuedItems !== null
+  const topLevelItems = itemSummary(operation.itemNames)
+  const showTopLevelItems =
+    !isCompleted && !isFailed && !isCancelled && topLevelItems !== null
+  const sourceSeparator = operation.sourceDir.includes('\\') ? '\\' : '/'
+  const destinationSeparator = operation.destinationDir.includes('\\') ? '\\' : '/'
+  const sourceDisplay = showTopLevelItems
+    ? `${operation.sourceDir}${sourceSeparator}${topLevelItems}`
+    : operation.sourceDir
+  const destinationDisplay = showTopLevelItems
+    ? `${operation.destinationDir}${destinationSeparator}${topLevelItems}`
+    : operation.destinationDir
   const showChart = !isPending && !isCompleted && !isFailed && !isCancelled
 
   // The backend briefly clears the current-file fields between finishing one
@@ -248,21 +257,20 @@ export function JobCard({
                       : `${verb(operation)} ${formatCount(operation.totalItems)} items`}
               </span>
             </div>
-            <div className="mt-1 min-h-5 truncate font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-              {showQueuedItems ? (
-                <span className="mb-1 block truncate text-light-text-soft dark:text-dark-text-soft">
-                  {queuedItems}
-                </span>
-              ) : null}
+            <div className="mt-1 font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
+              <div className="min-h-5 truncate" title={sourceDisplay}>
+                {sourceDisplay}
+              </div>
               {operation.destinationDir ? (
                 <>
-                  {operation.sourceDir}{' '}
-                  <ArrowRightIcon className="inline h-3 w-3 align-[-2px] text-accent-blue-light dark:text-accent-blue" />{' '}
-                  {operation.destinationDir}
+                  <div className="flex justify-center py-0.5">
+                    <ArrowDownIcon className="h-3 w-3 shrink-0 text-accent-blue-light dark:text-accent-blue" />
+                  </div>
+                  <div className="min-h-5 truncate" title={destinationDisplay}>
+                    {destinationDisplay}
+                  </div>
                 </>
-              ) : (
-                operation.sourceDir
-              )}
+              ) : null}
             </div>
           </div>
         </div>
@@ -291,7 +299,10 @@ export function JobCard({
       {showCurrentFile ? (
         <div className="mt-3.5">
           <div className="flex min-w-0 items-center justify-between gap-3">
-            <span className="min-w-0 flex-1 truncate text-xs text-light-text dark:text-dark-text">
+            <span
+              className="min-w-0 flex-1 truncate text-xs text-light-text dark:text-dark-text"
+              title={displayedFile?.name ?? undefined}
+            >
               {displayedFile?.name ?? ' '}
             </span>
             <span className="shrink-0 font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">

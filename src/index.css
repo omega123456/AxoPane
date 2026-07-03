@@ -132,7 +132,7 @@
   --spacing-conflict: 26rem;
   --spacing-queue-bars: 2rem;
   --spacing-queue-chart: 8rem;
-  --spacing-queue-list: 30rem;
+  --spacing-queue-list: min(37.5rem, calc(100vh - 6rem));
 
   --spacing-settings-modal-w: min(80vw, 1300px);
     --spacing-settings-modal-h: min(85vh, 52rem);

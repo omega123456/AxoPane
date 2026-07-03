@@ -162,6 +162,30 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`transfer-queue-expanded-${mode}.png`)
   })
 
+  test(`queue long path ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.queueLongPath[mode])
+    await page.getByRole('button', { name: 'Expand job queue' }).click()
+    await expect(page.getByRole('region', { name: 'Job queue' })).toBeVisible()
+    await expect(page.getByRole('progressbar', { name: 'Copying 1 items' })).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`transfer-queue-long-path-${mode}.png`)
+  })
+
+  test(`queue many pending jobs ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.queueManyPending[mode])
+    await page.getByRole('button', { name: 'Expand job queue' }).click()
+    await expect(page.getByRole('region', { name: 'Job queue' })).toBeVisible()
+    const pendingRows = page.locator('[aria-label="Queued jobs"] > div')
+    await expect(pendingRows).toHaveCount(5)
+    // At least 3 pending jobs should be visible without scrolling on a
+    // normal-height window instead of the old single-row allowance.
+    for (let index = 0; index < 3; index += 1) {
+      await expect(pendingRows.nth(index)).toBeInViewport()
+    }
+    await expect(page.locator('main')).toHaveScreenshot(
+      `transfer-queue-many-pending-${mode}.png`,
+    )
+  })
+
   test(`queue deleting collapsed ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.queueDeleting[mode])
     await expect(page.getByText('Deleting 1 job')).toBeVisible()

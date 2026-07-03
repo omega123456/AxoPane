@@ -5,6 +5,7 @@ import { ipc } from './ipc-mock'
 import type { DirectoryEntry, ListDirRequest, ListDirResponse } from '@/lib/types/ipc'
 import { renderApp } from './utils/render-app'
 import { usePanesStore } from '@/stores/panes-store'
+import { useQueueStore } from '@/stores/queue-store'
 
 const rootEntries: DirectoryEntry[] = [
   {
@@ -397,5 +398,38 @@ describe('App', () => {
     await waitFor(() => {
       expect(getRowInPane('Left pane', '4.0 KB')).toBeTruthy()
     })
+  })
+
+  it('shows a copy conflict application-wide instead of scoped to a single pane', async () => {
+    const user = userEvent.setup()
+    const resolveSpy = vi.fn(() => undefined)
+    installListDirOverride()
+    ipc.override('resolve_conflict', resolveSpy)
+    renderApp()
+
+    await waitFor(() => {
+      expect(getRowInPane('Left pane', 'Documents')).toBeTruthy()
+    })
+
+    act(() => {
+      useQueueStore.setState({
+        conflicts: {
+          'op-1': {
+            operationId: 'op-1',
+            sourcePath: 'C:\\src\\a.txt',
+            destinationPath: 'D:\\dst\\a.txt',
+            name: 'a.txt',
+          },
+        },
+        order: ['op-1'],
+      })
+    })
+
+    const dialog = await screen.findByRole('dialog', { name: 'Resolve file conflict' })
+    expect(screen.getByLabelText('Left pane')).not.toContainElement(dialog)
+    expect(screen.getByLabelText('Right pane')).not.toContainElement(dialog)
+
+    await user.keyboard('{Enter}')
+    expect(resolveSpy).toHaveBeenCalled()
   })
 })

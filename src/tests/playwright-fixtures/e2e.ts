@@ -16,6 +16,8 @@ import {
   expandedQueueProgressEvents,
   expandedQueueSeedSnapshot,
   expandedQueueSnapshot,
+  longPathQueueSnapshot,
+  manyPendingQueueSnapshot,
 } from './queue'
 import { fileTypesListDir } from './file-types'
 import { relativeDatesListDir } from './relative-dates'
@@ -449,6 +451,20 @@ export const screenshotScenarios = {
       },
     },
   },
+  queueManyPending: {
+    light: {
+      commands: {
+        load_config: lightConfig,
+        queue_snapshot: manyPendingQueueSnapshot,
+      },
+    },
+    dark: {
+      commands: {
+        load_config: darkConfig,
+        queue_snapshot: manyPendingQueueSnapshot,
+      },
+    },
+  },
   queueDeleting: {
     light: {
       commands: {
@@ -466,6 +482,20 @@ export const screenshotScenarios = {
       },
       events: {
         'queue://progress': deletingQueueProgressEvents,
+      },
+    },
+  },
+  queueLongPath: {
+    light: {
+      commands: {
+        load_config: lightConfig,
+        queue_snapshot: longPathQueueSnapshot,
+      },
+    },
+    dark: {
+      commands: {
+        load_config: darkConfig,
+        queue_snapshot: longPathQueueSnapshot,
       },
     },
   },

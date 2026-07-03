@@ -105,9 +105,9 @@ describe('ConflictDialog', () => {
     expect(onResolve).toHaveBeenCalledWith('skip', false, null)
   })
 
-  it('uses an absolute pane-scoped wrapper instead of a viewport backdrop', () => {
+  it('uses a fixed viewport-wide wrapper so it covers the whole app, not just one pane', () => {
     render(<ConflictDialog conflict={conflict} onResolve={vi.fn()} />)
-    expect(screen.getByRole('dialog', { name: 'Resolve file conflict' })).toHaveClass('absolute')
+    expect(screen.getByRole('dialog', { name: 'Resolve file conflict' })).toHaveClass('fixed')
     expect(screen.getByRole('button', { name: 'Dismiss conflict' })).toHaveClass('absolute')
   })
 })

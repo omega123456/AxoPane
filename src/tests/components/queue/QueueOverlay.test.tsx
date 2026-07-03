@@ -1,6 +1,5 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { FilePane } from '@/components/pane/FilePane'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { QueueOverlay } from '@/components/queue/QueueOverlay'
@@ -85,6 +84,39 @@ describe('QueueOverlay', () => {
     expect(await screen.findByRole('region', { name: 'Job queue' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /Fewer details/ }))
     expect(screen.queryByRole('region', { name: 'Job queue' })).not.toBeInTheDocument()
+  })
+
+  it('expands the collapsed toast when clicking the chevron area, not just the label', async () => {
+    const user = userEvent.setup()
+    ipc.override('queue_snapshot', [{ progress: progress({}), conflict: null }])
+    const { container } = render(<QueueOverlay />)
+
+    const toast = await screen.findByRole('button', { name: 'Expand job queue' })
+    const chevron = container.querySelector('.lucide-chevron-up')
+    expect(chevron).not.toBeNull()
+    expect(toast).toContainElement(chevron as HTMLElement)
+
+    await user.click(chevron as Element)
+
+    expect(await screen.findByRole('region', { name: 'Job queue' })).toBeInTheDocument()
+  })
+
+  it('caps the expanded panel height instead of reserving fixed space once jobs finish', async () => {
+    ipc.override('queue_snapshot', [
+      { progress: progress({ status: 'completed', currentFileName: null }), conflict: null },
+    ])
+    render(<QueueOverlay />)
+
+    act(() => {
+      useQueueStore.getState().setExpanded(true)
+    })
+    const region = await screen.findByRole('region', { name: 'Job queue' })
+
+    // A fixed height here would leave a large empty gap once the chart and
+    // other active-only sections stop rendering; max-height lets the panel
+    // shrink to its (now shorter) content instead.
+    expect(region.className).toContain('max-h-queue-list')
+    expect(region.className).not.toMatch(/(?<!max-)h-queue-list/)
   })
 
   it('auto-expands when a new active queue job appears and the preference is enabled', async () => {
@@ -177,39 +209,6 @@ describe('QueueOverlay', () => {
       expect(useQueueStore.getState().order).toEqual([])
     })
     expect(screen.queryByRole('button', { name: 'Expand job queue' })).not.toBeInTheDocument()
-  })
-
-  it('surfaces a conflict in the active pane only and keeps Enter mapped to Skip', async () => {
-    const user = userEvent.setup()
-    const resolveSpy = vi.fn(() => undefined)
-    ipc.override('resolve_conflict', resolveSpy)
-    act(() => {
-      useQueueStore.setState({
-        conflicts: {
-          'op-1': {
-            operationId: 'op-1',
-            sourcePath: 'C:\\src\\a.txt',
-            destinationPath: 'D:\\dst\\a.txt',
-            name: 'a.txt',
-          },
-        },
-        order: ['op-1'],
-      })
-    })
-
-    render(
-      <div className="grid grid-cols-2">
-        <FilePane paneId="left" />
-        <FilePane paneId="right" />
-      </div>,
-    )
-
-    const dialog = await screen.findByRole('dialog', { name: 'Resolve file conflict' })
-    expect(screen.getByLabelText('Left pane')).toContainElement(dialog)
-    expect(screen.getByLabelText('Right pane')).not.toContainElement(dialog)
-
-    await user.keyboard('{Enter}')
-    expect(resolveSpy).toHaveBeenCalled()
   })
 
   it('Escape collapses the expanded panel rather than cancelling', async () => {
