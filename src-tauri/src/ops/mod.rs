@@ -11,7 +11,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -2042,6 +2042,32 @@ fn delete_dir_recursive(
     fs::remove_dir(source).map_err(|error| error.to_string())
 }
 
+/// Removes a file or symlink at `path`.
+///
+/// On Windows, `DeleteFileW` (which `fs::remove_file` uses) fails with
+/// "Access is denied" for a symlink/junction that points at a directory —
+/// those reparse points must go through `RemoveDirectoryW`
+/// (`fs::remove_dir`) instead, even though the link itself isn't recursed
+/// into. `FileTypeExt::is_symlink_dir` reads that distinction straight off
+/// the reparse point, so it works even for a broken/dangling symlink whose
+/// target no longer exists. Unix `unlink` has no such distinction, so
+/// `remove_file` always works there regardless of what the symlink targets.
+#[cfg(windows)]
+fn remove_file_or_symlink(path: &Path, link_metadata: &fs::Metadata) -> io::Result<()> {
+    use std::os::windows::fs::FileTypeExt;
+
+    if link_metadata.file_type().is_symlink_dir() {
+        fs::remove_dir(path)
+    } else {
+        fs::remove_file(path)
+    }
+}
+
+#[cfg(not(windows))]
+fn remove_file_or_symlink(path: &Path, _link_metadata: &fs::Metadata) -> io::Result<()> {
+    fs::remove_file(path)
+}
+
 fn delete_file_with_progress(
     source: &Path,
     add_discovered_totals: bool,
@@ -2059,10 +2085,9 @@ fn delete_file_with_progress(
         return Ok(());
     }
 
-    let file_size = fs::symlink_metadata(source)
-        .map(|metadata| metadata.len())
-        .unwrap_or(0);
-    fs::remove_file(source).map_err(|error| error.to_string())?;
+    let link_metadata = fs::symlink_metadata(source).map_err(|error| error.to_string())?;
+    let file_size = link_metadata.len();
+    remove_file_or_symlink(source, &link_metadata).map_err(|error| error.to_string())?;
 
     {
         let mut op = ctx.op_arc.lock().expect("op lock");
@@ -2187,18 +2212,27 @@ fn copy_file_with_total_discovery(
 }
 
 pub fn remove_target(target: &Path) -> Result<(), String> {
-    if target.is_dir() {
-        fs::remove_dir_all(target).map_err(|error| error.to_string())
-    } else {
-        fs::remove_file(target).map_err(|error| error.to_string())
-    }
+    remove_path(target).map_err(|error| error.to_string())
 }
 
 pub fn remove_source(source: &Path) -> Result<(), String> {
-    if source.is_dir() {
-        fs::remove_dir_all(source).map_err(|error| error.to_string())
+    remove_path(source).map_err(|error| error.to_string())
+}
+
+/// Removes a file, symlink, or directory at `path`.
+///
+/// A dangling directory symlink/junction still reports as a reparse point
+/// rather than a real directory, so this checks `symlink_metadata` (which
+/// doesn't follow the link) instead of `Path::is_dir()` before deciding
+/// between `remove_dir_all` and [`remove_file_or_symlink`] — otherwise a
+/// broken directory symlink on Windows would hit `remove_file` and fail with
+/// access denied, same as the bug this guards against for live symlinks.
+fn remove_path(path: &Path) -> io::Result<()> {
+    let link_metadata = fs::symlink_metadata(path)?;
+    if link_metadata.is_dir() && !link_metadata.file_type().is_symlink() {
+        fs::remove_dir_all(path)
     } else {
-        fs::remove_file(source).map_err(|error| error.to_string())
+        remove_file_or_symlink(path, &link_metadata)
     }
 }
 

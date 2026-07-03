@@ -313,6 +313,53 @@ fn file_operation_helpers_delete_paths_with_progress_directly() {
     assert_eq!(op_arc.lock().expect("op lock").copied_bytes, 9);
 }
 
+/// Deleting a folder that contains a symlink (to a file or a directory) must
+/// remove the link itself without an OS permission error and without
+/// touching whatever the link points at. On Windows this specifically
+/// exercises `remove_file_or_symlink` choosing `RemoveDirectoryW` over
+/// `DeleteFileW` for directory symlinks/junctions — using the wrong API is
+/// what previously surfaced as "Access is denied" for folders holding
+/// symlinked items even though Explorer could delete them fine.
+#[cfg(unix)]
+#[test]
+fn file_operation_helpers_delete_a_folder_containing_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let fixture = tempfile::tempdir().expect("temp dir");
+    let root = fixture.path();
+    let target_dir = root.join("target-dir");
+    let target_file = root.join("target-file.txt");
+    std::fs::create_dir(&target_dir).expect("target dir");
+    std::fs::write(target_dir.join("keep.txt"), b"keep").expect("target dir child");
+    std::fs::write(&target_file, b"keep-file").expect("target file");
+
+    let container = root.join("container");
+    std::fs::create_dir(&container).expect("container dir");
+    symlink(&target_dir, container.join("linked-dir")).expect("dir symlink");
+    symlink(&target_file, container.join("linked-file")).expect("file symlink");
+
+    let mut delete_state = state();
+    delete_state.kind = OpKind::Delete;
+    let op_arc = Arc::new(Mutex::new(delete_state));
+    let resolver = Arc::new(std::sync::Condvar::new());
+    let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
+    let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
+    let ctx = WorkerCtx {
+        op_arc: &op_arc,
+        resolver: &resolver,
+        progress: &progress,
+        start: Instant::now(),
+        rate_window: Duration::from_secs(1),
+        instant_now: &instant_now,
+    };
+
+    delete_path_with_progress(&container, true, &ctx).expect("delete container with symlinks");
+
+    assert!(!container.exists());
+    assert!(target_dir.join("keep.txt").exists(), "link target dir survives");
+    assert!(target_file.exists(), "link target file survives");
+}
+
 #[test]
 fn file_operation_helpers_surface_io_errors_directly() {
     let fixture = tempfile::tempdir().expect("temp dir");
