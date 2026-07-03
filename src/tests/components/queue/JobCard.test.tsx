@@ -58,7 +58,7 @@ describe('JobCard', () => {
     expect(screen.getByText('Copying 1,248 items')).toBeInTheDocument()
     expect(screen.getByText('63%')).toBeInTheDocument()
     expect(screen.getByText('master-reel-final.mkv')).toBeInTheDocument()
-    expect(screen.getByText('812 / 1,248 items')).toBeInTheDocument()
+    expect(screen.getByText('813 / 1,248 items')).toBeInTheDocument()
     expect(screen.getByTestId('throughput-chart-line')).toBeInTheDocument()
     expect(screen.getByRole('progressbar', { name: 'Copying 1,248 items' })).toHaveAttribute(
       'aria-valuenow',
@@ -86,6 +86,55 @@ describe('JobCard', () => {
       />,
     )
     expect(screen.getByText('estimating…')).toBeInTheDocument()
+  })
+
+  it('keeps showing the last current file while the backend briefly clears it between files', () => {
+    const { rerender } = render(
+      <JobCard
+        operation={progress({})}
+        throughputHistory={samples([63, 260_046_848])}
+        throughputPeak={260_046_848}
+        hasConflict={false}
+        reorderable={false}
+        {...noopHandlers()}
+      />,
+    )
+    expect(screen.getByText('master-reel-final.mkv')).toBeInTheDocument()
+    const fileProgressbar = screen.getByRole('progressbar', {
+      name: 'Current file progress for master-reel-final.mkv',
+    })
+
+    // The backend clears currentFileName for an instant between finishing one
+    // file and starting the next; the block must stay mounted and keep
+    // showing the last file instead of disappearing and reappearing.
+    rerender(
+      <JobCard
+        operation={progress({
+          currentFileName: null,
+          currentFileCopiedBytes: 0,
+          currentFileTotalBytes: 0,
+        })}
+        throughputHistory={samples([63, 260_046_848])}
+        throughputPeak={260_046_848}
+        hasConflict={false}
+        reorderable={false}
+        {...noopHandlers()}
+      />,
+    )
+    expect(screen.getByText('master-reel-final.mkv')).toBeInTheDocument()
+    expect(fileProgressbar).toBeInTheDocument()
+
+    rerender(
+      <JobCard
+        operation={progress({ currentFileName: 'next-clip.mkv' })}
+        throughputHistory={samples([63, 260_046_848])}
+        throughputPeak={260_046_848}
+        hasConflict={false}
+        reorderable={false}
+        {...noopHandlers()}
+      />,
+    )
+    expect(screen.getByText('next-clip.mkv')).toBeInTheDocument()
   })
 
   it('renders a Resume control when paused and hides the chart', async () => {
@@ -308,7 +357,7 @@ describe('JobCard', () => {
     try {
       expect(liveRegion).toHaveClass('sr-only')
       expect(liveRegion?.parentElement).not.toHaveAttribute('aria-live')
-      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 812 / 1,248 items')
+      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 813 / 1,248 items')
 
       act(() => {
         rerender(
@@ -332,7 +381,7 @@ describe('JobCard', () => {
       // ceiling label can carry the same rate string when speed equals the peak.)
       const metricsRow = liveRegion?.parentElement as HTMLElement
       expect(within(metricsRow).getByText('248.0 MB/s')).toBeInTheDocument()
-      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 812 / 1,248 items')
+      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 813 / 1,248 items')
 
       // After the metrics refresh interval the visible row catches up…
       act(() => {
@@ -340,19 +389,19 @@ describe('JobCard', () => {
       })
       expect(within(metricsRow).getByText('286.1 MB/s')).toBeInTheDocument()
       expect(screen.getByText('about 2 min left')).toBeInTheDocument()
-      expect(screen.getByText('900 / 1,248 items')).toBeInTheDocument()
+      expect(screen.getByText('901 / 1,248 items')).toBeInTheDocument()
       // …but the slower 5s live region is still on the old announcement.
-      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 812 / 1,248 items')
+      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 813 / 1,248 items')
 
       act(() => {
         vi.advanceTimersByTime(3999)
       })
-      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 812 / 1,248 items')
+      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 813 / 1,248 items')
 
       act(() => {
         vi.advanceTimersByTime(1)
       })
-      expect(liveRegion).toHaveTextContent('286.1 MB/s, about 2 min left, 900 / 1,248 items')
+      expect(liveRegion).toHaveTextContent('286.1 MB/s, about 2 min left, 901 / 1,248 items')
     } finally {
       vi.useRealTimers()
     }
@@ -373,7 +422,7 @@ describe('JobCard', () => {
 
     const liveRegion = container.querySelector('[aria-live="polite"]')
     try {
-      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 812 / 1,248 items')
+      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 813 / 1,248 items')
 
       act(() => {
         rerender(
@@ -408,7 +457,7 @@ describe('JobCard', () => {
       act(() => {
         vi.advanceTimersByTime(5000)
       })
-      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 812 / 1,248 items')
+      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 813 / 1,248 items')
     } finally {
       vi.useRealTimers()
     }

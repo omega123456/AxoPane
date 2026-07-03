@@ -82,10 +82,6 @@ export function JobCard({
   const headingId = useId()
   const percent = Math.min(100, Math.max(0, operation.progressPercent))
   const roundedPercent = Math.round(percent)
-  const filePercent =
-    operation.currentFileTotalBytes > 0
-      ? Math.min(100, (operation.currentFileCopiedBytes / operation.currentFileTotalBytes) * 100)
-      : 0
   const isCompleted = operation.status === 'completed'
   const isFailed = operation.status === 'failed'
   const isPaused = operation.status === 'paused'
@@ -95,19 +91,59 @@ export function JobCard({
   const queuedItems = itemSummary(operation.itemNames)
   const showQueuedItems = isPending && queuedItems !== null
   const showChart = !isPending && !isPaused && !isCompleted && !isFailed && !isCancelled
+
+  // The backend briefly clears the current-file fields between finishing one
+  // file and starting the next, which would otherwise unmount this whole
+  // block and make the card's height (and everything below it) jump. Freeze
+  // the last known file in state and keep showing it through that gap; the
+  // block itself stays mounted for the whole active-ish lifetime of the job
+  // so its reserved space never collapses mid-run. (React's documented
+  // "adjusting state during render" pattern — the guarded `setState` below
+  // only fires when the snapshot actually changed, so it settles in the same
+  // render pass instead of looping.)
+  const currentFileSnapshot = operation.currentFileName
+    ? {
+        name: operation.currentFileName,
+        copiedBytes: operation.currentFileCopiedBytes,
+        totalBytes: operation.currentFileTotalBytes,
+      }
+    : null
+  const [lastCurrentFile, setLastCurrentFile] = useState(currentFileSnapshot)
+  if (
+    currentFileSnapshot &&
+    (currentFileSnapshot.name !== lastCurrentFile?.name ||
+      currentFileSnapshot.copiedBytes !== lastCurrentFile?.copiedBytes ||
+      currentFileSnapshot.totalBytes !== lastCurrentFile?.totalBytes)
+  ) {
+    setLastCurrentFile(currentFileSnapshot)
+  }
+  const showCurrentFile = !isPending && !isCompleted && !isFailed && !isCancelled
+  const displayedFile = showCurrentFile ? lastCurrentFile : null
+  const filePercent =
+    displayedFile && displayedFile.totalBytes > 0
+      ? Math.min(100, (displayedFile.copiedBytes / displayedFile.totalBytes) * 100)
+      : 0
   // Show the chart's smoothed leading-edge rate (not the raw instantaneous one)
   // so the number matches the curve and stays calm; fall back before any history.
   const currentRate =
     throughputHistory.length > 0
       ? throughputHistory[throughputHistory.length - 1].rate
       : operation.bytesPerSecond
+  // While a job is actively working through its queue, "N completed" reads as
+  // "0 of 2" for the entire time the first item is copying — show the item
+  // currently being worked on instead (like Windows' "item 1 of 2"). Once the
+  // job stops (done/failed/cancelled), fall back to the true completed count.
+  const isTerminalForItemCount = isCompleted || isFailed || isCancelled
+  const displayedItemNumber = isTerminalForItemCount
+    ? operation.completedItems
+    : Math.min(operation.completedItems + 1, operation.totalItems)
   const metrics = useMemo(
     () => ({
       rate: formatRate(currentRate),
       eta: operation.etaSeconds !== null ? formatEta(operation.etaSeconds) : 'estimating…',
-      items: `${formatCount(operation.completedItems)} / ${formatCount(operation.totalItems)} items`,
+      items: `${formatCount(displayedItemNumber)} / ${formatCount(operation.totalItems)} items`,
     }),
-    [currentRate, operation.completedItems, operation.etaSeconds, operation.totalItems],
+    [currentRate, displayedItemNumber, operation.etaSeconds, operation.totalItems],
   )
   // Throttle the live view (metrics + chart) to a calm, fixed cadence so the
   // number and the chart's leading edge update together a few times per second
@@ -252,20 +288,20 @@ export function JobCard({
         </div>
       </div>
 
-      {operation.currentFileName ? (
+      {showCurrentFile ? (
         <div className="mt-3.5 border-t border-light-border pt-3 dark:border-dark-border">
-          <div className="flex items-center justify-between gap-3">
-            <span className="truncate text-xs text-light-text dark:text-dark-text">
-              {operation.currentFileName}
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <span className="min-w-0 flex-1 truncate text-xs text-light-text dark:text-dark-text">
+              {displayedFile?.name ?? ' '}
             </span>
             <span className="shrink-0 font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-              {formatBytes(operation.currentFileCopiedBytes)} /{' '}
-              {formatBytes(operation.currentFileTotalBytes)}
+              {formatBytes(displayedFile?.copiedBytes ?? 0)} /{' '}
+              {formatBytes(displayedFile?.totalBytes ?? 0)}
             </span>
           </div>
           <div
             role="progressbar"
-            aria-label={`Current file progress for ${operation.currentFileName}`}
+            aria-label={`Current file progress for ${displayedFile?.name ?? 'current file'}`}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.round(filePercent)}

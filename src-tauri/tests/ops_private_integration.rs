@@ -270,11 +270,11 @@ mod tests {
     fn progress_helpers_update_state_and_cancelled_copies_short_circuit() {
         let (op_arc, resolver, progress_log, ctx) = make_ctx(op_state(OpStatus::Active, &["/"]));
 
-        add_discovered_total(&ctx, 12);
-        begin_file_progress(&ctx, Path::new("/tmp/example.txt"), 12);
-        report_chunk_progress(&ctx, 5);
+        add_discovered_total(&ctx, 12, None);
+        begin_file_progress(&ctx, Path::new("/tmp/example.txt"), 12, None);
+        report_chunk_progress(&ctx, 5, None);
         count_skipped_bytes(&ctx, 2);
-        finish_file_progress(&ctx);
+        finish_file_progress(&ctx, None);
         let tracked_item = { ctx.op_arc.lock().expect("op lock").items[0].clone() };
         advance_item(&ctx, &tracked_item);
 
@@ -293,7 +293,7 @@ mod tests {
 
         let mut reader = Cursor::new(b"cancelled".to_vec());
         let mut writer = Cursor::new(Vec::<u8>::new());
-        copy_reader_with_progress(&mut reader, &mut writer, &ctx).expect("cancelled copy");
+        copy_reader_with_progress(&mut reader, &mut writer, &ctx, None).expect("cancelled copy");
 
         let state = op_arc.lock().expect("op lock");
         assert_eq!(state.total_bytes, 12);

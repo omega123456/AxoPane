@@ -18,7 +18,13 @@ fn as_state<'a, T: Send + Sync + 'static>(value: &'a T) -> tauri::State<'a, T> {
     unsafe { std::mem::transmute::<&'a T, tauri::State<'a, T>>(value) }
 }
 
-fn build_state() -> (TempDir, TempDir, Arc<FileLogger>, LoggingState, PersistenceState) {
+fn build_state() -> (
+    TempDir,
+    TempDir,
+    Arc<FileLogger>,
+    LoggingState,
+    PersistenceState,
+) {
     let log_dir = tempdir().expect("log dir");
     let config_dir = tempdir().expect("config dir");
     let logger = FileLogger::new(log_dir.path(), LogLevel::Info).expect("logger");

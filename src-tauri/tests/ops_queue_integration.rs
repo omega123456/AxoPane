@@ -49,13 +49,18 @@ fn deterministic_instants(offsets_ms: &[u64]) -> impl Fn() -> Instant + Send + S
     }
 }
 
-fn pending_delete_state(id: &str, items: Vec<OpItem>) -> OpState {
+fn pending_transfer_state(
+    id: &str,
+    kind: OpKind,
+    destination_dir: &Path,
+    items: Vec<OpItem>,
+) -> OpState {
     let total_items = items.len() as u64;
     let total_bytes = items.iter().map(|item| item.size_bytes).sum();
     OpState {
         id: id.to_string(),
-        kind: OpKind::Delete,
-        destination_dir: Path::new("").to_path_buf(),
+        kind,
+        destination_dir: destination_dir.to_path_buf(),
         items,
         volumes: HashSet::from(["test-volume".to_string()]),
         status: OpStatus::Pending,
@@ -80,6 +85,10 @@ fn pending_delete_state(id: &str, items: Vec<OpItem>) -> OpState {
         apply_to_all: None,
         rename_to: None,
     }
+}
+
+fn pending_delete_state(id: &str, items: Vec<OpItem>) -> OpState {
+    pending_transfer_state(id, OpKind::Delete, Path::new(""), items)
 }
 
 /// Wait for a predicate over the latest progress snapshot, polling quickly.
@@ -237,6 +246,73 @@ fn delete_directory_progress_is_monotonic_and_coalesced() {
         assert!(
             pair[1].progress_percent >= pair[0].progress_percent,
             "delete progress regressed from {} to {}",
+            pair[0].progress_percent,
+            pair[1].progress_percent
+        );
+    }
+
+    let final_progress = progress.last().expect("final progress");
+    assert_eq!(final_progress.status, OpStatus::Completed);
+    assert_eq!(final_progress.total_items, 1);
+    assert_eq!(final_progress.completed_items, 1);
+    assert_eq!(final_progress.total_bytes, 100);
+    assert_eq!(final_progress.copied_bytes, 100);
+}
+
+#[test]
+fn copy_directory_progress_is_monotonic_and_coalesced() {
+    let dir = tempdir().expect("temp dir");
+    let tree = dir.path().join("many");
+    let dest = dir.path().join("dest");
+    fs::create_dir(&tree).expect("tree");
+    for index in 0..25 {
+        fs::write(tree.join(format!("file-{index}.txt")), b"abcd").expect("child");
+    }
+
+    let emitted = Arc::new(Mutex::new(Vec::<OpProgress>::new()));
+    let emitted_sink = emitted.clone();
+    let mut service = OpsService::new(Duration::from_millis(50));
+    service.set_instant_now_for_tests(Arc::new(deterministic_instants(&[0, 0, 0, 0, 100])));
+    service.set_progress_emitter(Arc::new(move |progress| {
+        emitted_sink.lock().expect("progress lock").push(progress);
+    }));
+    service.insert_op_for_tests(pending_transfer_state(
+        "copy-many",
+        OpKind::Copy,
+        &dest,
+        vec![OpItem {
+            source_path: tree.to_string_lossy().into_owned(),
+            name: "many".to_string(),
+            size_bytes: 0,
+        }],
+    ));
+
+    service.run_operation_for_tests("copy-many");
+
+    assert_eq!(fs::read_dir(dest.join("many")).expect("dest").count(), 25);
+    let progress = emitted.lock().expect("progress lock");
+    assert!(
+        progress.len() <= 6,
+        "too many copy progress events: {progress:?}"
+    );
+    // Regression coverage for the totals bug: the folder's real size must be
+    // measured up front, not discovered piecemeal as each nested file copies —
+    // otherwise `copied / total` races ahead of 100% and gets clamped there
+    // long before the job is actually done.
+    assert!(progress
+        .iter()
+        .any(|snapshot| snapshot.status == OpStatus::Active && snapshot.total_bytes == 100));
+    assert!(
+        progress
+            .iter()
+            .all(|snapshot| snapshot.copied_bytes <= snapshot.total_bytes),
+        "copy progress exceeded its own total: {progress:?}"
+    );
+
+    for pair in progress.windows(2) {
+        assert!(
+            pair[1].progress_percent >= pair[0].progress_percent,
+            "copy progress regressed from {} to {}",
             pair[0].progress_percent,
             pair[1].progress_percent
         );

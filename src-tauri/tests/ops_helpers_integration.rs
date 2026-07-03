@@ -91,7 +91,7 @@ fn filesystem_helpers_cover_measurement_cleanup_and_auto_names() {
     fs::write(nested.join("beta.bin"), vec![0_u8; 6]).expect("beta");
 
     let cancel = Arc::new(AtomicBool::new(false));
-    assert_eq!(measure_tree_size(root, &cancel), 10);
+    assert_eq!(measure_tree_size(root, &cancel, false), 10);
 
     fs::write(root.join("report.txt"), b"old").expect("report");
     fs::write(root.join("report (1).txt"), b"older").expect("report copy");
@@ -170,4 +170,51 @@ fn filesystem_helpers_surface_remove_dir_all_errors_for_directories() {
         source_error.is_err(),
         "removing a dir needs write access on its parent"
     );
+}
+
+/// Copy/move read through a symlink and transfer its target's bytes, so their
+/// pre-measurement must follow the link too — otherwise a symlink-heavy tree's
+/// initial total undercounts the same way an un-measured folder used to.
+#[cfg(unix)]
+#[test]
+fn measure_tree_size_follows_symlinks_only_when_asked() {
+    use std::os::unix::fs::symlink;
+
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    let real_dir = root.join("real");
+    fs::create_dir(&real_dir).expect("real dir");
+    fs::write(real_dir.join("inside.bin"), vec![0_u8; 12]).expect("real file");
+    fs::write(root.join("linked-file.bin"), vec![0_u8; 5]).expect("link target file");
+
+    symlink(root.join("real"), root.join("linked-dir")).expect("dir symlink");
+    symlink(root.join("linked-file.bin"), root.join("link-to-file.bin")).expect("file symlink");
+
+    let cancel = Arc::new(AtomicBool::new(false));
+
+    // Not following: symlinks contribute nothing, matching delete (which
+    // removes the link itself, not its target).
+    assert_eq!(measure_tree_size(root, &cancel, false), 12 + 5);
+
+    // Following: the symlinked directory's contents and the symlinked file's
+    // target are both counted, matching what copy/move actually transfers.
+    assert_eq!(measure_tree_size(root, &cancel, true), 12 + 5 + 12 + 5);
+}
+
+/// A symlinked directory that cycles back to an ancestor must not hang the
+/// measurement when following links.
+#[cfg(unix)]
+#[test]
+fn measure_tree_size_guards_against_symlink_cycles_when_following() {
+    use std::os::unix::fs::symlink;
+
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    let nested = root.join("nested");
+    fs::create_dir(&nested).expect("nested dir");
+    fs::write(nested.join("inside.bin"), vec![0_u8; 3]).expect("nested file");
+    symlink(root, nested.join("cycle")).expect("cyclic symlink");
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    assert_eq!(measure_tree_size(root, &cancel, true), 3);
 }

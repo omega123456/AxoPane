@@ -28,8 +28,9 @@ use crate::volumes::VolumeInfo;
 pub const DEFAULT_COMPLETED_RETENTION: Duration = Duration::from_secs(4);
 /// How often active operations recompute their short-window instantaneous rate.
 pub const DEFAULT_RATE_WINDOW: Duration = Duration::from_millis(250);
-/// Minimum spacing between progress emissions while deleting individual files.
-const DELETE_EMIT_INTERVAL: Duration = Duration::from_millis(90);
+/// Minimum spacing between progress emissions while deleting individual files,
+/// or while copying/moving the files nested inside a directory tree.
+const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(90);
 
 /// Number of progress samples required before an ETA is considered stable enough
 /// to surface to the UI.
@@ -141,6 +142,46 @@ impl DeleteThrottle {
         Self {
             last_emit,
             interval,
+        }
+    }
+}
+
+/// Coalesces the flood of per-nested-file progress emissions produced while
+/// copying/moving a directory tree with many small files. Only the recursive
+/// directory walk carries one of these (see `copy_dir_recursive`); a single
+/// top-level file transfer has no flood to coalesce and always emits directly.
+pub struct TransferThrottle {
+    last_emit: Instant,
+    interval: Duration,
+}
+
+impl TransferThrottle {
+    fn new(last_emit: Instant, interval: Duration) -> Self {
+        Self {
+            last_emit,
+            interval,
+        }
+    }
+}
+
+/// Emit `op`'s progress now, or — when a [`TransferThrottle`] is supplied —
+/// only once `interval` has elapsed since the last emission for this walk.
+fn maybe_emit_transfer(ctx: &WorkerCtx<'_>, op: &OpState, throttle: Option<&mut TransferThrottle>) {
+    match throttle {
+        None => {
+            if let Some(emitter) = ctx.progress {
+                emitter(op.progress());
+            }
+        }
+        Some(throttle) => {
+            let now = (ctx.instant_now)();
+            if now.saturating_duration_since(throttle.last_emit) < throttle.interval {
+                return;
+            }
+            throttle.last_emit = now;
+            if let Some(emitter) = ctx.progress {
+                emitter(op.progress());
+            }
         }
     }
 }
@@ -799,7 +840,7 @@ fn run_operation(id: String, inner: &Arc<Mutex<Inner>>, runtime: &WorkerRuntime)
     }
 
     let items = op_arc.lock().expect("op lock").items.clone();
-    measure_delete_totals_up_front(&items, &op_arc, &progress);
+    measure_totals_up_front(&items, &op_arc, &progress);
 
     let start = instant_now();
 
@@ -1009,11 +1050,13 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
         return;
     }
 
-    let add_discovered_totals = item.size_bytes == 0;
+    // Totals for zero-sized (folder) items were already measured up front by
+    // `measure_totals_up_front`, so the walk below never needs to grow the
+    // denominator mid-flight — only `copied_bytes` moves.
     let result = if matches!(kind, OpKind::Move) {
-        move_path_with_total_discovery(&source, &target, add_discovered_totals, ctx)
+        move_path_with_total_discovery(&source, &target, false, ctx)
     } else {
-        copy_path_with_total_discovery(&source, &target, add_discovered_totals, ctx)
+        copy_path_with_total_discovery(&source, &target, false, ctx)
     };
 
     match result {
@@ -1057,10 +1100,16 @@ pub fn archive_root_name_for_tests(source: &Path) -> PathBuf {
 
 #[cfg(feature = "test-utils")]
 pub fn begin_file_progress_for_tests(ctx: &WorkerCtx<'_>, source: &Path, total_bytes: u64) {
-    begin_file_progress(ctx, source, total_bytes);
+    begin_file_progress(ctx, source, total_bytes, None);
 }
 
-fn measure_delete_totals_up_front(
+/// Pre-measure the real byte total for items whose size arrived as 0 (folders,
+/// whose size the frontend cannot cheaply know up front) before any work starts.
+/// Without this, the total grows piecemeal as the walk discovers each nested
+/// file, so `copied / total` can race ahead of 100% and get clamped there long
+/// before the job is actually done — this keeps the denominator accurate from
+/// the first progress emission for all transfer-shaped kinds.
+fn measure_totals_up_front(
     items: &[OpItem],
     op_arc: &Arc<Mutex<OpState>>,
     progress: &Option<ProgressEmitter>,
@@ -1069,18 +1118,24 @@ fn measure_delete_totals_up_front(
         let op = op_arc.lock().expect("op lock");
         (op.kind, op.cancel.clone())
     };
-    if !matches!(kind, OpKind::Delete) {
+    if !matches!(kind, OpKind::Delete | OpKind::Copy | OpKind::Move) {
         return;
     }
 
+    // Copy/move read through a symlink and transfer its target's bytes, so
+    // their pre-measurement must follow links too or a symlink-heavy tree
+    // would undercount the total the same way an un-measured folder did.
+    // Delete removes the link itself, so it does not.
+    let follow_symlinks = matches!(kind, OpKind::Copy | OpKind::Move);
     let mut discovered_bytes = 0_u64;
     for item in items.iter().filter(|item| item.size_bytes == 0) {
         if cancel.load(Ordering::Relaxed) {
             break;
         }
-        discovered_bytes = discovered_bytes.saturating_add(measure_delete_size(
+        discovered_bytes = discovered_bytes.saturating_add(measure_path_size(
             &PathBuf::from(&item.source_path),
             &cancel,
+            follow_symlinks,
         ));
     }
 
@@ -1174,27 +1229,36 @@ fn count_skipped_bytes(ctx: &WorkerCtx<'_>, skipped_bytes: u64) {
     }
 }
 
-fn report_chunk_progress(ctx: &WorkerCtx<'_>, copied_delta: u64) {
+fn report_chunk_progress(
+    ctx: &WorkerCtx<'_>,
+    copied_delta: u64,
+    throttle: Option<&mut TransferThrottle>,
+) {
     let mut op = ctx.op_arc.lock().expect("op lock");
     op.current_file_copied = op.current_file_copied.saturating_add(copied_delta);
     refresh_rate_locked_with_now(&mut op, ctx.start, ctx.rate_window, (ctx.instant_now)());
-    if let Some(emitter) = ctx.progress {
-        emitter(op.progress());
-    }
+    maybe_emit_transfer(ctx, &op, throttle);
 }
 
-fn add_discovered_total(ctx: &WorkerCtx<'_>, discovered_bytes: u64) {
+fn add_discovered_total(
+    ctx: &WorkerCtx<'_>,
+    discovered_bytes: u64,
+    throttle: Option<&mut TransferThrottle>,
+) {
     if discovered_bytes == 0 {
         return;
     }
     let mut op = ctx.op_arc.lock().expect("op lock");
     op.total_bytes = op.total_bytes.saturating_add(discovered_bytes);
-    if let Some(emitter) = ctx.progress {
-        emitter(op.progress());
-    }
+    maybe_emit_transfer(ctx, &op, throttle);
 }
 
-fn begin_file_progress(ctx: &WorkerCtx<'_>, source: &Path, total_bytes: u64) {
+fn begin_file_progress(
+    ctx: &WorkerCtx<'_>,
+    source: &Path,
+    total_bytes: u64,
+    throttle: Option<&mut TransferThrottle>,
+) {
     let mut op = ctx.op_arc.lock().expect("op lock");
     op.current_file_name = source
         .file_name()
@@ -1203,21 +1267,17 @@ fn begin_file_progress(ctx: &WorkerCtx<'_>, source: &Path, total_bytes: u64) {
         .or_else(|| Some(source.to_string_lossy().into_owned()));
     op.current_file_copied = 0;
     op.current_file_total = total_bytes;
-    if let Some(emitter) = ctx.progress {
-        emitter(op.progress());
-    }
+    maybe_emit_transfer(ctx, &op, throttle);
 }
 
-fn finish_file_progress(ctx: &WorkerCtx<'_>) {
+fn finish_file_progress(ctx: &WorkerCtx<'_>, throttle: Option<&mut TransferThrottle>) {
     let mut op = ctx.op_arc.lock().expect("op lock");
     op.copied_bytes = op.copied_bytes.saturating_add(op.current_file_copied);
     op.current_file_name = None;
     op.current_file_copied = 0;
     op.current_file_total = 0;
     refresh_rate_locked_with_now(&mut op, ctx.start, ctx.rate_window, (ctx.instant_now)());
-    if let Some(emitter) = ctx.progress {
-        emitter(op.progress());
-    }
+    maybe_emit_transfer(ctx, &op, throttle);
 }
 
 fn refresh_rate_locked_with_now(
@@ -1425,7 +1485,7 @@ fn extract_item_with_progress(
         unique_archive_directory_path(destination_dir, &archive_stem_for_item(source));
     let discovered_total = zip_uncompressed_size(source)?;
     if item.size_bytes == 0 {
-        add_discovered_total(ctx, discovered_total);
+        add_discovered_total(ctx, discovered_total, None);
     }
 
     fs::create_dir_all(&output_root).map_err(|error| error.to_string())?;
@@ -1462,11 +1522,11 @@ fn extract_item_with_progress(
         }
 
         let entry_size = entry.size();
-        begin_file_progress(ctx, &output_path, entry_size);
+        begin_file_progress(ctx, &output_path, entry_size, None);
         let mut output_file = fs::File::create(&output_path).map_err(|error| error.to_string())?;
-        copy_reader_with_progress(&mut entry, &mut output_file, ctx)?;
+        copy_reader_with_progress(&mut entry, &mut output_file, ctx, None)?;
         output_file.flush().map_err(|error| error.to_string())?;
-        finish_file_progress(ctx);
+        finish_file_progress(ctx, None);
     }
 
     Ok(())
@@ -1523,15 +1583,15 @@ fn append_archive_path(
         .map(|metadata| metadata.len())
         .unwrap_or(0);
     if add_discovered_totals {
-        add_discovered_total(ctx, file_size);
+        add_discovered_total(ctx, file_size, None);
     }
-    begin_file_progress(ctx, source, file_size);
+    begin_file_progress(ctx, source, file_size, None);
     writer
         .start_file(to_zip_path(archive_path)?, zip_file_options())
         .map_err(|error| error.to_string())?;
     let mut input_file = fs::File::open(source).map_err(|error| error.to_string())?;
-    copy_reader_with_progress(&mut input_file, writer, ctx)?;
-    finish_file_progress(ctx);
+    copy_reader_with_progress(&mut input_file, writer, ctx, None)?;
+    finish_file_progress(ctx, None);
     Ok(())
 }
 
@@ -1539,6 +1599,7 @@ fn copy_reader_with_progress<R, W>(
     reader: &mut R,
     writer: &mut W,
     ctx: &WorkerCtx<'_>,
+    mut throttle: Option<&mut TransferThrottle>,
 ) -> Result<(), String>
 where
     R: Read,
@@ -1566,7 +1627,7 @@ where
         writer
             .write_all(&buffer[..read])
             .map_err(|error| error.to_string())?;
-        report_chunk_progress(ctx, read as u64);
+        report_chunk_progress(ctx, read as u64, throttle.as_deref_mut());
     }
     Ok(())
 }
@@ -1717,9 +1778,31 @@ fn zip_dir_options() -> SimpleFileOptions {
 // --- Filesystem helpers --------------------------------------------------------
 
 /// Sum the byte size of a directory tree to drive byte-accurate progress.
-/// Symlinks are not followed (consistent with the copy's link guard, and to stay
-/// cycle-safe) and IO errors are skipped so measurement never aborts the op.
-pub fn measure_tree_size(path: &Path, cancel: &Arc<AtomicBool>) -> u64 {
+///
+/// `follow_symlinks` should match what the operation actually does with a link:
+/// copy/move read through a symlink and transfer its target's bytes (see
+/// `copy_dir_recursive`), so they pass `true` and a symlinked file/directory is
+/// measured via its resolved target (cycle-guarded via `visited`); delete
+/// removes the link itself, not the target (see `delete_file_with_progress`'s
+/// use of `symlink_metadata`), so it passes `false` and symlinks are skipped
+/// entirely. IO errors are skipped so measurement never aborts the op.
+pub fn measure_tree_size(path: &Path, cancel: &Arc<AtomicBool>, follow_symlinks: bool) -> u64 {
+    // Seed the starting directory itself (like `copy_dir_recursive`'s `visited`
+    // guard) so a symlink cycling straight back to `path` is caught on its
+    // first hop rather than being traversed once before detection.
+    let mut visited = match path.canonicalize() {
+        Ok(canonical) => HashSet::from([canonical]),
+        Err(_) => HashSet::new(),
+    };
+    measure_tree_size_inner(path, cancel, follow_symlinks, &mut visited)
+}
+
+fn measure_tree_size_inner(
+    path: &Path,
+    cancel: &Arc<AtomicBool>,
+    follow_symlinks: bool,
+    visited: &mut HashSet<PathBuf>,
+) -> u64 {
     let mut total = 0_u64;
     let Ok(entries) = fs::read_dir(path) else {
         return total;
@@ -1731,8 +1814,25 @@ pub fn measure_tree_size(path: &Path, cancel: &Arc<AtomicBool>) -> u64 {
         let Ok(file_type) = entry.file_type() else {
             continue;
         };
+        if file_type.is_symlink() {
+            if !follow_symlinks {
+                continue;
+            }
+            total = total.saturating_add(measure_symlink_target_size(
+                &entry.path(),
+                cancel,
+                follow_symlinks,
+                visited,
+            ));
+            continue;
+        }
         if file_type.is_dir() {
-            total = total.saturating_add(measure_tree_size(&entry.path(), cancel));
+            total = total.saturating_add(measure_tree_size_inner(
+                &entry.path(),
+                cancel,
+                follow_symlinks,
+                visited,
+            ));
         } else if file_type.is_file() {
             if let Ok(metadata) = entry.metadata() {
                 total = total.saturating_add(metadata.len());
@@ -1742,14 +1842,45 @@ pub fn measure_tree_size(path: &Path, cancel: &Arc<AtomicBool>) -> u64 {
     total
 }
 
-fn measure_delete_size(path: &Path, cancel: &Arc<AtomicBool>) -> u64 {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
-            measure_tree_size(path, cancel)
-        }
-        Ok(metadata) => metadata.len(),
-        Err(_) => 0,
+/// Resolve a symlink's target and measure it, recursing (with cycle
+/// protection) if the target is a directory.
+fn measure_symlink_target_size(
+    link: &Path,
+    cancel: &Arc<AtomicBool>,
+    follow_symlinks: bool,
+    visited: &mut HashSet<PathBuf>,
+) -> u64 {
+    let Ok(target_metadata) = fs::metadata(link) else {
+        return 0;
+    };
+    if !target_metadata.is_dir() {
+        return target_metadata.len();
     }
+    let Ok(canonical) = link.canonicalize() else {
+        return 0;
+    };
+    if !visited.insert(canonical.clone()) {
+        return 0;
+    }
+    let total = measure_tree_size_inner(link, cancel, follow_symlinks, visited);
+    visited.remove(&canonical);
+    total
+}
+
+fn measure_path_size(path: &Path, cancel: &Arc<AtomicBool>, follow_symlinks: bool) -> u64 {
+    let Ok(link_metadata) = fs::symlink_metadata(path) else {
+        return 0;
+    };
+    if link_metadata.file_type().is_symlink() {
+        if !follow_symlinks {
+            return link_metadata.len();
+        }
+        return measure_symlink_target_size(path, cancel, follow_symlinks, &mut HashSet::new());
+    }
+    if link_metadata.is_dir() {
+        return measure_tree_size(path, cancel, follow_symlinks);
+    }
+    link_metadata.len()
 }
 
 pub fn copy_path(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(), String> {
@@ -1765,6 +1896,9 @@ fn copy_path_with_total_discovery(
     if source.is_dir() {
         let root = source.canonicalize().map_err(|error| error.to_string())?;
         let mut visited = HashSet::from([root.clone()]);
+        // Only the directory walk risks flooding the frontend with a progress
+        // event per nested file, so only it carries a throttle.
+        let mut throttle = TransferThrottle::new((ctx.instant_now)(), PROGRESS_EMIT_INTERVAL);
         copy_dir_recursive(
             source,
             target,
@@ -1772,9 +1906,10 @@ fn copy_path_with_total_discovery(
             &mut visited,
             add_discovered_totals,
             ctx,
+            Some(&mut throttle),
         )
     } else {
-        copy_file_with_total_discovery(source, target, add_discovered_totals, ctx)
+        copy_file_with_total_discovery(source, target, add_discovered_totals, ctx, None)
     }
 }
 
@@ -1785,6 +1920,7 @@ pub fn copy_dir_recursive(
     visited: &mut HashSet<PathBuf>,
     add_discovered_totals: bool,
     ctx: &WorkerCtx<'_>,
+    mut throttle: Option<&mut TransferThrottle>,
 ) -> Result<(), String> {
     fs::create_dir_all(target).map_err(|error| error.to_string())?;
     for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
@@ -1824,6 +1960,7 @@ pub fn copy_dir_recursive(
                 visited,
                 add_discovered_totals,
                 ctx,
+                throttle.as_deref_mut(),
             )?;
             visited.remove(&canonical_child);
         } else {
@@ -1832,6 +1969,7 @@ pub fn copy_dir_recursive(
                 &child_target,
                 add_discovered_totals,
                 ctx,
+                throttle.as_deref_mut(),
             )?;
         }
     }
@@ -1847,7 +1985,7 @@ pub fn delete_path_with_progress(
     add_discovered_totals: bool,
     ctx: &WorkerCtx<'_>,
 ) -> Result<(), String> {
-    let mut throttle = DeleteThrottle::new((ctx.instant_now)(), DELETE_EMIT_INTERVAL);
+    let mut throttle = DeleteThrottle::new((ctx.instant_now)(), PROGRESS_EMIT_INTERVAL);
     delete_path_with_progress_throttled(source, add_discovered_totals, ctx, &mut throttle)
 }
 
@@ -1991,7 +2129,7 @@ pub fn copy_file_with_progress(
     target: &Path,
     ctx: &WorkerCtx<'_>,
 ) -> Result<(), String> {
-    copy_file_with_total_discovery(source, target, false, ctx)
+    copy_file_with_total_discovery(source, target, false, ctx, None)
 }
 
 fn copy_file_with_total_discovery(
@@ -1999,6 +2137,7 @@ fn copy_file_with_total_discovery(
     target: &Path,
     add_discovered_total_bytes: bool,
     ctx: &WorkerCtx<'_>,
+    mut throttle: Option<&mut TransferThrottle>,
 ) -> Result<(), String> {
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -2008,9 +2147,9 @@ fn copy_file_with_total_discovery(
         .map(|metadata| metadata.len())
         .unwrap_or(0);
     if add_discovered_total_bytes {
-        add_discovered_total(ctx, file_size);
+        add_discovered_total(ctx, file_size, throttle.as_deref_mut());
     }
-    begin_file_progress(ctx, source, file_size);
+    begin_file_progress(ctx, source, file_size, throttle.as_deref_mut());
 
     let mut reader = fs::File::open(source).map_err(|error| error.to_string())?;
     let mut writer = fs::File::create(target).map_err(|error| error.to_string())?;
@@ -2025,7 +2164,7 @@ fn copy_file_with_total_discovery(
             .cancel
             .load(Ordering::Relaxed)
         {
-            finish_file_progress(ctx);
+            finish_file_progress(ctx, throttle.as_deref_mut());
             return Ok(());
         }
 
@@ -2039,11 +2178,11 @@ fn copy_file_with_total_discovery(
         writer
             .write_all(&buffer[..read])
             .map_err(|error| error.to_string())?;
-        report_chunk_progress(ctx, read as u64);
+        report_chunk_progress(ctx, read as u64, throttle.as_deref_mut());
     }
 
     writer.flush().map_err(|error| error.to_string())?;
-    finish_file_progress(ctx);
+    finish_file_progress(ctx, throttle);
     Ok(())
 }
 

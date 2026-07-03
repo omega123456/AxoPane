@@ -355,6 +355,7 @@ fn file_operation_helpers_surface_io_errors_directly() {
         &mut visited,
         false,
         &ctx,
+        None,
     )
     .expect_err("copy missing dir");
     assert!(!copy_dir_error.is_empty());
@@ -389,8 +390,16 @@ fn copy_dir_recursive_surfaces_create_dir_all_errors_for_the_target() {
     };
 
     let mut visited = HashSet::from([source_dir.clone()]);
-    let error = copy_dir_recursive(&source_dir, &target, &source_dir, &mut visited, false, &ctx)
-        .expect_err("target parent is a file");
+    let error = copy_dir_recursive(
+        &source_dir,
+        &target,
+        &source_dir,
+        &mut visited,
+        false,
+        &ctx,
+        None,
+    )
+    .expect_err("target parent is a file");
     assert!(!error.is_empty());
 }
 
