@@ -64,11 +64,7 @@ describe('JobCard', () => {
       'aria-valuenow',
       '63',
     )
-    expect(
-      screen.getByRole('progressbar', {
-        name: 'Current file progress for master-reel-final.mkv',
-      }),
-    ).toHaveAttribute('aria-valuenow', '60')
+    expect(screen.getByTestId('throughput-chart-progress-fill')).toHaveAttribute('width', '63')
     expect(screen.getByRole('button', { name: /Pause/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Skip/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Cancel/ })).toBeInTheDocument()
@@ -100,8 +96,8 @@ describe('JobCard', () => {
       />,
     )
     expect(screen.getByText('master-reel-final.mkv')).toBeInTheDocument()
-    const fileProgressbar = screen.getByRole('progressbar', {
-      name: 'Current file progress for master-reel-final.mkv',
+    const chartProgressbar = screen.getByRole('progressbar', {
+      name: 'Copying 1,248 items',
     })
 
     // The backend clears currentFileName for an instant between finishing one
@@ -122,7 +118,7 @@ describe('JobCard', () => {
       />,
     )
     expect(screen.getByText('master-reel-final.mkv')).toBeInTheDocument()
-    expect(fileProgressbar).toBeInTheDocument()
+    expect(chartProgressbar).toBeInTheDocument()
 
     rerender(
       <JobCard
@@ -137,7 +133,7 @@ describe('JobCard', () => {
     expect(screen.getByText('next-clip.mkv')).toBeInTheDocument()
   })
 
-  it('renders a Resume control when paused and hides the chart', async () => {
+  it('renders a Resume control when paused and keeps the chart surface stable', async () => {
     const handlers = noopHandlers()
     const user = userEvent.setup()
     render(
@@ -150,9 +146,10 @@ describe('JobCard', () => {
         {...handlers}
       />,
     )
-    expect(
-      screen.queryByRole('progressbar', { name: 'Copying 1,248 items' }),
-    ).not.toBeInTheDocument()
+    expect(screen.getByRole('progressbar', { name: 'Copying 1,248 items' })).toHaveAttribute(
+      'aria-valuenow',
+      '63',
+    )
     const resume = screen.getByRole('button', { name: /Resume/ })
     await user.click(resume)
     expect(handlers.onResume).toHaveBeenCalled()
@@ -312,6 +309,8 @@ describe('JobCard', () => {
       />,
     )
     expect(screen.getByText('Deleting 1,248 items')).toBeInTheDocument()
+    expect(screen.getByText('C:\\src')).toBeInTheDocument()
+    expect(screen.queryByText('D:\\dst')).not.toBeInTheDocument()
   })
 
   it('labels archive operations', () => {

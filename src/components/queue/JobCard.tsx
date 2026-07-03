@@ -90,7 +90,7 @@ export function JobCard({
   const isPending = operation.status === 'pending'
   const queuedItems = itemSummary(operation.itemNames)
   const showQueuedItems = isPending && queuedItems !== null
-  const showChart = !isPending && !isPaused && !isCompleted && !isFailed && !isCancelled
+  const showChart = !isPending && !isCompleted && !isFailed && !isCancelled
 
   // The backend briefly clears the current-file fields between finishing one
   // file and starting the next, which would otherwise unmount this whole
@@ -119,10 +119,6 @@ export function JobCard({
   }
   const showCurrentFile = !isPending && !isCompleted && !isFailed && !isCancelled
   const displayedFile = showCurrentFile ? lastCurrentFile : null
-  const filePercent =
-    displayedFile && displayedFile.totalBytes > 0
-      ? Math.min(100, (displayedFile.copiedBytes / displayedFile.totalBytes) * 100)
-      : 0
   // Show the chart's smoothed leading-edge rate (not the raw instantaneous one)
   // so the number matches the curve and stays calm; fall back before any history.
   const currentRate =
@@ -213,10 +209,10 @@ export function JobCard({
     <article
       aria-labelledby={headingId}
       data-status={operation.status}
-      className="border-b border-light-border p-4 last:border-b-0 dark:border-dark-border"
+      className="p-4"
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-2">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 flex-1 items-start gap-2">
           {reorderable ? (
             <span className="mt-0.5 flex shrink-0 flex-col">
               <button
@@ -230,7 +226,7 @@ export function JobCard({
               </button>
             </span>
           ) : null}
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div
               id={headingId}
               className="flex items-center gap-1.5 text-sm font-semibold text-light-text dark:text-dark-text"
@@ -252,15 +248,21 @@ export function JobCard({
                       : `${verb(operation)} ${formatCount(operation.totalItems)} items`}
               </span>
             </div>
-            <div className="mt-1 truncate font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
+            <div className="mt-1 min-h-5 truncate font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
               {showQueuedItems ? (
                 <span className="mb-1 block truncate text-light-text-soft dark:text-dark-text-soft">
                   {queuedItems}
                 </span>
               ) : null}
-              {operation.sourceDir}{' '}
-              <ArrowRightIcon className="inline h-3 w-3 align-[-2px] text-accent-blue-light dark:text-accent-blue" />{' '}
-              {operation.destinationDir}
+              {operation.destinationDir ? (
+                <>
+                  {operation.sourceDir}{' '}
+                  <ArrowRightIcon className="inline h-3 w-3 align-[-2px] text-accent-blue-light dark:text-accent-blue" />{' '}
+                  {operation.destinationDir}
+                </>
+              ) : (
+                operation.sourceDir
+              )}
             </div>
           </div>
         </div>
@@ -273,23 +275,21 @@ export function JobCard({
         </span>
       </div>
 
-      <div className="mt-2">
+      <div className="mt-3 border-t border-light-border pt-3 dark:border-dark-border">
         <span className="sr-only" aria-live="polite" aria-atomic="true">
           {liveMetricsAnnouncement}
         </span>
-        <div className="flex flex-wrap items-center gap-2 font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-          <span className="text-light-text-soft dark:text-dark-text-soft">
+        <div className="grid grid-cols-3 gap-3 font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
+          <span className="truncate text-light-text-soft dark:text-dark-text-soft">
             {displayMetrics.rate}
           </span>
-          <span className="text-light-text-faint dark:text-dark-text-faint">·</span>
-          <span>{displayMetrics.eta}</span>
-          <span className="text-light-text-faint dark:text-dark-text-faint">·</span>
-          <span>{displayMetrics.items}</span>
+          <span className="truncate text-center">{displayMetrics.eta}</span>
+          <span className="truncate text-right">{displayMetrics.items}</span>
         </div>
       </div>
 
       {showCurrentFile ? (
-        <div className="mt-3.5 border-t border-light-border pt-3 dark:border-dark-border">
+        <div className="mt-3.5">
           <div className="flex min-w-0 items-center justify-between gap-3">
             <span className="min-w-0 flex-1 truncate text-xs text-light-text dark:text-dark-text">
               {displayedFile?.name ?? ' '}
@@ -298,19 +298,6 @@ export function JobCard({
               {formatBytes(displayedFile?.copiedBytes ?? 0)} /{' '}
               {formatBytes(displayedFile?.totalBytes ?? 0)}
             </span>
-          </div>
-          <div
-            role="progressbar"
-            aria-label={`Current file progress for ${displayedFile?.name ?? 'current file'}`}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(filePercent)}
-            className="mt-2 h-1 overflow-hidden rounded-full bg-light-skeleton dark:bg-dark-skeleton"
-          >
-            <div
-              className="h-full rounded-full bg-accent-blue-light opacity-70 dark:bg-accent-blue"
-              style={{ width: `${filePercent}%` }}
-            />
           </div>
         </div>
       ) : null}
@@ -330,7 +317,7 @@ export function JobCard({
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={roundedPercent}
-          className="mt-3.5"
+          className="mt-2.5"
         >
           <ThroughputChart
             samples={view.samples}

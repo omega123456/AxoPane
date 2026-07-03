@@ -120,19 +120,33 @@ describe('queue store', () => {
         bytesPerSecond: 0,
       }),
     )
+    // A stall inside the same bucket never touches the frozen plotted point and
+    // never drops the peak; the drop would only ever surface as a *new* frozen
+    // point once progress crosses into the next bucket.
     const state = useQueueStore.getState()
-    expect(state.throughputHistory['op-1'].at(-1)).toEqual(sample(60, 168.75))
+    expect(state.throughputHistory['op-1'].at(-1)).toEqual(sample(60, 225))
     expect(state.throughputPeak['op-1']).toBe(225)
   })
 
-  it('folds non-advancing readings into the active bucket via EMA', () => {
+  it('holds the plotted point within a bucket and commits the carried EMA when it advances', () => {
     useQueueStore.getState().applyProgress(progress({ operationId: 'op-1', progressPercent: 40 }))
     useQueueStore
       .getState()
       .applyProgress(progress({ operationId: 'op-1', progressPercent: 40, bytesPerSecond: 200 }))
 
-    // EMA step on the changed rate: 100 + (200 - 100) * 0.25 = 125.
-    expect(useQueueStore.getState().throughputHistory['op-1']).toEqual([sample(40, 125)])
+    // Within a bucket the EMA steps internally (100 -> 125) but the plotted point
+    // is untouched — there is no provisional point that moves as it settles.
+    expect(useQueueStore.getState().throughputHistory['op-1']).toEqual([sample(40, 100)])
+
+    // Crossing into a new bucket commits one frozen point at the carried EMA
+    // value (125), gated so the repeated 200 B/s reading does not step it again.
+    useQueueStore
+      .getState()
+      .applyProgress(progress({ operationId: 'op-1', progressPercent: 60, bytesPerSecond: 200 }))
+    expect(useQueueStore.getState().throughputHistory['op-1']).toEqual([
+      sample(40, 100),
+      sample(60, 125),
+    ])
   })
 
   it('resets throughput history when percent or counters regress', () => {
@@ -253,13 +267,13 @@ describe('queue store', () => {
     const history = useQueueStore.getState().throughputHistory['op-1']
     // 1001 advancing events collapse into at most one sample per progress bucket.
     expect(history.length).toBeGreaterThan(1)
-    expect(history.length).toBeLessThanOrEqual(60)
+    expect(history.length).toBeLessThanOrEqual(90)
     for (let index = 1; index < history.length; index += 1) {
       expect(history[index].percent).toBeGreaterThanOrEqual(history[index - 1].percent)
     }
   })
 
-  it('keeps passed progress buckets immutable while updating only the active bucket', () => {
+  it('commits one frozen point per bucket and never mutates it within the bucket', () => {
     const apply = (percent: number, rate: number) =>
       useQueueStore.getState().applyProgress(
         progress({
@@ -272,18 +286,16 @@ describe('queue store', () => {
       )
 
     apply(5, 100)
-    apply(10, 500) // crosses into a new bucket → append
+    apply(10, 500) // crosses into a new bucket → commit a frozen point
     const afterTwo = useQueueStore.getState().throughputHistory['op-1']
     expect(afterTwo).toHaveLength(2)
 
-    // Two more events within the same bucket as 10% must update in place, never
-    // append, and must not touch the earlier (now-immutable) 5% bucket.
+    // Further events inside the same bucket as 10% neither append nor edit any
+    // plotted point — the whole history stays byte-for-byte identical, so the
+    // chart never draws a point that later moves as it settles.
     apply(10.01, 999)
     apply(10.02, 999)
-    const history = useQueueStore.getState().throughputHistory['op-1']
-    expect(history).toHaveLength(2)
-    expect(history[0]).toEqual(afterTwo[0])
-    expect(history[1].percent).toBe(10.02)
+    expect(useQueueStore.getState().throughputHistory['op-1']).toEqual(afterTwo)
   })
 
   it('clears a conflict when the op leaves the conflict state', () => {

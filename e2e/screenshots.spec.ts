@@ -155,6 +155,10 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(
       page.locator('[data-testid="throughput-chart-fill-extent"]').first(),
     ).toHaveAttribute('width', String(expandedQueueFinalProgressEvent.progressPercent))
+    await expect(page.locator('[data-testid="throughput-chart"]').first()).toHaveAttribute(
+      'data-scale-settled',
+      'true',
+    )
     await expect(page.locator('main')).toHaveScreenshot(`transfer-queue-expanded-${mode}.png`)
   })
 
@@ -177,6 +181,10 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(
       page.locator('[data-testid="throughput-chart-fill-extent"]').first(),
     ).toHaveAttribute('width', String(deletingQueueFinalProgressEvent.progressPercent))
+    await expect(page.locator('[data-testid="throughput-chart"]').first()).toHaveAttribute(
+      'data-scale-settled',
+      'true',
+    )
     await expect(page.locator('main')).toHaveScreenshot(
       `transfer-queue-deleting-expanded-${mode}.png`,
     )

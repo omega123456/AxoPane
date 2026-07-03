@@ -33,6 +33,13 @@ type QueueStore = {
    * value held across chunks doesn't collapse the smoothing. Internal state.
    */
   throughputLastRaw: Record<string, number>
+  /**
+   * The running EMA-smoothed rate per operation, carried across events *and*
+   * bucket boundaries. Only committed (frozen) points are ever plotted; this
+   * holds the in-progress smoothed value until the next bucket commits it, so
+   * the chart never draws a provisional point that later moves. Internal state.
+   */
+  throughputSmoothed: Record<string, number>
   /** Pending conflicts keyed by operation id. */
   conflicts: Record<string, ConflictInfo>
   /** Whether the queue panel is expanded (vs collapsed toast). */
@@ -67,22 +74,25 @@ function defaultState() {
     throughputHistory: {} as Record<string, ThroughputSample[]>,
     throughputPeak: {} as Record<string, number>,
     throughputLastRaw: {} as Record<string, number>,
+    throughputSmoothed: {} as Record<string, number>,
     conflicts: {} as Record<string, ConflictInfo>,
     expanded: false,
   }
 }
 
 /**
- * Number of progress-% buckets the history is quantised into. A new sample is
- * appended when progress crosses into the next bucket, so history length is
- * bounded and passed buckets stay immutable (preserving the historical shape).
- * Coarser buckets give a cleaner line at the cost of horizontal resolution.
+ * Number of progress-% buckets the history is quantised into. A single frozen
+ * point is committed each time progress crosses into the next bucket; committed
+ * points are never modified afterwards, so the plotted line only ever grows a
+ * new segment to the right and never re-bends. History length is bounded by the
+ * bucket count. More buckets = the line reaches nearer the leading edge and the
+ * first segment appears sooner, at the cost of a slightly busier trace.
  */
-const THROUGHPUT_BUCKETS = 60
+const THROUGHPUT_BUCKETS = 90
 /**
- * EMA factor for the continuous smoothed rate. Smoothing carries *across* bucket
- * boundaries so the leading edge never jumps to a raw reading — the whole curve,
- * including the active point, is the same denoised value.
+ * EMA factor for the running smoothed rate. Smoothing carries across every event
+ * and every bucket boundary; the value is only *sampled* into a frozen point at
+ * each bucket crossing, so consecutive committed points read as a denoised line.
  */
 const THROUGHPUT_EMA_FACTOR = 0.25
 const TERMINAL: ReadonlySet<OpProgress['status']> = new Set([
@@ -116,35 +126,45 @@ type FoldedThroughput = {
   history: ThroughputSample[]
   /** The raw rate just folded, to gate EMA stepping on the next reading. */
   lastRaw: number
+  /** The running smoothed rate, carried forward until the next bucket commits. */
+  smoothed: number
 }
 
 function foldThroughputSample(
   existing: ThroughputSample[] | undefined,
   lastRaw: number,
+  smoothed: number,
   percent: number,
   rate: number,
 ): FoldedThroughput {
   if (!existing || existing.length === 0) {
-    return { history: [{ percent, rate }], lastRaw: rate }
+    // The first reading initialises the EMA and the first frozen point.
+    return { history: [{ percent, rate }], lastRaw: rate, smoothed: rate }
   }
 
-  const lastSample = existing[existing.length - 1]
   // Step the EMA only when the raw rate changes (a new backend sampling window).
   // The backend holds a rate constant between windows and re-emits it on every
   // chunk; stepping per event would let the EMA collapse onto each raw value,
-  // re-introducing the jitter. The smoothed value carries across buckets.
-  const smoothed =
-    rate === lastRaw
-      ? lastSample.rate
-      : lastSample.rate + (rate - lastSample.rate) * THROUGHPUT_EMA_FACTOR
+  // re-introducing the jitter.
+  const nextSmoothed =
+    rate === lastRaw ? smoothed : smoothed + (rate - smoothed) * THROUGHPUT_EMA_FACTOR
 
-  // Crossing into a new bucket appends a point (passed buckets stay frozen);
-  // otherwise the active point tracks the latest percent + smoothed rate. Either
-  // way the value is the *continuous* smoothed rate, so the leading edge is as
-  // calm as the rest of the line.
-  return bucketOf(percent) > bucketOf(lastSample.percent)
-    ? { history: [...existing, { percent, rate: smoothed }], lastRaw: rate }
-    : { history: [...existing.slice(0, -1), { percent, rate: smoothed }], lastRaw: rate }
+  const lastSample = existing[existing.length - 1]
+
+  // Commit a frozen point ONLY when progress crosses into a new bucket; once
+  // placed, its x and y never change again. Within the active bucket we keep the
+  // EMA running but never touch the plotted curve — there is no provisional
+  // "current" point that later moves as it settles (the effect the user saw as a
+  // dog on a lead, the trailing segment re-aiming at a wandering front point).
+  if (bucketOf(percent) > bucketOf(lastSample.percent)) {
+    return {
+      history: [...existing, { percent, rate: nextSmoothed }],
+      lastRaw: rate,
+      smoothed: nextSmoothed,
+    }
+  }
+
+  return { history: existing, lastRaw: rate, smoothed: nextSmoothed }
 }
 
 function seedThroughputHistory(progress: OpProgress): ThroughputSample[] {
@@ -162,12 +182,15 @@ function pruneOperationState(state: QueueStore, id: string): Partial<QueueStore>
   delete throughputPeak[id]
   const throughputLastRaw = { ...state.throughputLastRaw }
   delete throughputLastRaw[id]
+  const throughputSmoothed = { ...state.throughputSmoothed }
+  delete throughputSmoothed[id]
   return {
     operations,
     conflicts,
     throughputHistory,
     throughputPeak,
     throughputLastRaw,
+    throughputSmoothed,
     order: state.order.filter((entry) => entry !== id),
   }
 }
@@ -183,6 +206,7 @@ export const useQueueStore = create<QueueStore>((set) => ({
       const throughputHistory: Record<string, ThroughputSample[]> = {}
       const throughputPeak: Record<string, number> = {}
       const throughputLastRaw: Record<string, number> = {}
+      const throughputSmoothed: Record<string, number> = {}
       const order: string[] = []
 
       for (const snapshot of snapshots) {
@@ -191,9 +215,12 @@ export const useQueueStore = create<QueueStore>((set) => ({
         const existingHistory = state.throughputHistory[id]
         const seededHistory = existingHistory ?? seedThroughputHistory(snapshot.progress)
         throughputHistory[id] = seededHistory
-        // Preserve an in-flight EMA gate; seed a fresh one from the snapshot rate.
+        // Preserve an in-flight EMA gate/value; seed fresh ones from the snapshot.
         throughputLastRaw[id] = existingHistory
           ? state.throughputLastRaw[id] ?? 0
+          : snapshot.progress.bytesPerSecond
+        throughputSmoothed[id] = existingHistory
+          ? state.throughputSmoothed[id] ?? 0
           : snapshot.progress.bytesPerSecond
         throughputPeak[id] = Math.max(
           state.throughputPeak[id] ?? 0,
@@ -210,6 +237,7 @@ export const useQueueStore = create<QueueStore>((set) => ({
         throughputHistory,
         throughputPeak,
         throughputLastRaw,
+        throughputSmoothed,
         conflicts,
       }
     })
@@ -220,10 +248,15 @@ export const useQueueStore = create<QueueStore>((set) => ({
       const resetHistory = shouldResetThroughputHistory(previousProgress, progress)
       const operations = { ...state.operations, [progress.operationId]: progress }
       const folded = resetHistory
-        ? { history: seedThroughputHistory(progress), lastRaw: progress.bytesPerSecond }
+        ? {
+            history: seedThroughputHistory(progress),
+            lastRaw: progress.bytesPerSecond,
+            smoothed: progress.bytesPerSecond,
+          }
         : foldThroughputSample(
             state.throughputHistory[progress.operationId],
             state.throughputLastRaw[progress.operationId] ?? 0,
+            state.throughputSmoothed[progress.operationId] ?? 0,
             progress.progressPercent,
             progress.bytesPerSecond,
           )
@@ -234,6 +267,10 @@ export const useQueueStore = create<QueueStore>((set) => ({
       const throughputLastRaw = {
         ...state.throughputLastRaw,
         [progress.operationId]: folded.lastRaw,
+      }
+      const throughputSmoothed = {
+        ...state.throughputSmoothed,
+        [progress.operationId]: folded.smoothed,
       }
       // Frozen Y ceiling: the non-decreasing max of the displayed (averaged)
       // rate. It ratchets up when the curve reaches a new high and never drops,
@@ -264,6 +301,7 @@ export const useQueueStore = create<QueueStore>((set) => ({
         throughputHistory,
         throughputPeak,
         throughputLastRaw,
+        throughputSmoothed,
         conflicts,
       }
     }),
@@ -324,6 +362,10 @@ export const useQueueStore = create<QueueStore>((set) => ({
         },
         throughputLastRaw: {
           ...state.throughputLastRaw,
+          [id]: 0,
+        },
+        throughputSmoothed: {
+          ...state.throughputSmoothed,
           [id]: 0,
         },
       }
