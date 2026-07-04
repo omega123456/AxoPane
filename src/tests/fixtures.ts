@@ -325,6 +325,9 @@ export const fixtures: {
   cancel_size: {
     cancelled: false,
   },
+  cancel_sizes: {
+    cancelled: 0,
+  },
   set_tab_watch: undefined,
   load_config: {
     theme: 'dark',

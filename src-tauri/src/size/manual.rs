@@ -1,6 +1,6 @@
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use jwalk::WalkDir;
@@ -51,9 +51,24 @@ pub fn calculate(
     }
 
     let mut total = 0_u64;
+
+    // `jwalk` walks the tree on a parallel worker pool that reads ahead of the
+    // consuming loop below. If we only bailed out of the loop, those already
+    // dispatched directory reads would keep churning through the whole subtree
+    // after the caller has cancelled (e.g. the pane navigated away), pegging
+    // the CPU for seconds. Pruning inside `process_read_dir` — which runs on
+    // the worker threads for every directory read — clears the children of
+    // each newly read directory once the job is cancelled, so the parallel
+    // descent collapses at the source instead of running to completion.
+    let prune_cancel = Arc::clone(cancel);
     let iterator = WalkDir::new(path)
         .follow_links(false)
         .sort(true)
+        .process_read_dir(move |_depth, _path, _state, children| {
+            if prune_cancel.load(Ordering::Relaxed) {
+                children.clear();
+            }
+        })
         .try_into_iter()?;
 
     for entry in iterator {
@@ -80,6 +95,16 @@ pub fn calculate(
         }
 
         total = total.saturating_add(metadata.len());
+    }
+
+    // Cancel-pruning in `process_read_dir` can drain the iterator to nothing
+    // the instant a job is cancelled, so the in-loop guard above may never run.
+    // Re-check here so a pruned walk reports the cancellation instead of
+    // returning a bogus partial size as success. (A fully drained walk that
+    // merely reached its timeout on the final entry completed successfully, so
+    // there is no post-loop timeout check — its total is correct.)
+    if cancel.load(Ordering::Relaxed) {
+        return Err(ManualSizeError::Cancelled);
     }
 
     Ok(total)

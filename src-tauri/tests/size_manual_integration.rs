@@ -10,11 +10,11 @@ use std::time::{Duration, Instant};
 
 use file_explorer_lib::size::everything::EverythingAvailability;
 use file_explorer_lib::size::everything::{
-    build_exact_folder_or_queries, escape_exact_folder_query_path, join_everything_result_path,
-    map_everything_result_sizes, normalize_result_path, EverythingHandle,
-    EVERYTHING_BATCH_CHUNK_SIZE,
+    EVERYTHING_BATCH_CHUNK_SIZE, EverythingHandle, build_exact_folder_or_queries,
+    escape_exact_folder_query_path, join_everything_result_path, map_everything_result_sizes,
+    normalize_result_path,
 };
-use file_explorer_lib::size::manual::{calculate, ManualSizeError};
+use file_explorer_lib::size::manual::{ManualSizeError, calculate};
 use file_explorer_lib::size::{SizeBackend, SizeService, SizeSource, SizeStateKind, SizeUpdate};
 use file_explorer_lib::volumes::VolumeInfo;
 use tempfile::tempdir;
@@ -141,12 +141,19 @@ fn everything_stub_reports_unavailable_under_test_utils() {
 
     let fixture = tempdir().expect("temp dir");
     fs::create_dir(fixture.path().join("folder")).expect("folder");
-    assert!(handle
-        .query_folder_size(&fixture.path().join("folder"))
-        .is_err());
-    assert!(handle
-        .query_folder_sizes(&[fixture.path().join("folder").to_string_lossy().into_owned()])
-        .is_err());
+    assert!(
+        handle
+            .query_folder_size(&fixture.path().join("folder"))
+            .is_err()
+    );
+    assert!(
+        handle
+            .query_folder_sizes(
+                &[fixture.path().join("folder").to_string_lossy().into_owned()],
+                &|| false,
+            )
+            .is_err()
+    );
 }
 
 #[cfg(not(windows))]
@@ -171,9 +178,11 @@ fn everything_non_windows_stub_reports_unsupported_and_supports_in_memory_querie
             .expect("query"),
         Some(42),
     );
-    assert!(EverythingHandle::test_available_error()
-        .query_folder_sizes(&["/tmp/known".to_string()])
-        .is_err());
+    assert!(
+        EverythingHandle::test_available_error()
+            .query_folder_sizes(&["/tmp/known".to_string()], &|| false)
+            .is_err()
+    );
 }
 
 #[cfg(windows)]
@@ -319,7 +328,7 @@ fn size_service_request_paths_emits_manual_success_lifecycle() {
         updates_for_emitter
             .lock()
             .expect("updates lock")
-            .push(update);
+            .extend(update);
     });
 
     wait_for_updates(&updates, |updates| {
@@ -339,7 +348,7 @@ fn size_service_request_paths_emits_manual_success_lifecycle() {
 }
 
 #[test]
-fn size_service_cancel_removes_in_flight_manual_jobs() {
+fn size_service_cancel_removes_a_requested_manual_job() {
     let fixture = tempdir().expect("temp dir");
     let root = fixture.path().join("cancelled");
     fs::create_dir_all(&root).expect("root");
@@ -356,23 +365,115 @@ fn size_service_cancel_removes_in_flight_manual_jobs() {
         updates_for_emitter
             .lock()
             .expect("updates lock")
-            .push(update);
+            .extend(update);
     });
 
-    wait_for_updates(&updates, |recorded| {
-        recorded
-            .iter()
-            .any(|update| update.state == SizeStateKind::Calculating)
-    });
-
+    // The job is registered synchronously by `request_paths`, so cancelling
+    // immediately — before its walk could finish — reliably finds and removes
+    // it. (A mid-walk cancel actually aborting the traversal is covered by
+    // `manual_sizer_honors_cancellation`.)
     assert!(service.cancel(&target));
+    // The registry entry is gone, so a second cancel finds nothing.
+    assert!(!service.cancel(&target));
+}
 
-    let deadline = Instant::now() + Duration::from_millis(200);
-    while Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(10));
+#[test]
+fn size_service_cancel_many_removes_only_requested_in_flight_jobs() {
+    let fixture = tempdir().expect("temp dir");
+    let roots = ["alpha", "beta", "gamma"]
+        .into_iter()
+        .map(|name| {
+            let root = fixture.path().join(name);
+            fs::create_dir_all(&root).expect("root");
+            for index in 0..400 {
+                fs::write(root.join(format!("file-{index}.bin")), vec![1_u8; 4096])
+                    .expect("seed file");
+            }
+            root.to_string_lossy().into_owned()
+        })
+        .collect::<Vec<_>>();
+
+    let service = SizeService::new(Duration::from_secs(5));
+    let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
+    let updates_for_emitter = updates.clone();
+
+    service.request_paths(roots.clone(), move |update| {
+        updates_for_emitter
+            .lock()
+            .expect("updates lock")
+            .extend(update);
+    });
+
+    // `request_paths` registers every job synchronously before it returns, so
+    // cancelling right away — before any multi-file walk could possibly finish
+    // — deterministically reports exactly the requested-and-registered jobs.
+    // Cancelling alpha/beta plus a path that was never requested reports only
+    // the two real jobs.
+    let cancelled = service.cancel_many(&[
+        roots[0].clone(),
+        roots[1].clone(),
+        fixture
+            .path()
+            .join("never-requested")
+            .to_string_lossy()
+            .into_owned(),
+    ]);
+    assert_eq!(cancelled, 2);
+
+    // gamma was left untouched, so a follow-up batch still finds it cancellable.
+    assert_eq!(service.cancel_many(&[roots[2].clone()]), 1);
+    // Every job is now gone from the registry.
+    assert_eq!(service.cancel_many(&roots), 0);
+}
+
+#[test]
+fn queued_manual_jobs_are_skipped_once_cancelled() {
+    // Reproduce the "huge folder, then navigate away" case: far more jobs than
+    // the worker pool can run at once, cancelled the instant they are queued.
+    // The backlog must be skipped without walking every folder, so the
+    // registry drains promptly and almost nothing produces a Ready result.
+    let fixture = tempdir().expect("temp dir");
+    let mut paths = Vec::new();
+    for index in 0..200 {
+        let dir = fixture.path().join(format!("folder-{index}"));
+        fs::create_dir_all(&dir).expect("folder");
+        fs::write(dir.join("file.bin"), vec![1_u8; 16]).expect("seed file");
+        paths.push(dir.to_string_lossy().into_owned());
     }
 
-    assert!(!service.cancel(&target));
+    let service = SizeService::new(Duration::from_secs(5));
+    let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
+    let updates_for_emitter = updates.clone();
+
+    service.request_paths(paths.clone(), move |update| {
+        updates_for_emitter
+            .lock()
+            .expect("updates lock")
+            .extend(update);
+    });
+
+    // Cancel the whole batch immediately; the vast majority are still queued
+    // behind the bounded pool and must take the pre-work skip branch.
+    service.cancel_many(&paths);
+
+    // The registry drains quickly precisely because skipped jobs do no I/O.
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < deadline && service.cancel_many(&paths) > 0 {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(service.cancel_many(&paths), 0);
+
+    let ready = updates
+        .lock()
+        .expect("updates lock")
+        .iter()
+        .filter(|update| update.state == SizeStateKind::Ready)
+        .count();
+    assert!(
+        ready < paths.len(),
+        "cancelled backlog should skip work, but {ready} of {} completed",
+        paths.len()
+    );
 }
 
 #[test]
@@ -390,7 +491,7 @@ fn completed_size_jobs_are_removed_from_the_registry() {
         updates_for_emitter
             .lock()
             .expect("updates lock")
-            .push(update);
+            .extend(update);
     });
 
     wait_for_updates(&updates, |updates| {
@@ -417,8 +518,8 @@ fn everything_backed_requests_emit_batched_ready_and_na_results() {
             Some(42),
         )]))),
     );
-    let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
-    let updates_for_emitter = updates.clone();
+    let batches = Arc::new(Mutex::new(Vec::<Vec<SizeUpdate>>::new()));
+    let batches_for_emitter = batches.clone();
 
     assert_eq!(
         service.everything_status().status,
@@ -429,26 +530,47 @@ fn everything_backed_requests_emit_batched_ready_and_na_results() {
     service.request_paths_with_volumes(
         vec![alpha_path.clone(), beta_path.clone()],
         vec![local_volume_for(root)],
-        Arc::new(move |update| {
-            updates_for_emitter
+        Arc::new(move |batch| {
+            batches_for_emitter
                 .lock()
                 .expect("updates lock")
-                .push(update);
+                .push(batch);
         }),
     );
 
-    wait_for_updates(&updates, |recorded| {
-        recorded
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < deadline {
+        let terminal_count = batches
+            .lock()
+            .expect("updates lock")
             .iter()
+            .flatten()
             .filter(|update| {
                 matches!(update.state, SizeStateKind::Ready | SizeStateKind::Na)
                     && update.source == SizeSource::Everything
             })
             .count()
-            >= 2
-    });
+            >= 2;
+        if terminal_count {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
 
-    let recorded = updates.lock().expect("updates lock").clone();
+    let recorded_batches = batches.lock().expect("updates lock").clone();
+    assert!(recorded_batches.iter().any(|batch| {
+        batch.len() == 2
+            && batch
+                .iter()
+                .all(|update| update.state == SizeStateKind::Calculating)
+    }));
+    assert!(recorded_batches.iter().any(|batch| {
+        batch.len() == 2
+            && batch
+                .iter()
+                .all(|update| matches!(update.state, SizeStateKind::Ready | SizeStateKind::Na))
+    }));
+    let recorded = recorded_batches.into_iter().flatten().collect::<Vec<_>>();
     assert!(recorded.iter().any(|update| {
         update.path == alpha_path
             && update.state == SizeStateKind::Ready
@@ -463,6 +585,29 @@ fn everything_backed_requests_emit_batched_ready_and_na_results() {
     }));
     assert!(!service.cancel(&alpha_path));
     assert!(!service.cancel(&beta_path));
+}
+
+#[test]
+fn everything_query_honors_cancellation_predicate() {
+    let path = if cfg!(windows) {
+        r"C:\alpha".to_string()
+    } else {
+        "/tmp/alpha".to_string()
+    };
+    let handle = EverythingHandle::test_available(HashMap::from([(path.clone(), Some(99_u64))]));
+
+    // Not cancelled: the query runs and resolves the known size.
+    let ready = handle
+        .query_folder_sizes(std::slice::from_ref(&path), &|| false)
+        .expect("query");
+    assert_eq!(ready.get(&path).copied().flatten(), Some(99));
+
+    // Cancelled up front: the query short-circuits instead of issuing IPC for
+    // the batch, so no size is resolved for the path.
+    let cancelled = handle
+        .query_folder_sizes(std::slice::from_ref(&path), &|| true)
+        .expect("query");
+    assert!(cancelled.get(&path).copied().flatten().is_none());
 }
 
 #[test]
@@ -484,7 +629,7 @@ fn everything_backed_requests_emit_errors_when_the_batch_query_fails() {
             updates_for_emitter
                 .lock()
                 .expect("updates lock")
-                .push(update);
+                .extend(update);
         }),
     );
 
@@ -513,7 +658,7 @@ fn size_service_reports_missing_manual_path_as_error() {
             updates_for_emitter
                 .lock()
                 .expect("updates lock")
-                .push(update);
+                .extend(update);
         },
     );
 
@@ -524,9 +669,12 @@ fn size_service_reports_missing_manual_path_as_error() {
     });
 
     let recorded = updates.lock().expect("updates lock").clone();
-    assert!(recorded
-        .iter()
-        .any(|update| update.source == SizeSource::Manual && update.state == SizeStateKind::Error));
+    assert!(
+        recorded
+            .iter()
+            .any(|update| update.source == SizeSource::Manual
+                && update.state == SizeStateKind::Error)
+    );
 }
 
 #[test]
@@ -563,7 +711,7 @@ fn request_path_with_explicit_volumes_emits_terminal_events() {
             updates_for_emitter
                 .lock()
                 .expect("updates lock")
-                .push(update);
+                .extend(update);
         }),
     );
 
@@ -588,7 +736,7 @@ fn size_service_reports_fixture_network_paths_as_not_applicable() {
         updates_for_emitter
             .lock()
             .expect("updates lock")
-            .push(update);
+            .extend(update);
     });
 
     let recorded = updates.lock().expect("updates lock").clone();
@@ -657,7 +805,7 @@ fn size_service_mixed_backend_requests_emit_network_and_manual_terminal_events()
             updates_for_emitter
                 .lock()
                 .expect("updates lock")
-                .push(update);
+                .extend(update);
         }),
     );
 

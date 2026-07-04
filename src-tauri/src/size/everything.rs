@@ -104,7 +104,7 @@ fn is_windows_root_like(path: &str) -> bool {
 #[cfg(all(windows, not(feature = "test-utils")))]
 mod platform {
     use super::{
-        build_exact_folder_or_queries, map_everything_result_sizes, EVERYTHING_BATCH_CHUNK_SIZE,
+        EVERYTHING_BATCH_CHUNK_SIZE, build_exact_folder_or_queries, map_everything_result_sizes,
     };
     use std::collections::HashMap;
     use std::ffi::OsStr;
@@ -232,13 +232,20 @@ mod platform {
 
         pub fn query_folder_size(&self, path: &Path) -> Result<Option<u64>, EverythingError> {
             let requested = vec![path.to_string_lossy().into_owned()];
-            self.query_folder_sizes(&requested)
+            self.query_folder_sizes(&requested, &|| false)
                 .map(|sizes| sizes.get(&requested[0]).copied().flatten())
         }
 
+        /// Queries folder sizes for `paths` in bounded chunks. `should_cancel`
+        /// is checked before each chunk, so a batch abandoned mid-flight (e.g.
+        /// the pane navigated away from a folder with tens of thousands of
+        /// subfolders) stops issuing further Everything IPC queries instead of
+        /// grinding through every remaining chunk. Any unqueried paths are left
+        /// as `None`; the caller discards cancelled results anyway.
         pub fn query_folder_sizes(
             &self,
             paths: &[String],
+            should_cancel: &dyn Fn() -> bool,
         ) -> Result<HashMap<String, Option<u64>>, EverythingError> {
             if self.availability() != EverythingAvailability::Available {
                 return Err(EverythingError::NotReady);
@@ -256,6 +263,9 @@ mod platform {
                 .collect::<HashMap<_, _>>();
 
             for chunk in paths.chunks(EVERYTHING_BATCH_CHUNK_SIZE) {
+                if should_cancel() {
+                    break;
+                }
                 let chunk_paths = chunk.to_vec();
                 let query =
                     build_exact_folder_or_queries(&chunk_paths, EVERYTHING_BATCH_CHUNK_SIZE)
@@ -420,16 +430,21 @@ mod platform {
         }
 
         pub fn query_folder_size(&self, _path: &Path) -> Result<Option<u64>, EverythingError> {
-            self.query_folder_sizes(&[_path.to_string_lossy().into_owned()])
+            self.query_folder_sizes(&[_path.to_string_lossy().into_owned()], &|| false)
                 .map(|sizes| sizes.values().next().copied().flatten())
         }
 
         pub fn query_folder_sizes(
             &self,
             paths: &[String],
+            should_cancel: &dyn Fn() -> bool,
         ) -> Result<HashMap<String, Option<u64>>, EverythingError> {
             if self.availability != EverythingAvailability::Available || self.fail_queries {
                 return Err(EverythingError::NotReady);
+            }
+
+            if should_cancel() {
+                return Ok(HashMap::new());
             }
 
             Ok(paths
@@ -508,16 +523,21 @@ mod platform {
         }
 
         pub fn query_folder_size(&self, _path: &Path) -> Result<Option<u64>, EverythingError> {
-            self.query_folder_sizes(&[_path.to_string_lossy().into_owned()])
+            self.query_folder_sizes(&[_path.to_string_lossy().into_owned()], &|| false)
                 .map(|sizes| sizes.values().next().copied().flatten())
         }
 
         pub fn query_folder_sizes(
             &self,
             paths: &[String],
+            should_cancel: &dyn Fn() -> bool,
         ) -> Result<HashMap<String, Option<u64>>, EverythingError> {
             if self.availability != EverythingAvailability::Available || self.fail_queries {
                 return Err(EverythingError::Unsupported);
+            }
+
+            if should_cancel() {
+                return Ok(HashMap::new());
             }
 
             Ok(paths

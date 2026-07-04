@@ -20,18 +20,18 @@ use super::mock;
 #[cfg(feature = "test-utils")]
 use super::types::WarmNativeMenusResponse;
 use super::types::{
-    AppConfig, CancelSizeRequest, CancelSizeResponse, CompressArchiveRequest, CreateEntryRequest,
-    DeleteFromTrashRequest, ExtractArchiveRequest, FileClipboardMode, FolderSizeRequest,
-    FolderSizesRequest, GetDefaultApplicationRequest, GetDefaultApplicationResponse,
-    IconStateEvent, InitialShellResponse, InvokeNativeMenuRequest, ListApplicationsResponse,
-    ListDirRequest, ListDirResponse, ListTrashResponse, ListTreeChildrenRequest,
-    ListTreeChildrenResponse, LoadNativeMenuRequest, LoadNativeMenuResponse, LogFrontendRequest,
-    MenuActionStatus, OpIdRequest, OpenPathRequest, OpenWithRequest, RenameEntryRequest,
-    ReorderOpsRequest, RequestIconsRequest, ResolveConflictRequest,
-    RestoreTrashRequest, SaveConfigRequest, SaveSessionRequest, SessionState,
-    SetDefaultApplicationRequest, SetLogLevelRequest, SetTabWatchRequest, ShowPropertiesRequest,
-    SizeStateEvent, StartOpRequest, TrashEntriesRequest, VolumeInfo, WarmNativeMenusRequest,
-    WriteFileClipboardRequest,
+    AppConfig, CancelSizeRequest, CancelSizeResponse, CancelSizesRequest, CancelSizesResponse,
+    CompressArchiveRequest, CreateEntryRequest, DeleteFromTrashRequest, ExtractArchiveRequest,
+    FileClipboardMode, FolderSizeRequest, FolderSizesRequest, GetDefaultApplicationRequest,
+    GetDefaultApplicationResponse, IconStateEvent, InitialShellResponse, InvokeNativeMenuRequest,
+    ListApplicationsResponse, ListDirRequest, ListDirResponse, ListTrashResponse,
+    ListTreeChildrenRequest, ListTreeChildrenResponse, LoadNativeMenuRequest,
+    LoadNativeMenuResponse, LogFrontendRequest, MenuActionStatus, OpIdRequest, OpenPathRequest,
+    OpenWithRequest, RenameEntryRequest, ReorderOpsRequest, RequestIconsRequest,
+    ResolveConflictRequest, RestoreTrashRequest, SaveConfigRequest, SaveSessionRequest,
+    SessionState, SetDefaultApplicationRequest, SetLogLevelRequest, SetTabWatchRequest,
+    ShowPropertiesRequest, SizeStateEvent, StartOpRequest, TrashEntriesRequest, VolumeInfo,
+    WarmNativeMenusRequest, WriteFileClipboardRequest,
 };
 use crate::fs::DirectoryEntry;
 use std::path::Path;
@@ -347,7 +347,7 @@ pub fn request_folder_size(
 pub fn request_folder_size(
     payload: FolderSizeRequest,
     state: State<'_, SizeService>,
-) -> Vec<SizeStateEvent> {
+) -> Vec<Vec<SizeStateEvent>> {
     request_folder_sizes(
         FolderSizesRequest {
             paths: vec![payload.path],
@@ -364,16 +364,14 @@ pub fn request_folder_sizes(
     state: State<'_, SizeService>,
 ) {
     let app_handle = app.clone();
-    state.request_paths(payload.paths, move |update| {
-        let _ = app_handle.emit(
-            super::events::SIZE_STATE,
-            SizeStateEvent {
-                path: update.path,
-                state: update.state,
-                source: update.source,
-                size_bytes: update.size_bytes,
-            },
-        );
+    state.request_paths(payload.paths, move |updates| {
+        let batch = updates
+            .into_iter()
+            .map(size_state_event_from_update)
+            .collect::<Vec<_>>();
+        if !batch.is_empty() {
+            let _ = app_handle.emit(super::events::SIZE_STATE, batch);
+        }
     });
 }
 
@@ -382,21 +380,26 @@ pub fn request_folder_sizes(
 pub fn request_folder_sizes(
     payload: FolderSizesRequest,
     state: State<'_, SizeService>,
-) -> Vec<SizeStateEvent> {
-    let updates = Arc::new(Mutex::new(Vec::<SizeStateEvent>::new()));
-    let updates_for_emitter = Arc::clone(&updates);
-    let expected_paths = payload.paths.len().max(1);
+) -> Vec<Vec<SizeStateEvent>> {
+    let expected_paths = payload.paths.len();
+    if expected_paths == 0 {
+        return Vec::new();
+    }
 
-    state.request_paths(payload.paths, move |update| {
-        updates_for_emitter
-            .lock()
-            .expect("size updates lock")
-            .push(SizeStateEvent {
-                path: update.path,
-                state: update.state,
-                source: update.source,
-                size_bytes: update.size_bytes,
-            });
+    let updates = Arc::new(Mutex::new(Vec::<Vec<SizeStateEvent>>::new()));
+    let updates_for_emitter = Arc::clone(&updates);
+
+    state.request_paths(payload.paths, move |batch| {
+        let events = batch
+            .into_iter()
+            .map(size_state_event_from_update)
+            .collect::<Vec<_>>();
+        if !events.is_empty() {
+            updates_for_emitter
+                .lock()
+                .expect("size updates lock")
+                .push(events);
+        }
     });
 
     let deadline = Instant::now() + Duration::from_secs(1);
@@ -404,6 +407,7 @@ pub fn request_folder_sizes(
         let recorded = updates.lock().expect("size updates lock");
         let terminal_count = recorded
             .iter()
+            .flatten()
             .filter(|event| {
                 matches!(
                     event.state,
@@ -422,6 +426,15 @@ pub fn request_folder_sizes(
 
     let recorded = updates.lock().expect("size updates lock").clone();
     recorded
+}
+
+fn size_state_event_from_update(update: crate::size::SizeUpdate) -> SizeStateEvent {
+    SizeStateEvent {
+        path: update.path,
+        state: update.state,
+        source: update.source,
+        size_bytes: update.size_bytes,
+    }
 }
 
 /// Resolves and emits icons for `paths`, batching the `icon://state` event
@@ -512,6 +525,16 @@ pub fn cancel_size(
 ) -> CancelSizeResponse {
     CancelSizeResponse {
         cancelled: state.cancel(&payload.path),
+    }
+}
+
+#[tauri::command]
+pub fn cancel_sizes(
+    payload: CancelSizesRequest,
+    state: State<'_, SizeService>,
+) -> CancelSizesResponse {
+    CancelSizesResponse {
+        cancelled: state.cancel_many(&payload.paths),
     }
 }
 

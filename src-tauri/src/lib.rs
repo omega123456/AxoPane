@@ -188,6 +188,7 @@ pub fn run() {
             commands::request_folder_sizes,
             commands::request_icons,
             commands::cancel_size,
+            commands::cancel_sizes,
             commands::set_tab_watch,
             commands::load_config,
             commands::save_config,

@@ -240,6 +240,14 @@ export type CancelSizeResponse = {
   cancelled: boolean
 }
 
+export type CancelSizesRequest = {
+  paths: string[]
+}
+
+export type CancelSizesResponse = {
+  cancelled: number
+}
+
 export type CreateEntryRequest = {
   parent: string
   name: string
@@ -648,6 +656,10 @@ export type IpcCommandMap = {
     request: CancelSizeRequest
     response: CancelSizeResponse
   }
+  cancel_sizes: {
+    request: CancelSizesRequest
+    response: CancelSizesResponse
+  }
   set_tab_watch: {
     request: SetTabWatchRequest
     response: void
@@ -720,7 +732,8 @@ export type IpcCommandMap = {
 
 export type IpcEventMap = {
   'dir://patch': DirPatchEvent
-  'size://state': SizeStateEvent
+  /** Batched: the backend flushes folder-size state changes in arrays to avoid IPC floods. */
+  'size://state': SizeStateEvent[]
   /** Batched: the backend flushes resolved icons in chunks (see Phase 3 backend batching). */
   'icon://state': IconStateEvent[]
   'volumes://changed': VolumesChangedEvent

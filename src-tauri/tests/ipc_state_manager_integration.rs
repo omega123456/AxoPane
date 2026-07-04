@@ -9,15 +9,15 @@ use std::time::{Duration, Instant};
 use file_explorer_lib::fs::{SortDirection, SortKey};
 use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::types::{
-    CancelSizeRequest, CreateEntryRequest, LogFrontendRequest, OpIdRequest, OpenPathRequest,
-    ReorderOpsRequest, ResolveConflictRequest, SaveConfigRequest, SaveSessionRequest,
-    SetTabWatchRequest, TrashEntriesRequest,
+    CancelSizeRequest, CancelSizesRequest, CreateEntryRequest, LogFrontendRequest, OpIdRequest,
+    OpenPathRequest, ReorderOpsRequest, ResolveConflictRequest, SaveConfigRequest,
+    SaveSessionRequest, SetTabWatchRequest, TrashEntriesRequest,
 };
 use file_explorer_lib::ops::{
     ConflictResolution, OpItem, OpKind, OpStatus, OpsService, StartOpRequest,
 };
 use file_explorer_lib::persist::{Config, PersistenceState, Session};
-use file_explorer_lib::size::{size_path_from_string, SizeService};
+use file_explorer_lib::size::{SizeService, size_path_from_string};
 use tempfile::tempdir;
 
 fn op_item(path: &Path) -> OpItem {
@@ -207,12 +207,13 @@ fn commands_cover_size_and_logging_state() {
     let listed_volumes = commands::list_volumes().expect("list volumes");
     assert!(!listed_volumes.is_empty());
 
-    let size_events = commands::request_folder_size(
+    let size_batches = commands::request_folder_size(
         file_explorer_lib::ipc::types::FolderSizeRequest {
             path: size_root.to_string_lossy().into_owned(),
         },
         as_state(&size_service),
     );
+    let size_events = size_batches.into_iter().flatten().collect::<Vec<_>>();
     assert!(size_events.iter().any(|event| {
         matches!(
             event.state,
@@ -229,7 +230,16 @@ fn commands_cover_size_and_logging_state() {
     );
     assert!(!cancel.cancelled);
 
-    let network_size_events = commands::request_folder_sizes(
+    // The batch cancel command reports zero for paths with no in-flight jobs.
+    let batch_cancel = commands::cancel_sizes(
+        CancelSizesRequest {
+            paths: vec![size_root.to_string_lossy().into_owned()],
+        },
+        as_state(&size_service),
+    );
+    assert_eq!(batch_cancel.cancelled, 0);
+
+    let network_size_batches = commands::request_folder_sizes(
         file_explorer_lib::ipc::types::FolderSizesRequest {
             paths: vec![
                 size_root.to_string_lossy().into_owned(),
@@ -242,6 +252,10 @@ fn commands_cover_size_and_logging_state() {
         },
         as_state(&size_service),
     );
+    let network_size_events = network_size_batches
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
     assert!(network_size_events.iter().any(|event| {
         event.path == size_root.to_string_lossy()
             && matches!(
@@ -276,9 +290,11 @@ fn commands_cover_size_and_logging_state() {
             .collect::<Vec<_>>(),
         icon_paths
     );
-    assert!(icon_events
-        .iter()
-        .all(|event| event.icon_data_url.is_none()));
+    assert!(
+        icon_events
+            .iter()
+            .all(|event| event.icon_data_url.is_none())
+    );
     assert_eq!(commands::frontend_log_level("error"), log::Level::Error);
     assert_eq!(commands::frontend_log_level("trace"), log::Level::Debug);
     assert_eq!(
@@ -319,9 +335,7 @@ fn commands_cover_size_and_logging_state() {
     let baseline =
         file_explorer_lib::watch::tab_snapshot_for_tests(&watch_service, &watch_target.tab_id)
             .expect("baseline recorded for tab");
-    assert!(baseline
-        .keys()
-        .any(|path| path.ends_with("watch.txt")));
+    assert!(baseline.keys().any(|path| path.ends_with("watch.txt")));
     commands::set_tab_watch(
         SetTabWatchRequest {
             target: None,

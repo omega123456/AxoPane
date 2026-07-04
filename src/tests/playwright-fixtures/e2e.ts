@@ -380,18 +380,20 @@ export const screenshotScenarios = {
       },
       events: {
         'size://state': [
-          {
-            path: 'C:\\Users\\Omega\\Documents',
-            state: 'calculating',
-            source: 'manual',
-            sizeBytes: null,
-          },
-          {
-            path: 'C:\\Users\\Omega\\Media',
-            state: 'ready',
-            source: 'everything',
-            sizeBytes: 987_654_321,
-          },
+          [
+            {
+              path: 'C:\\Users\\Omega\\Documents',
+              state: 'calculating',
+              source: 'manual',
+              sizeBytes: null,
+            },
+            {
+              path: 'C:\\Users\\Omega\\Media',
+              state: 'ready',
+              source: 'everything',
+              sizeBytes: 987_654_321,
+            },
+          ],
         ],
       },
     },
@@ -401,18 +403,20 @@ export const screenshotScenarios = {
       },
       events: {
         'size://state': [
-          {
-            path: 'C:\\Users\\Omega\\Documents',
-            state: 'calculating',
-            source: 'manual',
-            sizeBytes: null,
-          },
-          {
-            path: 'C:\\Users\\Omega\\Media',
-            state: 'ready',
-            source: 'everything',
-            sizeBytes: 987_654_321,
-          },
+          [
+            {
+              path: 'C:\\Users\\Omega\\Documents',
+              state: 'calculating',
+              source: 'manual',
+              sizeBytes: null,
+            },
+            {
+              path: 'C:\\Users\\Omega\\Media',
+              state: 'ready',
+              source: 'everything',
+              sizeBytes: 987_654_321,
+            },
+          ],
         ],
       },
     },

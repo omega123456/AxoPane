@@ -1,6 +1,7 @@
 import type {
   AppConfig,
   CancelSizeResponse,
+  CancelSizesResponse,
   CompressArchiveRequest,
   CreateEntryRequest,
   DeleteFromTrashRequest,
@@ -167,6 +168,13 @@ export function requestIcons(payload: RequestIconsRequest) {
 
 export function cancelSize(path: string) {
   return invokeCommand({ command: 'cancel_size', payload: { path } }) as Promise<CancelSizeResponse>
+}
+
+export function cancelSizes(paths: string[]) {
+  return invokeCommand({
+    command: 'cancel_sizes',
+    payload: { paths },
+  }) as Promise<CancelSizesResponse>
 }
 
 export function setTabWatch(target: WatchTarget | null, entries?: DirectoryEntry[]) {

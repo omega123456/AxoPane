@@ -4,6 +4,7 @@ import { ipc } from '@/tests/ipc-mock'
 import { invokeCommand, subscribeToEvent } from '@/lib/ipc/client'
 import {
   cancelSize,
+  cancelSizes,
   everythingStatus,
   getInitialShell,
   listDir,
@@ -59,6 +60,9 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
 
     ipc.override('cancel_size', (payload) => ({ cancelled: payload.path === 'C:\\x' }))
     await expect(cancelSize('C:\\x')).resolves.toEqual({ cancelled: true })
+
+    ipc.override('cancel_sizes', (payload) => ({ cancelled: payload.paths.length }))
+    await expect(cancelSizes(['C:\\x', 'C:\\y'])).resolves.toEqual({ cancelled: 2 })
 
     ipc.override('request_folder_size', () => undefined)
     ipc.override('request_folder_sizes', () => undefined)
@@ -262,12 +266,14 @@ describe('playwright ipc mock module', () => {
     ;(globalThis as { __PLAYWRIGHT_IPC_SCENARIO__?: unknown }).__PLAYWRIGHT_IPC_SCENARIO__ = {
       events: {
         'size://state': [
-          {
-            path: 'C:\\folder',
-            state: 'ready',
-            source: 'manual',
-            sizeBytes: 42,
-          },
+          [
+            {
+              path: 'C:\\folder',
+              state: 'ready',
+              source: 'manual',
+              sizeBytes: 42,
+            },
+          ],
         ],
       },
     }

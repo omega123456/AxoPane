@@ -56,6 +56,7 @@ impl TestApp<tauri::test::MockRuntime> {
                 commands::request_folder_sizes,
                 commands::request_icons,
                 commands::cancel_size,
+                commands::cancel_sizes,
                 commands::set_tab_watch,
                 commands::start_op,
                 commands::pause_op,

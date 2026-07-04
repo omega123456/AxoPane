@@ -8,13 +8,31 @@ import { useConfigStore } from '@/stores/config-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useTabsStore } from '@/stores/tabs-store'
 import type { PaneState } from '@/types/pane'
+import type { DirectoryEntry } from '@/lib/types/ipc'
 
-function pane(path: string): PaneState {
+function folderEntries(count: number): DirectoryEntry[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `dir-${index}`,
+    name: `dir-${index}`,
+    path: `C:\\Users\\Omega\\dir-${index}`,
+    isDir: true,
+    sizeBytes: null,
+    itemCount: 1,
+    typeLabel: 'Folder',
+    modifiedAt: null,
+    createdAt: null,
+    attributes: [],
+    isHidden: false,
+    isSystem: false,
+  }))
+}
+
+function pane(path: string, entries: DirectoryEntry[] = []): PaneState {
   return {
     id: 'left',
     title: 'Left pane',
     path,
-    entries: [],
+    entries,
     focusedEntryId: null,
     sortKey: 'name',
     sortDirection: 'asc',
@@ -181,6 +199,28 @@ describe('BreadcrumbBar calculate-all-sizes button', () => {
     useConfigStore.setState({ autoFolderSize: true })
 
     render(<BreadcrumbBar pane={pane('C:\\Users\\Omega')} isActive />)
+
+    expect(screen.queryByRole('button', { name: buttonName })).not.toBeInTheDocument()
+  })
+
+  it('shows the button when the pane holds more than 500 folders, even with auto sizing on', () => {
+    usePanesStore.setState({
+      everythingStatus: { status: 'available', isAvailable: true },
+    })
+    useConfigStore.setState({ autoFolderSize: true })
+
+    render(<BreadcrumbBar pane={pane('C:\\Users\\Omega', folderEntries(501))} isActive />)
+
+    expect(screen.getByRole('button', { name: buttonName })).toBeInTheDocument()
+  })
+
+  it('keeps the button hidden at exactly 500 folders with auto sizing on', () => {
+    usePanesStore.setState({
+      everythingStatus: { status: 'available', isAvailable: true },
+    })
+    useConfigStore.setState({ autoFolderSize: true })
+
+    render(<BreadcrumbBar pane={pane('C:\\Users\\Omega', folderEntries(500))} isActive />)
 
     expect(screen.queryByRole('button', { name: buttonName })).not.toBeInTheDocument()
   })

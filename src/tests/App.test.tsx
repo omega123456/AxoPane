@@ -369,7 +369,7 @@ describe('App', () => {
     expect(report.className).toContain('bg-accent-blue-soft')
   })
 
-  it('renders size state updates from the shared IPC event channel', async () => {
+  it('renders batched size state updates from the shared IPC event channel', async () => {
     installListDirOverride()
     renderApp()
 
@@ -378,21 +378,20 @@ describe('App', () => {
     })
 
     act(() => {
-      ipc.emit('size://state', {
-        path: 'C:\\Users\\Omega\\Documents',
-        state: 'calculating',
-        source: 'everything',
-        sizeBytes: null,
-      })
-    })
-
-    act(() => {
-      ipc.emit('size://state', {
-        path: 'C:\\Users\\Omega\\Documents',
-        state: 'ready',
-        source: 'everything',
-        sizeBytes: 4096,
-      })
+      ipc.emit('size://state', [
+        {
+          path: 'C:\\Users\\Omega\\Documents',
+          state: 'calculating',
+          source: 'everything',
+          sizeBytes: null,
+        },
+        {
+          path: 'C:\\Users\\Omega\\Documents',
+          state: 'ready',
+          source: 'everything',
+          sizeBytes: 4096,
+        },
+      ])
     })
 
     await waitFor(() => {

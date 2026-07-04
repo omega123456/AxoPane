@@ -222,8 +222,10 @@ function App() {
       setVolumes(event.volumes)
     })
 
-    const unlistenSizesPromise = onSizeState((event) => {
-      sizeBatcher.push(event)
+    const unlistenSizesPromise = onSizeState((events) => {
+      for (const event of events) {
+        sizeBatcher.push(event)
+      }
     })
 
     const unlistenIconsPromise = onIconState((events) => {

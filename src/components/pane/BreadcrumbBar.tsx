@@ -3,7 +3,7 @@ import type { PaneState } from '@/types/pane'
 import { ChevronRightIcon, PieChartIcon, RefreshIcon, SearchIcon } from '@/components/icons'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useConfigStore } from '@/stores/config-store'
-import { usePanesStore } from '@/stores/panes-store'
+import { autoFolderSizeDisabledForPane, usePanesStore } from '@/stores/panes-store'
 
 type BreadcrumbBarProps = {
   pane: PaneState
@@ -18,7 +18,10 @@ export function BreadcrumbBar({ pane, isActive }: BreadcrumbBarProps) {
   const everythingAvailable = usePanesStore((state) => state.everythingStatus?.isAvailable ?? false)
   const autoFolderSize = useConfigStore((state) => state.autoFolderSize)
   const openActionDialog = useActionDialogStore((state) => state.open)
-  const showCalculateAllSizes = !everythingAvailable || !autoFolderSize
+  // This pane has too many folders for eager auto-sizing, so surface the manual
+  // button here regardless of the global setting (evaluated per pane).
+  const tooManyFoldersForAuto = autoFolderSizeDisabledForPane(pane.entries)
+  const showCalculateAllSizes = !everythingAvailable || !autoFolderSize || tooManyFoldersForAuto
   const [editingPath, setEditingPath] = useState(false)
   const [pathDraft, setPathDraft] = useState(pane.path)
   const pathInputRef = useRef<HTMLInputElement>(null)

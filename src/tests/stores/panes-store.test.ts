@@ -912,6 +912,80 @@ describe('panes-store navigation', () => {
     expect(request).not.toHaveBeenCalled()
   })
 
+  it('gates eager sizing on the per-pane 500-folder limit', async () => {
+    const request = vi.fn(() => undefined)
+    ipc.override('request_folder_sizes', request)
+    ipc.override('list_dir', (payload) => ({
+      path: payload.path,
+      entries: Array.from({ length: payload.path === 'C:\\many' ? 501 : 500 }, (_, index) =>
+        dirAt(`${payload.path}\\dir-${index}`),
+      ),
+    }))
+    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
+
+    // Exactly 500 folders is still eagerly sized.
+    await usePanesStore.getState().navigatePane('left', 'C:\\few')
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(request).toHaveBeenCalledWith({
+      paths: Array.from({ length: 500 }, (_, index) => `C:\\few\\dir-${index}`),
+    })
+
+    // 501 folders crosses the limit, so auto-sizing is suppressed for the pane.
+    request.mockClear()
+    await usePanesStore.getState().navigatePane('left', 'C:\\many')
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it('cancels in-flight folder-size jobs for the folder it navigates away from', async () => {
+    const cancel = vi.fn((payload: { paths: string[] }) => ({ cancelled: payload.paths.length }))
+    ipc.override('cancel_sizes', cancel)
+    ipc.override('request_folder_sizes', () => undefined)
+    ipc.override('list_dir', (payload) =>
+      payload.path === 'C:\\root'
+        ? { path: 'C:\\root', entries: [dirAt('C:\\root\\Alpha'), dirAt('C:\\root\\Beta')] }
+        : { path: payload.path, entries: [] },
+    )
+    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    expect(usePanesStore.getState().pendingSizeRequests['C:\\root\\Alpha']).toBe(true)
+
+    // Alpha is actively calculating; cancellation should drop its transient state.
+    usePanesStore
+      .getState()
+      .applySizeStates([
+        { path: 'C:\\root\\Alpha', state: 'calculating', source: 'everything', sizeBytes: null },
+      ])
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root\\child')
+
+    expect(cancel).toHaveBeenCalledWith({ paths: ['C:\\root\\Alpha', 'C:\\root\\Beta'] })
+    expect(usePanesStore.getState().pendingSizeRequests['C:\\root\\Alpha']).toBeFalsy()
+    expect(usePanesStore.getState().pendingSizeRequests['C:\\root\\Beta']).toBeFalsy()
+    expect(usePanesStore.getState().sizeStates['C:\\root\\Alpha']).toBeUndefined()
+  })
+
+  it('leaves size jobs running for a folder still shown in the other pane', async () => {
+    const cancel = vi.fn((payload: { paths: string[] }) => ({ cancelled: payload.paths.length }))
+    ipc.override('cancel_sizes', cancel)
+    ipc.override('request_folder_sizes', () => undefined)
+    ipc.override('list_dir', (payload) =>
+      payload.path === 'C:\\root'
+        ? { path: 'C:\\root', entries: [dirAt('C:\\root\\Alpha')] }
+        : { path: payload.path, entries: [] },
+    )
+    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
+
+    // Both panes land on C:\root, so Alpha is shared.
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    await usePanesStore.getState().navigatePane('right', 'C:\\root')
+
+    // Leaving C:\root in the left pane must not cancel Alpha — the right pane
+    // still shows it.
+    await usePanesStore.getState().navigatePane('left', 'C:\\root\\child')
+    expect(cancel).not.toHaveBeenCalled()
+  })
+
   it('toggles hidden files, syncing config and reloading both panes', async () => {
     const saveConfig = vi.fn((payload: SaveConfigRequest) => payload.config)
     ipc.override('save_config', saveConfig)

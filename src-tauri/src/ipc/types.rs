@@ -161,6 +161,12 @@ pub struct CancelSizeRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CancelSizesRequest {
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateEntryRequest {
     pub parent: String,
     pub name: String,
@@ -270,6 +276,12 @@ pub struct ExtractArchiveRequest {
 #[serde(rename_all = "camelCase")]
 pub struct CancelSizeResponse {
     pub cancelled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelSizesResponse {
+    pub cancelled: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

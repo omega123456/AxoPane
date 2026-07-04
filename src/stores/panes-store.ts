@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import {
+  cancelSizes,
   listTreeChildren,
   listDir,
   listTrash,
@@ -343,6 +344,32 @@ function directoryPaths(entries: DirectoryEntry[]): string[] {
   return entries.filter((entry) => entry.isDir).map((entry) => entry.path)
 }
 
+/**
+ * Above this many folders in a single pane, eager (automatic) folder-size
+ * calculation is suppressed for that pane and the manual "Calculate all
+ * folder sizes" button is surfaced instead — computing hundreds of folder
+ * sizes on every navigation is too expensive to run unprompted. The limit is
+ * evaluated per pane, so one crowded pane never disables auto-sizing in the
+ * other.
+ */
+export const AUTO_FOLDER_SIZE_MAX_DIRECTORIES = 500
+
+// Diagnostic: cumulative count of size-state events applied, logged every
+// `SIZE_EVENT_LOG_INTERVAL` so a flood of size updates (and whether it keeps
+// arriving after navigation) is visible without one line per event.
+let sizeEventsProcessed = 0
+const SIZE_EVENT_LOG_INTERVAL = 2000
+
+/** Number of folders in a pane, used to gate per-pane auto folder sizing. */
+export function paneDirectoryCount(entries: DirectoryEntry[]): number {
+  return entries.reduce((count, entry) => (entry.isDir ? count + 1 : count), 0)
+}
+
+/** True when a pane holds too many folders for eager folder sizing. */
+export function autoFolderSizeDisabledForPane(entries: DirectoryEntry[]): boolean {
+  return paneDirectoryCount(entries) > AUTO_FOLDER_SIZE_MAX_DIRECTORIES
+}
+
 function isTerminalSizeState(state: SizeStateKind) {
   return state === 'ready' || state === 'na' || state === 'error'
 }
@@ -648,6 +675,13 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         return []
       }
 
+      // Suppress eager sizing when the folder holds more directories than a
+      // single pane can auto-calculate; the manual "Calculate all" button
+      // takes over for that pane instead.
+      if (paths.length > AUTO_FOLDER_SIZE_MAX_DIRECTORIES) {
+        return []
+      }
+
       const pending = collectPendingSizeRequests(paths, get().sizeStates, get().pendingSizeRequests)
 
       if (pending.length === 0) {
@@ -836,6 +870,56 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     const timer = get().filterTimers[paneId]
     if (timer && !options.viaHistory) {
       window.clearTimeout(timer)
+    }
+
+    // Abandon in-flight folder-size jobs for the folder we're leaving so they
+    // stop churning once the pane moves on. Jobs for folders still shown by the
+    // other pane (same directory open in both) are left untouched.
+    const leaving = get().panes[paneId]
+    const otherPaneId: PaneId = paneId === 'left' ? 'right' : 'left'
+    const otherDirPaths = new Set(directoryPaths(get().panes[otherPaneId].entries))
+    const leavingDirPaths = directoryPaths(leaving.entries)
+    const staleSizePaths = leavingDirPaths.filter(
+      (candidate) =>
+        !otherDirPaths.has(candidate) &&
+        (get().pendingSizeRequests[candidate] ||
+          get().sizeStates[candidate]?.state === 'calculating'),
+    )
+    log.debug('size: navigate cancel evaluation', {
+      paneId,
+      from: leaving.path,
+      to: path,
+      leavingDirs: leavingDirPaths.length,
+      stale: staleSizePaths.length,
+      sampleStale: staleSizePaths.slice(0, 3),
+    })
+    if (staleSizePaths.length > 0) {
+      set((state) => {
+        const pendingSizeRequests = { ...state.pendingSizeRequests }
+        const sizeStates = { ...state.sizeStates }
+        for (const stalePath of staleSizePaths) {
+          delete pendingSizeRequests[stalePath]
+          // Drop the transient "calculating" marker so revisiting the folder
+          // re-requests the size instead of assuming it is still resolving.
+          if (sizeStates[stalePath]?.state === 'calculating') {
+            delete sizeStates[stalePath]
+          }
+        }
+        return { pendingSizeRequests, sizeStates }
+      })
+      const cancelStartedAt = performance.now()
+      void cancelSizes(staleSizePaths)
+        .then((response) => {
+          log.debug('size: navigate cancel result', {
+            paneId,
+            requested: staleSizePaths.length,
+            cancelled: response.cancelled,
+            ms: Math.round(performance.now() - cancelStartedAt),
+          })
+        })
+        .catch((error) => {
+          log.error('navigatePane failed to cancel folder sizes', { paneId, error })
+        })
     }
 
     set((state) => {
@@ -1247,15 +1331,30 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
 
       const nextSizeStates = { ...state.sizeStates }
       const terminalPaths: string[] = []
+      let calculatingCount = 0
       for (const event of events) {
         nextSizeStates[event.path] = {
           state: event.state,
           sizeBytes: event.sizeBytes,
           source: event.source,
         }
+        if (event.state === 'calculating') {
+          calculatingCount += 1
+        }
         if (isTerminalSizeState(event.state)) {
           terminalPaths.push(event.path)
         }
+      }
+
+      const previousBucket = Math.floor(sizeEventsProcessed / SIZE_EVENT_LOG_INTERVAL)
+      sizeEventsProcessed += events.length
+      if (Math.floor(sizeEventsProcessed / SIZE_EVENT_LOG_INTERVAL) > previousBucket) {
+        log.debug('size: events applied', {
+          totalProcessed: sizeEventsProcessed,
+          lastBatch: events.length,
+          calculatingInBatch: calculatingCount,
+          terminalInBatch: terminalPaths.length,
+        })
       }
 
       return {
@@ -1384,6 +1483,12 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     const pane = get().panes[paneId]
     const paths = pane.entries.filter((entry) => entry.isDir).map((entry) => entry.path)
     const pending = paths.filter((path) => !get().pendingSizeRequests[path])
+    log.debug('size: calculateAllFolderSizes', {
+      paneId,
+      path: pane.path,
+      directories: paths.length,
+      pending: pending.length,
+    })
     if (pending.length === 0) {
       return
     }
@@ -1392,8 +1497,14 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       pendingSizeRequests: withPendingSizeRequests(state.pendingSizeRequests, pending, true),
     }))
 
+    const startedAt = performance.now()
     try {
       await requestFolderSizes({ paths: pending })
+      log.debug('size: calculateAllFolderSizes request returned', {
+        paneId,
+        requested: pending.length,
+        ms: Math.round(performance.now() - startedAt),
+      })
     } catch (error) {
       set((state) => ({
         pendingSizeRequests: withPendingSizeRequests(state.pendingSizeRequests, pending, false),
