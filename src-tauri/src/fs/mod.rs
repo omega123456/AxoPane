@@ -256,7 +256,7 @@ pub fn list_tree_children(
         let entry = entry?;
         let path = entry.path();
         let metadata = entry.metadata()?;
-        if !metadata.is_dir() {
+        if !resolve_is_dir(&path, &metadata) {
             continue;
         }
 
@@ -413,7 +413,7 @@ fn build_entry(entry: &DirEntry) -> Result<DirectoryEntry, FsError> {
         Ok(name) => name,
         Err(_) => return Err(FsError::InvalidFileName(path.clone())),
     };
-    let is_dir = metadata.is_dir();
+    let is_dir = resolve_is_dir(&path, &metadata);
     let attributes = collect_attributes(&path, &metadata);
     let mut is_hidden = false;
     let mut is_system = false;
@@ -500,7 +500,7 @@ fn directory_has_visible_child_dirs(path: &Path, show_hidden: bool) -> bool {
         let Ok(metadata) = entry.metadata() else {
             continue;
         };
-        if !metadata.is_dir() {
+        if !resolve_is_dir(&child_path, &metadata) {
             continue;
         }
         if show_hidden {
@@ -613,6 +613,25 @@ pub fn compare_optional_string(left: Option<&str>, right: Option<&str>) -> Order
 
 pub fn system_time_to_rfc3339(value: Option<SystemTime>) -> Option<String> {
     value.and_then(|time| OffsetDateTime::from(time).format(&Rfc3339).ok())
+}
+
+/// Determines whether `path` should be treated as a directory, following
+/// symlinks/junctions when the raw entry metadata is a reparse point.
+///
+/// On Windows, `std::fs::Metadata::is_dir()` is `false` for *any* reparse
+/// point (symlink or junction) even when it targets a directory, because
+/// `is_dir()`/`is_symlink()` are mutually exclusive there. Without this, a
+/// symlinked folder (e.g. a `mklink /d` or junction) is reported as a file
+/// and the UI can't navigate into it. Following the link to check the
+/// target's real type keeps folder-symlinks navigable on both platforms.
+pub fn resolve_is_dir(path: &Path, metadata: &Metadata) -> bool {
+    if metadata.is_dir() {
+        return true;
+    }
+    if metadata.file_type().is_symlink() {
+        return fs::metadata(path).map(|target| target.is_dir()).unwrap_or(false);
+    }
+    false
 }
 
 pub fn collect_attributes(path: &Path, metadata: &Metadata) -> Vec<String> {

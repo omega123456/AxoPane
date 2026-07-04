@@ -96,4 +96,30 @@ describe('EntryIcon', () => {
     expect(image).toHaveAttribute('src', 'data:image/png;base64,RkFLRQ==')
     expect(container.querySelector('svg')).toBeNull()
   })
+
+  it('adds a corner badge for a symlinked folder', () => {
+    const { container } = render(
+      <EntryIcon entry={{ name: 'linked_folder', isDir: true, attributes: ['symlink'] }} />,
+    )
+    expect(container.querySelector('[data-symlink="true"]')).not.toBeNull()
+    expect(container.querySelector('[data-file-category="folder"]')).not.toBeNull()
+    const badge = container.querySelectorAll('svg')[1]
+    expect(badge?.getAttribute('class')).toMatch(/corner-up-right/)
+  })
+
+  it('adds a corner badge for a symlinked file', () => {
+    const { container } = render(
+      <EntryIcon entry={{ name: 'main.ts', isDir: false, attributes: ['symlink'] }} />,
+    )
+    expect(container.querySelector('[data-symlink="true"]')).not.toBeNull()
+    expect(container.querySelectorAll('svg')).toHaveLength(2)
+  })
+
+  it('omits the badge for a plain folder without the symlink attribute', () => {
+    const { container } = render(
+      <EntryIcon entry={{ name: 'Documents', isDir: true, attributes: ['readonly'] }} />,
+    )
+    expect(container.querySelector('[data-symlink="true"]')).toBeNull()
+    expect(container.querySelectorAll('svg')).toHaveLength(1)
+  })
 })

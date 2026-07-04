@@ -12,6 +12,7 @@ import {
   ChevronRight,
   ChevronUp,
   Copy,
+  CornerUpRight,
   Cpu,
   Database,
   Disc,
@@ -84,6 +85,7 @@ export const ChevronDownIcon = withDefaults(ChevronDown)
 export const ChevronRightIcon = withDefaults(ChevronRight)
 export const ChevronUpIcon = withDefaults(ChevronUp)
 export const CopyIcon = withDefaults(Copy)
+export const CornerUpRightIcon = withDefaults(CornerUpRight)
 export const CpuIcon = withDefaults(Cpu)
 export const DatabaseIcon = withDefaults(Database)
 export const DiscIcon = withDefaults(Disc)

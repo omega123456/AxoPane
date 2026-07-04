@@ -501,6 +501,77 @@ fn list_dir_reports_readonly_and_plain_file_type_metadata() {
     fs::set_permissions(&plain, permissions).expect("restore writable");
 }
 
+/// A symlinked folder must be listed and treated as navigable — `is_dir` must
+/// be `true` and it must show up in the folder tree — not silently downgraded
+/// to a file. On Windows this guards against `std::fs::Metadata::is_dir()`
+/// being `false` for any reparse point (junctions included) even when it
+/// targets a directory.
+#[test]
+fn folder_symlink_is_listed_as_a_navigable_directory() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    let real = root.join("real_target");
+    fs::create_dir(&real).expect("real dir");
+    fs::write(real.join("inside.txt"), "hi").expect("inside file");
+
+    let link = root.join("linked_folder");
+    create_dir_link(&real, &link);
+
+    let response = list_dir(&ListDirOptions {
+        path: root.to_string_lossy().into_owned(),
+        sort_key: SortKey::Name,
+        sort_direction: SortDirection::Asc,
+        filter: String::new(),
+        show_hidden: false,
+        include_item_counts: true,
+    })
+    .expect("list dir");
+
+    let link_entry = response
+        .entries
+        .iter()
+        .find(|entry| entry.name == "linked_folder")
+        .expect("linked_folder entry present");
+    assert!(link_entry.is_dir, "folder symlink must report as a directory");
+    assert_eq!(link_entry.type_label, "Folder");
+    assert_eq!(link_entry.item_count, Some(1));
+
+    let tree = list_tree_children(&ListTreeChildrenOptions {
+        path: root.to_string_lossy().into_owned(),
+        show_hidden: false,
+    })
+    .expect("list tree children");
+    assert!(
+        tree.children.iter().any(|child| child.name == "linked_folder"),
+        "folder symlink must appear in the folder tree"
+    );
+}
+
+/// Creates a directory symlink (Unix) or NTFS junction (Windows) at `link`
+/// pointing at `target`. A junction is used on Windows instead of
+/// `symlink_dir` because junction creation doesn't require elevated
+/// privileges or Developer Mode, keeping the test runnable in CI.
+fn create_dir_link(target: &Path, link: &Path) {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, link).expect("create symlink");
+    }
+    #[cfg(windows)]
+    {
+        let status = std::process::Command::new("cmd")
+            .args([
+                "/C",
+                "mklink",
+                "/J",
+                &link.to_string_lossy(),
+                &target.to_string_lossy(),
+            ])
+            .status()
+            .expect("run mklink");
+        assert!(status.success(), "mklink /J failed");
+    }
+}
+
 #[test]
 fn list_dir_skips_item_counts_when_disabled() {
     let fixture = tempdir().expect("temp dir");

@@ -34,6 +34,13 @@ function folder(name: string): DirectoryEntry {
   }
 }
 
+function symlinkedFolder(name: string): DirectoryEntry {
+  return {
+    ...folder(name),
+    attributes: ['symlink'],
+  }
+}
+
 /**
  * One entry per icon category (plus a special and an ordinary folder) so the
  * screenshot exercises every glyph + token color in a single pane.
@@ -47,6 +54,7 @@ export const fileTypesListDir: ListDirResponse = {
   path: 'C:\\Users\\Omega',
   entries: [
     folder('Downloads'),
+    symlinkedFolder('LinkedFolder'),
     folder('Projects'),
     file('app.ts', 'TS file'),
     file('bundle.zip', 'ZIP archive'),

@@ -1,9 +1,10 @@
-import { useState, type ComponentType } from 'react'
+import { useState, type ComponentType, type ReactNode } from 'react'
 import type { LucideProps } from 'lucide-react'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import type { FileCategory, FolderGlyphKind } from '@/lib/file-type'
 import { getFileCategory, getFolderGlyphKind } from '@/lib/file-type'
 import {
+  CornerUpRightIcon,
   CpuIcon,
   DatabaseIcon,
   DiscIcon,
@@ -60,7 +61,7 @@ const FOLDER_GLYPHS: Record<FolderGlyphKind, IconComponent> = {
 const FOLDER_COLOR = 'text-accent-blue-light dark:text-accent-blue'
 
 type EntryIconProps = {
-  entry: Pick<DirectoryEntry, 'name' | 'isDir' | 'iconDataUrl'>
+  entry: Pick<DirectoryEntry, 'name' | 'isDir' | 'iconDataUrl'> & Partial<Pick<DirectoryEntry, 'attributes'>>
   /** Tree expansion / open state — drives `FolderOpen` and the fill opacity. */
   isOpen?: boolean
   /** Size / layout utilities. Defaults to a compact 16px square. */
@@ -72,6 +73,17 @@ type EntryIconProps = {
   colorClassName?: string
 }
 
+/** Small corner badge marking a symlink/junction so it's visually distinct from a real folder or file. */
+function SymlinkBadge() {
+  return (
+    <CornerUpRightIcon
+      aria-hidden="true"
+      strokeWidth={2.5}
+      className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-light-window text-light-text-muted dark:bg-dark-window dark:text-dark-text-muted"
+    />
+  )
+}
+
 /**
  * File-type-aware icon: distinct lucide glyph + token color per category, plus
  * folder polish (faint fill, open-state, name-based special-folder glyphs).
@@ -80,9 +92,12 @@ type EntryIconProps = {
 export function EntryIcon({ entry, isOpen = false, className = 'h-4 w-4 shrink-0', colorClassName }: EntryIconProps) {
   const [nativeIconFailed, setNativeIconFailed] = useState(false)
   const category = getFileCategory(entry)
+  const isSymlink = entry.attributes?.includes('symlink') ?? false
+
+  let glyph: ReactNode
 
   if (!entry.isDir && entry.iconDataUrl && !nativeIconFailed) {
-    return (
+    glyph = (
       <img
         src={entry.iconDataUrl}
         alt=""
@@ -93,13 +108,11 @@ export function EntryIcon({ entry, isOpen = false, className = 'h-4 w-4 shrink-0
         }}
       />
     )
-  }
-
-  if (category === 'folder') {
+  } else if (category === 'folder') {
     const kind = getFolderGlyphKind(entry.name, isOpen)
     const Glyph = FOLDER_GLYPHS[kind]
     const color = colorClassName ?? FOLDER_COLOR
-    return (
+    glyph = (
       <Glyph
         data-file-category="folder"
         className={`${className} ${color}`.trim()}
@@ -107,9 +120,20 @@ export function EntryIcon({ entry, isOpen = false, className = 'h-4 w-4 shrink-0
         fillOpacity={isOpen ? 0.26 : 0.18}
       />
     )
+  } else {
+    const { Glyph, colorClassName: defaultColor } = CATEGORY_STYLES[category]
+    const color = colorClassName ?? defaultColor
+    glyph = <Glyph data-file-category={category} className={`${className} ${color}`.trim()} />
   }
 
-  const { Glyph, colorClassName: defaultColor } = CATEGORY_STYLES[category]
-  const color = colorClassName ?? defaultColor
-  return <Glyph data-file-category={category} className={`${className} ${color}`.trim()} />
+  if (!isSymlink) {
+    return glyph
+  }
+
+  return (
+    <span className="relative inline-flex shrink-0" data-symlink="true">
+      {glyph}
+      <SymlinkBadge />
+    </span>
+  )
 }
