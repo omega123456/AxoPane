@@ -335,12 +335,6 @@ impl SizeService {
 
         emitter(SizeUpdate {
             path: path.to_string(),
-            state: SizeStateKind::Unknown,
-            source,
-            size_bytes: None,
-        });
-        emitter(SizeUpdate {
-            path: path.to_string(),
             state: SizeStateKind::Calculating,
             source,
             size_bytes: None,

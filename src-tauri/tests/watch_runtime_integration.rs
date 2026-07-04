@@ -46,6 +46,7 @@ fn watch_runtime_test_hooks_drive_targeted_and_rescan_callbacks() {
         sort_direction: SortDirection::Asc,
         filter: String::new(),
         show_hidden: true,
+        include_item_counts: true,
     };
     insert_tab_for_tests(
         &mut runtime,
@@ -136,6 +137,7 @@ fn watch_runtime_test_hook_surfaces_errors_and_removals() {
         sort_direction: SortDirection::Asc,
         filter: String::new(),
         show_hidden: true,
+        include_item_counts: true,
     };
     insert_tab_for_tests(
         &mut runtime,
@@ -213,6 +215,7 @@ fn watch_runtime_test_hook_covers_modify_and_rename_filters() {
         sort_direction: SortDirection::Asc,
         filter: "keep".to_string(),
         show_hidden: true,
+        include_item_counts: true,
     };
     insert_tab_for_tests(
         &mut runtime,
@@ -281,6 +284,7 @@ fn watch_runtime_test_hooks_cover_filtered_nonmatching_and_error_branches() {
         sort_direction: SortDirection::Asc,
         filter: String::new(),
         show_hidden: false,
+        include_item_counts: true,
     };
     insert_tab_for_tests(
         &mut runtime,
@@ -399,6 +403,7 @@ fn watch_runtime_test_hooks_cover_filtered_nonmatching_and_error_branches() {
         sort_direction: SortDirection::Asc,
         filter: String::new(),
         show_hidden: true,
+        include_item_counts: true,
     })
     .is_err());
 }

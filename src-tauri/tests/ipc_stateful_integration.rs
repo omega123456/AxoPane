@@ -12,9 +12,8 @@ use file_explorer_lib::ipc::types::{
     AppConfig, CancelSizeResponse, ConflictResolution, CreateEntryRequest, FolderSizeRequest,
     FolderSizesRequest, IconStateEvent, InitialShellResponse, ListDirRequest, ListDirResponse,
     ListTreeChildrenRequest, ListTreeChildrenResponse, OpIdRequest, OpSnapshot, OpenPathRequest,
-    RefreshTabRequest, ReorderOpsRequest, RequestIconsRequest, ResolveConflictRequest,
-    SaveConfigRequest, SaveSessionRequest, SessionState, SetTabWatchRequest, TrashEntriesRequest,
-    WatchDirPatch, WatchTarget,
+    ReorderOpsRequest, RequestIconsRequest, ResolveConflictRequest, SaveConfigRequest,
+    SaveSessionRequest, SessionState, SetTabWatchRequest, TrashEntriesRequest, WatchTarget,
 };
 use file_explorer_lib::ops::{OpItem, OpKind, OpStatus, OpsService, StartOpRequest};
 use file_explorer_lib::persist::{Config, PersistenceState, Session};
@@ -58,7 +57,6 @@ impl TestApp<tauri::test::MockRuntime> {
                 commands::request_icons,
                 commands::cancel_size,
                 commands::set_tab_watch,
-                commands::refresh_tab,
                 commands::start_op,
                 commands::pause_op,
                 commands::resume_op,
@@ -366,12 +364,14 @@ fn ipc_commands_cover_watch_size_and_logging_state() {
         sort_direction: SortDirection::Asc,
         filter: String::new(),
         show_hidden: true,
+        include_item_counts: true,
     };
     test_app
         .invoke_payload::<(), _>(
             "set_tab_watch",
             SetTabWatchRequest {
                 target: Some(watch_target.clone()),
+                entries: None,
             },
         )
         .expect("set watch");
@@ -379,28 +379,14 @@ fn ipc_commands_cover_watch_size_and_logging_state() {
     fs::remove_file(root.join("before.txt")).expect("remove before");
     write_file(&root.join("after.txt"), b"after");
 
-    let patch: Value = test_app
-        .invoke_payload(
-            "refresh_tab",
-            RefreshTabRequest {
-                target: watch_target.clone(),
+    test_app
+        .invoke_payload::<(), _>(
+            "set_tab_watch",
+            SetTabWatchRequest {
+                target: None,
+                entries: None,
             },
         )
-        .expect("refresh tab");
-    let watch_patch: WatchDirPatch =
-        serde_json::from_value(patch).expect("deserialize refresh patch");
-    assert_eq!(watch_patch.tab_id, "left-1");
-    assert!(watch_patch
-        .removed
-        .iter()
-        .any(|path| path.ends_with("before.txt")));
-    assert!(watch_patch
-        .changed
-        .iter()
-        .any(|entry| entry.path.ends_with("after.txt")));
-
-    test_app
-        .invoke_payload::<(), _>("set_tab_watch", SetTabWatchRequest { target: None })
         .expect("clear watch");
 
     let size_root = root.join("sizes");
@@ -443,7 +429,7 @@ fn ipc_commands_cover_watch_size_and_logging_state() {
         size_root.join("file-0.txt").to_string_lossy().into_owned(),
         size_root.join("file-1.txt").to_string_lossy().into_owned(),
     ];
-    let icon_events: Vec<IconStateEvent> = test_app
+    let icon_batches: Vec<Vec<IconStateEvent>> = test_app
         .invoke_payload(
             "request_icons",
             RequestIconsRequest {
@@ -451,6 +437,7 @@ fn ipc_commands_cover_watch_size_and_logging_state() {
             },
         )
         .expect("request icons");
+    let icon_events: Vec<IconStateEvent> = icon_batches.into_iter().flatten().collect();
     assert_eq!(icon_events.len(), icon_paths.len());
     assert!(icon_events
         .iter()

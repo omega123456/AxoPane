@@ -400,6 +400,28 @@ describe('App', () => {
     })
   })
 
+  it('applies a batched icon://state event, patching every matched entry from one array payload', async () => {
+    installListDirOverride()
+    renderApp()
+
+    await waitFor(() => {
+      expect(getRowInPane('Left pane', 'Documents')).toBeTruthy()
+      expect(getRowInPane('Left pane', 'Report.txt')).toBeTruthy()
+    })
+
+    act(() => {
+      ipc.emit('icon://state', [
+        { path: 'C:\\Users\\Omega\\Report.txt', iconDataUrl: 'data:image/png;base64,report-icon' },
+      ])
+    })
+
+    await waitFor(() => {
+      const row = getRowInPane('Left pane', 'Report.txt')
+      const img = row?.querySelector('img[src="data:image/png;base64,report-icon"]')
+      expect(img).toBeTruthy()
+    })
+  })
+
   it('shows a copy conflict application-wide instead of scoped to a single pane', async () => {
     const user = userEvent.setup()
     const resolveSpy = vi.fn(() => undefined)

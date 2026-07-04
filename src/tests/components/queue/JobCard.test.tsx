@@ -47,7 +47,7 @@ describe('JobCard', () => {
   it('renders the active copy header, percent, current file, chart and controls', () => {
     render(
       <JobCard
-        operation={progress({})}
+        operation={progress({ itemNames: ['footage', 'b-roll'] })}
         throughputHistory={samples([22, 240_000_000], [41, 250_000_000], [63, 260_046_848])}
         throughputPeak={260_046_848}
         hasConflict={false}
@@ -57,7 +57,7 @@ describe('JobCard', () => {
     )
     expect(screen.getByText('Copying 1,248 items')).toBeInTheDocument()
     expect(screen.getByText('63%')).toBeInTheDocument()
-    expect(screen.getByText('C:\\src\\footage')).toBeInTheDocument()
+    expect(screen.getByText('C:\\src\\footage, b-roll, +1,246 more')).toBeInTheDocument()
     expect(screen.getByText('master-reel-final.mkv')).toBeInTheDocument()
     expect(screen.getByText('813 / 1,248 items')).toBeInTheDocument()
     expect(screen.getByTestId('throughput-chart-line')).toBeInTheDocument()
@@ -250,6 +250,7 @@ describe('JobCard', () => {
           sourceDir: 'C:\\Downloads',
           itemNames: ['Season 01', 'poster.jpg', 'notes.txt'],
           destinationDir: 'D:\\Sorted',
+          totalItems: 3,
         })}
         throughputHistory={samples([0, 0])}
         throughputPeak={0}
@@ -274,6 +275,7 @@ describe('JobCard', () => {
           status: 'active',
           sourceDir: 'D:\\projects',
           itemNames: ['b'],
+          totalItems: 1,
           destinationDir: 'F:\\Download',
           currentFileName: 'server.mjs',
         })}
@@ -297,6 +299,7 @@ describe('JobCard', () => {
           status: 'active',
           sourceDir: 'D:\\projects',
           itemNames: ['b'],
+          totalItems: 1,
           destinationDir: 'F:\\Download',
           currentFileName: 'server.mjs',
         })}
@@ -351,7 +354,11 @@ describe('JobCard', () => {
   it('labels a delete operation', () => {
     render(
       <JobCard
-        operation={progress({ kind: 'delete', destinationDir: '' })}
+        operation={progress({
+          kind: 'delete',
+          destinationDir: '',
+          itemNames: ['footage', 'b-roll'],
+        })}
         throughputHistory={samples([63, 260_046_848])}
         throughputPeak={260_046_848}
         hasConflict={false}
@@ -360,7 +367,7 @@ describe('JobCard', () => {
       />,
     )
     expect(screen.getByText('Deleting 1,248 items')).toBeInTheDocument()
-    expect(screen.getByText('C:\\src\\footage')).toBeInTheDocument()
+    expect(screen.getByText('C:\\src\\footage, b-roll, +1,246 more')).toBeInTheDocument()
     expect(screen.queryByText('D:\\dst')).not.toBeInTheDocument()
   })
 

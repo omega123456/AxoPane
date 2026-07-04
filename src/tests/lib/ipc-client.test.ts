@@ -11,7 +11,6 @@ import {
   loadConfig,
   loadSession,
   openPath,
-  refreshTab,
   requestFolderSize,
   requestFolderSizes,
   saveConfig,
@@ -64,21 +63,43 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
     ipc.override('request_folder_size', () => undefined)
     ipc.override('request_folder_sizes', () => undefined)
     ipc.override('open_path', () => undefined)
-    ipc.override('set_tab_watch', () => undefined)
+    let lastSetTabWatchPayload: unknown
+    ipc.override('set_tab_watch', (payload) => {
+      lastSetTabWatchPayload = payload
+      return undefined
+    })
     await expect(requestFolderSize({ path: 'C:\\x' })).resolves.toBeUndefined()
     await expect(requestFolderSizes({ paths: ['C:\\x'] })).resolves.toBeUndefined()
     await expect(openPath({ path: 'C:\\x' })).resolves.toBeUndefined()
     await expect(setTabWatch(null)).resolves.toBeUndefined()
+    expect(lastSetTabWatchPayload).toEqual({ target: null, entries: undefined })
+
     await expect(
-      refreshTab({
+      setTabWatch(
+        {
+          tabId: 't',
+          path: 'C:\\x',
+          sortKey: 'name',
+          sortDirection: 'asc',
+          filter: '',
+          showHidden: false,
+          includeItemCounts: true,
+        },
+        [],
+      ),
+    ).resolves.toBeUndefined()
+    expect(lastSetTabWatchPayload).toEqual({
+      target: {
         tabId: 't',
         path: 'C:\\x',
         sortKey: 'name',
         sortDirection: 'asc',
         filter: '',
         showHidden: false,
-      }),
-    ).resolves.toHaveProperty('changed')
+        includeItemCounts: true,
+      },
+      entries: [],
+    })
 
     ipc.override('save_config', (payload) => payload.config)
     await expect(

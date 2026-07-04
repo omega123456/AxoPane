@@ -146,10 +146,16 @@ impl DeleteThrottle {
     }
 }
 
-/// Coalesces the flood of per-nested-file progress emissions produced while
-/// copying/moving a directory tree with many small files. Only the recursive
-/// directory walk carries one of these (see `copy_dir_recursive`); a single
-/// top-level file transfer has no flood to coalesce and always emits directly.
+/// Coalesces the flood of per-chunk / per-member progress emissions produced
+/// while transferring bytes. Every transfer-shaped path carries one of these:
+/// the recursive directory walk (`copy_dir_recursive`) shares a single
+/// throttle across the whole tree; the single top-level file transfer (the
+/// non-directory branch of `copy_path_with_total_discovery`) gets its own
+/// throttle, since a large single file floods exactly the same way a
+/// directory walk does; and the compress/extract member loops
+/// (`compress_item_with_progress`, `extract_item_with_progress`) share one
+/// throttle across every member of the operation so a many-small-member
+/// archive does not re-flood by minting a fresh throttle per member.
 pub struct TransferThrottle {
     last_emit: Instant,
     interval: Duration,
@@ -240,7 +246,17 @@ impl OpState {
                 .first()
                 .map(|item| parent_dir(&item.source_path))
                 .unwrap_or_default(),
-            item_names: self.items.iter().map(|item| item.name.clone()).collect(),
+            // Bounded preview: the UI only ever renders the first two names
+            // plus a "+K more" count (`JobCard`/`QueuePanel`), and that count
+            // is read from `total_items` (verified == `items.len()` at all
+            // times), so cloning every top-level item name on every tick would
+            // be pure waste on large selections.
+            item_names: self
+                .items
+                .iter()
+                .take(2)
+                .map(|item| item.name.clone())
+                .collect(),
             destination_dir: self.destination_dir.to_string_lossy().into_owned(),
             total_items: self.total_items,
             completed_items: self.completed_items,
@@ -1456,7 +1472,17 @@ fn compress_item_with_progress(
     let mut writer = ZipWriter::new(archive_file);
     let add_discovered_totals = item.size_bytes == 0;
     let root_name = archive_root_name(source);
-    append_archive_path(&mut writer, source, &root_name, add_discovered_totals, ctx)?;
+    // One throttle shared across every member appended below (mirrors how
+    // `copy_dir_recursive` shares a single throttle through its recursion).
+    let mut throttle = TransferThrottle::new((ctx.instant_now)(), PROGRESS_EMIT_INTERVAL);
+    append_archive_path(
+        &mut writer,
+        source,
+        &root_name,
+        add_discovered_totals,
+        ctx,
+        Some(&mut throttle),
+    )?;
     writer.finish().map_err(|error| error.to_string())?;
     Ok(())
 }
@@ -1493,6 +1519,10 @@ fn extract_item_with_progress(
     let mut archive = ZipArchive::new(file).map_err(|error| error.to_string())?;
     let wrapper_root = detect_redundant_wrapper_root(&mut archive, &archive_stem_for_item(source))?;
 
+    // One throttle shared across every archive member extracted below (mirrors
+    // how `copy_dir_recursive` shares a single throttle through its recursion).
+    let mut throttle = TransferThrottle::new((ctx.instant_now)(), PROGRESS_EMIT_INTERVAL);
+
     for index in 0..archive.len() {
         wait_while_paused(ctx.op_arc, ctx.resolver);
         if ctx
@@ -1522,22 +1552,27 @@ fn extract_item_with_progress(
         }
 
         let entry_size = entry.size();
-        begin_file_progress(ctx, &output_path, entry_size, None);
+        begin_file_progress(ctx, &output_path, entry_size, Some(&mut throttle));
         let mut output_file = fs::File::create(&output_path).map_err(|error| error.to_string())?;
-        copy_reader_with_progress(&mut entry, &mut output_file, ctx, None)?;
+        copy_reader_with_progress(&mut entry, &mut output_file, ctx, Some(&mut throttle))?;
         output_file.flush().map_err(|error| error.to_string())?;
-        finish_file_progress(ctx, None);
+        finish_file_progress(ctx, Some(&mut throttle));
     }
 
     Ok(())
 }
 
+/// Appends `source` (a file or, recursively, a directory tree) to `writer`.
+/// `throttle` is shared across the *whole* member loop of one compress
+/// operation (threaded through every recursive call) so a many-small-member
+/// source tree does not re-flood by minting a fresh throttle per member.
 fn append_archive_path(
     writer: &mut ZipWriter<fs::File>,
     source: &Path,
     archive_path: &Path,
     add_discovered_totals: bool,
     ctx: &WorkerCtx<'_>,
+    mut throttle: Option<&mut TransferThrottle>,
 ) -> Result<(), String> {
     wait_while_paused(ctx.op_arc, ctx.resolver);
     if ctx
@@ -1574,6 +1609,7 @@ fn append_archive_path(
                 &child_archive_path,
                 add_discovered_totals,
                 ctx,
+                throttle.as_deref_mut(),
             )?;
         }
         return Ok(());
@@ -1583,15 +1619,15 @@ fn append_archive_path(
         .map(|metadata| metadata.len())
         .unwrap_or(0);
     if add_discovered_totals {
-        add_discovered_total(ctx, file_size, None);
+        add_discovered_total(ctx, file_size, throttle.as_deref_mut());
     }
-    begin_file_progress(ctx, source, file_size, None);
+    begin_file_progress(ctx, source, file_size, throttle.as_deref_mut());
     writer
         .start_file(to_zip_path(archive_path)?, zip_file_options())
         .map_err(|error| error.to_string())?;
     let mut input_file = fs::File::open(source).map_err(|error| error.to_string())?;
-    copy_reader_with_progress(&mut input_file, writer, ctx, None)?;
-    finish_file_progress(ctx, None);
+    copy_reader_with_progress(&mut input_file, writer, ctx, throttle.as_deref_mut())?;
+    finish_file_progress(ctx, throttle);
     Ok(())
 }
 
@@ -1896,8 +1932,8 @@ fn copy_path_with_total_discovery(
     if source.is_dir() {
         let root = source.canonicalize().map_err(|error| error.to_string())?;
         let mut visited = HashSet::from([root.clone()]);
-        // Only the directory walk risks flooding the frontend with a progress
-        // event per nested file, so only it carries a throttle.
+        // The directory walk shares one throttle across the whole recursive
+        // tree so a many-small-file tree does not flood the frontend.
         let mut throttle = TransferThrottle::new((ctx.instant_now)(), PROGRESS_EMIT_INTERVAL);
         copy_dir_recursive(
             source,
@@ -1909,7 +1945,17 @@ fn copy_path_with_total_discovery(
             Some(&mut throttle),
         )
     } else {
-        copy_file_with_total_discovery(source, target, add_discovered_totals, ctx, None)
+        // A single top-level file transfer gets its own throttle: a large
+        // file (e.g. a multi-GB video) emits one progress event per 1 MiB
+        // chunk, which floods exactly the same way a directory walk does.
+        let mut throttle = TransferThrottle::new((ctx.instant_now)(), PROGRESS_EMIT_INTERVAL);
+        copy_file_with_total_discovery(
+            source,
+            target,
+            add_discovered_totals,
+            ctx,
+            Some(&mut throttle),
+        )
     }
 }
 

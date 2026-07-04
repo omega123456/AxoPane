@@ -276,12 +276,11 @@ pub struct CancelSizeResponse {
 #[serde(rename_all = "camelCase")]
 pub struct SetTabWatchRequest {
     pub target: Option<WatchTarget>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RefreshTabRequest {
-    pub target: WatchTarget,
+    /// The already-listed, post-filter/sort entries for `target.path` (the
+    /// listing the frontend just fetched via `list_dir`). When present, the
+    /// watcher seeds its baseline snapshot from these entries instead of
+    /// re-reading the directory, eliminating a redundant enumeration.
+    pub entries: Option<Vec<DirectoryEntry>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

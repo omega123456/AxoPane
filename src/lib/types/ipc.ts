@@ -416,14 +416,13 @@ export type WatchTarget = {
   sortDirection: SortDirection
   filter: string
   showHidden: boolean
+  includeItemCounts: boolean
 }
 
 export type SetTabWatchRequest = {
   target: WatchTarget | null
-}
-
-export type RefreshTabRequest = {
-  target: WatchTarget
+  /** Post-sort/filter entries already fetched for this listing, used to seed the watcher baseline. */
+  entries?: DirectoryEntry[]
 }
 
 export type VolumesChangedEvent = {
@@ -653,10 +652,6 @@ export type IpcCommandMap = {
     request: SetTabWatchRequest
     response: void
   }
-  refresh_tab: {
-    request: RefreshTabRequest
-    response: DirPatchEvent
-  }
   load_config: {
     request: undefined
     response: AppConfig
@@ -726,7 +721,8 @@ export type IpcCommandMap = {
 export type IpcEventMap = {
   'dir://patch': DirPatchEvent
   'size://state': SizeStateEvent
-  'icon://state': IconStateEvent
+  /** Batched: the backend flushes resolved icons in chunks (see Phase 3 backend batching). */
+  'icon://state': IconStateEvent[]
   'volumes://changed': VolumesChangedEvent
   'queue://progress': QueueProgressEvent
   'queue://conflict': QueueConflictEvent

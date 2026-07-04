@@ -1,6 +1,7 @@
 use crate::app_picker;
 use crate::archive;
 use crate::fs;
+use crate::ipc::icon_batch::IconBatcher;
 use crate::native_menu::NativeMenuService;
 use crate::ops::{OpSnapshot, OpsService};
 use crate::persist::{PersistedStore, PersistenceState};
@@ -9,12 +10,11 @@ use crate::volumes;
 use crate::watch::WatchService;
 #[cfg(not(feature = "test-utils"))]
 use rayon::prelude::*;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 #[cfg(feature = "test-utils")]
-use std::sync::Mutex;
-#[cfg(feature = "test-utils")]
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::mock;
 #[cfg(feature = "test-utils")]
@@ -26,8 +26,8 @@ use super::types::{
     IconStateEvent, InitialShellResponse, InvokeNativeMenuRequest, ListApplicationsResponse,
     ListDirRequest, ListDirResponse, ListTrashResponse, ListTreeChildrenRequest,
     ListTreeChildrenResponse, LoadNativeMenuRequest, LoadNativeMenuResponse, LogFrontendRequest,
-    MenuActionStatus, OpIdRequest, OpenPathRequest, OpenWithRequest, RefreshTabRequest,
-    RenameEntryRequest, ReorderOpsRequest, RequestIconsRequest, ResolveConflictRequest,
+    MenuActionStatus, OpIdRequest, OpenPathRequest, OpenWithRequest, RenameEntryRequest,
+    ReorderOpsRequest, RequestIconsRequest, ResolveConflictRequest,
     RestoreTrashRequest, SaveConfigRequest, SaveSessionRequest, SessionState,
     SetDefaultApplicationRequest, SetLogLevelRequest, SetTabWatchRequest, ShowPropertiesRequest,
     SizeStateEvent, StartOpRequest, TrashEntriesRequest, VolumeInfo, WarmNativeMenusRequest,
@@ -424,48 +424,85 @@ pub fn request_folder_sizes(
     recorded
 }
 
+/// Resolves and emits icons for `paths`, batching the `icon://state` event
+/// rather than emitting one event per path. This covers both the sequential
+/// fallback (used when the Windows rayon icon pool is unavailable, and on
+/// macOS) and the pooled path below; both flush via the shared
+/// [`IconBatcher`] (every [`crate::ipc::icon_batch::MAX_BATCH`] icons or
+/// [`crate::ipc::icon_batch::FLUSH_INTERVAL`], whichever comes first), plus a
+/// final flush of any remainder.
 #[cfg(not(feature = "test-utils"))]
 #[tauri::command]
 pub fn request_icons(payload: RequestIconsRequest, app: AppHandle) {
     let Some(pool) = crate::file_icons::icon_pool() else {
+        let app_handle = app.clone();
+        let mut batcher = IconBatcher::new(Instant::now());
         for path in payload.paths {
-            let _ = app.emit(
-                super::events::ICON_STATE,
-                IconStateEvent {
-                    path,
-                    icon_data_url: None,
-                },
-            );
+            let icon_data_url = crate::file_icons::resolve_icon(Path::new(&path), false);
+            let event = IconStateEvent {
+                path,
+                icon_data_url,
+            };
+            if let Some(batch) = batcher.push(event, Instant::now()) {
+                let _ = app_handle.emit(super::events::ICON_STATE, batch);
+            }
+        }
+        if let Some(batch) = batcher.drain_remainder() {
+            let _ = app_handle.emit(super::events::ICON_STATE, batch);
         }
         return;
     };
 
     let app_handle = app.clone();
     pool.spawn(move || {
+        let batcher = Mutex::new(IconBatcher::new(Instant::now()));
         payload.paths.into_par_iter().for_each(|path| {
             let icon_data_url = crate::file_icons::resolve_icon(Path::new(&path), false);
-            let _ = app_handle.emit(
-                super::events::ICON_STATE,
-                IconStateEvent {
-                    path,
-                    icon_data_url,
-                },
-            );
+            let event = IconStateEvent {
+                path,
+                icon_data_url,
+            };
+            let flushed = batcher
+                .lock()
+                .expect("icon batcher lock")
+                .push(event, Instant::now());
+            if let Some(batch) = flushed {
+                let _ = app_handle.emit(super::events::ICON_STATE, batch);
+            }
         });
+
+        let remainder = batcher
+            .into_inner()
+            .expect("icon batcher lock")
+            .drain_remainder();
+        if let Some(batch) = remainder {
+            let _ = app_handle.emit(super::events::ICON_STATE, batch);
+        }
     });
 }
 
+/// `test-utils` synchronous variant: returns the same batched shape the
+/// production command emits over IPC (`Vec<Vec<IconStateEvent>>`, one inner
+/// `Vec` per flushed batch) instead of a single flat list, so tests can
+/// assert on the number of batches produced.
 #[cfg(feature = "test-utils")]
 #[tauri::command]
-pub fn request_icons(payload: RequestIconsRequest) -> Vec<IconStateEvent> {
-    payload
-        .paths
-        .into_iter()
-        .map(|path| IconStateEvent {
+pub fn request_icons(payload: RequestIconsRequest) -> Vec<Vec<IconStateEvent>> {
+    let mut batcher = IconBatcher::new(Instant::now());
+    let mut batches = Vec::new();
+    for path in payload.paths {
+        let event = IconStateEvent {
             path,
             icon_data_url: None,
-        })
-        .collect()
+        };
+        if let Some(batch) = batcher.push(event, Instant::now()) {
+            batches.push(batch);
+        }
+    }
+    if let Some(batch) = batcher.drain_remainder() {
+        batches.push(batch);
+    }
+    batches
 }
 
 #[tauri::command]
@@ -490,6 +527,7 @@ pub fn set_tab_watch(
 
     state.set_tab_watch(
         payload.target,
+        payload.entries,
         Arc::new(move |patch| {
             let _ = patch_app.emit(
                 super::events::DIR_PATCH,
@@ -527,61 +565,10 @@ pub fn set_tab_watch(
 ) -> Result<(), String> {
     state.set_tab_watch(
         payload.target,
+        payload.entries,
         Arc::new(noop_dir_patch),
         Arc::new(noop_watch_error),
     )
-}
-
-#[cfg(not(feature = "test-utils"))]
-#[tauri::command]
-pub fn refresh_tab(
-    payload: RefreshTabRequest,
-    app: AppHandle,
-    state: State<'_, WatchService>,
-) -> Result<super::types::DirPatchEvent, String> {
-    let patch = state.refresh_tab(payload.target, Arc::new(|_| {}))?;
-    let event = super::types::DirPatchEvent {
-        tab_id: patch.tab_id,
-        path: patch.path,
-        reason: patch.reason,
-        changed: patch
-            .changed
-            .into_iter()
-            .map(|change| super::types::DirEntryPatch {
-                path: change.path,
-                entry: change.entry,
-            })
-            .collect(),
-        removed: patch.removed,
-    };
-
-    app.emit(super::events::DIR_PATCH, event.clone())
-        .map_err(|error| error.to_string())?;
-
-    Ok(event)
-}
-
-#[cfg(feature = "test-utils")]
-#[tauri::command]
-pub fn refresh_tab(
-    payload: RefreshTabRequest,
-    state: State<'_, WatchService>,
-) -> Result<super::types::DirPatchEvent, String> {
-    let patch = state.refresh_tab(payload.target, Arc::new(noop_dir_patch))?;
-    Ok(super::types::DirPatchEvent {
-        tab_id: patch.tab_id,
-        path: patch.path,
-        reason: patch.reason,
-        changed: patch
-            .changed
-            .into_iter()
-            .map(|change| super::types::DirEntryPatch {
-                path: change.path,
-                entry: change.entry,
-            })
-            .collect(),
-        removed: patch.removed,
-    })
 }
 
 #[tauri::command]

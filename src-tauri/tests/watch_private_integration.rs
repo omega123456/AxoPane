@@ -73,6 +73,71 @@ mod watch_src {
         }
 
         #[test]
+        fn diff_entries_covers_added_changed_and_removed_branches_directly() {
+            // "added": a key present only in `next`.
+            let added_path = "C:/added.txt".to_string();
+            // "changed": the same key present in both maps but with a different
+            // entry value (e.g. size changed on disk).
+            let changed_path = "C:/changed.txt".to_string();
+            // "removed": a key present only in `previous`.
+            let removed_path = "C:/removed.txt".to_string();
+            // unchanged: same key, identical value in both maps — must produce
+            // neither a `changed` nor a `removed` patch entry.
+            let unchanged_path = "C:/unchanged.txt".to_string();
+
+            let previous = HashMap::from([
+                (
+                    changed_path.clone(),
+                    DirectoryEntry {
+                        size_bytes: Some(1),
+                        ..entry(&changed_path, "changed.txt")
+                    },
+                ),
+                (
+                    removed_path.clone(),
+                    entry(&removed_path, "removed.txt"),
+                ),
+                (
+                    unchanged_path.clone(),
+                    entry(&unchanged_path, "unchanged.txt"),
+                ),
+            ]);
+            let next = HashMap::from([
+                (
+                    added_path.clone(),
+                    entry(&added_path, "added.txt"),
+                ),
+                (
+                    changed_path.clone(),
+                    DirectoryEntry {
+                        size_bytes: Some(2),
+                        ..entry(&changed_path, "changed.txt")
+                    },
+                ),
+                (
+                    unchanged_path.clone(),
+                    entry(&unchanged_path, "unchanged.txt"),
+                ),
+            ]);
+
+            let patch = diff_entries("left-3", "C:/", "watch", &previous, &next);
+
+            assert!(patch
+                .changed
+                .iter()
+                .any(|item| item.path == added_path && item.entry.is_some()));
+            assert!(patch
+                .changed
+                .iter()
+                .any(|item| item.path == changed_path
+                    && item.entry.as_ref().and_then(|e| e.size_bytes) == Some(2)));
+            assert!(!patch.changed.iter().any(|item| item.path == unchanged_path));
+            assert!(patch.removed.iter().any(|path| path == &removed_path));
+            assert!(!patch.removed.contains(&changed_path));
+            assert!(!patch.removed.contains(&added_path));
+        }
+
+        #[test]
         fn snapshot_for_target_applies_hidden_and_filter_rules() {
             let fixture = tempdir().expect("temp dir");
             let root = fixture.path();
@@ -87,6 +152,7 @@ mod watch_src {
                 sort_direction: SortDirection::Asc,
                 filter: "alpha".to_string(),
                 show_hidden: false,
+                include_item_counts: true,
             })
             .expect("filtered snapshot");
             assert_eq!(filtered.len(), 1);
@@ -99,6 +165,7 @@ mod watch_src {
                 sort_direction: SortDirection::Asc,
                 filter: String::new(),
                 show_hidden: true,
+                include_item_counts: true,
             })
             .expect("hidden snapshot");
             assert!(with_hidden.keys().any(|path| path.ends_with(".secret")));
@@ -115,6 +182,7 @@ mod watch_src {
                 sort_direction: SortDirection::Asc,
                 filter: String::new(),
                 show_hidden: true,
+                include_item_counts: true,
             };
             let alpha = root.join("alpha.txt");
             std::fs::write(&alpha, b"a").expect("alpha");
@@ -180,6 +248,7 @@ mod watch_src {
                 sort_direction: SortDirection::Asc,
                 filter: "keep".to_string(),
                 show_hidden: true,
+                include_item_counts: true,
             };
             let previous = HashMap::from([
                 (
@@ -236,6 +305,7 @@ mod watch_src {
                 sort_direction: SortDirection::Asc,
                 filter: String::new(),
                 show_hidden: true,
+                include_item_counts: true,
             };
             let one_sided_rename = DebouncedEvent::new(
                 Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::From)))
@@ -279,18 +349,20 @@ mod watch_src {
                 sort_direction: SortDirection::Asc,
                 filter: String::new(),
                 show_hidden: true,
+                include_item_counts: true,
             };
             let service = WatchService::default();
-            let patch = service
-                .refresh_tab(target.clone(), Arc::new(|_| {}))
-                .expect("refresh");
-            assert!(patch.changed.is_empty());
 
             service
-                .set_tab_watch(Some(target), Arc::new(|_| {}), Arc::new(|_, _| {}))
+                .set_tab_watch(
+                    Some(target.clone()),
+                    None,
+                    Arc::new(|_| {}),
+                    Arc::new(|_, _| {}),
+                )
                 .expect("set watch");
             service
-                .set_tab_watch(None, Arc::new(|_| {}), Arc::new(|_, _| {}))
+                .set_tab_watch(None, None, Arc::new(|_| {}), Arc::new(|_, _| {}))
                 .expect("clear watch");
         }
 
@@ -332,13 +404,24 @@ mod watch_src {
                 sort_direction: SortDirection::Asc,
                 filter: String::new(),
                 show_hidden: true,
+                include_item_counts: true,
             };
 
             service
-                .set_tab_watch(Some(base.clone()), Arc::new(|_| {}), Arc::new(|_, _| {}))
+                .set_tab_watch(
+                    Some(base.clone()),
+                    None,
+                    Arc::new(|_| {}),
+                    Arc::new(|_, _| {}),
+                )
                 .expect("set first watch");
             service
-                .set_tab_watch(Some(base.clone()), Arc::new(|_| {}), Arc::new(|_, _| {}))
+                .set_tab_watch(
+                    Some(base.clone()),
+                    None,
+                    Arc::new(|_| {}),
+                    Arc::new(|_, _| {}),
+                )
                 .expect("refresh same watch");
 
             {
@@ -354,6 +437,7 @@ mod watch_src {
                         path: left_b.to_string_lossy().into_owned(),
                         ..base.clone()
                     }),
+                    None,
                     Arc::new(|_| {}),
                     Arc::new(|_, _| {}),
                 )
@@ -373,6 +457,7 @@ mod watch_src {
                         path: left_c.to_string_lossy().into_owned(),
                         ..base
                     }),
+                    None,
                     Arc::new(|_| {}),
                     Arc::new(|_, _| {}),
                 )
@@ -403,6 +488,7 @@ mod watch_src {
                 sort_direction: SortDirection::Asc,
                 filter: "visible".to_string(),
                 show_hidden: false,
+                include_item_counts: true,
             };
 
             let mut next = HashMap::new();

@@ -168,4 +168,82 @@ describe('date-format', () => {
     expect(dateToneClassName.yesterday).toContain('accent-amber')
     expect(dateToneClassName.default).toContain('text-light-text-muted')
   })
+
+  describe('absolute-format cache', () => {
+    it('returns the identical (referentially equal) result for a repeated value|pattern pair', () => {
+      const first = abs(SAMPLE, 'ymd', true, true)
+      const second = abs(SAMPLE, 'ymd', true, true)
+
+      expect(second).toBe(first)
+      expect(second).toEqual({ text: '2026-06-30 14:05:09', tone: 'default' })
+    })
+
+    it('keys the cache on both value and pattern — different formats never collide', () => {
+      const ymd = abs(SAMPLE, 'ymd')
+      const dmy = abs(SAMPLE, 'dmy')
+
+      expect(ymd).not.toBe(dmy)
+      expect(ymd.text).toBe('2026-06-30')
+      expect(dmy.text).toBe('30/06/2026')
+
+      // Re-requesting the first pairing still hits the cached entry.
+      expect(abs(SAMPLE, 'ymd')).toBe(ymd)
+    })
+
+    it('keys the cache on the showTime/showSeconds-derived pattern, not just the format id', () => {
+      const dateOnly = abs(SAMPLE, 'ymd', false)
+      const withTime = abs(SAMPLE, 'ymd', true)
+
+      expect(dateOnly).not.toBe(withTime)
+      expect(dateOnly.text).toBe('2026-06-30')
+      expect(withTime.text).toBe('2026-06-30 14:05')
+    })
+
+    it('bypasses the cache for relative-mode results within the cutoff', () => {
+      const now = Date.parse(SAMPLE)
+      const value = new Date(now - 60_000).toISOString()
+      const options = {
+        format: 'ymd' as const,
+        showTime: false,
+        showSeconds: false,
+        relative: true,
+        now,
+      }
+
+      const first = formatEntryDate(value, options)
+      const second = formatEntryDate(value, options)
+
+      // Same inputs, but relative phrases are never cached — a fresh object
+      // is produced every call since "now" is volatile.
+      expect(second).not.toBe(first)
+      expect(second).toEqual(first)
+      expect(second).toEqual({ text: '1 minute ago', tone: 'recent' })
+    })
+
+    it('falls through to (and reuses) the cached absolute entry once relative mode is past the cutoff', () => {
+      const now = Date.parse(SAMPLE)
+      const value = new Date(now - 3 * 24 * 60 * 60_000).toISOString()
+      const relativeOptions = {
+        format: 'ymd' as const,
+        showTime: false,
+        showSeconds: false,
+        relative: true,
+        now,
+      }
+      const absoluteOptions = {
+        format: 'ymd' as const,
+        showTime: false,
+        showSeconds: false,
+        relative: false,
+      }
+
+      const viaRelativeFallback = formatEntryDate(value, relativeOptions)
+      const viaAbsolute = formatEntryDate(value, absoluteOptions)
+
+      // Both paths compute the same `value|pattern` cache key (relative mode
+      // no longer influences the key once it falls back to absolute), so the
+      // second call reuses the first's cached result.
+      expect(viaAbsolute).toBe(viaRelativeFallback)
+    })
+  })
 })

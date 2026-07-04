@@ -13,6 +13,7 @@ import {
 import { JobCard } from '@/components/queue/JobCard'
 import { reorderOps } from '@/lib/queue-commands'
 import { formatCount } from '@/lib/format'
+import { formatItemPreview, verb } from '@/lib/queue-format'
 import type { OpProgress, ThroughputSample } from '@/lib/types/ipc'
 import { isTerminal, useQueueStore } from '@/stores/queue-store'
 
@@ -67,27 +68,9 @@ function primaryOperation(operations: OpProgress[], conflicts: Record<string, un
     ?.operation
 }
 
-function verb(operation: OpProgress) {
-  if (operation.kind === 'delete') {
-    return 'Deleting'
-  }
-  if (operation.kind === 'compress') {
-    return 'Compressing'
-  }
-  if (operation.kind === 'extract') {
-    return 'Extracting'
-  }
-  return operation.kind === 'move' ? 'Moving' : 'Copying'
-}
-
 function itemSummary(operation: OpProgress) {
   if (operation.status === 'pending' && operation.itemNames.length > 0) {
-    if (operation.itemNames.length <= 2) {
-      return operation.itemNames.join(', ')
-    }
-    return `${operation.itemNames.slice(0, 2).join(', ')}, +${formatCount(
-      operation.itemNames.length - 2,
-    )} more`
+    return formatItemPreview(operation.itemNames, operation.totalItems)
   }
   if (operation.currentFileName) {
     return operation.currentFileName

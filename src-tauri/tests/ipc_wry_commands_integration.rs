@@ -7,7 +7,7 @@ use std::time::Duration;
 use file_explorer_lib::fs::{SortDirection, SortKey};
 use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::types::{
-    FolderSizeRequest, FolderSizesRequest, RefreshTabRequest, SetTabWatchRequest, WatchTarget,
+    FolderSizeRequest, FolderSizesRequest, SetTabWatchRequest, WatchTarget,
 };
 use file_explorer_lib::ops::OpsService;
 use file_explorer_lib::persist::PersistenceState;
@@ -50,11 +50,13 @@ fn concrete_apphandle_commands_cover_volume_watch_and_size_wrappers() {
         sort_direction: SortDirection::Asc,
         filter: String::new(),
         show_hidden: true,
+        include_item_counts: true,
     };
 
     commands::set_tab_watch(
         SetTabWatchRequest {
             target: Some(watch_target.clone()),
+            entries: None,
         },
         app.state::<WatchService>(),
     )
@@ -63,24 +65,29 @@ fn concrete_apphandle_commands_cover_volume_watch_and_size_wrappers() {
     fs::remove_file(root.join("before.txt")).expect("remove");
     fs::write(root.join("after.txt"), b"after").expect("after");
 
-    let patch = commands::refresh_tab(
-        RefreshTabRequest {
-            target: watch_target.clone(),
+    commands::set_tab_watch(
+        SetTabWatchRequest {
+            target: Some(watch_target.clone()),
+            entries: None,
         },
         app.state::<WatchService>(),
     )
-    .expect("refresh");
-    assert!(patch
-        .removed
-        .iter()
+    .expect("reseed watch after file changes");
+    let baseline =
+        file_explorer_lib::watch::tab_snapshot_for_tests(&app.state::<WatchService>(), &watch_target.tab_id)
+            .expect("baseline recorded for tab");
+    assert!(baseline
+        .keys()
+        .any(|path| path.ends_with("after.txt")));
+    assert!(!baseline
+        .keys()
         .any(|path| path.ends_with("before.txt")));
-    assert!(patch
-        .changed
-        .iter()
-        .any(|entry| entry.path.ends_with("after.txt")));
 
     commands::set_tab_watch(
-        SetTabWatchRequest { target: None },
+        SetTabWatchRequest {
+            target: None,
+            entries: None,
+        },
         app.state::<WatchService>(),
     )
     .expect("clear watch");

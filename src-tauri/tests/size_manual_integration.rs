@@ -329,8 +329,7 @@ fn size_service_request_paths_emits_manual_success_lifecycle() {
     });
 
     let recorded = updates.lock().expect("updates lock").clone();
-    assert_eq!(recorded[0].state, SizeStateKind::Unknown);
-    assert_eq!(recorded[1].state, SizeStateKind::Calculating);
+    assert_eq!(recorded[0].state, SizeStateKind::Calculating);
     let ready = recorded
         .iter()
         .find(|update| update.state == SizeStateKind::Ready)

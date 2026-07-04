@@ -189,7 +189,6 @@ pub fn run() {
             commands::request_icons,
             commands::cancel_size,
             commands::set_tab_watch,
-            commands::refresh_tab,
             commands::load_config,
             commands::save_config,
             commands::load_session,

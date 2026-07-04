@@ -10,8 +10,8 @@ use file_explorer_lib::fs::{SortDirection, SortKey};
 use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::types::{
     CancelSizeRequest, CreateEntryRequest, LogFrontendRequest, OpIdRequest, OpenPathRequest,
-    RefreshTabRequest, ReorderOpsRequest, ResolveConflictRequest, SaveConfigRequest,
-    SaveSessionRequest, SetTabWatchRequest, TrashEntriesRequest,
+    ReorderOpsRequest, ResolveConflictRequest, SaveConfigRequest, SaveSessionRequest,
+    SetTabWatchRequest, TrashEntriesRequest,
 };
 use file_explorer_lib::ops::{
     ConflictResolution, OpItem, OpKind, OpStatus, OpsService, StartOpRequest,
@@ -264,9 +264,11 @@ fn commands_cover_size_and_logging_state() {
         size_root.join("file-0.txt").to_string_lossy().into_owned(),
         size_root.join("file-1.txt").to_string_lossy().into_owned(),
     ];
-    let icon_events = commands::request_icons(file_explorer_lib::ipc::types::RequestIconsRequest {
-        paths: icon_paths.clone(),
-    });
+    let icon_batches =
+        commands::request_icons(file_explorer_lib::ipc::types::RequestIconsRequest {
+            paths: icon_paths.clone(),
+        });
+    let icon_events: Vec<_> = icon_batches.into_iter().flatten().collect();
     assert_eq!(
         icon_events
             .iter()
@@ -295,28 +297,36 @@ fn commands_cover_size_and_logging_state() {
         sort_direction: SortDirection::Asc,
         filter: String::new(),
         show_hidden: true,
+        include_item_counts: true,
     };
     commands::set_tab_watch(
         SetTabWatchRequest {
             target: Some(watch_target.clone()),
+            entries: None,
         },
         as_state(&watch_service),
     )
     .expect("set tab watch");
     write_file(&fixture.path().join("watch.txt"), b"watch");
-    let refreshed = commands::refresh_tab(
-        RefreshTabRequest {
-            target: watch_target,
+    commands::set_tab_watch(
+        SetTabWatchRequest {
+            target: Some(watch_target.clone()),
+            entries: None,
         },
         as_state(&watch_service),
     )
-    .expect("refresh tab");
-    assert!(refreshed
-        .changed
-        .iter()
-        .any(|entry| entry.path.ends_with("watch.txt")));
+    .expect("reseed tab watch after file write");
+    let baseline =
+        file_explorer_lib::watch::tab_snapshot_for_tests(&watch_service, &watch_target.tab_id)
+            .expect("baseline recorded for tab");
+    assert!(baseline
+        .keys()
+        .any(|path| path.ends_with("watch.txt")));
     commands::set_tab_watch(
-        SetTabWatchRequest { target: None },
+        SetTabWatchRequest {
+            target: None,
+            entries: None,
+        },
         as_state(&watch_service),
     )
     .expect("clear tab watch");

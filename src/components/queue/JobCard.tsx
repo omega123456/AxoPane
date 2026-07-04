@@ -12,6 +12,7 @@ import {
 } from '@/components/icons'
 import { ThroughputChart } from '@/components/queue/ThroughputChart'
 import { formatBytes, formatCount, formatEta, formatRate } from '@/lib/format'
+import { formatItemPreview, verb } from '@/lib/queue-format'
 import type { OpProgress, ThroughputSample } from '@/lib/types/ipc'
 
 type JobCardProps = {
@@ -40,29 +41,6 @@ const LIVE_REGION_THROTTLE_MS = 5000
  */
 const METRICS_REFRESH_MS = 500
 
-function verb(operation: OpProgress) {
-  if (operation.kind === 'delete') {
-    return 'Deleting'
-  }
-  if (operation.kind === 'compress') {
-    return 'Compressing'
-  }
-  if (operation.kind === 'extract') {
-    return 'Extracting'
-  }
-  return operation.kind === 'move' ? 'Moving' : 'Copying'
-}
-
-function itemSummary(itemNames: string[]) {
-  if (itemNames.length === 0) {
-    return null
-  }
-  if (itemNames.length <= 2) {
-    return itemNames.join(', ')
-  }
-  return `${itemNames.slice(0, 2).join(', ')}, +${formatCount(itemNames.length - 2)} more`
-}
-
 export function JobCard({
   operation,
   throughputHistory,
@@ -88,7 +66,7 @@ export function JobCard({
   const isCancelled = operation.status === 'cancelled'
   const isConflict = operation.status === 'conflict' || hasConflict
   const isPending = operation.status === 'pending'
-  const topLevelItems = itemSummary(operation.itemNames)
+  const topLevelItems = formatItemPreview(operation.itemNames, operation.totalItems)
   const showTopLevelItems =
     !isCompleted && !isFailed && !isCancelled && topLevelItems !== null
   const sourceSeparator = operation.sourceDir.includes('\\') ? '\\' : '/'

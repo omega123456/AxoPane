@@ -49,6 +49,23 @@ fn deterministic_instants(offsets_ms: &[u64]) -> impl Fn() -> Instant + Send + S
     }
 }
 
+/// A clock that advances by `step` on every call, guaranteeing strictly
+/// increasing instants. Phase 1's `TransferThrottle` gates single-file
+/// transfer progress emissions on `PROGRESS_EMIT_INTERVAL` (90ms) elapsing
+/// since the last emission, in addition to the existing rate-window logic
+/// gating `bytes_per_second` recomputation. Using a step comfortably above
+/// the throttle interval means every throttle check the test cares about
+/// reliably opens, without racing a real (fast, sub-millisecond) clock that
+/// would otherwise never cross the interval inside a tiny test fixture.
+fn ever_advancing_clock(step: Duration) -> impl Fn() -> Instant + Send + Sync + 'static {
+    let now = Arc::new(Mutex::new(Instant::now()));
+    move || {
+        let mut guard = now.lock().expect("clock lock");
+        *guard += step;
+        *guard
+    }
+}
+
 fn pending_transfer_state(
     id: &str,
     kind: OpKind,
@@ -1124,7 +1141,14 @@ fn emits_incremental_current_file_progress() {
     let events = Arc::new(std::sync::Mutex::new(Vec::<OpProgress>::new()));
     let events_clone = events.clone();
 
-    let service = OpsService::new(Duration::from_secs(30));
+    let mut service = OpsService::new(Duration::from_secs(30));
+    // Phase 1 throttles single-file transfer progress to one emission per
+    // `PROGRESS_EMIT_INTERVAL` (90ms). A real (fast) clock never crosses that
+    // interval while copying a 3MB fixture in-test, so an ever-advancing
+    // injected clock (step comfortably above the interval) is used to
+    // deterministically force intermediate emissions open instead of racing
+    // the throttle.
+    service.set_instant_now_for_tests(Arc::new(ever_advancing_clock(Duration::from_millis(150))));
     service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
     service.set_progress_emitter(Arc::new(move |progress| {
         events_clone.lock().expect("events lock").push(progress);
@@ -1200,7 +1224,11 @@ fn events_for_mid_copy_rate(rate_window: Duration) -> Vec<OpProgress> {
     let events = Arc::new(Mutex::new(Vec::<OpProgress>::new()));
     let events_clone = events.clone();
 
-    let service = OpsService::with_rate_window(Duration::from_secs(30), rate_window);
+    let mut service = OpsService::with_rate_window(Duration::from_secs(30), rate_window);
+    // See `emits_incremental_current_file_progress`: Phase 1's single-file
+    // transfer throttle needs a deterministically-advancing clock to reliably
+    // surface a mid-copy snapshot instead of racing a real clock.
+    service.set_instant_now_for_tests(Arc::new(ever_advancing_clock(Duration::from_millis(150))));
     service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
     service.set_progress_emitter(Arc::new(move |progress| {
         events_clone.lock().expect("events lock").push(progress);
@@ -1251,7 +1279,25 @@ fn zero_rate_window_recomputes_each_chunk() {
     let events_clone = events.clone();
 
     let mut service = OpsService::with_rate_window(Duration::from_secs(30), Duration::ZERO);
-    service.set_instant_now_for_tests(Arc::new(deterministic_instants(&[0, 1, 6, 31, 56, 57])));
+    // Phase 1's single-file `TransferThrottle` (90ms interval) now also
+    // consumes clock calls at every intra-file emit checkpoint (begin/each
+    // chunk/finish), interleaved with the pre-existing rate-window refresh
+    // calls. The 3MB fixture below copies in exactly 3 x 1MiB chunks, so
+    // chunk 3 always finishes the file exactly (`current_file_copied_bytes ==
+    // current_file_total_bytes`) and is excluded by the "mid-copy" filter
+    // (`current_file_copied_bytes < current_file_total_bytes`) below
+    // regardless of the throttle — only chunks 1 and 2 can ever count. This
+    // sequence is crafted so: the rate-refresh calls (which drive
+    // `bytes_per_second`) land far enough apart to differ between chunks 1
+    // and 2 (required by "recomputes each chunk"), while the throttle-check
+    // calls are spaced so both chunk 1 and chunk 2 individually cross the
+    // 90ms interval since the previous emission and emit — giving the
+    // required >= 2 recorded active-chunk snapshots with distinct rates,
+    // matching the throttled behavior instead of the old unthrottled
+    // per-chunk emission.
+    service.set_instant_now_for_tests(Arc::new(deterministic_instants(&[
+        0, 0, 0, 0, 10, 200, 220, 350, 400, 420, 430, 440, 450,
+    ])));
     service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
     service.set_progress_emitter(Arc::new(move |progress| {
         events_clone.lock().expect("events lock").push(progress);
@@ -1304,7 +1350,16 @@ fn large_rate_window_holds_prior_rate_between_chunks() {
 
     let mut service =
         OpsService::with_rate_window(Duration::from_secs(30), Duration::from_secs(60));
-    service.set_instant_now_for_tests(Arc::new(deterministic_instants(&[0, 1, 6, 31, 56, 57])));
+    // Same crafted clock sequence as `zero_rate_window_recomputes_each_chunk`
+    // (see the comment there for the full breakdown of what each offset
+    // drives). With a 60s rate window, only the first rate-refresh call
+    // (chunk 1) recomputes `bytes_per_second` — chunk 2 and chunk 3 both fall
+    // within the window and hold the prior rate — while the throttle still
+    // opens for chunk 1 and chunk 3 (chunk 2 is swallowed), so the two
+    // recorded active-chunk snapshots share the same, positive rate.
+    service.set_instant_now_for_tests(Arc::new(deterministic_instants(&[
+        0, 0, 0, 0, 10, 200, 220, 350, 400, 420, 430, 440, 450,
+    ])));
     service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
     service.set_progress_emitter(Arc::new(move |progress| {
         events_clone.lock().expect("events lock").push(progress);

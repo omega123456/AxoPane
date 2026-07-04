@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect } from 'react'
 import { ActionDialog } from '@/components/dialogs/ActionDialog'
 import { ConflictDialog } from '@/components/dialogs/ConflictDialog'
 import { DefaultAppDialog } from '@/components/dialogs/DefaultAppDialog'
@@ -13,11 +13,12 @@ import { QueueOverlay } from '@/components/queue/QueueOverlay'
 import { ErrorToast } from '@/components/states/ErrorToast'
 import { hydrateAppConfig, persistAppConfig } from '@/lib/app-config'
 import { executeCommand } from '@/lib/commands'
-import { isPathInsideVolume } from '@/lib/volumes'
 import { everythingStatus, listVolumes, loadConfig, loadSession } from '@/lib/ipc/commands'
 import { installCloseGuard } from '@/lib/close-guard'
 import { onDirPatch, onIconState, onSizeState, onVolumesChanged } from '@/lib/ipc/events'
 import { resolveCommandForEvent } from '@/lib/keymap'
+import { createRafBatcher } from '@/lib/raf-batcher'
+import type { IconStateEvent, SizeStateEvent } from '@/lib/types/ipc'
 import { UpdateBanner } from '@/components/states/UpdateBanner'
 import { useUpdaterStore } from '@/stores/updater-store'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
@@ -28,7 +29,6 @@ import { useKeymapStore } from '@/stores/keymap-store'
 import { initializePanes, usePanesStore } from '@/stores/panes-store'
 import { activeConflict, useQueueStore } from '@/stores/queue-store'
 import { useSettingsStore } from '@/stores/settings-store'
-import { useSelectionStore } from '@/stores/selection-store'
 import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 import { useDefaultAppDialogStore } from '@/stores/default-app-dialog-store'
 import { initializeTheme, useThemeStore } from '@/stores/theme-store'
@@ -45,20 +45,15 @@ function App() {
   const initialize = usePanesStore((state) => state.initialize)
   const setEverythingStatus = usePanesStore((state) => state.setEverythingStatus)
   const setVolumes = usePanesStore((state) => state.setVolumes)
-  const applySizeState = usePanesStore((state) => state.applySizeState)
-  const applyIconState = usePanesStore((state) => state.applyIconState)
+  const applySizeStates = usePanesStore((state) => state.applySizeStates)
+  const applyIconStates = usePanesStore((state) => state.applyIconStates)
   const applyDirPatch = usePanesStore((state) => state.applyDirPatch)
   const reloadPane = usePanesStore((state) => state.reloadPane)
-  const panes = usePanesStore((state) => state.panes)
-  const activePaneId = usePanesStore((state) => state.activePaneId)
-  const volumes = usePanesStore((state) => state.volumes)
-  const activePane = panes[activePaneId]
   const theme = useThemeStore((state) => state.theme)
   const applyTheme = useThemeStore((state) => state.setTheme)
   const syncThemePreference = useThemeStore((state) => state.setThemePreference)
   const persistThemePreference = useConfigStore((state) => state.setThemePreference)
   const defaultPaneMode = useLayoutStore((state) => state.defaultPaneMode)
-  const activeSelection = useSelectionStore((state) => state.selections[activePaneId])
   const keymap = useKeymapStore((state) => state.bindings)
   const settingsOpen = useSettingsStore((state) => state.isOpen)
   const menuOpen = useContextMenuStore((state) => state.menu !== null)
@@ -213,16 +208,28 @@ function App() {
   ])
 
   useEffect(() => {
+    // Icon/size events can arrive in bursts (e.g. loading a folder full of
+    // executables/subfolders); coalesce each burst into a single batched
+    // store update per animation frame instead of one `set` per event.
+    const iconBatcher = createRafBatcher<IconStateEvent>((batch) => {
+      applyIconStates(batch)
+    })
+    const sizeBatcher = createRafBatcher<SizeStateEvent>((batch) => {
+      applySizeStates(batch)
+    })
+
     const unlistenVolumesPromise = onVolumesChanged((event) => {
       setVolumes(event.volumes)
     })
 
     const unlistenSizesPromise = onSizeState((event) => {
-      applySizeState(event)
+      sizeBatcher.push(event)
     })
 
-    const unlistenIconsPromise = onIconState((event) => {
-      applyIconState(event)
+    const unlistenIconsPromise = onIconState((events) => {
+      for (const event of events) {
+        iconBatcher.push(event)
+      }
     })
 
     const unlistenPatchesPromise = onDirPatch((event) => {
@@ -234,22 +241,15 @@ function App() {
       void unlistenSizesPromise.then((unlisten) => unlisten())
       void unlistenIconsPromise.then((unlisten) => unlisten())
       void unlistenPatchesPromise.then((unlisten) => unlisten())
+      // Flush any buffered events before tearing down so a burst that lands
+      // right before unmount is not silently dropped, then cancel the
+      // batchers so no further frame callback fires.
+      iconBatcher.flush()
+      iconBatcher.cancel()
+      sizeBatcher.flush()
+      sizeBatcher.cancel()
     }
-  }, [applyDirPatch, applyIconState, applySizeState, setVolumes])
-
-  const statusSummary = useMemo(() => {
-    const selectionCount = activeSelection?.selectedIds.length ?? 0
-    const focusedEntry = activePane.focusedEntryId
-      ? activePane.entries.find((entry) => entry.id === activePane.focusedEntryId)
-      : undefined
-
-    return {
-      itemCount: activePane.entries.length,
-      selectionCount,
-      focusedEntry,
-      volume: volumes.find((volume) => isPathInsideVolume(activePane.path ?? '', volume.mountRoot)),
-    }
-  }, [activePane, activeSelection, volumes])
+  }, [applyDirPatch, applyIconStates, applySizeStates, setVolumes])
 
   return (
     <main className="flex h-full select-none flex-col overflow-hidden bg-light-window font-ui text-light-text dark:bg-dark-window dark:text-dark-text">
@@ -264,7 +264,7 @@ function App() {
             }}
           />
         }
-        statusBar={<StatusBar activePane={activePane} summary={statusSummary} />}
+        statusBar={<StatusBar />}
         overlay={
           <>
             <QueueOverlay />

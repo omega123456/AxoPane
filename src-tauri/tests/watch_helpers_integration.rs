@@ -80,6 +80,7 @@ fn snapshot_helper_respects_filter_and_hidden_flags() {
         sort_direction: SortDirection::Asc,
         filter: "alpha".to_string(),
         show_hidden: false,
+        include_item_counts: true,
     })
     .expect("filtered snapshot");
     assert_eq!(filtered.len(), 1);
@@ -94,6 +95,7 @@ fn snapshot_helper_respects_filter_and_hidden_flags() {
         sort_direction: SortDirection::Asc,
         filter: String::new(),
         show_hidden: true,
+        include_item_counts: true,
     })
     .expect("hidden snapshot");
     assert!(with_hidden
@@ -118,7 +120,9 @@ fn clearing_watches_stops_future_patch_delivery() {
                 sort_direction: SortDirection::Asc,
                 filter: String::new(),
                 show_hidden: true,
+                include_item_counts: true,
             }),
+            None,
             Arc::new(move |patch| {
                 patches_for_callback
                     .lock()
@@ -130,7 +134,7 @@ fn clearing_watches_stops_future_patch_delivery() {
         .expect("set watch");
 
     service
-        .set_tab_watch(None, Arc::new(|_| {}), Arc::new(|_, _| {}))
+        .set_tab_watch(None, None, Arc::new(|_| {}), Arc::new(|_, _| {}))
         .expect("clear watches");
     fs::write(root.join("after-clear.txt"), b"x").expect("after clear");
     thread::sleep(Duration::from_millis(250));

@@ -80,6 +80,37 @@ export const dateToneClassName: Record<DateTone, string> = {
 
 const EMPTY: FormattedDate = { text: '—', tone: 'default' }
 
+/**
+ * Absolute-format results are pure functions of `value|pattern` (no volatile
+ * "now" input), so repeated cells sharing a value/format — the common case
+ * while scrolling a folder without touching the clock — reuse the same
+ * formatted result instead of re-running `date-fns` `format` every render.
+ * Capped so a session that pages through many distinct folders can't grow
+ * this unbounded.
+ */
+const ABSOLUTE_FORMAT_CACHE_LIMIT = 2000
+const absoluteFormatCache = new Map<string, FormattedDate>()
+
+function cachedAbsoluteFormat(value: string, pattern: string, compute: () => FormattedDate): FormattedDate {
+  const cacheKey = `${value}|${pattern}`
+  const cached = absoluteFormatCache.get(cacheKey)
+  if (cached) {
+    return cached
+  }
+
+  const result = compute()
+  if (absoluteFormatCache.size >= ABSOLUTE_FORMAT_CACHE_LIMIT) {
+    // Evict the oldest inserted entry (Map preserves insertion order) rather
+    // than tracking recency — simple and good enough for a soft size cap.
+    const oldestKey = absoluteFormatCache.keys().next().value
+    if (oldestKey !== undefined) {
+      absoluteFormatCache.delete(oldestKey)
+    }
+  }
+  absoluteFormatCache.set(cacheKey, result)
+  return result
+}
+
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
@@ -135,9 +166,14 @@ export function formatEntryDate(
   if (options.relative) {
     const phrase = formatRelative((options.now ?? Date.now()) - ms)
     if (phrase) {
+      // Relative phrases are a function of "now", which advances outside of
+      // any cache key we could construct — never cache these.
       return phrase
     }
   }
   const pattern = absolutePattern(options.format, options.showTime, options.showSeconds)
-  return { text: format(new Date(ms), pattern), tone: 'default' }
+  return cachedAbsoluteFormat(value, pattern, () => ({
+    text: format(new Date(ms), pattern),
+    tone: 'default',
+  }))
 }

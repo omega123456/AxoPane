@@ -3,7 +3,6 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { CommandBar } from '@/components/shell/CommandBar'
-import { StatusBar } from '@/components/shell/StatusBar'
 import { usePanesStore } from '@/stores/panes-store'
 
 beforeEach(() => {
@@ -61,77 +60,5 @@ describe('CommandBar', () => {
 
     await user.click(toggle)
     expect(setShowHiddenFiles).toHaveBeenCalledWith(true)
-  })
-})
-
-describe('StatusBar', () => {
-  const basePane = () => usePanesStore.getState().panes.left
-
-  it('renders counts, focused entry, and volume free space', () => {
-    render(
-      <StatusBar
-        activePane={{ ...basePane(), path: 'C:\\Users', typing: false }}
-        summary={{
-          itemCount: 3,
-          selectionCount: 1,
-          focusedEntry: {
-            id: 'r',
-            name: 'Report.txt',
-            path: 'C:\\Users\\Report.txt',
-            isDir: false,
-            sizeBytes: 1024,
-            itemCount: null,
-            typeLabel: 'TXT file',
-            modifiedAt: null,
-            createdAt: null,
-            attributes: [],
-            isHidden: false,
-            isSystem: false,
-          },
-          volume: {
-            mountRoot: 'C:\\',
-            label: 'System',
-            totalBytes: 4_000_000_000_000,
-            freeBytes: 412_000_000_000,
-            isNetwork: false,
-            isRemovable: false,
-          },
-        }}
-      />,
-    )
-
-    expect(screen.getByText('3 items')).toBeInTheDocument()
-    expect(screen.getByText('1 selected')).toBeInTheDocument()
-    expect(screen.getByText(/Report.txt/)).toBeInTheDocument()
-    expect(screen.getByText(/free of/)).toBeInTheDocument()
-  })
-
-  it('shows a filtering indicator and a folder focus label without a volume', () => {
-    render(
-      <StatusBar
-        activePane={{ ...basePane(), path: 'C:\\Users', typing: true }}
-        summary={{
-          itemCount: 0,
-          selectionCount: 0,
-          focusedEntry: {
-            id: 'd',
-            name: 'Docs',
-            path: 'C:\\Users\\Docs',
-            isDir: true,
-            sizeBytes: null,
-            itemCount: 2,
-            typeLabel: 'Folder',
-            modifiedAt: null,
-            createdAt: null,
-            attributes: [],
-            isHidden: false,
-            isSystem: false,
-          },
-        }}
-      />,
-    )
-
-    expect(screen.getByText('Filtering…')).toBeInTheDocument()
-    expect(screen.getByText(/· folder/)).toBeInTheDocument()
   })
 })

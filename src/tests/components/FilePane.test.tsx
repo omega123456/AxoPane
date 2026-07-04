@@ -383,6 +383,161 @@ describe('FilePane state rendering', () => {
     expect(scroller.scrollTop).toBe(180)
   })
 
+  it('stops forcing an unreachable saved scroll position once the folder has permanently shrunk (regression)', () => {
+    // Simulates returning to a path whose saved scrollTop (from a previous,
+    // larger visit) can no longer be reached because the folder shrank while
+    // the user was away. A real WebView clamps `scrollTop` short of the
+    // assigned value in that case (and can also round a fractional target
+    // read back through `document.documentElement.zoom` scaling) — jsdom
+    // does neither, so this test stubs `scrollTop`/`scrollHeight`/
+    // `clientHeight` on the scroll container to model the clamp.
+    const longEntries = Array.from({ length: 40 }, (_, index) => entry(`Item ${index}`))
+    seedPane({
+      path: 'C:\\root',
+      entries: longEntries,
+      scrollPositions: { 'C:\\root\\shrunk': 500 },
+    })
+
+    const view = render(<FilePane paneId="left" />)
+    const scroller = screen.getByTestId('file-pane-scroll-left')
+
+    const maxScrollTop = 50
+    let scrollTop = 0
+    Object.defineProperty(scroller, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value: number) => {
+        scrollTop = Math.min(value, maxScrollTop)
+      },
+    })
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 100 })
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 100 })
+
+    // Switch to the shrunk path. The very first evaluation of a fresh restore
+    // always gets one full attempt — the effect can't yet tell whether
+    // `totalHeight` is about to grow — so the unreachable target (500, way
+    // past the 50px clamp ceiling) is not yet treated as permanent.
+    act(() => {
+      usePanesStore.setState((state) => ({
+        panes: {
+          ...state.panes,
+          left: {
+            ...state.panes.left,
+            path: 'C:\\root\\shrunk',
+            entries: [entry('OnlyItem')],
+          },
+        },
+      }))
+      view.rerender(<FilePane paneId="left" />)
+    })
+    expect(scroller.scrollTop).toBe(maxScrollTop)
+
+    // A second same-path re-render (e.g. a fs-watch patch touching the entry
+    // count) confirms the target is genuinely unreachable, so the pending
+    // restore is abandoned instead of retrying forever.
+    act(() => {
+      usePanesStore.setState((state) => ({
+        panes: {
+          ...state.panes,
+          left: { ...state.panes.left, entries: [entry('OnlyItem'), entry('SecondItem')] },
+        },
+      }))
+      view.rerender(<FilePane paneId="left" />)
+    })
+    expect(scroller.scrollTop).toBe(maxScrollTop)
+
+    // The user then scrolls to a new live position...
+    fireEvent.scroll(scroller, { target: { scrollTop: 20 } })
+    expect(scroller.scrollTop).toBe(20)
+
+    // ...and a further same-path re-render (another entry-count change) must
+    // leave that live position alone rather than re-forcing the stale,
+    // unreachable saved target back onto the container — the exact bug this
+    // hardening fixes.
+    act(() => {
+      usePanesStore.setState((state) => ({
+        panes: {
+          ...state.panes,
+          left: {
+            ...state.panes.left,
+            entries: [entry('OnlyItem'), entry('SecondItem'), entry('ThirdItem')],
+          },
+        },
+      }))
+      view.rerender(<FilePane paneId="left" />)
+    })
+    expect(scroller.scrollTop).toBe(20)
+  })
+
+  it('does not write to the store on scroll, but persists the live position on path change', () => {
+    const originalSetScrollPosition = usePanesStore.getState().setScrollPosition
+    const setScrollPosition = vi.fn(originalSetScrollPosition)
+    act(() => {
+      usePanesStore.setState({ setScrollPosition })
+    })
+
+    try {
+      seedPane({ path: 'C:\\root', entries: [entry('Alpha')], scrollPositions: {} })
+      render(<FilePane paneId="left" />)
+      const scroller = screen.getByTestId('file-pane-scroll-left')
+
+      fireEvent.scroll(scroller, { target: { scrollTop: 240 } })
+      // A scroll event only updates the internal ref — no store write, so no
+      // re-render of anything subscribed to `panes` is triggered.
+      expect(setScrollPosition).not.toHaveBeenCalled()
+
+      act(() => {
+        usePanesStore.setState((state) => ({
+          panes: {
+            ...state.panes,
+            left: { ...state.panes.left, path: 'C:\\root\\child', entries: [] },
+          },
+        }))
+      })
+
+      expect(setScrollPosition).toHaveBeenCalledWith('left', 'C:\\root', 240)
+    } finally {
+      act(() => {
+        usePanesStore.setState({ setScrollPosition: originalSetScrollPosition })
+      })
+    }
+  })
+
+  it('does not reset the live scroll position when the entry count changes on the same path (regression)', () => {
+    // Simulates a background fs-watch patch adding/removing entries while the
+    // user is scrolled mid-list on the same path. Before the fix, the layout
+    // effect unconditionally reapplied the *stale* saved scroll position
+    // (from whenever `setScrollPosition` last ran) on every re-run, including
+    // one triggered only by `totalHeight` changing due to the new entry count
+    // — clobbering the user's current scroll position even though the path
+    // never changed.
+    const longEntries = Array.from({ length: 40 }, (_, index) => entry(`Item ${index}`))
+    seedPane({ path: 'C:\\root', entries: longEntries, scrollPositions: {} })
+
+    const view = render(<FilePane paneId="left" />)
+    const scroller = screen.getByTestId('file-pane-scroll-left')
+
+    fireEvent.scroll(scroller, { target: { scrollTop: 300 } })
+    expect(scroller.scrollTop).toBe(300)
+
+    act(() => {
+      usePanesStore.setState((state) => ({
+        panes: {
+          ...state.panes,
+          left: {
+            ...state.panes.left,
+            entries: [...longEntries, entry('Item 40'), entry('Item 41')],
+          },
+        },
+      }))
+      view.rerender(<FilePane paneId="left" />)
+    })
+
+    // Same path, only the entry count changed: the live scroll position must
+    // be left alone, not reset to the (stale, unset) saved position.
+    expect(scroller.scrollTop).toBe(300)
+  })
+
   it('opens non-folder items with the OS default application on activation', async () => {
     const user = userEvent.setup()
     const openPath = vi.fn(() => undefined)
@@ -930,7 +1085,9 @@ describe('FilePane visible-row icon requests', () => {
     })
 
     act(() => {
-      usePanesStore.getState().applyIconState({ path: 'C:\\root\\readme.txt', iconDataUrl: null })
+      usePanesStore
+        .getState()
+        .applyIconStates([{ path: 'C:\\root\\readme.txt', iconDataUrl: null }])
     })
 
     // Give the debounced effect plenty of room to re-fire if the bug regresses.

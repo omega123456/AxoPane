@@ -8,66 +8,66 @@ import { useLayoutStore } from '@/stores/layout-store'
 import { columnFlexStyle } from './HeaderRow'
 import { SizeValue } from './SizeValue'
 
+import type { DragEvent, KeyboardEvent, MouseEvent } from 'react'
+import { memo, useEffect, useMemo, useRef } from 'react'
+
+/**
+ * Stable, id-keyed handler dispatcher for a pane's rows.
+ *
+ * `FilePane` builds exactly one of these per pane (memoized so its identity
+ * never changes across renders) and every `FileRow` binds `entry.id` itself
+ * when calling into it. Keeping this a single stable prop — instead of ~9-13
+ * fresh per-row arrow-function props recreated on every `FilePane` render —
+ * is what lets `React.memo` below actually skip re-rendering rows whose own
+ * props (entry/selection/focus/...) didn't change.
+ */
+export type FileRowActions = {
+  onPointerDown: () => void
+  onActivate: (entryId: string, eventTimeStamp: number) => void
+  onClick: (entryId: string, event: MouseEvent<HTMLDivElement>) => void
+  onContextMenu: (entryId: string, event: MouseEvent<HTMLDivElement>) => void
+  onMiddleClick: (entryId: string) => void
+  onDragStart: (entryId: string, event: DragEvent<HTMLDivElement>) => void
+  onDragEnd: () => void
+  onDragEnter: (entryId: string, event: DragEvent<HTMLDivElement>) => void
+  onDragOver: (entryId: string, event: DragEvent<HTMLDivElement>) => void
+  onDragLeave: (entryId: string) => void
+  onDrop: (entryId: string, event: DragEvent<HTMLDivElement>) => void
+  onRenameChange: (value: string) => void
+  onRenameSubmit: () => void
+  onRenameCancel: () => void
+  onRenameBlur: () => void
+}
+
 type FileRowProps = {
   entry: DirectoryEntry
   isActivePane: boolean
   isFocused: boolean
   isSelected: boolean
-  onPointerDown: () => void
-  onActivate: (eventTimeStamp: number) => void
-  onClick: (event: MouseEvent<HTMLDivElement>) => void
-  onContextMenu: (event: MouseEvent<HTMLDivElement>) => void
-  onMiddleClick: () => void
+  actions: FileRowActions
   isCut?: boolean
   isRenaming?: boolean
   renameValue?: string
   renameBusy?: boolean
   renameError?: string | null
-  onRenameChange?: (value: string) => void
-  onRenameSubmit?: () => void
-  onRenameCancel?: () => void
-  onRenameBlur?: () => void
   /** True while a valid internal drag is hovering this (directory) row. */
   isDropTarget?: boolean
   draggable?: boolean
-  onDragStart?: (event: DragEvent<HTMLDivElement>) => void
-  onDragEnd?: () => void
-  onDragEnter?: (event: DragEvent<HTMLDivElement>) => void
-  onDragOver?: (event: DragEvent<HTMLDivElement>) => void
-  onDragLeave?: (event: DragEvent<HTMLDivElement>) => void
-  onDrop?: (event: DragEvent<HTMLDivElement>) => void
 }
 
-import type { DragEvent, KeyboardEvent, MouseEvent } from 'react'
-import { useEffect, useMemo, useRef } from 'react'
-
-export function FileRow({
+function FileRowImpl({
   entry,
   isActivePane,
   isFocused,
   isSelected,
-  onPointerDown,
-  onActivate,
-  onClick,
-  onContextMenu,
-  onMiddleClick,
+  actions,
   isCut = false,
   isRenaming = false,
   renameValue = '',
   renameBusy = false,
   renameError = null,
-  onRenameChange,
-  onRenameSubmit,
-  onRenameCancel,
-  onRenameBlur,
   isDropTarget = false,
   draggable = false,
-  onDragStart,
-  onDragEnd,
-  onDragEnter,
-  onDragOver,
-  onDragLeave,
-  onDrop,
 }: FileRowProps) {
   const columns = useLayoutStore((state) => state.columns)
   const columnWidths = useLayoutStore((state) => state.columnWidths)
@@ -97,10 +97,10 @@ export function FileRow({
     event.stopPropagation()
     if (event.key === 'Enter') {
       event.preventDefault()
-      onRenameSubmit?.()
+      actions.onRenameSubmit()
     } else if (event.key === 'Escape') {
       event.preventDefault()
-      onRenameCancel?.()
+      actions.onRenameCancel()
     }
   }
 
@@ -125,8 +125,8 @@ export function FileRow({
                     value={renameValue}
                     disabled={renameBusy}
                     onMouseDown={(event) => event.stopPropagation()}
-                    onBlur={onRenameBlur}
-                    onChange={(event) => onRenameChange?.(event.target.value)}
+                    onBlur={actions.onRenameBlur}
+                    onChange={(event) => actions.onRenameChange(event.target.value)}
                     onKeyDown={onRenameKeyDown}
                     className="min-w-0 flex-1 select-text rounded-tab border border-accent-blue-border bg-light-window px-2 py-1 font-mono text-uxs text-light-text outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:bg-dark-window dark:text-dark-text"
                   />
@@ -209,24 +209,24 @@ export function FileRow({
       role="row"
       data-entry-id={entry.id}
       draggable={draggable}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-      onDragEnter={onDragEnter}
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
+      onDragStart={(event) => actions.onDragStart(entry.id, event)}
+      onDragEnd={actions.onDragEnd}
+      onDragEnter={(event) => actions.onDragEnter(entry.id, event)}
+      onDragOver={(event) => actions.onDragOver(entry.id, event)}
+      onDragLeave={() => actions.onDragLeave(entry.id)}
+      onDrop={(event) => actions.onDrop(entry.id, event)}
       // A non-focusable div (not a <button>) so mousedown never steals keyboard
       // focus away from the pane <section>; that lets us skip the mousedown
       // preventDefault a <button> needed, which would otherwise suppress the
       // native `dragstart` and break drag-and-drop entirely.
-      onMouseDown={onPointerDown}
-      onDoubleClick={(event) => onActivate(event.timeStamp)}
-      onClick={onClick}
-      onContextMenu={onContextMenu}
+      onMouseDown={actions.onPointerDown}
+      onDoubleClick={(event) => actions.onActivate(entry.id, event.timeStamp)}
+      onClick={(event) => actions.onClick(entry.id, event)}
+      onContextMenu={(event) => actions.onContextMenu(entry.id, event)}
       onAuxClick={(event) => {
         if (event.button === 1 && entry.isDir && !entry.trashId) {
           event.preventDefault()
-          onMiddleClick()
+          actions.onMiddleClick(entry.id)
         }
       }}
       className={`${rowClassName} cursor-pointer select-none ${
@@ -321,3 +321,13 @@ export function FileRow({
     </div>
   )
 }
+
+/**
+ * Memoized so a pane holding hundreds/thousands of rows only re-renders the
+ * rows whose own props actually changed (e.g. the previous and next focused
+ * row on an arrow-key move) rather than every visible row on every keystroke.
+ * This only helps because `actions` (see `FileRowActions` above) and
+ * `isSelected` (a `Set`-backed membership check in `FilePane`) are stable /
+ * cheap to recompute — see `FilePane.tsx`.
+ */
+export const FileRow = memo(FileRowImpl)

@@ -38,6 +38,10 @@ pub struct WatchTarget {
     pub sort_direction: SortDirection,
     pub filter: String,
     pub show_hidden: bool,
+    /// Whether the watcher should ask `list_dir` to count child-directory contents
+    /// (mirrors the Items column visibility). When `false`, snapshots/resnapshots
+    /// skip opening subdirectories purely to count their entries.
+    pub include_item_counts: bool,
 }
 
 #[derive(Default)]
@@ -58,9 +62,17 @@ struct WatchedTab {
 }
 
 impl WatchService {
+    /// Arms (or disarms) the watch for a tab.
+    ///
+    /// When `entries` is `Some`, the baseline snapshot is seeded directly from
+    /// those entries (the listing the frontend already fetched) instead of
+    /// re-reading the directory, eliminating a redundant enumeration. The
+    /// entries supplied must be the post-filter/sort listing for `target.path`
+    /// so the first diff against subsequent filesystem events is empty.
     pub fn set_tab_watch(
         &self,
         target: Option<WatchTarget>,
+        entries: Option<Vec<DirectoryEntry>>,
         emit_patch: Arc<dyn Fn(DirPatch) + Send + Sync>,
         emit_error: Arc<dyn Fn(String, String) + Send + Sync>,
     ) -> Result<(), String> {
@@ -74,7 +86,10 @@ impl WatchService {
 
             let runtime = guard.as_mut().expect("watch runtime");
             let path = PathBuf::from(&target.path);
-            let snapshot = snapshot_for_target(&target)?;
+            let snapshot = match entries {
+                Some(entries) => snapshot_from_entries(entries),
+                None => snapshot_for_target(&target)?,
+            };
             let pane_name = pane_scope(&target.tab_id).to_string();
 
             let (same_tab_previous, stale_tabs) = {
@@ -127,38 +142,6 @@ impl WatchService {
 
         Ok(())
     }
-
-    pub fn refresh_tab(
-        &self,
-        target: WatchTarget,
-        emit_patch: Arc<dyn Fn(DirPatch) + Send + Sync>,
-    ) -> Result<DirPatch, String> {
-        let mut guard = self.inner.lock().expect("watch service lock");
-        if guard.is_none() {
-            let runtime = create_runtime(Arc::clone(&emit_patch), Arc::new(noop_watch_error))?;
-            *guard = Some(runtime);
-        }
-
-        let runtime = guard.as_mut().expect("watch runtime");
-
-        let mut tabs = runtime.tabs.lock().expect("watch tabs lock");
-        let previous = match tabs.get(&target.tab_id) {
-            Some(tab) => tab.snapshot.clone(),
-            None => HashMap::new(),
-        };
-        let next = snapshot_for_target(&target)?;
-        let patch = diff_entries(&target.tab_id, &target.path, "refresh", &previous, &next);
-
-        tabs.insert(
-            target.tab_id.clone(),
-            WatchedTab {
-                target,
-                snapshot: next,
-            },
-        );
-
-        Ok(patch)
-    }
 }
 
 pub fn create_runtime(
@@ -193,6 +176,7 @@ pub fn pane_scope(tab_id: &str) -> &str {
     }
 }
 
+#[cfg(feature = "test-utils")]
 #[inline(never)]
 fn noop_watch_error(_: String, _: String) {}
 
@@ -265,6 +249,26 @@ pub fn insert_tab_for_tests(
         .lock()
         .expect("watch tabs lock")
         .insert(target.tab_id.clone(), WatchedTab { target, snapshot });
+}
+
+/// Returns the current baseline snapshot stored for `tab_id`, or `None` if the
+/// tab isn't (or is no longer) watched. Lets tests assert on `set_tab_watch`'s
+/// seeded baseline directly, without forcing a synchronous re-diff.
+#[cfg(feature = "test-utils")]
+#[allow(dead_code)]
+pub fn tab_snapshot_for_tests(
+    service: &WatchService,
+    tab_id: &str,
+) -> Option<HashMap<String, DirectoryEntry>> {
+    let guard = service.inner.lock().expect("watch service lock");
+    guard.as_ref().and_then(|runtime| {
+        runtime
+            .tabs
+            .lock()
+            .expect("watch tabs lock")
+            .get(tab_id)
+            .map(|tab| tab.snapshot.clone())
+    })
 }
 
 #[cfg(feature = "test-utils")]
@@ -525,14 +529,35 @@ pub fn snapshot_for_target(
         sort_direction: target.sort_direction,
         filter: target.filter.clone(),
         show_hidden: target.show_hidden,
-        include_item_counts: true,
+        include_item_counts: target.include_item_counts,
     })?;
 
-    Ok(response
-        .entries
+    Ok(snapshot_from_entries(response.entries))
+}
+
+/// Builds a snapshot map keyed by entry path from an already-fetched entries
+/// list, avoiding a second directory enumeration when the caller (e.g. the
+/// frontend's `list_dir` response) has already produced the listing.
+///
+/// `icon_data_url` is normalized to `None` regardless of what the caller
+/// supplies: `list_dir` (and therefore every subsequent re-diff snapshot)
+/// always reports entries with `icon_data_url: None` — icons are resolved
+/// separately and asynchronously by the frontend and are never part of the
+/// filesystem listing itself. The frontend, however, seeds this baseline from
+/// entries that may already carry a resolved `iconDataUrl` (from its own
+/// icon cache). Without this normalization those icon-bearing entries would
+/// never compare equal to a subsequent `list_dir`-sourced snapshot, so the
+/// very first diff after arming would spuriously report every such entry as
+/// "changed" even though nothing changed on disk. Normalizing here keeps the
+/// guarantee that the first diff after seeding is empty.
+fn snapshot_from_entries(entries: Vec<DirectoryEntry>) -> HashMap<String, DirectoryEntry> {
+    entries
         .into_iter()
-        .map(|entry| (entry.path.clone(), entry))
-        .collect())
+        .map(|mut entry| {
+            entry.icon_data_url = None;
+            (entry.path.clone(), entry)
+        })
+        .collect()
 }
 
 fn list_dir_for_snapshot(options: &ListDirOptions) -> Result<ListDirResponse, String> {

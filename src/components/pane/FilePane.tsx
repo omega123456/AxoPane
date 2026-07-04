@@ -5,7 +5,7 @@ import {
   resolveMenuTarget,
 } from '@/components/menus/menu-definitions'
 import { BreadcrumbBar } from './BreadcrumbBar'
-import { FileRow } from './FileRow'
+import { FileRow, type FileRowActions } from './FileRow'
 import { HeaderRow } from './HeaderRow'
 import { ParentRow } from './ParentRow'
 import { TabBar } from './TabBar'
@@ -34,7 +34,6 @@ import { useSelectionStore } from '@/stores/selection-store'
 import { useDragStore } from '@/stores/drag-store'
 import { useNativeMenuWarmStore } from '@/stores/native-menu-warm-store'
 import { canDropInto, performDrop, resolveDropKind, type DragItem } from '@/lib/drag-drop'
-import type { DirectoryEntry } from '@/lib/types/ipc'
 import type { PaneId } from '@/types/pane'
 
 function isPermissionError(message: string | null) {
@@ -122,6 +121,27 @@ export function FilePane({ paneId }: FilePaneProps) {
   const paneRef = useRef<HTMLElement | null>(null)
   const parentRef = useRef<HTMLDivElement | null>(null)
   const scrollPathRef = useRef(pane.path)
+  // Tracks the live scrollTop for the currently-mounted path without writing
+  // to the store on every scroll event (that would re-render the whole app on
+  // every frame of scrolling). Kept in sync with the DOM on every scroll and
+  // whenever the path-change effect below restores/persists a position.
+  const liveScrollTopRef = useRef(0)
+  // Target scrollTop the layout effect below is still trying to apply after a
+  // path switch (kept while retrying across a couple of re-runs while
+  // `totalHeight` grows enough for the target to actually stick — see the
+  // effect for details). `null` once the restore has taken effect (or there is
+  // no path switch in flight), so a same-path re-run triggered by something
+  // else entirely (e.g. a fs-watch patch changing the entry count) never
+  // clobbers the user's current live scroll position.
+  const pendingRestoreRef = useRef<number | null>(pane.scrollPositions[pane.path] ?? 0)
+  // True for exactly the first evaluation of a given `pendingRestoreRef` arm
+  // (right after mount or a path switch). While true, the layout effect below
+  // gives the restore the benefit of the doubt even if it looks unreachable
+  // this render — `totalHeight` may still be about to grow once async content
+  // (e.g. entries arriving after the initial render) lands. From the second
+  // evaluation onward, a restore that still can't reach its target is treated
+  // as permanently unreachable (see the effect for the exact conditions).
+  const restoreJustArmedRef = useRef(true)
   const lastPointerActivationRef = useRef<{ path: string; activatedAt: number } | null>(null)
   const renameSubmittingRef = useRef(false)
   const ignoreNextRenameBlurRef = useRef(false)
@@ -151,6 +171,9 @@ export function FilePane({ paneId }: FilePaneProps) {
         : new Set<string>(),
     [clipboardEntries, clipboardMode],
   )
+  // O(1) per-row membership check instead of `selectedIds.includes(...)`
+  // (O(selection size)) on every row on every render.
+  const selectedIdSet = useMemo(() => new Set(selection.selectedIds), [selection.selectedIds])
 
   const rowVirtualizer = useElementVirtualizer({
     count: rowCount,
@@ -184,12 +207,49 @@ export function FilePane({ paneId }: FilePaneProps) {
 
     const previousPath = scrollPathRef.current
     if (previousPath !== pane.path) {
-      setScrollPosition(paneId, previousPath, scrollElement.scrollTop)
+      setScrollPosition(paneId, previousPath, liveScrollTopRef.current)
       scrollPathRef.current = pane.path
+      // A path switch always (re)starts a restore attempt targeting the new
+      // path's saved position, superseding anything left pending from before.
+      pendingRestoreRef.current = savedScrollTop
+      restoreJustArmedRef.current = true
     }
 
-    if (scrollElement.scrollTop !== savedScrollTop) {
-      scrollElement.scrollTop = savedScrollTop
+    // Only force `scrollTop` while a restore is actually in flight (right
+    // after a path switch, possibly across a few re-runs while `totalHeight`
+    // grows tall enough for the target to stick). A same-path re-run with no
+    // pending restore — e.g. the entry count changing because of a fs-watch
+    // patch — must leave the user's live scroll position alone.
+    if (pendingRestoreRef.current !== null) {
+      const target = pendingRestoreRef.current
+      const wasJustArmed = restoreJustArmedRef.current
+      if (scrollElement.scrollTop !== target) {
+        scrollElement.scrollTop = target
+      }
+      liveScrollTopRef.current = scrollElement.scrollTop
+      // Consider the restore attempt "done" — and stop forcing scrollTop on
+      // future same-path re-runs — once no further retry could possibly make
+      // progress toward `target`:
+      //   - reached (or overshot) the target; or
+      //   - within a sub-pixel tolerance of it (a WebView can round a
+      //     fractional saved target — this app reads `documentElement.zoom`
+      //     for scaling — to an integer that never equals `target` exactly).
+      // Beyond the very first evaluation of this arm, also treat the restore
+      // as done when it's clamped short with no room left to grow — the
+      // folder shrank while the user was away, so `scrollHeight` no longer
+      // exceeds `clientHeight` (or the assignment above was silently clamped
+      // to something below `target`). The first evaluation is exempted so a
+      // fresh path switch still gets one full retry cycle while `totalHeight`
+      // catches up with async content (e.g. entries arriving after mount).
+      const reachedOrClose =
+        scrollElement.scrollTop >= target || Math.abs(scrollElement.scrollTop - target) < 1
+      const clampedWithNoRoomToGrow =
+        !wasJustArmed &&
+        (scrollElement.scrollTop < target || scrollElement.scrollHeight <= scrollElement.clientHeight)
+      if (reachedOrClose || clampedWithNoRoomToGrow) {
+        pendingRestoreRef.current = null
+      }
+      restoreJustArmedRef.current = false
     }
   }, [pane.path, paneId, savedScrollTop, setScrollPosition, totalHeight])
 
@@ -506,9 +566,10 @@ export function FilePane({ paneId }: FilePaneProps) {
     return { ctrlKey: event.ctrlKey, shiftKey: event.shiftKey }
   }
 
-  function handleRowDragStart(entry: DirectoryEntry, event: React.DragEvent<HTMLDivElement>) {
+  function handleRowDragStart(entryId: string, event: React.DragEvent<HTMLDivElement>) {
+    const entry = pane.entries.find((item) => item.id === entryId)
     // The synthetic parent row and trash rows have no real transferable source.
-    if (entry.trashId) {
+    if (!entry || entry.trashId) {
       event.preventDefault()
       return
     }
@@ -541,7 +602,13 @@ export function FilePane({ paneId }: FilePaneProps) {
     setIsPaneDropTarget(false)
   }
 
-  function handleFolderDragOver(entry: DirectoryEntry, event: React.DragEvent<HTMLDivElement>) {
+  function handleFolderDragOver(entryId: string, event: React.DragEvent<HTMLDivElement>) {
+    const entry = pane.entries.find((item) => item.id === entryId)
+    // Non-directory rows are never a valid drop target (mirrors the previous
+    // behaviour of only wiring this handler up for directory rows at all).
+    if (!entry || !entry.isDir) {
+      return
+    }
     const drag = useDragStore.getState().drag
     if (!canDropInto(drag, entry.path, os)) {
       return
@@ -554,11 +621,15 @@ export function FilePane({ paneId }: FilePaneProps) {
     setDropTargetEntryId(entry.id)
   }
 
-  function handleFolderDragLeave(entry: DirectoryEntry) {
-    setDropTargetEntryId((current) => (current === entry.id ? null : current))
+  function handleFolderDragLeave(entryId: string) {
+    setDropTargetEntryId((current) => (current === entryId ? null : current))
   }
 
-  async function handleFolderDrop(entry: DirectoryEntry, event: React.DragEvent<HTMLDivElement>) {
+  async function handleFolderDrop(entryId: string, event: React.DragEvent<HTMLDivElement>) {
+    const entry = pane.entries.find((item) => item.id === entryId)
+    if (!entry || !entry.isDir) {
+      return
+    }
     event.preventDefault()
     event.stopPropagation()
     const drag = useDragStore.getState().drag
@@ -592,6 +663,82 @@ export function FilePane({ paneId }: FilePaneProps) {
     clearDragState()
     await performDrop(drag, pane.path, modifiers, os)
   }
+
+  function renameCancel() {
+    ignoreNextRenameBlurRef.current = true
+    renameSubmittingRef.current = false
+    cancelRename()
+    focusPaneShell()
+  }
+
+  function renameBlur() {
+    if (ignoreNextRenameBlurRef.current) {
+      ignoreNextRenameBlurRef.current = false
+      return
+    }
+    void submitRename()
+  }
+
+  async function middleClickOpen(entryId: string) {
+    const entry = pane.entries.find((item) => item.id === entryId)
+    if (!entry) {
+      return
+    }
+    await openTabFromPath(paneId, entry.path)
+  }
+
+  // `FileRow` is `React.memo`-wrapped: for that to actually skip re-rendering
+  // rows whose own props are unchanged, every row must receive the *same*
+  // handler object across renders. Every handler below closes over "current"
+  // pane state (entries/selection/rename/...), so it's re-assigned into this
+  // ref on every render; the memoized `actions` dispatcher reads through the
+  // ref — its identity never changes even though the behaviour it invokes
+  // always sees up-to-date state.
+  const latestHandlers = {
+    focusPaneShell,
+    activateEntryFromPointer,
+    selectWithModifiers,
+    showMenu,
+    middleClickOpen,
+    handleRowDragStart,
+    clearDragState,
+    handleFolderDragOver,
+    handleFolderDragLeave,
+    handleFolderDrop,
+    setRenameValue,
+    submitRename,
+    renameCancel,
+    renameBlur,
+  }
+  const latestRef = useRef(latestHandlers)
+  // Refreshed synchronously after every commit (before the browser paints and
+  // therefore before any user interaction can reach the dispatcher below) —
+  // never written during render itself.
+  useLayoutEffect(() => {
+    latestRef.current = latestHandlers
+  })
+
+  const actions = useMemo<FileRowActions>(
+    () => ({
+      onPointerDown: () => latestRef.current.focusPaneShell(),
+      onActivate: (entryId, eventTimeStamp) =>
+        latestRef.current.activateEntryFromPointer(entryId, eventTimeStamp),
+      onClick: (entryId, event) => latestRef.current.selectWithModifiers(entryId, event),
+      onContextMenu: (entryId, event) => latestRef.current.showMenu(event, entryId),
+      onMiddleClick: (entryId) => void latestRef.current.middleClickOpen(entryId),
+      onDragStart: (entryId, event) => latestRef.current.handleRowDragStart(entryId, event),
+      onDragEnd: () => latestRef.current.clearDragState(),
+      onDragEnter: (entryId, event) => latestRef.current.handleFolderDragOver(entryId, event),
+      onDragOver: (entryId, event) => latestRef.current.handleFolderDragOver(entryId, event),
+      onDragLeave: (entryId) => latestRef.current.handleFolderDragLeave(entryId),
+      onDrop: (entryId, event) => void latestRef.current.handleFolderDrop(entryId, event),
+      onRenameChange: (value) => latestRef.current.setRenameValue(value),
+      onRenameSubmit: () => void latestRef.current.submitRename(),
+      onRenameCancel: () => latestRef.current.renameCancel(),
+      onRenameBlur: () => latestRef.current.renameBlur(),
+    }),
+    [],
+  )
 
   return (
     <section
@@ -722,7 +869,9 @@ export function FilePane({ paneId }: FilePaneProps) {
             isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-accent-blue-border' : ''
           }`}
           onMouseDown={handleContainerMouseDown}
-          onScroll={(event) => setScrollPosition(paneId, pane.path, event.currentTarget.scrollTop)}
+          onScroll={(event) => {
+            liveScrollTopRef.current = event.currentTarget.scrollTop
+          }}
           onContextMenu={(event) => showMenu(event)}
           onDragOver={handlePaneDragOver}
           onDragLeave={handlePaneDragLeave}
@@ -772,46 +921,15 @@ export function FilePane({ paneId }: FilePaneProps) {
                     entry={entry}
                     isActivePane={isActivePane}
                     isFocused={pane.focusedEntryId === entry.id}
-                    isSelected={selection.selectedIds.includes(entry.id)}
+                    isSelected={selectedIdSet.has(entry.id)}
                     isCut={cutEntryPaths.has(entry.path.toLowerCase())}
                     isDropTarget={dropTargetEntryId === entry.id}
                     draggable={!entry.trashId}
-                    onDragStart={(event) => handleRowDragStart(entry, event)}
-                    onDragEnd={clearDragState}
-                    onDragEnter={
-                      entry.isDir ? (event) => handleFolderDragOver(entry, event) : undefined
-                    }
-                    onDragOver={
-                      entry.isDir ? (event) => handleFolderDragOver(entry, event) : undefined
-                    }
-                    onDragLeave={entry.isDir ? () => handleFolderDragLeave(entry) : undefined}
-                    onDrop={entry.isDir ? (event) => void handleFolderDrop(entry, event) : undefined}
                     isRenaming={rename?.entryId === entry.id}
                     renameValue={rename?.entryId === entry.id ? rename.value : ''}
                     renameBusy={rename?.entryId === entry.id ? rename.busy : false}
                     renameError={rename?.entryId === entry.id ? rename.error : null}
-                    onPointerDown={focusPaneShell}
-                    onActivate={(eventTimeStamp) =>
-                      activateEntryFromPointer(entry.id, eventTimeStamp)
-                    }
-                    onClick={(event) => selectWithModifiers(entry.id, event)}
-                    onMiddleClick={() => void openTabFromPath(paneId, entry.path)}
-                    onContextMenu={(event) => showMenu(event, entry.id)}
-                    onRenameChange={(value) => setRenameValue(value)}
-                    onRenameSubmit={() => void submitRename()}
-                    onRenameCancel={() => {
-                      ignoreNextRenameBlurRef.current = true
-                      renameSubmittingRef.current = false
-                      cancelRename()
-                      focusPaneShell()
-                    }}
-                    onRenameBlur={() => {
-                      if (ignoreNextRenameBlurRef.current) {
-                        ignoreNextRenameBlurRef.current = false
-                        return
-                      }
-                      void submitRename()
-                    }}
+                    actions={actions}
                   />
                 </div>
               )

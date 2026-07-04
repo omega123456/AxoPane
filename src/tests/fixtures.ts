@@ -326,13 +326,6 @@ export const fixtures: {
     cancelled: false,
   },
   set_tab_watch: undefined,
-  refresh_tab: {
-    tabId: 'left-1',
-    path: 'C:\\Users\\Omega',
-    reason: 'refresh',
-    changed: [],
-    removed: [],
-  },
   load_config: {
     theme: 'dark',
     showHiddenFiles: false,

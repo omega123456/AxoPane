@@ -3,7 +3,6 @@ import {
   listTreeChildren,
   listDir,
   listTrash,
-  refreshTab,
   requestFolderSize,
   requestFolderSizes,
   requestIcons,
@@ -126,9 +125,16 @@ type PanesStore = {
   setFocusedEntry: (paneId: PaneId, entryId: string | null) => void
   setVisibleRange: (paneId: PaneId, startIndex: number, endIndex: number) => void
   setScrollPosition: (paneId: PaneId, path: string, scrollTop: number) => void
-  applySizeState: (event: SizeStateEvent) => void
+  /** Applies a batch of size-state events (coalesced by the frontend rAF batcher) in one `set`. */
+  applySizeStates: (events: SizeStateEvent[]) => void
   requestVisibleIcons: (paneId: PaneId, paths: string[]) => Promise<void>
-  applyIconState: (event: IconStateEvent) => void
+  /**
+   * Applies a batch of icon-state events (coalesced by the frontend rAF
+   * batcher, or a backend batch, in one `set`). Returns the existing `panes`
+   * reference unchanged when none of the buffered paths matched any entry in
+   * either pane, so a no-op icon update never triggers a re-render (FR7).
+   */
+  applyIconStates: (events: IconStateEvent[]) => void
   setEverythingStatus: (status: EverythingStatus) => void
   setVolumes: (volumes: VolumeInfo[]) => void
   setShowHiddenFiles: (showHiddenFiles: boolean) => Promise<void>
@@ -784,14 +790,18 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       })
       schedulePersistSession(get().activePaneId)
 
-      await setTabWatch({
-        tabId: activeTab(paneId).id,
-        path: nextPane.path,
-        sortKey: nextPane.sortKey,
-        sortDirection: nextPane.sortDirection,
-        filter: nextPane.filterApplied,
-        showHidden: get().showHiddenFiles,
-      })
+      await setTabWatch(
+        {
+          tabId: activeTab(paneId).id,
+          path: nextPane.path,
+          sortKey: nextPane.sortKey,
+          sortDirection: nextPane.sortDirection,
+          filter: nextPane.filterApplied,
+          showHidden: get().showHiddenFiles,
+          includeItemCounts: itemsColumnVisible,
+        },
+        nextPane.entries,
+      )
 
       const requestedDirectories = await requestDirectorySizes(directoryPaths(nextPane.entries))
 
@@ -1021,23 +1031,10 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       },
     }))
 
-    // Background-tab recheck (M3): refresh the freshly-activated tab and re-arm
-    // its watcher, then apply the returned patch on top of the full reload.
+    // `reloadPane` performs the single directory enumeration for the newly
+    // active tab and re-arms its watcher (seeded from that same listing), so
+    // no separate recheck/patch step is needed here.
     await get().reloadPane(paneId)
-
-    try {
-      const patch = await refreshTab({
-        tabId: next.id,
-        path: next.path,
-        sortKey: next.sortKey,
-        sortDirection: next.sortDirection,
-        filter: next.filter,
-        showHidden: get().showHiddenFiles,
-      })
-      get().applyDirPatch(patch)
-    } catch {
-      // A failed recheck leaves the full-reload result in place.
-    }
   },
   refreshEverything: async (paneId) => {
     // Ctrl+R: drop cached size states for the active path then reload, which
@@ -1242,21 +1239,30 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       },
     }))
   },
-  applySizeState: (event) =>
+  applySizeStates: (events) =>
     set((state) => {
-      const nextSizeStates = {
-        ...state.sizeStates,
-        [event.path]: {
+      if (events.length === 0) {
+        return {}
+      }
+
+      const nextSizeStates = { ...state.sizeStates }
+      const terminalPaths: string[] = []
+      for (const event of events) {
+        nextSizeStates[event.path] = {
           state: event.state,
           sizeBytes: event.sizeBytes,
           source: event.source,
-        },
+        }
+        if (isTerminalSizeState(event.state)) {
+          terminalPaths.push(event.path)
+        }
       }
 
       return {
-        pendingSizeRequests: isTerminalSizeState(event.state)
-          ? withPendingSizeRequests(state.pendingSizeRequests, [event.path], false)
-          : state.pendingSizeRequests,
+        pendingSizeRequests:
+          terminalPaths.length > 0
+            ? withPendingSizeRequests(state.pendingSizeRequests, terminalPaths, false)
+            : state.pendingSizeRequests,
         sizeStates: nextSizeStates,
       }
     }),
@@ -1286,30 +1292,61 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       throw error
     }
   },
-  applyIconState: (event) =>
+  applyIconStates: (events) =>
     set((state) => {
+      if (events.length === 0) {
+        return {}
+      }
+
+      // Only allocate a new `panes` object/entries array for panes that
+      // actually changed. If no buffered path matched any entry in either
+      // pane, `panes` stays the exact same reference as `state.panes` so the
+      // update is a true no-op re-render-wise (FR7).
+      let panesChanged = false
       const nextPanes = { ...state.panes }
       for (const paneId of Object.keys(nextPanes) as PaneId[]) {
         const pane = nextPanes[paneId]
-        const entryIndex = pane.entries.findIndex((entry) => entry.path === event.path)
-        if (entryIndex < 0 || pane.entries[entryIndex].iconDataUrl === event.iconDataUrl) {
-          continue
+        let nextEntries: DirectoryEntry[] | undefined
+
+        for (const event of events) {
+          const entryIndex = pane.entries.findIndex((entry) => entry.path === event.path)
+          if (entryIndex < 0) {
+            continue
+          }
+
+          const currentEntries = nextEntries ?? pane.entries
+          if (currentEntries[entryIndex].iconDataUrl === event.iconDataUrl) {
+            continue
+          }
+
+          if (!nextEntries) {
+            nextEntries = [...pane.entries]
+          }
+          nextEntries[entryIndex] = {
+            ...nextEntries[entryIndex],
+            iconDataUrl: event.iconDataUrl,
+          }
         }
 
-        const nextEntries = [...pane.entries]
-        nextEntries[entryIndex] = {
-          ...nextEntries[entryIndex],
-          iconDataUrl: event.iconDataUrl,
+        if (nextEntries) {
+          nextPanes[paneId] = { ...pane, entries: nextEntries }
+          panesChanged = true
         }
-        nextPanes[paneId] = { ...pane, entries: nextEntries }
+      }
+
+      const resolvedIconPaths = { ...state.resolvedIconPaths }
+      const paths: string[] = []
+      for (const event of events) {
+        paths.push(event.path)
+        // Recorded even when `iconDataUrl` is null: a resolved-to-nothing
+        // result must stop future requests just as much as a real icon does.
+        resolvedIconPaths[event.path] = event.iconDataUrl
       }
 
       return {
-        panes: nextPanes,
-        pendingIconRequests: withPendingIconRequests(state.pendingIconRequests, [event.path], false),
-        // Recorded even when `iconDataUrl` is null: a resolved-to-nothing
-        // result must stop future requests just as much as a real icon does.
-        resolvedIconPaths: { ...state.resolvedIconPaths, [event.path]: event.iconDataUrl },
+        panes: panesChanged ? nextPanes : state.panes,
+        pendingIconRequests: withPendingIconRequests(state.pendingIconRequests, paths, false),
+        resolvedIconPaths,
       }
     }),
   setEverythingStatus: (everythingStatus) => set({ everythingStatus }),

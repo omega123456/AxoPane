@@ -99,6 +99,53 @@ mod tests {
         (op_arc, resolver, progress_log, ctx)
     }
 
+    /// Like [`make_ctx`], but the injected clock advances by `step` on every
+    /// call instead of tracking real wall-clock time. Phase 1's
+    /// `TransferThrottle` (shared by `compress_item_with_progress` /
+    /// `extract_item_with_progress`) now gates every intra-member progress
+    /// emission on `PROGRESS_EMIT_INTERVAL` elapsing since the last emission;
+    /// with a real clock a small/fast fixture never crosses that interval, so
+    /// tests that need to observe at least one intra-member snapshot (rather
+    /// than only the unconditional per-item completion snapshot) must use a
+    /// clock that always advances past the interval between calls.
+    fn make_ctx_with_ever_advancing_clock(state: OpState, step: Duration) -> OpCtx {
+        let now = Arc::new(Mutex::new(Instant::now()));
+        let now_for_closure = now.clone();
+        let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(move || {
+            let mut guard = now_for_closure.lock().expect("clock lock");
+            *guard += step;
+            *guard
+        });
+
+        let op_arc = Arc::new(Mutex::new(state));
+        let resolver = Arc::new(Condvar::new());
+        let progress_log = Arc::new(Mutex::new(Vec::<OpProgress>::new()));
+        let progress_for_emitter = progress_log.clone();
+        let progress: Option<Arc<dyn Fn(OpProgress) + Send + Sync>> =
+            Some(Arc::new(move |progress| {
+                progress_for_emitter
+                    .lock()
+                    .expect("progress log lock")
+                    .push(progress);
+            }));
+
+        let op_arc_ref = Box::leak(Box::new(op_arc.clone()));
+        let resolver_ref = Box::leak(Box::new(resolver.clone()));
+        let progress_ref = Box::leak(Box::new(progress));
+        let instant_now_ref = Box::leak(Box::new(instant_now));
+
+        let ctx = WorkerCtx {
+            op_arc: op_arc_ref,
+            resolver: resolver_ref,
+            progress: progress_ref,
+            start: Instant::now() - Duration::from_secs(1),
+            rate_window: Duration::ZERO,
+            instant_now: instant_now_ref,
+        };
+
+        (op_arc, resolver, progress_log, ctx)
+    }
+
     #[test]
     fn archive_helpers_round_trip_wrapper_archives_and_progress() {
         let fixture = tempdir().expect("temp dir");
@@ -111,7 +158,15 @@ mod tests {
         let extract_root = fixture.path().join("extract");
         let source_item = item(&source_dir, 0);
         let archive_item = item(&archive_path, 0);
-        let (_op_arc, _resolver, progress_log, ctx) = make_ctx(op_state(OpStatus::Active, &["/"]));
+        // Phase 1 throttles intra-member compress/extract progress
+        // (`TransferThrottle`, 90ms interval): a clock that always advances
+        // past the interval between calls guarantees at least one emission
+        // still carries the 7-byte file's `current_file_total_bytes`, rather
+        // than racing a real (fast) clock that never crosses the interval.
+        let (_op_arc, _resolver, progress_log, ctx) = make_ctx_with_ever_advancing_clock(
+            op_state(OpStatus::Active, &["/"]),
+            Duration::from_millis(100),
+        );
 
         compress_item_with_progress(&source_dir, &archive_path, &source_item, &ctx)
             .expect("compress");

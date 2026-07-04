@@ -262,10 +262,18 @@ describe('panes-store navigation', () => {
       path: 'C:\\root',
       entries: [dirAt('C:\\root\\Alpha')],
     }))
+    const setTabWatch = vi.fn(() => undefined)
     ipc.override('list_dir', listDir)
+    ipc.override('set_tab_watch', setTabWatch)
 
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
     expect(listDir).toHaveBeenLastCalledWith(expect.objectContaining({ includeItemCounts: true }))
+    expect(setTabWatch).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        target: expect.objectContaining({ includeItemCounts: true }),
+        entries: usePanesStore.getState().panes.left.entries,
+      }),
+    )
 
     useLayoutStore.setState((state) => ({
       columns: state.columns.map((column) =>
@@ -273,9 +281,16 @@ describe('panes-store navigation', () => {
       ),
     }))
     listDir.mockClear()
+    setTabWatch.mockClear()
 
     await usePanesStore.getState().reloadPane('left')
     expect(listDir).toHaveBeenLastCalledWith(expect.objectContaining({ includeItemCounts: false }))
+    expect(setTabWatch).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        target: expect.objectContaining({ includeItemCounts: false }),
+        entries: usePanesStore.getState().panes.left.entries,
+      }),
+    )
 
     useLayoutStore.setState((state) => ({
       columns: state.columns.map((column) =>
@@ -331,24 +346,26 @@ describe('panes-store navigation', () => {
       'Zulu',
     ])
 
-    usePanesStore.getState().applySizeState({
-      path: 'C:\\root\\Zulu',
-      state: 'ready',
-      source: 'everything',
-      sizeBytes: 10,
-    })
-    usePanesStore.getState().applySizeState({
-      path: 'C:\\root\\Alpha',
-      state: 'ready',
-      source: 'everything',
-      sizeBytes: 50,
-    })
-    usePanesStore.getState().applySizeState({
-      path: 'C:\\root\\Beta',
-      state: 'calculating',
-      source: 'everything',
-      sizeBytes: null,
-    })
+    usePanesStore.getState().applySizeStates([
+      {
+        path: 'C:\\root\\Zulu',
+        state: 'ready',
+        source: 'everything',
+        sizeBytes: 10,
+      },
+      {
+        path: 'C:\\root\\Alpha',
+        state: 'ready',
+        source: 'everything',
+        sizeBytes: 50,
+      },
+      {
+        path: 'C:\\root\\Beta',
+        state: 'calculating',
+        source: 'everything',
+        sizeBytes: null,
+      },
+    ])
 
     expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
       'Alpha',
@@ -368,24 +385,36 @@ describe('panes-store navigation', () => {
 
   it('refreshes everything by clearing size states then reloading', async () => {
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
-    usePanesStore.getState().applySizeState({
-      path: 'C:\\root\\Alpha',
-      state: 'ready',
-      source: 'everything',
-      sizeBytes: 5,
-    })
+    usePanesStore.getState().applySizeStates([
+      {
+        path: 'C:\\root\\Alpha',
+        state: 'ready',
+        source: 'everything',
+        sizeBytes: 5,
+      },
+    ])
     await usePanesStore.getState().refreshEverything('left')
     expect(usePanesStore.getState().sizeStates['C:\\root\\Alpha']).toBeUndefined()
   })
 
-  it('opens, switches with recheck, and closes tabs', async () => {
-    ipc.override('refresh_tab', (payload) => ({
-      tabId: payload.target.tabId,
-      path: payload.target.path,
-      reason: 'refresh',
-      changed: [],
-      removed: [],
+  it('applySizeStates is a no-op for an empty batch', async () => {
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    const sizeStatesBefore = usePanesStore.getState().sizeStates
+
+    usePanesStore.getState().applySizeStates([])
+
+    expect(usePanesStore.getState().sizeStates).toBe(sizeStatesBefore)
+  })
+
+  it('opens, switches (single enumeration), and closes tabs', async () => {
+    const listDir = vi.fn((payload: { path: string }) => ({
+      path: payload.path,
+      entries:
+        payload.path === 'C:\\root'
+          ? [dirAt('C:\\root\\Alpha'), dirAt('C:\\root\\Beta')]
+          : [],
     }))
+    ipc.override('list_dir', listDir)
 
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
     await usePanesStore.getState().openTabFromPath('left', 'C:\\root\\Alpha')
@@ -393,8 +422,10 @@ describe('panes-store navigation', () => {
     expect(usePanesStore.getState().panes.left.path).toBe('C:\\root\\Alpha')
 
     const firstTabId = useTabsStore.getState().panes.left.tabs[0].id
+    listDir.mockClear()
     await usePanesStore.getState().switchTab('left', firstTabId)
     expect(useTabsStore.getState().panes.left.activeTabIndex).toBe(0)
+    expect(listDir).toHaveBeenCalledTimes(1)
 
     // switching to the already-active tab is a no-op activation
     await usePanesStore.getState().switchTab('left', firstTabId)
@@ -835,18 +866,20 @@ describe('panes-store navigation', () => {
     await usePanesStore.getState().reloadPane('left')
     expect(request).not.toHaveBeenCalled()
 
-    usePanesStore.getState().applySizeState({
-      path: 'C:\\root\\Alpha',
-      state: 'ready',
-      source: 'everything',
-      sizeBytes: 12,
-    })
-    usePanesStore.getState().applySizeState({
-      path: 'C:\\root\\Beta',
-      state: 'na',
-      source: 'everything',
-      sizeBytes: null,
-    })
+    usePanesStore.getState().applySizeStates([
+      {
+        path: 'C:\\root\\Alpha',
+        state: 'ready',
+        source: 'everything',
+        sizeBytes: 12,
+      },
+      {
+        path: 'C:\\root\\Beta',
+        state: 'na',
+        source: 'everything',
+        sizeBytes: null,
+      },
+    ])
 
     request.mockClear()
     await usePanesStore.getState().reloadPane('left')
@@ -865,12 +898,14 @@ describe('panes-store navigation', () => {
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
     expect(request).toHaveBeenCalledWith({ paths: ['C:\\root\\Alpha'] })
 
-    usePanesStore.getState().applySizeState({
-      path: 'C:\\root\\Alpha',
-      state: 'error',
-      source: 'everything',
-      sizeBytes: null,
-    })
+    usePanesStore.getState().applySizeStates([
+      {
+        path: 'C:\\root\\Alpha',
+        state: 'error',
+        source: 'everything',
+        sizeBytes: null,
+      },
+    ])
 
     request.mockClear()
     await usePanesStore.getState().reloadPane('left')
@@ -940,10 +975,12 @@ describe('panes-store icons', () => {
       pendingIconRequests: { 'C:\\root\\installer.exe': true },
     })
 
-    usePanesStore.getState().applyIconState({
-      path: 'C:\\root\\installer.exe',
-      iconDataUrl: 'data:image/png;base64,abc',
-    })
+    usePanesStore.getState().applyIconStates([
+      {
+        path: 'C:\\root\\installer.exe',
+        iconDataUrl: 'data:image/png;base64,abc',
+      },
+    ])
 
     const entry = usePanesStore
       .getState()
@@ -961,10 +998,12 @@ describe('panes-store icons', () => {
     }))
 
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
-    usePanesStore.getState().applyIconState({
-      path: 'C:\\root\\installer.exe',
-      iconDataUrl: 'data:image/png;base64,abc',
-    })
+    usePanesStore.getState().applyIconStates([
+      {
+        path: 'C:\\root\\installer.exe',
+        iconDataUrl: 'data:image/png;base64,abc',
+      },
+    ])
 
     await usePanesStore.getState().navigatePane('right', 'C:\\root')
 
@@ -1018,10 +1057,12 @@ describe('panes-store icons', () => {
     }))
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
 
-    usePanesStore.getState().applyIconState({
-      path: 'C:\\root\\installer.exe',
-      iconDataUrl: 'data:image/png;base64,abc',
-    })
+    usePanesStore.getState().applyIconStates([
+      {
+        path: 'C:\\root\\installer.exe',
+        iconDataUrl: 'data:image/png;base64,abc',
+      },
+    ])
 
     await usePanesStore.getState().requestVisibleIcons('left', ['C:\\root\\installer.exe'])
     expect(request).not.toHaveBeenCalled()
@@ -1043,10 +1084,12 @@ describe('panes-store icons', () => {
     await usePanesStore.getState().requestVisibleIcons('left', ['C:\\root\\readme.txt'])
     expect(request).toHaveBeenCalledTimes(1)
 
-    usePanesStore.getState().applyIconState({
-      path: 'C:\\root\\readme.txt',
-      iconDataUrl: null,
-    })
+    usePanesStore.getState().applyIconStates([
+      {
+        path: 'C:\\root\\readme.txt',
+        iconDataUrl: null,
+      },
+    ])
     expect(
       usePanesStore.getState().panes.left.entries.find((entry) => entry.path === 'C:\\root\\readme.txt')
         ?.iconDataUrl,
@@ -1058,5 +1101,90 @@ describe('panes-store icons', () => {
       await usePanesStore.getState().requestVisibleIcons('left', ['C:\\root\\readme.txt'])
     }
     expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it('applyIconStates is a no-op for an empty batch', async () => {
+    ipc.override('list_dir', () => ({
+      path: 'C:\\root',
+      entries: [dirAt('C:\\root\\a.exe', false)],
+    }))
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+
+    const panesBefore = usePanesStore.getState().panes
+    const resolvedIconPathsBefore = usePanesStore.getState().resolvedIconPaths
+    usePanesStore.getState().applyIconStates([])
+
+    expect(usePanesStore.getState().panes).toBe(panesBefore)
+    expect(usePanesStore.getState().resolvedIconPaths).toBe(resolvedIconPathsBefore)
+  })
+
+  it('applyIconStates batches an entire buffered burst into one panes update, patching every matched entry', async () => {
+    ipc.override('list_dir', () => ({
+      path: 'C:\\root',
+      entries: [dirAt('C:\\root\\a.exe', false), dirAt('C:\\root\\b.exe', false)],
+    }))
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+
+    usePanesStore.getState().applyIconStates([
+      { path: 'C:\\root\\a.exe', iconDataUrl: 'data:image/png;base64,aaa' },
+      { path: 'C:\\root\\b.exe', iconDataUrl: 'data:image/png;base64,bbb' },
+    ])
+
+    const entries = usePanesStore.getState().panes.left.entries
+    expect(entries.find((entry) => entry.path === 'C:\\root\\a.exe')?.iconDataUrl).toBe(
+      'data:image/png;base64,aaa',
+    )
+    expect(entries.find((entry) => entry.path === 'C:\\root\\b.exe')?.iconDataUrl).toBe(
+      'data:image/png;base64,bbb',
+    )
+  })
+
+  it('applyIconStates skips a matched entry whose icon is already identical, still updating an unrelated matched entry', async () => {
+    ipc.override('list_dir', () => ({
+      path: 'C:\\root',
+      entries: [dirAt('C:\\root\\a.exe', false), dirAt('C:\\root\\b.exe', false)],
+    }))
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+
+    usePanesStore.getState().applyIconStates([
+      { path: 'C:\\root\\a.exe', iconDataUrl: 'data:image/png;base64,aaa' },
+    ])
+    const entriesAfterFirst = usePanesStore.getState().panes.left.entries
+
+    // Re-sending the identical icon for `a.exe` alongside a genuinely new
+    // icon for `b.exe` must still patch `b.exe` while leaving `a.exe`'s
+    // entry object untouched (exercises the per-event no-op continue).
+    usePanesStore.getState().applyIconStates([
+      { path: 'C:\\root\\a.exe', iconDataUrl: 'data:image/png;base64,aaa' },
+      { path: 'C:\\root\\b.exe', iconDataUrl: 'data:image/png;base64,bbb' },
+    ])
+
+    const entriesAfterSecond = usePanesStore.getState().panes.left.entries
+    expect(entriesAfterSecond.find((entry) => entry.path === 'C:\\root\\a.exe')).toBe(
+      entriesAfterFirst.find((entry) => entry.path === 'C:\\root\\a.exe'),
+    )
+    expect(entriesAfterSecond.find((entry) => entry.path === 'C:\\root\\b.exe')?.iconDataUrl).toBe(
+      'data:image/png;base64,bbb',
+    )
+  })
+
+  it('applyIconStates leaves the panes reference untouched when no buffered path matches any entry (FR7)', async () => {
+    ipc.override('list_dir', () => ({
+      path: 'C:\\root',
+      entries: [dirAt('C:\\root\\a.exe', false)],
+    }))
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+
+    const panesBefore = usePanesStore.getState().panes
+
+    usePanesStore.getState().applyIconStates([
+      { path: 'C:\\root\\does-not-exist.exe', iconDataUrl: 'data:image/png;base64,zzz' },
+    ])
+
+    expect(usePanesStore.getState().panes).toBe(panesBefore)
+    // Still recorded in the resolved-icon cache so this path is never re-requested.
+    expect(usePanesStore.getState().resolvedIconPaths['C:\\root\\does-not-exist.exe']).toBe(
+      'data:image/png;base64,zzz',
+    )
   })
 })

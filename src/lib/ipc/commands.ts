@@ -5,7 +5,6 @@ import type {
   CreateEntryRequest,
   DeleteFromTrashRequest,
   DirectoryEntry,
-  DirPatchEvent,
   EverythingStatus,
   ExtractArchiveRequest,
   FolderSizeRequest,
@@ -170,12 +169,11 @@ export function cancelSize(path: string) {
   return invokeCommand({ command: 'cancel_size', payload: { path } }) as Promise<CancelSizeResponse>
 }
 
-export function setTabWatch(target: WatchTarget | null) {
-  return invokeCommand({ command: 'set_tab_watch', payload: { target } }) as Promise<void>
-}
-
-export function refreshTab(target: WatchTarget) {
-  return invokeCommand({ command: 'refresh_tab', payload: { target } }) as Promise<DirPatchEvent>
+export function setTabWatch(target: WatchTarget | null, entries?: DirectoryEntry[]) {
+  return invokeCommand({
+    command: 'set_tab_watch',
+    payload: { target, entries },
+  }) as Promise<void>
 }
 
 export function loadConfig() {

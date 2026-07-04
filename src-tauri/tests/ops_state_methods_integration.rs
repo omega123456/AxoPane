@@ -356,7 +356,10 @@ fn file_operation_helpers_delete_a_folder_containing_symlinks() {
     delete_path_with_progress(&container, true, &ctx).expect("delete container with symlinks");
 
     assert!(!container.exists());
-    assert!(target_dir.join("keep.txt").exists(), "link target dir survives");
+    assert!(
+        target_dir.join("keep.txt").exists(),
+        "link target dir survives"
+    );
     assert!(target_file.exists(), "link target file survives");
 }
 
