@@ -271,7 +271,7 @@ describe('panes-store navigation', () => {
     expect(setTabWatch).toHaveBeenLastCalledWith(
       expect.objectContaining({
         target: expect.objectContaining({ includeItemCounts: true }),
-        entries: usePanesStore.getState().panes.left.entries,
+        entries: undefined,
       }),
     )
 
@@ -288,7 +288,7 @@ describe('panes-store navigation', () => {
     expect(setTabWatch).toHaveBeenLastCalledWith(
       expect.objectContaining({
         target: expect.objectContaining({ includeItemCounts: false }),
-        entries: usePanesStore.getState().panes.left.entries,
+        entries: undefined,
       }),
     )
 
@@ -461,6 +461,137 @@ describe('panes-store navigation', () => {
       removed: [],
     })
     expect(usePanesStore.getState().panes.left.entries).toBe(before)
+  })
+
+  it('binary-inserts a new folder into its sorted slot without re-mapping untouched rows', async () => {
+    ipc.override('list_dir', () => ({
+      path: 'C:\\root',
+      entries: [dir('Alpha'), dir('Charlie'), dir('mango.txt', false), dir('zebra.txt', false)],
+    }))
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    const before = usePanesStore.getState().panes.left.entries
+    const alphaRef = before[0]
+
+    usePanesStore.getState().applyDirPatch({
+      tabId: useTabsStore.getState().panes.left.tabs[0].id,
+      path: 'C:\\root',
+      reason: 'watch',
+      changed: [{ path: 'C:\\root\\Bravo', entry: dir('Bravo') }],
+      removed: [],
+    })
+
+    const after = usePanesStore.getState().panes.left.entries
+    expect(after.map((entry) => entry.name)).toEqual([
+      'Alpha',
+      'Bravo',
+      'Charlie',
+      'mango.txt',
+      'zebra.txt',
+    ])
+    // Untouched rows keep their identity (no full-listing re-map/re-sort).
+    expect(after[0]).toBe(alphaRef)
+  })
+
+  it('inserts a new file after the folders and among the files', async () => {
+    ipc.override('list_dir', () => ({
+      path: 'C:\\root',
+      entries: [dir('Alpha'), dir('mango.txt', false), dir('zebra.txt', false)],
+    }))
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+
+    usePanesStore.getState().applyDirPatch({
+      tabId: useTabsStore.getState().panes.left.tabs[0].id,
+      path: 'C:\\root',
+      reason: 'watch',
+      changed: [{ path: 'C:\\root\\nova.txt', entry: dir('nova.txt', false) }],
+      removed: [],
+    })
+
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'Alpha',
+      'mango.txt',
+      'nova.txt',
+      'zebra.txt',
+    ])
+  })
+
+  it('applies a rename (remove old + insert new) at the renamed sorted position', async () => {
+    ipc.override('list_dir', () => ({
+      path: 'C:\\root',
+      entries: [dir('Alpha'), dir('Charlie'), dir('mango.txt', false)],
+    }))
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+
+    usePanesStore.getState().applyDirPatch({
+      tabId: useTabsStore.getState().panes.left.tabs[0].id,
+      path: 'C:\\root',
+      reason: 'watch',
+      changed: [{ path: 'C:\\root\\Delta', entry: dir('Delta') }],
+      removed: ['C:\\root\\Charlie'],
+    })
+
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'Alpha',
+      'Delta',
+      'mango.txt',
+    ])
+  })
+
+  it('drops a changed entry that no longer matches the pane (now hidden)', async () => {
+    ipc.override('list_dir', () => ({
+      path: 'C:\\root',
+      entries: [dir('Alpha'), dir('Bravo'), dir('Charlie')],
+    }))
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+
+    usePanesStore.getState().applyDirPatch({
+      tabId: useTabsStore.getState().panes.left.tabs[0].id,
+      path: 'C:\\root',
+      reason: 'watch',
+      changed: [{ path: 'C:\\root\\Bravo', entry: { ...dir('Bravo'), isHidden: true } }],
+      removed: [],
+    })
+
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'Alpha',
+      'Charlie',
+    ])
+  })
+
+  it('reorders a same-path modify under a non-name sort key (modified)', async () => {
+    ipc.override('list_dir', () => ({
+      path: 'C:\\root',
+      entries: [
+        { ...dir('a.txt', false), modifiedAt: '2024-01-03T00:00:00Z' },
+        { ...dir('b.txt', false), modifiedAt: '2024-01-02T00:00:00Z' },
+        { ...dir('c.txt', false), modifiedAt: '2024-01-01T00:00:00Z' },
+      ],
+    }))
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    // Sort by modified: first click yields descending (newest first).
+    await usePanesStore.getState().setSort('left', 'modified')
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'a.txt',
+      'b.txt',
+      'c.txt',
+    ])
+
+    // c.txt becomes the newest -> it must move to the front.
+    usePanesStore.getState().applyDirPatch({
+      tabId: useTabsStore.getState().panes.left.tabs[0].id,
+      path: 'C:\\root',
+      reason: 'watch',
+      changed: [
+        { path: 'C:\\root\\c.txt', entry: { ...dir('c.txt', false), modifiedAt: '2024-01-09T00:00:00Z' } },
+      ],
+      removed: [],
+    })
+
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'c.txt',
+      'a.txt',
+      'b.txt',
+    ])
   })
 
   it('records history and steps back and forward', async () => {
@@ -791,17 +922,7 @@ describe('panes-store navigation', () => {
         dirAt('C:\\root\\notes.txt', false),
       ],
     }))
-    usePanesStore.setState((state) => ({
-      everythingStatus: { status: 'available', isAvailable: true },
-      panes: {
-        ...state.panes,
-        left: {
-          ...state.panes.left,
-          visibleStartIndex: 0,
-          visibleEndIndex: 0,
-        },
-      },
-    }))
+    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
 
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
 
@@ -834,20 +955,6 @@ describe('panes-store navigation', () => {
 
     expect(request).not.toHaveBeenCalled()
     useConfigStore.getState().hydrate({ ...useConfigStore.getState(), autoFolderSize: true })
-  })
-
-  it('never requests folder sizes when the visible range changes', async () => {
-    const request = vi.fn(() => undefined)
-    ipc.override('request_folder_sizes', request)
-    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
-
-    await usePanesStore.getState().navigatePane('left', 'C:\\root')
-    request.mockClear()
-
-    usePanesStore.getState().setVisibleRange('left', 0, 5)
-    usePanesStore.getState().setVisibleRange('left', 5, 10)
-
-    expect(request).not.toHaveBeenCalled()
   })
 
   it('suppresses duplicate eager requests while pending and after terminal size states', async () => {
@@ -1260,5 +1367,154 @@ describe('panes-store icons', () => {
     expect(usePanesStore.getState().resolvedIconPaths['C:\\root\\does-not-exist.exe']).toBe(
       'data:image/png;base64,zzz',
     )
+  })
+})
+
+describe('panes-store streamed listings', () => {
+  function streamHead(overrides: {
+    firstChunk: DirectoryEntry[]
+    requestId: number
+    done: boolean
+    total?: number
+  }) {
+    return (payload: { path: string }) => ({
+      path: payload.path,
+      total: overrides.total ?? overrides.firstChunk.length,
+      requestId: overrides.requestId,
+      firstChunk: overrides.firstChunk,
+      done: overrides.done,
+    })
+  }
+
+  it('shows the first chunk immediately and appends streamed chunks in order', async () => {
+    ipc.override(
+      'start_list_dir',
+      streamHead({ firstChunk: [dir('Alpha'), dir('Bravo')], requestId: 7, done: false, total: 4 }),
+    )
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    expect(usePanesStore.getState().panes.left.loading).toBe(false)
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'Alpha',
+      'Bravo',
+    ])
+
+    const tabId = useTabsStore.getState().panes.left.tabs[0].id
+    usePanesStore.getState().applyListChunk([
+      {
+        tabId,
+        requestId: 7,
+        path: 'C:\\root',
+        entries: [dir('Charlie'), dir('mango.txt', false)],
+        done: true,
+      },
+    ])
+
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'Alpha',
+      'Bravo',
+      'Charlie',
+      'mango.txt',
+    ])
+  })
+
+  it('ignores chunks from a superseded request, tab, or path', async () => {
+    ipc.override(
+      'start_list_dir',
+      streamHead({ firstChunk: [dir('Alpha')], requestId: 7, done: false, total: 3 }),
+    )
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    const tabId = useTabsStore.getState().panes.left.tabs[0].id
+    const before = usePanesStore.getState().panes.left.entries
+
+    // Stale request id.
+    usePanesStore.getState().applyListChunk([
+      { tabId, requestId: 6, path: 'C:\\root', entries: [dir('Stale')], done: true },
+    ])
+    // Wrong path.
+    usePanesStore.getState().applyListChunk([
+      { tabId, requestId: 7, path: 'C:\\other', entries: [dir('Other')], done: true },
+    ])
+    // Wrong tab.
+    usePanesStore.getState().applyListChunk([
+      { tabId: 'right-1', requestId: 7, path: 'C:\\root', entries: [dir('RightPane')], done: true },
+    ])
+
+    expect(usePanesStore.getState().panes.left.entries).toBe(before)
+  })
+
+  it('arms the watcher and eager-sizes directories once the final chunk lands', async () => {
+    const setTabWatch = vi.fn(() => undefined)
+    const requestFolderSizes = vi.fn(() => undefined)
+    ipc.override('set_tab_watch', setTabWatch)
+    ipc.override('request_folder_sizes', requestFolderSizes)
+    ipc.override(
+      'start_list_dir',
+      streamHead({ firstChunk: [dir('Alpha')], requestId: 3, done: false, total: 2 }),
+    )
+    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    const tabId = useTabsStore.getState().panes.left.tabs[0].id
+    setTabWatch.mockClear()
+
+    usePanesStore.getState().applyListChunk([
+      { tabId, requestId: 3, path: 'C:\\root', entries: [dir('Bravo')], done: true },
+    ])
+
+    await vi.waitFor(() => {
+      expect(setTabWatch).toHaveBeenCalledWith(
+        expect.objectContaining({ target: expect.objectContaining({ path: 'C:\\root' }) }),
+      )
+      expect(requestFolderSizes).toHaveBeenCalledWith({
+        paths: ['C:\\root\\Alpha', 'C:\\root\\Bravo'],
+      })
+    })
+  })
+
+  it('re-sorts the accumulated listing by size when the final chunk lands under size sort', async () => {
+    ipc.override(
+      'start_list_dir',
+      streamHead({
+        firstChunk: [{ ...dir('big.bin', false), sizeBytes: 900 }],
+        requestId: 5,
+        done: false,
+        total: 3,
+      }),
+    )
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: { ...state.panes.left, sortKey: 'size', sortDirection: 'desc' },
+      },
+    }))
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    const tabId = useTabsStore.getState().panes.left.tabs[0].id
+
+    usePanesStore.getState().applyListChunk([
+      {
+        tabId,
+        requestId: 5,
+        path: 'C:\\root',
+        entries: [
+          { ...dir('huge.bin', false), sizeBytes: 5000 },
+          { ...dir('small.bin', false), sizeBytes: 10 },
+        ],
+        done: true,
+      },
+    ])
+
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'huge.bin',
+      'big.bin',
+      'small.bin',
+    ])
+  })
+
+  it('applyListChunk is a no-op for an empty batch', () => {
+    const before = usePanesStore.getState().panes
+    usePanesStore.getState().applyListChunk([])
+    expect(usePanesStore.getState().panes).toBe(before)
   })
 })

@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { isPathInsideVolume } from '@/lib/volumes'
 import { usePanesStore } from '@/stores/panes-store'
@@ -5,18 +6,24 @@ import { useSelectionStore } from '@/stores/selection-store'
 
 export function StatusBar() {
   const activePaneId = usePanesStore((state) => state.activePaneId)
-  const { path, typing, itemCount, focusedEntry } = usePanesStore(
+  // Select only cheap references here; the O(n) lookup for the focused entry is
+  // deferred to a `useMemo` below so it runs when entries/focus change rather
+  // than on every unrelated panes-store emission (size/icon/patch bursts).
+  const { path, typing, itemCount, focusedEntryId, entries } = usePanesStore(
     useShallow((state) => {
       const pane = state.panes[state.activePaneId]
       return {
         path: pane.path,
         typing: pane.typing,
         itemCount: pane.entries.length,
-        focusedEntry: pane.focusedEntryId
-          ? pane.entries.find((entry) => entry.id === pane.focusedEntryId)
-          : undefined,
+        focusedEntryId: pane.focusedEntryId,
+        entries: pane.entries,
       }
     }),
+  )
+  const focusedEntry = useMemo(
+    () => (focusedEntryId ? entries.find((entry) => entry.id === focusedEntryId) : undefined),
+    [entries, focusedEntryId],
   )
   const volumes = usePanesStore(useShallow((state) => state.volumes))
   const selectionCount = useSelectionStore(

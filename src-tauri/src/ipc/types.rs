@@ -6,7 +6,7 @@ pub use crate::app_picker::types::{
 };
 pub use crate::fs::{
     DirectoryEntry, ListDirOptions, ListDirResponse, ListTreeChildrenOptions,
-    ListTreeChildrenResponse, TreeChildEntry,
+    ListTreeChildrenResponse, SortDirection, SortKey, TreeChildEntry,
 };
 pub use crate::native_menu::types::{
     InvokeNativeMenuRequest, LoadNativeMenuRequest, LoadNativeMenuResponse,
@@ -62,6 +62,58 @@ pub struct LogFrontendRequest {
 
 pub type ListDirRequest = ListDirOptions;
 pub type ListTreeChildrenRequest = ListTreeChildrenOptions;
+
+/// Starts a chunked/streamed directory listing for a tab. Mirrors
+/// [`ListDirOptions`] plus the `tab_id` used to scope streaming cancellation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartListDirRequest {
+    pub tab_id: String,
+    pub path: String,
+    pub sort_key: SortKey,
+    pub sort_direction: SortDirection,
+    pub filter: String,
+    pub show_hidden: bool,
+    pub include_item_counts: bool,
+}
+
+impl StartListDirRequest {
+    pub fn to_options(&self) -> ListDirOptions {
+        ListDirOptions {
+            path: self.path.clone(),
+            sort_key: self.sort_key,
+            sort_direction: self.sort_direction,
+            filter: self.filter.clone(),
+            show_hidden: self.show_hidden,
+            include_item_counts: self.include_item_counts,
+        }
+    }
+}
+
+/// Head of a chunked listing: the total entry count, a monotonic per-tab
+/// request id, the inline first chunk, and whether the listing is already
+/// complete (no `list_chunk` events will follow).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartListDirResponse {
+    pub path: String,
+    pub total: u64,
+    pub request_id: u64,
+    pub first_chunk: Vec<DirectoryEntry>,
+    pub done: bool,
+}
+
+/// A streamed slice of a directory listing following the `start_list_dir` head.
+/// `done` marks the final chunk for this `request_id`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListChunkEvent {
+    pub tab_id: String,
+    pub request_id: u64,
+    pub path: String,
+    pub entries: Vec<DirectoryEntry>,
+    pub done: bool,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

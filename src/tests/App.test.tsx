@@ -5,6 +5,7 @@ import { ipc } from './ipc-mock'
 import type { DirectoryEntry, ListDirRequest, ListDirResponse } from '@/lib/types/ipc'
 import { renderApp } from './utils/render-app'
 import { usePanesStore } from '@/stores/panes-store'
+import { useTabsStore } from '@/stores/tabs-store'
 import { useQueueStore } from '@/stores/queue-store'
 
 const rootEntries: DirectoryEntry[] = [
@@ -418,6 +419,43 @@ describe('App', () => {
       const row = getRowInPane('Left pane', 'Report.txt')
       const img = row?.querySelector('img[src="data:image/png;base64,report-icon"]')
       expect(img).toBeTruthy()
+    })
+  })
+
+  it('appends a streamed dir://list-chunk event onto the initial (partial) listing', async () => {
+    ipc.override('set_tab_watch', () => undefined)
+    // Left pane opens as a partial listing (first chunk only); the remainder
+    // streams in as a separate list-chunk event.
+    ipc.override('start_list_dir', (payload) => ({
+      path: payload.path,
+      total: payload.path === 'C:\\Users\\Omega' ? 3 : 0,
+      requestId: 42,
+      firstChunk:
+        payload.path === 'C:\\Users\\Omega' ? [rootEntries[0], rootEntries[1]] : [],
+      done: payload.path !== 'C:\\Users\\Omega',
+    }))
+    renderApp()
+
+    await waitFor(() => {
+      expect(getRowInPane('Left pane', 'Documents')).toBeTruthy()
+      expect(getRowInPane('Left pane', 'Media')).toBeTruthy()
+    })
+    // The streamed remainder is not shown until its chunk arrives.
+    expect(getRowInPane('Left pane', 'Report.txt')).toBeFalsy()
+
+    const tabId = useTabsStore.getState().panes.left.tabs[0].id
+    act(() => {
+      ipc.emit('dir://list-chunk', {
+        tabId,
+        requestId: 42,
+        path: 'C:\\Users\\Omega',
+        entries: [rootEntries[2]],
+        done: true,
+      })
+    })
+
+    await waitFor(() => {
+      expect(getRowInPane('Left pane', 'Report.txt')).toBeTruthy()
     })
   })
 

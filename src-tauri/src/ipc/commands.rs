@@ -30,14 +30,15 @@ use super::types::{
     OpenWithRequest, RenameEntryRequest, ReorderOpsRequest, RequestIconsRequest,
     ResolveConflictRequest, RestoreTrashRequest, SaveConfigRequest, SaveSessionRequest,
     SessionState, SetDefaultApplicationRequest, SetLogLevelRequest, SetTabWatchRequest,
-    ShowPropertiesRequest, SizeStateEvent, StartOpRequest, TrashEntriesRequest, VolumeInfo,
-    WarmNativeMenusRequest, WriteFileClipboardRequest,
+    ShowPropertiesRequest, SizeStateEvent, StartListDirRequest, StartListDirResponse, StartOpRequest,
+    TrashEntriesRequest, VolumeInfo, WarmNativeMenusRequest, WriteFileClipboardRequest,
 };
+use crate::listing::ListingService;
 use crate::fs::DirectoryEntry;
 use std::path::Path;
 use tauri::State;
 #[cfg(not(feature = "test-utils"))]
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 #[cfg(feature = "test-utils")]
 #[inline(never)]
@@ -58,6 +59,95 @@ pub fn list_dir(payload: ListDirRequest) -> Result<ListDirResponse, String> {
         let message = format!("Failed to load \"{}\": {error}", payload.path);
         log::error!("{message}");
         message
+    })
+}
+
+/// Streams a directory listing to the frontend in chunks.
+///
+/// Enumerating + sorting the whole directory happens here on a Tauri worker
+/// thread (never the UI thread), then the response carries only the inline
+/// first chunk; any remaining entries are emitted as `list_chunk` events from a
+/// background thread. This keeps the webview from parsing a single multi-MB
+/// listing array in one blocking `JSON.parse`. A per-tab request id (via
+/// [`ListingService`]) lets a superseding navigation cancel the in-flight
+/// stream so abandoned listings stop emitting.
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub fn start_list_dir(
+    payload: StartListDirRequest,
+    app: AppHandle,
+    state: State<'_, ListingService>,
+) -> Result<StartListDirResponse, String> {
+    let ListDirResponse { path, entries } = fs::list_dir(&payload.to_options()).map_err(|error| {
+        let message = format!("Failed to load \"{}\": {error}", payload.path);
+        log::error!("{message}");
+        message
+    })?;
+
+    let total = entries.len() as u64;
+    let request_id = state.next_request_id(&payload.tab_id);
+    let (first_chunk, rest) =
+        crate::listing::split_first_chunk(entries, crate::listing::LIST_CHUNK_SIZE);
+    let done = rest.is_empty();
+
+    if !done {
+        let tab_id = payload.tab_id.clone();
+        let stream_path = path.clone();
+        std::thread::spawn(move || {
+            let service = app.state::<ListingService>();
+            let total_rest = rest.len();
+            let mut emitted = 0usize;
+            for chunk in rest.chunks(crate::listing::LIST_CHUNK_SIZE) {
+                // Bail as soon as a newer navigation for this tab supersedes us.
+                if !service.is_current(&tab_id, request_id) {
+                    return;
+                }
+                emitted += chunk.len();
+                let event = super::types::ListChunkEvent {
+                    tab_id: tab_id.clone(),
+                    request_id,
+                    path: stream_path.clone(),
+                    entries: chunk.to_vec(),
+                    done: emitted >= total_rest,
+                };
+                let _ = app.emit(super::events::LIST_CHUNK, event);
+            }
+        });
+    }
+
+    Ok(StartListDirResponse {
+        path,
+        total,
+        request_id,
+        first_chunk,
+        done,
+    })
+}
+
+/// `test-utils` variant: builds the same listing head (first chunk + totals)
+/// without an `AppHandle`, so the streamed remainder is never emitted. The
+/// chunk-splitting and request-id logic it shares with the production command
+/// live in [`crate::listing`] and are covered directly by integration tests.
+#[cfg(feature = "test-utils")]
+#[tauri::command]
+pub fn start_list_dir(
+    payload: StartListDirRequest,
+    state: State<'_, ListingService>,
+) -> Result<StartListDirResponse, String> {
+    let ListDirResponse { path, entries } =
+        fs::list_dir(&payload.to_options()).map_err(|error| error.to_string())?;
+
+    let total = entries.len() as u64;
+    let request_id = state.next_request_id(&payload.tab_id);
+    let (first_chunk, rest) =
+        crate::listing::split_first_chunk(entries, crate::listing::LIST_CHUNK_SIZE);
+
+    Ok(StartListDirResponse {
+        path,
+        total,
+        request_id,
+        done: rest.is_empty(),
+        first_chunk,
     })
 }
 

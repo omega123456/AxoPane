@@ -59,12 +59,18 @@ export async function invokePlaywrightCommand<CommandName extends keyof IpcComma
   command: CommandName,
   payload: IpcCommandMap[CommandName]['request'],
 ) {
-  const delayMs = readDelay(command)
+  // `start_list_dir` replaced `list_dir` as the listing entrypoint, so it
+  // inherits any scenario delay/error configured for `list_dir` (loading,
+  // error, and permission-denied fixtures still target `list_dir`).
+  const delayMs =
+    readDelay(command) || (command === 'start_list_dir' ? readDelay('list_dir') : 0)
   if (delayMs > 0) {
     await new Promise((resolve) => window.setTimeout(resolve, delayMs))
   }
 
-  const message = readCommandError(command)
+  const message =
+    readCommandError(command) ??
+    (command === 'start_list_dir' ? readCommandError('list_dir') : undefined)
   if (message) {
     throw new Error(message)
   }
@@ -80,6 +86,22 @@ export async function invokePlaywrightCommand<CommandName extends keyof IpcComma
         return response as IpcCommandMap[CommandName]['response']
       }
     }
+  }
+
+  // `start_list_dir` derives a "complete head" from whatever `list_dir` a
+  // scenario provides, so every existing e2e fixture drives the streamed
+  // listing path without declaring a separate head (mirrors the Vitest
+  // harness). An explicit `start_list_dir` scenario override still wins below.
+  if (command === 'start_list_dir' && !readCommandOverride('start_list_dir').found) {
+    const listOverride = readCommandOverride('list_dir')
+    const listing = listOverride.found ? listOverride.value : getFixtureResponse('list_dir')
+    return {
+      path: listing.path,
+      total: listing.entries.length,
+      requestId: 1,
+      firstChunk: listing.entries,
+      done: true,
+    } as IpcCommandMap[CommandName]['response']
   }
 
   const override = readCommandOverride(command)

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import {
   cancelSizes,
   listTreeChildren,
-  listDir,
+  startListDir,
   listTrash,
   requestFolderSize,
   requestFolderSizes,
@@ -16,6 +16,7 @@ import type {
   DirPatchEvent,
   EverythingStatus,
   IconStateEvent,
+  ListChunkEvent,
   SessionState,
   SizeStateEvent,
   SortDirection,
@@ -65,8 +66,11 @@ type PaneState = {
   typing: boolean
   loading: boolean
   error: string | null
-  visibleStartIndex: number
-  visibleEndIndex: number
+  // Monotonic id of the in-flight streamed listing for this pane's active tab,
+  // set from the `start_list_dir` head. Streamed `list_chunk` events are only
+  // applied while their `requestId` matches, so chunks from a superseded
+  // navigation are ignored.
+  listRequestId: number
   scrollPositions: Record<string, number>
   history: string[]
   historyIndex: number
@@ -119,12 +123,15 @@ type PanesStore = {
   closeTab: (paneId: PaneId, tabId: string) => Promise<void>
   switchTab: (paneId: PaneId, tabId: string) => Promise<void>
   refreshEverything: (paneId: PaneId) => Promise<void>
+  /** Appends a batch of streamed listing chunks to their pane, ignoring superseded ones. */
+  applyListChunk: (events: ListChunkEvent[]) => void
+  /** Runs the post-listing tail (arm fs-watch, eager folder sizes, tree children) once a listing is complete. */
+  finalizeListing: (paneId: PaneId) => Promise<void>
   applyDirPatch: (event: DirPatchEvent) => void
   setSort: (paneId: PaneId, sortKey: SortKey) => Promise<void>
   setFilterDraft: (paneId: PaneId, value: string) => void
   clearFilter: (paneId: PaneId) => void
   setFocusedEntry: (paneId: PaneId, entryId: string | null) => void
-  setVisibleRange: (paneId: PaneId, startIndex: number, endIndex: number) => void
   setScrollPosition: (paneId: PaneId, path: string, scrollTop: number) => void
   /** Applies a batch of size-state events (coalesced by the frontend rAF batcher) in one `set`. */
   applySizeStates: (events: SizeStateEvent[]) => void
@@ -163,8 +170,7 @@ function createPane(id: PaneId, title: string, path = '.'): PaneState {
     typing: false,
     loading: false,
     error: null,
-    visibleStartIndex: 0,
-    visibleEndIndex: 40,
+    listRequestId: 0,
     scrollPositions: {},
     history: [],
     historyIndex: -1,
@@ -303,41 +309,83 @@ function sortEntries(
   sortDirection: SortDirection,
   sizeStates: Record<string, EntrySizeState>,
 ) {
+  return [...entries].sort((left, right) =>
+    compareEntries(left, right, sortKey, sortDirection, sizeStates),
+  )
+}
+
+/**
+ * The single ordering authority shared by the initial `sortEntries` sort and
+ * the incremental patch inserts below. Folders always sort before files;
+ * within a group, the active `sortKey`/`sortDirection` decides, with a
+ * natural-name tiebreak. The size key keeps entries whose size is still
+ * unknown after the ones with a known size (name-ordered among themselves) so
+ * a folder whose size is still resolving never jumps around.
+ */
+function compareEntries(
+  left: DirectoryEntry,
+  right: DirectoryEntry,
+  sortKey: SortKey,
+  sortDirection: SortDirection,
+  sizeStates: Record<string, EntrySizeState>,
+): number {
+  if (left.isDir !== right.isDir) {
+    return left.isDir ? -1 : 1
+  }
+
   const direction = sortDirection === 'asc' ? 1 : -1
 
-  return [...entries].sort((left, right) => {
-    if (left.isDir !== right.isDir) {
-      return left.isDir ? -1 : 1
+  if (sortKey === 'size') {
+    const leftHasKnownSize = isKnownSize(left, sizeStates[left.path])
+    const rightHasKnownSize = isKnownSize(right, sizeStates[right.path])
+
+    if (leftHasKnownSize !== rightHasKnownSize) {
+      return leftHasKnownSize ? -1 : 1
     }
 
-    if (sortKey === 'size') {
-      const leftState = sizeStates[left.path]
-      const rightState = sizeStates[right.path]
-      const leftHasKnownSize = isKnownSize(left, leftState)
-      const rightHasKnownSize = isKnownSize(right, rightState)
-
-      if (leftHasKnownSize !== rightHasKnownSize) {
-        return leftHasKnownSize ? -1 : 1
-      }
-
-      if (!leftHasKnownSize && !rightHasKnownSize) {
-        return compareEntryNames(left, right)
-      }
+    if (!leftHasKnownSize && !rightHasKnownSize) {
+      return compareEntryNames(left, right)
     }
+  }
 
-    const leftValue = entrySortValue(left, sizeStates[left.path], sortKey)
-    const rightValue = entrySortValue(right, sizeStates[right.path], sortKey)
+  const leftValue = entrySortValue(left, sizeStates[left.path], sortKey)
+  const rightValue = entrySortValue(right, sizeStates[right.path], sortKey)
 
-    if (leftValue < rightValue) {
-      return -1 * direction
+  if (leftValue < rightValue) {
+    return -1 * direction
+  }
+
+  if (leftValue > rightValue) {
+    return 1 * direction
+  }
+
+  return compareEntryNames(left, right) * direction
+}
+
+/**
+ * Inserts `entry` into an already-sorted `entries` array at the position given
+ * by [`compareEntries`], mutating the array in place. O(log n) comparisons +
+ * one splice, so a watcher patch touching a handful of rows never triggers a
+ * full re-sort of the whole listing.
+ */
+function insertSorted(
+  entries: DirectoryEntry[],
+  entry: DirectoryEntry,
+  sortKey: SortKey,
+  sortDirection: SortDirection,
+  sizeStates: Record<string, EntrySizeState>,
+) {
+  let low = 0
+  let high = entries.length
+  while (low < high) {
+    const mid = (low + high) >>> 1
+    if (compareEntries(entries[mid], entry, sortKey, sortDirection, sizeStates) < 0) {
+      low = mid + 1
+    } else {
+      high = mid
     }
-
-    if (leftValue > rightValue) {
-      return 1 * direction
-    }
-
-    return compareEntryNames(left, right) * direction
-  })
+  }
+  entries.splice(low, 0, entry)
 }
 
 function directoryPaths(entries: DirectoryEntry[]): string[] {
@@ -458,21 +506,36 @@ function hasResolvedIconPath(resolvedIconPaths: ResolvedIconPaths, path: string)
 
 function withResolvedIcons(entries: DirectoryEntry[], resolvedIconPaths: ResolvedIconPaths) {
   let changed = false
-  const nextEntries = entries.map((entry) => {
-    if (entry.isDir || !hasResolvedIconPath(resolvedIconPaths, entry.path)) {
-      return entry
-    }
-
-    const iconDataUrl = resolvedIconPaths[entry.path]
-    if (entry.iconDataUrl === iconDataUrl) {
-      return entry
-    }
-
+  const nextEntries = entries.map((entry) => hydrateEntryIcon(entry, resolvedIconPaths, () => {
     changed = true
-    return { ...entry, iconDataUrl }
-  })
+  }))
 
   return changed ? nextEntries : entries
+}
+
+/**
+ * Applies any already-resolved native icon for a single entry from the session
+ * icon cache. Used both by the bulk [`withResolvedIcons`] hydration and by the
+ * incremental patch path, which only needs to hydrate the freshly-changed
+ * entries rather than re-mapping the entire listing. `onChange` fires when a
+ * new object had to be allocated.
+ */
+function hydrateEntryIcon(
+  entry: DirectoryEntry,
+  resolvedIconPaths: ResolvedIconPaths,
+  onChange?: () => void,
+): DirectoryEntry {
+  if (entry.isDir || !hasResolvedIconPath(resolvedIconPaths, entry.path)) {
+    return entry
+  }
+
+  const iconDataUrl = resolvedIconPaths[entry.path]
+  if (entry.iconDataUrl === iconDataUrl) {
+    return entry
+  }
+
+  onChange?.()
+  return { ...entry, iconDataUrl }
 }
 
 function withPendingIconRequests(
@@ -572,34 +635,69 @@ export function schedulePersistSession(activePaneId: PaneId) {
 
 /**
  * Applies an incremental directory patch to a pane's listing without a full
- * reload. Returns the next entry list (re-sorted) or null when the patch does
+ * reload or re-sort. Returns the next entry list or null when the patch does
  * not target the pane's current path.
+ *
+ * The existing listing is already sorted, so every path the patch touches
+ * (removed or changed) is dropped in a single order-preserving pass, then each
+ * surviving changed entry is binary-inserted back at its sorted position via
+ * [`insertSorted`]. This avoids the O(n·log n) locale-aware re-sort of the
+ * whole listing that a folder-size folder full of 20k entries would otherwise
+ * pay on every ~150 ms watcher batch. Only the freshly-changed entries have
+ * their cached native icon re-applied (untouched rows keep their existing
+ * objects, and therefore their icons).
  */
 function patchEntries(
   pane: PaneState,
   event: DirPatchEvent,
   sizeStates: Record<string, EntrySizeState>,
   showHiddenFiles: boolean,
+  resolvedIconPaths: ResolvedIconPaths,
 ): DirectoryEntry[] | null {
   if (pane.path !== event.path) {
     return null
   }
 
-  const byId = new Map(pane.entries.map((entry) => [entry.path, entry]))
-
-  for (const removedPath of event.removed) {
-    byId.delete(removedPath)
+  const affected = new Set<string>(event.removed)
+  for (const change of event.changed) {
+    affected.add(change.path)
   }
 
+  const next =
+    affected.size > 0
+      ? pane.entries.filter((entry) => !affected.has(entry.path))
+      : [...pane.entries]
+
+  // Reconcile the changed set by path (last write wins, matching the previous
+  // map-based behaviour); a change whose entry is missing or no longer matches
+  // the pane's filter/hidden rules stays dropped rather than re-inserted.
+  const inserts = new Map<string, DirectoryEntry>()
   for (const change of event.changed) {
     if (change.entry && entryMatchesPane(change.entry, pane, showHiddenFiles)) {
-      byId.set(change.entry.path, change.entry)
+      inserts.set(change.entry.path, change.entry)
     } else {
-      byId.delete(change.path)
+      inserts.delete(change.path)
     }
   }
 
-  return sortEntries([...byId.values()], pane.sortKey, pane.sortDirection, sizeStates)
+  const hydrated = Array.from(inserts.values(), (entry) =>
+    hydrateEntryIcon(entry, resolvedIconPaths),
+  )
+
+  // Size ordering depends on folder sizes that resolve asynchronously and are
+  // not continuously re-sorted into the listing, so the array can't be assumed
+  // sorted against the current sizeStates — fall back to a full re-sort for
+  // that one key. Every other key is a pure function of entry fields, so the
+  // listing stays sorted and each change can be binary-inserted in place.
+  if (pane.sortKey === 'size') {
+    return sortEntries([...next, ...hydrated], pane.sortKey, pane.sortDirection, sizeStates)
+  }
+
+  for (const entry of hydrated) {
+    insertSorted(next, entry, pane.sortKey, pane.sortDirection, sizeStates)
+  }
+
+  return next
 }
 
 function entryMatchesPane(entry: DirectoryEntry, pane: PaneState, showHiddenFiles: boolean) {
@@ -670,39 +768,6 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     schedulePersistSession(paneId)
   },
   reloadPane: async (paneId) => {
-    const requestDirectorySizes = async (paths: string[]) => {
-      if (!eagerSizesEnabled(get().everythingStatus, useConfigStore.getState().autoFolderSize)) {
-        return []
-      }
-
-      // Suppress eager sizing when the folder holds more directories than a
-      // single pane can auto-calculate; the manual "Calculate all" button
-      // takes over for that pane instead.
-      if (paths.length > AUTO_FOLDER_SIZE_MAX_DIRECTORIES) {
-        return []
-      }
-
-      const pending = collectPendingSizeRequests(paths, get().sizeStates, get().pendingSizeRequests)
-
-      if (pending.length === 0) {
-        return []
-      }
-
-      set((state) => ({
-        pendingSizeRequests: withPendingSizeRequests(state.pendingSizeRequests, pending, true),
-      }))
-
-      try {
-        await requestFolderSizes({ paths: pending })
-        return pending
-      } catch (error) {
-        set((state) => ({
-          pendingSizeRequests: withPendingSizeRequests(state.pendingSizeRequests, pending, false),
-        }))
-        throw error
-      }
-    }
-
     const pane = get().panes[paneId]
     const selection = useSelectionStore.getState().selections[paneId]
     set((state) => ({
@@ -767,7 +832,12 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       const itemsColumnVisible =
         useLayoutStore.getState().columns.find((column) => column.key === 'items')?.visible ?? true
 
-      const response = await listDir({
+      // Stream the listing: Rust enumerates + sorts on its worker thread and
+      // returns only the inline first chunk here; any remaining entries arrive
+      // as `list_chunk` events (see `applyListChunk`). This keeps the webview
+      // from parsing a single multi-MB listing array in one blocking task.
+      const head = await startListDir({
+        tabId: activeTab(paneId).id,
         path: pane.path,
         sortKey: pane.sortKey,
         sortDirection: pane.sortDirection,
@@ -776,19 +846,18 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         includeItemCounts: itemsColumnVisible,
       })
 
-      // Rust is the canonical sort authority for `list_dir`: its response is
-      // already ordered by `sortKey`/`sortDirection`, so only the size column
-      // needs a client re-sort (folder sizes resolve asynchronously after the
-      // listing returns and can reorder entries Rust couldn't know about yet).
-      const sortedEntries =
+      // Rust is the canonical sort authority, so only the size column needs a
+      // client re-sort (folder sizes resolve asynchronously and can reorder
+      // entries Rust couldn't know about yet).
+      const firstChunk =
         pane.sortKey === 'size'
-          ? sortEntries(response.entries, pane.sortKey, pane.sortDirection, get().sizeStates)
-          : response.entries
+          ? sortEntries(head.firstChunk, pane.sortKey, pane.sortDirection, get().sizeStates)
+          : head.firstChunk
 
       set((state) => {
         const previous = state.panes[paneId]
-        const entries = withResolvedIcons(sortedEntries, state.resolvedIconPaths)
-        const restoredFocusId = findMatchingEntryId(sortedEntries, [
+        const entries = withResolvedIcons(firstChunk, state.resolvedIconPaths)
+        const restoredFocusId = findMatchingEntryId(firstChunk, [
           selection.focusedId,
           previous.focusedEntryId,
           ...selection.selectedIds,
@@ -797,7 +866,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         // (initial load, or after a tab switch reset its history to empty).
         const seeded =
           previous.historyIndex === -1
-            ? { history: [response.path], historyIndex: 0 }
+            ? { history: [head.path], historyIndex: 0 }
             : { history: previous.history, historyIndex: previous.historyIndex }
 
         return {
@@ -805,10 +874,11 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
             ...state.panes,
             [paneId]: {
               ...previous,
-              path: response.path,
+              path: head.path,
               entries,
-              focusedEntryId: restoredFocusId ?? sortedEntries[0]?.id ?? null,
+              focusedEntryId: restoredFocusId ?? firstChunk[0]?.id ?? null,
               loading: false,
+              listRequestId: head.requestId,
               ...seeded,
             },
           },
@@ -824,29 +894,11 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       })
       schedulePersistSession(get().activePaneId)
 
-      await setTabWatch(
-        {
-          tabId: activeTab(paneId).id,
-          path: nextPane.path,
-          sortKey: nextPane.sortKey,
-          sortDirection: nextPane.sortDirection,
-          filter: nextPane.filterApplied,
-          showHidden: get().showHiddenFiles,
-          includeItemCounts: itemsColumnVisible,
-        },
-        nextPane.entries,
-      )
-
-      const requestedDirectories = await requestDirectorySizes(directoryPaths(nextPane.entries))
-
-      log.debug('reloadPane done', {
-        paneId,
-        path: nextPane.path,
-        entries: nextPane.entries.length,
-        sizeRequests: requestedDirectories.length,
-      })
-
-      await get().ensureTreeChildren(getParentPath(nextPane.path) ?? nextPane.path)
+      // When the listing already fits in the first chunk the tail runs now;
+      // otherwise it runs from `applyListChunk` once the final chunk arrives.
+      if (head.done) {
+        await get().finalizeListing(paneId)
+      }
     } catch (error) {
       log.error('reloadPane failed to load directory', {
         paneId,
@@ -944,8 +996,6 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
             filterDraft: options.viaHistory ? pane.filterDraft : '',
             filterApplied: options.viaHistory ? pane.filterApplied : '',
             typing: options.viaHistory ? pane.typing : false,
-            visibleStartIndex: 0,
-            visibleEndIndex: 40,
             history,
             historyIndex,
             scrollPositions: options.viaHistory
@@ -1031,8 +1081,6 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           typing: false,
           entries: [],
           focusedEntryId: null,
-          visibleStartIndex: 0,
-          visibleEndIndex: 40,
           scrollPositions: {},
           history: [],
           historyIndex: -1,
@@ -1070,8 +1118,6 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           typing: false,
           entries: [],
           focusedEntryId: null,
-          visibleStartIndex: 0,
-          visibleEndIndex: 40,
           scrollPositions: {},
           history: [],
           historyIndex: -1,
@@ -1106,8 +1152,6 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           typing: false,
           entries: [],
           focusedEntryId: null,
-          visibleStartIndex: 0,
-          visibleEndIndex: 40,
           scrollPositions: {},
           history: [],
           historyIndex: -1,
@@ -1136,6 +1180,141 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
 
     await get().reloadPane(paneId)
   },
+  applyListChunk: (events) => {
+    if (events.length === 0) {
+      return
+    }
+
+    const completedPanes = new Set<PaneId>()
+    set((state) => {
+      const nextPanes = { ...state.panes }
+      let changed = false
+
+      for (const paneId of Object.keys(nextPanes) as PaneId[]) {
+        const pane = nextPanes[paneId]
+        const activeTabId = activeTab(paneId).id
+        let entries: DirectoryEntry[] | null = null
+        let completed = false
+
+        for (const event of events) {
+          // Only apply chunks for this pane's current tab and in-flight listing
+          // request; anything from a superseded navigation is dropped.
+          if (
+            paneIdFromTabId(event.tabId) !== paneId ||
+            event.tabId !== activeTabId ||
+            event.requestId !== pane.listRequestId ||
+            event.path !== pane.path
+          ) {
+            continue
+          }
+
+          // Rust streams globally-sorted chunks, so appending keeps order.
+          if (!entries) {
+            entries = [...pane.entries]
+          }
+          for (const entry of event.entries) {
+            entries.push(hydrateEntryIcon(entry, state.resolvedIconPaths))
+          }
+          if (event.done) {
+            completed = true
+          }
+        }
+
+        if (!entries) {
+          continue
+        }
+
+        // Folder sizes resolve asynchronously and are not continuously
+        // re-sorted into the listing, so re-sort the whole accumulated list
+        // once on completion for the size key (mirrors `patchEntries`).
+        if (completed && pane.sortKey === 'size') {
+          entries = sortEntries(entries, pane.sortKey, pane.sortDirection, state.sizeStates)
+        }
+
+        nextPanes[paneId] = { ...pane, entries }
+        changed = true
+        if (completed) {
+          completedPanes.add(paneId)
+        }
+      }
+
+      return changed ? { panes: nextPanes } : state
+    })
+
+    for (const paneId of completedPanes) {
+      void get().finalizeListing(paneId)
+    }
+  },
+  finalizeListing: async (paneId) => {
+    const pane = get().panes[paneId]
+    // Trash is a virtual location with no fs watcher / tree / size requests.
+    if (isTrashPath(pane.path)) {
+      return
+    }
+
+    const itemsColumnVisible =
+      useLayoutStore.getState().columns.find((column) => column.key === 'items')?.visible ?? true
+
+    const requestDirectorySizes = async (paths: string[]) => {
+      if (!eagerSizesEnabled(get().everythingStatus, useConfigStore.getState().autoFolderSize)) {
+        return []
+      }
+
+      // Suppress eager sizing when the folder holds more directories than a
+      // single pane can auto-calculate; the manual "Calculate all" button takes
+      // over for that pane instead.
+      if (paths.length > AUTO_FOLDER_SIZE_MAX_DIRECTORIES) {
+        return []
+      }
+
+      const pending = collectPendingSizeRequests(paths, get().sizeStates, get().pendingSizeRequests)
+      if (pending.length === 0) {
+        return []
+      }
+
+      set((state) => ({
+        pendingSizeRequests: withPendingSizeRequests(state.pendingSizeRequests, pending, true),
+      }))
+
+      try {
+        await requestFolderSizes({ paths: pending })
+        return pending
+      } catch (error) {
+        set((state) => ({
+          pendingSizeRequests: withPendingSizeRequests(state.pendingSizeRequests, pending, false),
+        }))
+        throw error
+      }
+    }
+
+    try {
+      // Seed the fs-watch baseline on the Rust side (entries omitted): Rust
+      // re-enumerates via `snapshot_for_target` on its worker thread instead of
+      // us re-serializing the entire listing back across the IPC boundary.
+      await setTabWatch({
+        tabId: activeTab(paneId).id,
+        path: pane.path,
+        sortKey: pane.sortKey,
+        sortDirection: pane.sortDirection,
+        filter: pane.filterApplied,
+        showHidden: get().showHiddenFiles,
+        includeItemCounts: itemsColumnVisible,
+      })
+
+      const requested = await requestDirectorySizes(directoryPaths(get().panes[paneId].entries))
+
+      log.debug('finalizeListing done', {
+        paneId,
+        path: pane.path,
+        entries: get().panes[paneId].entries.length,
+        sizeRequests: requested.length,
+      })
+
+      await get().ensureTreeChildren(getParentPath(pane.path) ?? pane.path)
+    } catch (error) {
+      log.error('finalizeListing failed', { paneId, path: pane.path, error })
+    }
+  },
   applyDirPatch: (event) =>
     set((state) => {
       const paneId = paneIdFromTabId(event.tabId)
@@ -1148,8 +1327,17 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         return state
       }
 
-      const nextEntries = patchEntries(pane, event, state.sizeStates, state.showHiddenFiles)
-      if (!nextEntries) {
+      // `patchEntries` already hydrates the cached native icon for the changed
+      // entries it inserts, so no second full-listing `withResolvedIcons` pass
+      // is needed here.
+      const entries = patchEntries(
+        pane,
+        event,
+        state.sizeStates,
+        state.showHiddenFiles,
+        state.resolvedIconPaths,
+      )
+      if (!entries) {
         log.debug('applyDirPatch skipped (path mismatch)', {
           paneId,
           panePath: pane.path,
@@ -1161,12 +1349,11 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       log.debug('applyDirPatch applied', {
         paneId,
         path: event.path,
-        entries: nextEntries.length,
+        entries: entries.length,
         changed: event.changed.length,
         removed: event.removed.length,
       })
 
-      const entries = withResolvedIcons(nextEntries, state.resolvedIconPaths)
       const focusedStillPresent = entries.some((entry) => entry.id === pane.focusedEntryId)
 
       return {
@@ -1287,23 +1474,6 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         },
       },
     })),
-  setVisibleRange: (paneId, startIndex, endIndex) => {
-    const previous = get().panes[paneId]
-    if (previous.visibleStartIndex === startIndex && previous.visibleEndIndex === endIndex) {
-      return
-    }
-
-    set((state) => ({
-      panes: {
-        ...state.panes,
-        [paneId]: {
-          ...state.panes[paneId],
-          visibleStartIndex: startIndex,
-          visibleEndIndex: endIndex,
-        },
-      },
-    }))
-  },
   setScrollPosition: (paneId, path, scrollTop) => {
     const previous = get().panes[paneId].scrollPositions[path]
     if (previous === scrollTop) {

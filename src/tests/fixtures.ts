@@ -72,6 +72,16 @@ export const fixtures: {
       },
     ],
   },
+  // Placeholder only: the shared harness derives the real `start_list_dir` head
+  // from whatever `list_dir` responder is active (see `ipc-mock.ts`), so tests
+  // that mock `list_dir` transparently drive the streamed listing path too.
+  start_list_dir: {
+    path: 'C:\\Users\\Omega',
+    total: 0,
+    requestId: 1,
+    firstChunk: [],
+    done: true,
+  },
   list_tree_children: {
     path: 'C:\\Users\\Omega',
     children: [

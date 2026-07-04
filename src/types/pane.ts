@@ -15,7 +15,6 @@ export type PaneState = {
   typing: boolean
   loading: boolean
   error: string | null
-  visibleStartIndex: number
-  visibleEndIndex: number
+  listRequestId: number
   scrollPositions: Record<string, number>
 }

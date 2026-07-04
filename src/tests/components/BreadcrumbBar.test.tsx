@@ -41,8 +41,7 @@ function pane(path: string, entries: DirectoryEntry[] = []): PaneState {
     typing: false,
     loading: false,
     error: null,
-    visibleStartIndex: 0,
-    visibleEndIndex: 40,
+    listRequestId: 0,
     scrollPositions: {},
   }
 }

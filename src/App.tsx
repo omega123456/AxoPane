@@ -15,10 +15,10 @@ import { hydrateAppConfig, persistAppConfig } from '@/lib/app-config'
 import { executeCommand } from '@/lib/commands'
 import { everythingStatus, listVolumes, loadConfig, loadSession } from '@/lib/ipc/commands'
 import { installCloseGuard } from '@/lib/close-guard'
-import { onDirPatch, onIconState, onSizeState, onVolumesChanged } from '@/lib/ipc/events'
+import { onDirPatch, onIconState, onListChunk, onSizeState, onVolumesChanged } from '@/lib/ipc/events'
 import { resolveCommandForEvent } from '@/lib/keymap'
 import { createRafBatcher } from '@/lib/raf-batcher'
-import type { IconStateEvent, SizeStateEvent } from '@/lib/types/ipc'
+import type { IconStateEvent, ListChunkEvent, SizeStateEvent } from '@/lib/types/ipc'
 import { UpdateBanner } from '@/components/states/UpdateBanner'
 import { useUpdaterStore } from '@/stores/updater-store'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
@@ -48,6 +48,7 @@ function App() {
   const applySizeStates = usePanesStore((state) => state.applySizeStates)
   const applyIconStates = usePanesStore((state) => state.applyIconStates)
   const applyDirPatch = usePanesStore((state) => state.applyDirPatch)
+  const applyListChunk = usePanesStore((state) => state.applyListChunk)
   const reloadPane = usePanesStore((state) => state.reloadPane)
   const theme = useThemeStore((state) => state.theme)
   const applyTheme = useThemeStore((state) => state.setTheme)
@@ -217,9 +218,18 @@ function App() {
     const sizeBatcher = createRafBatcher<SizeStateEvent>((batch) => {
       applySizeStates(batch)
     })
+    // Coalesce streamed listing chunks so several chunks landing in one frame
+    // become a single store update (and one React commit) instead of one each.
+    const listChunkBatcher = createRafBatcher<ListChunkEvent>((batch) => {
+      applyListChunk(batch)
+    })
 
     const unlistenVolumesPromise = onVolumesChanged((event) => {
       setVolumes(event.volumes)
+    })
+
+    const unlistenListChunksPromise = onListChunk((event) => {
+      listChunkBatcher.push(event)
     })
 
     const unlistenSizesPromise = onSizeState((events) => {
@@ -243,6 +253,7 @@ function App() {
       void unlistenSizesPromise.then((unlisten) => unlisten())
       void unlistenIconsPromise.then((unlisten) => unlisten())
       void unlistenPatchesPromise.then((unlisten) => unlisten())
+      void unlistenListChunksPromise.then((unlisten) => unlisten())
       // Flush any buffered events before tearing down so a burst that lands
       // right before unmount is not silently dropped, then cancel the
       // batchers so no further frame callback fires.
@@ -250,8 +261,10 @@ function App() {
       iconBatcher.cancel()
       sizeBatcher.flush()
       sizeBatcher.cancel()
+      listChunkBatcher.flush()
+      listChunkBatcher.cancel()
     }
-  }, [applyDirPatch, applyIconStates, applySizeStates, setVolumes])
+  }, [applyDirPatch, applyIconStates, applyListChunk, applySizeStates, setVolumes])
 
   return (
     <main className="flex h-full select-none flex-col overflow-hidden bg-light-window font-ui text-light-text dark:bg-dark-window dark:text-dark-text">

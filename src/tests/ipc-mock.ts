@@ -1,5 +1,5 @@
 import { afterEach, vi } from 'vitest'
-import type { IpcCommandMap, IpcEventMap } from '@/lib/types/ipc'
+import type { IpcCommandMap, IpcEventMap, ListDirResponse } from '@/lib/types/ipc'
 import { fixtures } from './fixtures'
 
 type OverrideMap = Partial<{
@@ -17,6 +17,22 @@ function cloneValue<T>(value: T): T {
   return structuredClone(value)
 }
 
+/**
+ * Resolves the active `list_dir` responder (override or fixture) directly,
+ * without recursing through the generic `getResponse` (which would blow up the
+ * return-type union). Used to synthesize the `start_list_dir` head.
+ */
+function resolveListDir(payload: IpcCommandMap['list_dir']['request']): ListDirResponse {
+  const override = overrides.list_dir
+  if (typeof override === 'function') {
+    return override(payload)
+  }
+  if (override !== undefined) {
+    return cloneValue(override)
+  }
+  return cloneValue(fixtures.list_dir)
+}
+
 function getResponse<CommandName extends keyof IpcCommandMap>(
   command: CommandName,
   payload: IpcCommandMap[CommandName]['request'],
@@ -29,6 +45,24 @@ function getResponse<CommandName extends keyof IpcCommandMap>(
 
   if (override !== undefined) {
     return cloneValue(override)
+  }
+
+  // `start_list_dir` defaults to a "complete head" derived from whatever
+  // `list_dir` responder is active, so the many tests that mock `list_dir`
+  // transparently drive the streamed listing path without each re-mocking the
+  // head. An explicit `start_list_dir` override (handled above) still wins, and
+  // a thrown `list_dir` responder propagates here just as the real command
+  // would surface a listing failure.
+  if (command === 'start_list_dir') {
+    const listing = resolveListDir(payload as IpcCommandMap['list_dir']['request'])
+    const head: IpcCommandMap['start_list_dir']['response'] = {
+      path: listing.path,
+      total: listing.entries.length,
+      requestId: 1,
+      firstChunk: listing.entries,
+      done: true,
+    }
+    return head
   }
 
   // A command is "mocked" when it is declared in the fixtures map — even when

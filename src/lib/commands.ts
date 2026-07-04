@@ -52,7 +52,8 @@ export function executeCommand(
 
   const selection = useSelectionStore.getState().selections[paneId]
   const entry = targetEntryId ? pane.entries.find((item) => item.id === targetEntryId) : undefined
-  const selectedEntries = pane.entries.filter((item) => selection.selectedIds.includes(item.id))
+  const selectedIdSet = new Set(selection.selectedIds)
+  const selectedEntries = pane.entries.filter((item) => selectedIdSet.has(item.id))
   const effectiveEntries = entry ? [entry] : selectedEntries
   const focusedEntry = pane.focusedEntryId
     ? pane.entries.find((item) => item.id === pane.focusedEntryId)
@@ -369,5 +370,6 @@ export function canExecuteCommand(
 export function selectedEntriesForPane(paneId: 'left' | 'right'): DirectoryEntry[] {
   const pane = usePanesStore.getState().panes[paneId]
   const selection = useSelectionStore.getState().selections[paneId]
-  return pane.entries.filter((entry) => selection.selectedIds.includes(entry.id))
+  const selectedIdSet = new Set(selection.selectedIds)
+  return pane.entries.filter((entry) => selectedIdSet.has(entry.id))
 }

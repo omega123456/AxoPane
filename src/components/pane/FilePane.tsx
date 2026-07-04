@@ -96,7 +96,6 @@ export function FilePane({ paneId }: FilePaneProps) {
   const goUp = usePanesStore((state) => state.goUp)
   const openTabFromPath = usePanesStore((state) => state.openTabFromPath)
   const reloadPane = usePanesStore((state) => state.reloadPane)
-  const requestVisibleRange = usePanesStore((state) => state.setVisibleRange)
   const requestVisibleIcons = usePanesStore((state) => state.requestVisibleIcons)
   const warmVisibleNativeMenus = useNativeMenuWarmStore((state) => state.warmVisibleNativeMenus)
   const setScrollPosition = usePanesStore((state) => state.setScrollPosition)
@@ -259,11 +258,11 @@ export function FilePane({ paneId }: FilePaneProps) {
       return
     }
 
-    // Report the visible range in entry coordinates (excluding the synthetic
-    // parent row) so size requests target real directory entries only.
+    // Visible range in entry coordinates (excluding the synthetic parent row),
+    // used only to target lazy icon/native-menu requests at the real directory
+    // entries currently on screen.
     const start = Math.max(0, items[0].index - parentOffset)
     const end = Math.max(0, items[items.length - 1].index - parentOffset)
-    requestVisibleRange(paneId, start, end)
 
     // Native icons are lazy and per-visible-row: debounce so fast scrolling
     // doesn't spam the backend with a request per frame.
@@ -283,7 +282,6 @@ export function FilePane({ paneId }: FilePaneProps) {
     pane.entries,
     parentOffset,
     requestVisibleIcons,
-    requestVisibleRange,
     warmVisibleNativeMenus,
   ])
 

@@ -5,6 +5,7 @@ pub mod file_icons;
 pub mod fs;
 pub mod ipc;
 pub mod launch;
+pub mod listing;
 pub mod logging;
 pub mod native_menu;
 pub mod ops;
@@ -139,6 +140,7 @@ pub fn run() {
             app.manage(NativeMenuService::default());
             app.manage(SizeService::default());
             app.manage(WatchService::default());
+            app.manage(listing::ListingService::default());
 
             let ops = OpsService::default();
             let progress_handle = app.handle().clone();
@@ -160,6 +162,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_initial_shell,
             commands::list_dir,
+            commands::start_list_dir,
             commands::list_tree_children,
             commands::create_folder,
             commands::create_file,

@@ -85,6 +85,32 @@ export type ListDirResponse = {
   entries: DirectoryEntry[]
 }
 
+export type StartListDirRequest = {
+  tabId: string
+  path: string
+  sortKey: SortKey
+  sortDirection: SortDirection
+  filter: string
+  showHidden: boolean
+  includeItemCounts: boolean
+}
+
+export type StartListDirResponse = {
+  path: string
+  total: number
+  requestId: number
+  firstChunk: DirectoryEntry[]
+  done: boolean
+}
+
+export type ListChunkEvent = {
+  tabId: string
+  requestId: number
+  path: string
+  entries: DirectoryEntry[]
+  done: boolean
+}
+
 export type TreeChildEntry = {
   name: string
   path: string
@@ -544,6 +570,10 @@ export type IpcCommandMap = {
     request: ListDirRequest
     response: ListDirResponse
   }
+  start_list_dir: {
+    request: StartListDirRequest
+    response: StartListDirResponse
+  }
   list_tree_children: {
     request: ListTreeChildrenRequest
     response: ListTreeChildrenResponse
@@ -732,6 +762,8 @@ export type IpcCommandMap = {
 
 export type IpcEventMap = {
   'dir://patch': DirPatchEvent
+  /** A streamed slice of a directory listing following the `start_list_dir` head. */
+  'dir://list-chunk': ListChunkEvent
   /** Batched: the backend flushes folder-size state changes in arrays to avoid IPC floods. */
   'size://state': SizeStateEvent[]
   /** Batched: the backend flushes resolved icons in chunks (see Phase 3 backend batching). */

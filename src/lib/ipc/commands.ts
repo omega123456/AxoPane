@@ -17,6 +17,8 @@ import type {
   ListApplicationsResponse,
   ListDirRequest,
   ListDirResponse,
+  StartListDirRequest,
+  StartListDirResponse,
   ListTreeChildrenRequest,
   ListTreeChildrenResponse,
   ListTrashResponse,
@@ -47,6 +49,10 @@ export function getInitialShell() {
 
 export function listDir(payload: ListDirRequest) {
   return invokeCommand({ command: 'list_dir', payload }) as Promise<ListDirResponse>
+}
+
+export function startListDir(payload: StartListDirRequest) {
+  return invokeCommand({ command: 'start_list_dir', payload }) as Promise<StartListDirResponse>
 }
 
 export function listTreeChildren(payload: ListTreeChildrenRequest) {

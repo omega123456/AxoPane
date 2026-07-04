@@ -1,4 +1,5 @@
 pub const DIR_PATCH: &str = "dir://patch";
+pub const LIST_CHUNK: &str = "dir://list-chunk";
 pub const SIZE_STATE: &str = "size://state";
 pub const ICON_STATE: &str = "icon://state";
 pub const VOLUMES_CHANGED: &str = "volumes://changed";

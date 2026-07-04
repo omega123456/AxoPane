@@ -101,7 +101,8 @@ function buildNativeMenuRequest(
         selectedPaths: [target.entry.path],
       }
     case 'multi': {
-      const selectedEntries = pane.entries.filter((item) => selection.selectedIds.includes(item.id))
+      const selectedIdSet = new Set(selection.selectedIds)
+      const selectedEntries = pane.entries.filter((item) => selectedIdSet.has(item.id))
       const hasDirs = selectedEntries.some((item) => item.isDir)
       const hasFiles = selectedEntries.some((item) => !item.isDir)
       return {
