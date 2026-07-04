@@ -3,10 +3,10 @@ pub mod manual;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use serde::{Deserialize, Serialize};
@@ -89,38 +89,9 @@ pub enum SizeBackend {
     NetworkNa,
 }
 
-/// Process-lifetime counters for the size pipeline, used purely for diagnostic
-/// logging. Every counter is monotonic; snapshots are logged at enqueue,
-/// cancellation, and periodically as workers make progress so the whole
-/// lifecycle of a large "calculate all" (and its cancellation) is traceable in
-/// the daily log.
-#[derive(Default)]
-struct SizeMetrics {
-    enqueued: AtomicU64,
-    started: AtomicU64,
-    skipped: AtomicU64,
-    completed: AtomicU64,
-    cancelled: AtomicU64,
-}
-
-impl SizeMetrics {
-    /// A compact `key=value` snapshot for a single log line.
-    fn snapshot(&self) -> String {
-        format!(
-            "enqueued={} started={} skipped={} completed={} cancelled={}",
-            self.enqueued.load(Ordering::Relaxed),
-            self.started.load(Ordering::Relaxed),
-            self.skipped.load(Ordering::Relaxed),
-            self.completed.load(Ordering::Relaxed),
-            self.cancelled.load(Ordering::Relaxed),
-        )
-    }
-}
-
 pub struct SizeService {
     inner: Arc<Mutex<SizeServiceInner>>,
     timeout: Duration,
-    metrics: Arc<SizeMetrics>,
 }
 
 struct SizeServiceInner {
@@ -144,7 +115,6 @@ impl SizeService {
                 everything,
             })),
             timeout,
-            metrics: Arc::new(SizeMetrics::default()),
         }
     }
 
@@ -156,7 +126,6 @@ impl SizeService {
                 everything: handle.map(Arc::new),
             })),
             timeout,
-            metrics: Arc::new(SizeMetrics::default()),
         }
     }
 
@@ -214,63 +183,30 @@ impl SizeService {
         self.request_paths_with_volumes(paths, volumes, emitter);
     }
 
-    /// Number of jobs currently registered (queued or running). Diagnostic.
-    fn job_count(&self) -> usize {
-        self.inner.lock().expect("size service lock").jobs.len()
-    }
-
     pub fn cancel(&self, path: &str) -> bool {
-        let cancelled = {
-            let mut inner = self.inner.lock().expect("size service lock");
-            if let Some(cancel) = inner.jobs.remove(path) {
-                cancel.store(true, Ordering::Relaxed);
-                true
-            } else {
-                false
-            }
-        };
-        if cancelled {
-            self.metrics.cancelled.fetch_add(1, Ordering::Relaxed);
+        let mut inner = self.inner.lock().expect("size service lock");
+        if let Some(cancel) = inner.jobs.remove(path) {
+            cancel.store(true, Ordering::Relaxed);
+            true
+        } else {
+            false
         }
-        log::debug!(
-            "size: cancel path_cancelled={cancelled} jobs_now={} [{}]",
-            self.job_count(),
-            self.metrics.snapshot(),
-        );
-        cancelled
     }
 
     /// Cancels every in-flight job in `paths`, returning how many were actually
     /// running. Used to abandon a folder's pending size jobs when the pane
     /// navigates away, without disturbing jobs for any other path.
     pub fn cancel_many(&self, paths: &[String]) -> usize {
-        let started_at = Instant::now();
-        let cancelled = {
-            let mut inner = self.inner.lock().expect("size service lock");
-            paths
-                .iter()
-                .filter(|path| {
-                    inner.jobs.remove(*path).is_some_and(|cancel| {
-                        cancel.store(true, Ordering::Relaxed);
-                        true
-                    })
+        let mut inner = self.inner.lock().expect("size service lock");
+        paths
+            .iter()
+            .filter(|path| {
+                inner.jobs.remove(*path).is_some_and(|cancel| {
+                    cancel.store(true, Ordering::Relaxed);
+                    true
                 })
-                .count()
-        };
-        self.metrics
-            .cancelled
-            .fetch_add(cancelled as u64, Ordering::Relaxed);
-        // `requested` vs `cancelled` is the key diagnostic: if we ask to cancel
-        // thousands of paths but almost none match a registered job, the paths
-        // the frontend sent don't match the keys jobs were registered under.
-        log::debug!(
-            "size: cancel_many requested={} cancelled={cancelled} took_ms={} jobs_now={} [{}]",
-            paths.len(),
-            started_at.elapsed().as_millis(),
-            self.job_count(),
-            self.metrics.snapshot(),
-        );
-        cancelled
+            })
+            .count()
     }
 
     pub fn request_path_with_volumes(
@@ -288,19 +224,14 @@ impl SizeService {
         volumes: Vec<VolumeInfo>,
         emitter: Arc<dyn Fn(Vec<SizeUpdate>) + Send + Sync>,
     ) {
-        let started_at = Instant::now();
-        let total = paths.len();
         let mut everything_paths = Vec::new();
         let mut network_updates = Vec::new();
-        let mut manual_count = 0_usize;
-        let mut network_count = 0_usize;
 
         for path in paths {
             let backend = self.choose_backend_for_path(Path::new(&path), &volumes);
 
             match backend {
                 SizeBackend::NetworkNa => {
-                    network_count += 1;
                     network_updates.push(SizeUpdate {
                         path,
                         state: SizeStateKind::Na,
@@ -310,7 +241,6 @@ impl SizeService {
                 }
                 SizeBackend::Everything => everything_paths.push(path),
                 SizeBackend::Manual => {
-                    manual_count += 1;
                     let timeout = self.timeout;
                     self.spawn_job(
                         path,
@@ -348,20 +278,9 @@ impl SizeService {
             emitter(network_updates);
         }
 
-        let everything_count = everything_paths.len();
-        self.metrics
-            .enqueued
-            .fetch_add((manual_count + everything_count) as u64, Ordering::Relaxed);
         if !everything_paths.is_empty() {
             self.spawn_everything_batch(everything_paths, emitter);
         }
-
-        log::debug!(
-            "size: request enqueued total={total} manual={manual_count} everything={everything_count} network={network_count} enqueue_ms={} jobs_now={} [{}]",
-            started_at.elapsed().as_millis(),
-            self.job_count(),
-            self.metrics.snapshot(),
-        );
     }
 
     fn spawn_everything_batch(
@@ -413,8 +332,6 @@ impl SizeService {
                 return;
             }
 
-            let query_started_at = Instant::now();
-            let requested = requestable.len();
             // The whole batch is abandoned once every one of its jobs has been
             // cancelled (navigating away cancels them all at once). `.all`
             // short-circuits on the first still-active job, so this is O(1) in
@@ -446,14 +363,7 @@ impl SizeService {
                     emitter(calculating_updates);
                 }
 
-                let results = handle.query_folder_sizes(&requestable, &batch_cancelled);
-                log::debug!(
-                    "size: everything batch queried requested={requested} query_ms={} cancelled={} jobs_now={}",
-                    query_started_at.elapsed().as_millis(),
-                    batch_cancelled(),
-                    inner.lock().expect("size service lock").jobs.len(),
-                );
-                results
+                handle.query_folder_sizes(&requestable, &batch_cancelled)
             };
 
             match results {
@@ -543,7 +453,6 @@ impl SizeService {
     ) {
         let cancel = self.register_job(&path);
         let inner = Arc::clone(&self.inner);
-        let metrics = Arc::clone(&self.metrics);
         let cleanup_path = path.clone();
         let cleanup_cancel = Arc::clone(&cancel);
 
@@ -555,16 +464,7 @@ impl SizeService {
             // folder whose result will be discarded. The `Calculating` event
             // is emitted here — only once work actually begins — so a cancelled
             // backlog stays completely silent.
-            if cancel.load(Ordering::Relaxed) {
-                metrics.skipped.fetch_add(1, Ordering::Relaxed);
-            } else {
-                // Log a progress snapshot every 2000 started jobs so a large,
-                // still-running calculation is visible in the log without one
-                // line per folder.
-                let started = metrics.started.fetch_add(1, Ordering::Relaxed) + 1;
-                if started % 2000 == 0 {
-                    log::debug!("size: worker progress [{}]", metrics.snapshot());
-                }
+            if !cancel.load(Ordering::Relaxed) {
                 emitter(vec![SizeUpdate {
                     path: path.clone(),
                     state: SizeStateKind::Calculating,
@@ -575,7 +475,6 @@ impl SizeService {
                     emitter(vec![update]);
                 }
             }
-            metrics.completed.fetch_add(1, Ordering::Relaxed);
             SizeService::complete_job(&inner, &cleanup_path, &cleanup_cancel);
         };
 
