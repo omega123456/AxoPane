@@ -65,6 +65,21 @@ function getResponse<CommandName extends keyof IpcCommandMap>(
     return head
   }
 
+  // Unmocked `list_tree_children` calls default to the fixture only for the
+  // exact path it describes; any other path echoes back empty children. A
+  // real backend never returns another folder's children for an unrelated
+  // path, and without this, every not-yet-loaded volume root would get
+  // stamped with the same fixture children, producing duplicate React keys
+  // once more than one root is expanded in a single test.
+  if (command === 'list_tree_children') {
+    const request = payload as IpcCommandMap['list_tree_children']['request']
+    const fixture = fixtures.list_tree_children
+    if (request.path === fixture.path) {
+      return cloneValue(fixture) as IpcCommandMap[CommandName]['response']
+    }
+    return { path: request.path, children: [] } as IpcCommandMap[CommandName]['response']
+  }
+
   // A command is "mocked" when it is declared in the fixtures map — even when
   // its declared response is `undefined` (void commands such as the folder-size
   // requests). Only commands genuinely absent from the fixtures throw the
