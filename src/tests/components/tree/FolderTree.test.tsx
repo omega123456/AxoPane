@@ -1,15 +1,28 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { FolderTree } from '@/components/tree/FolderTree'
+import { useContextMenuStore } from '@/stores/context-menu-store'
 import { useDragStore } from '@/stores/drag-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useTabsStore } from '@/stores/tabs-store'
 
 function treeRow(label: string) {
-  const row = screen.getByText(label, { selector: 'span' }).closest('li')
+  const row = screen.getByText(label, { selector: 'span' }).closest('[data-tree-row]')
   expect(row).not.toBeNull()
-  return row
+  return row as HTMLElement
+}
+
+/** Set the tree's scrollTop and dispatch a scroll event so the pinned overlay recomputes. */
+function scrollTreeTo(scrollTop: number) {
+  const scroll = screen.getByTestId('folder-tree-scroll')
+  scroll.scrollTop = scrollTop
+  fireEvent.scroll(scroll)
+}
+
+function pinnedRows() {
+  return screen.queryAllByTestId('tree-pinned-row')
 }
 
 beforeEach(() => {
@@ -17,6 +30,7 @@ beforeEach(() => {
   usePanesStore.getState().reset()
   useTabsStore.getState().reset()
   useDragStore.getState().end()
+  useContextMenuStore.setState({ menu: null })
 })
 
 function seedVolumes() {
@@ -62,7 +76,7 @@ describe('FolderTree', () => {
     expect(screen.queryByText('Network Drives')).not.toBeInTheDocument()
   })
 
-  it('pins the ancestor chain of the active node and leaves unrelated siblings unpinned', async () => {
+  it('pins the ancestor chain of the active node once scrolled past, leaving siblings unpinned', async () => {
     seedVolumes()
     usePanesStore.setState((state) => ({
       panes: { ...state.panes, left: { ...state.panes.left, path: 'C:\\aa\\bb' } },
@@ -105,36 +119,37 @@ describe('FolderTree', () => {
     }))
 
     render(<FolderTree />)
-
     await screen.findByText('aa', { selector: 'span' })
 
-    const rootRow = treeRow('Windows (C:)')
-    const aaRow = treeRow('aa')
-    const bbRow = treeRow('bb')
-    const ccRow = treeRow('cc')
+    // Nothing is pinned until the chain is actually scrolled past.
+    expect(pinnedRows()).toHaveLength(0)
 
-    expect(rootRow).toHaveStyle({ position: 'sticky' })
-    expect(aaRow).toHaveStyle({ position: 'sticky' })
-    expect(bbRow).toHaveStyle({ position: 'sticky' })
-    expect(ccRow).not.toHaveStyle({ position: 'sticky' })
+    scrollTreeTo(420)
 
-    expect(rootRow?.className).toContain('hover:bg-light-tree-hover')
-    expect(aaRow?.className).toContain('hover:bg-light-tree-hover')
-    expect(bbRow?.className).toContain('hover:bg-light-tree-current-hover')
-    expect(ccRow?.className).toContain('hover:bg-light-hover')
+    const pinned = pinnedRows()
+    expect(pinned.map((row) => row.textContent)).toEqual(['Windows (C:)', 'aa', 'bb'])
 
-    expect(Number(rootRow?.style.zIndex)).toBeLessThan(Number(aaRow?.style.zIndex))
-    expect(Number(aaRow?.style.zIndex)).toBeLessThan(Number(bbRow?.style.zIndex))
+    // Unrelated sibling `cc` is never pinned.
+    expect(pinned.some((row) => within(row).queryByText('cc'))).toBe(false)
 
-    // The stack offset is a calc() against a fixed token, computed on the
-    // very first render - not a value that only converges after each row's
-    // own async height measurement (see regression below).
-    expect(rootRow?.style.top).toBe('calc(var(--spacing-tree-row) * 0)')
-    expect(aaRow?.style.top).toBe('calc(var(--spacing-tree-row) * 1)')
-    expect(bbRow?.style.top).toBe('calc(var(--spacing-tree-row) * 2)')
+    // Pinned rows stack from the viewport top: strictly increasing offset and
+    // z-index so a deeper ancestor always paints above a shallower one.
+    const tops = pinned.map((row) => Number.parseFloat(row.style.top))
+    const zIndexes = pinned.map((row) => Number(row.style.zIndex))
+    for (let i = 1; i < pinned.length; i += 1) {
+      expect(tops[i]).toBeGreaterThan(tops[i - 1])
+      expect(zIndexes[i]).toBeGreaterThan(zIndexes[i - 1])
+    }
+
+    // The pinned current row (bb) uses the opaque stand-in, not the translucent
+    // selection tint, so rows scrolling underneath don't bleed through.
+    const bbPinned = pinned[2]
+    expect(within(bbPinned).getByText('bb').closest('[data-tree-row]')?.className).toContain(
+      'bg-light-tree-current',
+    )
   })
 
-  it('renders visible volume rows as direct siblings in one flat list', async () => {
+  it('renders every visible row in depth-first order, then the trash and other volumes', async () => {
     seedVolumes()
     usePanesStore.setState((state) => ({
       panes: { ...state.panes, left: { ...state.panes.left, path: 'C:\\aa\\bb' } },
@@ -176,26 +191,20 @@ describe('FolderTree', () => {
       },
     }))
 
-    render(<FolderTree />)
+    const { container } = render(<FolderTree />)
     await screen.findByText('bb', { selector: 'span' })
 
-    const rootRow = treeRow('Windows (C:)')
-    const volumeList = rootRow?.closest('ul')
-    expect(volumeList).not.toBeNull()
-    expect(Array.from(volumeList?.children ?? [])).toEqual([
-      rootRow,
-      treeRow('aa'),
-      treeRow('bb'),
-      treeRow('cc'),
-    ])
-    expect(volumeList?.querySelectorAll('ul')).toHaveLength(0)
+    const order = Array.from(container.querySelectorAll('[data-tree-row]')).map((row) =>
+      row.getAttribute('data-tree-row'),
+    )
+    expect(order).toEqual(['C:\\', 'C:\\aa', 'C:\\aa\\bb', 'C:\\cc', 'trash', 'E:\\', 'Z:\\'])
   })
 
-  it('gives every ancestor a distinct sticky offset when many levels are revealed in one jump', async () => {
+  it('gives every ancestor a distinct pinned slot when many levels are revealed in one jump', async () => {
     // Regression: navigating straight to a deeply nested path reveals every
-    // ancestor's tree node in a single state update. Offsets must be correct
-    // immediately (no render settling required), or deeper rows visually
-    // collapse onto shallower ones.
+    // ancestor's tree node in a single state update. Once scrolled past, each
+    // pins to its own slot with a strictly increasing offset and z-index so
+    // deeper rows never visually collapse onto shallower ones.
     seedVolumes()
     const deepPath = 'C:\\a\\b\\c\\d\\e'
     usePanesStore.setState((state) => ({
@@ -254,19 +263,59 @@ describe('FolderTree', () => {
     render(<FolderTree />)
     await screen.findByText('e', { selector: 'span' })
 
-    const names = ['a', 'b', 'c', 'd', 'e']
-    const rows = names.map(treeRow)
+    scrollTreeTo(420)
 
-    rows.forEach((row, index) => {
-      expect(row?.style.top).toBe(`calc(var(--spacing-tree-row) * ${index + 1})`)
-    })
+    // The whole chain (volume root + a..e) is pinned.
+    const pinned = pinnedRows()
+    expect(pinned).toHaveLength(6)
 
-    // Every level gets a strictly increasing z-index, so a deeper row never
-    // renders visually on top of / merged with a shallower one.
-    const zIndexes = rows.map((row) => Number(row?.style.zIndex))
-    for (let i = 1; i < zIndexes.length; i += 1) {
+    const tops = pinned.map((row) => Number.parseFloat(row.style.top))
+    const zIndexes = pinned.map((row) => Number(row.style.zIndex))
+    for (let i = 1; i < pinned.length; i += 1) {
+      expect(tops[i]).toBeGreaterThan(tops[i - 1])
       expect(zIndexes[i]).toBeGreaterThan(zIndexes[i - 1])
     }
+  })
+
+  it('wires each node row to the store: toggle, navigate, open-tab, and context menu', async () => {
+    const user = userEvent.setup()
+    const toggle = vi.fn(() => Promise.resolve())
+    const navigate = vi.fn(() => Promise.resolve())
+    const openTab = vi.fn(() => Promise.resolve())
+    seedVolumes()
+    usePanesStore.setState((state) => ({
+      toggleTreeNode: toggle,
+      navigatePane: navigate,
+      openTabFromPath: openTab,
+      treeNodes: {
+        ...state.treeNodes,
+        'C:\\': { ...state.treeNodes['C:\\'], children: ['C:\\cc'], expanded: true, loaded: true },
+        'C:\\cc': {
+          id: 'C:\\cc',
+          name: 'cc',
+          path: 'C:\\cc',
+          parentPath: 'C:\\',
+          children: [],
+          expanded: false,
+          loaded: true,
+        },
+      },
+    }))
+
+    render(<FolderTree />)
+    const ccRow = treeRow('cc')
+
+    await user.click(within(ccRow).getByRole('button', { name: /Expand cc/ }))
+    expect(toggle).toHaveBeenCalledWith('C:\\cc')
+
+    await user.click(screen.getByText('cc'))
+    expect(navigate).toHaveBeenCalledWith('left', 'C:\\cc')
+
+    await user.pointer({ keys: '[MouseMiddle]', target: screen.getByText('cc') })
+    expect(openTab).toHaveBeenCalledWith('left', 'C:\\cc')
+
+    fireEvent.contextMenu(ccRow)
+    expect(useContextMenuStore.getState().menu?.title).toBe('cc')
   })
 
   it('accepts an internal drop onto a folder node and enqueues the transfer', async () => {
@@ -296,10 +345,7 @@ describe('FolderTree', () => {
     })
 
     render(<FolderTree />)
-    const row = (await screen.findByText('cc', { selector: 'span' })).closest('li')
-    if (!row) {
-      throw new Error('tree row missing')
-    }
+    const row = treeRow('cc')
 
     fireEvent.dragOver(row, { dataTransfer: { dropEffect: '' } })
     expect(row).toHaveClass('ring-accent-blue-border')

@@ -1,14 +1,15 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { DetailsPanel } from '@/components/details/DetailsPanel'
 import { HeaderRow, columnFlexStyle } from '@/components/pane/HeaderRow'
 import { SizeValue } from '@/components/pane/SizeValue'
-import { TreeNode } from '@/components/tree/TreeNode'
+import { TreeNode, type TreeRowActions } from '@/components/tree/TreeNode'
 import { TRASH_PATH } from '@/lib/trash'
+import { useDragStore } from '@/stores/drag-store'
 import { useLayoutStore } from '@/stores/layout-store'
-import { usePanesStore } from '@/stores/panes-store'
+import { usePanesStore, type TreeNodeState } from '@/stores/panes-store'
 import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 import { useTabsStore } from '@/stores/tabs-store'
 import type { DirectoryEntry } from '@/lib/types/ipc'
@@ -184,130 +185,87 @@ describe('HeaderRow', () => {
   })
 })
 
+function treeNodeState(overrides: Partial<TreeNodeState> = {}): TreeNodeState {
+  return {
+    id: 'C:\\root',
+    name: 'root',
+    path: 'C:\\root',
+    parentPath: null,
+    children: [],
+    expanded: true,
+    loaded: true,
+    ...overrides,
+  }
+}
+
+/** A dragLeave event with a reliably-set `relatedTarget` (fireEvent init leaves it read-only/null). */
+function dragLeaveTo(row: HTMLElement, relatedTarget: Element) {
+  const event = createEvent.dragLeave(row)
+  Object.defineProperty(event, 'relatedTarget', { value: relatedTarget })
+  return event
+}
+
+function treeRowActions(overrides: Partial<TreeRowActions> = {}): TreeRowActions {
+  return {
+    onToggle: vi.fn(),
+    onNavigate: vi.fn(),
+    onOpenTab: vi.fn(),
+    onContextMenu: vi.fn(),
+    ...overrides,
+  }
+}
+
 describe('TreeNode', () => {
-  it('renders nothing for an unknown node', () => {
-    const { container } = render(
-      <ul>
-        <TreeNode path="C:\\missing" depth={0} />
-      </ul>,
+  it('renders the node label and marks the current node opaque when pinned', () => {
+    const { rerender } = render(
+      <TreeNode node={treeNodeState()} depth={0} isCurrent actions={treeRowActions()} />,
     )
-    expect(container.querySelector('li')).toBeNull()
+    const label = screen.getByText('root')
+    expect(label).toBeInTheDocument()
+    // Current + in-flow uses the translucent selection tint.
+    expect(label.closest('[data-tree-row]')?.className).toContain('bg-accent-blue-soft')
+
+    // Current + pinned swaps to the opaque stand-in so rows scrolling under it
+    // don't bleed through.
+    rerender(<TreeNode node={treeNodeState()} depth={0} isCurrent isPinned actions={treeRowActions()} />)
+    expect(screen.getByText('root').closest('[data-tree-row]')?.className).toContain(
+      'bg-light-tree-current',
+    )
   })
 
-  it('expands, navigates, and marks the current node', async () => {
+  it('expands and navigates through the stable actions', async () => {
     const user = userEvent.setup()
-    const toggle = vi.fn(() => Promise.resolve())
-    const navigate = vi.fn(() => Promise.resolve())
-    usePanesStore.setState((state) => ({
-      toggleTreeNode: toggle,
-      navigatePane: navigate,
-      panes: { ...state.panes, left: { ...state.panes.left, path: 'C:\\root' } },
-      treeNodes: {
-        'C:\\root': {
-          id: 'C:\\root',
-          name: 'root',
-          path: 'C:\\root',
-          parentPath: null,
-          children: [],
-          expanded: true,
-          loaded: true,
-        },
-      },
-    }))
-
-    render(
-      <ul>
-        <TreeNode path={'C:\\root'} depth={0} />
-      </ul>,
-    )
+    const actions = treeRowActions()
+    render(<TreeNode node={treeNodeState()} depth={0} isCurrent actions={actions} />)
 
     await user.click(screen.getByRole('button', { name: /Collapse root/ }))
-    expect(toggle).toHaveBeenCalledWith('C:\\root')
+    expect(actions.onToggle).toHaveBeenCalledWith('C:\\root')
 
     await user.click(screen.getByText('root'))
-    expect(navigate).toHaveBeenCalledWith('left', 'C:\\root')
+    expect(actions.onNavigate).toHaveBeenCalledWith('C:\\root')
   })
 
-  it('opens a node in a new tab on the active pane via middle-click', async () => {
+  it('opens a node in a new tab via middle-click', async () => {
     const user = userEvent.setup()
-    const openTab = vi.fn(() => Promise.resolve())
-    usePanesStore.setState({
-      activePaneId: 'right',
-      openTabFromPath: openTab,
-      treeNodes: {
-        'C:\\root': {
-          id: 'C:\\root',
-          name: 'root',
-          path: 'C:\\root',
-          parentPath: null,
-          children: [],
-          expanded: true,
-          loaded: true,
-        },
-      },
-    })
-
-    render(
-      <ul>
-        <TreeNode path={'C:\\root'} depth={0} />
-      </ul>,
-    )
+    const actions = treeRowActions()
+    render(<TreeNode node={treeNodeState()} depth={0} isCurrent={false} actions={actions} />)
 
     await user.pointer({ keys: '[MouseMiddle]', target: screen.getByText('root') })
-    expect(openTab).toHaveBeenCalledWith('right', 'C:\\root')
+    expect(actions.onOpenTab).toHaveBeenCalledWith('C:\\root')
   })
 
   it('opens a node in a new tab when middle-clicking its icon', async () => {
     const user = userEvent.setup()
-    const openTab = vi.fn(() => Promise.resolve())
-    usePanesStore.setState({
-      activePaneId: 'right',
-      openTabFromPath: openTab,
-      treeNodes: {
-        'C:\\root': {
-          id: 'C:\\root',
-          name: 'root',
-          path: 'C:\\root',
-          parentPath: null,
-          children: [],
-          expanded: true,
-          loaded: true,
-        },
-      },
-    })
-
-    render(
-      <ul>
-        <TreeNode path={'C:\\root'} depth={0} />
-      </ul>,
-    )
+    const actions = treeRowActions()
+    render(<TreeNode node={treeNodeState()} depth={0} isCurrent={false} actions={actions} />)
 
     const icon = screen.getByText('root').closest('button')!.querySelector('svg')!
     await user.pointer({ keys: '[MouseMiddle]', target: icon })
-    expect(openTab).toHaveBeenCalledWith('right', 'C:\\root')
+    expect(actions.onOpenTab).toHaveBeenCalledWith('C:\\root')
   })
 
   it('suppresses middle-click autoscroll so the auxclick gesture can fire', () => {
-    usePanesStore.setState({
-      activePaneId: 'right',
-      treeNodes: {
-        'C:\\root': {
-          id: 'C:\\root',
-          name: 'root',
-          path: 'C:\\root',
-          parentPath: null,
-          children: [],
-          expanded: true,
-          loaded: true,
-        },
-      },
-    })
-
-    render(
-      <ul>
-        <TreeNode path={'C:\\root'} depth={0} />
-      </ul>,
-    )
+    render(<TreeNode node={treeNodeState()} depth={0} isCurrent={false} actions={treeRowActions()} />)
 
     const label = screen.getByText('root').closest('button')!
     const prevented = !fireEvent.mouseDown(label, { button: 1 })
@@ -316,5 +274,65 @@ describe('TreeNode', () => {
     // Left-button mousedown must not be prevented (preserves focus/click).
     const leftAllowed = fireEvent.mouseDown(label, { button: 0 })
     expect(leftAllowed).toBe(true)
+  })
+
+  it('highlights on a valid drag-over and clears only when the pointer truly leaves', () => {
+    useDragStore.getState().begin({
+      sourcePaneId: 'left',
+      sourceDir: 'C:\\other',
+      items: [{ id: 'a', name: 'A', path: 'C:\\other\\A', isDir: false, sizeBytes: 1 }],
+    })
+    render(<TreeNode node={treeNodeState()} depth={0} isCurrent={false} actions={treeRowActions()} />)
+    const row = screen.getByRole('treeitem')
+
+    fireEvent.dragOver(row, { dataTransfer: { dropEffect: '' } })
+    expect(row).toHaveClass('ring-accent-blue-border')
+
+    // Moving onto a child element inside the row is not a leave.
+    fireEvent(row, dragLeaveTo(row, within(row).getAllByRole('button')[0]))
+    expect(row).toHaveClass('ring-accent-blue-border')
+
+    fireEvent(row, dragLeaveTo(row, document.body))
+    expect(row).not.toHaveClass('ring-accent-blue-border')
+
+    useDragStore.getState().end()
+  })
+
+  it('ignores a drag-over when nothing is being dragged', () => {
+    useDragStore.getState().end()
+    render(<TreeNode node={treeNodeState()} depth={0} isCurrent={false} actions={treeRowActions()} />)
+    const row = screen.getByRole('treeitem')
+
+    fireEvent.dragOver(row)
+    expect(row).not.toHaveClass('ring-accent-blue-border')
+  })
+
+  it('reads macOS drop modifiers when computing the drop effect', () => {
+    const originalPlatform = navigator.platform
+    Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true })
+    useDragStore.getState().begin({
+      sourcePaneId: 'left',
+      sourceDir: 'C:\\other',
+      items: [{ id: 'a', name: 'A', path: 'C:\\other\\A', isDir: false, sizeBytes: 1 }],
+    })
+    render(<TreeNode node={treeNodeState()} depth={0} isCurrent={false} actions={treeRowActions()} />)
+    const row = screen.getByRole('treeitem')
+
+    fireEvent.dragOver(row, { altKey: true, dataTransfer: { dropEffect: '' } })
+    expect(row).toHaveClass('ring-accent-blue-border')
+
+    useDragStore.getState().end()
+    Object.defineProperty(navigator, 'platform', { value: originalPlatform, configurable: true })
+  })
+
+  it('opens the context menu through the stable action', () => {
+    const actions = treeRowActions()
+    render(<TreeNode node={treeNodeState()} depth={0} isCurrent={false} actions={actions} />)
+
+    fireEvent.contextMenu(screen.getByRole('treeitem'))
+    expect(actions.onContextMenu).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'C:\\root' }),
+      expect.anything(),
+    )
   })
 })

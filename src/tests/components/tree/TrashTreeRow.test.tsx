@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, afterEach } from 'vitest'
+import { beforeEach, afterEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { FolderTree } from '@/components/tree/FolderTree'
 import { TRASH_PATH } from '@/lib/trash'
@@ -53,6 +53,17 @@ describe('TrashTreeRow', () => {
     await user.click(screen.getByText('Recycle Bin'))
 
     expect(usePanesStore.getState().panes.left.path).toBe(TRASH_PATH)
+  })
+
+  it('opens the trash in a new tab on the active pane via middle-click', async () => {
+    const user = userEvent.setup()
+    const openTab = vi.fn(() => Promise.resolve())
+    usePanesStore.setState({ openTabFromPath: openTab })
+    render(<FolderTree />)
+
+    await user.pointer({ keys: '[MouseMiddle]', target: screen.getByText('Recycle Bin') })
+
+    expect(openTab).toHaveBeenCalledWith('left', TRASH_PATH)
   })
 
   it('opens a context menu with an Empty Trash action on right-click', async () => {
