@@ -1,4 +1,5 @@
 import type { IpcCommandMap, IpcEventMap } from '@/lib/types/ipc'
+import { TRASH_PATH } from '@/lib/trash'
 import { getFixtureResponse } from '@/tests/playwright-fixtures'
 import type { PlaywrightScenario } from '@/tests/playwright-fixtures/e2e'
 import type { TreeChildrenByPath } from '@/tests/playwright-fixtures/tree-states'
@@ -40,6 +41,50 @@ function readTreeChildrenOverride(path: string, treeChildrenByPath: TreeChildren
   return treeChildrenByPath[path]
 }
 
+function listVolumesFixture() {
+  const override = readCommandOverride('list_volumes')
+  return override.found ? override.value : getFixtureResponse('list_volumes')
+}
+
+function isVolumeRoot(path: string) {
+  return listVolumesFixture().some((volume) => volume.mountRoot.toLowerCase() === path.toLowerCase())
+}
+
+function loadSessionFixture() {
+  const override = readCommandOverride('load_session')
+  return override.found ? override.value : getFixtureResponse('load_session')
+}
+
+function rootForPath(path: string) {
+  const normalized = path.toLowerCase()
+  return listVolumesFixture()
+    .filter((volume) => {
+      const root = volume.mountRoot.toLowerCase()
+      return normalized === root || normalized.startsWith(root)
+    })
+    .sort((left, right) => right.mountRoot.length - left.mountRoot.length)[0]?.mountRoot
+}
+
+function defaultTreeFixtureTarget() {
+  const session = loadSessionFixture()
+  const preferred =
+    session.activePane === 'right'
+      ? [session.rightPath, session.leftPath]
+      : [session.leftPath, session.rightPath]
+
+  for (const path of preferred) {
+    if (!path || path === TRASH_PATH) {
+      continue
+    }
+    const root = rootForPath(path)
+    if (root) {
+      return { root, path }
+    }
+  }
+
+  return undefined
+}
+
 function withLiveNativeRequestId<CommandName extends keyof IpcCommandMap>(
   command: CommandName,
   payload: IpcCommandMap[CommandName]['request'],
@@ -76,16 +121,32 @@ export async function invokePlaywrightCommand<CommandName extends keyof IpcComma
   }
 
   if (command === 'list_tree_children') {
+    const path = (payload as IpcCommandMap['list_tree_children']['request']).path
     const treeChildrenByPath = readScenario()?.treeChildrenByPath
     if (treeChildrenByPath) {
-      const response = readTreeChildrenOverride(
-        (payload as IpcCommandMap['list_tree_children']['request']).path,
-        treeChildrenByPath,
-      )
+      const response = readTreeChildrenOverride(path, treeChildrenByPath)
       if (response) {
         return response as IpcCommandMap[CommandName]['response']
       }
     }
+
+    const defaultTreeTarget = defaultTreeFixtureTarget()
+    if (
+      isVolumeRoot(path) &&
+      defaultTreeTarget?.root.toLowerCase() === path.toLowerCase() &&
+      defaultTreeTarget.path.toLowerCase() !== defaultTreeTarget.root.toLowerCase()
+    ) {
+      const fixture = getFixtureResponse('list_tree_children')
+      return {
+        path,
+        children: fixture.children,
+      } as IpcCommandMap[CommandName]['response']
+    }
+
+    return {
+      path,
+      children: [],
+    } as IpcCommandMap[CommandName]['response']
   }
 
   // `start_list_dir` derives a "complete head" from whatever `list_dir` a

@@ -3,6 +3,18 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(feature = "test-utils"))]
 use std::cmp::Ordering;
 
+#[cfg(not(feature = "test-utils"))]
+use std::sync::{
+    atomic::{AtomicBool, Ordering as AtomicOrdering},
+    Arc, Mutex,
+};
+
+#[cfg(not(feature = "test-utils"))]
+use std::thread::{self, JoinHandle};
+
+#[cfg(not(feature = "test-utils"))]
+use std::time::Duration;
+
 #[cfg(all(not(feature = "test-utils"), not(windows)))]
 use sysinfo::Disks;
 
@@ -41,6 +53,9 @@ use windows_sys::Win32::Storage::FileSystem::{
     GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW,
 };
 
+#[cfg(not(feature = "test-utils"))]
+use tauri::{AppHandle, Emitter};
+
 #[cfg(all(not(feature = "test-utils"), windows))]
 const DRIVE_UNKNOWN: u32 = 0;
 #[cfg(all(not(feature = "test-utils"), windows))]
@@ -65,6 +80,115 @@ pub struct VolumeInfo {
     pub free_bytes: u64,
     pub is_network: bool,
     pub is_removable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct VolumeIdentity {
+    mount_root: String,
+    label: String,
+    total_bytes: u64,
+    is_network: bool,
+    is_removable: bool,
+}
+
+#[cfg(not(feature = "test-utils"))]
+const VOLUME_POLL_INTERVAL: Duration = Duration::from_secs(1);
+
+#[cfg(not(feature = "test-utils"))]
+pub struct VolumeMonitorService {
+    started: AtomicBool,
+    stop: Arc<AtomicBool>,
+    handle: Mutex<Option<JoinHandle<()>>>,
+}
+
+#[cfg(not(feature = "test-utils"))]
+impl Default for VolumeMonitorService {
+    fn default() -> Self {
+        Self {
+            started: AtomicBool::new(false),
+            stop: Arc::new(AtomicBool::new(false)),
+            handle: Mutex::new(None),
+        }
+    }
+}
+
+#[cfg(not(feature = "test-utils"))]
+impl VolumeMonitorService {
+    pub fn start(&self, app: AppHandle) {
+        if self.started.swap(true, AtomicOrdering::SeqCst) {
+            return;
+        }
+
+        self.stop.store(false, AtomicOrdering::SeqCst);
+        let stop = Arc::clone(&self.stop);
+
+        match thread::Builder::new()
+            .name("volume-monitor".to_string())
+            .spawn(move || {
+                let mut previous = list_volumes();
+
+                while !stop.load(AtomicOrdering::SeqCst) {
+                    thread::sleep(VOLUME_POLL_INTERVAL);
+                    if stop.load(AtomicOrdering::SeqCst) {
+                        break;
+                    }
+
+                    let next = list_volumes();
+                    if !volume_inventory_changed(&previous, &next) {
+                        continue;
+                    }
+
+                    previous = next.clone();
+                    if let Err(error) = app.emit(
+                        crate::ipc::events::VOLUMES_CHANGED,
+                        crate::ipc::types::VolumesChangedEvent { volumes: next },
+                    ) {
+                        log::error!("volume monitor failed to emit update: {error}");
+                    }
+                }
+            }) {
+            Ok(handle) => {
+                *self.handle.lock().expect("volume monitor handle lock") = Some(handle);
+            }
+            Err(error) => {
+                self.started.store(false, AtomicOrdering::SeqCst);
+                log::error!("failed to start volume monitor: {error}");
+            }
+        }
+    }
+}
+
+#[cfg(not(feature = "test-utils"))]
+impl Drop for VolumeMonitorService {
+    fn drop(&mut self) {
+        self.stop.store(true, AtomicOrdering::SeqCst);
+        if let Some(handle) = self
+            .handle
+            .get_mut()
+            .expect("volume monitor handle lock")
+            .take()
+        {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn volume_identity(volume: &VolumeInfo) -> VolumeIdentity {
+    VolumeIdentity {
+        mount_root: volume.mount_root.to_ascii_lowercase(),
+        label: volume.label.clone(),
+        total_bytes: volume.total_bytes,
+        is_network: volume.is_network,
+        is_removable: volume.is_removable,
+    }
+}
+
+pub fn volume_inventory_changed(previous: &[VolumeInfo], next: &[VolumeInfo]) -> bool {
+    let mut previous_identities: Vec<_> = previous.iter().map(volume_identity).collect();
+    let mut next_identities: Vec<_> = next.iter().map(volume_identity).collect();
+    previous_identities.sort();
+    next_identities.sort();
+    previous_identities != next_identities
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]

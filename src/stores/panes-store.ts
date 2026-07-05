@@ -1708,7 +1708,13 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
             path,
             parentPath: currentNode?.parentPath ?? getParentPath(path),
             children: directoryChildren.map((entry) => entry.path),
-            expanded: currentNode?.expanded ?? true,
+            // Newly-seen volume roots should open on first hydration just like
+            // the initial roots. Once a root has loaded, preserve the user's
+            // explicit expanded/collapsed choice on later refreshes.
+            expanded:
+              currentNode == null
+                ? true
+                : currentNode.expanded || (currentNode.parentPath === null && !currentNode.loaded),
             loaded: true,
           },
           ...Object.fromEntries(
@@ -1737,7 +1743,10 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
             path,
             parentPath: currentNode?.parentPath ?? getParentPath(path),
             children: [],
-            expanded: currentNode?.expanded ?? false,
+            expanded:
+              currentNode == null
+                ? false
+                : currentNode.expanded || (currentNode.parentPath === null && !currentNode.loaded),
             loaded: true,
           },
         },
@@ -1822,6 +1831,17 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
 }))
 
 export async function initializePanes() {
-  const { ensureTreeChildren, treeRoots } = usePanesStore.getState()
-  await Promise.all(treeRoots.map((root) => ensureTreeChildren(root)))
+  const { ensureTreeChildren, treeRoots, panes, activePaneId } = usePanesStore.getState()
+  const activePath = panes[activePaneId].path
+
+  if (!activePath || isTrashPath(activePath)) {
+    return
+  }
+
+  const activeRoot = treeRoots.find((root) => isPathInsideVolume(activePath, root))
+  if (!activeRoot) {
+    return
+  }
+
+  await ensureTreeChildren(activeRoot)
 }

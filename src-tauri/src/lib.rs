@@ -141,6 +141,9 @@ pub fn run() {
             app.manage(SizeService::default());
             app.manage(WatchService::default());
             app.manage(listing::ListingService::default());
+            let volume_monitor = volumes::VolumeMonitorService::default();
+            volume_monitor.start(app.handle().clone());
+            app.manage(volume_monitor);
 
             let ops = OpsService::default();
             let progress_handle = app.handle().clone();

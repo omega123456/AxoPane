@@ -45,6 +45,7 @@ function App() {
   const initialize = usePanesStore((state) => state.initialize)
   const setEverythingStatus = usePanesStore((state) => state.setEverythingStatus)
   const setVolumes = usePanesStore((state) => state.setVolumes)
+  const treeRoots = usePanesStore((state) => state.treeRoots)
   const applySizeStates = usePanesStore((state) => state.applySizeStates)
   const applyIconStates = usePanesStore((state) => state.applyIconStates)
   const applyDirPatch = usePanesStore((state) => state.applyDirPatch)
@@ -96,7 +97,7 @@ function App() {
 
   useEffect(() => {
     void initializePanes()
-  }, [])
+  }, [treeRoots])
 
   useEffect(() => {
     // Always checks once on launch, then schedules background polls at the

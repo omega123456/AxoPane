@@ -55,6 +55,7 @@ const rootEntries: DirectoryEntry[] = [
 
 function installListDirOverride() {
   ipc.override('list_dir', (payload) => createDirResponse(payload))
+  ipc.override('list_tree_children', (payload) => ({ path: payload.path, children: [] }))
   ipc.override('set_tab_watch', () => undefined)
 }
 
@@ -422,8 +423,48 @@ describe('App', () => {
     })
   })
 
+  it('updates the tree when mounted volumes are added or removed', async () => {
+    installListDirOverride()
+    renderApp()
+
+    expect(await screen.findByRole('button', { name: 'Windows (C:)' })).toBeInTheDocument()
+    expect(await screen.findByLabelText('Collapse Windows (C:)')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Archive (Y:)' })).not.toBeInTheDocument()
+
+    act(() => {
+      ipc.emit('volumes://changed', {
+        volumes: [
+          {
+            mountRoot: 'C:\\',
+            label: 'Windows',
+            totalBytes: 1_000_000_000,
+            freeBytes: 500_000_000,
+            isNetwork: false,
+            isRemovable: false,
+          },
+          {
+            mountRoot: 'Y:\\',
+            label: 'Archive',
+            totalBytes: 750_000_000,
+            freeBytes: 300_000_000,
+            isNetwork: true,
+            isRemovable: false,
+          },
+        ],
+      })
+    })
+
+    expect(await screen.findByRole('button', { name: 'Archive (Y:)' })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Projects (D:)' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'USB Stick (E:)' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Share (Z:)' })).not.toBeInTheDocument()
+    })
+  })
+
   it('appends a streamed dir://list-chunk event onto the initial (partial) listing', async () => {
     ipc.override('set_tab_watch', () => undefined)
+    ipc.override('list_tree_children', (payload) => ({ path: payload.path, children: [] }))
     // Left pane opens as a partial listing (first chunk only); the remainder
     // streams in as a separate list-chunk event.
     ipc.override('start_list_dir', (payload) => ({
