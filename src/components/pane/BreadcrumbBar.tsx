@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PaneState } from '@/types/pane'
 import { ChevronRightIcon, PieChartIcon, RefreshIcon, SearchIcon } from '@/components/icons'
+import type { BreadcrumbLayoutMeasure } from '@/lib/breadcrumb-layout'
+import { computeBreadcrumbLayout, createBreadcrumbMeasurer } from '@/lib/breadcrumb-layout'
+import { useElementWidth } from '@/lib/use-element-width'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useConfigStore } from '@/stores/config-store'
 import { autoFolderSizeDisabledForPane, usePanesStore } from '@/stores/panes-store'
@@ -25,8 +28,21 @@ export function BreadcrumbBar({ pane, isActive }: BreadcrumbBarProps) {
   const [editingPath, setEditingPath] = useState(false)
   const [pathDraft, setPathDraft] = useState(pane.path)
   const pathInputRef = useRef<HTMLInputElement>(null)
+  const [navElement, setNavElement] = useState<HTMLElement | null>(null)
+  const [measureVersion, setMeasureVersion] = useState(0)
 
   const segments = splitPath(pane.path)
+  const navWidth = useElementWidth(navElement)
+  const layout = computeBreadcrumbLayout({
+    segments,
+    availableWidth: navWidth,
+    measure:
+      navWidth > 0
+        ? createBreadcrumbMeasurer(navElement)
+        : ({
+            segment: () => Number.NaN,
+          } satisfies BreadcrumbLayoutMeasure),
+  })
 
   useEffect(() => {
     if (!editingPath) {
@@ -36,6 +52,37 @@ export function BreadcrumbBar({ pane, isActive }: BreadcrumbBarProps) {
     pathInputRef.current?.focus()
     pathInputRef.current?.select()
   }, [editingPath])
+
+  useEffect(() => {
+    let active = true
+    const bumpMeasureVersion = () => {
+      if (!active) {
+        return
+      }
+
+      setMeasureVersion((version) => version + 1)
+    }
+
+    const animationFrame = window.requestAnimationFrame(bumpMeasureVersion)
+    const fonts = document.fonts
+    if (!fonts) {
+      return () => {
+        active = false
+        window.cancelAnimationFrame(animationFrame)
+      }
+    }
+
+    void fonts.ready.then(bumpMeasureVersion)
+    fonts.addEventListener?.('loadingdone', bumpMeasureVersion)
+
+    return () => {
+      active = false
+      window.cancelAnimationFrame(animationFrame)
+      fonts.removeEventListener?.('loadingdone', bumpMeasureVersion)
+    }
+  }, [])
+
+  void measureVersion
 
   function startPathEdit() {
     setPathDraft(pane.path)
@@ -80,27 +127,39 @@ export function BreadcrumbBar({ pane, isActive }: BreadcrumbBarProps) {
         />
       ) : (
         <nav
+          ref={setNavElement}
           aria-label={`${pane.title} path`}
-          className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden"
+          className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-row"
           onDoubleClick={(event) => {
             if (event.target === event.currentTarget) {
               startPathEdit()
             }
           }}
         >
-          {segments.map((segment, index) => (
+          {layout.collapsed ? (
+            <span
+              aria-hidden="true"
+              data-testid="breadcrumb-collapse-marker"
+              className="inline-flex shrink-0 items-center gap-1 text-row text-light-text-muted dark:text-dark-text-muted"
+            >
+              <span>{'..'}</span>
+              <ChevronRightIcon className="h-3.5 w-3.5" />
+            </span>
+          ) : null}
+          {layout.items.map((segment, index) => (
             <button
               key={segment.path}
               type="button"
               onClick={() => void navigatePane(pane.id, segment.path)}
+              title={segment.truncated ? segment.fullLabel : undefined}
               className={`inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-tab px-2 py-1 text-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border ${
-                index === segments.length - 1
+                index === layout.items.length - 1
                   ? 'bg-accent-blue-soft text-accent-blue-light dark:text-accent-blue'
                   : 'text-light-text-soft hover:bg-light-hover dark:text-dark-text-soft dark:hover:bg-dark-hover'
               }`}
             >
               <span className="truncate">{segment.label}</span>
-              {index < segments.length - 1 ? <ChevronRightIcon className="h-3.5 w-3.5" /> : null}
+              {index < layout.items.length - 1 ? <ChevronRightIcon className="h-3.5 w-3.5" /> : null}
             </button>
           ))}
         </nav>

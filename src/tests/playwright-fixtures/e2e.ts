@@ -8,6 +8,7 @@ import type {
 } from '@/lib/types/ipc'
 import { TRASH_PATH } from '@/lib/trash'
 import { contextMenuFixtures } from './context-menu'
+import { deepBreadcrumbListDir, deepBreadcrumbSession } from './breadcrumbs'
 import {
   conflictQueueSnapshot,
   deletingQueueProgressEvents,
@@ -269,6 +270,38 @@ export const screenshotScenarios = {
         load_session: multiTabSession,
         queue_snapshot: emptyQueueSnapshot,
       },
+    },
+  },
+  breadcrumbs: {
+    light: {
+      commands: {
+        load_config: {
+          ...lightConfig,
+          layout: {
+          ...lightConfig.layout,
+            paneSplit: 0.18,
+          },
+        },
+        load_session: deepBreadcrumbSession,
+        list_dir: deepBreadcrumbListDir,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+      platform: 'windows',
+    },
+    dark: {
+      commands: {
+        load_config: {
+          ...darkConfig,
+          layout: {
+          ...darkConfig.layout,
+            paneSplit: 0.18,
+          },
+        },
+        load_session: deepBreadcrumbSession,
+        list_dir: deepBreadcrumbListDir,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+      platform: 'windows',
     },
   },
   fileTypes: {

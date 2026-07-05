@@ -113,11 +113,14 @@
   --spacing-row: 1.875rem;
   --spacing-status: 1.625rem;
   --spacing-tree: 12.75rem;
-  /* Fixed tree-row height. Sticky ancestor rows stack via `calc(var(--spacing-tree-row) * n)`,
-     so this must stay a compile-time constant rather than a measured value -
-     a JS-measured height only converges after each row's first paint, which
-     left gaps/overlaps when many ancestor levels mounted at once. */
-  --spacing-tree-row: 1.55rem;
+  /* Fixed tree-row height. Keep this on a whole CSS pixel so every engine
+     agrees on the cumulative virtualized offsets; WebKit drifted enough on the
+     former fractional value to make long trees overlap. Sticky ancestor rows
+     still stack via `calc(var(--spacing-tree-row) * n)`, so this must stay a
+     compile-time constant rather than a measured value - a JS-measured height
+     only converges after each row's first paint, which left gaps/overlaps when
+     many ancestor levels mounted at once. */
+  --spacing-tree-row: 1.5625rem;
   /* Fixed height of a tree section heading row ("Drives" etc.). Like the row
      height above this must stay a compile-time constant: the virtualizer sizes
      each flat row by kind (header vs node) from these tokens, and the sticky

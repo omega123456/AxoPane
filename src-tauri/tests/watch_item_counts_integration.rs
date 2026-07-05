@@ -11,7 +11,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use file_explorer_lib::fs::{DirectoryEntry, SortDirection, SortKey};
+use file_explorer_lib::fs::{self, DirectoryEntry, SortDirection, SortKey};
 use file_explorer_lib::watch::{
     create_runtime, diff_entries, handle_debounce_result_for_tests, insert_tab_for_tests,
     snapshot_for_target, tab_snapshot_for_tests, DirPatch, WatchService, WatchTarget,
@@ -134,7 +134,9 @@ fn set_tab_watch_seeds_empty_first_diff_even_when_supplied_entries_carry_icon_da
     let root = fixture.path();
     std::fs::write(root.join("real.txt"), b"real").expect("real file");
 
-    let real_path = root.join("real.txt").to_string_lossy().into_owned();
+    let real_path = fs::display_path_from_path(
+        &std::fs::canonicalize(root.join("real.txt")).expect("canonical real file"),
+    );
     let service = WatchService::default();
     let target = base_target("left-1", &root.to_string_lossy(), true);
 

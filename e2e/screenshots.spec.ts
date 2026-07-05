@@ -73,6 +73,16 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`pane-tabs-${mode}.png`)
   })
 
+  test(`breadcrumbs ${mode}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 520 })
+    await gotoScenario(page, screenshotScenarios.breadcrumbs[mode])
+    const rightPane = page.getByRole('region', { name: 'Right pane' })
+    await expect(rightPane).toBeVisible()
+    await expect(rightPane.getByTestId('breadcrumb-collapse-marker')).toBeVisible()
+    await expect(rightPane.getByRole('button', { name: 'Foxtrot' })).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`breadcrumb-overflow-${mode}.png`)
+  })
+
   test(`file types ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.fileTypes[mode])
     await expect(page.getByRole('region', { name: 'Left pane' })).toBeVisible()

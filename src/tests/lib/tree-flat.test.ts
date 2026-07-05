@@ -120,4 +120,9 @@ describe('buildTreeFlatModel', () => {
     expect(treeRowHeight({ kind: 'node', path: 'C:\\', depth: 0 })).toBe(TREE_ROW_HEIGHT_PX)
     expect(treeRowHeight({ kind: 'trash' })).toBe(TREE_ROW_HEIGHT_PX)
   })
+
+  it('keeps virtual row heights on whole CSS pixels', () => {
+    expect(Number.isInteger(TREE_ROW_HEIGHT_PX)).toBe(true)
+    expect(Number.isInteger(TREE_HEADER_HEIGHT_PX)).toBe(true)
+  })
 })

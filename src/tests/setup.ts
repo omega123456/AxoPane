@@ -27,10 +27,12 @@ function matchMediaMock() {
 
 beforeAll(() => {
   Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
     writable: true,
     value: matchMediaMock,
   })
   Object.defineProperty(window, 'ResizeObserver', {
+    configurable: true,
     writable: true,
     value: ResizeObserverMock,
   })

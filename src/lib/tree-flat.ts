@@ -6,14 +6,14 @@ import { groupVolumesByCategory } from '@/lib/volumes'
 
 /**
  * Pixel geometry of the virtualized tree, derived from the fixed `@theme`
- * tokens `--spacing-tree-row` (1.55rem) and `--spacing-tree-header` (1.75rem)
- * at the app's 16px root. These must stay compile-time constants: the
- * virtualizer sizes each flat row by kind from them and the sticky overlay's
- * stacking offsets are multiples of the row height, so a JS-measured value
- * would let deeply nested pinned rows drift by a sub-pixel (see
- * `--spacing-tree-row` in `index.css`).
+ * tokens `--spacing-tree-row` (1.5625rem = 25px) and
+ * `--spacing-tree-header` (1.75rem = 28px) at the app's 16px root. These must
+ * stay compile-time constants: the virtualizer sizes each flat row by kind
+ * from them and the sticky overlay's stacking offsets are multiples of the row
+ * height. The row height also stays on a whole CSS pixel so Chromium and
+ * WebKit accumulate the same offsets in long trees.
  */
-export const TREE_ROW_HEIGHT_PX = 24.8
+export const TREE_ROW_HEIGHT_PX = 25
 export const TREE_HEADER_HEIGHT_PX = 28
 
 /**

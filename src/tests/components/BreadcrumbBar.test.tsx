@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, vi } from 'vitest'
+import { afterEach, beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { BreadcrumbBar, splitPath } from '@/components/pane/BreadcrumbBar'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
@@ -54,6 +54,10 @@ beforeEach(() => {
   useActionDialogStore.getState().close()
 })
 
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
 describe('splitPath', () => {
   it('splits Windows paths into cumulative segments with the drive root preserved', () => {
     expect(splitPath('C:\\Users\\Omega\\Documents')).toEqual([
@@ -97,6 +101,15 @@ describe('splitPath', () => {
 })
 
 describe('BreadcrumbBar navigation', () => {
+  it('keeps full breadcrumb labels clickable when width measurement is unavailable', () => {
+    render(<BreadcrumbBar pane={pane('C:\\Users\\Omega')} isActive />)
+
+    expect(screen.getByRole('button', { name: 'C:' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Users' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Omega' })).toBeInTheDocument()
+    expect(screen.queryByText('..')).not.toBeInTheDocument()
+  })
+
   it('navigates the pane to the clicked segment path', async () => {
     const user = userEvent.setup()
     const navigatePane = vi.fn(() => Promise.resolve())
@@ -157,6 +170,42 @@ describe('BreadcrumbBar navigation', () => {
       'title',
       'Refresh',
     )
+  })
+
+  it('renders a visual collapse marker and title tooltip for truncated crumbs when measured widths are narrow', () => {
+    const originalGetComputedStyle = window.getComputedStyle
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function mockRect(
+      this: HTMLElement,
+    ) {
+      if (this.getAttribute('aria-label') === 'Left pane path') {
+        return DOMRect.fromRect({ width: 195 })
+      }
+
+      return DOMRect.fromRect()
+    })
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      font: '',
+      measureText: (label: string) => ({ width: label.length * 10 }) as TextMetrics,
+    } as CanvasRenderingContext2D)
+    vi.spyOn(window, 'getComputedStyle').mockImplementation(
+      (element: Element) => {
+        const style = originalGetComputedStyle(element)
+        if (element.getAttribute('aria-label') === 'Left pane path') {
+          Object.defineProperty(style, 'font', {
+            configurable: true,
+            value: '12px ui-monospace',
+          })
+        }
+        return style
+      },
+    )
+
+    render(<BreadcrumbBar pane={pane('C:\\Alpha\\Bravo\\Charlie')} isActive />)
+
+    expect(screen.getByTestId('breadcrumb-collapse-marker')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Br' })).toHaveAttribute('title', 'Bravo')
+    expect(screen.getByRole('button', { name: 'Charlie' })).toBeInTheDocument()
   })
 })
 
