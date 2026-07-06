@@ -5,6 +5,7 @@ import { invokeCommand, subscribeToEvent } from '@/lib/ipc/client'
 import {
   cancelSize,
   cancelSizes,
+  ejectVolume,
   everythingStatus,
   getInitialShell,
   listDir,
@@ -40,6 +41,7 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
   it('invokes commands through the global bridge', async () => {
     await expect(getInitialShell()).resolves.toHaveProperty('panes')
     await expect(listVolumes()).resolves.toBeInstanceOf(Array)
+    await expect(ejectVolume({ mountRoot: 'E:\\' })).resolves.toHaveProperty('handled')
     await expect(everythingStatus()).resolves.toHaveProperty('isAvailable')
     await expect(loadConfig()).resolves.toHaveProperty('theme')
     await expect(loadSession()).resolves.toHaveProperty('activePane')

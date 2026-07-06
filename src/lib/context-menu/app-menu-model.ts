@@ -3,6 +3,7 @@ import {
   commandContextAction,
   compressContextAction,
   copyPathsContextAction,
+  ejectVolumeContextAction,
   extractContextAction,
   navigateContextAction,
   openPathInExplicitPaneContextAction,
@@ -12,6 +13,7 @@ import {
   requestFolderSizeContextAction,
 } from '@/lib/context-menu/context-menu-actions'
 import { getFileCategory } from '@/lib/file-type'
+import { findVolumeForPath, isVolumeRoot } from '@/lib/volumes'
 import {
   createPathPropertiesDialogItem,
   createTrashPropertiesDialogItem,
@@ -485,11 +487,15 @@ function buildTreeContent(
     return buildTrashTreeContent(os)
   }
 
-  const networkNode = usePanesStore
-    .getState()
-    .volumes.find((volume) =>
-      target.path.toLowerCase().startsWith(volume.mountRoot.toLowerCase()),
-    )?.isNetwork
+  const volumes = usePanesStore.getState().volumes
+  const networkNode = volumes.find((volume) =>
+    target.path.toLowerCase().startsWith(volume.mountRoot.toLowerCase()),
+  )?.isNetwork
+
+  const volume = findVolumeForPath(target.path, volumes)
+  const isEjectableRoot = Boolean(
+    volume && isVolumeRoot(target.path, volume) && volume.isRemovable,
+  )
 
   return {
     topStrip: [],
@@ -526,6 +532,18 @@ function buildTreeContent(
           },
         ),
       ]),
+      ...(isEjectableRoot && volume
+        ? [
+            section('eject', [
+              customRow(
+                `eject-tree-${target.path}`,
+                'Eject',
+                ejectVolumeContextAction(volume.mountRoot),
+                { icon: { kind: 'app', name: 'eject' } },
+              ),
+            ]),
+          ]
+        : []),
       section('properties', [
         customRow(
           `properties-tree-${target.path}`,

@@ -65,6 +65,19 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`tree-context-menu-dual-pane-${mode}.png`)
   })
 
+  test(`tree context menu removable drive ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.browsing[mode])
+    const treeScroll = page.getByTestId('folder-tree-scroll')
+    const usbRow = treeScroll.getByRole('button', { name: 'USB Stick (E:)', exact: true })
+    await expect(usbRow).toBeVisible()
+
+    await usbRow.click({ button: 'right' })
+    const menu = page.getByRole('menu', { name: 'USB Stick (E:)' })
+    await expect(menu).toBeVisible()
+    await expect(menu.getByRole('menuitem', { name: 'Eject' })).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`tree-context-menu-eject-${mode}.png`)
+  })
+
   test(`tabs ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.tabs[mode])
     const leftPane = page.getByRole('region', { name: 'Left pane' })

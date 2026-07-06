@@ -3,6 +3,7 @@ import { beforeEach, vi } from 'vitest'
 import { dispatchContextMenuAction } from '@/lib/context-menu/context-menu-actions'
 import { ipc } from '@/tests/ipc-mock'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
+import { useErrorToastStore } from '@/stores/error-toast-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 import type { DirectoryEntry } from '@/lib/types/ipc'
@@ -28,6 +29,7 @@ function entry(overrides: Partial<DirectoryEntry> = {}): DirectoryEntry {
 beforeEach(() => {
   ipc.install()
   useActionDialogStore.getState().close()
+  useErrorToastStore.getState().dismiss()
   usePanesStore.getState().reset()
   usePropertiesDialogStore.getState().close()
   usePanesStore.setState((state) => ({
@@ -199,5 +201,33 @@ describe('dispatchContextMenuAction', () => {
     expect(frontendLog).toHaveBeenCalledWith(
       expect.objectContaining({ level: 'info', message: 'share command unavailable' }),
     )
+  })
+
+  it('ejects a removable volume through IPC when selected from the tree menu', async () => {
+    const ejectVolume = vi.fn(() => ({ handled: true, message: null }))
+    ipc.override('eject_volume', ejectVolume)
+
+    dispatchContextMenuAction('left', {
+      kind: 'eject-volume',
+      mountRoot: 'E:\\',
+    })
+
+    await waitFor(() => {
+      expect(ejectVolume).toHaveBeenCalledWith({ mountRoot: 'E:\\' })
+    })
+    expect(useErrorToastStore.getState().message).toBeNull()
+  })
+
+  it('surfaces an error toast when ejecting a volume fails', async () => {
+    ipc.override('eject_volume', () => ({ handled: false, message: 'disk in use' }))
+
+    dispatchContextMenuAction('left', {
+      kind: 'eject-volume',
+      mountRoot: 'E:\\',
+    })
+
+    await waitFor(() => {
+      expect(useErrorToastStore.getState().message).toBe('disk in use')
+    })
   })
 })

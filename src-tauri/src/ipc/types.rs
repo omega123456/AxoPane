@@ -282,6 +282,12 @@ pub struct MenuActionStatus {
     pub message: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EjectVolumeRequest {
+    pub mount_root: String,
+}
+
 impl MenuActionStatus {
     pub fn handled_with_message(message: impl Into<String>) -> Self {
         Self {

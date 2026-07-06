@@ -325,6 +325,10 @@ export const fixtures: {
       isRemovable: true,
     },
   ],
+  eject_volume: {
+    handled: true,
+    message: null,
+  },
   everything_status: {
     status: 'available',
     isAvailable: true,

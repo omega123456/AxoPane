@@ -676,6 +676,45 @@ describe('panes-store navigation', () => {
     expect(usePanesStore.getState().treeNodes['C:\\root'].expanded).toBe(false)
   })
 
+  it('corrects a stale path-derived node name once the real parent listing arrives', async () => {
+    // Simulates a node created before its parent was ever listed (e.g. a pane
+    // navigating straight to it), which previously stuck with its raw path as
+    // the display name forever since the merge below never refreshed it.
+    usePanesStore.setState((state) => ({
+      treeNodes: {
+        ...state.treeNodes,
+        'C:\\Users\\Omega\\Downloads': {
+          id: 'C:\\Users\\Omega\\Downloads',
+          name: 'C:\\Users\\Omega\\Downloads',
+          path: 'C:\\Users\\Omega\\Downloads',
+          parentPath: null,
+          children: [],
+          expanded: false,
+          loaded: false,
+        },
+      },
+    }))
+
+    ipc.override(
+      'list_tree_children',
+      (): ListTreeChildrenResponse => ({
+        path: 'C:\\Users\\Omega',
+        children: [{ name: 'Downloads', path: 'C:\\Users\\Omega\\Downloads', hasChildren: true }],
+      }),
+    )
+    await usePanesStore.getState().ensureTreeChildren('C:\\Users\\Omega')
+
+    expect(usePanesStore.getState().treeNodes['C:\\Users\\Omega\\Downloads']).toMatchObject({
+      name: 'Downloads',
+      parentPath: 'C:\\Users\\Omega',
+    })
+  })
+
+  it('names a newly expanded leaf from its path when its parent has not been listed yet', async () => {
+    await usePanesStore.getState().toggleTreeNode('C:\\Users\\Omega\\Downloads')
+    expect(usePanesStore.getState().treeNodes['C:\\Users\\Omega\\Downloads'].name).toBe('Downloads')
+  })
+
   it('reveals the active path by expanding its ancestor chain down to the leaf', async () => {
     usePanesStore.getState().initialize({
       session: { activePane: 'left', leftPath: 'C:\\', rightPath: 'C:\\' },

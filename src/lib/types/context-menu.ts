@@ -22,6 +22,7 @@ export type ContextMenuAppIconName =
   | 'copy'
   | 'cut'
   | 'delete'
+  | 'eject'
   | 'empty-trash'
   | 'extract'
   | 'new-file'

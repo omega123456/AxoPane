@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
+import { ContextMenu } from '@/components/menus/ContextMenu'
 import { FolderTree } from '@/components/tree/FolderTree'
 import { useContextMenuStore } from '@/stores/context-menu-store'
 import { useDragStore } from '@/stores/drag-store'
@@ -511,6 +512,25 @@ describe('FolderTree', () => {
 
     fireEvent.contextMenu(ccRow)
     expect(useContextMenuStore.getState().menu?.title).toBe('cc')
+  })
+
+  it('surfaces Eject for a removable drive row but not for fixed or network rows', () => {
+    seedVolumes()
+    render(
+      <>
+        <FolderTree />
+        <ContextMenu />
+      </>,
+    )
+
+    fireEvent.contextMenu(treeRow('Windows (C:)'))
+    expect(screen.queryByRole('menuitem', { name: 'Eject' })).not.toBeInTheDocument()
+
+    fireEvent.contextMenu(treeRow('Share (Z:)'))
+    expect(screen.queryByRole('menuitem', { name: 'Eject' })).not.toBeInTheDocument()
+
+    fireEvent.contextMenu(treeRow('USB Stick (E:)'))
+    expect(screen.getByRole('menuitem', { name: 'Eject' })).toBeInTheDocument()
   })
 
   it('accepts an internal drop onto a folder node and enqueues the transfer', async () => {

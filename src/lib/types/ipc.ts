@@ -325,6 +325,10 @@ export type MenuActionStatus = {
   message?: string | null
 }
 
+export type EjectVolumeRequest = {
+  mountRoot: string
+}
+
 export type NativeMenuTargetKind =
   | 'file'
   | 'folder'
@@ -665,6 +669,10 @@ export type IpcCommandMap = {
   list_volumes: {
     request: undefined
     response: VolumeInfo[]
+  }
+  eject_volume: {
+    request: EjectVolumeRequest
+    response: MenuActionStatus
   }
   everything_status: {
     request: undefined

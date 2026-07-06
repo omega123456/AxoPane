@@ -6,6 +6,7 @@ import type {
   CreateEntryRequest,
   DeleteFromTrashRequest,
   DirectoryEntry,
+  EjectVolumeRequest,
   EverythingStatus,
   ExtractArchiveRequest,
   FolderSizeRequest,
@@ -154,6 +155,10 @@ export function extractArchive(payload: ExtractArchiveRequest) {
 
 export function listVolumes() {
   return invokeCommand({ command: 'list_volumes' }) as Promise<VolumeInfo[]>
+}
+
+export function ejectVolume(payload: EjectVolumeRequest) {
+  return invokeCommand({ command: 'eject_volume', payload }) as Promise<MenuActionStatus>
 }
 
 export function everythingStatus() {

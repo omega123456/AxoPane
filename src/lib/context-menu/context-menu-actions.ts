@@ -1,5 +1,6 @@
 import { log } from '@/lib/app-log-commands'
 import { executeCommand } from '@/lib/commands'
+import { runEjectVolume } from '@/lib/eject-commands'
 import { copyPathsToClipboard } from '@/lib/path-clipboard'
 import {
   invokeNativeMenu,
@@ -8,6 +9,7 @@ import {
 import { requestFolderSize } from '@/lib/ipc/commands'
 import { showPropertiesDialog } from '@/lib/properties-commands'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
+import { useErrorToastStore } from '@/stores/error-toast-store'
 import type { PropertiesDialogItem } from '@/stores/properties-dialog-store'
 import type { CommandId } from '@/lib/types/ipc'
 import { usePanesStore } from '@/stores/panes-store'
@@ -66,6 +68,10 @@ export type ContextMenuAction =
   | {
       kind: 'share'
       paths: string[]
+    }
+  | {
+      kind: 'eject-volume'
+      mountRoot: string
     }
   | {
       kind: 'invoke-native'
@@ -134,6 +140,10 @@ export function extractContextAction(paths: string[], destinationDir: string): C
 
 export function shareContextAction(paths: string[]): ContextMenuAction {
   return { kind: 'share', paths }
+}
+
+export function ejectVolumeContextAction(mountRoot: string): ContextMenuAction {
+  return { kind: 'eject-volume', mountRoot }
 }
 
 export function nativeInvocationContextAction(token: string): ContextMenuAction {
@@ -226,6 +236,15 @@ export function dispatchContextMenuAction(paneId: PaneId, action: ContextMenuAct
       log.info('share command unavailable', {
         path: action.paths.length === 1 ? action.paths[0] : undefined,
         paths: action.paths.length > 1 ? action.paths : undefined,
+      })
+      return
+    case 'eject-volume':
+      void runEjectVolume({ mountRoot: action.mountRoot }).then((response) => {
+        if (!response.handled) {
+          useErrorToastStore
+            .getState()
+            .show(response.message ?? 'Could not eject the drive.')
+        }
       })
       return
     case 'invoke-native':

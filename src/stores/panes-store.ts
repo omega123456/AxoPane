@@ -252,6 +252,21 @@ export function getParentPath(path: string): string | null {
   return stripped.slice(0, lastSep)
 }
 
+/**
+ * Last path segment, for naming a tree node created before it's ever been
+ * seen as a listed child of its parent (e.g. expanded directly). Falls back
+ * to the full (normalized) path only for roots with no separator at all.
+ */
+function basenameFromPath(path: string): string {
+  const normalized = normalizeExtendedWindowsPath(path)
+  const stripped = normalized.replace(/[\\/]+$/, '')
+  const lastSep = Math.max(stripped.lastIndexOf('\\'), stripped.lastIndexOf('/'))
+  if (lastSep < 0 || lastSep === stripped.length - 1) {
+    return stripped || normalized
+  }
+  return stripped.slice(lastSep + 1)
+}
+
 function normalizeExtendedWindowsPath(path: string) {
   if (path.toLowerCase().startsWith('\\\\?\\unc\\')) {
     return `\\\\${path.slice(8)}`
@@ -1704,7 +1719,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           ...state.treeNodes,
           [path]: {
             id: path,
-            name: currentNode?.name ?? path,
+            name: currentNode?.name ?? basenameFromPath(path),
             path,
             parentPath: currentNode?.parentPath ?? getParentPath(path),
             children: directoryChildren.map((entry) => entry.path),
@@ -1717,19 +1732,28 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
                 : currentNode.expanded || (currentNode.parentPath === null && !currentNode.loaded),
             loaded: true,
           },
+          // Always refresh name/parentPath from this fresh listing (the source
+          // of truth) rather than trusting an existing node, which may be a
+          // placeholder created before its parent was ever listed (e.g. a pane
+          // navigated straight to it) and so was named from its raw path.
           ...Object.fromEntries(
-            directoryChildren.map((entry) => [
-              entry.path,
-              state.treeNodes[entry.path] ?? {
-                id: entry.path,
-                name: entry.name,
-                path: entry.path,
-                parentPath: path,
-                children: [],
-                expanded: false,
-                loaded: false,
-              },
-            ]),
+            directoryChildren.map((entry) => {
+              const existing = state.treeNodes[entry.path]
+              return [
+                entry.path,
+                existing
+                  ? { ...existing, name: entry.name, parentPath: path }
+                  : {
+                      id: entry.path,
+                      name: entry.name,
+                      path: entry.path,
+                      parentPath: path,
+                      children: [],
+                      expanded: false,
+                      loaded: false,
+                    },
+              ]
+            }),
           ),
         },
       }))
@@ -1739,7 +1763,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           ...state.treeNodes,
           [path]: {
             id: path,
-            name: currentNode?.name ?? path,
+            name: currentNode?.name ?? basenameFromPath(path),
             path,
             parentPath: currentNode?.parentPath ?? getParentPath(path),
             children: [],
@@ -1813,7 +1837,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         [path]: {
           ...(state.treeNodes[path] ?? {
             id: path,
-            name: path,
+            name: basenameFromPath(path),
             path,
             parentPath: getParentPath(path),
             children: [],

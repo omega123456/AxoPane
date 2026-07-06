@@ -67,6 +67,14 @@ describe('buildAppContextMenuContent', () => {
           isNetwork: true,
           isRemovable: false,
         },
+        {
+          mountRoot: 'E:\\',
+          label: 'USB Stick',
+          totalBytes: 1,
+          freeBytes: 1,
+          isNetwork: false,
+          isRemovable: true,
+        },
       ],
       panes: {
         left: {
@@ -207,6 +215,42 @@ describe('buildAppContextMenuContent', () => {
       'Open',
       'Open in new tab',
     ])
+  })
+
+  it('offers Eject only for removable volume roots in the tree menu', () => {
+    const removableRootContent = buildAppContextMenuContent(
+      'left',
+      { kind: 'tree', path: 'E:\\' },
+      'windows',
+    )
+    const fixedRootContent = buildAppContextMenuContent(
+      'left',
+      { kind: 'tree', path: 'C:\\' },
+      'windows',
+    )
+    const networkRootContent = buildAppContextMenuContent(
+      'left',
+      { kind: 'tree', path: '\\\\server\\Share' },
+      'windows',
+    )
+    const nonRootContent = buildAppContextMenuContent(
+      'left',
+      { kind: 'tree', path: 'E:\\Photos' },
+      'windows',
+    )
+
+    expect(removableRootContent.sections.map((section) => section.id)).toContain('eject')
+    const ejectRow = removableRootContent.sections
+      .find((section) => section.id === 'eject')
+      ?.rows.find((row) => row.label === 'Eject')
+    expect(ejectRow).toMatchObject({
+      icon: { kind: 'app', name: 'eject' },
+      action: { kind: 'eject-volume', mountRoot: 'E:\\' },
+    })
+
+    expect(fixedRootContent.sections.map((section) => section.id)).not.toContain('eject')
+    expect(networkRootContent.sections.map((section) => section.id)).not.toContain('eject')
+    expect(nonRootContent.sections.map((section) => section.id)).not.toContain('eject')
   })
 
   it('only enables Extract for all-ZIP multi-selections', () => {

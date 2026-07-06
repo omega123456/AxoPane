@@ -21,7 +21,8 @@ use super::mock;
 use super::types::WarmNativeMenusResponse;
 use super::types::{
     AppConfig, CancelSizeRequest, CancelSizeResponse, CancelSizesRequest, CancelSizesResponse,
-    CompressArchiveRequest, CreateEntryRequest, DeleteFromTrashRequest, ExtractArchiveRequest,
+    CompressArchiveRequest, CreateEntryRequest, DeleteFromTrashRequest, EjectVolumeRequest,
+    ExtractArchiveRequest,
     FileClipboardMode, FolderSizeRequest, FolderSizesRequest, GetDefaultApplicationRequest,
     GetDefaultApplicationResponse, IconStateEvent, InitialShellResponse, InvokeNativeMenuRequest,
     ListApplicationsResponse, ListDirRequest, ListDirResponse, ListTrashResponse,
@@ -30,11 +31,12 @@ use super::types::{
     OpenWithRequest, RenameEntryRequest, ReorderOpsRequest, RequestIconsRequest,
     ResolveConflictRequest, RestoreTrashRequest, SaveConfigRequest, SaveSessionRequest,
     SessionState, SetDefaultApplicationRequest, SetLogLevelRequest, SetTabWatchRequest,
-    ShowPropertiesRequest, SizeStateEvent, StartListDirRequest, StartListDirResponse, StartOpRequest,
-    TrashEntriesRequest, VolumeInfo, WarmNativeMenusRequest, WriteFileClipboardRequest,
+    ShowPropertiesRequest, SizeStateEvent, StartListDirRequest, StartListDirResponse,
+    StartOpRequest, TrashEntriesRequest, VolumeInfo, WarmNativeMenusRequest,
+    WriteFileClipboardRequest,
 };
-use crate::listing::ListingService;
 use crate::fs::DirectoryEntry;
+use crate::listing::ListingService;
 use std::path::Path;
 use tauri::State;
 #[cfg(not(feature = "test-utils"))]
@@ -78,11 +80,12 @@ pub fn start_list_dir(
     app: AppHandle,
     state: State<'_, ListingService>,
 ) -> Result<StartListDirResponse, String> {
-    let ListDirResponse { path, entries } = fs::list_dir(&payload.to_options()).map_err(|error| {
-        let message = format!("Failed to load \"{}\": {error}", payload.path);
-        log::error!("{message}");
-        message
-    })?;
+    let ListDirResponse { path, entries } =
+        fs::list_dir(&payload.to_options()).map_err(|error| {
+            let message = format!("Failed to load \"{}\": {error}", payload.path);
+            log::error!("{message}");
+            message
+        })?;
 
     let total = entries.len() as u64;
     let request_id = state.next_request_id(&payload.tab_id);
@@ -409,6 +412,29 @@ pub fn list_volumes(app: AppHandle) -> Result<Vec<VolumeInfo>, String> {
 #[tauri::command]
 pub fn list_volumes() -> Result<Vec<VolumeInfo>, String> {
     Ok(volumes::list_volumes())
+}
+
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub fn eject_volume(
+    app: AppHandle,
+    payload: EjectVolumeRequest,
+) -> Result<MenuActionStatus, String> {
+    let status = volumes::eject::eject_volume(&payload.mount_root);
+    if status.handled {
+        let volumes = volumes::list_volumes();
+        let _ = app.emit(
+            super::events::VOLUMES_CHANGED,
+            super::types::VolumesChangedEvent { volumes },
+        );
+    }
+    Ok(status)
+}
+
+#[cfg(feature = "test-utils")]
+#[tauri::command]
+pub fn eject_volume(payload: EjectVolumeRequest) -> Result<MenuActionStatus, String> {
+    Ok(volumes::eject::eject_volume(&payload.mount_root))
 }
 
 #[tauri::command]

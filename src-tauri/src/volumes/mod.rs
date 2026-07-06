@@ -1,3 +1,5 @@
+pub mod eject;
+
 use serde::{Deserialize, Serialize};
 
 #[cfg(not(feature = "test-utils"))]
@@ -311,6 +313,14 @@ fn test_volumes() -> Vec<VolumeInfo> {
             free_bytes: 1_500_000,
             is_network: true,
             is_removable: false,
+        },
+        VolumeInfo {
+            mount_root: String::from("/Volumes/Untitled"),
+            label: String::from("Untitled"),
+            total_bytes: 3_000_000,
+            free_bytes: 2_200_000,
+            is_network: false,
+            is_removable: true,
         },
     ]
 }

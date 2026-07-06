@@ -37,6 +37,7 @@ import {
   FolderOpen,
   GripVertical,
   HardDrive,
+  HardDriveUpload,
   Info,
   LoaderCircle,
   Lock,
@@ -110,6 +111,7 @@ export const FolderPlusIcon = withDefaults(FolderPlus)
 export const FolderOpenIcon = withDefaults(FolderOpen)
 export const GripVerticalIcon = withDefaults(GripVertical)
 export const HardDriveIcon = withDefaults(HardDrive)
+export const EjectIcon = withDefaults(HardDriveUpload)
 export const InfoIcon = withDefaults(Info)
 export const LoaderCircleIcon = withDefaults(LoaderCircle)
 export const LockIcon = withDefaults(Lock)

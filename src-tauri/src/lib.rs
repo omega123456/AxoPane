@@ -189,6 +189,7 @@ pub fn run() {
             commands::compress_archive,
             commands::extract_archive,
             commands::list_volumes,
+            commands::eject_volume,
             commands::everything_status,
             commands::request_folder_size,
             commands::request_folder_sizes,
