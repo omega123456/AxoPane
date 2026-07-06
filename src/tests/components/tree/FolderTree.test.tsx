@@ -1,12 +1,18 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, vi } from 'vitest'
+import { afterEach, beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { FolderTree } from '@/components/tree/FolderTree'
 import { useContextMenuStore } from '@/stores/context-menu-store'
 import { useDragStore } from '@/stores/drag-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useTabsStore } from '@/stores/tabs-store'
+
+const originalPlatform = navigator.platform
+
+function setPlatform(value: string) {
+  Object.defineProperty(navigator, 'platform', { value, configurable: true })
+}
 
 function treeRow(label: string) {
   const row = screen.getByText(label, { selector: 'span' }).closest('[data-tree-row]')
@@ -33,6 +39,10 @@ beforeEach(() => {
   useContextMenuStore.setState({ menu: null })
 })
 
+afterEach(() => {
+  setPlatform(originalPlatform)
+})
+
 function seedVolumes() {
   usePanesStore.getState().initialize({
     session: { activePane: 'left', leftPath: '.', rightPath: '.' },
@@ -42,6 +52,32 @@ function seedVolumes() {
       { mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false, isRemovable: false },
       { mountRoot: 'E:\\', label: 'USB Stick', totalBytes: 1, freeBytes: 1, isNetwork: false, isRemovable: true },
       { mountRoot: 'Z:\\', label: 'Share', totalBytes: 1, freeBytes: 1, isNetwork: true, isRemovable: false },
+    ],
+  })
+}
+
+function seedMacVolumes() {
+  usePanesStore.getState().initialize({
+    session: { activePane: 'left', leftPath: '/', rightPath: '/' },
+    showHiddenFiles: false,
+    everythingStatus: { status: 'unavailable', isAvailable: false },
+    volumes: [
+      {
+        mountRoot: '/',
+        label: 'Macintosh HD',
+        totalBytes: 1,
+        freeBytes: 1,
+        isNetwork: false,
+        isRemovable: false,
+      },
+      {
+        mountRoot: '/Volumes/Untitled',
+        label: 'Untitled',
+        totalBytes: 1,
+        freeBytes: 1,
+        isNetwork: false,
+        isRemovable: true,
+      },
     ],
   })
 }
@@ -198,6 +234,165 @@ describe('FolderTree', () => {
       row.getAttribute('data-tree-row'),
     )
     expect(order).toEqual(['C:\\', 'C:\\aa', 'C:\\aa\\bb', 'C:\\cc', 'trash', 'E:\\', 'Z:\\'])
+  })
+
+  it('removes collapsed descendants and keeps the pinned overlay out of the macOS scrollbar lane', async () => {
+    const user = userEvent.setup()
+    setPlatform('MacIntel')
+    seedVolumes()
+    usePanesStore.setState((state) => ({
+      treeNodes: {
+        ...state.treeNodes,
+        'C:\\': {
+          ...state.treeNodes['C:\\'],
+          children: ['C:\\aa', 'C:\\cc'],
+          expanded: true,
+          loaded: true,
+        },
+        'C:\\aa': {
+          id: 'C:\\aa',
+          name: 'aa',
+          path: 'C:\\aa',
+          parentPath: 'C:\\',
+          children: ['C:\\aa\\bb'],
+          expanded: true,
+          loaded: true,
+        },
+        'C:\\aa\\bb': {
+          id: 'C:\\aa\\bb',
+          name: 'bb',
+          path: 'C:\\aa\\bb',
+          parentPath: 'C:\\aa',
+          children: [],
+          expanded: false,
+          loaded: true,
+        },
+        'C:\\cc': {
+          id: 'C:\\cc',
+          name: 'cc',
+          path: 'C:\\cc',
+          parentPath: 'C:\\',
+          children: [],
+          expanded: false,
+          loaded: true,
+        },
+      },
+    }))
+
+    render(<FolderTree />)
+    expect(await screen.findByText('bb', { selector: 'span' })).toBeInTheDocument()
+
+    const scroll = screen.getByTestId('folder-tree-scroll')
+    expect(scroll).toHaveClass('overflow-x-hidden', 'overflow-y-auto', 'overscroll-contain')
+    expect(treeRow('Windows (C:)').parentElement).toHaveClass('inset-x-0')
+
+    await user.click(within(treeRow('Windows (C:)')).getByRole('button', { name: /Collapse/ }))
+
+    await waitFor(() => {
+      expect(screen.queryByText('aa', { selector: 'span' })).not.toBeInTheDocument()
+      expect(screen.queryByText('bb', { selector: 'span' })).not.toBeInTheDocument()
+    })
+    expect(treeRow('USB Stick (E:)')).toBeInTheDocument()
+  })
+
+  it('does not leave /Volumes descendants painted over trash or removable rows on macOS', async () => {
+    const user = userEvent.setup()
+    setPlatform('MacIntel')
+    seedMacVolumes()
+    usePanesStore.setState((state) => ({
+      treeNodes: {
+        ...state.treeNodes,
+        '/': {
+          ...state.treeNodes['/'],
+          children: ['/Volumes', '/var'],
+          expanded: true,
+          loaded: true,
+        },
+        '/Volumes': {
+          id: '/Volumes',
+          name: 'Volumes',
+          path: '/Volumes',
+          parentPath: '/',
+          children: ['/Volumes/AxoPane', '/Volumes/Untitled'],
+          expanded: false,
+          loaded: true,
+        },
+        '/Volumes/AxoPane': {
+          id: '/Volumes/AxoPane',
+          name: 'AxoPane',
+          path: '/Volumes/AxoPane',
+          parentPath: '/Volumes',
+          children: [],
+          expanded: false,
+          loaded: true,
+        },
+        '/Volumes/Untitled': {
+          ...state.treeNodes['/Volumes/Untitled'],
+          children: [],
+          expanded: false,
+          loaded: true,
+        },
+        '/var': {
+          id: '/var',
+          name: 'var',
+          path: '/var',
+          parentPath: '/',
+          children: [],
+          expanded: false,
+          loaded: true,
+        },
+      },
+    }))
+
+    render(<FolderTree />)
+    expect(screen.queryByText('AxoPane', { selector: 'span' })).not.toBeInTheDocument()
+
+    await user.click(within(treeRow('Volumes')).getByRole('button', { name: /Expand/ }))
+
+    expect(await screen.findByText('AxoPane', { selector: 'span' })).toBeInTheDocument()
+    expect(screen.getAllByText('Untitled', { selector: 'span' })).toHaveLength(2)
+
+    await user.click(within(treeRow('Volumes')).getByRole('button', { name: /Collapse/ }))
+
+    await waitFor(() => {
+      expect(screen.queryByText('AxoPane', { selector: 'span' })).not.toBeInTheDocument()
+      expect(screen.getAllByText('Untitled', { selector: 'span' })).toHaveLength(1)
+    })
+    expect(treeRow('Trash').parentElement).toHaveClass('bg-light-tree', 'overflow-hidden')
+    expect(treeRow('Untitled').parentElement).toHaveClass('bg-light-tree', 'overflow-hidden')
+  })
+
+  it('keeps pinned rows out of the macOS overlay-scrollbar lane', async () => {
+    setPlatform('MacIntel')
+    seedVolumes()
+    usePanesStore.setState((state) => ({
+      panes: { ...state.panes, left: { ...state.panes.left, path: 'C:\\aa' } },
+      treeNodes: {
+        ...state.treeNodes,
+        'C:\\': {
+          ...state.treeNodes['C:\\'],
+          children: ['C:\\aa'],
+          expanded: true,
+          loaded: true,
+        },
+        'C:\\aa': {
+          id: 'C:\\aa',
+          name: 'aa',
+          path: 'C:\\aa',
+          parentPath: 'C:\\',
+          children: [],
+          expanded: false,
+          loaded: true,
+        },
+      },
+    }))
+
+    render(<FolderTree />)
+    await screen.findByText('aa', { selector: 'span' })
+    scrollTreeTo(420)
+
+    const pinnedOverlay = pinnedRows()[0]?.parentElement
+    expect(pinnedOverlay).toHaveClass('right-2')
   })
 
   it('gives every ancestor a distinct pinned slot when many levels are revealed in one jump', async () => {

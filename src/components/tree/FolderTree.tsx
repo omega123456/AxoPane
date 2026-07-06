@@ -11,14 +11,8 @@ import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
 
-function rowKey(row: TreeFlatRow, index: number): string {
-  if (row.kind === 'node') {
-    return `node-${row.path}`
-  }
-  if (row.kind === 'trash') {
-    return 'trash'
-  }
-  return `header-${index}`
+function rowKey(row: TreeFlatRow): string {
+  return row.renderKey
 }
 
 export function FolderTree() {
@@ -47,6 +41,8 @@ export function FolderTree() {
     () => buildTreeFlatModel(treeNodes, volumes),
     [treeNodes, volumes],
   )
+  const isMacOs = detectPlatformOs() === 'macos'
+  const rowLayerClassName = 'absolute inset-x-0 overflow-hidden bg-light-tree dark:bg-dark-tree'
 
   // The ancestor chain (volume root -> active node) pins to the top of the
   // scroll area as the user scrolls past each ancestor - an editor-style "sticky
@@ -175,12 +171,12 @@ export function FolderTree() {
       <div
         ref={scrollRef}
         data-testid="folder-tree-scroll"
-        className="min-h-0 flex-1 overflow-auto pb-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint"
+        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pb-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint"
         onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
       >
         {/*
           Styling-constraint exception: runtime geometry only. The total scroll
-          height and each row's translateY come from @tanstack/react-virtual and
+          height and each row's top offset come from @tanstack/react-virtual and
           are continuous px values no static token can express. Every
           design-system value elsewhere stays a pure Tailwind utility.
         */}
@@ -188,16 +184,12 @@ export function FolderTree() {
           {itemsToRender.map((item) => {
             const row = rows[item.index]
             const style = {
-              position: 'absolute' as const,
-              top: 0,
-              left: 0,
-              width: '100%',
-              transform: `translateY(${item.start}px)`,
+              top: `${item.start}px`,
             }
 
             if (row.kind === 'header') {
               return (
-                <div key={rowKey(row, item.index)} style={style}>
+                <div key={rowKey(row)} className={rowLayerClassName} style={style}>
                   <div className="flex h-tree-header items-end px-3 pb-1">
                     <span className="font-mono text-uxs uppercase tracking-wide text-light-text-faint dark:text-dark-text-faint">
                       {row.label}
@@ -209,7 +201,7 @@ export function FolderTree() {
 
             if (row.kind === 'trash') {
               return (
-                <div key={rowKey(row, item.index)} style={style}>
+                <div key={rowKey(row)} className={rowLayerClassName} style={style}>
                   <TrashTreeRow
                     isCurrent={activePath === TRASH_PATH}
                     onNavigate={trashActions.onNavigate}
@@ -225,7 +217,7 @@ export function FolderTree() {
               return null
             }
             return (
-              <div key={rowKey(row, item.index)} style={style}>
+              <div key={rowKey(row)} className={rowLayerClassName} style={style}>
                 <TreeNode
                   node={node}
                   depth={row.depth}
@@ -248,7 +240,9 @@ export function FolderTree() {
         a rubber-band jitter. The wrapper is zero-height so it never intercepts
         pointer events; each pinned row re-enables them for itself.
       */}
-      <div className="pointer-events-none absolute inset-x-0 top-0">
+      <div
+        className={`pointer-events-none absolute left-0 top-0 ${isMacOs ? 'right-2' : 'right-0'}`}
+      >
         {pinnedRows.map(({ path, chainIndex, top }) => {
           const node = treeNodes[path]
           const index = indexByPath.get(path)
@@ -260,12 +254,9 @@ export function FolderTree() {
             <div
               key={`pinned-${path}`}
               data-testid="tree-pinned-row"
-              className="pointer-events-auto"
+              className="pointer-events-auto absolute inset-x-0"
               style={{
-                position: 'absolute',
                 top: `${top}px`,
-                left: 0,
-                width: '100%',
                 zIndex: 10 + chainIndex,
               }}
             >

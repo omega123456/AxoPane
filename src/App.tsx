@@ -268,7 +268,7 @@ function App() {
   }, [applyDirPatch, applyIconStates, applyListChunk, applySizeStates, setVolumes])
 
   return (
-    <main className="flex h-full select-none flex-col overflow-hidden bg-light-window font-ui text-light-text dark:bg-dark-window dark:text-dark-text">
+    <main className="flex h-full select-none flex-col overflow-hidden overscroll-x-none bg-light-window font-ui text-light-text dark:bg-dark-window dark:text-dark-text">
       <UpdateBanner />
       <AppFrame
         commandBar={

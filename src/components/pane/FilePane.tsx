@@ -155,6 +155,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   const [isPaneDropTarget, setIsPaneDropTarget] = useState(false)
   const isActivePane = activePaneId === paneId
   const os = detectPlatformOs()
+  const rowLayerClassName = 'absolute inset-x-0'
   // Suppress the loading skeleton on fast loads: it only appears once loading
   // has lasted longer than a second, avoiding a jarring flash-and-replace when
   // a folder resolves in a few milliseconds.
@@ -836,7 +837,7 @@ export function FilePane({ paneId }: FilePaneProps) {
       <BreadcrumbBar pane={pane} isActive={isActivePane} />
       <HeaderRow pane={pane} />
       {showSkeleton ? (
-        <div className="min-h-0 flex-1 overflow-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint">
+        <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint">
           <LoadingSkeleton />
         </div>
       ) : permissionDenied ? (
@@ -863,7 +864,7 @@ export function FilePane({ paneId }: FilePaneProps) {
         <div
           ref={parentRef}
           data-testid={`file-pane-scroll-${paneId}`}
-          className={`min-h-0 flex-1 overflow-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint ${
+          className={`min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint ${
             isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-accent-blue-border' : ''
           }`}
           onMouseDown={handleContainerMouseDown}
@@ -877,7 +878,7 @@ export function FilePane({ paneId }: FilePaneProps) {
         >
           {/*
             Styling-constraint exception: runtime geometry only. The total
-            scroll height and each row's translateY come from
+            scroll height and each row's top offset come from
             @tanstack/react-virtual (D18) and are continuous px values that no
             static utility/@theme token can express. Every design-system value
             (color/spacing/typography) elsewhere stays a pure Tailwind utility.
@@ -885,16 +886,12 @@ export function FilePane({ paneId }: FilePaneProps) {
           <div style={{ height: `${totalHeight}px`, position: 'relative' }} className="min-h-full">
             {itemsToRender.map((virtualRow) => {
               const rowStyle = {
-                position: 'absolute' as const,
-                top: 0,
-                left: 0,
-                width: '100%',
-                transform: `translateY(${virtualRow.start}px)`,
+                top: `${virtualRow.start}px`,
               }
 
               if (hasParent && virtualRow.index === 0) {
                 return (
-                  <div key={PARENT_ROW_ID} style={rowStyle}>
+                  <div key={PARENT_ROW_ID} className={rowLayerClassName} style={rowStyle}>
                     <ParentRow
                       isActivePane={isActivePane}
                       isFocused={pane.focusedEntryId === PARENT_ROW_ID}
@@ -914,7 +911,7 @@ export function FilePane({ paneId }: FilePaneProps) {
               }
 
               return (
-                <div key={entry.id} style={rowStyle}>
+                <div key={entry.id} className={rowLayerClassName} style={rowStyle}>
                   <FileRow
                     entry={entry}
                     isActivePane={isActivePane}

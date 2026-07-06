@@ -23,9 +23,9 @@ export const TREE_HEADER_HEIGHT_PX = 28
  * than a real `<TreeNode>` per row.
  */
 export type TreeFlatRow =
-  | { kind: 'header'; label: string }
-  | { kind: 'node'; path: string; depth: number; volume?: VolumeInfo }
-  | { kind: 'trash' }
+  | { kind: 'header'; label: string; renderKey: string }
+  | { kind: 'node'; path: string; depth: number; volume?: VolumeInfo; renderKey: string }
+  | { kind: 'trash'; renderKey: string }
 
 export type TreeFlatModel = {
   rows: TreeFlatRow[]
@@ -64,7 +64,7 @@ export function buildTreeFlatModel(
   const indexByPath = new Map<string, number>()
 
   for (const group of groups) {
-    rows.push({ kind: 'header', label: group.label })
+    rows.push({ kind: 'header', label: group.label, renderKey: `header-${group.category}` })
     for (const volume of group.volumes) {
       for (const row of flattenVisibleTree(treeNodes, volume.mountRoot)) {
         indexByPath.set(row.path, rows.length)
@@ -73,12 +73,15 @@ export function buildTreeFlatModel(
           path: row.path,
           depth: row.depth,
           volume: row.depth === 0 ? volume : undefined,
+          // A macOS mount can be visible both as /Volumes/<name> and as a
+          // volume root, so path-only React keys are not unique.
+          renderKey: `node-${group.category}-${volume.mountRoot}-${row.path}-${row.depth}`,
         })
       }
     }
     if (group.category === 'fixed') {
       indexByPath.set(TRASH_PATH, rows.length)
-      rows.push({ kind: 'trash' })
+      rows.push({ kind: 'trash', renderKey: 'trash-fixed' })
     }
   }
 

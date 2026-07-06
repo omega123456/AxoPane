@@ -5,8 +5,8 @@ use std::fs;
 use std::path::Path;
 
 use file_explorer_lib::fs::{
-    canonicalize_dir, default_start_dir, display_path_from_text, list_dir, list_tree_children,
-    ListDirOptions, ListTreeChildrenOptions, SortDirection, SortKey,
+    canonicalize_dir, default_start_dir, display_path_from_text, expand_home_path_with, list_dir,
+    list_tree_children, ListDirOptions, ListTreeChildrenOptions, SortDirection, SortKey,
 };
 use tempfile::tempdir;
 
@@ -164,6 +164,29 @@ fn list_dir_returns_canonical_absolute_path() {
     assert!(!response.path.starts_with("\\\\?\\"));
     assert_eq!(response.entries.len(), 1);
     assert_eq!(response.entries[0].name, "child");
+}
+
+#[test]
+fn expands_home_shorthand_only_for_path_prefixes() {
+    let home = Path::new("home-dir");
+
+    assert_eq!(expand_home_path_with("~", Some(home)), home);
+    assert_eq!(
+        expand_home_path_with("~/Projects/AxoPane", Some(home)),
+        home.join("Projects").join("AxoPane")
+    );
+    assert_eq!(
+        expand_home_path_with("~\\Projects\\AxoPane", Some(home)),
+        home.join("Projects\\AxoPane")
+    );
+    assert_eq!(
+        expand_home_path_with("~archive", Some(home)),
+        Path::new("~archive")
+    );
+    assert_eq!(
+        expand_home_path_with("~/Projects", None),
+        Path::new("~/Projects")
+    );
 }
 
 #[test]

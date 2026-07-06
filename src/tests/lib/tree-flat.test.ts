@@ -1,5 +1,6 @@
 import {
   buildTreeFlatModel,
+  type TreeFlatRow,
   treeRowHeight,
   TREE_HEADER_HEIGHT_PX,
   TREE_ROW_HEIGHT_PX,
@@ -31,6 +32,23 @@ function node(overrides: Partial<TreeNodeState> & Pick<TreeNodeState, 'path'>): 
   }
 }
 
+function rowShapes(rows: TreeFlatRow[]) {
+  return rows.map((row) => {
+    if (row.kind === 'header') {
+      return { kind: row.kind, label: row.label }
+    }
+    if (row.kind === 'trash') {
+      return { kind: row.kind }
+    }
+    return {
+      kind: row.kind,
+      path: row.path,
+      depth: row.depth,
+      volume: row.volume,
+    }
+  })
+}
+
 describe('buildTreeFlatModel', () => {
   it('emits a heading per non-empty category, each volume subtree, and trash after the fixed group', () => {
     const volumes = [
@@ -47,7 +65,7 @@ describe('buildTreeFlatModel', () => {
 
     const { rows } = buildTreeFlatModel(treeNodes, volumes)
 
-    expect(rows).toEqual([
+    expect(rowShapes(rows)).toEqual([
       { kind: 'header', label: 'Drives' },
       { kind: 'node', path: 'C:\\', depth: 0, volume: volumes[0] },
       { kind: 'node', path: 'C:\\aa', depth: 1, volume: undefined },
@@ -69,7 +87,7 @@ describe('buildTreeFlatModel', () => {
 
     const { rows } = buildTreeFlatModel(treeNodes, volumes)
 
-    expect(rows.filter((row) => row.kind === 'node')).toEqual([
+    expect(rowShapes(rows.filter((row) => row.kind === 'node'))).toEqual([
       { kind: 'node', path: 'C:\\', depth: 0, volume: volumes[0] },
     ])
   })
@@ -79,7 +97,36 @@ describe('buildTreeFlatModel', () => {
 
     const { rows } = buildTreeFlatModel({}, volumes)
 
-    expect(rows).toEqual([{ kind: 'header', label: 'Drives' }, { kind: 'trash' }])
+    expect(rowShapes(rows)).toEqual([{ kind: 'header', label: 'Drives' }, { kind: 'trash' }])
+  })
+
+  it('uses distinct render keys when a macOS mount also appears under /Volumes', () => {
+    const volumes = [
+      volume({ mountRoot: '/', label: 'Macintosh HD' }),
+      volume({ mountRoot: '/Volumes/Untitled', label: 'Untitled', isRemovable: true }),
+    ]
+    const treeNodes: Record<string, TreeNodeState> = {
+      '/': node({ path: '/', children: ['/Volumes'], expanded: true }),
+      '/Volumes': node({
+        path: '/Volumes',
+        parentPath: '/',
+        children: ['/Volumes/AxoPane', '/Volumes/Untitled'],
+        expanded: true,
+      }),
+      '/Volumes/AxoPane': node({ path: '/Volumes/AxoPane', parentPath: '/Volumes' }),
+      '/Volumes/Untitled': node({ path: '/Volumes/Untitled', parentPath: null }),
+    }
+
+    const { rows } = buildTreeFlatModel(treeNodes, volumes)
+    const renderKeys = rows.map((row) => row.renderKey)
+    const untitledRows = rows.filter(
+      (row): row is Extract<TreeFlatRow, { kind: 'node' }> =>
+        row.kind === 'node' && row.path === '/Volumes/Untitled',
+    )
+
+    expect(new Set(renderKeys).size).toBe(renderKeys.length)
+    expect(untitledRows).toHaveLength(2)
+    expect(untitledRows[0].renderKey).not.toBe(untitledRows[1].renderKey)
   })
 
   it('computes cumulative offsets by row kind, ending with the total height', () => {
@@ -116,9 +163,13 @@ describe('buildTreeFlatModel', () => {
   })
 
   it('sizes header rows and node/trash rows from their tokens', () => {
-    expect(treeRowHeight({ kind: 'header', label: 'Drives' })).toBe(TREE_HEADER_HEIGHT_PX)
-    expect(treeRowHeight({ kind: 'node', path: 'C:\\', depth: 0 })).toBe(TREE_ROW_HEIGHT_PX)
-    expect(treeRowHeight({ kind: 'trash' })).toBe(TREE_ROW_HEIGHT_PX)
+    expect(treeRowHeight({ kind: 'header', label: 'Drives', renderKey: 'header-fixed' })).toBe(
+      TREE_HEADER_HEIGHT_PX,
+    )
+    expect(
+      treeRowHeight({ kind: 'node', path: 'C:\\', depth: 0, renderKey: 'node-fixed-C:\\-C:\\-0' }),
+    ).toBe(TREE_ROW_HEIGHT_PX)
+    expect(treeRowHeight({ kind: 'trash', renderKey: 'trash-fixed' })).toBe(TREE_ROW_HEIGHT_PX)
   })
 
   it('keeps virtual row heights on whole CSS pixels', () => {

@@ -125,7 +125,7 @@ impl From<std::io::Error> for FsError {
 /// location the OS actually resolves, which is what every later navigation,
 /// breadcrumb, and watcher operation depends on.
 pub fn canonicalize_dir(path: &Path) -> Result<PathBuf, FsError> {
-    Ok(dunce::canonicalize(path)?)
+    Ok(dunce::canonicalize(expand_home_path(path))?)
 }
 
 pub fn display_path_from_path(path: &Path) -> String {
@@ -190,6 +190,31 @@ fn home_dir() -> Option<PathBuf> {
     }
 
     None
+}
+
+pub fn expand_home_path(path: &Path) -> PathBuf {
+    expand_home_path_with(&path.to_string_lossy(), home_dir().as_deref())
+}
+
+pub fn expand_home_path_with(path: &str, home: Option<&Path>) -> PathBuf {
+    let Some(rest) = path.strip_prefix('~') else {
+        return PathBuf::from(path);
+    };
+
+    if !rest.is_empty() && !rest.starts_with(['/', '\\']) {
+        return PathBuf::from(path);
+    }
+
+    let Some(home) = home else {
+        return PathBuf::from(path);
+    };
+
+    let rest = rest.trim_start_matches(['/', '\\']);
+    if rest.is_empty() {
+        home.to_path_buf()
+    } else {
+        home.join(rest)
+    }
 }
 
 pub fn list_dir(options: &ListDirOptions) -> Result<ListDirResponse, FsError> {
