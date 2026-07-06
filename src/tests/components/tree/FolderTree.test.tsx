@@ -514,7 +514,8 @@ describe('FolderTree', () => {
     expect(useContextMenuStore.getState().menu?.title).toBe('cc')
   })
 
-  it('surfaces Eject for a removable drive row but not for fixed or network rows', () => {
+  it('surfaces Eject for a removable drive row on macOS but not for fixed or network rows', () => {
+    setPlatform('MacIntel')
     seedVolumes()
     render(
       <>
@@ -531,6 +532,20 @@ describe('FolderTree', () => {
 
     fireEvent.contextMenu(treeRow('USB Stick (E:)'))
     expect(screen.getByRole('menuitem', { name: 'Eject' })).toBeInTheDocument()
+  })
+
+  it('does not surface Eject on Windows (native shell Eject is used instead)', () => {
+    setPlatform('Win32')
+    seedVolumes()
+    render(
+      <>
+        <FolderTree />
+        <ContextMenu />
+      </>,
+    )
+
+    fireEvent.contextMenu(treeRow('USB Stick (E:)'))
+    expect(screen.queryByRole('menuitem', { name: 'Eject' })).not.toBeInTheDocument()
   })
 
   it('accepts an internal drop onto a folder node and enqueues the transfer', async () => {

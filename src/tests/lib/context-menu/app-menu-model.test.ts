@@ -217,26 +217,26 @@ describe('buildAppContextMenuContent', () => {
     ])
   })
 
-  it('offers Eject only for removable volume roots in the tree menu', () => {
+  it('offers Eject only for removable volume roots in the tree menu on macOS', () => {
     const removableRootContent = buildAppContextMenuContent(
       'left',
       { kind: 'tree', path: 'E:\\' },
-      'windows',
+      'macos',
     )
     const fixedRootContent = buildAppContextMenuContent(
       'left',
       { kind: 'tree', path: 'C:\\' },
-      'windows',
+      'macos',
     )
     const networkRootContent = buildAppContextMenuContent(
       'left',
       { kind: 'tree', path: '\\\\server\\Share' },
-      'windows',
+      'macos',
     )
     const nonRootContent = buildAppContextMenuContent(
       'left',
       { kind: 'tree', path: 'E:\\Photos' },
-      'windows',
+      'macos',
     )
 
     expect(removableRootContent.sections.map((section) => section.id)).toContain('eject')
@@ -251,6 +251,16 @@ describe('buildAppContextMenuContent', () => {
     expect(fixedRootContent.sections.map((section) => section.id)).not.toContain('eject')
     expect(networkRootContent.sections.map((section) => section.id)).not.toContain('eject')
     expect(nonRootContent.sections.map((section) => section.id)).not.toContain('eject')
+  })
+
+  it('never offers Eject on Windows (native shell Eject is used instead)', () => {
+    const removableRootContent = buildAppContextMenuContent(
+      'left',
+      { kind: 'tree', path: 'E:\\' },
+      'windows',
+    )
+
+    expect(removableRootContent.sections.map((section) => section.id)).not.toContain('eject')
   })
 
   it('only enables Extract for all-ZIP multi-selections', () => {

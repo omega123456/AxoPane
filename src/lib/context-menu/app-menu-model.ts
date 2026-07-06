@@ -493,9 +493,12 @@ function buildTreeContent(
   )?.isNetwork
 
   const volume = findVolumeForPath(target.path, volumes)
-  const isEjectableRoot = Boolean(
-    volume && isVolumeRoot(target.path, volume) && volume.isRemovable,
-  )
+  // Eject is macOS-only: on Windows a safe removal isn't possible from here (an
+  // in-use volume can only be force-dismounted), so Windows users use the native
+  // "Eject" entry in the shell context menu instead.
+  const isEjectableRoot =
+    os === 'macos' &&
+    Boolean(volume && isVolumeRoot(target.path, volume) && volume.isRemovable)
 
   return {
     topStrip: [],

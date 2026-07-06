@@ -66,7 +66,7 @@ for (const mode of ['light', 'dark'] as const) {
   })
 
   test(`tree context menu removable drive ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.browsing[mode])
+    await gotoScenario(page, screenshotScenarios.ejectMenu[mode])
     const treeScroll = page.getByTestId('folder-tree-scroll')
     const usbRow = treeScroll.getByRole('button', { name: 'USB Stick (E:)', exact: true })
     await expect(usbRow).toBeVisible()

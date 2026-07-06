@@ -603,4 +603,12 @@ export const screenshotScenarios = {
     load_session: trashSession,
     queue_snapshot: emptyQueueSnapshot,
   }),
+  // Eject is macOS-only (Windows uses the native shell "Eject"), so pin the
+  // removable-drive tree menu to macOS to capture the eject entry deterministically.
+  ejectMenu: scenarioByTheme(
+    {
+      queue_snapshot: emptyQueueSnapshot,
+    },
+    'macos',
+  ),
 } satisfies Record<string, { light: PlaywrightScenario; dark: PlaywrightScenario }>
