@@ -9,7 +9,6 @@
 //!   correct patches.
 
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use file_explorer_lib::fs::{self, DirectoryEntry, SortDirection, SortKey};
 use file_explorer_lib::watch::{
@@ -18,7 +17,6 @@ use file_explorer_lib::watch::{
 };
 use notify::event::EventKind;
 use notify::Event;
-use notify_debouncer_full::DebouncedEvent;
 use tempfile::tempdir;
 
 fn base_target(tab_id: &str, path: &str, include_item_counts: bool) -> WatchTarget {
@@ -108,8 +106,7 @@ fn set_tab_watch_seeds_baseline_from_supplied_entries_without_relisting() {
         )
         .expect("seed watch from supplied entries");
 
-    let baseline =
-        tab_snapshot_for_tests(&service, &target.tab_id).expect("tab baseline recorded");
+    let baseline = tab_snapshot_for_tests(&service, &target.tab_id).expect("tab baseline recorded");
     assert!(
         baseline.keys().any(|path| path.ends_with("phantom.txt")),
         "the seeded phantom entry must be present in the baseline, proving it came from \
@@ -118,7 +115,9 @@ fn set_tab_watch_seeds_baseline_from_supplied_entries_without_relisting() {
 
     let real_listing = snapshot_for_target(&target).expect("real directory listing");
     assert!(
-        !real_listing.keys().any(|path| path.ends_with("phantom.txt")),
+        !real_listing
+            .keys()
+            .any(|path| path.ends_with("phantom.txt")),
         "the real directory must not contain the phantom entry"
     );
 }
@@ -160,8 +159,7 @@ fn set_tab_watch_seeds_empty_first_diff_even_when_supplied_entries_carry_icon_da
         )
         .expect("seed watch from icon-bearing entries");
 
-    let baseline =
-        tab_snapshot_for_tests(&service, &target.tab_id).expect("tab baseline recorded");
+    let baseline = tab_snapshot_for_tests(&service, &target.tab_id).expect("tab baseline recorded");
     assert_eq!(
         baseline
             .get(&real_path)
@@ -171,7 +169,13 @@ fn set_tab_watch_seeds_empty_first_diff_even_when_supplied_entries_carry_icon_da
     );
 
     let real_listing = snapshot_for_target(&target).expect("real directory listing");
-    let patch = diff_entries(&target.tab_id, &target.path, "watch", &baseline, &real_listing);
+    let patch = diff_entries(
+        &target.tab_id,
+        &target.path,
+        "watch",
+        &baseline,
+        &real_listing,
+    );
     assert!(
         patch.changed.is_empty() && patch.removed.is_empty(),
         "the first diff against a real list_dir snapshot must be empty even when the \
@@ -197,8 +201,7 @@ fn set_tab_watch_falls_back_to_listing_when_no_entries_supplied() {
         )
         .expect("set watch without seeded entries");
 
-    let baseline =
-        tab_snapshot_for_tests(&service, &target.tab_id).expect("tab baseline recorded");
+    let baseline = tab_snapshot_for_tests(&service, &target.tab_id).expect("tab baseline recorded");
     let real_listing = snapshot_for_target(&target).expect("real directory listing");
 
     assert_eq!(
@@ -232,10 +235,7 @@ fn debounce_resnapshot_honors_include_item_counts_flag() {
     // which resnapshots via `snapshot_for_target` and must still honor the flag.
     handle_debounce_result_for_tests(
         &runtime,
-        Ok(vec![DebouncedEvent::new(
-            Event::new(EventKind::Any).add_path(watched_file.clone()),
-            Instant::now(),
-        )]),
+        vec![Ok(Event::new(EventKind::Any).add_path(watched_file.clone()))],
         Arc::new(move |patch| {
             patches_for_callback
                 .lock()

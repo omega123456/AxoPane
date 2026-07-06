@@ -12,10 +12,8 @@ mod watch_src {
             CreateKind, DataChange, EventKind, Flag, ModifyKind, RemoveKind, RenameMode,
         };
         use notify::Event;
-        use notify_debouncer_full::DebouncedEvent;
         use std::collections::HashSet;
         use std::path::PathBuf;
-        use std::time::Instant;
         use tempfile::tempdir;
 
         fn entry(path: &str, name: &str) -> DirectoryEntry {
@@ -93,20 +91,14 @@ mod watch_src {
                         ..entry(&changed_path, "changed.txt")
                     },
                 ),
-                (
-                    removed_path.clone(),
-                    entry(&removed_path, "removed.txt"),
-                ),
+                (removed_path.clone(), entry(&removed_path, "removed.txt")),
                 (
                     unchanged_path.clone(),
                     entry(&unchanged_path, "unchanged.txt"),
                 ),
             ]);
             let next = HashMap::from([
-                (
-                    added_path.clone(),
-                    entry(&added_path, "added.txt"),
-                ),
+                (added_path.clone(), entry(&added_path, "added.txt")),
                 (
                     changed_path.clone(),
                     DirectoryEntry {
@@ -126,11 +118,8 @@ mod watch_src {
                 .changed
                 .iter()
                 .any(|item| item.path == added_path && item.entry.is_some()));
-            assert!(patch
-                .changed
-                .iter()
-                .any(|item| item.path == changed_path
-                    && item.entry.as_ref().and_then(|e| e.size_bytes) == Some(2)));
+            assert!(patch.changed.iter().any(|item| item.path == changed_path
+                && item.entry.as_ref().and_then(|e| e.size_bytes) == Some(2)));
             assert!(!patch.changed.iter().any(|item| item.path == unchanged_path));
             assert!(patch.removed.iter().any(|path| path == &removed_path));
             assert!(!patch.removed.contains(&changed_path));
@@ -187,10 +176,7 @@ mod watch_src {
             let alpha = root.join("alpha.txt");
             std::fs::write(&alpha, b"a").expect("alpha");
 
-            let created = DebouncedEvent::new(
-                Event::new(EventKind::Create(CreateKind::File)).add_path(alpha.clone()),
-                Instant::now(),
-            );
+            let created = Event::new(EventKind::Create(CreateKind::File)).add_path(alpha.clone());
             let PatchResult::Targeted { patch, snapshot } =
                 patch_for_events(&target, &HashMap::new(), &[created]).expect("create patch")
             else {
@@ -203,10 +189,7 @@ mod watch_src {
             assert!(snapshot.keys().any(|path| path.ends_with("alpha.txt")));
 
             std::fs::remove_file(&alpha).expect("remove alpha");
-            let removed = DebouncedEvent::new(
-                Event::new(EventKind::Remove(RemoveKind::File)).add_path(alpha),
-                Instant::now(),
-            );
+            let removed = Event::new(EventKind::Remove(RemoveKind::File)).add_path(alpha);
             let PatchResult::Targeted { patch, snapshot } =
                 patch_for_events(&target, &snapshot, &[removed]).expect("remove patch")
             else {
@@ -260,17 +243,11 @@ mod watch_src {
                     fs::directory_entry_from_path(&old).expect("old entry"),
                 ),
             ]);
-            let filtered_out = DebouncedEvent::new(
-                Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Content)))
-                    .add_path(drop.clone()),
-                Instant::now(),
-            );
-            let rename = DebouncedEvent::new(
-                Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Both)))
-                    .add_path(old)
-                    .add_path(new),
-                Instant::now(),
-            );
+            let filtered_out = Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Content)))
+                .add_path(drop.clone());
+            let rename = Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Both)))
+                .add_path(old)
+                .add_path(new);
             let PatchResult::Targeted { patch, snapshot } =
                 patch_for_events(&target, &previous, &[filtered_out, rename])
                     .expect("targeted patch")
@@ -307,23 +284,18 @@ mod watch_src {
                 show_hidden: true,
                 include_item_counts: true,
             };
-            let one_sided_rename = DebouncedEvent::new(
+            let one_sided_rename =
                 Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::From)))
-                    .add_path(fixture.path().join("old.txt")),
-                Instant::now(),
-            );
+                    .add_path(fixture.path().join("old.txt"));
             assert!(matches!(
                 patch_for_events(&target, &HashMap::new(), &[one_sided_rename])
                     .expect("rename decision"),
                 PatchResult::NeedsResnapshot
             ));
 
-            let rescan = DebouncedEvent::new(
-                Event::new(EventKind::Create(CreateKind::Any))
-                    .add_path(fixture.path().join("new.txt"))
-                    .set_flag(Flag::Rescan),
-                Instant::now(),
-            );
+            let rescan = Event::new(EventKind::Create(CreateKind::Any))
+                .add_path(fixture.path().join("new.txt"))
+                .set_flag(Flag::Rescan);
             assert!(matches!(
                 patch_for_events(&target, &HashMap::new(), &[rescan]).expect("rescan decision"),
                 PatchResult::NeedsResnapshot

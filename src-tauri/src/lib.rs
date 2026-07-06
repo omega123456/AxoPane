@@ -120,6 +120,20 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        .on_window_event(|window, event| {
+            // Reliability net for any native volume-change event the OS
+            // dropped while the window was unfocused: reconciling here costs
+            // nothing at rest since it only runs in response to another
+            // event (focus), never on a timer.
+            if let tauri::WindowEvent::Focused(true) = event {
+                if let Some(monitor) = window
+                    .app_handle()
+                    .try_state::<volumes::VolumeMonitorService>()
+                {
+                    monitor.reconcile();
+                }
+            }
+        })
         .setup(|app| {
             let config_dir = resolved_app_config_dir(&app.path().app_config_dir()?);
             let persistence = PersistenceState::load(&config_dir)

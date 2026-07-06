@@ -6,10 +6,8 @@ use file_explorer_lib::watch::{
 };
 use notify::event::{CreateKind, DataChange, EventKind, ModifyKind, RemoveKind, RenameMode};
 use notify::Event;
-use notify_debouncer_full::DebouncedEvent;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 use tempfile::tempdir;
 
 #[test]
@@ -63,10 +61,9 @@ fn watch_runtime_test_hooks_drive_targeted_and_rescan_callbacks() {
     std::fs::write(&created, b"created").expect("created");
     handle_debounce_result_for_tests(
         &runtime,
-        Ok(vec![DebouncedEvent::new(
-            Event::new(EventKind::Create(CreateKind::File)).add_path(created.clone()),
-            Instant::now(),
-        )]),
+        vec![Ok(
+            Event::new(EventKind::Create(CreateKind::File)).add_path(created.clone())
+        )],
         Arc::new(move |patch| {
             patches_for_callback
                 .lock()
@@ -97,10 +94,7 @@ fn watch_runtime_test_hooks_drive_targeted_and_rescan_callbacks() {
     let errors_for_rescan = errors.clone();
     handle_debounce_result_for_tests(
         &runtime,
-        Ok(vec![DebouncedEvent::new(
-            Event::new(EventKind::Any).add_path(before.clone()),
-            Instant::now(),
-        )]),
+        vec![Ok(Event::new(EventKind::Any).add_path(before.clone()))],
         Arc::new(move |patch| {
             patches_for_rescan.lock().expect("patches lock").push(patch);
         }),
@@ -150,10 +144,9 @@ fn watch_runtime_test_hook_surfaces_errors_and_removals() {
     std::fs::remove_file(&doomed).expect("remove doomed");
     handle_debounce_result_for_tests(
         &runtime,
-        Ok(vec![DebouncedEvent::new(
-            Event::new(EventKind::Remove(RemoveKind::File)).add_path(doomed.clone()),
-            Instant::now(),
-        )]),
+        vec![Ok(
+            Event::new(EventKind::Remove(RemoveKind::File)).add_path(doomed.clone())
+        )],
         Arc::new({
             let patches = patches.clone();
             move |patch| {
@@ -178,9 +171,9 @@ fn watch_runtime_test_hook_surfaces_errors_and_removals() {
 
     handle_debounce_result_for_tests(
         &runtime,
-        Err(vec![
+        vec![Err(
             notify::Error::generic("boom").add_path(root.join("broken.txt"))
-        ]),
+        )],
         Arc::new(|_| {}),
         Arc::new({
             let errors = errors.clone();
@@ -230,19 +223,17 @@ fn watch_runtime_test_hook_covers_modify_and_rename_filters() {
     let patches = Arc::new(Mutex::new(Vec::<DirPatch>::new()));
     handle_debounce_result_for_tests(
         &runtime,
-        Ok(vec![
-            DebouncedEvent::new(
+        vec![
+            Ok(
                 Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Content)))
                     .add_path(drop.clone()),
-                Instant::now(),
             ),
-            DebouncedEvent::new(
+            Ok(
                 Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Both)))
                     .add_path(old.clone())
                     .add_path(new.clone()),
-                Instant::now(),
             ),
-        ]),
+        ],
         Arc::new({
             let patches = patches.clone();
             move |patch| {
@@ -301,10 +292,9 @@ fn watch_runtime_test_hooks_cover_filtered_nonmatching_and_error_branches() {
 
     handle_debounce_result_for_tests(
         &runtime,
-        Ok(vec![DebouncedEvent::new(
-            Event::new(EventKind::Create(CreateKind::File)).add_path(sibling.join("ignore.txt")),
-            Instant::now(),
-        )]),
+        vec![Ok(
+            Event::new(EventKind::Create(CreateKind::File)).add_path(sibling.join("ignore.txt"))
+        )],
         Arc::new({
             let patches = patches.clone();
             move |patch| patches.lock().expect("patches lock").push(patch)
@@ -319,19 +309,15 @@ fn watch_runtime_test_hooks_cover_filtered_nonmatching_and_error_branches() {
 
     handle_debounce_result_for_tests(
         &runtime,
-        Ok(vec![
-            DebouncedEvent::new(
+        vec![
+            Ok(
                 Event::new(EventKind::Access(notify::event::AccessKind::Close(
                     notify::event::AccessMode::Write,
                 )))
                 .add_path(visible.clone()),
-                Instant::now(),
             ),
-            DebouncedEvent::new(
-                Event::new(EventKind::Modify(ModifyKind::Any)).add_path(visible.clone()),
-                Instant::now(),
-            ),
-        ]),
+            Ok(Event::new(EventKind::Modify(ModifyKind::Any)).add_path(visible.clone())),
+        ],
         Arc::new({
             let patches = patches.clone();
             move |patch| patches.lock().expect("patches lock").push(patch)
@@ -353,10 +339,9 @@ fn watch_runtime_test_hooks_cover_filtered_nonmatching_and_error_branches() {
     std::fs::remove_dir_all(root).expect("remove watched dir");
     handle_debounce_result_for_tests(
         &runtime,
-        Ok(vec![DebouncedEvent::new(
-            Event::new(EventKind::Any).add_path(Path::new(&target.path).join("gone.txt")),
-            Instant::now(),
-        )]),
+        vec![Ok(
+            Event::new(EventKind::Any).add_path(Path::new(&target.path).join("gone.txt"))
+        )],
         Arc::new(|_| {}),
         Arc::new({
             let errors = errors.clone();
@@ -371,7 +356,7 @@ fn watch_runtime_test_hooks_cover_filtered_nonmatching_and_error_branches() {
 
     handle_debounce_result_for_tests(
         &runtime,
-        Err(vec![notify::Error::generic("plain boom")]),
+        vec![Err(notify::Error::generic("plain boom"))],
         Arc::new(|_| {}),
         Arc::new({
             let errors = errors.clone();

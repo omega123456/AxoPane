@@ -1,13 +1,12 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use notify::event::{EventKind, ModifyKind, RenameMode};
-use notify::RecursiveMode;
-use notify_debouncer_full::{
-    new_debouncer, DebounceEventResult, DebouncedEvent, Debouncer, FileIdMap,
-};
+use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 
 use crate::fs::{self, DirectoryEntry, ListDirOptions, ListDirResponse, SortDirection, SortKey};
@@ -49,10 +48,32 @@ pub struct WatchService {
     inner: Mutex<Option<WatchRuntime>>,
 }
 
+/// The debounce/coalescing window: watch events for a given directory are
+/// batched for this long after the first event arrives before being
+/// processed together, mirroring the coalescing behavior `notify-debouncer-full`
+/// previously provided (but without its unconditional polling loop).
+const DEBOUNCE_WINDOW: Duration = Duration::from_millis(150);
+
+enum WatchMsg {
+    Event(Result<notify::Event, notify::Error>),
+    Shutdown,
+}
+
 pub struct WatchRuntime {
-    pub debouncer: Debouncer<notify::RecommendedWatcher, FileIdMap>,
+    pub watcher: notify::RecommendedWatcher,
+    tx: mpsc::Sender<WatchMsg>,
+    coalescing_thread: Option<JoinHandle<()>>,
     tabs: Arc<Mutex<HashMap<String, WatchedTab>>>,
     pub watch_counts: HashMap<PathBuf, usize>,
+}
+
+impl Drop for WatchRuntime {
+    fn drop(&mut self) {
+        let _ = self.tx.send(WatchMsg::Shutdown);
+        if let Some(handle) = self.coalescing_thread.take() {
+            let _ = handle.join();
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -149,21 +170,55 @@ pub fn create_runtime(
     emit_error: Arc<dyn Fn(String, String) + Send + Sync>,
 ) -> Result<WatchRuntime, String> {
     let tabs = Arc::new(Mutex::new(HashMap::<String, WatchedTab>::new()));
-    let patch_emitter = emit_patch;
-    let error_emitter = emit_error;
-    let tabs_for_callback = tabs.clone();
+    let (tx, rx) = mpsc::channel::<WatchMsg>();
+    let watcher_tx = tx.clone();
 
-    let debouncer = new_debouncer(
-        Duration::from_millis(150),
-        None,
-        move |result: DebounceEventResult| {
-            handle_debounce_result(&tabs_for_callback, result, &patch_emitter, &error_emitter)
-        },
-    )
-    .map_err(|error| error.to_string())?;
+    let watcher =
+        notify::recommended_watcher(move |result: Result<notify::Event, notify::Error>| {
+            let _ = watcher_tx.send(WatchMsg::Event(result));
+        })
+        .map_err(|error| error.to_string())?;
+
+    let tabs_for_thread = tabs.clone();
+    let coalescing_thread = std::thread::Builder::new()
+        .name("watch-coalescer".to_string())
+        .spawn(move || {
+            while let Ok(first) = rx.recv() {
+                let first_event = match first {
+                    WatchMsg::Event(event) => event,
+                    WatchMsg::Shutdown => break,
+                };
+
+                let mut batch = vec![first_event];
+                let mut stop = false;
+                loop {
+                    match rx.recv_timeout(DEBOUNCE_WINDOW) {
+                        Ok(WatchMsg::Event(event)) => batch.push(event),
+                        Ok(WatchMsg::Shutdown) => {
+                            stop = true;
+                            break;
+                        }
+                        Err(RecvTimeoutError::Timeout) => break,
+                        Err(RecvTimeoutError::Disconnected) => {
+                            stop = true;
+                            break;
+                        }
+                    }
+                }
+
+                process_results(&tabs_for_thread, batch, &emit_patch, &emit_error);
+
+                if stop {
+                    break;
+                }
+            }
+        })
+        .map_err(|error| error.to_string())?;
 
     Ok(WatchRuntime {
-        debouncer,
+        watcher,
+        tx,
+        coalescing_thread: Some(coalescing_thread),
         tabs,
         watch_counts: HashMap::new(),
     })
@@ -180,60 +235,64 @@ pub fn pane_scope(tab_id: &str) -> &str {
 #[inline(never)]
 fn noop_watch_error(_: String, _: String) {}
 
-fn handle_debounce_result(
+fn process_results(
     tabs: &Arc<Mutex<HashMap<String, WatchedTab>>>,
-    result: DebounceEventResult,
+    batch: Vec<Result<notify::Event, notify::Error>>,
     patch_emitter: &Arc<dyn Fn(DirPatch) + Send + Sync>,
     error_emitter: &Arc<dyn Fn(String, String) + Send + Sync>,
 ) {
-    match result {
-        Ok(events) => {
-            let changed_paths: HashSet<PathBuf> = events
-                .iter()
-                .flat_map(|event| event.paths.iter().cloned())
-                .filter(|path| path.parent().is_some())
-                .collect();
+    let mut events = Vec::new();
+    let mut errors = Vec::new();
+    for item in batch {
+        match item {
+            Ok(event) => events.push(event),
+            Err(error) => errors.push(error),
+        }
+    }
 
-            let mut tabs = tabs.lock().expect("watch tabs lock");
-            for watched in tabs.values_mut() {
-                if !matches_watched_parent(&changed_paths, &watched.target.path) {
-                    continue;
+    if !events.is_empty() {
+        let changed_paths: HashSet<PathBuf> = events
+            .iter()
+            .flat_map(|event| event.paths.iter().cloned())
+            .filter(|path| path.parent().is_some())
+            .collect();
+
+        let mut tabs = tabs.lock().expect("watch tabs lock");
+        for watched in tabs.values_mut() {
+            if !matches_watched_parent(&changed_paths, &watched.target.path) {
+                continue;
+            }
+
+            match patch_for_events(&watched.target, &watched.snapshot, &events) {
+                Ok(PatchResult::Targeted { patch, snapshot }) => {
+                    watched.snapshot = snapshot;
+                    if !patch.changed.is_empty() || !patch.removed.is_empty() {
+                        patch_emitter(patch);
+                    }
                 }
-
-                match patch_for_events(&watched.target, &watched.snapshot, &events) {
-                    Ok(PatchResult::Targeted { patch, snapshot }) => {
-                        watched.snapshot = snapshot;
+                Ok(PatchResult::NeedsResnapshot) => match snapshot_for_target(&watched.target) {
+                    Ok(next_snapshot) => {
+                        let patch = diff_entries(
+                            &watched.target.tab_id,
+                            &watched.target.path,
+                            "watch",
+                            &watched.snapshot,
+                            &next_snapshot,
+                        );
+                        watched.snapshot = next_snapshot;
                         if !patch.changed.is_empty() || !patch.removed.is_empty() {
                             patch_emitter(patch);
                         }
                     }
-                    Ok(PatchResult::NeedsResnapshot) => {
-                        match snapshot_for_target(&watched.target) {
-                            Ok(next_snapshot) => {
-                                let patch = diff_entries(
-                                    &watched.target.tab_id,
-                                    &watched.target.path,
-                                    "watch",
-                                    &watched.snapshot,
-                                    &next_snapshot,
-                                );
-                                watched.snapshot = next_snapshot;
-                                if !patch.changed.is_empty() || !patch.removed.is_empty() {
-                                    patch_emitter(patch);
-                                }
-                            }
-                            Err(error) => error_emitter(watched.target.path.clone(), error),
-                        }
-                    }
                     Err(error) => error_emitter(watched.target.path.clone(), error),
-                }
+                },
+                Err(error) => error_emitter(watched.target.path.clone(), error),
             }
         }
-        Err(errors) => {
-            for error in errors {
-                error_emitter(first_error_path(&error), error.to_string());
-            }
-        }
+    }
+
+    for error in errors {
+        error_emitter(first_error_path(&error), error.to_string());
     }
 }
 
@@ -275,11 +334,11 @@ pub fn tab_snapshot_for_tests(
 #[allow(dead_code)]
 pub fn handle_debounce_result_for_tests(
     runtime: &WatchRuntime,
-    result: DebounceEventResult,
+    batch: Vec<Result<notify::Event, notify::Error>>,
     emit_patch: Arc<dyn Fn(DirPatch) + Send + Sync>,
     emit_error: Arc<dyn Fn(String, String) + Send + Sync>,
 ) {
-    handle_debounce_result(&runtime.tabs, result, &emit_patch, &emit_error);
+    process_results(&runtime.tabs, batch, &emit_patch, &emit_error);
 }
 
 #[cfg(feature = "test-utils")]
@@ -338,7 +397,7 @@ enum PatchResult {
 fn patch_for_events(
     target: &WatchTarget,
     previous: &HashMap<String, DirectoryEntry>,
-    events: &[DebouncedEvent],
+    events: &[notify::Event],
 ) -> Result<PatchResult, String> {
     let watched_parent = Path::new(&target.path);
     let mut next = previous.clone();
@@ -498,7 +557,7 @@ pub fn add_watch(runtime: &mut WatchRuntime, path: &Path) -> Result<(), String> 
             Ok(())
         }
         None => {
-            watch_path(&mut runtime.debouncer, path)?;
+            watch_path(&mut runtime.watcher, path)?;
             runtime.watch_counts.insert(path.to_path_buf(), 1);
             Ok(())
         }
@@ -515,7 +574,7 @@ pub fn remove_watch(runtime: &mut WatchRuntime, path: &Path) -> Result<(), Strin
         return Ok(());
     }
 
-    unwatch_path(&mut runtime.debouncer, path)?;
+    unwatch_path(&mut runtime.watcher, path)?;
     runtime.watch_counts.remove(path);
     Ok(())
 }
@@ -564,20 +623,14 @@ fn list_dir_for_snapshot(options: &ListDirOptions) -> Result<ListDirResponse, St
     fs::list_dir(options).map_err(|error| error.to_string())
 }
 
-fn watch_path(
-    debouncer: &mut Debouncer<notify::RecommendedWatcher, FileIdMap>,
-    path: &Path,
-) -> Result<(), String> {
-    debouncer
+fn watch_path(watcher: &mut notify::RecommendedWatcher, path: &Path) -> Result<(), String> {
+    watcher
         .watch(path, RecursiveMode::NonRecursive)
         .map_err(|error| error.to_string())
 }
 
-fn unwatch_path(
-    debouncer: &mut Debouncer<notify::RecommendedWatcher, FileIdMap>,
-    path: &Path,
-) -> Result<(), String> {
-    debouncer.unwatch(path).map_err(|error| error.to_string())
+fn unwatch_path(watcher: &mut notify::RecommendedWatcher, path: &Path) -> Result<(), String> {
+    watcher.unwatch(path).map_err(|error| error.to_string())
 }
 
 pub fn diff_entries(
