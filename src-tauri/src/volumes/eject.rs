@@ -73,14 +73,16 @@ mod windows_eject {
     use windows::Win32::Devices::DeviceAndDriverInstallation::{
         CM_Get_Parent, CM_Request_Device_EjectW, SetupDiDestroyDeviceInfoList,
         SetupDiEnumDeviceInterfaces, SetupDiGetClassDevsW, SetupDiGetDeviceInterfaceDetailW,
-        DIGCF_DEVICEINTERFACE, DIGCF_PRESENT, GUID_DEVINTERFACE_DISK, HDEVINFO, PNP_VETO_TYPE,
+        CONFIGRET, DIGCF_DEVICEINTERFACE, DIGCF_PRESENT, HDEVINFO, PNP_VETO_TYPE,
         SP_DEVICE_INTERFACE_DATA, SP_DEVICE_INTERFACE_DETAIL_DATA_W, SP_DEVINFO_DATA,
     };
     use windows::Win32::Foundation::{CloseHandle, HWND};
     use windows::Win32::Storage::FileSystem::{
         CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
-    use windows::Win32::System::Ioctl::{IOCTL_STORAGE_GET_DEVICE_NUMBER, STORAGE_DEVICE_NUMBER};
+    use windows::Win32::System::Ioctl::{
+        GUID_DEVINTERFACE_DISK, IOCTL_STORAGE_GET_DEVICE_NUMBER, STORAGE_DEVICE_NUMBER,
+    };
     use windows::Win32::System::IO::DeviceIoControl;
 
     pub fn eject_volume(mount_root: &str) -> MenuActionStatus {
@@ -170,7 +172,7 @@ mod windows_eject {
             SetupDiGetClassDevsW(
                 Some(&GUID_DEVINTERFACE_DISK),
                 PCWSTR::null(),
-                HWND::default(),
+                Some(HWND::default()),
                 DIGCF_PRESENT | DIGCF_DEVICEINTERFACE,
             )
         }
@@ -220,7 +222,7 @@ mod windows_eject {
                     let mut parent_devinst = 0_u32;
                     let status =
                         unsafe { CM_Get_Parent(&mut parent_devinst, devinfo_data.DevInst, 0) };
-                    if status == 0 {
+                    if status == CONFIGRET(0) {
                         return Some(parent_devinst);
                     }
                     return None;
@@ -287,7 +289,7 @@ mod windows_eject {
             CM_Request_Device_EjectW(devinst, Some(&mut veto_type), Some(&mut veto_name), 0)
         };
 
-        if status == 0 && veto_type == PNP_VETO_TYPE::default() {
+        if status == CONFIGRET(0) && veto_type == PNP_VETO_TYPE::default() {
             return MenuActionStatus::handled_with_message("ejected");
         }
 
