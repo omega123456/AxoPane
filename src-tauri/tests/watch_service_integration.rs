@@ -1,9 +1,9 @@
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use file_explorer_lib::fs::{self as app_fs, SortDirection, SortKey};
-use file_explorer_lib::watch::{tab_snapshot_for_tests, WatchService, WatchTarget};
+use file_explorer_lib::watch::{tab_snapshot_for_tests, DirPatch, WatchService, WatchTarget};
 use tempfile::tempdir;
 
 fn canonical_display_path(path: &Path) -> String {
@@ -110,4 +110,70 @@ fn clearing_watches_removes_all_recorded_tab_snapshots() {
         .expect("clear watches");
 
     assert!(tab_snapshot_for_tests(&service, &watch_target.tab_id).is_none());
+}
+
+#[test]
+fn reconcile_emits_refresh_patch_for_missed_directory_changes() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    fs::write(root.join("old.txt"), "old").expect("old");
+
+    let service = WatchService::default();
+    let watch_target = target("left-1", root);
+
+    service
+        .set_tab_watch(
+            Some(watch_target.clone()),
+            None,
+            Arc::new(|_| {}),
+            Arc::new(|_, _| {}),
+        )
+        .expect("set watch");
+
+    let patches = Arc::new(Mutex::new(Vec::<DirPatch>::new()));
+    let errors = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+
+    service.reconcile(
+        Arc::new({
+            let patches = Arc::clone(&patches);
+            move |patch| patches.lock().expect("patches lock").push(patch)
+        }),
+        Arc::new({
+            let errors = Arc::clone(&errors);
+            move |path, error| errors.lock().expect("errors lock").push((path, error))
+        }),
+    );
+    assert!(patches.lock().expect("patches lock").is_empty());
+    assert!(errors.lock().expect("errors lock").is_empty());
+
+    fs::remove_file(root.join("old.txt")).expect("remove old");
+    fs::create_dir(root.join("fresh")).expect("fresh dir");
+
+    service.reconcile(
+        Arc::new({
+            let patches = Arc::clone(&patches);
+            move |patch| patches.lock().expect("patches lock").push(patch)
+        }),
+        Arc::new({
+            let errors = Arc::clone(&errors);
+            move |path, error| errors.lock().expect("errors lock").push((path, error))
+        }),
+    );
+
+    assert!(errors.lock().expect("errors lock").is_empty());
+    let patches = patches.lock().expect("patches lock");
+    let patch = patches
+        .iter()
+        .find(|patch| patch.path == watch_target.path)
+        .expect("refresh patch for watched path");
+    assert_eq!(patch.reason, "refresh");
+    assert!(patch.removed.iter().any(|path| path.ends_with("old.txt")));
+    assert!(patch.changed.iter().any(|change| {
+        change.path.ends_with("fresh") && change.entry.as_ref().is_some_and(|entry| entry.is_dir)
+    }));
+
+    let baseline =
+        tab_snapshot_for_tests(&service, &watch_target.tab_id).expect("tab baseline refreshed");
+    assert!(!baseline.keys().any(|path| path.ends_with("old.txt")));
+    assert!(baseline.keys().any(|path| path.ends_with("fresh")));
 }

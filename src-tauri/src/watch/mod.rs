@@ -163,6 +163,25 @@ impl WatchService {
 
         Ok(())
     }
+
+    /// Rechecks every currently watched tab and emits a patch only for paths
+    /// whose snapshot changed. Used as a window-focus reliability net for OS
+    /// watcher events that may have been dropped while the app was inactive.
+    pub fn reconcile(
+        &self,
+        emit_patch: Arc<dyn Fn(DirPatch) + Send + Sync>,
+        emit_error: Arc<dyn Fn(String, String) + Send + Sync>,
+    ) {
+        let tabs = {
+            let guard = self.inner.lock().expect("watch service lock");
+            let Some(runtime) = guard.as_ref() else {
+                return;
+            };
+            Arc::clone(&runtime.tabs)
+        };
+
+        reconcile_tabs(&tabs, "refresh", &emit_patch, &emit_error);
+    }
 }
 
 pub fn create_runtime(
@@ -293,6 +312,33 @@ fn process_results(
 
     for error in errors {
         error_emitter(first_error_path(&error), error.to_string());
+    }
+}
+
+fn reconcile_tabs(
+    tabs: &Arc<Mutex<HashMap<String, WatchedTab>>>,
+    reason: &str,
+    patch_emitter: &Arc<dyn Fn(DirPatch) + Send + Sync>,
+    error_emitter: &Arc<dyn Fn(String, String) + Send + Sync>,
+) {
+    let mut tabs = tabs.lock().expect("watch tabs lock");
+    for watched in tabs.values_mut() {
+        match snapshot_for_target(&watched.target) {
+            Ok(next_snapshot) => {
+                let patch = diff_entries(
+                    &watched.target.tab_id,
+                    &watched.target.path,
+                    reason,
+                    &watched.snapshot,
+                    &next_snapshot,
+                );
+                watched.snapshot = next_snapshot;
+                if !patch.changed.is_empty() || !patch.removed.is_empty() {
+                    patch_emitter(patch);
+                }
+            }
+            Err(error) => error_emitter(watched.target.path.clone(), error),
+        }
     }
 }
 

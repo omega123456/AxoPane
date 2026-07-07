@@ -132,6 +132,38 @@ pub fn run() {
                 {
                     monitor.reconcile();
                 }
+                if let Some(watch) = window.app_handle().try_state::<WatchService>() {
+                    let patch_handle = window.app_handle().clone();
+                    let error_handle = window.app_handle().clone();
+                    watch.reconcile(
+                        Arc::new(move |patch| {
+                            let _ = patch_handle.emit(
+                                ipc::events::DIR_PATCH,
+                                ipc::types::DirPatchEvent {
+                                    tab_id: patch.tab_id,
+                                    path: patch.path,
+                                    reason: patch.reason,
+                                    changed: patch
+                                        .changed
+                                        .into_iter()
+                                        .map(|change| ipc::types::DirEntryPatch {
+                                            path: change.path,
+                                            entry: change.entry,
+                                        })
+                                        .collect(),
+                                    removed: patch.removed,
+                                },
+                            );
+                        }),
+                        Arc::new(move |path, message| {
+                            log::warn!("watch reconcile error for {path}: {message}");
+                            let _ = error_handle.emit(
+                                ipc::events::WATCH_ERROR,
+                                ipc::types::WatchErrorEvent { path, message },
+                            );
+                        }),
+                    );
+                }
             }
         })
         .setup(|app| {

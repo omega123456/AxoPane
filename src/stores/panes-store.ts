@@ -199,7 +199,10 @@ function defaultState() {
   }
 }
 
-function findMatchingEntryId(entries: DirectoryEntry[], candidates: Array<string | null | undefined>) {
+function findMatchingEntryId(
+  entries: DirectoryEntry[],
+  candidates: Array<string | null | undefined>,
+) {
   for (const candidate of candidates) {
     if (candidate && entries.some((entry) => entry.id === candidate)) {
       return candidate
@@ -521,9 +524,11 @@ function hasResolvedIconPath(resolvedIconPaths: ResolvedIconPaths, path: string)
 
 function withResolvedIcons(entries: DirectoryEntry[], resolvedIconPaths: ResolvedIconPaths) {
   let changed = false
-  const nextEntries = entries.map((entry) => hydrateEntryIcon(entry, resolvedIconPaths, () => {
-    changed = true
-  }))
+  const nextEntries = entries.map((entry) =>
+    hydrateEntryIcon(entry, resolvedIconPaths, () => {
+      changed = true
+    }),
+  )
 
   return changed ? nextEntries : entries
 }
@@ -723,6 +728,158 @@ function entryMatchesPane(entry: DirectoryEntry, pane: PaneState, showHiddenFile
   return (
     pane.filterApplied === '' || entry.name.toLowerCase().includes(pane.filterApplied.toLowerCase())
   )
+}
+
+function pathsEqual(left: string, right: string) {
+  return left === right || left.toLowerCase() === right.toLowerCase()
+}
+
+function treeNodeKeyForPath(treeNodes: Record<string, TreeNodeState>, path: string) {
+  if (treeNodes[path]) {
+    return path
+  }
+
+  const normalized = path.toLowerCase()
+  return Object.keys(treeNodes).find((nodePath) => nodePath.toLowerCase() === normalized) ?? null
+}
+
+function childPathInList(children: string[], path: string) {
+  return children.find((childPath) => pathsEqual(childPath, path)) ?? null
+}
+
+function collectTreeSubtreePaths(
+  treeNodes: Record<string, TreeNodeState>,
+  path: string,
+  collected: Set<string>,
+) {
+  if (collected.has(path)) {
+    return
+  }
+
+  collected.add(path)
+  for (const childPath of treeNodes[path]?.children ?? []) {
+    collectTreeSubtreePaths(treeNodes, childPath, collected)
+  }
+}
+
+function compareTreeChildPaths(
+  treeNodes: Record<string, TreeNodeState>,
+  leftPath: string,
+  rightPath: string,
+) {
+  const leftName = treeNodes[leftPath]?.name ?? basenameFromPath(leftPath)
+  const rightName = treeNodes[rightPath]?.name ?? basenameFromPath(rightPath)
+  return leftName.localeCompare(rightName, undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  })
+}
+
+function applyTreeDirPatch(state: PanesStore, event: DirPatchEvent) {
+  const parentKey = treeNodeKeyForPath(state.treeNodes, event.path)
+  if (!parentKey) {
+    return null
+  }
+
+  const parent = state.treeNodes[parentKey]
+  if (!parent.loaded) {
+    return null
+  }
+
+  let nextTreeNodes = state.treeNodes
+  let nextChildren = parent.children
+
+  const mutableTreeNodes = () => {
+    if (nextTreeNodes === state.treeNodes) {
+      nextTreeNodes = { ...state.treeNodes }
+    }
+    return nextTreeNodes
+  }
+
+  const mutableChildren = () => {
+    if (nextChildren === parent.children) {
+      nextChildren = [...parent.children]
+    }
+    return nextChildren
+  }
+
+  const removeChild = (path: string, pruneTree = true) => {
+    const childPath = childPathInList(nextChildren, path)
+    if (childPath) {
+      const children = mutableChildren()
+      nextChildren = children.filter((candidate) => !pathsEqual(candidate, path))
+    }
+
+    if (!pruneTree) {
+      return
+    }
+
+    const nodeKey = treeNodeKeyForPath(nextTreeNodes, path)
+    if (!nodeKey) {
+      return
+    }
+
+    const node = nextTreeNodes[nodeKey]
+    if (!pathsEqual(node.parentPath ?? '', parent.path) && !childPath) {
+      return
+    }
+
+    const doomed = new Set<string>()
+    collectTreeSubtreePaths(nextTreeNodes, nodeKey, doomed)
+    const treeNodes = mutableTreeNodes()
+    for (const doomedPath of doomed) {
+      delete treeNodes[doomedPath]
+    }
+  }
+
+  for (const path of event.removed) {
+    removeChild(path)
+  }
+
+  for (const change of event.changed) {
+    const entry = change.entry
+    const keepDirectory =
+      entry?.isDir === true && (state.showHiddenFiles || (!entry.isHidden && !entry.isSystem))
+    const existingKeyBeforeRemove = treeNodeKeyForPath(nextTreeNodes, change.path)
+    const existingBeforeRemove =
+      keepDirectory && existingKeyBeforeRemove ? nextTreeNodes[existingKeyBeforeRemove] : undefined
+    removeChild(change.path, !keepDirectory)
+
+    if (!keepDirectory) {
+      continue
+    }
+
+    const existingKey = treeNodeKeyForPath(nextTreeNodes, entry.path)
+    const existing = existingKey ? nextTreeNodes[existingKey] : undefined
+    const treeNodes = mutableTreeNodes()
+    if (existingKey && existingKey !== entry.path) {
+      delete treeNodes[existingKey]
+    }
+    treeNodes[entry.path] = {
+      id: entry.path,
+      name: entry.name,
+      path: entry.path,
+      parentPath: parent.path,
+      children: existingBeforeRemove?.children ?? existing?.children ?? [],
+      expanded: existingBeforeRemove?.expanded ?? existing?.expanded ?? false,
+      loaded: existingBeforeRemove?.loaded ?? existing?.loaded ?? false,
+    }
+
+    if (!childPathInList(nextChildren, entry.path)) {
+      mutableChildren().push(entry.path)
+    }
+  }
+
+  if (nextChildren !== parent.children) {
+    const treeNodes = mutableTreeNodes()
+    const uniqueChildren = Array.from(new Set(nextChildren))
+    treeNodes[parentKey] = {
+      ...parent,
+      children: uniqueChildren.sort((left, right) => compareTreeChildPaths(treeNodes, left, right)),
+    }
+  }
+
+  return nextTreeNodes === state.treeNodes ? null : nextTreeNodes
 }
 
 export const usePanesStore = create<PanesStore>((set, get) => ({
@@ -1370,6 +1527,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       })
 
       const focusedStillPresent = entries.some((entry) => entry.id === pane.focusedEntryId)
+      const treeNodes = applyTreeDirPatch(state, event)
 
       return {
         panes: {
@@ -1377,11 +1535,10 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           [paneId]: {
             ...pane,
             entries,
-            focusedEntryId: focusedStillPresent
-              ? pane.focusedEntryId
-              : (entries[0]?.id ?? null),
+            focusedEntryId: focusedStillPresent ? pane.focusedEntryId : (entries[0]?.id ?? null),
           },
         },
+        ...(treeNodes ? { treeNodes } : {}),
       }
     }),
   setSort: async (paneId, sortKey) => {

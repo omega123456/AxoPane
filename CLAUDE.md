@@ -9,6 +9,14 @@ A **super-fast, lightweight, dual-pane cross-OS (Windows + macOS) file explorer*
 - **Stack**: Tauri v2 · Rust · React 19 · TypeScript (strict) · Tailwind CSS v4 · pnpm.
 - **Ownership split**: **Rust** owns filesystem/core logic, sorting, in-folder filtering, folder-size capability layer, copy/move queue, fs-watching, volume enumeration, persistence. **React** owns presentation + interaction state (Zustand + Tauri events + a thin typed `invoke()`; TanStack Query only for discrete request/response calls).
 
+## Refresh Model: Panes + Tree
+
+- **No polling for folder refresh.** Panes refresh through Rust-owned filesystem watches and explicit user/navigation actions only. When a pane listing finishes, `finalizeListing` arms `set_tab_watch` for that pane's active tab; Rust keeps the watch non-recursive and emits `dir://patch` with only direct-child changes.
+- **Window-focus refresh is an event-driven reconcile, not a timer.** On `WindowEvent::Focused(true)`, Rust resnapshots only the currently watched pane paths and emits a `dir://patch` with `reason: "refresh"` only when the snapshot differs. This catches OS watcher events dropped while the app was inactive without doing work at rest.
+- **The folder tree follows pane patches.** The tree must not create its own recursive watcher or polling loop. Loaded tree nodes are updated from accepted pane `dir://patch` events for the same path: directory additions are inserted into that node's child list, directory removals prune the cached subtree, and file-only patches leave the tree cache untouched.
+- **Tree fetching stays lazy.** `list_tree_children` is for first expansion/reveal (and explicit reload-style paths), not for every watcher patch. If a tree node is not loaded, leave it alone; it will fetch when expanded. If a pane skips a patch because it is stale, path-mismatched, or typing-filter state is in progress, the tree should skip it too.
+- **Keep Windows/macOS path behavior in mind.** Watch events and tree nodes may use drive roots, UNC roots, POSIX roots, or canonicalized macOS paths; compare exact paths first and only use case-insensitive matching as a compatibility fallback.
+
 ## Critical Rules for Agents
 
 - **Every change must work on BOTH Windows and macOS.** This is a cross-OS app — never make a change that fixes/works on one OS while breaking or ignoring the other. Account for platform differences (path separators, drive letters vs POSIX roots, keyboard modifiers, Windows-only shell extensions / native menus, etc.) on both sides. Platform-specific behavior must degrade gracefully (e.g. return `Unsupported` / an empty result) on the OS where it doesn't apply, and tests must stay deterministic regardless of which OS the suite runs on. When you fix something for macOS, confirm you haven't broken the Windows path, and vice versa.
@@ -66,7 +74,6 @@ Keep every test in a dedicated file under the appropriate test root (`src/tests/
 - **Do not increase Playwright screenshot pixel tolerance** (or any visual diff threshold in `playwright.config.mjs`) to make tests pass — fix the UI/regression or intentionally update baselines instead.
 - Update the `VITE_PLAYWRIGHT` mock for any new IPC command called from the UI. **Never embed fixture data or domain logic inline in `playwright-ipc-mock.ts`** — all fixture data belongs in `src/tests/playwright-fixtures/` (one file per domain) and must be wired through the registry in `src/tests/playwright-fixtures/index.ts` so it can be looked up and overridden per-test without touching the mock router.
 - After intentional visual changes, regenerate baselines: `pnpm test:e2e --update-snapshots` and commit the updated snapshot files.
-
 
 ## Commands
 

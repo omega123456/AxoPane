@@ -410,9 +410,7 @@ describe('panes-store navigation', () => {
     const listDir = vi.fn((payload: { path: string }) => ({
       path: payload.path,
       entries:
-        payload.path === 'C:\\root'
-          ? [dirAt('C:\\root\\Alpha'), dirAt('C:\\root\\Beta')]
-          : [],
+        payload.path === 'C:\\root' ? [dirAt('C:\\root\\Alpha'), dirAt('C:\\root\\Beta')] : [],
     }))
     ipc.override('list_dir', listDir)
 
@@ -490,6 +488,161 @@ describe('panes-store navigation', () => {
     ])
     // Untouched rows keep their identity (no full-listing re-map/re-sort).
     expect(after[0]).toBe(alphaRef)
+  })
+
+  it('patches loaded tree children from accepted directory patches without refetching', () => {
+    const listTreeChildren = vi.fn(treeResponder)
+    ipc.override('list_tree_children', listTreeChildren)
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: {
+          ...state.panes.left,
+          path: 'C:\\root',
+          entries: [dir('Alpha'), dir('Zulu')],
+          focusedEntryId: 'Alpha',
+        },
+      },
+      treeNodes: {
+        'C:\\root': {
+          id: 'C:\\root',
+          name: 'root',
+          path: 'C:\\root',
+          parentPath: 'C:\\',
+          children: ['C:\\root\\Alpha', 'C:\\root\\Zulu'],
+          expanded: true,
+          loaded: true,
+        },
+        'C:\\root\\Alpha': {
+          id: 'C:\\root\\Alpha',
+          name: 'Alpha',
+          path: 'C:\\root\\Alpha',
+          parentPath: 'C:\\root',
+          children: [],
+          expanded: false,
+          loaded: false,
+        },
+        'C:\\root\\Zulu': {
+          id: 'C:\\root\\Zulu',
+          name: 'Zulu',
+          path: 'C:\\root\\Zulu',
+          parentPath: 'C:\\root',
+          children: [],
+          expanded: false,
+          loaded: false,
+        },
+      },
+    }))
+
+    usePanesStore.getState().applyDirPatch({
+      tabId: useTabsStore.getState().panes.left.tabs[0].id,
+      path: 'C:\\root',
+      reason: 'watch',
+      changed: [{ path: 'C:\\root\\Bravo', entry: dir('Bravo') }],
+      removed: [],
+    })
+
+    expect(usePanesStore.getState().treeNodes['C:\\root'].children).toEqual([
+      'C:\\root\\Alpha',
+      'C:\\root\\Bravo',
+      'C:\\root\\Zulu',
+    ])
+    expect(usePanesStore.getState().treeNodes['C:\\root\\Bravo']).toMatchObject({
+      name: 'Bravo',
+      parentPath: 'C:\\root',
+      loaded: false,
+    })
+    expect(listTreeChildren).not.toHaveBeenCalled()
+  })
+
+  it('removes deleted tree children and their cached descendants from directory patches', () => {
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: {
+          ...state.panes.left,
+          path: 'C:\\root',
+          entries: [dir('Alpha')],
+          focusedEntryId: 'Alpha',
+        },
+      },
+      treeNodes: {
+        'C:\\root': {
+          id: 'C:\\root',
+          name: 'root',
+          path: 'C:\\root',
+          parentPath: 'C:\\',
+          children: ['C:\\root\\Alpha'],
+          expanded: true,
+          loaded: true,
+        },
+        'C:\\root\\Alpha': {
+          id: 'C:\\root\\Alpha',
+          name: 'Alpha',
+          path: 'C:\\root\\Alpha',
+          parentPath: 'C:\\root',
+          children: ['C:\\root\\Alpha\\Nested'],
+          expanded: true,
+          loaded: true,
+        },
+        'C:\\root\\Alpha\\Nested': {
+          id: 'C:\\root\\Alpha\\Nested',
+          name: 'Nested',
+          path: 'C:\\root\\Alpha\\Nested',
+          parentPath: 'C:\\root\\Alpha',
+          children: [],
+          expanded: false,
+          loaded: false,
+        },
+      },
+    }))
+
+    usePanesStore.getState().applyDirPatch({
+      tabId: useTabsStore.getState().panes.left.tabs[0].id,
+      path: 'C:\\root',
+      reason: 'watch',
+      changed: [],
+      removed: ['C:\\root\\Alpha'],
+    })
+
+    expect(usePanesStore.getState().treeNodes['C:\\root'].children).toEqual([])
+    expect(usePanesStore.getState().treeNodes['C:\\root\\Alpha']).toBeUndefined()
+    expect(usePanesStore.getState().treeNodes['C:\\root\\Alpha\\Nested']).toBeUndefined()
+  })
+
+  it('keeps the tree cache untouched for file-only directory patches', () => {
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: {
+          ...state.panes.left,
+          path: 'C:\\root',
+          entries: [],
+        },
+      },
+      treeNodes: {
+        'C:\\root': {
+          id: 'C:\\root',
+          name: 'root',
+          path: 'C:\\root',
+          parentPath: 'C:\\',
+          children: [],
+          expanded: true,
+          loaded: true,
+        },
+      },
+    }))
+    const before = usePanesStore.getState().treeNodes
+
+    usePanesStore.getState().applyDirPatch({
+      tabId: useTabsStore.getState().panes.left.tabs[0].id,
+      path: 'C:\\root',
+      reason: 'watch',
+      changed: [{ path: 'C:\\root\\note.txt', entry: dir('note.txt', false) }],
+      removed: [],
+    })
+
+    expect(usePanesStore.getState().treeNodes).toBe(before)
   })
 
   it('inserts a new file after the folders and among the files', async () => {
@@ -582,7 +735,10 @@ describe('panes-store navigation', () => {
       path: 'C:\\root',
       reason: 'watch',
       changed: [
-        { path: 'C:\\root\\c.txt', entry: { ...dir('c.txt', false), modifiedAt: '2024-01-09T00:00:00Z' } },
+        {
+          path: 'C:\\root\\c.txt',
+          entry: { ...dir('c.txt', false), modifiedAt: '2024-01-09T00:00:00Z' },
+        },
       ],
       removed: [],
     })
@@ -1311,8 +1467,9 @@ describe('panes-store icons', () => {
       },
     ])
     expect(
-      usePanesStore.getState().panes.left.entries.find((entry) => entry.path === 'C:\\root\\readme.txt')
-        ?.iconDataUrl,
+      usePanesStore
+        .getState()
+        .panes.left.entries.find((entry) => entry.path === 'C:\\root\\readme.txt')?.iconDataUrl,
     ).toBeNull()
 
     // Simulate the effect re-firing (e.g. because the entries array reference
@@ -1366,9 +1523,9 @@ describe('panes-store icons', () => {
     }))
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
 
-    usePanesStore.getState().applyIconStates([
-      { path: 'C:\\root\\a.exe', iconDataUrl: 'data:image/png;base64,aaa' },
-    ])
+    usePanesStore
+      .getState()
+      .applyIconStates([{ path: 'C:\\root\\a.exe', iconDataUrl: 'data:image/png;base64,aaa' }])
     const entriesAfterFirst = usePanesStore.getState().panes.left.entries
 
     // Re-sending the identical icon for `a.exe` alongside a genuinely new
@@ -1397,9 +1554,11 @@ describe('panes-store icons', () => {
 
     const panesBefore = usePanesStore.getState().panes
 
-    usePanesStore.getState().applyIconStates([
-      { path: 'C:\\root\\does-not-exist.exe', iconDataUrl: 'data:image/png;base64,zzz' },
-    ])
+    usePanesStore
+      .getState()
+      .applyIconStates([
+        { path: 'C:\\root\\does-not-exist.exe', iconDataUrl: 'data:image/png;base64,zzz' },
+      ])
 
     expect(usePanesStore.getState().panes).toBe(panesBefore)
     // Still recorded in the resolved-icon cache so this path is never re-requested.
@@ -1467,16 +1626,26 @@ describe('panes-store streamed listings', () => {
     const before = usePanesStore.getState().panes.left.entries
 
     // Stale request id.
-    usePanesStore.getState().applyListChunk([
-      { tabId, requestId: 6, path: 'C:\\root', entries: [dir('Stale')], done: true },
-    ])
+    usePanesStore
+      .getState()
+      .applyListChunk([
+        { tabId, requestId: 6, path: 'C:\\root', entries: [dir('Stale')], done: true },
+      ])
     // Wrong path.
-    usePanesStore.getState().applyListChunk([
-      { tabId, requestId: 7, path: 'C:\\other', entries: [dir('Other')], done: true },
-    ])
+    usePanesStore
+      .getState()
+      .applyListChunk([
+        { tabId, requestId: 7, path: 'C:\\other', entries: [dir('Other')], done: true },
+      ])
     // Wrong tab.
     usePanesStore.getState().applyListChunk([
-      { tabId: 'right-1', requestId: 7, path: 'C:\\root', entries: [dir('RightPane')], done: true },
+      {
+        tabId: 'right-1',
+        requestId: 7,
+        path: 'C:\\root',
+        entries: [dir('RightPane')],
+        done: true,
+      },
     ])
 
     expect(usePanesStore.getState().panes.left.entries).toBe(before)
@@ -1497,9 +1666,11 @@ describe('panes-store streamed listings', () => {
     const tabId = useTabsStore.getState().panes.left.tabs[0].id
     setTabWatch.mockClear()
 
-    usePanesStore.getState().applyListChunk([
-      { tabId, requestId: 3, path: 'C:\\root', entries: [dir('Bravo')], done: true },
-    ])
+    usePanesStore
+      .getState()
+      .applyListChunk([
+        { tabId, requestId: 3, path: 'C:\\root', entries: [dir('Bravo')], done: true },
+      ])
 
     await vi.waitFor(() => {
       expect(setTabWatch).toHaveBeenCalledWith(
