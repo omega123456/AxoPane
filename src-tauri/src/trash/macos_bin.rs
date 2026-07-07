@@ -70,11 +70,22 @@ pub fn list_trash() -> Result<Vec<TrashEntry>, String> {
         return Ok(Vec::new());
     }
 
-    let entries = fs::read_dir(&trash_dir).map_err(|error| error.to_string())?;
+    let entries =
+        fs::read_dir(&trash_dir).map_err(|error| format!("{}: {error}", trash_dir.display()))?;
     let mut result = Vec::new();
     let put_back_index = put_back_index(&trash_dir);
 
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                log::warn!(
+                    "Skipping unreadable trash entry in '{}': {error}",
+                    trash_dir.display()
+                );
+                continue;
+            }
+        };
         let path = entry.path();
         let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
             continue;
@@ -83,8 +94,27 @@ pub fn list_trash() -> Result<Vec<TrashEntry>, String> {
             continue;
         }
 
-        let metadata = entry.metadata().map_err(|error| error.to_string())?;
-        let is_dir = metadata.is_dir();
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(error) => {
+                log::warn!(
+                    "Skipping trash entry '{}': failed to read file type: {error}",
+                    path.display()
+                );
+                continue;
+            }
+        };
+        let metadata = match fs::metadata(&path) {
+            Ok(metadata) => Some(metadata),
+            Err(error) => {
+                log::warn!(
+                    "Trash entry '{}' is listed without metadata: {error}",
+                    path.display()
+                );
+                None
+            }
+        };
+        let is_dir = file_type.is_dir();
         let (original_path, deleted_at) = match manifest::lookup(&trash_dir, name) {
             Some((original_path, deleted_at)) => (Some(original_path), Some(deleted_at)),
             None => match put_back_index.get(name) {
@@ -94,7 +124,7 @@ pub fn list_trash() -> Result<Vec<TrashEntry>, String> {
                         &put_back.original_dir,
                         &put_back.original_name,
                     )),
-                    Some(metadata.ctime()),
+                    metadata.as_ref().map(|metadata| metadata.ctime()),
                 ),
                 None => (None, None),
             },
@@ -104,7 +134,9 @@ pub fn list_trash() -> Result<Vec<TrashEntry>, String> {
             id: name.to_string(),
             name: name.to_string(),
             original_path,
-            size_bytes: (!is_dir).then_some(metadata.len()),
+            size_bytes: metadata
+                .as_ref()
+                .and_then(|metadata| (!is_dir).then_some(metadata.len())),
             is_dir,
             deleted_at,
         });

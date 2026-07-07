@@ -71,6 +71,31 @@ fn list_trash_on_a_missing_directory_returns_an_empty_list() {
     assert!(entries.is_empty());
 }
 
+#[cfg(unix)]
+#[test]
+fn list_trash_keeps_opening_when_one_entry_has_no_metadata() {
+    use std::os::unix::fs::symlink;
+
+    let trash_dir = isolated_trash_dir();
+    fs::create_dir_all(trash_dir.path()).expect("trash dir");
+    fs::write(trash_dir.path().join("visible.txt"), b"payload").expect("visible entry");
+    symlink(
+        trash_dir.path().join("missing-target"),
+        trash_dir.path().join("orphan-link"),
+    )
+    .expect("broken symlink");
+
+    let mut entries = list_trash_for_tests(trash_dir.path()).expect("list trash");
+    entries.sort_by(|left, right| left.name.cmp(&right.name));
+
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].name, "orphan-link");
+    assert!(!entries[0].is_dir);
+    assert_eq!(entries[0].size_bytes, None);
+    assert_eq!(entries[1].name, "visible.txt");
+    assert_eq!(entries[1].size_bytes, Some(7));
+}
+
 #[test]
 fn restore_from_trash_moves_the_item_back_and_removes_it_from_the_listing() {
     let source_fixture = tempdir().expect("source dir");
