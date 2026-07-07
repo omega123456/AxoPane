@@ -1,4 +1,4 @@
-import { format } from 'date-fns'
+import { format, getTime, isValid, parseISO } from 'date-fns'
 
 /**
  * Date formatting for directory listings and the properties dialog.
@@ -8,9 +8,10 @@ import { format } from 'date-fns'
  * instant and supplies ordinals through the `do` token). The time portion is
  * appended only when `showTime` is set — with seconds only when `showSeconds`
  * is also set — so it composes with any date format rather than multiplying the
- * catalogue. The optional relative mode is purely diff-based (timezone
- * independent): it replaces the absolute value with phrases like `15 minutes
- * ago` up to a 2-day cutoff, after which it falls back to the chosen format.
+ * catalogue. The optional relative mode replaces the absolute value with
+ * phrases like `15 minutes ago`, keeps `1/2/3 days ago` for the first few day
+ * buckets, then switches to weekday labels like `on Tuesday` for older items
+ * from the past week before falling back to the chosen absolute format.
  */
 
 export const DATE_FORMATS = ['ymd', 'dmy', 'mdy', 'med', 'dme', 'lmd', 'dml', 'dly'] as const
@@ -114,8 +115,9 @@ function cachedAbsoluteFormat(value: string, pattern: string, compute: () => For
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
+const RELATIVE_DAY_PRIORITY_CUTOFF = 4 * DAY
 /** Beyond this age the relative phrasing is dropped for the absolute format. */
-const RELATIVE_CUTOFF = 2 * DAY
+const RELATIVE_CUTOFF = 7 * DAY
 
 function absolutePattern(format: DateFormat, showTime: boolean, showSeconds: boolean): string {
   const datePattern = datePatterns[format]
@@ -125,7 +127,14 @@ function absolutePattern(format: DateFormat, showTime: boolean, showSeconds: boo
   return `${datePattern} ${showSeconds ? 'HH:mm:ss' : 'HH:mm'}`
 }
 
-function formatRelative(ageMs: number): FormattedDate | null {
+function relativeWeekdayPattern(showTime: boolean, showSeconds: boolean): string {
+  if (!showTime) {
+    return "'on' EEEE"
+  }
+  return `'on' EEEE ${showSeconds ? 'HH:mm:ss' : 'HH:mm'}`
+}
+
+function formatRelative(value: Date, ageMs: number, showTime: boolean, showSeconds: boolean): FormattedDate | null {
   // Clamp clock-skewed "future" timestamps to the present.
   const age = ageMs < 0 ? 0 : ageMs
   if (age >= RELATIVE_CUTOFF) {
@@ -142,8 +151,11 @@ function formatRelative(ageMs: number): FormattedDate | null {
     const hours = Math.floor(age / HOUR)
     return { text: `${hours} hour${hours === 1 ? '' : 's'} ago`, tone: 'today' }
   }
-  const days = Math.floor(age / DAY)
-  return { text: `${days} day${days === 1 ? '' : 's'} ago`, tone: 'yesterday' }
+  if (age < RELATIVE_DAY_PRIORITY_CUTOFF) {
+    const days = Math.floor(age / DAY)
+    return { text: `${days} day${days === 1 ? '' : 's'} ago`, tone: 'yesterday' }
+  }
+  return { text: format(value, relativeWeekdayPattern(showTime, showSeconds)), tone: 'default' }
 }
 
 /**
@@ -159,12 +171,18 @@ export function formatEntryDate(
   if (!value) {
     return EMPTY
   }
-  const ms = Date.parse(value)
-  if (Number.isNaN(ms)) {
+  const date = parseISO(value)
+  if (!isValid(date)) {
     return EMPTY
   }
+  const ms = getTime(date)
   if (options.relative) {
-    const phrase = formatRelative((options.now ?? Date.now()) - ms)
+    const phrase = formatRelative(
+      date,
+      (options.now ?? Date.now()) - ms,
+      options.showTime,
+      options.showSeconds,
+    )
     if (phrase) {
       // Relative phrases are a function of "now", which advances outside of
       // any cache key we could construct — never cache these.
@@ -173,7 +191,7 @@ export function formatEntryDate(
   }
   const pattern = absolutePattern(options.format, options.showTime, options.showSeconds)
   return cachedAbsoluteFormat(value, pattern, () => ({
-    text: format(new Date(ms), pattern),
+    text: format(date, pattern),
     tone: 'default',
   }))
 }

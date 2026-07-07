@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
+import { parseISO } from 'date-fns'
 import { useState } from 'react'
 import { afterEach, beforeEach, vi } from 'vitest'
 import { FileRow, type FileRowActions } from '@/components/pane/FileRow'
@@ -74,7 +75,7 @@ describe('FileRow date column', () => {
 
   it('colour-codes a recent modified date when relative dates are enabled', () => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-06-30T12:00:00Z'))
+    vi.setSystemTime(parseISO('2026-06-30T12:00:00Z'))
     useConfigStore.setState({ dateFormat: 'ymd', relativeDates: true })
 
     render(
@@ -89,6 +90,29 @@ describe('FileRow date column', () => {
 
     const cell = screen.getByText('2 hours ago')
     expect(cell).toHaveClass('text-accent-blue-light')
+  })
+
+  it('shows a weekday label for modified dates from earlier in the past week', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(parseISO('2026-06-30T12:00:00Z'))
+    useConfigStore.setState({
+      dateFormat: 'ymd',
+      relativeDates: true,
+      showTime: true,
+      showSeconds: false,
+    })
+
+    render(
+      <FileRow
+        entry={makeEntry({ modifiedAt: '2026-06-26T10:00:00Z' })}
+        isActivePane
+        isFocused={false}
+        isSelected={false}
+        actions={makeActions()}
+      />,
+    )
+
+    expect(screen.getByText('on Friday 10:00')).toBeInTheDocument()
   })
 })
 

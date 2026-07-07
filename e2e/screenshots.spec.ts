@@ -110,6 +110,7 @@ for (const mode of ['light', 'dark'] as const) {
     await gotoScenario(page, screenshotScenarios.relativeDates[mode])
     await expect(page.getByText('15 minutes ago').first()).toBeVisible()
     await expect(page.getByText('1 day ago').first()).toBeVisible()
+    await expect(page.getByText('on Friday').first()).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`relative-dates-${mode}.png`)
   })
 

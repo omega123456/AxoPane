@@ -1,3 +1,13 @@
+import {
+  addMilliseconds,
+  addMinutes,
+  getTime,
+  parseISO,
+  subDays,
+  subHours,
+  subMinutes,
+  subSeconds,
+} from 'date-fns'
 import { describe, expect, it } from 'vitest'
 import {
   DATE_FORMATS,
@@ -103,7 +113,8 @@ describe('date-format', () => {
   })
 
   describe('relative mode', () => {
-    const now = Date.parse(SAMPLE)
+    const nowDate = parseISO(SAMPLE)
+    const now = getTime(nowDate)
     const rel = (value: string) =>
       formatEntryDate(value, {
         format: 'dmy',
@@ -114,48 +125,93 @@ describe('date-format', () => {
       })
 
     it('shows "just now" for sub-minute ages with the recent tone', () => {
-      expect(rel(new Date(now - 30_000).toISOString())).toEqual({
+      expect(rel(subSeconds(nowDate, 30).toISOString())).toEqual({
         text: 'just now',
         tone: 'recent',
       })
     })
 
     it('pluralises minutes and keeps the recent tone under an hour', () => {
-      expect(rel(new Date(now - 60_000).toISOString())).toEqual({
+      expect(rel(subMinutes(nowDate, 1).toISOString())).toEqual({
         text: '1 minute ago',
         tone: 'recent',
       })
-      expect(rel(new Date(now - 15 * 60_000).toISOString())).toEqual({
+      expect(rel(subMinutes(nowDate, 15).toISOString())).toEqual({
         text: '15 minutes ago',
         tone: 'recent',
       })
     })
 
     it('uses the today tone for hour-scale ages', () => {
-      expect(rel(new Date(now - 60 * 60_000).toISOString())).toEqual({
+      expect(rel(subHours(nowDate, 1).toISOString())).toEqual({
         text: '1 hour ago',
         tone: 'today',
       })
-      expect(rel(new Date(now - 2 * 60 * 60_000).toISOString())).toEqual({
+      expect(rel(subHours(nowDate, 2).toISOString())).toEqual({
         text: '2 hours ago',
         tone: 'today',
       })
     })
 
-    it('uses the yesterday tone for day-scale ages within the cutoff', () => {
-      expect(rel(new Date(now - 25 * 60 * 60_000).toISOString())).toEqual({
+    it('uses the yesterday tone for 1-3 day ages before weekday labels take over', () => {
+      expect(rel(subHours(nowDate, 25).toISOString())).toEqual({
         text: '1 day ago',
+        tone: 'yesterday',
+      })
+      expect(rel(subDays(nowDate, 2).toISOString())).toEqual({
+        text: '2 days ago',
+        tone: 'yesterday',
+      })
+      expect(rel(subDays(nowDate, 3).toISOString())).toEqual({
+        text: '3 days ago',
         tone: 'yesterday',
       })
     })
 
-    it('falls back to the absolute format (honouring showTime) at the cutoff', () => {
-      const atCutoff = new Date(now - 2 * 24 * 60 * 60_000).toISOString()
-      expect(rel(atCutoff)).toEqual({ text: '28/06/2026 14:05:09', tone: 'default' })
+    it('shows weekday labels for older items from the past week and keeps the time when enabled', () => {
+      expect(rel(subDays(nowDate, 4).toISOString())).toEqual({
+        text: 'on Friday 14:05:09',
+        tone: 'default',
+      })
+      expect(rel(subDays(nowDate, 6).toISOString())).toEqual({
+        text: 'on Wednesday 14:05:09',
+        tone: 'default',
+      })
+    })
+
+    it('falls back to the absolute format (honouring showTime) at the 7-day cutoff', () => {
+      const atCutoff = subDays(nowDate, 7).toISOString()
+      expect(rel(atCutoff)).toEqual({ text: '23/06/2026 14:05:09', tone: 'default' })
+    })
+
+    it('keeps the 3-day label ahead of weekday formatting near the boundary', () => {
+      const justUnderFourDays = addMilliseconds(subDays(nowDate, 4), 1).toISOString()
+      expect(rel(justUnderFourDays)).toEqual({
+        text: '3 days ago',
+        tone: 'yesterday',
+      })
+    })
+
+    it('uses weekday labels again immediately after the 3-day priority window', () => {
+      const atFourDays = subDays(nowDate, 4).toISOString()
+      expect(rel(atFourDays)).toEqual({ text: 'on Friday 14:05:09', tone: 'default' })
+    })
+
+    it('omits the time from weekday labels when showTime is disabled', () => {
+      const value = subDays(nowDate, 4).toISOString()
+      expect(
+        formatEntryDate(value, {
+          format: 'dmy',
+          showTime: false,
+          showSeconds: false,
+          relative: true,
+          now,
+        }),
+      ).toEqual({ text: 'on Friday', tone: 'default' })
     })
 
     it('clamps clock-skewed future timestamps to "just now"', () => {
-      expect(rel(new Date(now + 60_000).toISOString())).toEqual({
+      expect(rel(addMinutes(nowDate, 1).toISOString())).toEqual({
         text: 'just now',
         tone: 'recent',
       })
@@ -200,8 +256,9 @@ describe('date-format', () => {
     })
 
     it('bypasses the cache for relative-mode results within the cutoff', () => {
-      const now = Date.parse(SAMPLE)
-      const value = new Date(now - 60_000).toISOString()
+      const nowDate = parseISO(SAMPLE)
+      const now = getTime(nowDate)
+      const value = subMinutes(nowDate, 1).toISOString()
       const options = {
         format: 'ymd' as const,
         showTime: false,
@@ -221,8 +278,9 @@ describe('date-format', () => {
     })
 
     it('falls through to (and reuses) the cached absolute entry once relative mode is past the cutoff', () => {
-      const now = Date.parse(SAMPLE)
-      const value = new Date(now - 3 * 24 * 60 * 60_000).toISOString()
+      const nowDate = parseISO(SAMPLE)
+      const now = getTime(nowDate)
+      const value = subDays(nowDate, 8).toISOString()
       const relativeOptions = {
         format: 'ymd' as const,
         showTime: false,
