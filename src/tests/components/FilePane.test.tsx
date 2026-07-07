@@ -253,9 +253,28 @@ describe('FilePane state rendering', () => {
     render(<FilePane paneId="left" />)
 
     const scroller = screen.getByTestId('file-pane-scroll-left')
-    expect(scroller).toHaveClass('overflow-x-hidden', 'overflow-y-auto', 'overscroll-contain')
+    expect(scroller).toHaveClass('overflow-x-auto', 'overflow-y-auto', 'overscroll-contain')
     const row = within(screen.getByLabelText('Left pane')).getByRole('row', { name: /Alpha/ })
     expect(row.parentElement).toHaveClass('inset-x-0')
+  })
+
+  it('keeps the header aligned with the pane body while horizontally scrolling', () => {
+    seedPane({ entries: [entry('Alpha')], focusedEntryId: 'Alpha' })
+
+    render(<FilePane paneId="left" />)
+
+    const header = screen.getByTestId('file-pane-header-scroll-left')
+    const scroller = screen.getByTestId('file-pane-scroll-left')
+
+    Object.defineProperty(header, 'scrollLeft', {
+      configurable: true,
+      writable: true,
+      value: 0,
+    })
+
+    fireEvent.scroll(scroller, { target: { scrollTop: 0, scrollLeft: 128 } })
+
+    expect(header.scrollLeft).toBe(128)
   })
 
   it('renders permission denied for an access error', () => {

@@ -339,6 +339,66 @@ mod watch_src {
         }
 
         #[test]
+        fn included_watch_service_reconcile_emits_refresh_patches() {
+            let fixture = tempdir().expect("temp dir");
+            let root = fixture.path();
+            let old_path = root.join("old.txt");
+            std::fs::write(&old_path, b"old").expect("old");
+
+            let target = WatchTarget {
+                tab_id: "left-1".to_string(),
+                path: root.to_string_lossy().into_owned(),
+                sort_key: SortKey::Name,
+                sort_direction: SortDirection::Asc,
+                filter: String::new(),
+                show_hidden: true,
+                include_item_counts: true,
+            };
+            let service = WatchService::default();
+
+            service
+                .set_tab_watch(
+                    Some(target.clone()),
+                    None,
+                    Arc::new(|_| {}),
+                    Arc::new(|_, _| {}),
+                )
+                .expect("set watch");
+
+            let patches = Arc::new(Mutex::new(Vec::<DirPatch>::new()));
+            let errors = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+
+            std::fs::remove_file(&old_path).expect("remove old");
+            let fresh_path = root.join("fresh");
+            std::fs::create_dir(&fresh_path).expect("fresh dir");
+
+            service.reconcile(
+                Arc::new({
+                    let patches = Arc::clone(&patches);
+                    move |patch| patches.lock().expect("patches lock").push(patch)
+                }),
+                Arc::new({
+                    let errors = Arc::clone(&errors);
+                    move |path, error| errors.lock().expect("errors lock").push((path, error))
+                }),
+            );
+
+            assert!(errors.lock().expect("errors lock").is_empty());
+
+            let patches = patches.lock().expect("patches lock");
+            let patch = patches
+                .iter()
+                .find(|patch| patch.path == target.path)
+                .expect("refresh patch for watched path");
+            assert_eq!(patch.reason, "refresh");
+            assert!(patch.removed.iter().any(|path| path.ends_with("old.txt")));
+            assert!(patch.changed.iter().any(|change| {
+                change.path.ends_with("fresh")
+                    && change.entry.as_ref().is_some_and(|entry| entry.is_dir)
+            }));
+        }
+
+        #[test]
         fn add_and_remove_watch_updates_reference_counts() {
             let fixture = tempdir().expect("temp dir");
             let root = fixture.path();

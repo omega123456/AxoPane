@@ -9,10 +9,10 @@ type AppFrameProps = {
 
 export function AppFrame({ children, commandBar, statusBar, overlay }: AppFrameProps) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-light-window dark:bg-dark-window">
         {commandBar}
-        <div className="flex min-h-0 flex-1">{children}</div>
+        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">{children}</div>
         {statusBar}
         {overlay}
       </section>

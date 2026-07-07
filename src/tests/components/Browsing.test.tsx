@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { DetailsPanel } from '@/components/details/DetailsPanel'
-import { HeaderRow, columnFlexStyle } from '@/components/pane/HeaderRow'
+import { HeaderRow, columnFlexStyle, paneContentWidth } from '@/components/pane/HeaderRow'
 import { SizeValue } from '@/components/pane/SizeValue'
 import { TreeNode, type TreeRowActions } from '@/components/tree/TreeNode'
 import { TRASH_PATH } from '@/lib/trash'
@@ -161,6 +161,15 @@ describe('HeaderRow', () => {
       flex: '0 0 184px',
       width: '184px',
     })
+    expect(
+      paneContentWidth(
+        [
+          { key: 'name', visible: true },
+          { key: 'size', visible: true },
+        ],
+        { name: 384, size: 96 },
+      ),
+    ).toBe(516)
   })
 
   it('resizes a column by dragging its header divider', () => {

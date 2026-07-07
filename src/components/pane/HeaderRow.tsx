@@ -7,7 +7,10 @@ import { ChevronDownIcon } from '@/components/icons'
 import { isTrashPath } from '@/lib/trash'
 import { defaultColumnWidths, useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
-import type { ColumnKey } from '@/lib/types/ipc'
+import type { ColumnConfig, ColumnKey } from '@/lib/types/ipc'
+
+const paneColumnGapPx = 12
+const paneRowHorizontalPaddingPx = 24
 
 type HeaderRowProps = {
   pane: PaneState
@@ -23,6 +26,7 @@ export function HeaderRow({ pane }: HeaderRowProps) {
     () => configuredColumns.filter((column) => column.visible),
     [configuredColumns],
   )
+  const contentWidth = paneContentWidth(columns, columnWidths)
   const isTrash = isTrashPath(pane.path)
 
   function startResize(event: ReactPointerEvent<HTMLDivElement>, key: ColumnKey) {
@@ -56,7 +60,10 @@ export function HeaderRow({ pane }: HeaderRowProps) {
   }
 
   return (
-    <div className="flex h-headrow items-center gap-3 border-b border-light-border bg-light-header px-3 text-uxs uppercase tracking-wide text-light-text-muted dark:border-dark-border dark:bg-dark-header dark:text-dark-text-muted">
+    <div
+      style={{ minWidth: `${contentWidth}px` }}
+      className="flex h-headrow w-full items-center gap-3 border-b border-light-border bg-light-header px-3 text-uxs uppercase tracking-wide text-light-text-muted dark:border-dark-border dark:bg-dark-header dark:text-dark-text-muted"
+    >
       {columns.map((column) => {
         const active = pane.sortKey === column.key
         const definition = columnDefinitions[column.key]
@@ -122,4 +129,16 @@ export function columnFlexStyle(
 ): CSSProperties {
   const width = widths[key] ?? defaultColumnWidths[key]
   return { flex: `0 0 ${width}px`, width: `${width}px` }
+}
+
+export function paneContentWidth(
+  columns: ColumnConfig[],
+  widths: Partial<Record<ColumnKey, number>>,
+) {
+  const columnWidth = columns.reduce(
+    (total, column) => total + (widths[column.key] ?? defaultColumnWidths[column.key]),
+    0,
+  )
+  const gapWidth = Math.max(0, columns.length - 1) * paneColumnGapPx
+  return paneRowHorizontalPaddingPx + columnWidth + gapWidth
 }

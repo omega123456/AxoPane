@@ -6,7 +6,7 @@ import {
 } from '@/components/menus/menu-definitions'
 import { BreadcrumbBar } from './BreadcrumbBar'
 import { FileRow, type FileRowActions } from './FileRow'
-import { HeaderRow } from './HeaderRow'
+import { HeaderRow, paneContentWidth } from './HeaderRow'
 import { ParentRow } from './ParentRow'
 import { TabBar } from './TabBar'
 import { executeCommand } from '@/lib/commands'
@@ -22,6 +22,7 @@ import { useElementVirtualizer } from '@/lib/use-element-virtualizer'
 import { renameEntryInPane } from '@/lib/file-actions'
 import { log } from '@/lib/app-log-commands'
 import { useInlineRenameStore } from '@/stores/inline-rename-store'
+import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { activeConflict, useQueueStore } from '@/stores/queue-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
@@ -99,6 +100,8 @@ export function FilePane({ paneId }: FilePaneProps) {
   const requestVisibleIcons = usePanesStore((state) => state.requestVisibleIcons)
   const warmVisibleNativeMenus = useNativeMenuWarmStore((state) => state.warmVisibleNativeMenus)
   const setScrollPosition = usePanesStore((state) => state.setScrollPosition)
+  const configuredColumns = useLayoutStore((state) => state.columns)
+  const columnWidths = useLayoutStore((state) => state.columnWidths)
   const selection = useSelectionStore((state) => state.selections[paneId])
   const keymap = useKeymapStore((state) => state.bindings)
   const setSelection = useSelectionStore((state) => state.setSelection)
@@ -118,6 +121,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   const setRenameError = useInlineRenameStore((state) => state.setError)
   const setRenameValue = useInlineRenameStore((state) => state.setValue)
   const paneRef = useRef<HTMLElement | null>(null)
+  const headerScrollRef = useRef<HTMLDivElement | null>(null)
   const parentRef = useRef<HTMLDivElement | null>(null)
   const scrollPathRef = useRef(pane.path)
   // Tracks the live scrollTop for the currently-mounted path without writing
@@ -164,6 +168,14 @@ export function FilePane({ paneId }: FilePaneProps) {
   const hasParent = getParentPath(pane.path) !== null
   const parentOffset = hasParent ? 1 : 0
   const rowCount = pane.entries.length + parentOffset
+  const visibleColumns = useMemo(
+    () => configuredColumns.filter((column) => column.visible),
+    [configuredColumns],
+  )
+  const contentWidth = useMemo(
+    () => paneContentWidth(visibleColumns, columnWidths),
+    [columnWidths, visibleColumns],
+  )
   const cutEntryPaths = useMemo(
     () =>
       clipboardMode === 'move'
@@ -744,7 +756,7 @@ export function FilePane({ paneId }: FilePaneProps) {
       ref={paneRef}
       data-pane-id={paneId}
       aria-label={pane.title}
-      className={`relative flex h-full min-h-0 flex-col bg-light-surface dark:bg-dark-surface ${
+      className={`relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-light-surface dark:bg-dark-surface ${
         isActivePane ? 'outline outline-1 outline-accent-blue-border' : ''
       }`}
       onMouseDown={() => setActivePane(paneId)}
@@ -835,9 +847,15 @@ export function FilePane({ paneId }: FilePaneProps) {
       <TabBar paneId={paneId} title={pane.title} currentPath={pane.path} isActive={isActivePane} />
       <EverythingBanner />
       <BreadcrumbBar pane={pane} isActive={isActivePane} />
-      <HeaderRow pane={pane} />
+      <div
+        ref={headerScrollRef}
+        data-testid={`file-pane-header-scroll-${paneId}`}
+        className="overflow-hidden"
+      >
+        <HeaderRow pane={pane} />
+      </div>
       {showSkeleton ? (
-        <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint">
+        <div className="min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint">
           <LoadingSkeleton />
         </div>
       ) : permissionDenied ? (
@@ -864,12 +882,15 @@ export function FilePane({ paneId }: FilePaneProps) {
         <div
           ref={parentRef}
           data-testid={`file-pane-scroll-${paneId}`}
-          className={`min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint ${
+          className={`min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint ${
             isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-accent-blue-border' : ''
           }`}
           onMouseDown={handleContainerMouseDown}
           onScroll={(event) => {
             liveScrollTopRef.current = event.currentTarget.scrollTop
+            if (headerScrollRef.current) {
+              headerScrollRef.current.scrollLeft = event.currentTarget.scrollLeft
+            }
           }}
           onContextMenu={(event) => showMenu(event)}
           onDragOver={handlePaneDragOver}
@@ -883,7 +904,10 @@ export function FilePane({ paneId }: FilePaneProps) {
             static utility/@theme token can express. Every design-system value
             (color/spacing/typography) elsewhere stays a pure Tailwind utility.
           */}
-          <div style={{ height: `${totalHeight}px`, position: 'relative' }} className="min-h-full">
+          <div
+            style={{ height: `${totalHeight}px`, minWidth: `${contentWidth}px`, position: 'relative' }}
+            className="min-h-full w-full"
+          >
             {itemsToRender.map((virtualRow) => {
               const rowStyle = {
                 top: `${virtualRow.start}px`,

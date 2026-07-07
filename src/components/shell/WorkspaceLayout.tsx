@@ -52,7 +52,7 @@ export function WorkspaceLayout() {
   }
 
   return (
-    <div className="flex min-h-0 w-full flex-1">
+    <div className="flex min-h-0 min-w-0 w-full flex-1 overflow-hidden">
       <FolderTree />
       <ResizeHandle
         ariaLabel="Resize folder tree"
@@ -68,7 +68,7 @@ export function WorkspaceLayout() {
         onCommit={commit}
       />
       {defaultPaneMode === 'single' ? (
-        <div className="min-h-0 flex-1 overflow-hidden">
+        <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
           <FilePane paneId={activePaneId} />
         </div>
       ) : (
@@ -77,7 +77,7 @@ export function WorkspaceLayout() {
           // A grid (not flexbox) so the column split rounds identically to the
           // fixed design; `divide-x` paints the divider line between the panes.
           style={{ gridTemplateColumns: `minmax(0, ${paneSplit}fr) minmax(0, ${1 - paneSplit}fr)` }}
-          className="relative grid min-h-0 flex-1 grid-rows-1 divide-x divide-light-border dark:divide-dark-border"
+          className="relative grid min-h-0 min-w-0 flex-1 overflow-hidden grid-rows-1 divide-x divide-light-border dark:divide-dark-border"
         >
           <FilePane paneId="left" />
           <FilePane paneId="right" />

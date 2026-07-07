@@ -362,11 +362,21 @@ for (const mode of ['light', 'dark'] as const) {
     await page.setViewportSize({ width: 520, height: 720 })
     await gotoScenario(page, screenshotScenarios.rowContextMenu[mode])
     const row = page.getByRole('row', { name: /Documents/ }).first()
-    const rowBox = await row.boundingBox()
+    const scroller = page.getByTestId('file-pane-scroll-left')
+    const [rowBox, scrollerBox] = await Promise.all([row.boundingBox(), scroller.boundingBox()])
     expect(rowBox).not.toBeNull()
-    await page.mouse.click((rowBox?.x ?? 0) + (rowBox?.width ?? 0) - 4, (rowBox?.y ?? 0) + 12, {
-      button: 'right',
-    })
+    expect(scrollerBox).not.toBeNull()
+
+    // With pane-level horizontal overflow enabled, the row can be wider than
+    // the visible pane. Click near the visible trailing edge of the pane's
+    // scroll viewport rather than the row's full scroll width so the pointer
+    // still lands on the rendered row while keeping the menu close enough to
+    // the viewport edge to exercise the submenu left-fallback placement.
+    const visibleRightEdge = Math.min(
+      (rowBox?.x ?? 0) + (rowBox?.width ?? 0),
+      (scrollerBox?.x ?? 0) + (scrollerBox?.width ?? 0),
+    )
+    await page.mouse.click(visibleRightEdge - 4, (rowBox?.y ?? 0) + 12, { button: 'right' })
 
     const menu = page.getByRole('menu', { name: 'Documents' })
     await expect(menu).toBeVisible()
