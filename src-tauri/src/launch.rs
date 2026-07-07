@@ -41,6 +41,14 @@ pub fn open_path(path: &Path) -> Result<(), OpenPathError> {
     platform::open_path(&resolved)
 }
 
+/// Matches Explorer-style launches: scripts and associated apps start in the
+/// clicked item's containing folder, not the file explorer process directory.
+pub fn launch_directory(path: &Path) -> Option<PathBuf> {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+}
+
 #[cfg(feature = "test-utils")]
 mod platform {
     use std::path::Path;
@@ -71,6 +79,10 @@ mod platform {
     pub fn open_path(path: &Path) -> Result<(), OpenPathError> {
         let operation = wide(OsStr::new("open"));
         let target = wide(path.as_os_str());
+        let directory = super::launch_directory(path).map(|value| wide(value.as_os_str()));
+        let directory_ptr = directory
+            .as_ref()
+            .map_or(PCWSTR::null(), |value| PCWSTR(value.as_ptr()));
 
         let result = unsafe {
             ShellExecuteW(
@@ -78,7 +90,7 @@ mod platform {
                 PCWSTR(operation.as_ptr()),
                 PCWSTR(target.as_ptr()),
                 PCWSTR::null(),
-                PCWSTR::null(),
+                directory_ptr,
                 SW_SHOWNORMAL,
             )
         };

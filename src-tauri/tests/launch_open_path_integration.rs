@@ -1,6 +1,8 @@
 use std::fs;
 
-use file_explorer_lib::launch::{open_path, OpenPathError};
+use std::path::Path;
+
+use file_explorer_lib::launch::{launch_directory, open_path, OpenPathError};
 use tempfile::tempdir;
 
 #[cfg(feature = "test-utils")]
@@ -32,4 +34,17 @@ fn open_path_reports_io_errors_for_missing_paths() {
         }
         other => panic!("expected io error, got {other:?}"),
     }
+}
+
+#[test]
+fn launch_directory_returns_the_paths_parent_folder() {
+    let fixture = tempdir().expect("temp dir");
+    let path = fixture.path().join("links.bat");
+
+    assert_eq!(launch_directory(&path).as_deref(), Some(fixture.path()));
+}
+
+#[test]
+fn launch_directory_ignores_bare_relative_file_names() {
+    assert_eq!(launch_directory(Path::new("links.bat")), None);
 }
