@@ -60,21 +60,25 @@ export function buildTreeFlatModel(
   volumes: VolumeInfo[],
 ): TreeFlatModel {
   const groups = groupVolumesByCategory(volumes)
+  const volumeRootKeys = new Set(volumes.map((volume) => volume.mountRoot.toLowerCase()))
   const rows: TreeFlatRow[] = []
   const indexByPath = new Map<string, number>()
 
   for (const group of groups) {
     rows.push({ kind: 'header', label: group.label, renderKey: `header-${group.category}` })
     for (const volume of group.volumes) {
-      for (const row of flattenVisibleTree(treeNodes, volume.mountRoot)) {
+      const nestedVolumeRoots = new Set(volumeRootKeys)
+      nestedVolumeRoots.delete(volume.mountRoot.toLowerCase())
+
+      for (const row of flattenVisibleTree(treeNodes, volume.mountRoot, nestedVolumeRoots)) {
         indexByPath.set(row.path, rows.length)
         rows.push({
           kind: 'node',
           path: row.path,
           depth: row.depth,
           volume: row.depth === 0 ? volume : undefined,
-          // A macOS mount can be visible both as /Volumes/<name> and as a
-          // volume root, so path-only React keys are not unique.
+          // Include the volume identity so keys stay stable even when two
+          // platform roots use equivalent-looking path text.
           renderKey: `node-${group.category}-${volume.mountRoot}-${row.path}-${row.depth}`,
         })
       }

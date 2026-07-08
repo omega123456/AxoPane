@@ -27,7 +27,12 @@ import { activeTab, fromSessionPane, toSessionPane, useTabsStore } from '@/store
 import { useConfigStore } from '@/stores/config-store'
 import { useLayoutStore } from '@/stores/layout-store'
 import { log } from '@/lib/app-log-commands'
-import { formatVolumeTreeName, isPathInsideVolume, sortVolumesForTree } from '@/lib/volumes'
+import {
+  findVolumeForPath,
+  formatVolumeTreeName,
+  isPathInsideVolume,
+  sortVolumesForTree,
+} from '@/lib/volumes'
 import { useSelectionStore } from '@/stores/selection-store'
 
 type PaneId = 'left' | 'right'
@@ -624,6 +629,14 @@ function buildRootTreeState(
   }
 
   return { treeRoots, treeNodes: nextTreeNodes }
+}
+
+function treeRootForPath(treeRoots: string[], path: string) {
+  return (
+    treeRoots.find((root) => root === path) ??
+    treeRoots.find((root) => root.toLowerCase() === path.toLowerCase()) ??
+    null
+  )
 }
 
 const sessionPersistDelayMs = 200
@@ -1878,8 +1891,12 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
             id: path,
             name: currentNode?.name ?? basenameFromPath(path),
             path,
-            parentPath: currentNode?.parentPath ?? getParentPath(path),
-            children: directoryChildren.map((entry) => entry.path),
+            parentPath: treeRootForPath(state.treeRoots, path)
+              ? null
+              : (currentNode?.parentPath ?? getParentPath(path)),
+            children: directoryChildren.map(
+              (entry) => treeRootForPath(state.treeRoots, entry.path) ?? entry.path,
+            ),
             // Newly-seen volume roots should open on first hydration just like
             // the initial roots. Once a root has loaded, preserve the user's
             // explicit expanded/collapsed choice on later refreshes.
@@ -1895,16 +1912,22 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           // navigated straight to it) and so was named from its raw path.
           ...Object.fromEntries(
             directoryChildren.map((entry) => {
-              const existing = state.treeNodes[entry.path]
+              const volumeRoot = treeRootForPath(state.treeRoots, entry.path)
+              const nodePath = volumeRoot ?? entry.path
+              const existing = state.treeNodes[nodePath] ?? state.treeNodes[entry.path]
               return [
-                entry.path,
+                nodePath,
                 existing
-                  ? { ...existing, name: entry.name, parentPath: path }
+                  ? {
+                      ...existing,
+                      name: volumeRoot ? existing.name : entry.name,
+                      parentPath: volumeRoot ? null : path,
+                    }
                   : {
-                      id: entry.path,
+                      id: nodePath,
                       name: entry.name,
-                      path: entry.path,
-                      parentPath: path,
+                      path: nodePath,
+                      parentPath: volumeRoot ? null : path,
                       children: [],
                       expanded: false,
                       loaded: false,
@@ -1922,7 +1945,9 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
             id: path,
             name: currentNode?.name ?? basenameFromPath(path),
             path,
-            parentPath: currentNode?.parentPath ?? getParentPath(path),
+            parentPath: treeRootForPath(state.treeRoots, path)
+              ? null
+              : (currentNode?.parentPath ?? getParentPath(path)),
             children: [],
             expanded:
               currentNode == null
@@ -1941,7 +1966,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
 
     // Only reveal paths that live under one of the tree roots (volumes); paths
     // outside any volume have no node to expand to.
-    const root = get().treeRoots.find((candidate) => isPathInsideVolume(path, candidate))
+    const root = findVolumeForPath(path, get().volumes)?.mountRoot ?? null
     if (!root) {
       return
     }

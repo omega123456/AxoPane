@@ -81,7 +81,12 @@ describe('buildTreeFlatModel', () => {
     const volumes = [volume({ mountRoot: 'C:\\' })]
     const treeNodes: Record<string, TreeNodeState> = {
       'C:\\': node({ path: 'C:\\', children: ['C:\\aa'], expanded: false }),
-      'C:\\aa': node({ path: 'C:\\aa', parentPath: 'C:\\', children: ['C:\\aa\\bb'], expanded: true }),
+      'C:\\aa': node({
+        path: 'C:\\aa',
+        parentPath: 'C:\\',
+        children: ['C:\\aa\\bb'],
+        expanded: true,
+      }),
       'C:\\aa\\bb': node({ path: 'C:\\aa\\bb', parentPath: 'C:\\aa' }),
     }
 
@@ -100,7 +105,7 @@ describe('buildTreeFlatModel', () => {
     expect(rowShapes(rows)).toEqual([{ kind: 'header', label: 'Drives' }, { kind: 'trash' }])
   })
 
-  it('uses distinct render keys when a macOS mount also appears under /Volumes', () => {
+  it('renders a macOS mount only as its own volume root, not under /Volumes', () => {
     const volumes = [
       volume({ mountRoot: '/', label: 'Macintosh HD' }),
       volume({ mountRoot: '/Volumes/Untitled', label: 'Untitled', isRemovable: true }),
@@ -118,15 +123,59 @@ describe('buildTreeFlatModel', () => {
     }
 
     const { rows } = buildTreeFlatModel(treeNodes, volumes)
-    const renderKeys = rows.map((row) => row.renderKey)
     const untitledRows = rows.filter(
       (row): row is Extract<TreeFlatRow, { kind: 'node' }> =>
         row.kind === 'node' && row.path === '/Volumes/Untitled',
     )
+    const nodeRows = rows
+      .filter((row): row is Extract<TreeFlatRow, { kind: 'node' }> => row.kind === 'node')
+      .map((row) => ({ path: row.path, depth: row.depth, volume: row.volume }))
 
-    expect(new Set(renderKeys).size).toBe(renderKeys.length)
-    expect(untitledRows).toHaveLength(2)
-    expect(untitledRows[0].renderKey).not.toBe(untitledRows[1].renderKey)
+    expect(untitledRows).toHaveLength(1)
+    expect(nodeRows).toEqual([
+      { path: '/', depth: 0, volume: volumes[0] },
+      { path: '/Volumes', depth: 1, volume: undefined },
+      { path: '/Volumes/AxoPane', depth: 2, volume: undefined },
+      { path: '/Volumes/Untitled', depth: 0, volume: volumes[1] },
+    ])
+  })
+
+  it('keeps a network mount subtree out of the local /Volumes branch', () => {
+    const volumes = [
+      volume({ mountRoot: '/', label: 'Macintosh HD' }),
+      volume({ mountRoot: '/Volumes/team', label: 'Team Share', isNetwork: true }),
+    ]
+    const treeNodes: Record<string, TreeNodeState> = {
+      '/': node({ path: '/', children: ['/Volumes'], expanded: true }),
+      '/Volumes': node({
+        path: '/Volumes',
+        parentPath: '/',
+        children: ['/Volumes/team'],
+        expanded: true,
+      }),
+      '/Volumes/team': node({
+        path: '/Volumes/team',
+        parentPath: null,
+        children: ['/Volumes/team/Project'],
+        expanded: true,
+      }),
+      '/Volumes/team/Project': node({
+        path: '/Volumes/team/Project',
+        parentPath: '/Volumes/team',
+      }),
+    }
+
+    const { rows } = buildTreeFlatModel(treeNodes, volumes)
+
+    expect(rowShapes(rows)).toEqual([
+      { kind: 'header', label: 'Drives' },
+      { kind: 'node', path: '/', depth: 0, volume: volumes[0] },
+      { kind: 'node', path: '/Volumes', depth: 1, volume: undefined },
+      { kind: 'trash' },
+      { kind: 'header', label: 'Network Drives' },
+      { kind: 'node', path: '/Volumes/team', depth: 0, volume: volumes[1] },
+      { kind: 'node', path: '/Volumes/team/Project', depth: 1, volume: undefined },
+    ])
   })
 
   it('computes cumulative offsets by row kind, ending with the total height', () => {

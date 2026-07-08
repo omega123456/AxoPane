@@ -130,6 +130,44 @@ describe('flattenVisibleTree', () => {
     ])
   })
 
+  it('does not render nested mounted volume roots from an ancestor volume', () => {
+    const treeNodes: Record<string, TreeNodeState> = {
+      '/': node({
+        path: '/',
+        parentPath: null,
+        children: ['/Volumes'],
+        expanded: true,
+      }),
+      '/Volumes': node({
+        path: '/Volumes',
+        parentPath: '/',
+        children: ['/Volumes/team'],
+        expanded: true,
+      }),
+      '/Volumes/team': node({
+        path: '/Volumes/team',
+        parentPath: null,
+        children: ['/Volumes/team/Project'],
+        expanded: true,
+      }),
+      '/Volumes/team/Project': node({
+        path: '/Volumes/team/Project',
+        parentPath: '/Volumes/team',
+        children: [],
+        expanded: false,
+      }),
+    }
+
+    expect(flattenVisibleTree(treeNodes, '/', new Set(['/volumes/team']))).toEqual([
+      { path: '/', depth: 0 },
+      { path: '/Volumes', depth: 1 },
+    ])
+    expect(flattenVisibleTree(treeNodes, '/Volumes/team', new Set(['/']))).toEqual([
+      { path: '/Volumes/team', depth: 0 },
+      { path: '/Volumes/team/Project', depth: 1 },
+    ])
+  })
+
   it('returns an empty list for a missing root node', () => {
     expect(flattenVisibleTree({}, 'C:\\missing')).toEqual([])
   })

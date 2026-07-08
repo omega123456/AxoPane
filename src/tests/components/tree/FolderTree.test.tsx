@@ -50,9 +50,30 @@ function seedVolumes() {
     showHiddenFiles: false,
     everythingStatus: { status: 'unavailable', isAvailable: false },
     volumes: [
-      { mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false, isRemovable: false },
-      { mountRoot: 'E:\\', label: 'USB Stick', totalBytes: 1, freeBytes: 1, isNetwork: false, isRemovable: true },
-      { mountRoot: 'Z:\\', label: 'Share', totalBytes: 1, freeBytes: 1, isNetwork: true, isRemovable: false },
+      {
+        mountRoot: 'C:\\',
+        label: 'Windows',
+        totalBytes: 1,
+        freeBytes: 1,
+        isNetwork: false,
+        isRemovable: false,
+      },
+      {
+        mountRoot: 'E:\\',
+        label: 'USB Stick',
+        totalBytes: 1,
+        freeBytes: 1,
+        isNetwork: false,
+        isRemovable: true,
+      },
+      {
+        mountRoot: 'Z:\\',
+        label: 'Share',
+        totalBytes: 1,
+        freeBytes: 1,
+        isNetwork: true,
+        isRemovable: false,
+      },
     ],
   })
 }
@@ -103,7 +124,14 @@ describe('FolderTree', () => {
       showHiddenFiles: false,
       everythingStatus: { status: 'unavailable', isAvailable: false },
       volumes: [
-        { mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false, isRemovable: false },
+        {
+          mountRoot: 'C:\\',
+          label: 'Windows',
+          totalBytes: 1,
+          freeBytes: 1,
+          isNetwork: false,
+          isRemovable: false,
+        },
       ],
     })
     render(<FolderTree />)
@@ -351,7 +379,7 @@ describe('FolderTree', () => {
     await user.click(within(treeRow('Volumes')).getByRole('button', { name: /Expand/ }))
 
     expect(await screen.findByText('AxoPane', { selector: 'span' })).toBeInTheDocument()
-    expect(screen.getAllByText('Untitled', { selector: 'span' })).toHaveLength(2)
+    expect(screen.getAllByText('Untitled', { selector: 'span' })).toHaveLength(1)
 
     await user.click(within(treeRow('Volumes')).getByRole('button', { name: /Collapse/ }))
 

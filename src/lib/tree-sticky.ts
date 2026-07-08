@@ -46,9 +46,14 @@ export type FlatTreeRow = {
 export function flattenVisibleTree(
   treeNodes: Record<string, TreeNodeState>,
   rootPath: string,
+  excludedRootPaths: ReadonlySet<string> = new Set(),
 ): FlatTreeRow[] {
   const rows: FlatTreeRow[] = []
   const walk = (path: string, depth: number): void => {
+    if (depth > 0 && excludedRootPaths.has(path.toLowerCase())) {
+      return
+    }
+
     const node = treeNodes[path]
     if (!node) {
       return

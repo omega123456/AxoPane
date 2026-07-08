@@ -920,6 +920,113 @@ describe('panes-store navigation', () => {
     expect(nodes['C:\\Users\\Omega']).toBeDefined()
   })
 
+  it('reveals macOS network mount paths from the deepest mounted volume root', async () => {
+    usePanesStore.getState().initialize({
+      session: { activePane: 'left', leftPath: '/', rightPath: '/' },
+      showHiddenFiles: false,
+      everythingStatus: { status: 'unavailable', isAvailable: false },
+      volumes: [
+        {
+          mountRoot: '/',
+          label: 'Macintosh HD',
+          totalBytes: 1,
+          freeBytes: 1,
+          isNetwork: false,
+          isRemovable: false,
+        },
+        {
+          mountRoot: '/Volumes/team',
+          label: 'Team Share',
+          totalBytes: 1,
+          freeBytes: 1,
+          isNetwork: true,
+          isRemovable: false,
+        },
+      ],
+    })
+
+    const listedPaths: string[] = []
+    ipc.override(
+      'list_tree_children',
+      (payload: ListTreeChildrenRequest): ListTreeChildrenResponse => {
+        listedPaths.push(payload.path)
+        return {
+          path: payload.path,
+          children:
+            payload.path === '/Volumes/team'
+              ? [{ name: 'Project', path: '/Volumes/team/Project', hasChildren: false }]
+              : [],
+        }
+      },
+    )
+
+    await usePanesStore.getState().revealPath('/Volumes/team/Project')
+
+    const nodes = usePanesStore.getState().treeNodes
+    expect(listedPaths).toEqual(['/Volumes/team'])
+    expect(nodes['/'].expanded).toBe(false)
+    expect(nodes['/Volumes']).toBeUndefined()
+    expect(nodes['/Volumes/team'].parentPath).toBeNull()
+    expect(nodes['/Volumes/team'].expanded).toBe(true)
+    expect(nodes['/Volumes/team/Project']).toMatchObject({
+      parentPath: '/Volumes/team',
+      expanded: false,
+    })
+  })
+
+  it('keeps mounted volume roots detached when listing their /Volumes parent', async () => {
+    usePanesStore.getState().initialize({
+      session: { activePane: 'left', leftPath: '/', rightPath: '/' },
+      showHiddenFiles: false,
+      everythingStatus: { status: 'unavailable', isAvailable: false },
+      volumes: [
+        {
+          mountRoot: '/',
+          label: 'Macintosh HD',
+          totalBytes: 1,
+          freeBytes: 1,
+          isNetwork: false,
+          isRemovable: false,
+        },
+        {
+          mountRoot: '/Volumes/team',
+          label: 'Team Share',
+          totalBytes: 1,
+          freeBytes: 1,
+          isNetwork: true,
+          isRemovable: false,
+        },
+      ],
+    })
+
+    ipc.override(
+      'list_tree_children',
+      (payload: ListTreeChildrenRequest): ListTreeChildrenResponse => ({
+        path: payload.path,
+        children:
+          payload.path === '/Volumes'
+            ? [
+                { name: 'team', path: '/Volumes/team', hasChildren: true },
+                { name: 'local', path: '/Volumes/local', hasChildren: false },
+              ]
+            : [],
+      }),
+    )
+
+    await usePanesStore.getState().ensureTreeChildren('/Volumes')
+
+    const nodes = usePanesStore.getState().treeNodes
+    expect(nodes['/Volumes'].children).toEqual(['/Volumes/team', '/Volumes/local'])
+    expect(nodes['/Volumes/team']).toMatchObject({
+      name: 'Team Share',
+      parentPath: null,
+    })
+    expect(nodes['/Volumes/local']).toMatchObject({
+      name: 'local',
+      parentPath: '/Volumes',
+    })
+  })
+
   it('collapses unrelated branches when revealing a different path', async () => {
     usePanesStore.getState().initialize({
       session: { activePane: 'left', leftPath: 'C:\\', rightPath: 'C:\\' },
