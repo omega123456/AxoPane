@@ -144,7 +144,7 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-          EXPECTED_APPLE_CERTIFICATE_SHA1: 4C94EA335760EA1DF899340373AD0C8405BEC9F3
+          EXPECTED_APPLE_CERTIFICATE_SHA1: A1006E17504884874FB91995CB27E336FC1BC348
         run: |
           set -euo pipefail
 
@@ -208,7 +208,7 @@ jobs:
       - name: Verify macOS code signing requirement
         shell: bash
         env:
-          EXPECTED_APPLE_CERTIFICATE_SHA1: 4c94ea335760ea1df899340373ad0c8405bec9f3
+          EXPECTED_APPLE_CERTIFICATE_SHA1: a1006e17504884874fb91995cb27e336fc1bc348
         run: |
           set -euo pipefail
 

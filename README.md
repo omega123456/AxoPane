@@ -224,7 +224,7 @@ The release workflow runs on **`workflow_dispatch`** (Actions → Release → Ru
 1. From the repo root, run **`pnpm release:tauri-version`**. It bumps **`version`** in [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json), prompts for release notes, writes [`.github/tauri-release-body.md`](.github/tauri-release-body.md), runs **`pnpm build`** first, and only commits/tags/pushes on success.
 2. Or bump `tauri.conf.json` yourself, commit, create and push the tag (`git tag v0.1.0 && git push origin v0.1.0`), or run the workflow manually after tagging.
 3. Before the first updater-enabled release, configure `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; the workflow asserts that the updater endpoint, public key, and bundle identifier in `tauri.conf.json` are real values.
-4. For macOS releases, export the `AxoPane Local Code Signing` certificate/private-key identity as a `.p12`, base64 encode it with `openssl base64 -A -in AxoPaneLocalCodeSigning.p12 -out certificate-base64.txt`, then set `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, and `KEYCHAIN_PASSWORD` repository secrets. CI verifies the imported certificate SHA-1 is `4C94EA335760EA1DF899340373AD0C8405BEC9F3`.
+4. For macOS releases, export the `AxoPane Local Code Signing` certificate/private-key identity as a `.p12`, base64 encode it with `openssl base64 -A -in AxoPaneLocalCodeSigning.p12 -out certificate-base64.txt`, then set `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, and `KEYCHAIN_PASSWORD` repository secrets. CI verifies the imported certificate SHA-1 is `A1006E17504884874FB91995CB27E336FC1BC348`.
 
 Releases are published directly (non-draft) by default.
 
@@ -269,7 +269,7 @@ codesign -d -r- /Applications/AxoPane.app
 Expected requirement fragment:
 
 ```text
-identifier "com.axopane.app" and certificate leaf = H"4c94ea335760ea1df899340373ad0c8405bec9f3"
+identifier "com.axopane.app" and certificate leaf = H"a1006e17504884874fb91995cb27e336fc1bc348"
 ```
 
 If it shows `cdhash`, the app was ad-hoc signed and Full Disk Access will not persist across updates.
