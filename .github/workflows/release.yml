@@ -138,6 +138,38 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Import AxoPane code signing certificate
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          EXPECTED_APPLE_CERTIFICATE_SHA1: 4C94EA335760EA1DF899340373AD0C8405BEC9F3
+        run: |
+          set -euo pipefail
+
+          : "${APPLE_CERTIFICATE:?Missing APPLE_CERTIFICATE secret. Export AxoPane Local Code Signing as a base64-encoded .p12.}"
+          : "${APPLE_CERTIFICATE_PASSWORD:?Missing APPLE_CERTIFICATE_PASSWORD secret.}"
+          : "${KEYCHAIN_PASSWORD:?Missing KEYCHAIN_PASSWORD secret.}"
+
+          printf '%s' "$APPLE_CERTIFICATE" > certificate-base64.txt
+          openssl base64 -d -A -in certificate-base64.txt -out certificate.p12
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security list-keychains -d user -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+
+          identities="$(security find-identity -v -p codesigning build.keychain)"
+          printf '%s\n' "$identities"
+          if [[ "$identities" != *"$EXPECTED_APPLE_CERTIFICATE_SHA1"*"AxoPane Local Code Signing"* ]]; then
+            echo "[release] Imported certificate does not match AxoPane Local Code Signing (${EXPECTED_APPLE_CERTIFICATE_SHA1})."
+            exit 1
+          fi
+
       - name: Read release body for tauri-action
         id: release_body
         shell: bash
@@ -158,6 +190,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: AxoPane Local Code Signing
         with:
           tauriScript: pnpm tauri
           tagName: v__VERSION__
@@ -168,6 +201,27 @@ jobs:
           uploadUpdaterJson: true
           assetNamePattern: '[name]-[version]-[platform]-[arch][setup][ext]'
           args: --target aarch64-apple-darwin --bundles dmg,app -- --locked
+
+      - name: Verify macOS code signing requirement
+        shell: bash
+        env:
+          EXPECTED_APPLE_CERTIFICATE_SHA1: 4c94ea335760ea1df899340373ad0c8405bec9f3
+        run: |
+          set -euo pipefail
+
+          app_path="$(find src-tauri/target/aarch64-apple-darwin/release/bundle/macos -maxdepth 1 -name 'AxoPane.app' -type d -print -quit)"
+          if [ -z "$app_path" ]; then
+            echo "[release] Built AxoPane.app was not found."
+            exit 1
+          fi
+
+          requirement="$(codesign -d -r- "$app_path" 2>&1)"
+          printf '%s\n' "$requirement"
+          if [[ "$requirement" != *"certificate leaf = H\"${EXPECTED_APPLE_CERTIFICATE_SHA1}\""* ]]; then
+            echo "[release] macOS app was not signed by the expected AxoPane Local Code Signing certificate."
+            echo "[release] A cdhash-based requirement means Full Disk Access will not persist across updates."
+            exit 1
+          fi
 
   validate-release:
     needs:

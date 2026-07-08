@@ -246,10 +246,10 @@ describe('FilePane state rendering', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Something broke')
   })
 
-  // Regression guard: on macOS with auto-hidden overlay scrollbars, the pane
-  // must reserve a right-side lane so the transient vertical scrollbar paints
-  // above clear space instead of being clipped by row content. This also keeps
-  // the header/body widths aligned while the pane remains horizontally scrollable.
+  // Regression guard: on macOS with auto-hidden overlay scrollbars, a pane that
+  // is wider than its viewport must keep the transient vertical/horizontal
+  // scrollbar affordances on the visible pane edges instead of on the far edge
+  // of the scrolled file-table canvas.
   it('uses vertical scroll containment for trackpad scrolling', () => {
     setPlatform('MacIntel')
     seedPane({ entries: [entry('Alpha')], focusedEntryId: 'Alpha' })
@@ -258,19 +258,81 @@ describe('FilePane state rendering', () => {
 
     const headerScroller = screen.getByTestId('file-pane-header-scroll-left')
     const scroller = screen.getByTestId('file-pane-scroll-left')
-    expect(headerScroller).toHaveClass('pr-2')
-    expect(scroller).toHaveClass('overflow-x-auto', 'overflow-y-auto', 'overscroll-contain', 'pr-2')
+    const horizontalScroller = screen.getByTestId('file-pane-horizontal-scroll-left')
+    expect(headerScroller).toHaveClass('overflow-hidden')
+    expect(scroller).toHaveClass(
+      'overflow-x-hidden',
+      'overflow-y-auto',
+      'overscroll-contain',
+      'pb-2',
+    )
+    expect(horizontalScroller).toHaveClass(
+      'absolute',
+      'inset-x-0',
+      'bottom-0',
+      'overflow-x-auto',
+      'overflow-y-hidden',
+    )
     const row = within(screen.getByLabelText('Left pane')).getByRole('row', { name: /Alpha/ })
     expect(row.parentElement).toHaveClass('inset-x-0')
   })
 
-  it('keeps the header aligned with the pane body while horizontally scrolling', () => {
+  it('keeps the header aligned with the pane body while horizontally scrolling on macOS', () => {
+    setPlatform('MacIntel')
+    seedPane({ entries: [entry('Alpha')], focusedEntryId: 'Alpha' })
+
+    render(<FilePane paneId="left" />)
+
+    const header = screen.getByTestId('file-pane-header-scroll-left')
+    const horizontalScroller = screen.getByTestId('file-pane-horizontal-scroll-left')
+
+    Object.defineProperty(header, 'scrollLeft', {
+      configurable: true,
+      writable: true,
+      value: 0,
+    })
+
+    fireEvent.scroll(horizontalScroller, { target: { scrollLeft: 128 } })
+
+    expect(header.scrollLeft).toBe(128)
+  })
+
+  it('routes macOS horizontal wheel deltas to the pinned horizontal scroller', () => {
+    setPlatform('MacIntel')
     seedPane({ entries: [entry('Alpha')], focusedEntryId: 'Alpha' })
 
     render(<FilePane paneId="left" />)
 
     const header = screen.getByTestId('file-pane-header-scroll-left')
     const scroller = screen.getByTestId('file-pane-scroll-left')
+    const horizontalScroller = screen.getByTestId('file-pane-horizontal-scroll-left')
+
+    Object.defineProperties(horizontalScroller, {
+      clientWidth: { configurable: true, value: 100 },
+      scrollWidth: { configurable: true, value: 300 },
+      scrollLeft: { configurable: true, writable: true, value: 0 },
+    })
+    Object.defineProperty(header, 'scrollLeft', {
+      configurable: true,
+      writable: true,
+      value: 0,
+    })
+
+    fireEvent.wheel(scroller, { deltaX: 64 })
+
+    expect(horizontalScroller.scrollLeft).toBe(64)
+    expect(header.scrollLeft).toBe(64)
+  })
+
+  it('keeps the header aligned with the pane body while horizontally scrolling off macOS', () => {
+    seedPane({ entries: [entry('Alpha')], focusedEntryId: 'Alpha' })
+
+    render(<FilePane paneId="left" />)
+
+    const header = screen.getByTestId('file-pane-header-scroll-left')
+    const scroller = screen.getByTestId('file-pane-scroll-left')
+    expect(screen.queryByTestId('file-pane-horizontal-scroll-left')).not.toBeInTheDocument()
+    expect(scroller).toHaveClass('overflow-x-auto', 'overflow-y-auto')
 
     Object.defineProperty(header, 'scrollLeft', {
       configurable: true,

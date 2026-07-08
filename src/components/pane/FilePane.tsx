@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   buildContextMenuContent,
   describeMenuTarget,
@@ -123,6 +123,9 @@ export function FilePane({ paneId }: FilePaneProps) {
   const paneRef = useRef<HTMLElement | null>(null)
   const headerScrollRef = useRef<HTMLDivElement | null>(null)
   const parentRef = useRef<HTMLDivElement | null>(null)
+  const horizontalScrollRef = useRef<HTMLDivElement | null>(null)
+  const contentLayerRef = useRef<HTMLDivElement | null>(null)
+  const horizontalScrollLeftRef = useRef(0)
   const scrollPathRef = useRef(pane.path)
   // Tracks the live scrollTop for the currently-mounted path without writing
   // to the store on every scroll event (that would re-render the whole app on
@@ -159,7 +162,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   const [isPaneDropTarget, setIsPaneDropTarget] = useState(false)
   const isActivePane = activePaneId === paneId
   const os = detectPlatformOs()
-  const macScrollbarLaneClassName = os === 'macos' ? 'pr-2' : ''
+  const usesDetachedMacScrollbars = os === 'macos'
   const rowLayerClassName = 'absolute inset-x-0'
   // Suppress the loading skeleton on fast loads: it only appears once loading
   // has lasted longer than a second, avoiding a jarring flash-and-replace when
@@ -203,7 +206,8 @@ export function FilePane({ paneId }: FilePaneProps) {
           index,
           start: index * rowHeightPx,
         }))
-  const totalHeight = virtualItems.length > 0 ? rowVirtualizer.getTotalSize() : rowCount * rowHeightPx
+  const totalHeight =
+    virtualItems.length > 0 ? rowVirtualizer.getTotalSize() : rowCount * rowHeightPx
   const savedScrollTop = pane.scrollPositions[pane.path] ?? 0
 
   useEffect(() => {
@@ -258,7 +262,8 @@ export function FilePane({ paneId }: FilePaneProps) {
         scrollElement.scrollTop >= target || Math.abs(scrollElement.scrollTop - target) < 1
       const clampedWithNoRoomToGrow =
         !wasJustArmed &&
-        (scrollElement.scrollTop < target || scrollElement.scrollHeight <= scrollElement.clientHeight)
+        (scrollElement.scrollTop < target ||
+          scrollElement.scrollHeight <= scrollElement.clientHeight)
       if (reachedOrClose || clampedWithNoRoomToGrow) {
         pendingRestoreRef.current = null
       }
@@ -439,7 +444,9 @@ export function FilePane({ paneId }: FilePaneProps) {
     const bounds = container.getBoundingClientRect()
     const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1
     return {
-      x: (clientX - bounds.left) / zoom + container.scrollLeft,
+      x:
+        (clientX - bounds.left) / zoom +
+        (usesDetachedMacScrollbars ? horizontalScrollLeftRef.current : container.scrollLeft),
       y: (clientY - bounds.top) / zoom + container.scrollTop,
     }
   }
@@ -629,7 +636,12 @@ export function FilePane({ paneId }: FilePaneProps) {
     // pane-background highlight from also lighting up while over a folder row.
     event.preventDefault()
     event.stopPropagation()
-    event.dataTransfer.dropEffect = resolveDropKind(dropModifiers(event), drag!.sourceDir, entry.path, os)
+    event.dataTransfer.dropEffect = resolveDropKind(
+      dropModifiers(event),
+      drag!.sourceDir,
+      entry.path,
+      os,
+    )
     setDropTargetEntryId(entry.id)
   }
 
@@ -656,7 +668,12 @@ export function FilePane({ paneId }: FilePaneProps) {
       return
     }
     event.preventDefault()
-    event.dataTransfer.dropEffect = resolveDropKind(dropModifiers(event), drag!.sourceDir, pane.path, os)
+    event.dataTransfer.dropEffect = resolveDropKind(
+      dropModifiers(event),
+      drag!.sourceDir,
+      pane.path,
+      os,
+    )
     setIsPaneDropTarget(true)
   }
 
@@ -751,6 +768,55 @@ export function FilePane({ paneId }: FilePaneProps) {
     }),
     [],
   )
+
+  const syncHorizontalScroll = useCallback((scrollLeft: number) => {
+    horizontalScrollLeftRef.current = scrollLeft
+    if (headerScrollRef.current) {
+      headerScrollRef.current.scrollLeft = scrollLeft
+    }
+    if (contentLayerRef.current) {
+      contentLayerRef.current.style.transform =
+        scrollLeft === 0 ? '' : `translateX(-${scrollLeft}px)`
+    }
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!usesDetachedMacScrollbars) {
+      horizontalScrollLeftRef.current = 0
+      if (contentLayerRef.current) {
+        contentLayerRef.current.style.transform = ''
+      }
+      return
+    }
+
+    const scrollLeft = horizontalScrollRef.current?.scrollLeft ?? 0
+    syncHorizontalScroll(scrollLeft)
+  }, [contentWidth, syncHorizontalScroll, usesDetachedMacScrollbars])
+
+  function handleHorizontalScroll(event: React.UIEvent<HTMLDivElement>) {
+    syncHorizontalScroll(event.currentTarget.scrollLeft)
+  }
+
+  function handleBodyWheel(event: React.WheelEvent<HTMLDivElement>) {
+    if (!usesDetachedMacScrollbars || event.deltaX === 0) {
+      return
+    }
+
+    const horizontalScroll = horizontalScrollRef.current
+    if (!horizontalScroll) {
+      return
+    }
+
+    const maxScrollLeft = Math.max(0, horizontalScroll.scrollWidth - horizontalScroll.clientWidth)
+    const nextScrollLeft = Math.max(
+      0,
+      Math.min(maxScrollLeft, horizontalScroll.scrollLeft + event.deltaX),
+    )
+    if (nextScrollLeft !== horizontalScroll.scrollLeft) {
+      horizontalScroll.scrollLeft = nextScrollLeft
+      syncHorizontalScroll(nextScrollLeft)
+    }
+  }
 
   return (
     <section
@@ -851,14 +917,18 @@ export function FilePane({ paneId }: FilePaneProps) {
       <div
         ref={headerScrollRef}
         data-testid={`file-pane-header-scroll-${paneId}`}
-        className={`overflow-hidden ${macScrollbarLaneClassName}`}
+        className="relative overflow-hidden"
       >
         <HeaderRow pane={pane} />
+        {usesDetachedMacScrollbars ? (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 right-0 w-2 bg-light-header dark:bg-dark-header"
+          />
+        ) : null}
       </div>
       {showSkeleton ? (
-        <div
-          className={`min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint ${macScrollbarLaneClassName}`}
-        >
+        <div className="min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint">
           <LoadingSkeleton />
         </div>
       ) : permissionDenied ? (
@@ -882,93 +952,119 @@ export function FilePane({ paneId }: FilePaneProps) {
           <EmptyState />
         </div>
       ) : (
-        <div
-          ref={parentRef}
-          data-testid={`file-pane-scroll-${paneId}`}
-          className={`min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint ${macScrollbarLaneClassName} ${
-            isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-accent-blue-border' : ''
-          }`}
-          onMouseDown={handleContainerMouseDown}
-          onScroll={(event) => {
-            liveScrollTopRef.current = event.currentTarget.scrollTop
-            if (headerScrollRef.current) {
-              headerScrollRef.current.scrollLeft = event.currentTarget.scrollLeft
-            }
-          }}
-          onContextMenu={(event) => showMenu(event)}
-          onDragOver={handlePaneDragOver}
-          onDragLeave={handlePaneDragLeave}
-          onDrop={(event) => void handlePaneDrop(event)}
-        >
-          {/*
+        <div className="relative min-h-0 flex-1">
+          <div
+            ref={parentRef}
+            data-testid={`file-pane-scroll-${paneId}`}
+            className={`h-full min-h-0 overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint ${
+              usesDetachedMacScrollbars
+                ? 'overflow-x-hidden overflow-y-auto pb-2'
+                : 'overflow-x-auto overflow-y-auto'
+            } ${
+              isPaneDropTarget
+                ? 'outline outline-2 -outline-offset-2 outline-accent-blue-border'
+                : ''
+            }`}
+            onMouseDown={handleContainerMouseDown}
+            onWheel={handleBodyWheel}
+            onScroll={(event) => {
+              liveScrollTopRef.current = event.currentTarget.scrollTop
+              if (!usesDetachedMacScrollbars && headerScrollRef.current) {
+                headerScrollRef.current.scrollLeft = event.currentTarget.scrollLeft
+              }
+            }}
+            onContextMenu={(event) => showMenu(event)}
+            onDragOver={handlePaneDragOver}
+            onDragLeave={handlePaneDragLeave}
+            onDrop={(event) => void handlePaneDrop(event)}
+          >
+            {/*
             Styling-constraint exception: runtime geometry only. The total
             scroll height and each row's top offset come from
             @tanstack/react-virtual (D18) and are continuous px values that no
             static utility/@theme token can express. Every design-system value
             (color/spacing/typography) elsewhere stays a pure Tailwind utility.
           */}
-          <div
-            style={{ height: `${totalHeight}px`, minWidth: `${contentWidth}px`, position: 'relative' }}
-            className="min-h-full w-full"
-          >
-            {itemsToRender.map((virtualRow) => {
-              const rowStyle = {
-                top: `${virtualRow.start}px`,
-              }
+            <div
+              ref={contentLayerRef}
+              style={{
+                height: `${totalHeight}px`,
+                minWidth: `${contentWidth}px`,
+                position: 'relative',
+              }}
+              className={`min-h-full w-full ${
+                usesDetachedMacScrollbars ? 'will-change-transform' : ''
+              }`}
+            >
+              {itemsToRender.map((virtualRow) => {
+                const rowStyle = {
+                  top: `${virtualRow.start}px`,
+                }
 
-              if (hasParent && virtualRow.index === 0) {
+                if (hasParent && virtualRow.index === 0) {
+                  return (
+                    <div key={PARENT_ROW_ID} className={rowLayerClassName} style={rowStyle}>
+                      <ParentRow
+                        isActivePane={isActivePane}
+                        isFocused={pane.focusedEntryId === PARENT_ROW_ID}
+                        onPointerDown={focusPaneShell}
+                        onActivate={(eventTimeStamp) =>
+                          activateEntryFromPointer(PARENT_ROW_ID, eventTimeStamp)
+                        }
+                        onFocus={() => focusByRowIndex(0)}
+                      />
+                    </div>
+                  )
+                }
+
+                const entry = pane.entries[virtualRow.index - parentOffset]
+                if (!entry) {
+                  return null
+                }
+
                 return (
-                  <div key={PARENT_ROW_ID} className={rowLayerClassName} style={rowStyle}>
-                    <ParentRow
+                  <div key={entry.id} className={rowLayerClassName} style={rowStyle}>
+                    <FileRow
+                      entry={entry}
                       isActivePane={isActivePane}
-                      isFocused={pane.focusedEntryId === PARENT_ROW_ID}
-                      onPointerDown={focusPaneShell}
-                      onActivate={(eventTimeStamp) =>
-                        activateEntryFromPointer(PARENT_ROW_ID, eventTimeStamp)
-                      }
-                      onFocus={() => focusByRowIndex(0)}
+                      isFocused={pane.focusedEntryId === entry.id}
+                      isSelected={selectedIdSet.has(entry.id)}
+                      isCut={cutEntryPaths.has(entry.path.toLowerCase())}
+                      isDropTarget={dropTargetEntryId === entry.id}
+                      draggable={!entry.trashId}
+                      isRenaming={rename?.entryId === entry.id}
+                      renameValue={rename?.entryId === entry.id ? rename.value : ''}
+                      renameBusy={rename?.entryId === entry.id ? rename.busy : false}
+                      renameError={rename?.entryId === entry.id ? rename.error : null}
+                      actions={actions}
                     />
                   </div>
                 )
-              }
-
-              const entry = pane.entries[virtualRow.index - parentOffset]
-              if (!entry) {
-                return null
-              }
-
-              return (
-                <div key={entry.id} className={rowLayerClassName} style={rowStyle}>
-                  <FileRow
-                    entry={entry}
-                    isActivePane={isActivePane}
-                    isFocused={pane.focusedEntryId === entry.id}
-                    isSelected={selectedIdSet.has(entry.id)}
-                    isCut={cutEntryPaths.has(entry.path.toLowerCase())}
-                    isDropTarget={dropTargetEntryId === entry.id}
-                    draggable={!entry.trashId}
-                    isRenaming={rename?.entryId === entry.id}
-                    renameValue={rename?.entryId === entry.id ? rename.value : ''}
-                    renameBusy={rename?.entryId === entry.id ? rename.busy : false}
-                    renameError={rename?.entryId === entry.id ? rename.error : null}
-                    actions={actions}
-                  />
-                </div>
-              )
-            })}
-            {marqueeRect ? (
-              <div
-                data-testid="marquee-selection"
-                className="pointer-events-none absolute border border-accent-blue-border bg-accent-blue-soft"
-                style={{
-                  left: `${marqueeRect.left}px`,
-                  top: `${marqueeRect.top}px`,
-                  width: `${marqueeRect.width}px`,
-                  height: `${marqueeRect.height}px`,
-                }}
-              />
-            ) : null}
+              })}
+              {marqueeRect ? (
+                <div
+                  data-testid="marquee-selection"
+                  className="pointer-events-none absolute border border-accent-blue-border bg-accent-blue-soft"
+                  style={{
+                    left: `${marqueeRect.left}px`,
+                    top: `${marqueeRect.top}px`,
+                    width: `${marqueeRect.width}px`,
+                    height: `${marqueeRect.height}px`,
+                  }}
+                />
+              ) : null}
+            </div>
           </div>
+          {usesDetachedMacScrollbars ? (
+            <div
+              ref={horizontalScrollRef}
+              data-testid={`file-pane-horizontal-scroll-${paneId}`}
+              className="absolute inset-x-0 bottom-0 z-20 h-2 overflow-x-auto overflow-y-hidden overscroll-contain bg-light-surface scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:bg-dark-surface dark:scrollbar-thumb-dark-text-faint"
+              onScroll={handleHorizontalScroll}
+            >
+              <div style={{ width: `${contentWidth}px`, height: '1px' }} />
+            </div>
+          ) : null}
         </div>
       )}
     </section>

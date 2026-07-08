@@ -217,17 +217,18 @@ The workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) pu
 | Platform | Artifacts | Notes |
 | -------- | --------- | ----- |
 | **Windows (x64)** | Updater bundle + `.msi` / `.exe` (NSIS) installers | Signed when `TAURI_SIGNING_PRIVATE_KEY` secrets are configured; in-app updates download first, then restart to finish |
-| **macOS (Apple Silicon)** | `.dmg` | **Unsigned in v1** — no Apple code signing or notarization yet; users may see Gatekeeper warnings |
+| **macOS (Apple Silicon)** | Updater bundle + `.dmg` | Code-signed with the self-signed `AxoPane Local Code Signing` identity when the Apple certificate secrets are configured; not Apple-notarized, so users may still see Gatekeeper warnings |
 
 The release workflow runs on **`workflow_dispatch`** (Actions → Release → Run workflow) or when you push a version tag matching `v*` (for example `v0.1.0`).
 
 1. From the repo root, run **`pnpm release:tauri-version`**. It bumps **`version`** in [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json), prompts for release notes, writes [`.github/tauri-release-body.md`](.github/tauri-release-body.md), runs **`pnpm build`** first, and only commits/tags/pushes on success.
 2. Or bump `tauri.conf.json` yourself, commit, create and push the tag (`git tag v0.1.0 && git push origin v0.1.0`), or run the workflow manually after tagging.
-3. Before the **first signed Windows release**, replace placeholder updater values in `tauri.conf.json` — see [`.github/RELEASE_CHECKLIST.md`](.github/RELEASE_CHECKLIST.md).
+3. Before the first updater-enabled release, configure `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; the workflow asserts that the updater endpoint, public key, and bundle identifier in `tauri.conf.json` are real values.
+4. For macOS releases, export the `AxoPane Local Code Signing` certificate/private-key identity as a `.p12`, base64 encode it with `openssl base64 -A -in AxoPaneLocalCodeSigning.p12 -out certificate-base64.txt`, then set `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, and `KEYCHAIN_PASSWORD` repository secrets. CI verifies the imported certificate SHA-1 is `4C94EA335760EA1DF899340373AD0C8405BEC9F3`.
 
 Releases are published directly (non-draft) by default.
 
-> See the release assets to download installers for Windows and the unsigned macOS disk image.
+> See the release assets to download installers for Windows and the macOS disk image.
 
 ## Install by operating system
 
@@ -236,7 +237,7 @@ Download installers from **GitHub Releases** for your repository. Use the table 
 | OS | Artifacts (CI) | Install | In-app updates | More detail |
 | -- | -------------- | ------- | -------------- | ----------- |
 | **Windows (x64)** | `.msi`, `.exe`, updater bundle | Run the installer from the release asset | Yes — download then restart to finish | [GitHub releases](#github-releases-ci) |
-| **macOS (Apple Silicon)** | `.dmg` | Open the `.dmg` and drag **AxoPane** to **Applications** | Limited on unsigned builds | [macOS quarantine](#macos-quarantine-exclusion-step-by-step) · [Tauri macOS signing](https://v2.tauri.app/distribute/sign-macos/) |
+| **macOS (Apple Silicon)** | `.dmg`, updater bundle | Open the `.dmg` and drag **AxoPane** to **Applications** | Yes, when CI uses the stable `AxoPane Local Code Signing` identity | [macOS quarantine](#macos-quarantine-exclusion-step-by-step) · [Tauri macOS signing](https://v2.tauri.app/distribute/sign-macos/) |
 
 For **building from source** on any supported OS, use [Requirements](#requirements), [Setup](#setup), and [Quick start](#quick-start) instead of prebuilt installers.
 
@@ -255,13 +256,27 @@ For **building from source** on any supported OS, use [Requirements](#requiremen
 
 1. Download the `.dmg` from GitHub Releases.
 2. Open the disk image and drag **AxoPane** into **Applications**.
-3. If macOS blocks the app because it is unsigned, follow [macOS quarantine exclusion](#macos-quarantine-exclusion-step-by-step) below.
+3. If macOS blocks the app because it is not Apple-notarized, follow [macOS quarantine exclusion](#macos-quarantine-exclusion-step-by-step) below.
 
-macOS builds from CI are **unsigned** in v1 (see [`.github/RELEASE_CHECKLIST.md`](.github/RELEASE_CHECKLIST.md)). Gatekeeper may report the app as damaged or refuse to open it until quarantine is cleared or you use **Open** from the context menu.
+macOS builds from CI are signed with the same self-signed `AxoPane Local Code Signing` identity so macOS sees a stable designated requirement across updates. That is what preserves Full Disk Access/TCC grants. It is not Developer ID notarization, so Gatekeeper may still report the app as damaged or refuse to open it until quarantine is cleared or you use **Open** from the context menu.
+
+After installing a CI artifact, this command should show the certificate-based requirement:
+
+```bash
+codesign -d -r- /Applications/AxoPane.app
+```
+
+Expected requirement fragment:
+
+```text
+identifier "com.axopane.app" and certificate leaf = H"4c94ea335760ea1df899340373ad0c8405bec9f3"
+```
+
+If it shows `cdhash`, the app was ad-hoc signed and Full Disk Access will not persist across updates.
 
 ## macOS quarantine exclusion (step by step)
 
-If macOS blocks AxoPane because it is unsigned (for example, "app is damaged" or "cannot be opened"), remove quarantine attributes from the app bundle.
+If macOS blocks AxoPane because it is not Apple-notarized (for example, "app is damaged" or "cannot be opened"), remove quarantine attributes from the app bundle.
 
 1. Move the app to a stable location, such as `/Applications/AxoPane.app`.
 2. Open Terminal.
