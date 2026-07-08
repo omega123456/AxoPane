@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(feature = "test-utils"))]
 use std::cmp::Ordering;
 
+#[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
+use std::ffi::CStr;
+
 #[cfg(not(feature = "test-utils"))]
 use std::sync::{
     atomic::{AtomicBool, Ordering as AtomicOrdering},
@@ -350,6 +353,9 @@ pub fn list_volumes() -> Vec<VolumeInfo> {
         })
         .collect();
 
+    #[cfg(target_os = "macos")]
+    extend_macos_network_mounts(&mut volumes);
+
     sort_volumes(&mut volumes);
     volumes
 }
@@ -434,6 +440,135 @@ fn sort_volumes(volumes: &mut [VolumeInfo]) {
                 }
             })
     });
+}
+
+#[doc(hidden)]
+pub fn add_network_mount_if_missing(
+    volumes: &mut Vec<VolumeInfo>,
+    mount_root: &str,
+    file_system: &str,
+    total_bytes: u64,
+    free_bytes: u64,
+) -> bool {
+    let mount_root = normalize_supplemental_mount_root(mount_root);
+    if mount_root.is_empty() || !is_network_file_system(file_system) {
+        return false;
+    }
+
+    if volumes
+        .iter()
+        .any(|volume| mount_roots_match(&volume.mount_root, &mount_root))
+    {
+        return false;
+    }
+
+    volumes.push(VolumeInfo {
+        label: label_for_mount_root(&mount_root),
+        mount_root,
+        total_bytes,
+        free_bytes: free_bytes.min(total_bytes),
+        is_network: true,
+        is_removable: false,
+    });
+
+    true
+}
+
+fn normalize_supplemental_mount_root(mount_root: &str) -> String {
+    let trimmed = mount_root.trim();
+    if trimmed == "/" {
+        trimmed.to_string()
+    } else {
+        trimmed.trim_end_matches(['\\', '/']).to_string()
+    }
+}
+
+fn mount_roots_match(left: &str, right: &str) -> bool {
+    left == right || left.eq_ignore_ascii_case(right)
+}
+
+fn label_for_mount_root(mount_root: &str) -> String {
+    let trimmed = mount_root.trim_end_matches(['\\', '/']);
+    if trimmed.is_empty() {
+        return mount_root.to_string();
+    }
+
+    trimmed
+        .rsplit(['\\', '/'])
+        .find(|part| !part.is_empty())
+        .unwrap_or(trimmed)
+        .to_string()
+}
+
+fn is_network_file_system(file_system: &str) -> bool {
+    matches!(
+        file_system.to_ascii_lowercase().as_str(),
+        "nfs" | "nfs4" | "smbfs" | "cifs" | "afpfs" | "sshfs" | "webdav" | "davfs"
+    )
+}
+
+#[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
+fn extend_macos_network_mounts(volumes: &mut Vec<VolumeInfo>) {
+    for mount in macos_mount_entries() {
+        add_network_mount_if_missing(
+            volumes,
+            &mount.mount_root,
+            &mount.file_system,
+            mount.total_bytes,
+            mount.free_bytes,
+        );
+    }
+}
+
+#[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
+struct MacosMountEntry {
+    mount_root: String,
+    file_system: String,
+    total_bytes: u64,
+    free_bytes: u64,
+}
+
+#[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
+fn macos_mount_entries() -> Vec<MacosMountEntry> {
+    let count = unsafe { libc::getfsstat(std::ptr::null_mut(), 0, libc::MNT_NOWAIT) };
+    if count < 1 {
+        return Vec::new();
+    }
+
+    let Some(buffer_bytes) = count.checked_mul(std::mem::size_of::<libc::statfs>() as libc::c_int)
+    else {
+        return Vec::new();
+    };
+
+    let mut raw_mounts = Vec::with_capacity(count as usize);
+    let count = unsafe { libc::getfsstat(raw_mounts.as_mut_ptr(), buffer_bytes, libc::MNT_NOWAIT) };
+    if count < 1 {
+        return Vec::new();
+    }
+
+    unsafe {
+        raw_mounts.set_len(count as usize);
+    }
+
+    raw_mounts
+        .into_iter()
+        .map(|mount| {
+            let block_size = u64::from(mount.f_bsize);
+            MacosMountEntry {
+                mount_root: macos_statfs_string(&mount.f_mntonname),
+                file_system: macos_statfs_string(&mount.f_fstypename),
+                total_bytes: mount.f_blocks.saturating_mul(block_size),
+                free_bytes: mount.f_bavail.saturating_mul(block_size),
+            }
+        })
+        .collect()
+}
+
+#[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
+fn macos_statfs_string(value: &[libc::c_char]) -> String {
+    unsafe { CStr::from_ptr(value.as_ptr()) }
+        .to_string_lossy()
+        .into_owned()
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]
@@ -821,8 +956,5 @@ pub fn path_is_network(path: &std::path::Path, volumes: &[VolumeInfo]) -> bool {
 
 #[cfg(all(not(feature = "test-utils"), not(windows)))]
 fn is_network_disk(_mount_root: &str, file_system: &str) -> bool {
-    matches!(
-        file_system.to_ascii_lowercase().as_str(),
-        "nfs" | "smbfs" | "cifs" | "afpfs" | "sshfs" | "webdav"
-    )
+    is_network_file_system(file_system)
 }

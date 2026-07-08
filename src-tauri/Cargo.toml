@@ -17,6 +17,7 @@ base64 = "~0.22.1"
 dunce = "~1.0.5"
 jwalk = "~0.8.1"
 lexical-sort = "~0.3.1"
+libc = "~0.2.186"
 libloading = "~0.8.9"
 log = { version = "~0.4.33", features = ["std"] }
 notify = "~8.2.0"

@@ -887,6 +887,7 @@ dependencies = [
  "dunce",
  "jwalk",
  "lexical-sort",
+ "libc",
  "libloading 0.8.9",
  "log",
  "notify",

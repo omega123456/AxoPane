@@ -1,4 +1,6 @@
-use file_explorer_lib::volumes::{list_volumes, path_is_network, VolumeInfo};
+use file_explorer_lib::volumes::{
+    add_network_mount_if_missing, list_volumes, path_is_network, VolumeInfo,
+};
 
 #[test]
 fn enumerates_test_fixture_volumes_under_test_utils() {
@@ -84,4 +86,69 @@ fn path_is_network_matches_longest_mount_root_across_platform_styles() {
             &volumes
         ));
     }
+}
+
+#[test]
+fn adds_missing_network_mounts_from_filesystem_type() {
+    let mut volumes = vec![VolumeInfo {
+        mount_root: "/".to_string(),
+        label: "Fixture Root".to_string(),
+        total_bytes: 1_000,
+        free_bytes: 500,
+        is_network: false,
+        is_removable: false,
+    }];
+
+    assert!(add_network_mount_if_missing(
+        &mut volumes,
+        "/Volumes/team-share/",
+        "smbfs",
+        2_000,
+        1_500,
+    ));
+    assert!(add_network_mount_if_missing(
+        &mut volumes,
+        "/Volumes/build-cache",
+        "nfs",
+        3_000,
+        2_500,
+    ));
+
+    assert_eq!(volumes.len(), 3);
+    assert_eq!(volumes[1].mount_root, "/Volumes/team-share");
+    assert_eq!(volumes[1].label, "team-share");
+    assert!(volumes[1].is_network);
+    assert!(!volumes[1].is_removable);
+    assert_eq!(volumes[2].mount_root, "/Volumes/build-cache");
+    assert_eq!(volumes[2].label, "build-cache");
+    assert!(volumes[2].is_network);
+}
+
+#[test]
+fn skips_duplicate_or_local_supplemental_mounts() {
+    let mut volumes = vec![VolumeInfo {
+        mount_root: "/Volumes/team-share".to_string(),
+        label: "Team Share".to_string(),
+        total_bytes: 2_000,
+        free_bytes: 1_500,
+        is_network: true,
+        is_removable: false,
+    }];
+
+    assert!(!add_network_mount_if_missing(
+        &mut volumes,
+        "/Volumes/team-share/",
+        "smbfs",
+        2_000,
+        1_500,
+    ));
+    assert!(!add_network_mount_if_missing(
+        &mut volumes,
+        "/Volumes/local",
+        "apfs",
+        2_000,
+        1_500,
+    ));
+
+    assert_eq!(volumes.len(), 1);
 }
