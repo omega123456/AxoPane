@@ -159,6 +159,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   const [isPaneDropTarget, setIsPaneDropTarget] = useState(false)
   const isActivePane = activePaneId === paneId
   const os = detectPlatformOs()
+  const macScrollbarLaneClassName = os === 'macos' ? 'pr-2' : ''
   const rowLayerClassName = 'absolute inset-x-0'
   // Suppress the loading skeleton on fast loads: it only appears once loading
   // has lasted longer than a second, avoiding a jarring flash-and-replace when
@@ -850,12 +851,14 @@ export function FilePane({ paneId }: FilePaneProps) {
       <div
         ref={headerScrollRef}
         data-testid={`file-pane-header-scroll-${paneId}`}
-        className="overflow-hidden"
+        className={`overflow-hidden ${macScrollbarLaneClassName}`}
       >
         <HeaderRow pane={pane} />
       </div>
       {showSkeleton ? (
-        <div className="min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint">
+        <div
+          className={`min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint ${macScrollbarLaneClassName}`}
+        >
           <LoadingSkeleton />
         </div>
       ) : permissionDenied ? (
@@ -882,7 +885,7 @@ export function FilePane({ paneId }: FilePaneProps) {
         <div
           ref={parentRef}
           data-testid={`file-pane-scroll-${paneId}`}
-          className={`min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint ${
+          className={`min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint ${macScrollbarLaneClassName} ${
             isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-accent-blue-border' : ''
           }`}
           onMouseDown={handleContainerMouseDown}

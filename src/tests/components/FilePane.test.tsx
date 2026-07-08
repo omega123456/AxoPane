@@ -246,14 +246,20 @@ describe('FilePane state rendering', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Something broke')
   })
 
+  // Regression guard: on macOS with auto-hidden overlay scrollbars, the pane
+  // must reserve a right-side lane so the transient vertical scrollbar paints
+  // above clear space instead of being clipped by row content. This also keeps
+  // the header/body widths aligned while the pane remains horizontally scrollable.
   it('uses vertical scroll containment for trackpad scrolling', () => {
     setPlatform('MacIntel')
     seedPane({ entries: [entry('Alpha')], focusedEntryId: 'Alpha' })
 
     render(<FilePane paneId="left" />)
 
+    const headerScroller = screen.getByTestId('file-pane-header-scroll-left')
     const scroller = screen.getByTestId('file-pane-scroll-left')
-    expect(scroller).toHaveClass('overflow-x-auto', 'overflow-y-auto', 'overscroll-contain')
+    expect(headerScroller).toHaveClass('pr-2')
+    expect(scroller).toHaveClass('overflow-x-auto', 'overflow-y-auto', 'overscroll-contain', 'pr-2')
     const row = within(screen.getByLabelText('Left pane')).getByRole('row', { name: /Alpha/ })
     expect(row.parentElement).toHaveClass('inset-x-0')
   })
