@@ -163,8 +163,9 @@ jobs:
           security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
           openssl pkcs12 -in certificate.p12 -nokeys -clcerts -out certificate.cer -passin env:APPLE_CERTIFICATE_PASSWORD
-          security add-trusted-cert -r trustRoot -p codeSign -k build.keychain certificate.cer
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain certificate.cer
 
+          security find-certificate -c "AxoPane Local Code Signing" -Z build.keychain
           identities="$(security find-identity -v -p codesigning build.keychain)"
           printf '%s\n' "$identities"
           if [[ "$identities" != *"$EXPECTED_APPLE_CERTIFICATE_SHA1"*"AxoPane Local Code Signing"* ]]; then
