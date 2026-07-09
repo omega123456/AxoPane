@@ -10,11 +10,11 @@ use std::time::{Duration, Instant};
 
 use file_explorer_lib::size::everything::EverythingAvailability;
 use file_explorer_lib::size::everything::{
-    EVERYTHING_BATCH_CHUNK_SIZE, EverythingHandle, build_exact_folder_or_queries,
-    escape_exact_folder_query_path, join_everything_result_path, map_everything_result_sizes,
-    normalize_result_path,
+    build_exact_folder_or_queries, escape_exact_folder_query_path, join_everything_result_path,
+    map_everything_result_sizes, normalize_result_path, EverythingHandle,
+    EVERYTHING_BATCH_CHUNK_SIZE,
 };
-use file_explorer_lib::size::manual::{ManualSizeError, calculate};
+use file_explorer_lib::size::manual::{calculate, ManualSizeError};
 use file_explorer_lib::size::{SizeBackend, SizeService, SizeSource, SizeStateKind, SizeUpdate};
 use file_explorer_lib::volumes::VolumeInfo;
 use tempfile::tempdir;
@@ -141,19 +141,15 @@ fn everything_stub_reports_unavailable_under_test_utils() {
 
     let fixture = tempdir().expect("temp dir");
     fs::create_dir(fixture.path().join("folder")).expect("folder");
-    assert!(
-        handle
-            .query_folder_size(&fixture.path().join("folder"))
-            .is_err()
-    );
-    assert!(
-        handle
-            .query_folder_sizes(
-                &[fixture.path().join("folder").to_string_lossy().into_owned()],
-                &|| false,
-            )
-            .is_err()
-    );
+    assert!(handle
+        .query_folder_size(&fixture.path().join("folder"))
+        .is_err());
+    assert!(handle
+        .query_folder_sizes(
+            &[fixture.path().join("folder").to_string_lossy().into_owned()],
+            &|| false,
+        )
+        .is_err());
 }
 
 #[cfg(not(windows))]
@@ -178,11 +174,9 @@ fn everything_non_windows_stub_reports_unsupported_and_supports_in_memory_querie
             .expect("query"),
         Some(42),
     );
-    assert!(
-        EverythingHandle::test_available_error()
-            .query_folder_sizes(&["/tmp/known".to_string()], &|| false)
-            .is_err()
-    );
+    assert!(EverythingHandle::test_available_error()
+        .query_folder_sizes(&["/tmp/known".to_string()], &|| false)
+        .is_err());
 }
 
 #[cfg(windows)]
@@ -669,12 +663,9 @@ fn size_service_reports_missing_manual_path_as_error() {
     });
 
     let recorded = updates.lock().expect("updates lock").clone();
-    assert!(
-        recorded
-            .iter()
-            .any(|update| update.source == SizeSource::Manual
-                && update.state == SizeStateKind::Error)
-    );
+    assert!(recorded
+        .iter()
+        .any(|update| update.source == SizeSource::Manual && update.state == SizeStateKind::Error));
 }
 
 #[test]

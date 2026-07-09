@@ -93,6 +93,7 @@ impl WatchService {
     pub fn set_tab_watch(
         &self,
         target: Option<WatchTarget>,
+        listing_seed_entries: Option<Vec<DirectoryEntry>>,
         entries: Option<Vec<DirectoryEntry>>,
         emit_patch: Arc<dyn Fn(DirPatch) + Send + Sync>,
         emit_error: Arc<dyn Fn(String, String) + Send + Sync>,
@@ -107,9 +108,10 @@ impl WatchService {
 
             let runtime = guard.as_mut().expect("watch runtime");
             let path = PathBuf::from(&target.path);
-            let snapshot = match entries {
-                Some(entries) => snapshot_from_entries(entries),
-                None => snapshot_for_target(&target)?,
+            let snapshot = match (listing_seed_entries, entries) {
+                (Some(entries), _) => snapshot_from_entries_for_watch(&target, entries),
+                (None, Some(entries)) => snapshot_from_entries_for_watch(&target, entries),
+                (None, None) => snapshot_for_watch_baseline(&target)?,
             };
             let pane_name = pane_scope(&target.tab_id).to_string();
 
@@ -289,22 +291,24 @@ fn process_results(
                         patch_emitter(patch);
                     }
                 }
-                Ok(PatchResult::NeedsResnapshot) => match snapshot_for_target(&watched.target) {
-                    Ok(next_snapshot) => {
-                        let patch = diff_entries(
-                            &watched.target.tab_id,
-                            &watched.target.path,
-                            "watch",
-                            &watched.snapshot,
-                            &next_snapshot,
-                        );
-                        watched.snapshot = next_snapshot;
-                        if !patch.changed.is_empty() || !patch.removed.is_empty() {
-                            patch_emitter(patch);
+                Ok(PatchResult::NeedsResnapshot) => {
+                    match snapshot_for_watch_baseline(&watched.target) {
+                        Ok(next_snapshot) => {
+                            let patch = diff_entries(
+                                &watched.target.tab_id,
+                                &watched.target.path,
+                                "watch",
+                                &watched.snapshot,
+                                &next_snapshot,
+                            );
+                            watched.snapshot = next_snapshot;
+                            if !patch.changed.is_empty() || !patch.removed.is_empty() {
+                                patch_emitter(patch);
+                            }
                         }
+                        Err(error) => error_emitter(watched.target.path.clone(), error),
                     }
-                    Err(error) => error_emitter(watched.target.path.clone(), error),
-                },
+                }
                 Err(error) => error_emitter(watched.target.path.clone(), error),
             }
         }
@@ -323,7 +327,7 @@ fn reconcile_tabs(
 ) {
     let mut tabs = tabs.lock().expect("watch tabs lock");
     for watched in tabs.values_mut() {
-        match snapshot_for_target(&watched.target) {
+        match snapshot_for_watch_baseline(&watched.target) {
             Ok(next_snapshot) => {
                 let patch = diff_entries(
                     &watched.target.tab_id,
@@ -552,7 +556,8 @@ fn patch_changed_path(
         return Ok(());
     }
 
-    let entry = fs::directory_entry_from_path(path).map_err(|error| error.to_string())?;
+    let entry = fs::directory_entry_from_path_without_item_count(path)
+        .map_err(|error| error.to_string())?;
     if !matches_target_filter(&entry, target) {
         next.remove(&display_path);
         if !removed.contains(&display_path) {
@@ -637,7 +642,22 @@ pub fn snapshot_for_target(
         include_item_counts: target.include_item_counts,
     })?;
 
-    Ok(snapshot_from_entries(response.entries))
+    Ok(snapshot_from_entries(response.entries, false))
+}
+
+fn snapshot_for_watch_baseline(
+    target: &WatchTarget,
+) -> Result<HashMap<String, DirectoryEntry>, String> {
+    let response = list_dir_for_snapshot(&ListDirOptions {
+        path: target.path.clone(),
+        sort_key: baseline_sort_key(target),
+        sort_direction: SortDirection::Asc,
+        filter: target.filter.clone(),
+        show_hidden: target.show_hidden,
+        include_item_counts: baseline_include_item_counts(target),
+    })?;
+
+    Ok(snapshot_from_entries_for_watch(target, response.entries))
 }
 
 /// Builds a snapshot map keyed by entry path from an already-fetched entries
@@ -655,11 +675,36 @@ pub fn snapshot_for_target(
 /// very first diff after arming would spuriously report every such entry as
 /// "changed" even though nothing changed on disk. Normalizing here keeps the
 /// guarantee that the first diff after seeding is empty.
-fn snapshot_from_entries(entries: Vec<DirectoryEntry>) -> HashMap<String, DirectoryEntry> {
+fn snapshot_from_entries_for_watch(
+    target: &WatchTarget,
+    entries: Vec<DirectoryEntry>,
+) -> HashMap<String, DirectoryEntry> {
+    snapshot_from_entries(entries, !baseline_include_item_counts(target))
+}
+
+fn baseline_sort_key(target: &WatchTarget) -> SortKey {
+    if target.sort_key == SortKey::Items {
+        SortKey::Name
+    } else {
+        target.sort_key
+    }
+}
+
+fn baseline_include_item_counts(target: &WatchTarget) -> bool {
+    target.include_item_counts && target.sort_key != SortKey::Items
+}
+
+fn snapshot_from_entries(
+    entries: Vec<DirectoryEntry>,
+    strip_item_counts: bool,
+) -> HashMap<String, DirectoryEntry> {
     entries
         .into_iter()
         .map(|mut entry| {
             entry.icon_data_url = None;
+            if strip_item_counts {
+                entry.item_count = None;
+            }
             (entry.path.clone(), entry)
         })
         .collect()

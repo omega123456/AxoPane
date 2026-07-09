@@ -117,6 +117,12 @@ impl From<std::io::Error> for FsError {
     }
 }
 
+#[derive(Debug)]
+pub enum ListDirOutcome {
+    Complete(ListDirResponse),
+    Cancelled,
+}
+
 /// Canonicalizes a user-supplied path into an absolute, real path.
 ///
 /// Uses `dunce::canonicalize` so Windows results stay in the familiar
@@ -218,6 +224,19 @@ pub fn expand_home_path_with(path: &str, home: Option<&Path>) -> PathBuf {
 }
 
 pub fn list_dir(options: &ListDirOptions) -> Result<ListDirResponse, FsError> {
+    match list_dir_with_cancellation(options, || false)? {
+        ListDirOutcome::Complete(response) => Ok(response),
+        ListDirOutcome::Cancelled => unreachable!("default list_dir cannot be cancelled"),
+    }
+}
+
+pub fn list_dir_with_cancellation<F>(
+    options: &ListDirOptions,
+    is_cancelled: F,
+) -> Result<ListDirOutcome, FsError>
+where
+    F: Fn() -> bool + Sync,
+{
     let requested = Path::new(&options.path);
     let directory = canonicalize_dir(requested).map_err(|error| {
         log::warn!(
@@ -235,6 +254,9 @@ pub fn list_dir(options: &ListDirOptions) -> Result<ListDirResponse, FsError> {
     let mut entries = Vec::new();
 
     for entry in fs::read_dir(&directory)? {
+        if is_cancelled() {
+            return Ok(ListDirOutcome::Cancelled);
+        }
         let entry = entry?;
         let listed = build_entry(&entry)?;
 
@@ -251,12 +273,19 @@ pub fn list_dir(options: &ListDirOptions) -> Result<ListDirResponse, FsError> {
     }
 
     if options.include_item_counts {
-        populate_item_counts(&mut entries);
+        populate_item_counts_with_cancellation(&mut entries, &is_cancelled);
+        if is_cancelled() {
+            return Ok(ListDirOutcome::Cancelled);
+        }
     }
 
     entries.sort_by(|left, right| {
         compare_entries(left, right, options.sort_key, options.sort_direction)
     });
+
+    if is_cancelled() {
+        return Ok(ListDirOutcome::Cancelled);
+    }
 
     log::info!(
         "list_dir: {} -> {} entries",
@@ -264,10 +293,10 @@ pub fn list_dir(options: &ListDirOptions) -> Result<ListDirResponse, FsError> {
         entries.len()
     );
 
-    Ok(ListDirResponse {
+    Ok(ListDirOutcome::Complete(ListDirResponse {
         path: display_path_from_path(&directory),
         entries,
-    })
+    }))
 }
 
 pub fn list_tree_children(
@@ -390,6 +419,13 @@ pub fn rename_entry(path: &str, new_name: &str) -> Result<DirectoryEntry, FsErro
 /// operation produces a new/renamed item). Mirrors [`build_entry`] but reads
 /// metadata directly from the path rather than a [`DirEntry`].
 fn build_entry_from_path(path: &Path) -> Result<DirectoryEntry, FsError> {
+    build_entry_from_path_with_options(path, true)
+}
+
+fn build_entry_from_path_with_options(
+    path: &Path,
+    include_item_count: bool,
+) -> Result<DirectoryEntry, FsError> {
     let metadata = path.metadata()?;
     let Some(file_name) = path.file_name() else {
         return Err(FsError::InvalidFileName(path.to_path_buf()));
@@ -417,7 +453,11 @@ fn build_entry_from_path(path: &Path) -> Result<DirectoryEntry, FsError> {
         is_dir,
         icon_data_url: None,
         size_bytes: (!is_dir).then_some(metadata.len()),
-        item_count: if is_dir { read_item_count(path) } else { None },
+        item_count: if is_dir && include_item_count {
+            read_item_count(path)
+        } else {
+            None
+        },
         type_label: infer_type_label(&name, is_dir),
         modified_at: system_time_to_rfc3339(metadata.modified().ok()),
         created_at: system_time_to_rfc3339(metadata.created().ok()),
@@ -429,6 +469,12 @@ fn build_entry_from_path(path: &Path) -> Result<DirectoryEntry, FsError> {
 
 pub fn directory_entry_from_path(path: &Path) -> Result<DirectoryEntry, FsError> {
     build_entry_from_path(path)
+}
+
+pub fn directory_entry_from_path_without_item_count(
+    path: &Path,
+) -> Result<DirectoryEntry, FsError> {
+    build_entry_from_path_with_options(path, false)
 }
 
 fn build_entry(entry: &DirEntry) -> Result<DirectoryEntry, FsError> {
@@ -479,11 +525,14 @@ fn item_count_pool() -> Option<&'static ThreadPool> {
     .as_ref()
 }
 
-fn populate_item_counts(entries: &mut [DirectoryEntry]) {
+pub fn populate_item_counts_with_cancellation<F>(entries: &mut [DirectoryEntry], is_cancelled: &F)
+where
+    F: Fn() -> bool + Sync,
+{
     if let Some(pool) = item_count_pool() {
         pool.install(|| {
             entries.par_iter_mut().for_each(|entry| {
-                if entry.is_dir {
+                if entry.is_dir && !is_cancelled() {
                     entry.item_count = read_item_count(Path::new(&entry.path));
                 }
             });
@@ -492,6 +541,9 @@ fn populate_item_counts(entries: &mut [DirectoryEntry]) {
     }
 
     for entry in entries {
+        if is_cancelled() {
+            return;
+        }
         if entry.is_dir {
             entry.item_count = read_item_count(Path::new(&entry.path));
         }
@@ -654,7 +706,9 @@ pub fn resolve_is_dir(path: &Path, metadata: &Metadata) -> bool {
         return true;
     }
     if metadata.file_type().is_symlink() {
-        return fs::metadata(path).map(|target| target.is_dir()).unwrap_or(false);
+        return fs::metadata(path)
+            .map(|target| target.is_dir())
+            .unwrap_or(false);
     }
     false
 }

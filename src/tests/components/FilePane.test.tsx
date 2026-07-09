@@ -115,6 +115,93 @@ describe('FilePane state rendering', () => {
     expect(screen.queryByRole('row', { name: 'Go to parent folder' })).not.toBeInTheDocument()
   })
 
+  it('keeps unknown item counts rendered as an em dash', () => {
+    seedPane({ entries: [{ ...entry('Alpha'), itemCount: null }] })
+    render(<FilePane paneId="left" />)
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+  })
+
+  it('shows explicit items-sort pending feedback without changing row placeholders', () => {
+    seedPane({
+      sortKey: 'items',
+      sortDirection: 'desc',
+      itemsSortStatus: 'counting',
+      entries: [{ ...entry('Alpha'), itemCount: null }],
+    })
+
+    render(<FilePane paneId="left" />)
+
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: 'Items' })).toHaveAccessibleDescription(
+      'Counting items. Current row order will update when counting finishes.',
+    )
+  })
+
+  it('debounces visible-row item-count enrichment to the current viewport range', () => {
+    vi.useFakeTimers()
+    const originalRequestVisibleItemCounts = usePanesStore.getState().requestVisibleItemCounts
+    const requestVisibleItemCounts = vi.fn(() => Promise.resolve())
+    act(() => {
+      usePanesStore.setState({ requestVisibleItemCounts })
+    })
+
+    try {
+      seedPane({
+        path: 'C:\\root',
+        entries: [
+          { ...entry('Alpha'), itemCount: null },
+          { ...entry('Beta'), itemCount: null },
+          { ...entry('Gamma'), itemCount: null },
+        ],
+      })
+
+      render(<FilePane paneId="left" />)
+      act(() => {
+        vi.runOnlyPendingTimers()
+      })
+
+      expect(requestVisibleItemCounts).toHaveBeenCalledWith('left', 0, 2, 3)
+      expect(requestVisibleItemCounts).toHaveBeenCalledTimes(1)
+    } finally {
+      act(() => {
+        usePanesStore.setState({ requestVisibleItemCounts: originalRequestVisibleItemCounts })
+      })
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not spam visible-row count requests across unrelated rerenders', () => {
+    vi.useFakeTimers()
+    const originalRequestVisibleItemCounts = usePanesStore.getState().requestVisibleItemCounts
+    const requestVisibleItemCounts = vi.fn(() => Promise.resolve())
+    act(() => {
+      usePanesStore.setState({ requestVisibleItemCounts })
+    })
+
+    try {
+      seedPane({
+        path: 'C:\\root',
+        entries: [{ ...entry('Alpha'), itemCount: null }, { ...entry('Beta'), itemCount: null }],
+      })
+
+      const view = render(<FilePane paneId="left" />)
+      act(() => {
+        usePanesStore.setState((state) => ({
+          activePaneId: state.activePaneId === 'left' ? 'right' : 'left',
+        }))
+        view.rerender(<FilePane paneId="left" />)
+        vi.runOnlyPendingTimers()
+      })
+
+      expect(requestVisibleItemCounts).toHaveBeenCalledTimes(1)
+    } finally {
+      act(() => {
+        usePanesStore.setState({ requestVisibleItemCounts: originalRequestVisibleItemCounts })
+      })
+      vi.useRealTimers()
+    }
+  })
+
   it('renders a synthetic parent row that navigates up on activation', async () => {
     const user = userEvent.setup()
     const goUp = vi.fn(() => Promise.resolve())

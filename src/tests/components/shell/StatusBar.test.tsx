@@ -109,6 +109,28 @@ describe('StatusBar', () => {
     expect(screen.getByText('0 selected')).toBeInTheDocument()
   })
 
+  it('shows terse counting feedback while explicit items sorting is pending', () => {
+    act(() => {
+      usePanesStore.setState((state) => ({
+        activePaneId: 'left',
+        panes: {
+          ...state.panes,
+          left: {
+            ...state.panes.left,
+            path: 'C:\\Users',
+            sortKey: 'items',
+            itemsSortStatus: 'counting',
+            entries: [docsEntry],
+          },
+        },
+      }))
+    })
+
+    render(<StatusBar />)
+
+    expect(screen.getByRole('status', { name: 'Counting items…' })).toBeInTheDocument()
+  })
+
   it('follows the active pane when it changes', () => {
     act(() => {
       usePanesStore.setState((state) => ({

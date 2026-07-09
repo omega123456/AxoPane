@@ -1,6 +1,7 @@
 import type { IpcCommandMap } from '@/lib/types/ipc'
 import { fixtures } from '../fixtures'
 import { contextMenuFixtures } from './context-menu'
+import { itemsSortReadyResponse } from './item-counts'
 import { shellFixtures } from './shell'
 
 const registry: Partial<{
@@ -8,6 +9,8 @@ const registry: Partial<{
 }> = {
   ...fixtures,
   ...shellFixtures,
+  request_visible_item_counts: undefined,
+  sort_active_items: itemsSortReadyResponse,
   load_native_menu: contextMenuFixtures.emptyNativeExtras,
 }
 

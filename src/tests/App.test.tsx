@@ -468,6 +468,7 @@ describe('App', () => {
     // Left pane opens as a partial listing (first chunk only); the remainder
     // streams in as a separate list-chunk event.
     ipc.override('start_list_dir', (payload) => ({
+      kind: 'head' as const,
       path: payload.path,
       total: payload.path === 'C:\\Users\\Omega' ? 3 : 0,
       requestId: 42,
@@ -491,6 +492,7 @@ describe('App', () => {
         requestId: 42,
         path: 'C:\\Users\\Omega',
         entries: [rootEntries[2]],
+        chunkIndex: 1,
         done: true,
       })
     })

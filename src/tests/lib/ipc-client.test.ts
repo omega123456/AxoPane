@@ -15,12 +15,16 @@ import {
   openPath,
   requestFolderSize,
   requestFolderSizes,
+  requestVisibleItemCounts,
   saveConfig,
   saveSession,
+  sortActiveItems,
+  startListDir,
   setTabWatch,
 } from '@/lib/ipc/commands'
 import {
   onDirPatch,
+  onItemCountState,
   onQueueConflict,
   onQueueProgress,
   onSizeState,
@@ -60,6 +64,33 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
       }),
     ).resolves.toEqual({ path: 'C:\\x', entries: [] })
 
+    ipc.override('start_list_dir', (payload) => ({
+      kind: 'head',
+      path: payload.path,
+      total: 0,
+      requestId: 4,
+      firstChunk: [],
+      done: true,
+    }))
+    await expect(
+      startListDir({
+        tabId: 'left-1',
+        path: 'C:\\x',
+        sortKey: 'name',
+        sortDirection: 'asc',
+        filter: '',
+        showHidden: false,
+        includeItemCounts: true,
+      }),
+    ).resolves.toEqual({
+      kind: 'head',
+      path: 'C:\\x',
+      total: 0,
+      requestId: 4,
+      firstChunk: [],
+      done: true,
+    })
+
     ipc.override('cancel_size', (payload) => ({ cancelled: payload.path === 'C:\\x' }))
     await expect(cancelSize('C:\\x')).resolves.toEqual({ cancelled: true })
 
@@ -68,6 +99,7 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
 
     ipc.override('request_folder_size', () => undefined)
     ipc.override('request_folder_sizes', () => undefined)
+    ipc.override('request_visible_item_counts', () => undefined)
     ipc.override('open_path', () => undefined)
     let lastSetTabWatchPayload: unknown
     ipc.override('set_tab_watch', (payload) => {
@@ -76,9 +108,19 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
     })
     await expect(requestFolderSize({ path: 'C:\\x' })).resolves.toBeUndefined()
     await expect(requestFolderSizes({ paths: ['C:\\x'] })).resolves.toBeUndefined()
+    await expect(
+      requestVisibleItemCounts({
+        context: { paneId: 'left', tabId: 'left-1', requestId: 3, path: 'C:\\x' },
+        paths: ['C:\\x\\Alpha'],
+      }),
+    ).resolves.toBeUndefined()
     await expect(openPath({ path: 'C:\\x' })).resolves.toBeUndefined()
     await expect(setTabWatch(null)).resolves.toBeUndefined()
-    expect(lastSetTabWatchPayload).toEqual({ target: null, entries: undefined })
+    expect(lastSetTabWatchPayload).toEqual({
+      target: null,
+      seedReference: undefined,
+      entries: undefined,
+    })
 
     await expect(
       setTabWatch(
@@ -92,6 +134,7 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
           includeItemCounts: true,
         },
         [],
+        { tabId: 't', requestId: 9, path: 'C:\\x' },
       ),
     ).resolves.toBeUndefined()
     expect(lastSetTabWatchPayload).toEqual({
@@ -104,10 +147,25 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
         showHidden: false,
         includeItemCounts: true,
       },
+      seedReference: { tabId: 't', requestId: 9, path: 'C:\\x' },
       entries: [],
     })
 
     ipc.override('save_config', (payload) => payload.config)
+    await expect(
+      sortActiveItems({
+        context: { paneId: 'left', tabId: 'left-1', requestId: 4, path: 'C:\\x' },
+        sortDirection: 'desc',
+        filter: '',
+        showHidden: false,
+      }),
+    ).resolves.toEqual({
+      kind: 'ready',
+      context: { paneId: 'left', tabId: 'left-tab-1', requestId: 1, path: 'C:\\Users\\Omega' },
+      path: 'C:\\Users\\Omega',
+      entries: [],
+    })
+
     await expect(
       saveConfig({
         theme: 'light',
@@ -190,6 +248,7 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
   it('exposes typed event subscription helpers', async () => {
     const handlers = [
       await onDirPatch(vi.fn()),
+      await onItemCountState(vi.fn()),
       await onSizeState(vi.fn()),
       await onVolumesChanged(vi.fn()),
       await onQueueProgress(vi.fn()),
@@ -233,6 +292,17 @@ describe('playwright ipc mock module', () => {
 
   it('returns fixture responses and manages listeners', async () => {
     await expect(invokePlaywrightCommand('list_volumes', undefined)).resolves.toBeInstanceOf(Array)
+    await expect(
+      invokePlaywrightCommand('start_list_dir', {
+        tabId: 'left-1',
+        path: 'C:\\Users\\Omega',
+        sortKey: 'name',
+        sortDirection: 'asc',
+        filter: '',
+        showHidden: false,
+        includeItemCounts: true,
+      }),
+    ).resolves.toHaveProperty('kind', 'head')
     const handler = vi.fn()
     const unlisten = await listenPlaywrightEvent('dir://patch', handler)
     unlisten()

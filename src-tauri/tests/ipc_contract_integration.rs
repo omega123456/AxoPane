@@ -4,12 +4,14 @@ mod common;
 use std::fs;
 
 use file_explorer_lib::fs::{SortDirection, SortKey};
+use file_explorer_lib::item_counts::ItemCountService;
 use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::events;
 use file_explorer_lib::ipc::mock;
 use file_explorer_lib::ipc::types::{
-    CreateEntryRequest, FileClipboardMode, ListDirRequest, ListTreeChildrenRequest,
-    OpenPathRequest, RenameEntryRequest, TrashEntriesRequest, WriteFileClipboardRequest,
+    ActiveItemsSortRequest, ActiveItemsSortResponse, CreateEntryRequest, FileClipboardMode,
+    ItemCountRequestContext, ListDirRequest, ListTreeChildrenRequest, OpenPathRequest,
+    RenameEntryRequest, TrashEntriesRequest, VisibleItemCountsRequest, WriteFileClipboardRequest,
 };
 use tempfile::tempdir;
 
@@ -31,8 +33,13 @@ fn exposes_mock_contract_data() {
 #[test]
 fn exposes_event_channel_names() {
     assert_eq!(events::DIR_PATCH, "dir://patch");
+    assert_eq!(events::ITEM_COUNT, "item-count://state");
     assert_eq!(events::WATCH_ERROR, "watch://error");
     assert_eq!(common::bootstrap_message(), "phase-1-common");
+}
+
+fn as_state<T: Send + Sync + 'static>(value: &T) -> tauri::State<'_, T> {
+    unsafe { std::mem::transmute::<&T, tauri::State<'_, T>>(value) }
 }
 
 #[test]
@@ -228,4 +235,73 @@ fn list_tree_children_command_surfaces_errors_as_strings() {
     .expect_err("missing tree path");
 
     assert!(error.contains("Failed to load tree children"));
+}
+
+#[test]
+fn request_visible_item_counts_records_batched_events_under_test_utils() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    let child = root.join("child");
+    fs::create_dir(&child).expect("child dir");
+    fs::write(child.join("seed.txt"), b"x").expect("seed");
+
+    let service = ItemCountService::default();
+    commands::request_visible_item_counts(
+        VisibleItemCountsRequest {
+            context: ItemCountRequestContext {
+                pane_id: "left".to_string(),
+                tab_id: "left-1".to_string(),
+                request_id: 10,
+                path: root.to_string_lossy().into_owned(),
+            },
+            paths: vec![child.to_string_lossy().into_owned()],
+        },
+        as_state(&service),
+    );
+
+    let events = service.take_test_events();
+    assert_eq!(events.len(), 1);
+    assert!(events[0].done);
+    assert_eq!(events[0].results[0].item_count, Some(1));
+}
+
+#[test]
+fn sort_active_items_returns_ready_result_with_request_context() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    fs::create_dir(root.join("many")).expect("many");
+    fs::create_dir(root.join("few")).expect("few");
+    fs::write(root.join("many").join("a.txt"), b"a").expect("many child");
+    fs::write(root.join("many").join("b.txt"), b"b").expect("many child");
+    fs::write(root.join("few").join("a.txt"), b"a").expect("few child");
+
+    let service = ItemCountService::default();
+    let response = commands::sort_active_items(
+        ActiveItemsSortRequest {
+            context: ItemCountRequestContext {
+                pane_id: "left".to_string(),
+                tab_id: "left-1".to_string(),
+                request_id: 11,
+                path: root.to_string_lossy().into_owned(),
+            },
+            sort_direction: SortDirection::Desc,
+            filter: String::new(),
+            show_hidden: true,
+        },
+        as_state(&service),
+    )
+    .expect("sort active items");
+
+    let ActiveItemsSortResponse::Ready(ready) = response else {
+        panic!("expected ready result");
+    };
+    assert_eq!(ready.context.request_id, 11);
+    assert_eq!(
+        ready
+            .entries
+            .iter()
+            .map(|entry| (&entry.name, entry.item_count))
+            .collect::<Vec<_>>(),
+        vec![(&"many".to_string(), Some(2)), (&"few".to_string(), Some(1))]
+    );
 }

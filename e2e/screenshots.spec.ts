@@ -156,6 +156,13 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`folder-size-states-${mode}.png`)
   })
 
+  test(`items sort pending ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.itemsSortPending[mode])
+    await expect(page.getByRole('status', { name: 'Counting items…' })).toBeVisible()
+    await expect(page.getByRole('columnheader', { name: /Items/ }).first()).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`items-sort-pending-${mode}.png`)
+  })
+
   test(`queue collapsed ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.queueCollapsed[mode])
     await expect(page.getByRole('button', { name: 'Expand job queue' })).toBeVisible()

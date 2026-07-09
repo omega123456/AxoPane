@@ -555,7 +555,10 @@ fn folder_symlink_is_listed_as_a_navigable_directory() {
         .iter()
         .find(|entry| entry.name == "linked_folder")
         .expect("linked_folder entry present");
-    assert!(link_entry.is_dir, "folder symlink must report as a directory");
+    assert!(
+        link_entry.is_dir,
+        "folder symlink must report as a directory"
+    );
     assert_eq!(link_entry.type_label, "Folder");
     assert_eq!(link_entry.item_count, Some(1));
 
@@ -565,7 +568,9 @@ fn folder_symlink_is_listed_as_a_navigable_directory() {
     })
     .expect("list tree children");
     assert!(
-        tree.children.iter().any(|child| child.name == "linked_folder"),
+        tree.children
+            .iter()
+            .any(|child| child.name == "linked_folder"),
         "folder symlink must appear in the folder tree"
     );
 }

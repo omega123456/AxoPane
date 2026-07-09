@@ -123,6 +123,7 @@ fn clearing_watches_stops_future_patch_delivery() {
                 include_item_counts: true,
             }),
             None,
+            None,
             Arc::new(move |patch| {
                 patches_for_callback
                     .lock()
@@ -134,7 +135,7 @@ fn clearing_watches_stops_future_patch_delivery() {
         .expect("set watch");
 
     service
-        .set_tab_watch(None, None, Arc::new(|_| {}), Arc::new(|_, _| {}))
+        .set_tab_watch(None, None, None, Arc::new(|_| {}), Arc::new(|_, _| {}))
         .expect("clear watches");
     fs::write(root.join("after-clear.txt"), b"x").expect("after clear");
     thread::sleep(Duration::from_millis(250));

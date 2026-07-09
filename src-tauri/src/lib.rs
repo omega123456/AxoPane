@@ -4,6 +4,7 @@ mod clipboard;
 pub mod file_icons;
 pub mod fs;
 pub mod ipc;
+pub mod item_counts;
 pub mod launch;
 pub mod listing;
 pub mod logging;
@@ -37,6 +38,8 @@ pub fn resolved_app_config_dir(base: &Path) -> PathBuf {
 
 #[cfg(not(feature = "test-utils"))]
 use ipc::commands;
+#[cfg(not(feature = "test-utils"))]
+use item_counts::ItemCountService;
 #[cfg(not(feature = "test-utils"))]
 use native_menu::NativeMenuService;
 #[cfg(not(feature = "test-utils"))]
@@ -184,6 +187,7 @@ pub fn run() {
 
             app.manage(persistence);
             app.manage(NativeMenuService::default());
+            app.manage(ItemCountService::default());
             app.manage(SizeService::default());
             app.manage(WatchService::default());
             app.manage(listing::ListingService::default());
@@ -240,6 +244,8 @@ pub fn run() {
             commands::request_folder_size,
             commands::request_folder_sizes,
             commands::request_icons,
+            commands::request_visible_item_counts,
+            commands::sort_active_items,
             commands::cancel_size,
             commands::cancel_sizes,
             commands::set_tab_watch,

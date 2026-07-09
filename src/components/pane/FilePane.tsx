@@ -12,6 +12,8 @@ import { TabBar } from './TabBar'
 import { executeCommand } from '@/lib/commands'
 import { detectPlatformOs, resolveCommandForEvent } from '@/lib/keymap'
 import { getParentPath } from '@/stores/panes-store'
+import { pathKey } from '@/lib/path-compare'
+import { isTrashPath } from '@/lib/trash'
 import { EmptyState } from '@/components/states/EmptyState'
 import { ErrorState } from '@/components/states/ErrorState'
 import { EverythingBanner } from '@/components/states/EverythingBanner'
@@ -97,6 +99,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   const goUp = usePanesStore((state) => state.goUp)
   const openTabFromPath = usePanesStore((state) => state.openTabFromPath)
   const reloadPane = usePanesStore((state) => state.reloadPane)
+  const requestVisibleItemCounts = usePanesStore((state) => state.requestVisibleItemCounts)
   const requestVisibleIcons = usePanesStore((state) => state.requestVisibleIcons)
   const warmVisibleNativeMenus = useNativeMenuWarmStore((state) => state.warmVisibleNativeMenus)
   const setScrollPosition = usePanesStore((state) => state.setScrollPosition)
@@ -183,7 +186,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   const cutEntryPaths = useMemo(
     () =>
       clipboardMode === 'move'
-        ? new Set(clipboardEntries.map((entry) => entry.path.toLowerCase()))
+        ? new Set(clipboardEntries.map((entry) => pathKey(entry.path)))
         : new Set<string>(),
     [clipboardEntries, clipboardMode],
   )
@@ -283,10 +286,15 @@ export function FilePane({ paneId }: FilePaneProps) {
     const start = Math.max(0, items[0].index - parentOffset)
     const end = Math.max(0, items[items.length - 1].index - parentOffset)
 
-    // Native icons are lazy and per-visible-row: debounce so fast scrolling
-    // doesn't spam the backend with a request per frame.
+    const viewportCount = Math.max(1, end - start + 1)
+
+    // Visible-row enrichment is debounced so fast scrolls and unrelated renders
+    // collapse into one backend request for the final viewport.
     window.clearTimeout(visibleIconRequestTimerRef.current)
     visibleIconRequestTimerRef.current = window.setTimeout(() => {
+      if (!isTrashPath(pane.path)) {
+        void requestVisibleItemCounts(paneId, start, end, viewportCount)
+      }
       const visiblePaths = pane.entries.slice(start, end + 1).map((entry) => entry.path)
       void requestVisibleIcons(paneId, visiblePaths)
       // Background native-context-menu cache pre-warming reuses this same
@@ -299,7 +307,9 @@ export function FilePane({ paneId }: FilePaneProps) {
     itemsToRender,
     paneId,
     pane.entries,
+    pane.path,
     parentOffset,
+    requestVisibleItemCounts,
     requestVisibleIcons,
     warmVisibleNativeMenus,
   ])
@@ -1029,7 +1039,7 @@ export function FilePane({ paneId }: FilePaneProps) {
                       isActivePane={isActivePane}
                       isFocused={pane.focusedEntryId === entry.id}
                       isSelected={selectedIdSet.has(entry.id)}
-                      isCut={cutEntryPaths.has(entry.path.toLowerCase())}
+                      isCut={cutEntryPaths.has(pathKey(entry.path))}
                       isDropTarget={dropTargetEntryId === entry.id}
                       draggable={!entry.trashId}
                       isRenaming={rename?.entryId === entry.id}

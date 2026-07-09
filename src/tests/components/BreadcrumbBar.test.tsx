@@ -40,6 +40,7 @@ function pane(path: string, entries: DirectoryEntry[] = []): PaneState {
     filterApplied: '',
     typing: false,
     loading: false,
+    itemsSortStatus: 'idle',
     error: null,
     listRequestId: 0,
     scrollPositions: {},

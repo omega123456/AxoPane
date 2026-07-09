@@ -21,6 +21,7 @@ import {
   manyPendingQueueSnapshot,
 } from './queue'
 import { fileTypesListDir } from './file-types'
+import { itemsSortPendingListDir, itemsSortPendingSession } from './item-counts'
 import { relativeDatesListDir } from './relative-dates'
 import { stickyTreeChildrenByPath, stickyTreeListDir, stickyTreeSession } from './tree'
 import type { TreeChildrenByPath } from './tree-states'
@@ -451,6 +452,30 @@ export const screenshotScenarios = {
             },
           ],
         ],
+      },
+    },
+  },
+  itemsSortPending: {
+    light: {
+      commands: {
+        load_config: lightConfig,
+        load_session: itemsSortPendingSession,
+        list_dir: itemsSortPendingListDir,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+      delaysMs: {
+        sort_active_items: 5_000,
+      },
+    },
+    dark: {
+      commands: {
+        load_config: darkConfig,
+        load_session: itemsSortPendingSession,
+        list_dir: itemsSortPendingListDir,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+      delaysMs: {
+        sort_active_items: 5_000,
       },
     },
   },

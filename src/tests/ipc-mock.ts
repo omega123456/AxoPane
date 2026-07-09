@@ -56,6 +56,7 @@ function getResponse<CommandName extends keyof IpcCommandMap>(
   if (command === 'start_list_dir') {
     const listing = resolveListDir(payload as IpcCommandMap['list_dir']['request'])
     const head: IpcCommandMap['start_list_dir']['response'] = {
+      kind: 'head',
       path: listing.path,
       total: listing.entries.length,
       requestId: 1,
@@ -82,8 +83,8 @@ function getResponse<CommandName extends keyof IpcCommandMap>(
 
   // A command is "mocked" when it is declared in the fixtures map — even when
   // its declared response is `undefined` (void commands such as the folder-size
-  // requests). Only commands genuinely absent from the fixtures throw the
-  // intentional unmocked-IPC error.
+  // and item-count request commands). Only commands genuinely absent from the
+  // fixtures throw the intentional unmocked-IPC error.
   if (!Object.prototype.hasOwnProperty.call(fixtures, command)) {
     throw new Error(`[vitest] Unmocked Tauri IPC command: ${String(command)}`)
   }
@@ -107,6 +108,8 @@ export const ipc = {
           ),
         ),
       listen: (eventName: keyof IpcEventMap, callback: (payload: unknown) => void) => {
+        // Event routing stays centralized here for every typed IPC surface,
+        // including batched size/icon events and single item-count updates.
         const eventListeners = listeners[eventName] ?? new Set()
         eventListeners.add(callback)
         listeners[eventName] = eventListeners

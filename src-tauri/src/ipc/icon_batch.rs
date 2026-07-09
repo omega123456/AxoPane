@@ -48,7 +48,11 @@ impl IconBatcher {
     /// buffer — when the batch has reached [`MAX_BATCH`] items or
     /// [`FLUSH_INTERVAL`] has elapsed since the last flush; otherwise
     /// returns `None` and the event stays buffered.
-    pub(crate) fn push(&mut self, event: IconStateEvent, now: Instant) -> Option<Vec<IconStateEvent>> {
+    pub(crate) fn push(
+        &mut self,
+        event: IconStateEvent,
+        now: Instant,
+    ) -> Option<Vec<IconStateEvent>> {
         self.buffer.push(event);
         if self.buffer.len() >= MAX_BATCH || now.duration_since(self.last_flush) >= FLUSH_INTERVAL {
             self.last_flush = now;

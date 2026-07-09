@@ -1,5 +1,7 @@
 import type {
   AppConfig,
+  ActiveItemsSortRequest,
+  ActiveItemsSortResponse,
   CancelSizeResponse,
   CancelSizesResponse,
   CompressArchiveRequest,
@@ -36,10 +38,12 @@ import type {
   SetDefaultApplicationRequest,
   ShowPropertiesRequest,
   TrashEntriesRequest,
+  VisibleItemCountsRequest,
   WarmNativeMenusRequest,
   WatchTarget,
   SessionState,
   VolumeInfo,
+  WatchSeedReference,
   WriteFileClipboardRequest,
 } from '@/lib/types/ipc'
 import { invokeCommand } from './client'
@@ -177,6 +181,14 @@ export function requestIcons(payload: RequestIconsRequest) {
   return invokeCommand({ command: 'request_icons', payload }) as Promise<void>
 }
 
+export function requestVisibleItemCounts(payload: VisibleItemCountsRequest) {
+  return invokeCommand({ command: 'request_visible_item_counts', payload }) as Promise<void>
+}
+
+export function sortActiveItems(payload: ActiveItemsSortRequest) {
+  return invokeCommand({ command: 'sort_active_items', payload }) as Promise<ActiveItemsSortResponse>
+}
+
 export function cancelSize(path: string) {
   return invokeCommand({ command: 'cancel_size', payload: { path } }) as Promise<CancelSizeResponse>
 }
@@ -188,10 +200,14 @@ export function cancelSizes(paths: string[]) {
   }) as Promise<CancelSizesResponse>
 }
 
-export function setTabWatch(target: WatchTarget | null, entries?: DirectoryEntry[]) {
+export function setTabWatch(
+  target: WatchTarget | null,
+  entries?: DirectoryEntry[],
+  seedReference?: WatchSeedReference,
+) {
   return invokeCommand({
     command: 'set_tab_watch',
-    payload: { target, entries },
+    payload: { target, seedReference, entries },
   }) as Promise<void>
 }
 

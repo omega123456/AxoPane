@@ -95,7 +95,8 @@ export type StartListDirRequest = {
   includeItemCounts: boolean
 }
 
-export type StartListDirResponse = {
+export type StartListDirHead = {
+  kind: 'head'
   path: string
   total: number
   requestId: number
@@ -103,11 +104,20 @@ export type StartListDirResponse = {
   done: boolean
 }
 
+export type StartListDirSuperseded = {
+  kind: 'superseded'
+  requestId: number
+}
+
+export type StartListDirResponse = StartListDirHead | StartListDirSuperseded
+
 export type ListChunkEvent = {
   tabId: string
   requestId: number
   path: string
   entries: DirectoryEntry[]
+  /** Monotonic within a request; the inline listing head is chunk 0. */
+  chunkIndex: number
   done: boolean
 }
 
@@ -457,8 +467,60 @@ export type WatchTarget = {
   includeItemCounts: boolean
 }
 
+export type WatchSeedReference = {
+  tabId: string
+  requestId: number
+  path: string
+}
+
+export type ItemCountRequestContext = {
+  paneId: string
+  tabId: string
+  requestId: number
+  path: string
+}
+
+export type VisibleItemCountsRequest = {
+  context: ItemCountRequestContext
+  paths: string[]
+}
+
+export type ItemCountResult = {
+  path: string
+  itemCount: number | null
+}
+
+export type ItemCountEvent = {
+  context: ItemCountRequestContext
+  results: ItemCountResult[]
+  done: boolean
+}
+
+export type ActiveItemsSortRequest = {
+  context: ItemCountRequestContext
+  sortDirection: SortDirection
+  filter: string
+  showHidden: boolean
+}
+
+export type ActiveItemsSortReady = {
+  kind: 'ready'
+  context: ItemCountRequestContext
+  path: string
+  entries: DirectoryEntry[]
+}
+
+export type ActiveItemsSortSuperseded = {
+  kind: 'superseded'
+  context: ItemCountRequestContext
+}
+
+export type ActiveItemsSortResponse = ActiveItemsSortReady | ActiveItemsSortSuperseded
+
 export type SetTabWatchRequest = {
   target: WatchTarget | null
+  /** Reference to a completed Rust-owned listing snapshot that can seed the watcher baseline. */
+  seedReference?: WatchSeedReference
   /** Post-sort/filter entries already fetched for this listing, used to seed the watcher baseline. */
   entries?: DirectoryEntry[]
 }
@@ -690,6 +752,14 @@ export type IpcCommandMap = {
     request: RequestIconsRequest
     response: void
   }
+  request_visible_item_counts: {
+    request: VisibleItemCountsRequest
+    response: void
+  }
+  sort_active_items: {
+    request: ActiveItemsSortRequest
+    response: ActiveItemsSortResponse
+  }
   cancel_size: {
     request: CancelSizeRequest
     response: CancelSizeResponse
@@ -776,6 +846,7 @@ export type IpcEventMap = {
   'size://state': SizeStateEvent[]
   /** Batched: the backend flushes resolved icons in chunks (see Phase 3 backend batching). */
   'icon://state': IconStateEvent[]
+  'item-count://state': ItemCountEvent
   'volumes://changed': VolumesChangedEvent
   'queue://progress': QueueProgressEvent
   'queue://conflict': QueueConflictEvent

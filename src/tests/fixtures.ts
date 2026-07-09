@@ -76,6 +76,7 @@ export const fixtures: {
   // from whatever `list_dir` responder is active (see `ipc-mock.ts`), so tests
   // that mock `list_dir` transparently drive the streamed listing path too.
   start_list_dir: {
+    kind: 'head',
     path: 'C:\\Users\\Omega',
     total: 0,
     requestId: 1,
@@ -336,6 +337,18 @@ export const fixtures: {
   request_folder_size: undefined,
   request_folder_sizes: undefined,
   request_icons: undefined,
+  request_visible_item_counts: undefined,
+  sort_active_items: {
+    kind: 'ready',
+    context: {
+      paneId: 'left',
+      tabId: 'left-tab-1',
+      requestId: 1,
+      path: 'C:\\Users\\Omega',
+    },
+    path: 'C:\\Users\\Omega',
+    entries: [],
+  },
   cancel_size: {
     cancelled: false,
   },

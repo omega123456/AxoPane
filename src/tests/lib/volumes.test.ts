@@ -107,6 +107,7 @@ describe('isVolumeRoot', () => {
 
   it('matches a posix and network root', () => {
     expect(isVolumeRoot('/', volume({ mountRoot: '/' }))).toBe(true)
+    expect(isVolumeRoot('/Work/foo', volume({ mountRoot: '/Work/Foo' }))).toBe(false)
     const share = volume({ mountRoot: '\\\\server\\share', isNetwork: true })
     expect(isVolumeRoot('\\\\server\\share\\', share)).toBe(true)
     expect(isVolumeRoot('\\\\server\\share\\sub', share)).toBe(false)

@@ -9,6 +9,7 @@ use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::types::{
     FolderSizeRequest, FolderSizesRequest, SetTabWatchRequest, WatchTarget,
 };
+use file_explorer_lib::listing::ListingService;
 use file_explorer_lib::ops::OpsService;
 use file_explorer_lib::persist::PersistenceState;
 use file_explorer_lib::size::SizeService;
@@ -24,6 +25,7 @@ fn build_app() -> (tempfile::TempDir, tauri::App<tauri::test::MockRuntime>) {
     let app = mock_builder()
         .manage(persistence)
         .manage(SizeService::default())
+        .manage(ListingService::default())
         .manage(WatchService::default())
         .manage(OpsService::new(Duration::from_secs(30)))
         .build(mock_context(noop_assets()))
@@ -56,8 +58,10 @@ fn concrete_apphandle_commands_cover_volume_watch_and_size_wrappers() {
     commands::set_tab_watch(
         SetTabWatchRequest {
             target: Some(watch_target.clone()),
+            seed_reference: None,
             entries: None,
         },
+        app.state::<ListingService>(),
         app.state::<WatchService>(),
     )
     .expect("set watch");
@@ -68,26 +72,28 @@ fn concrete_apphandle_commands_cover_volume_watch_and_size_wrappers() {
     commands::set_tab_watch(
         SetTabWatchRequest {
             target: Some(watch_target.clone()),
+            seed_reference: None,
             entries: None,
         },
+        app.state::<ListingService>(),
         app.state::<WatchService>(),
     )
     .expect("reseed watch after file changes");
-    let baseline =
-        file_explorer_lib::watch::tab_snapshot_for_tests(&app.state::<WatchService>(), &watch_target.tab_id)
-            .expect("baseline recorded for tab");
-    assert!(baseline
-        .keys()
-        .any(|path| path.ends_with("after.txt")));
-    assert!(!baseline
-        .keys()
-        .any(|path| path.ends_with("before.txt")));
+    let baseline = file_explorer_lib::watch::tab_snapshot_for_tests(
+        &app.state::<WatchService>(),
+        &watch_target.tab_id,
+    )
+    .expect("baseline recorded for tab");
+    assert!(baseline.keys().any(|path| path.ends_with("after.txt")));
+    assert!(!baseline.keys().any(|path| path.ends_with("before.txt")));
 
     commands::set_tab_watch(
         SetTabWatchRequest {
             target: None,
+            seed_reference: None,
             entries: None,
         },
+        app.state::<ListingService>(),
         app.state::<WatchService>(),
     )
     .expect("clear watch");

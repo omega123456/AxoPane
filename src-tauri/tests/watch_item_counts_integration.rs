@@ -11,6 +11,9 @@
 use std::sync::{Arc, Mutex};
 
 use file_explorer_lib::fs::{self, DirectoryEntry, SortDirection, SortKey};
+use file_explorer_lib::ipc::commands;
+use file_explorer_lib::ipc::types::{SetTabWatchRequest, WatchSeedReference};
+use file_explorer_lib::listing::ListingService;
 use file_explorer_lib::watch::{
     create_runtime, diff_entries, handle_debounce_result_for_tests, insert_tab_for_tests,
     snapshot_for_target, tab_snapshot_for_tests, DirPatch, WatchService, WatchTarget,
@@ -47,6 +50,10 @@ fn phantom_entry(path: &str, name: &str) -> DirectoryEntry {
         is_hidden: false,
         is_system: false,
     }
+}
+
+fn as_state<'a, T: Send + Sync + 'static>(value: &'a T) -> tauri::State<'a, T> {
+    unsafe { std::mem::transmute::<&'a T, tauri::State<'a, T>>(value) }
 }
 
 #[test]
@@ -100,6 +107,7 @@ fn set_tab_watch_seeds_baseline_from_supplied_entries_without_relisting() {
     service
         .set_tab_watch(
             Some(target.clone()),
+            None,
             Some(entries),
             Arc::new(|_| {}),
             Arc::new(|_, _| {}),
@@ -153,6 +161,7 @@ fn set_tab_watch_seeds_empty_first_diff_even_when_supplied_entries_carry_icon_da
     service
         .set_tab_watch(
             Some(target.clone()),
+            None,
             Some(vec![icon_bearing_entry]),
             Arc::new(|_| {}),
             Arc::new(|_, _| {}),
@@ -196,6 +205,7 @@ fn set_tab_watch_falls_back_to_listing_when_no_entries_supplied() {
         .set_tab_watch(
             Some(target.clone()),
             None,
+            None,
             Arc::new(|_| {}),
             Arc::new(|_, _| {}),
         )
@@ -208,6 +218,47 @@ fn set_tab_watch_falls_back_to_listing_when_no_entries_supplied() {
         baseline, real_listing,
         "baseline should already match the on-disk listing when no entries were supplied"
     );
+}
+
+#[test]
+fn set_tab_watch_uses_valid_listing_seed_reference_without_relisting() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    let phantom_path = root.join("phantom.txt").to_string_lossy().into_owned();
+    let seeded_entry = phantom_entry(&phantom_path, "phantom.txt");
+
+    let listing_service = ListingService::default();
+    let session = listing_service.begin_session("left-1");
+    assert!(listing_service.complete_session(
+        &session,
+        root.to_string_lossy().into_owned(),
+        SortKey::Name,
+        SortDirection::Asc,
+        String::new(),
+        true,
+        true,
+        vec![seeded_entry],
+    ));
+
+    let watch_service = WatchService::default();
+    commands::set_tab_watch(
+        SetTabWatchRequest {
+            target: Some(base_target("left-1", &root.to_string_lossy(), true)),
+            seed_reference: Some(WatchSeedReference {
+                tab_id: "left-1".to_string(),
+                request_id: session.request_id,
+                path: root.to_string_lossy().into_owned(),
+            }),
+            entries: None,
+        },
+        as_state(&listing_service),
+        as_state(&watch_service),
+    )
+    .expect("set watch from seed reference");
+
+    let baseline =
+        tab_snapshot_for_tests(&watch_service, "left-1").expect("baseline recorded from seed");
+    assert!(baseline.keys().any(|path| path.ends_with("phantom.txt")));
 }
 
 #[test]

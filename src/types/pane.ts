@@ -14,6 +14,7 @@ export type PaneState = {
   filterApplied: string
   typing: boolean
   loading: boolean
+  itemsSortStatus: 'idle' | 'counting' | 'complete' | 'stale' | 'failed'
   error: string | null
   listRequestId: number
   scrollPositions: Record<string, number>

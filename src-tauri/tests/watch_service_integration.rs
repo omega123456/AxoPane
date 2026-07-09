@@ -36,6 +36,7 @@ fn set_tab_watch_records_the_current_listing_as_the_tab_baseline() {
         .set_tab_watch(
             Some(watch_target.clone()),
             None,
+            None,
             Arc::new(|_| {}),
             Arc::new(|_, _| {}),
         )
@@ -63,6 +64,7 @@ fn replacing_a_same_pane_watch_discards_the_previous_tab_snapshot() {
         .set_tab_watch(
             Some(target("left-1", &left_a)),
             None,
+            None,
             Arc::new(|_| {}),
             Arc::new(|_, _| {}),
         )
@@ -70,6 +72,7 @@ fn replacing_a_same_pane_watch_discards_the_previous_tab_snapshot() {
     service
         .set_tab_watch(
             Some(target("left-2", &left_b)),
+            None,
             None,
             Arc::new(|_| {}),
             Arc::new(|_, _| {}),
@@ -99,6 +102,7 @@ fn clearing_watches_removes_all_recorded_tab_snapshots() {
         .set_tab_watch(
             Some(watch_target.clone()),
             None,
+            None,
             Arc::new(|_| {}),
             Arc::new(|_, _| {}),
         )
@@ -106,7 +110,7 @@ fn clearing_watches_removes_all_recorded_tab_snapshots() {
     assert!(tab_snapshot_for_tests(&service, &watch_target.tab_id).is_some());
 
     service
-        .set_tab_watch(None, None, Arc::new(|_| {}), Arc::new(|_, _| {}))
+        .set_tab_watch(None, None, None, Arc::new(|_| {}), Arc::new(|_, _| {}))
         .expect("clear watches");
 
     assert!(tab_snapshot_for_tests(&service, &watch_target.tab_id).is_none());
@@ -124,6 +128,7 @@ fn reconcile_emits_refresh_patch_for_missed_directory_changes() {
     service
         .set_tab_watch(
             Some(watch_target.clone()),
+            None,
             None,
             Arc::new(|_| {}),
             Arc::new(|_, _| {}),

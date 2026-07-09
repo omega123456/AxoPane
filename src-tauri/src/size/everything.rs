@@ -104,7 +104,7 @@ fn is_windows_root_like(path: &str) -> bool {
 #[cfg(all(windows, not(feature = "test-utils")))]
 mod platform {
     use super::{
-        EVERYTHING_BATCH_CHUNK_SIZE, build_exact_folder_or_queries, map_everything_result_sizes,
+        build_exact_folder_or_queries, map_everything_result_sizes, EVERYTHING_BATCH_CHUNK_SIZE,
     };
     use std::collections::HashMap;
     use std::ffi::OsStr;

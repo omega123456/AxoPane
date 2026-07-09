@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import {
   cancelSizes,
   listTreeChildren,
+  requestVisibleItemCounts as requestVisibleItemCountsCommand,
+  sortActiveItems,
   startListDir,
   listTrash,
   requestFolderSize,
@@ -16,6 +18,8 @@ import type {
   DirPatchEvent,
   EverythingStatus,
   IconStateEvent,
+  ItemCountEvent,
+  ItemCountRequestContext,
   ListChunkEvent,
   SessionState,
   SizeStateEvent,
@@ -25,8 +29,8 @@ import type {
 } from '@/lib/types/ipc'
 import { activeTab, fromSessionPane, toSessionPane, useTabsStore } from '@/stores/tabs-store'
 import { useConfigStore } from '@/stores/config-store'
-import { useLayoutStore } from '@/stores/layout-store'
 import { log } from '@/lib/app-log-commands'
+import { pathKey, pathsMatch, samePathOrWindowsCaseFold } from '@/lib/path-compare'
 import {
   findVolumeForPath,
   formatVolumeTreeName,
@@ -70,12 +74,24 @@ type PaneState = {
   filterApplied: string
   typing: boolean
   loading: boolean
+  itemsSortStatus: 'idle' | 'counting' | 'complete' | 'stale' | 'failed'
+  // Monotonic frontend operation identity for explicit Items sorts. Context
+  // alone is insufficient when the same pane context starts another sort.
+  itemsSortOperationId: number
   error: string | null
   // Monotonic id of the in-flight streamed listing for this pane's active tab,
   // set from the `start_list_dir` head. Streamed `list_chunk` events are only
   // applied while their `requestId` matches, so chunks from a superseded
   // navigation are ignored.
   listRequestId: number
+  // Local navigation generation invalidates the previously accepted request
+  // before `start_list_dir` resolves. This closes the A -> B -> A tail race.
+  listingGeneration: number
+  // Stream chunks carry a protocol-level index, not inferred entry identity.
+  acceptedChunkIndexes: number[]
+  // A streamed listing is safe for backend Items sorting only after its final
+  // chunk has been accepted. This also rejects duplicate/late tail chunks.
+  listingComplete: boolean
   scrollPositions: Record<string, number>
   history: string[]
   historyIndex: number
@@ -83,6 +99,7 @@ type PaneState = {
 
 type PendingSizeRequests = Record<string, true>
 type PendingIconRequests = Record<string, true>
+type PassiveItemCountRequests = Record<string, true>
 // Paths that have received a `request_icons` response, keyed to the resolved
 // data URL or `null` when the backend deliberately found no native icon. Most
 // files never resolve to an icon (non-Windows, or a Windows extension outside
@@ -113,10 +130,12 @@ type PanesStore = {
   sizeStates: Record<string, EntrySizeState>
   pendingSizeRequests: PendingSizeRequests
   pendingIconRequests: PendingIconRequests
+  passiveItemCountRequests: PassiveItemCountRequests
   resolvedIconPaths: ResolvedIconPaths
   treeNodes: Record<string, TreeNodeState>
   treeRoots: string[]
   filterTimers: Partial<Record<PaneId, number>>
+  pendingListChunks: Record<string, ListChunkEvent[]>
   initialize: (payload: InitializePayload) => void
   setActivePane: (paneId: PaneId) => void
   reloadPane: (paneId: PaneId) => Promise<void>
@@ -140,6 +159,13 @@ type PanesStore = {
   setScrollPosition: (paneId: PaneId, path: string, scrollTop: number) => void
   /** Applies a batch of size-state events (coalesced by the frontend rAF batcher) in one `set`. */
   applySizeStates: (events: SizeStateEvent[]) => void
+  requestVisibleItemCounts: (
+    paneId: PaneId,
+    visibleStartIndex: number,
+    visibleEndIndex: number,
+    viewportCount: number,
+  ) => Promise<void>
+  applyItemCountEvents: (events: ItemCountEvent[]) => void
   requestVisibleIcons: (paneId: PaneId, paths: string[]) => Promise<void>
   /**
    * Applies a batch of icon-state events (coalesced by the frontend rAF
@@ -160,6 +186,12 @@ type PanesStore = {
 }
 
 const filterDelayMs = 180
+const AUTO_VISIBLE_ITEM_COUNT_LIMIT = 200
+// A list_chunk can race ahead of its start_list_dir head. Retain a bounded
+// amount of that pre-head data so an abandoned invoke response cannot retain
+// arbitrarily many stale payloads in the renderer.
+const MAX_PENDING_LIST_CHUNK_BUFFERS = 8
+const MAX_PENDING_LIST_CHUNKS_PER_BUFFER = 32
 
 function createPane(id: PaneId, title: string, path = '.'): PaneState {
   return {
@@ -174,8 +206,13 @@ function createPane(id: PaneId, title: string, path = '.'): PaneState {
     filterApplied: '',
     typing: false,
     loading: false,
+    itemsSortStatus: 'idle',
+    itemsSortOperationId: 0,
     error: null,
     listRequestId: 0,
+    listingGeneration: 0,
+    acceptedChunkIndexes: [],
+    listingComplete: true,
     scrollPositions: {},
     history: [],
     historyIndex: -1,
@@ -197,10 +234,12 @@ function defaultState() {
     sizeStates: {} as Record<string, EntrySizeState>,
     pendingSizeRequests: {} as PendingSizeRequests,
     pendingIconRequests: {} as PendingIconRequests,
+    passiveItemCountRequests: {} as PassiveItemCountRequests,
     resolvedIconPaths: {} as ResolvedIconPaths,
     treeNodes: {} as Record<string, TreeNodeState>,
     treeRoots: [] as string[],
     filterTimers: {} as Partial<Record<PaneId, number>>,
+    pendingListChunks: {} as Record<string, ListChunkEvent[]>,
   }
 }
 
@@ -527,6 +566,226 @@ function hasResolvedIconPath(resolvedIconPaths: ResolvedIconPaths, path: string)
   return Object.prototype.hasOwnProperty.call(resolvedIconPaths, path)
 }
 
+function itemCountContextKey(context: ItemCountRequestContext) {
+  return `${context.paneId}::${context.tabId}::${context.requestId}`
+}
+
+function itemCountRequestKey(context: ItemCountRequestContext, path: string) {
+  return `${itemCountContextKey(context)}::${pathKey(path)}`
+}
+
+function listChunkBufferKey(event: Pick<ListChunkEvent, 'tabId' | 'requestId' | 'path'>) {
+  return `${event.tabId}::${event.requestId}::${pathKey(event.path)}`
+}
+
+function boundedPendingListChunks(
+  pendingListChunks: Record<string, ListChunkEvent[]>,
+  tabId: string,
+) {
+  const tabPrefix = `${tabId}::`
+  const candidates = Object.entries(pendingListChunks)
+    .filter(([, events]) => events[0]?.tabId === tabId)
+    .sort(([, left], [, right]) => (right[0]?.requestId ?? 0) - (left[0]?.requestId ?? 0))
+    .slice(0, MAX_PENDING_LIST_CHUNK_BUFFERS)
+
+  const next = Object.fromEntries(
+    candidates.map(([key, events]) => [
+      key,
+      [...events]
+        .sort((left, right) => left.chunkIndex - right.chunkIndex)
+        .slice(0, MAX_PENDING_LIST_CHUNKS_PER_BUFFER),
+    ]),
+  ) as Record<string, ListChunkEvent[]>
+
+  // Buffers belonging to the other pane cannot ever be adopted by this
+  // navigation. Keep them untouched; that pane will prune its own scope.
+  for (const [key, events] of Object.entries(pendingListChunks)) {
+    if (!key.startsWith(tabPrefix)) {
+      next[key] = events
+    }
+  }
+
+  return next
+}
+
+function clearPendingListChunksForTab(
+  pendingListChunks: Record<string, ListChunkEvent[]>,
+  tabId: string,
+) {
+  return Object.fromEntries(
+    Object.entries(pendingListChunks).filter(([, events]) => events[0]?.tabId !== tabId),
+  ) as Record<string, ListChunkEvent[]>
+}
+
+function isChunkForPane(paneId: PaneId, pane: PaneState, event: ListChunkEvent) {
+  return (
+    paneIdFromTabId(event.tabId) === paneId &&
+    event.tabId === activeTab(paneId).id &&
+    event.requestId === pane.listRequestId &&
+    pathsMatch(event.path, pane.path)
+  )
+}
+
+function clearPassiveItemCountRequestsForPane(
+  passiveItemCountRequests: PassiveItemCountRequests,
+  paneId: PaneId,
+) {
+  const prefix = `${paneId}::`
+  return Object.fromEntries(
+    Object.entries(passiveItemCountRequests).filter(([key]) => !key.startsWith(prefix)),
+  ) as PassiveItemCountRequests
+}
+
+function currentItemCountContext(paneId: PaneId, pane: PaneState): ItemCountRequestContext {
+  return {
+    paneId,
+    tabId: activeTab(paneId).id,
+    requestId: pane.listRequestId,
+    path: pane.path,
+  }
+}
+
+function itemCountContextMatches(
+  paneId: PaneId,
+  pane: PaneState,
+  context: ItemCountRequestContext,
+) {
+  return (
+    context.paneId === paneId &&
+    context.tabId === activeTab(paneId).id &&
+    context.requestId === pane.listRequestId &&
+    pathsMatch(context.path, pane.path)
+  )
+}
+
+function itemsSortContextMatches(
+  paneId: PaneId,
+  pane: PaneState,
+  context: ItemCountRequestContext,
+  expected?: { filterApplied?: string; sortDirection?: SortDirection },
+) {
+  return (
+    itemCountContextMatches(paneId, pane, context) &&
+    pane.sortKey === 'items' &&
+    (expected?.filterApplied == null || pane.filterApplied === expected.filterApplied) &&
+    (expected?.sortDirection == null || pane.sortDirection === expected.sortDirection)
+  )
+}
+
+async function runActiveItemsSort(
+  paneId: PaneId,
+  context: ItemCountRequestContext,
+  expected: {
+    filterApplied: string
+    sortDirection: SortDirection
+  },
+) {
+  const state = usePanesStore.getState()
+  const pane = state.panes[paneId]
+  if (
+    !itemsSortContextMatches(paneId, pane, context, expected) ||
+    pane.loading ||
+    !pane.listingComplete
+  ) {
+    return
+  }
+
+  let operationId = 0
+  usePanesStore.setState((current) => {
+    const currentPane = current.panes[paneId]
+    if (!itemsSortContextMatches(paneId, currentPane, context, expected)) {
+      return current
+    }
+
+    operationId = currentPane.itemsSortOperationId + 1
+    return {
+      panes: {
+        ...current.panes,
+        [paneId]: {
+          ...currentPane,
+          itemsSortStatus: 'counting',
+          itemsSortOperationId: operationId,
+          error: null,
+        },
+      },
+    }
+  })
+
+  try {
+    const response = await sortActiveItems({
+      context,
+      sortDirection: expected.sortDirection,
+      filter: expected.filterApplied,
+      showHidden: usePanesStore.getState().showHiddenFiles,
+    })
+
+    if (response.kind === 'superseded') {
+      usePanesStore.setState((current) => {
+        const currentPane = current.panes[paneId]
+        if (
+          !itemsSortContextMatches(paneId, currentPane, response.context, expected) ||
+          currentPane.itemsSortOperationId !== operationId
+        ) return current
+        return { panes: { ...current.panes, [paneId]: { ...currentPane, itemsSortStatus: 'stale' } } }
+      })
+      return
+    }
+
+    usePanesStore.setState((current) => {
+      const currentPane = current.panes[paneId]
+      if (
+        !itemsSortContextMatches(paneId, currentPane, response.context, expected) ||
+        currentPane.itemsSortOperationId !== operationId
+      ) {
+        return current
+      }
+      if (!samePathOrWindowsCaseFold(response.path, currentPane.path)) {
+        return current
+      }
+
+      const nextEntries = withResolvedIcons(response.entries, current.resolvedIconPaths)
+      const focusedStillPresent = nextEntries.some(
+        (entry) => entry.id === currentPane.focusedEntryId,
+      )
+
+      return {
+        panes: {
+          ...current.panes,
+          [paneId]: {
+            ...currentPane,
+            entries: nextEntries,
+            focusedEntryId: focusedStillPresent
+              ? currentPane.focusedEntryId
+              : (nextEntries[0]?.id ?? null),
+            itemsSortStatus: 'complete',
+          },
+        },
+      }
+    })
+  } catch (error) {
+    usePanesStore.setState((current) => {
+      const currentPane = current.panes[paneId]
+      if (
+        !itemsSortContextMatches(paneId, currentPane, context, expected) ||
+        currentPane.itemsSortOperationId !== operationId
+      ) {
+        return current
+      }
+
+      return {
+        panes: {
+          ...current.panes,
+          [paneId]: {
+            ...currentPane,
+            itemsSortStatus: 'failed',
+            error: error instanceof Error ? error.message : 'Failed to sort items',
+          },
+        },
+      }
+    })
+  }
+}
+
 function withResolvedIcons(entries: DirectoryEntry[], resolvedIconPaths: ResolvedIconPaths) {
   let changed = false
   const nextEntries = entries.map((entry) =>
@@ -603,15 +862,13 @@ function buildRootTreeState(
 ) {
   const sortedVolumes = sortVolumesForTree(volumes)
   const treeRoots = sortedVolumes.map((volume) => volume.mountRoot)
-  const activeRoots = treeRoots.map((root) => root.toLowerCase())
   const nextTreeNodes = Object.fromEntries(
     Object.entries(currentNodes).filter(([, node]) => {
       if (node.parentPath === null) {
         return false
       }
 
-      const nodePath = node.path.toLowerCase()
-      return activeRoots.some((root) => isPathInsideVolume(nodePath, root))
+      return treeRoots.some((root) => isPathInsideVolume(node.path, root))
     }),
   ) as Record<string, TreeNodeState>
 
@@ -634,7 +891,7 @@ function buildRootTreeState(
 function treeRootForPath(treeRoots: string[], path: string) {
   return (
     treeRoots.find((root) => root === path) ??
-    treeRoots.find((root) => root.toLowerCase() === path.toLowerCase()) ??
+    treeRoots.find((root) => pathsMatch(root, path)) ??
     null
   )
 }
@@ -691,14 +948,16 @@ function patchEntries(
     return null
   }
 
-  const affected = new Set<string>(event.removed)
+  const affected = [...event.removed]
   for (const change of event.changed) {
-    affected.add(change.path)
+    if (!affected.some((path) => pathsMatch(path, change.path))) {
+      affected.push(change.path)
+    }
   }
 
   const next =
-    affected.size > 0
-      ? pane.entries.filter((entry) => !affected.has(entry.path))
+    affected.length > 0
+      ? pane.entries.filter((entry) => !affected.some((path) => pathsMatch(path, entry.path)))
       : [...pane.entries]
 
   // Reconcile the changed set by path (last write wins, matching the previous
@@ -706,10 +965,10 @@ function patchEntries(
   // the pane's filter/hidden rules stays dropped rather than re-inserted.
   const inserts = new Map<string, DirectoryEntry>()
   for (const change of event.changed) {
+    const matchingKey = Array.from(inserts.keys()).find((path) => pathsMatch(path, change.path))
+    if (matchingKey) inserts.delete(matchingKey)
     if (change.entry && entryMatchesPane(change.entry, pane, showHiddenFiles)) {
       inserts.set(change.entry.path, change.entry)
-    } else {
-      inserts.delete(change.path)
     }
   }
 
@@ -720,10 +979,15 @@ function patchEntries(
   // Size ordering depends on folder sizes that resolve asynchronously and are
   // not continuously re-sorted into the listing, so the array can't be assumed
   // sorted against the current sizeStates — fall back to a full re-sort for
-  // that one key. Every other key is a pure function of entry fields, so the
-  // listing stays sorted and each change can be binary-inserted in place.
+  // that one key. Active items sorting also waits for the backend-owned
+  // count-then-sort pass, so watcher patches preserve the current local order
+  // plus changed rows rather than finalizing a client-side items order.
   if (pane.sortKey === 'size') {
     return sortEntries([...next, ...hydrated], pane.sortKey, pane.sortDirection, sizeStates)
+  }
+
+  if (pane.sortKey === 'items') {
+    return [...next, ...hydrated]
   }
 
   for (const entry of hydrated) {
@@ -744,7 +1008,24 @@ function entryMatchesPane(entry: DirectoryEntry, pane: PaneState, showHiddenFile
 }
 
 function pathsEqual(left: string, right: string) {
-  return left === right || left.toLowerCase() === right.toLowerCase()
+  return pathsMatch(left, right)
+}
+
+function matchesListingContext(
+  pane: PaneState,
+  expected: {
+    path: string
+    sortKey: SortKey
+    sortDirection: SortDirection
+    filterApplied: string
+  },
+) {
+  return (
+    pathsMatch(pane.path, expected.path) &&
+    pane.sortKey === expected.sortKey &&
+    pane.sortDirection === expected.sortDirection &&
+    pane.filterApplied === expected.filterApplied
+  )
 }
 
 function treeNodeKeyForPath(treeNodes: Record<string, TreeNodeState>, path: string) {
@@ -752,8 +1033,7 @@ function treeNodeKeyForPath(treeNodes: Record<string, TreeNodeState>, path: stri
     return path
   }
 
-  const normalized = path.toLowerCase()
-  return Object.keys(treeNodes).find((nodePath) => nodePath.toLowerCase() === normalized) ?? null
+  return Object.keys(treeNodes).find((nodePath) => pathsEqual(nodePath, path)) ?? null
 }
 
 function childPathInList(children: string[], path: string) {
@@ -954,13 +1234,38 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
   },
   reloadPane: async (paneId) => {
     const pane = get().panes[paneId]
+    const tabId = activeTab(paneId).id
+    const requestContext = {
+      path: pane.path,
+      sortKey: pane.sortKey,
+      sortDirection: pane.sortDirection,
+      filterApplied: pane.filterApplied,
+    }
     const selection = useSelectionStore.getState().selections[paneId]
     set((state) => ({
+      // This invocation supersedes any unresolved head for the active tab.
+      // Chunks emitted by the new request are buffered after this transition,
+      // so they remain available for matching-head adoption.
+      pendingListChunks: clearPendingListChunksForTab(
+        state.pendingListChunks,
+        activeTab(paneId).id,
+      ),
       panes: {
         ...state.panes,
-        [paneId]: { ...state.panes[paneId], loading: true, error: null },
+        [paneId]: {
+          ...state.panes[paneId],
+          loading: true,
+          error: null,
+          // A previous same-path request must be invalid before this async IPC
+          // call begins; its late chunks are never eligible for this attempt.
+          listRequestId: 0,
+          listingGeneration: state.panes[paneId].listingGeneration + 1,
+          acceptedChunkIndexes: [],
+          listingComplete: false,
+        },
       },
     }))
+    const listingGeneration = get().panes[paneId].listingGeneration
 
     try {
       // The trash browser is a virtual location backed by list_trash, not a
@@ -997,6 +1302,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
                 entries,
                 focusedEntryId: restoredFocusId ?? sortedEntries[0]?.id ?? null,
                 loading: false,
+                itemsSortStatus: 'idle',
                 ...seeded,
               },
             },
@@ -1014,22 +1320,33 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         return
       }
 
-      const itemsColumnVisible =
-        useLayoutStore.getState().columns.find((column) => column.key === 'items')?.visible ?? true
-
       // Stream the listing: Rust enumerates + sorts on its worker thread and
       // returns only the inline first chunk here; any remaining entries arrive
       // as `list_chunk` events (see `applyListChunk`). This keeps the webview
       // from parsing a single multi-MB listing array in one blocking task.
       const head = await startListDir({
-        tabId: activeTab(paneId).id,
+        tabId,
         path: pane.path,
         sortKey: pane.sortKey,
         sortDirection: pane.sortDirection,
         filter: pane.filterApplied,
         showHidden: get().showHiddenFiles,
-        includeItemCounts: itemsColumnVisible,
+        includeItemCounts: false,
       })
+
+      if (head.kind === 'superseded') {
+        return
+      }
+
+      const currentTabId = activeTab(paneId).id
+      const currentPane = get().panes[paneId]
+      if (
+        currentTabId !== tabId ||
+        currentPane.listingGeneration !== listingGeneration ||
+        !matchesListingContext(currentPane, requestContext)
+      ) {
+        return
+      }
 
       // Rust is the canonical sort authority, so only the size column needs a
       // client re-sort (folder sizes resolve asynchronously and can reorder
@@ -1041,7 +1358,20 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
 
       set((state) => {
         const previous = state.panes[paneId]
-        const entries = withResolvedIcons(firstChunk, state.resolvedIconPaths)
+        const bufferKey = listChunkBufferKey({ tabId, requestId: head.requestId, path: head.path })
+        const buffered = [...(state.pendingListChunks[bufferKey] ?? [])]
+          .filter((event) => event.chunkIndex > 0)
+          .sort((left, right) => left.chunkIndex - right.chunkIndex)
+        const acceptedChunkIndexes = new Set<number>([0])
+        let adoptedEntries = firstChunk
+        let listingComplete = head.done
+        for (const event of buffered) {
+          if (acceptedChunkIndexes.has(event.chunkIndex)) continue
+          acceptedChunkIndexes.add(event.chunkIndex)
+          adoptedEntries = [...adoptedEntries, ...event.entries]
+          listingComplete ||= event.done
+        }
+        const entries = withResolvedIcons(adoptedEntries, state.resolvedIconPaths)
         const restoredFocusId = findMatchingEntryId(firstChunk, [
           selection.focusedId,
           previous.focusedEntryId,
@@ -1055,15 +1385,27 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
             : { history: previous.history, historyIndex: previous.historyIndex }
 
         return {
+          // Adoption resolves the only pre-head buffer that can belong to
+          // this listing. Discard every buffer for the tab, including stale
+          // superseded requests, while preserving the matching early chunks
+          // above before this purge.
+          pendingListChunks: clearPendingListChunksForTab(state.pendingListChunks, tabId),
+          passiveItemCountRequests: clearPassiveItemCountRequestsForPane(
+            state.passiveItemCountRequests,
+            paneId,
+          ),
           panes: {
             ...state.panes,
             [paneId]: {
               ...previous,
               path: head.path,
               entries,
-              focusedEntryId: restoredFocusId ?? firstChunk[0]?.id ?? null,
+              focusedEntryId: restoredFocusId ?? adoptedEntries[0]?.id ?? null,
               loading: false,
+              itemsSortStatus: 'idle',
               listRequestId: head.requestId,
+              acceptedChunkIndexes: [...acceptedChunkIndexes],
+              listingComplete,
               ...seeded,
             },
           },
@@ -1081,21 +1423,37 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
 
       // When the listing already fits in the first chunk the tail runs now;
       // otherwise it runs from `applyListChunk` once the final chunk arrives.
-      if (head.done) {
+      if (get().panes[paneId].listingComplete) {
+        await runActiveItemsSort(paneId, currentItemCountContext(paneId, nextPane), {
+          filterApplied: nextPane.filterApplied,
+          sortDirection: nextPane.sortDirection,
+        })
         await get().finalizeListing(paneId)
       }
     } catch (error) {
+      const currentTabId = activeTab(paneId).id
+      const currentPane = get().panes[paneId]
+      if (
+        currentTabId !== tabId ||
+        currentPane.listingGeneration !== listingGeneration ||
+        !matchesListingContext(currentPane, requestContext)
+      ) {
+        return
+      }
+
       log.error('reloadPane failed to load directory', {
         paneId,
-        path: pane.path,
+        path: requestContext.path,
         error,
       })
       set((state) => ({
+        pendingListChunks: clearPendingListChunksForTab(state.pendingListChunks, tabId),
         panes: {
           ...state.panes,
           [paneId]: {
             ...state.panes[paneId],
             loading: false,
+            itemsSortStatus: 'idle',
             error: error instanceof Error ? error.message : 'Failed to load directory',
           },
         },
@@ -1254,6 +1612,10 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       activePaneId: paneId,
       focusRequestId: state.focusRequestId + 1,
       focusRequestPaneId: paneId,
+      passiveItemCountRequests: clearPassiveItemCountRequestsForPane(
+        state.passiveItemCountRequests,
+        paneId,
+      ),
       panes: {
         ...state.panes,
         [paneId]: {
@@ -1265,6 +1627,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           filterApplied: '',
           typing: false,
           entries: [],
+          itemsSortStatus: 'idle',
           focusedEntryId: null,
           scrollPositions: {},
           history: [],
@@ -1291,6 +1654,10 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
 
     const next = activeTab(paneId)
     set((state) => ({
+      passiveItemCountRequests: clearPassiveItemCountRequestsForPane(
+        state.passiveItemCountRequests,
+        paneId,
+      ),
       panes: {
         ...state.panes,
         [paneId]: {
@@ -1302,6 +1669,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           filterApplied: next.filter,
           typing: false,
           entries: [],
+          itemsSortStatus: 'idle',
           focusedEntryId: null,
           scrollPositions: {},
           history: [],
@@ -1325,6 +1693,10 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     const next = activeTab(paneId)
     set((state) => ({
       activePaneId: paneId,
+      passiveItemCountRequests: clearPassiveItemCountRequestsForPane(
+        state.passiveItemCountRequests,
+        paneId,
+      ),
       panes: {
         ...state.panes,
         [paneId]: {
@@ -1336,6 +1708,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           filterApplied: next.filter,
           typing: false,
           entries: [],
+          itemsSortStatus: 'idle',
           focusedEntryId: null,
           scrollPositions: {},
           history: [],
@@ -1373,30 +1746,45 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     const completedPanes = new Set<PaneId>()
     set((state) => {
       const nextPanes = { ...state.panes }
+      let pendingListChunks = state.pendingListChunks
       let changed = false
 
       for (const paneId of Object.keys(nextPanes) as PaneId[]) {
         const pane = nextPanes[paneId]
         const activeTabId = activeTab(paneId).id
         let entries: DirectoryEntry[] | null = null
-        let completed = false
+        let completed = pane.listingComplete
+        const acceptedChunkIndexes = new Set(pane.acceptedChunkIndexes)
 
         for (const event of events) {
-          // Only apply chunks for this pane's current tab and in-flight listing
-          // request; anything from a superseded navigation is dropped.
-          if (
-            paneIdFromTabId(event.tabId) !== paneId ||
-            event.tabId !== activeTabId ||
-            event.requestId !== pane.listRequestId ||
-            event.path !== pane.path
-          ) {
+          if (paneIdFromTabId(event.tabId) !== paneId || event.tabId !== activeTabId) {
             continue
           }
+
+          // Tauri may deliver an emitted tail before the invoke response. Keep
+          // it until its exact request/path head is adopted. A request id of 0
+          // means this navigation intentionally invalidated the old identity.
+          if (pane.listRequestId === 0) {
+            const key = listChunkBufferKey(event)
+            const existing = pendingListChunks[key] ?? []
+            if (!existing.some((candidate) => candidate.chunkIndex === event.chunkIndex)) {
+              if (pendingListChunks === state.pendingListChunks) pendingListChunks = { ...pendingListChunks }
+              pendingListChunks[key] = [...existing, event]
+              pendingListChunks = boundedPendingListChunks(pendingListChunks, activeTabId)
+            }
+            continue
+          }
+
+          if (!isChunkForPane(paneId, pane, event) || pane.listingComplete || completed) continue
+          // Explicit backend chunk identity rejects duplicate non-terminal
+          // events without relying on entry equality.
+          if (acceptedChunkIndexes.has(event.chunkIndex)) continue
 
           // Rust streams globally-sorted chunks, so appending keeps order.
           if (!entries) {
             entries = [...pane.entries]
           }
+          acceptedChunkIndexes.add(event.chunkIndex)
           for (const entry of event.entries) {
             entries.push(hydrateEntryIcon(entry, state.resolvedIconPaths))
           }
@@ -1416,17 +1804,31 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           entries = sortEntries(entries, pane.sortKey, pane.sortDirection, state.sizeStates)
         }
 
-        nextPanes[paneId] = { ...pane, entries }
+        nextPanes[paneId] = {
+          ...pane,
+          entries,
+          acceptedChunkIndexes: [...acceptedChunkIndexes],
+          listingComplete: completed,
+        }
         changed = true
         if (completed) {
           completedPanes.add(paneId)
         }
       }
 
-      return changed ? { panes: nextPanes } : state
+      return changed || pendingListChunks !== state.pendingListChunks
+        ? { panes: nextPanes, pendingListChunks }
+        : state
     })
 
     for (const paneId of completedPanes) {
+      const pane = get().panes[paneId]
+      if (pane.sortKey === 'items') {
+        void runActiveItemsSort(paneId, currentItemCountContext(paneId, pane), {
+          filterApplied: pane.filterApplied,
+          sortDirection: pane.sortDirection,
+        })
+      }
       void get().finalizeListing(paneId)
     }
   },
@@ -1436,9 +1838,6 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     if (isTrashPath(pane.path)) {
       return
     }
-
-    const itemsColumnVisible =
-      useLayoutStore.getState().columns.find((column) => column.key === 'items')?.visible ?? true
 
     const requestDirectorySizes = async (paths: string[]) => {
       if (!eagerSizesEnabled(get().everythingStatus, useConfigStore.getState().autoFolderSize)) {
@@ -1476,15 +1875,23 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       // Seed the fs-watch baseline on the Rust side (entries omitted): Rust
       // re-enumerates via `snapshot_for_target` on its worker thread instead of
       // us re-serializing the entire listing back across the IPC boundary.
-      await setTabWatch({
-        tabId: activeTab(paneId).id,
-        path: pane.path,
-        sortKey: pane.sortKey,
-        sortDirection: pane.sortDirection,
-        filter: pane.filterApplied,
-        showHidden: get().showHiddenFiles,
-        includeItemCounts: itemsColumnVisible,
-      })
+      await setTabWatch(
+        {
+          tabId: activeTab(paneId).id,
+          path: pane.path,
+          sortKey: pane.sortKey,
+          sortDirection: pane.sortDirection,
+          filter: pane.filterApplied,
+          showHidden: get().showHiddenFiles,
+          includeItemCounts: false,
+        },
+        undefined,
+        {
+          tabId: activeTab(paneId).id,
+          requestId: pane.listRequestId,
+          path: pane.path,
+        },
+      )
 
       const requested = await requestDirectorySizes(directoryPaths(get().panes[paneId].entries))
 
@@ -1515,6 +1922,33 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       // `patchEntries` already hydrates the cached native icon for the changed
       // entries it inserts, so no second full-listing `withResolvedIcons` pass
       // is needed here.
+      if (event.tabId !== activeTab(paneId).id) {
+        log.debug('applyDirPatch skipped (inactive tab)', { paneId, tabId: event.tabId })
+        return state
+      }
+
+      // Items sorting is backend-owned count-then-sort. Preserve the accepted
+      // rows verbatim until that replacement arrives; locally removing or
+      // inserting patch rows would show an untrustworthy transient order.
+      if (pane.sortKey === 'items') {
+        if (!pathsMatch(pane.path, event.path)) {
+          log.debug('applyDirPatch skipped (path mismatch)', { paneId, panePath: pane.path, eventPath: event.path })
+          return state
+        }
+        const treeNodes = applyTreeDirPatch(state, event)
+        queueMicrotask(() => {
+          const currentPane = usePanesStore.getState().panes[paneId]
+          void runActiveItemsSort(paneId, currentItemCountContext(paneId, currentPane), {
+            filterApplied: currentPane.filterApplied,
+            sortDirection: currentPane.sortDirection,
+          })
+        })
+        return {
+          panes: { ...state.panes, [paneId]: { ...pane, itemsSortStatus: 'counting' } },
+          ...(treeNodes ? { treeNodes } : {}),
+        }
+      }
+
       const entries = patchEntries(
         pane,
         event,
@@ -1543,11 +1977,29 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       const treeNodes = applyTreeDirPatch(state, event)
 
       return {
+        passiveItemCountRequests: (() => {
+          const invalidatedPaths = new Set(
+            event.changed
+              .filter((change) => change.entry?.isDir && change.entry.itemCount == null)
+              .map((change) =>
+                itemCountRequestKey(currentItemCountContext(paneId, pane), change.path),
+              ),
+          )
+          if (invalidatedPaths.size === 0) {
+            return state.passiveItemCountRequests
+          }
+          return Object.fromEntries(
+            Object.entries(state.passiveItemCountRequests).filter(
+              ([key]) => !invalidatedPaths.has(key),
+            ),
+          ) as PassiveItemCountRequests
+        })(),
         panes: {
           ...state.panes,
           [paneId]: {
             ...pane,
             entries,
+            itemsSortStatus: pane.itemsSortStatus,
             focusedEntryId: focusedStillPresent ? pane.focusedEntryId : (entries[0]?.id ?? null),
           },
         },
@@ -1555,6 +2007,21 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       }
     }),
   setSort: async (paneId, sortKey) => {
+    // A streamed listing owns the entries until its terminal chunk. Rust's
+    // tail remains ordered for the sort requested by its head, so accepting a
+    // local non-Items sort here would corrupt the accumulated row order too.
+    if (get().panes[paneId].loading || !get().panes[paneId].listingComplete) {
+      return
+    }
+    if (isTrashPath(get().panes[paneId].path)) {
+      set((state) => {
+        const pane = state.panes[paneId]
+        const sortDirection = pane.sortKey === sortKey ? (pane.sortDirection === 'asc' ? 'desc' : 'asc') : sortKey === 'name' || sortKey === 'type' ? 'asc' : 'desc'
+        return { panes: { ...state.panes, [paneId]: { ...pane, sortKey, sortDirection, entries: sortEntries(pane.entries, sortKey, sortDirection, state.sizeStates), itemsSortStatus: 'complete' } } }
+      })
+      return
+    }
+    let shouldRunActiveSort = false
     set((state) => {
       const pane = state.panes[paneId]
       const sortDirection =
@@ -1565,7 +2032,11 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           : sortKey === 'name' || sortKey === 'type'
             ? 'asc'
             : 'desc'
-      const sortedEntries = sortEntries(pane.entries, sortKey, sortDirection, state.sizeStates)
+      const isItemsSort = sortKey === 'items'
+      shouldRunActiveSort = isItemsSort
+      const sortedEntries = isItemsSort
+        ? pane.entries
+        : sortEntries(pane.entries, sortKey, sortDirection, state.sizeStates)
 
       return {
         panes: {
@@ -1575,6 +2046,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
             entries: sortedEntries,
             sortKey,
             sortDirection,
+            itemsSortStatus: isItemsSort ? 'counting' : 'idle',
           },
         },
       }
@@ -1586,6 +2058,12 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       sortDirection: nextPane.sortDirection,
     })
     schedulePersistSession(get().activePaneId)
+    if (shouldRunActiveSort) {
+      await runActiveItemsSort(paneId, currentItemCountContext(paneId, nextPane), {
+        filterApplied: nextPane.filterApplied,
+        sortDirection: nextPane.sortDirection,
+      })
+    }
   },
   setFilterDraft: (paneId, value) => {
     const timer = get().filterTimers[paneId]
@@ -1612,6 +2090,10 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
             ...state.panes[paneId],
             filterApplied: value,
             typing: false,
+            itemsSortStatus:
+              state.panes[paneId].sortKey === 'items'
+                ? 'counting'
+                : state.panes[paneId].itemsSortStatus,
           },
         },
       }))
@@ -1643,6 +2125,10 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           filterDraft: '',
           filterApplied: '',
           typing: false,
+          itemsSortStatus:
+            state.panes[paneId].sortKey === 'items'
+              ? 'counting'
+              : state.panes[paneId].itemsSortStatus,
         },
       },
     }))
@@ -1719,6 +2205,154 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
             : state.pendingSizeRequests,
         sizeStates: nextSizeStates,
       }
+    }),
+  requestVisibleItemCounts: async (paneId, visibleStartIndex, visibleEndIndex, viewportCount) => {
+    const pane = get().panes[paneId]
+    if (
+      pane.loading ||
+      isTrashPath(pane.path) ||
+      pane.itemsSortStatus === 'counting' ||
+      pane.listRequestId === 0 ||
+      pane.entries.length === 0
+    ) {
+      return
+    }
+
+    const context = currentItemCountContext(paneId, pane)
+    const overscan = Math.max(0, viewportCount)
+    const startIndex = Math.max(0, visibleStartIndex - overscan)
+    const endIndex = Math.min(pane.entries.length - 1, visibleEndIndex + overscan)
+    if (endIndex < startIndex) {
+      return
+    }
+
+    const pending = (() => {
+      const nextPaths: string[] = []
+      const seen = new Set<string>()
+      const passiveItemCountRequests = get().passiveItemCountRequests
+      let remaining = AUTO_VISIBLE_ITEM_COUNT_LIMIT
+      for (const key of Object.keys(passiveItemCountRequests)) {
+        if (key.startsWith(`${itemCountContextKey(context)}::`)) {
+          remaining -= 1
+        }
+      }
+
+      if (remaining <= 0) {
+        return nextPaths
+      }
+
+      for (let index = startIndex; index <= endIndex; index += 1) {
+        const entry = pane.entries[index]
+        if (!entry?.isDir || entry.itemCount != null) {
+          continue
+        }
+
+        const normalizedPath = pathKey(entry.path)
+        if (seen.has(normalizedPath)) {
+          continue
+        }
+        seen.add(normalizedPath)
+
+        const requestKey = itemCountRequestKey(context, entry.path)
+        if (passiveItemCountRequests[requestKey]) {
+          continue
+        }
+
+        nextPaths.push(entry.path)
+        if (nextPaths.length >= remaining) {
+          break
+        }
+      }
+
+      return nextPaths
+    })()
+
+    if (pending.length === 0) {
+      return
+    }
+
+    set((state) => {
+      const currentPane = state.panes[paneId]
+      if (!itemCountContextMatches(paneId, currentPane, context)) {
+        return state
+      }
+
+      // The backend supersedes automatic work for this scope. Keep dedupe
+      // aligned with its latest request, otherwise paths cancelled by a fast
+      // scroll can remain marked pending forever with a null count.
+      const nextPassiveItemCountRequests = Object.fromEntries(
+        Object.entries(state.passiveItemCountRequests).filter(
+          ([key]) => !key.startsWith(`${itemCountContextKey(context)}::`),
+        ),
+      ) as PassiveItemCountRequests
+      for (const path of pending) {
+        nextPassiveItemCountRequests[itemCountRequestKey(context, path)] = true
+      }
+
+      return { passiveItemCountRequests: nextPassiveItemCountRequests }
+    })
+
+    try {
+      await requestVisibleItemCountsCommand({ context, paths: pending })
+    } catch (error) {
+      set((state) => {
+        const nextPassiveItemCountRequests = { ...state.passiveItemCountRequests }
+        for (const path of pending) {
+          delete nextPassiveItemCountRequests[itemCountRequestKey(context, path)]
+        }
+        return { passiveItemCountRequests: nextPassiveItemCountRequests }
+      })
+      throw error
+    }
+  },
+  applyItemCountEvents: (events) =>
+    set((state) => {
+      if (events.length === 0) {
+        return state
+      }
+
+      let panesChanged = false
+      const nextPanes = { ...state.panes }
+      for (const paneId of Object.keys(nextPanes) as PaneId[]) {
+        const pane = nextPanes[paneId]
+        let nextEntries: DirectoryEntry[] | undefined
+
+        for (const event of events) {
+          if (!itemCountContextMatches(paneId, pane, event.context)) {
+            continue
+          }
+
+          for (const result of event.results) {
+            const entryIndex = pane.entries.findIndex(
+              (entry) => entry.isDir && pathsMatch(entry.path, result.path),
+            )
+            if (entryIndex < 0) {
+              continue
+            }
+
+            const currentEntries = nextEntries ?? pane.entries
+            if (currentEntries[entryIndex].itemCount === result.itemCount) {
+              continue
+            }
+
+            if (!nextEntries) {
+              nextEntries = [...pane.entries]
+            }
+
+            nextEntries[entryIndex] = {
+              ...nextEntries[entryIndex],
+              itemCount: result.itemCount,
+            }
+          }
+        }
+
+        if (nextEntries) {
+          nextPanes[paneId] = { ...pane, entries: nextEntries }
+          panesChanged = true
+        }
+      }
+
+      return panesChanged ? { panes: nextPanes } : state
     }),
   requestVisibleIcons: async (paneId, paths) => {
     const pane = get().panes[paneId]
@@ -1976,7 +2610,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     let current: string | null = path
     while (current) {
       chain.unshift(current)
-      if (current.toLowerCase() === root.toLowerCase()) {
+      if (pathsMatch(current, root)) {
         break
       }
       current = getParentPath(current)
@@ -1991,16 +2625,16 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     set((state) => {
       // Ancestors of the active path (all chain entries but the leaf) stay open;
       // every other expanded branch collapses so only the active path is shown.
-      const ancestors = new Set(chain.slice(0, -1).map((entry) => entry.toLowerCase()))
-      const leaf = path.toLowerCase()
+      const ancestors = new Set(chain.slice(0, -1).map((entry) => pathKey(entry)))
+      const leaf = pathKey(path)
       const treeNodes = { ...state.treeNodes }
       for (const [nodePath, node] of Object.entries(state.treeNodes)) {
-        const lowerPath = nodePath.toLowerCase()
-        if (ancestors.has(lowerPath)) {
+        const nodePathKey = pathKey(nodePath)
+        if (ancestors.has(nodePathKey)) {
           if (!node.expanded) {
             treeNodes[nodePath] = { ...node, expanded: true }
           }
-        } else if (lowerPath !== leaf && node.expanded) {
+        } else if (nodePathKey !== leaf && node.expanded) {
           treeNodes[nodePath] = { ...node, expanded: false }
         }
       }

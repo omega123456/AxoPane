@@ -13,11 +13,12 @@ use file_explorer_lib::ipc::types::{
     OpenPathRequest, ReorderOpsRequest, ResolveConflictRequest, SaveConfigRequest,
     SaveSessionRequest, SetTabWatchRequest, TrashEntriesRequest,
 };
+use file_explorer_lib::listing::ListingService;
 use file_explorer_lib::ops::{
     ConflictResolution, OpItem, OpKind, OpStatus, OpsService, StartOpRequest,
 };
 use file_explorer_lib::persist::{Config, PersistenceState, Session};
-use file_explorer_lib::size::{SizeService, size_path_from_string};
+use file_explorer_lib::size::{size_path_from_string, SizeService};
 use tempfile::tempdir;
 
 fn op_item(path: &Path) -> OpItem {
@@ -290,11 +291,9 @@ fn commands_cover_size_and_logging_state() {
             .collect::<Vec<_>>(),
         icon_paths
     );
-    assert!(
-        icon_events
-            .iter()
-            .all(|event| event.icon_data_url.is_none())
-    );
+    assert!(icon_events
+        .iter()
+        .all(|event| event.icon_data_url.is_none()));
     assert_eq!(commands::frontend_log_level("error"), log::Level::Error);
     assert_eq!(commands::frontend_log_level("trace"), log::Level::Debug);
     assert_eq!(
@@ -315,11 +314,14 @@ fn commands_cover_size_and_logging_state() {
         show_hidden: true,
         include_item_counts: true,
     };
+    let listing_service = ListingService::default();
     commands::set_tab_watch(
         SetTabWatchRequest {
             target: Some(watch_target.clone()),
+            seed_reference: None,
             entries: None,
         },
+        as_state(&listing_service),
         as_state(&watch_service),
     )
     .expect("set tab watch");
@@ -327,8 +329,10 @@ fn commands_cover_size_and_logging_state() {
     commands::set_tab_watch(
         SetTabWatchRequest {
             target: Some(watch_target.clone()),
+            seed_reference: None,
             entries: None,
         },
+        as_state(&listing_service),
         as_state(&watch_service),
     )
     .expect("reseed tab watch after file write");
@@ -339,8 +343,10 @@ fn commands_cover_size_and_logging_state() {
     commands::set_tab_watch(
         SetTabWatchRequest {
             target: None,
+            seed_reference: None,
             entries: None,
         },
+        as_state(&listing_service),
         as_state(&watch_service),
     )
     .expect("clear tab watch");

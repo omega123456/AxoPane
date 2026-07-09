@@ -1,10 +1,11 @@
 import type { VolumeCategory, VolumeGroup, VolumeInfo } from '@/lib/types/ipc'
+import { pathKey } from '@/lib/path-compare'
 
 const windowsDriveRootPattern = /^([A-Za-z]:)[\\/]?$/
 
 export function isPathInsideVolume(path: string, mountRoot: string) {
-  const normalizedPath = normalizeExtendedWindowsPath(path).toLowerCase()
-  const normalizedRoot = normalizeExtendedWindowsPath(mountRoot).toLowerCase()
+  const normalizedPath = pathKey(normalizeExtendedWindowsPath(path))
+  const normalizedRoot = pathKey(normalizeExtendedWindowsPath(mountRoot))
 
   if (normalizedPath === normalizedRoot) {
     return true
@@ -32,9 +33,10 @@ function normalizeExtendedWindowsPath(path: string) {
   return path
 }
 
-/** Strip trailing separators and lowercase, for root-equality comparisons. */
+/** Strip trailing separators and apply OS-appropriate identity normalization. */
 function normalizeRoot(path: string) {
-  return normalizeExtendedWindowsPath(path).replace(/[\\/]+$/, '').toLowerCase()
+  const normalized = normalizeExtendedWindowsPath(path).replace(/[\\/]+$/, '')
+  return /^[A-Za-z]:$/.test(normalized) ? normalized.toLowerCase() : pathKey(normalized)
 }
 
 /**

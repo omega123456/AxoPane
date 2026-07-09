@@ -4,7 +4,6 @@ import { getParentPath, schedulePersistSession, usePanesStore } from '@/stores/p
 import { useSelectionStore } from '@/stores/selection-store'
 import { useTabsStore } from '@/stores/tabs-store'
 import { useConfigStore } from '@/stores/config-store'
-import { useLayoutStore } from '@/stores/layout-store'
 import type {
   DirectoryEntry,
   ListDirRequest,
@@ -257,46 +256,28 @@ describe('panes-store navigation', () => {
     expect(requestFolderSizes).not.toHaveBeenCalled()
   })
 
-  it('requests item counts only when the items column is visible', async () => {
+  it('requests normal listings and watches without synchronous item counts', async () => {
     const listDir = vi.fn(() => ({
       path: 'C:\\root',
-      entries: [dirAt('C:\\root\\Alpha')],
+      entries: [dirAt('C:\\root\\Alpha'), dirAt('C:\\root\\Beta', false)],
     }))
     const setTabWatch = vi.fn(() => undefined)
     ipc.override('list_dir', listDir)
     ipc.override('set_tab_watch', setTabWatch)
 
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
-    expect(listDir).toHaveBeenLastCalledWith(expect.objectContaining({ includeItemCounts: true }))
-    expect(setTabWatch).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        target: expect.objectContaining({ includeItemCounts: true }),
-        entries: undefined,
-      }),
-    )
 
-    useLayoutStore.setState((state) => ({
-      columns: state.columns.map((column) =>
-        column.key === 'items' ? { ...column, visible: false } : column,
-      ),
-    }))
-    listDir.mockClear()
-    setTabWatch.mockClear()
-
-    await usePanesStore.getState().reloadPane('left')
     expect(listDir).toHaveBeenLastCalledWith(expect.objectContaining({ includeItemCounts: false }))
     expect(setTabWatch).toHaveBeenLastCalledWith(
       expect.objectContaining({
         target: expect.objectContaining({ includeItemCounts: false }),
-        entries: undefined,
+        seedReference: expect.objectContaining({
+          path: 'C:\\root',
+          requestId: expect.any(Number),
+          tabId: expect.any(String),
+        }),
       }),
     )
-
-    useLayoutStore.setState((state) => ({
-      columns: state.columns.map((column) =>
-        column.key === 'items' ? { ...column, visible: true } : column,
-      ),
-    }))
   })
 
   it('sorts by type in both directions locally', async () => {
@@ -1683,6 +1664,7 @@ describe('panes-store streamed listings', () => {
     total?: number
   }) {
     return (payload: { path: string }) => ({
+      kind: 'head' as const,
       path: payload.path,
       total: overrides.total ?? overrides.firstChunk.length,
       requestId: overrides.requestId,
@@ -1711,6 +1693,7 @@ describe('panes-store streamed listings', () => {
         requestId: 7,
         path: 'C:\\root',
         entries: [dir('Charlie'), dir('mango.txt', false)],
+        chunkIndex: 1,
         done: true,
       },
     ])
@@ -1721,6 +1704,139 @@ describe('panes-store streamed listings', () => {
       'Charlie',
       'mango.txt',
     ])
+  })
+
+  it('adopts an early terminal chunk once its matching head resolves and ignores its duplicate', async () => {
+    let resolveHead: ((value: ReturnType<ReturnType<typeof streamHead>>) => void) | undefined
+    ipc.override(
+      'start_list_dir',
+      () =>
+        new Promise((resolve) => {
+          resolveHead = resolve as typeof resolveHead
+        }) as never,
+    )
+
+    const navigation = usePanesStore.getState().navigatePane('left', 'C:\\root')
+    const tabId = useTabsStore.getState().panes.left.tabs[0].id
+    const earlyTail = {
+      tabId,
+      requestId: 41,
+      path: 'C:\\root',
+      entries: [dir('Bravo')],
+      chunkIndex: 1,
+      done: true,
+    }
+    usePanesStore.getState().applyListChunk([earlyTail])
+    resolveHead?.({
+      kind: 'head',
+      path: 'C:\\root',
+      total: 2,
+      requestId: 41,
+      firstChunk: [dir('Alpha')],
+      done: false,
+    })
+    await navigation
+
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'Alpha',
+      'Bravo',
+    ])
+    expect(usePanesStore.getState().panes.left.listingComplete).toBe(true)
+    usePanesStore.getState().applyListChunk([earlyTail])
+    expect(usePanesStore.getState().panes.left.entries).toHaveLength(2)
+  })
+
+  it('ignores sort actions while a listing head is still pending', async () => {
+    ipc.override('start_list_dir', () => new Promise(() => {}) as never)
+    void usePanesStore.getState().navigatePane('left', 'C:\\root')
+    await vi.waitFor(() => expect(usePanesStore.getState().panes.left.loading).toBe(true))
+
+    await usePanesStore.getState().setSort('left', 'items')
+    const pane = usePanesStore.getState().panes.left
+    expect(pane.sortKey).toBe('name')
+    expect(pane.itemsSortStatus).toBe('idle')
+    expect(pane.loading).toBe(true)
+  })
+
+  it('waits for the terminal chunk before Items sorting and ignores duplicate late tails', async () => {
+    let resolveSort:
+      | ((value: {
+          kind: 'ready'
+          context: { paneId: string; tabId: string; requestId: number; path: string }
+          path: string
+          entries: DirectoryEntry[]
+        }) => void)
+      | undefined
+    const sortActiveItems = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveSort = resolve as typeof resolveSort
+        }),
+    )
+    ipc.override('sort_active_items', sortActiveItems as never)
+    ipc.override(
+      'start_list_dir',
+      streamHead({ firstChunk: [dir('Alpha')], requestId: 9, done: false, total: 2 }),
+    )
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: { ...state.panes.left, sortKey: 'items', sortDirection: 'desc' },
+      },
+    }))
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    expect(sortActiveItems).not.toHaveBeenCalled()
+
+    const tabId = useTabsStore.getState().panes.left.tabs[0].id
+    usePanesStore
+      .getState()
+      .applyListChunk([
+        { tabId, requestId: 9, path: 'C:\\root', entries: [dir('Zulu')], chunkIndex: 1, done: true },
+      ])
+    await vi.waitFor(() => expect(sortActiveItems).toHaveBeenCalledOnce())
+    resolveSort?.({
+      kind: 'ready',
+      context: { paneId: 'left', tabId, requestId: 9, path: 'C:\\root' },
+      path: 'C:\\root',
+      entries: [dir('Zulu'), dir('Alpha')],
+    })
+    await vi.waitFor(() =>
+      expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+        'Zulu',
+        'Alpha',
+      ]),
+    )
+
+    usePanesStore
+      .getState()
+      .applyListChunk([
+        { tabId, requestId: 9, path: 'C:\\root', entries: [dir('Zulu')], chunkIndex: 1, done: true },
+      ])
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'Zulu',
+      'Alpha',
+    ])
+  })
+
+  it('does not change a non-Items sort while streamed tail chunks are still pending', async () => {
+    ipc.override(
+      'start_list_dir',
+      streamHead({ firstChunk: [dir('Alpha')], requestId: 12, done: false, total: 2 }),
+    )
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+
+    await usePanesStore.getState().setSort('left', 'size')
+    expect(usePanesStore.getState().panes.left.sortKey).toBe('name')
+
+    const tabId = useTabsStore.getState().panes.left.tabs[0].id
+    usePanesStore.getState().applyListChunk([
+      { tabId, requestId: 12, path: 'C:\\root', entries: [dir('Bravo')], chunkIndex: 1, done: true },
+    ])
+
+    const pane = usePanesStore.getState().panes.left
+    expect(pane.listingComplete).toBe(true)
+    expect(pane.entries.map((entry) => entry.name)).toEqual(['Alpha', 'Bravo'])
   })
 
   it('ignores chunks from a superseded request, tab, or path', async () => {
@@ -1736,13 +1852,13 @@ describe('panes-store streamed listings', () => {
     usePanesStore
       .getState()
       .applyListChunk([
-        { tabId, requestId: 6, path: 'C:\\root', entries: [dir('Stale')], done: true },
+        { tabId, requestId: 6, path: 'C:\\root', entries: [dir('Stale')], chunkIndex: 1, done: true },
       ])
     // Wrong path.
     usePanesStore
       .getState()
       .applyListChunk([
-        { tabId, requestId: 7, path: 'C:\\other', entries: [dir('Other')], done: true },
+        { tabId, requestId: 7, path: 'C:\\other', entries: [dir('Other')], chunkIndex: 1, done: true },
       ])
     // Wrong tab.
     usePanesStore.getState().applyListChunk([
@@ -1751,6 +1867,7 @@ describe('panes-store streamed listings', () => {
         requestId: 7,
         path: 'C:\\root',
         entries: [dir('RightPane')],
+        chunkIndex: 1,
         done: true,
       },
     ])
@@ -1776,12 +1893,15 @@ describe('panes-store streamed listings', () => {
     usePanesStore
       .getState()
       .applyListChunk([
-        { tabId, requestId: 3, path: 'C:\\root', entries: [dir('Bravo')], done: true },
+        { tabId, requestId: 3, path: 'C:\\root', entries: [dir('Bravo')], chunkIndex: 1, done: true },
       ])
 
     await vi.waitFor(() => {
       expect(setTabWatch).toHaveBeenCalledWith(
-        expect.objectContaining({ target: expect.objectContaining({ path: 'C:\\root' }) }),
+        expect.objectContaining({
+          target: expect.objectContaining({ path: 'C:\\root' }),
+          seedReference: { tabId, requestId: 3, path: 'C:\\root' },
+        }),
       )
       expect(requestFolderSizes).toHaveBeenCalledWith({
         paths: ['C:\\root\\Alpha', 'C:\\root\\Bravo'],
@@ -1818,6 +1938,7 @@ describe('panes-store streamed listings', () => {
           { ...dir('huge.bin', false), sizeBytes: 5000 },
           { ...dir('small.bin', false), sizeBytes: 10 },
         ],
+        chunkIndex: 1,
         done: true,
       },
     ])
@@ -1829,9 +1950,599 @@ describe('panes-store streamed listings', () => {
     ])
   })
 
+  it('ignores a stale resolved head after the pane navigates again', async () => {
+    let resolveFirst:
+      | ((value: {
+          kind: 'head'
+          path: string
+          total: number
+          requestId: number
+          firstChunk: DirectoryEntry[]
+          done: boolean
+        }) => void)
+      | undefined
+    ipc.override(
+      'start_list_dir',
+      vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveFirst = resolve
+            }),
+        )
+        .mockImplementationOnce(
+          streamHead({ firstChunk: [dir('Fresh')], requestId: 2, done: true }),
+        ),
+    )
+
+    const firstNavigation = usePanesStore.getState().navigatePane('left', 'C:\\root')
+    await Promise.resolve()
+    await usePanesStore.getState().navigatePane('left', 'C:\\other')
+    resolveFirst?.({
+      kind: 'head',
+      path: 'C:\\root',
+      total: 1,
+      requestId: 1,
+      firstChunk: [dir('Stale')],
+      done: true,
+    })
+    await firstNavigation
+
+    expect(usePanesStore.getState().panes.left.path).toBe('C:\\other')
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'Fresh',
+    ])
+  })
+
+  it('bounds pre-head chunk buffers, adopts matching early chunks, and purges them on failure', async () => {
+    let rejectHead: ((reason?: unknown) => void) | undefined
+    ipc.override(
+      'start_list_dir',
+      () =>
+        new Promise((_, reject) => {
+          rejectHead = reject
+        }) as never,
+    )
+    const navigation = usePanesStore.getState().navigatePane('left', 'C:\\root')
+    const tabId = useTabsStore.getState().panes.left.tabs[0].id
+    usePanesStore.getState().applyListChunk(
+      Array.from({ length: 40 }, (_, index) => ({
+        tabId,
+        requestId: index + 1,
+        path: 'C:\\root',
+        entries: [dir(`Early-${index}`)],
+        chunkIndex: 1,
+        done: true,
+      })),
+    )
+
+    expect(Object.keys(usePanesStore.getState().pendingListChunks)).toHaveLength(8)
+    rejectHead?.(new Error('Access is denied'))
+    await navigation
+    expect(usePanesStore.getState().pendingListChunks).toEqual({})
+  })
+
+  it('preserves matching early chunks until their head is adopted', async () => {
+    let resolveHead: ((value: ReturnType<ReturnType<typeof streamHead>>) => void) | undefined
+    ipc.override(
+      'start_list_dir',
+      () =>
+        new Promise((resolve) => {
+          resolveHead = resolve as typeof resolveHead
+        }) as never,
+    )
+    const navigation = usePanesStore.getState().navigatePane('left', 'C:\\root')
+    const tabId = useTabsStore.getState().panes.left.tabs[0].id
+    usePanesStore.getState().applyListChunk([
+      { tabId, requestId: 77, path: 'C:\\root', entries: [dir('Bravo')], chunkIndex: 1, done: true },
+    ])
+    resolveHead?.({
+      kind: 'head',
+      path: 'C:\\root',
+      total: 2,
+      requestId: 77,
+      firstChunk: [dir('Alpha')],
+      done: false,
+    })
+    await navigation
+
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'Alpha',
+      'Bravo',
+    ])
+    expect(usePanesStore.getState().pendingListChunks).toEqual({})
+  })
+
+  it('purges an unresolved head buffer when a newer navigation supersedes it', async () => {
+    ipc.override('start_list_dir', () => new Promise(() => {}) as never)
+    void usePanesStore.getState().navigatePane('left', 'C:\\root')
+    const tabId = useTabsStore.getState().panes.left.tabs[0].id
+    usePanesStore.getState().applyListChunk([
+      { tabId, requestId: 31, path: 'C:\\root', entries: [dir('Stale')], chunkIndex: 1, done: true },
+    ])
+    expect(Object.keys(usePanesStore.getState().pendingListChunks)).toHaveLength(1)
+
+    void usePanesStore.getState().navigatePane('left', 'C:\\other')
+    expect(usePanesStore.getState().pendingListChunks).toEqual({})
+  })
+
+  it('ignores a stale listing error after the pane navigates again', async () => {
+    let rejectFirst: ((reason?: unknown) => void) | undefined
+    ipc.override(
+      'start_list_dir',
+      vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise((_, reject) => {
+              rejectFirst = reject
+            }),
+        )
+        .mockImplementationOnce(
+          streamHead({ firstChunk: [dir('Fresh')], requestId: 2, done: true }),
+        ),
+    )
+
+    const firstNavigation = usePanesStore.getState().navigatePane('left', 'C:\\root')
+    await Promise.resolve()
+    await usePanesStore.getState().navigatePane('left', 'C:\\other')
+    rejectFirst?.(new Error('Stale failure'))
+    await firstNavigation
+
+    expect(usePanesStore.getState().panes.left.path).toBe('C:\\other')
+    expect(usePanesStore.getState().panes.left.error).toBeNull()
+    expect(usePanesStore.getState().panes.left.loading).toBe(false)
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'Fresh',
+    ])
+  })
+
   it('applyListChunk is a no-op for an empty batch', () => {
     const before = usePanesStore.getState().panes
     usePanesStore.getState().applyListChunk([])
     expect(usePanesStore.getState().panes).toBe(before)
+  })
+})
+
+describe('panes-store passive item counts', () => {
+  it('requests only visible unknown-count directories within the bounded cap', async () => {
+    const requestVisibleItemCounts = vi.fn((payload: unknown) => {
+      void payload
+      return undefined
+    })
+    ipc.override('request_visible_item_counts', requestVisibleItemCounts)
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: {
+          ...state.panes.left,
+          entries: [
+            ...Array.from({ length: 205 }, (_, index) => ({
+              ...dirAt(`C:\\root\\Dir${index}`),
+              itemCount: null,
+            })),
+            { ...dirAt('C:\\root\\readme.txt', false), itemCount: null },
+            { ...dirAt('C:\\root\\Known'), itemCount: 4 },
+          ],
+        },
+      },
+    }))
+
+    await usePanesStore.getState().requestVisibleItemCounts('left', 0, 204, 204)
+    await usePanesStore.getState().requestVisibleItemCounts('left', 0, 204, 204)
+
+    expect(requestVisibleItemCounts).toHaveBeenCalledOnce()
+    const payload = requestVisibleItemCounts.mock.calls[0]?.[0] as
+      | { context: unknown; paths: string[] }
+      | undefined
+    if (!payload) {
+      throw new Error('missing request payload')
+    }
+    expect(payload.paths).toHaveLength(200)
+    expect(requestVisibleItemCounts).toHaveBeenCalledWith({
+      context: expect.objectContaining({
+        paneId: 'left',
+        tabId: expect.any(String),
+        requestId: expect.any(Number),
+        path: 'C:\\root',
+      }),
+      paths: Array.from({ length: 200 }, (_, index) => `C:\\root\\Dir${index}`),
+    })
+  })
+
+  it('applies current item-count events without reordering rows or changing focus', async () => {
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: {
+          ...state.panes.left,
+          entries: [
+            { ...dirAt('C:\\root\\Zulu'), itemCount: null },
+            { ...dirAt('C:\\root\\Alpha'), itemCount: null },
+            dirAt('C:\\root\\file.txt', false),
+          ],
+          focusedEntryId: 'C:\\root\\Alpha',
+        },
+      },
+    }))
+
+    const beforeOrder = usePanesStore.getState().panes.left.entries.map((entry) => entry.name)
+    const { listRequestId, path } = usePanesStore.getState().panes.left
+    const tabId = useTabsStore.getState().panes.left.tabs[0].id
+    usePanesStore.getState().applyItemCountEvents([
+      {
+        context: { paneId: 'left', tabId, requestId: listRequestId, path },
+        results: [
+          { path: 'C:\\root\\Alpha', itemCount: 2 },
+          { path: 'C:\\root\\Zulu', itemCount: 7 },
+        ],
+        done: true,
+      },
+    ])
+
+    const pane = usePanesStore.getState().panes.left
+    expect(pane.entries.map((entry) => entry.name)).toEqual(beforeOrder)
+    expect(pane.entries.find((entry) => entry.path === 'C:\\root\\Alpha')?.itemCount).toBe(2)
+    expect(pane.entries.find((entry) => entry.path === 'C:\\root\\Zulu')?.itemCount).toBe(7)
+    expect(pane.focusedEntryId).toBe('C:\\root\\Alpha')
+  })
+
+  it('re-arms passive counts after a watcher patch invalidates a known directory count', async () => {
+    const requestVisibleItemCounts = vi.fn(() => undefined)
+    ipc.override('request_visible_item_counts', requestVisibleItemCounts)
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: {
+          ...state.panes.left,
+          entries: [{ ...dirAt('C:\\root\\Alpha'), itemCount: null }],
+        },
+      },
+    }))
+
+    await usePanesStore.getState().requestVisibleItemCounts('left', 0, 0, 0)
+    const pane = usePanesStore.getState().panes.left
+    const tabId = useTabsStore.getState().panes.left.tabs[0].id
+    usePanesStore.getState().applyItemCountEvents([
+      {
+        context: { paneId: 'left', tabId, requestId: pane.listRequestId, path: pane.path },
+        results: [{ path: 'C:\\root\\Alpha', itemCount: 2 }],
+        done: true,
+      },
+    ])
+    usePanesStore.getState().applyDirPatch({
+      tabId,
+      path: 'C:\\root',
+      reason: 'watch',
+      changed: [
+        { path: 'C:\\root\\Alpha', entry: { ...dirAt('C:\\root\\Alpha'), itemCount: null } },
+      ],
+      removed: [],
+    })
+
+    await usePanesStore.getState().requestVisibleItemCounts('left', 0, 0, 0)
+    expect(requestVisibleItemCounts).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries a cancelled passive path after fast viewport supersession', async () => {
+    const requestVisibleItemCounts = vi.fn(() => undefined)
+    ipc.override('request_visible_item_counts', requestVisibleItemCounts)
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: {
+          ...state.panes.left,
+          entries: [
+            { ...dirAt('C:\\root\\Alpha'), itemCount: null },
+            { ...dirAt('C:\\root\\Bravo'), itemCount: null },
+          ],
+        },
+      },
+    }))
+
+    await usePanesStore.getState().requestVisibleItemCounts('left', 0, 0, 0)
+    await usePanesStore.getState().requestVisibleItemCounts('left', 1, 1, 0)
+    await usePanesStore.getState().requestVisibleItemCounts('left', 0, 0, 0)
+
+    expect(requestVisibleItemCounts).toHaveBeenCalledTimes(3)
+    const requestedPaths = (requestVisibleItemCounts.mock.calls as unknown as Array<[{ paths: string[] }]>).map(
+      ([payload]) => payload.paths,
+    )
+    expect(requestedPaths).toEqual([
+      ['C:\\root\\Alpha'],
+      ['C:\\root\\Bravo'],
+      ['C:\\root\\Alpha'],
+    ])
+  })
+
+  it('does not request passive counts while an explicit Items sort is counting', async () => {
+    const requestVisibleItemCounts = vi.fn(() => undefined)
+    ipc.override('request_visible_item_counts', requestVisibleItemCounts)
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: {
+          ...state.panes.left,
+          itemsSortStatus: 'counting',
+          entries: [{ ...dirAt('C:\\root\\Alpha'), itemCount: null }],
+        },
+      },
+    }))
+
+    await usePanesStore.getState().requestVisibleItemCounts('left', 0, 0, 0)
+    expect(requestVisibleItemCounts).not.toHaveBeenCalled()
+  })
+
+  it('never requests passive filesystem counts for the trash virtual location', async () => {
+    const requestVisibleItemCounts = vi.fn(() => undefined)
+    ipc.override('request_visible_item_counts', requestVisibleItemCounts)
+    await usePanesStore.getState().navigatePane('left', 'trash://')
+    await usePanesStore.getState().requestVisibleItemCounts('left', 0, 10, 10)
+    expect(requestVisibleItemCounts).not.toHaveBeenCalled()
+  })
+
+  it('ignores stale item-count events when tab, request, or path context no longer matches', async () => {
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: {
+          ...state.panes.left,
+          entries: [{ ...dirAt('C:\\root\\Alpha'), itemCount: null }],
+        },
+      },
+    }))
+
+    const pane = usePanesStore.getState().panes.left
+    const currentTabId = useTabsStore.getState().panes.left.tabs[0].id
+    usePanesStore.getState().applyItemCountEvents([
+      {
+        context: {
+          paneId: 'left',
+          tabId: currentTabId,
+          requestId: pane.listRequestId + 1,
+          path: pane.path,
+        },
+        results: [{ path: 'C:\\root\\Alpha', itemCount: 1 }],
+        done: true,
+      },
+      {
+        context: {
+          paneId: 'left',
+          tabId: 'left-tab-stale',
+          requestId: pane.listRequestId,
+          path: pane.path,
+        },
+        results: [{ path: 'C:\\root\\Alpha', itemCount: 2 }],
+        done: true,
+      },
+      {
+        context: {
+          paneId: 'left',
+          tabId: currentTabId,
+          requestId: pane.listRequestId,
+          path: 'C:\\other',
+        },
+        results: [{ path: 'C:\\root\\Alpha', itemCount: 3 }],
+        done: true,
+      },
+    ])
+
+    expect(usePanesStore.getState().panes.left.entries[0].itemCount).toBeNull()
+  })
+})
+
+describe('panes-store active items sort', () => {
+  it('counts then applies the final backend items order without progressive reordering', async () => {
+    const sortActiveItems = vi.fn(() => ({
+      kind: 'ready' as const,
+      context: {
+        paneId: 'left',
+        tabId: useTabsStore.getState().panes.left.tabs[0].id,
+        requestId: usePanesStore.getState().panes.left.listRequestId,
+        path: 'C:\\root',
+      },
+      path: 'C:\\root',
+      entries: [
+        { ...dirAt('C:\\root\\Zulu'), itemCount: 7 },
+        { ...dirAt('C:\\root\\Alpha'), itemCount: 2 },
+        dirAt('C:\\root\\file.txt', false),
+      ],
+    }))
+    ipc.override('sort_active_items', sortActiveItems)
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: {
+          ...state.panes.left,
+          entries: [
+            { ...dirAt('C:\\root\\Alpha'), itemCount: null },
+            { ...dirAt('C:\\root\\Zulu'), itemCount: null },
+            dirAt('C:\\root\\file.txt', false),
+          ],
+          focusedEntryId: 'C:\\root\\Alpha',
+        },
+      },
+    }))
+
+    await usePanesStore.getState().setSort('left', 'items')
+
+    const pane = usePanesStore.getState().panes.left
+    expect(sortActiveItems).toHaveBeenCalledOnce()
+    expect(pane.entries.map((entry) => entry.name)).toEqual(['Zulu', 'Alpha', 'file.txt'])
+    expect(pane.focusedEntryId).toBe('C:\\root\\Alpha')
+    expect(pane.itemsSortStatus).toBe('complete')
+  })
+
+  it('rejects stale active items results after navigation, filter settle, or tab switch', async () => {
+    let resolveSort:
+      | ((value: {
+          kind: 'ready'
+          context: { paneId: string; tabId: string; requestId: number; path: string }
+          path: string
+          entries: DirectoryEntry[]
+        }) => void)
+      | undefined
+    ipc.override(
+      'sort_active_items',
+      vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveSort = resolve as typeof resolveSort
+            }),
+        )
+        .mockImplementation(() => ({
+          kind: 'ready' as const,
+          context: {
+            paneId: 'left',
+            tabId: useTabsStore.getState().panes.left.tabs[0].id,
+            requestId: usePanesStore.getState().panes.left.listRequestId,
+            path: usePanesStore.getState().panes.left.path,
+          },
+          path: usePanesStore.getState().panes.left.path,
+          entries: [{ ...dirAt('C:\\other\\Alpha'), itemCount: 1 }, dirAt('C:\\other\\Beta')],
+        })),
+    )
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: {
+          ...state.panes.left,
+          entries: [{ ...dirAt('C:\\root\\Alpha'), itemCount: null }],
+        },
+      },
+    }))
+
+    const startingPane = usePanesStore.getState().panes.left
+    const startingTabId = useTabsStore.getState().panes.left.tabs[0].id
+    const sortPromise = usePanesStore.getState().setSort('left', 'items')
+    await Promise.resolve()
+    await usePanesStore.getState().navigatePane('left', 'C:\\other')
+    resolveSort?.({
+      kind: 'ready',
+      context: {
+        paneId: 'left',
+        tabId: startingTabId,
+        requestId: startingPane.listRequestId,
+        path: 'C:\\root',
+      },
+      path: 'C:\\root',
+      entries: [{ ...dirAt('C:\\root\\Zulu'), itemCount: 9 }],
+    })
+    await sortPromise
+
+    expect(usePanesStore.getState().panes.left.path).toBe('C:\\other')
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'Alpha',
+      'Beta',
+    ])
+  })
+
+  it('keeps the newest same-context Items-sort terminal state when an older request fails', async () => {
+    let resolveNewest: ((value: { kind: 'ready'; context: { paneId: string; tabId: string; requestId: number; path: string }; path: string; entries: DirectoryEntry[] }) => void) | undefined
+    let rejectOldest: ((reason?: unknown) => void) | undefined
+    ipc.override('sort_active_items', vi.fn()
+      .mockImplementationOnce(() => new Promise((_, reject) => { rejectOldest = reject }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveNewest = resolve as typeof resolveNewest })))
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    const pane = usePanesStore.getState().panes.left
+    const tabId = useTabsStore.getState().panes.left.tabs[0].id
+    const first = usePanesStore.getState().setSort('left', 'items')
+    await Promise.resolve()
+    usePanesStore.getState().applyDirPatch({ tabId, path: pane.path, reason: 'watch', changed: [], removed: [] })
+    await Promise.resolve()
+    resolveNewest?.({ kind: 'ready', context: { paneId: 'left', tabId, requestId: pane.listRequestId, path: pane.path }, path: pane.path, entries: [{ ...dirAt('C:\\root\\Newest'), itemCount: 2 }] })
+    await Promise.resolve()
+    rejectOldest?.(new Error('old request failed'))
+    await first
+    const finalPane = usePanesStore.getState().panes.left
+    expect(finalPane.entries.map((entry) => entry.name)).toEqual(['Newest'])
+    expect(finalPane.itemsSortStatus).toBe('complete')
+    expect(finalPane.error).toBeNull()
+  })
+
+  it('routes reloads and watcher invalidations through the active items sort path', async () => {
+    const sortActiveItems = vi.fn(() => ({
+      kind: 'ready' as const,
+      context: {
+        paneId: 'left',
+        tabId: useTabsStore.getState().panes.left.tabs[0].id,
+        requestId: usePanesStore.getState().panes.left.listRequestId,
+        path: 'C:\\root',
+      },
+      path: 'C:\\root',
+      entries: [
+        { ...dirAt('C:\\root\\Newer'), itemCount: 11 },
+        { ...dirAt('C:\\root\\Older'), itemCount: 3 },
+      ],
+    }))
+    ipc.override('sort_active_items', sortActiveItems)
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    await usePanesStore.getState().setSort('left', 'items')
+    sortActiveItems.mockClear()
+
+    await usePanesStore.getState().reloadPane('left')
+    expect(sortActiveItems).toHaveBeenCalledTimes(1)
+
+    usePanesStore.getState().applyDirPatch({
+      tabId: useTabsStore.getState().panes.left.tabs[0].id,
+      path: 'C:\\root',
+      reason: 'watch',
+      changed: [
+        { path: 'C:\\root\\Draft', entry: { ...dirAt('C:\\root\\Draft'), itemCount: null } },
+      ],
+      removed: [],
+    })
+    await Promise.resolve()
+    expect(sortActiveItems).toHaveBeenCalledTimes(2)
+    expect(usePanesStore.getState().panes.left.itemsSortStatus).toBe('counting')
+  })
+
+  it('uses the active items sort path for filter settles and preserves order on failures', async () => {
+    vi.useFakeTimers()
+    const sortActiveItems = vi.fn(() => {
+      throw new Error('count failed')
+    })
+    ipc.override('sort_active_items', sortActiveItems)
+    try {
+      await usePanesStore.getState().navigatePane('left', 'C:\\root')
+      usePanesStore.setState((state) => ({
+        panes: {
+          ...state.panes,
+          left: {
+            ...state.panes.left,
+            sortKey: 'items',
+            sortDirection: 'desc',
+            itemsSortStatus: 'idle',
+            entries: [
+              { ...dirAt('C:\\root\\Alpha'), itemCount: null },
+              { ...dirAt('C:\\root\\Zulu'), itemCount: null },
+            ],
+          },
+        },
+      }))
+
+      usePanesStore.getState().setFilterDraft('left', 'Al')
+      await vi.advanceTimersByTimeAsync(250)
+
+      const pane = usePanesStore.getState().panes.left
+      expect(sortActiveItems).toHaveBeenCalled()
+      expect(pane.entries.map((entry) => entry.name)).toEqual(['Alpha', 'Beta'])
+      expect(pane.itemsSortStatus).toBe('failed')
+      expect(pane.error).toBe('count failed')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

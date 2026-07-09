@@ -28,6 +28,7 @@ export function HeaderRow({ pane }: HeaderRowProps) {
   )
   const contentWidth = paneContentWidth(columns, columnWidths)
   const isTrash = isTrashPath(pane.path)
+  const itemsSortPending = pane.sortKey === 'items' && pane.itemsSortStatus === 'counting'
 
   function startResize(event: ReactPointerEvent<HTMLDivElement>, key: ColumnKey) {
     event.preventDefault()
@@ -72,11 +73,19 @@ export function HeaderRow({ pane }: HeaderRowProps) {
           <div
             key={column.key}
             style={columnFlexStyle(column.key, columnWidths)}
+            role="columnheader"
+            aria-label={label}
             className={`${definition.className} group relative flex h-full items-center`}
+            aria-sort={
+              active ? (pane.sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'
+            }
           >
             <button
               type="button"
               onClick={() => void setSort(pane.id, column.key)}
+              aria-describedby={
+                column.key === 'items' && itemsSortPending ? `${pane.id}-items-sort-status` : undefined
+              }
               className="flex h-full w-full min-w-0 cursor-pointer items-center gap-1 rounded-tab text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
             >
               <span className="truncate">{label}</span>
@@ -86,6 +95,11 @@ export function HeaderRow({ pane }: HeaderRowProps) {
                 />
               ) : null}
             </button>
+            {column.key === 'items' && itemsSortPending ? (
+              <span id={`${pane.id}-items-sort-status`} className="sr-only">
+                Counting items. Current row order will update when counting finishes.
+              </span>
+            ) : null}
             <div
               role="separator"
               aria-label={`Resize ${label} column`}

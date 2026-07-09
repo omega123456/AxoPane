@@ -8,6 +8,11 @@ pub use crate::fs::{
     DirectoryEntry, ListDirOptions, ListDirResponse, ListTreeChildrenOptions,
     ListTreeChildrenResponse, SortDirection, SortKey, TreeChildEntry,
 };
+pub use crate::item_counts::{
+    ActiveItemsSortReady, ActiveItemsSortRequest, ActiveItemsSortResponse,
+    ActiveItemsSortSuperseded, ItemCountEvent, ItemCountRequestContext, ItemCountResult,
+    VisibleItemCountsRequest,
+};
 pub use crate::native_menu::types::{
     InvokeNativeMenuRequest, LoadNativeMenuRequest, LoadNativeMenuResponse,
     NativeMenuCanonicalActionKind, NativeMenuIcon, NativeMenuIconKind, NativeMenuItem,
@@ -90,17 +95,31 @@ impl StartListDirRequest {
     }
 }
 
-/// Head of a chunked listing: the total entry count, a monotonic per-tab
-/// request id, the inline first chunk, and whether the listing is already
-/// complete (no `list_chunk` events will follow).
+/// Head of a chunked listing when the backend completed filesystem work
+/// without being superseded by a newer request for the same tab.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StartListDirResponse {
+pub struct StartListDirHead {
     pub path: String,
     pub total: u64,
     pub request_id: u64,
     pub first_chunk: Vec<DirectoryEntry>,
     pub done: bool,
+}
+
+/// A `start_list_dir` request that was superseded by a newer request for the
+/// same tab before the backend finished enumeration/count/sort work.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartListDirSuperseded {
+    pub request_id: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum StartListDirResponse {
+    Head(StartListDirHead),
+    Superseded(StartListDirSuperseded),
 }
 
 /// A streamed slice of a directory listing following the `start_list_dir` head.
@@ -112,6 +131,9 @@ pub struct ListChunkEvent {
     pub request_id: u64,
     pub path: String,
     pub entries: Vec<DirectoryEntry>,
+    /// Monotonic within a listing request (the inline head is index 0).
+    /// Consumers must accept each index at most once.
+    pub chunk_index: u64,
     pub done: bool,
 }
 
@@ -344,8 +366,21 @@ pub struct CancelSizesResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WatchSeedReference {
+    pub tab_id: String,
+    pub request_id: u64,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SetTabWatchRequest {
     pub target: Option<WatchTarget>,
+    /// Reference to a completed listing snapshot retained on the Rust side.
+    /// When valid for the same tab/request/path context, watcher arming can
+    /// reuse that baseline instead of re-enumerating the directory or
+    /// requiring the frontend to echo a full listing back across IPC.
+    pub seed_reference: Option<WatchSeedReference>,
     /// The already-listed, post-filter/sort entries for `target.path` (the
     /// listing the frontend just fetched via `list_dir`). When present, the
     /// watcher seeds its baseline snapshot from these entries instead of

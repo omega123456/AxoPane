@@ -1,6 +1,7 @@
 use crate::app_picker;
 use crate::archive;
 use crate::fs;
+use crate::item_counts::ItemCountService;
 use crate::ipc::icon_batch::IconBatcher;
 use crate::native_menu::NativeMenuService;
 use crate::ops::{OpSnapshot, OpsService};
@@ -22,20 +23,20 @@ use super::types::WarmNativeMenusResponse;
 use super::types::{
     AppConfig, CancelSizeRequest, CancelSizeResponse, CancelSizesRequest, CancelSizesResponse,
     CompressArchiveRequest, CreateEntryRequest, DeleteFromTrashRequest, EjectVolumeRequest,
-    ExtractArchiveRequest,
-    FileClipboardMode, FolderSizeRequest, FolderSizesRequest, GetDefaultApplicationRequest,
-    GetDefaultApplicationResponse, IconStateEvent, InitialShellResponse, InvokeNativeMenuRequest,
-    ListApplicationsResponse, ListDirRequest, ListDirResponse, ListTrashResponse,
-    ListTreeChildrenRequest, ListTreeChildrenResponse, LoadNativeMenuRequest,
-    LoadNativeMenuResponse, LogFrontendRequest, MenuActionStatus, OpIdRequest, OpenPathRequest,
-    OpenWithRequest, RenameEntryRequest, ReorderOpsRequest, RequestIconsRequest,
-    ResolveConflictRequest, RestoreTrashRequest, SaveConfigRequest, SaveSessionRequest,
-    SessionState, SetDefaultApplicationRequest, SetLogLevelRequest, SetTabWatchRequest,
-    ShowPropertiesRequest, SizeStateEvent, StartListDirRequest, StartListDirResponse,
-    StartOpRequest, TrashEntriesRequest, VolumeInfo, WarmNativeMenusRequest,
-    WriteFileClipboardRequest,
+    ExtractArchiveRequest, FileClipboardMode, FolderSizeRequest, FolderSizesRequest,
+    GetDefaultApplicationRequest, GetDefaultApplicationResponse, IconStateEvent,
+    InitialShellResponse, InvokeNativeMenuRequest, ListApplicationsResponse, ListDirRequest,
+    ListDirResponse, ListTrashResponse, ListTreeChildrenRequest, ListTreeChildrenResponse,
+    LoadNativeMenuRequest, LoadNativeMenuResponse, LogFrontendRequest, MenuActionStatus,
+    OpIdRequest, OpenPathRequest, OpenWithRequest, RenameEntryRequest, ReorderOpsRequest,
+    RequestIconsRequest, ResolveConflictRequest, RestoreTrashRequest, SaveConfigRequest,
+    ActiveItemsSortRequest, ActiveItemsSortResponse, SaveSessionRequest, SessionState,
+    SetDefaultApplicationRequest, SetLogLevelRequest, SetTabWatchRequest, ShowPropertiesRequest,
+    SizeStateEvent, StartListDirHead, StartListDirRequest, StartListDirResponse,
+    StartListDirSuperseded, StartOpRequest, TrashEntriesRequest, VisibleItemCountsRequest,
+    VolumeInfo, WarmNativeMenusRequest, WriteFileClipboardRequest,
 };
-use crate::fs::DirectoryEntry;
+use crate::fs::{DirectoryEntry, ListDirOutcome};
 use crate::listing::ListingService;
 use std::path::Path;
 use tauri::State;
@@ -79,16 +80,43 @@ pub fn start_list_dir(
     payload: StartListDirRequest,
     app: AppHandle,
     state: State<'_, ListingService>,
+    item_counts: State<'_, ItemCountService>,
 ) -> Result<StartListDirResponse, String> {
-    let ListDirResponse { path, entries } =
-        fs::list_dir(&payload.to_options()).map_err(|error| {
-            let message = format!("Failed to load \"{}\": {error}", payload.path);
-            log::error!("{message}");
-            message
-        })?;
+    item_counts.cancel_tab(&payload.tab_id);
+    let session = state.begin_session(&payload.tab_id);
+    let outcome =
+        fs::list_dir_with_cancellation(&payload.to_options(), || state.is_cancelled(&session))
+            .map_err(|error| {
+                let message = format!("Failed to load \"{}\": {error}", payload.path);
+                log::error!("{message}");
+                message
+            })?;
+
+    let ListDirResponse { path, entries } = match outcome {
+        ListDirOutcome::Complete(response) => response,
+        ListDirOutcome::Cancelled => {
+            return Ok(StartListDirResponse::Superseded(StartListDirSuperseded {
+                request_id: session.request_id,
+            }));
+        }
+    };
 
     let total = entries.len() as u64;
-    let request_id = state.next_request_id(&payload.tab_id);
+    let request_id = session.request_id;
+    if !state.complete_session(
+        &session,
+        path.clone(),
+        payload.sort_key,
+        payload.sort_direction,
+        payload.filter.clone(),
+        payload.show_hidden,
+        payload.include_item_counts,
+        entries.clone(),
+    ) {
+        return Ok(StartListDirResponse::Superseded(StartListDirSuperseded {
+            request_id,
+        }));
+    }
     let (first_chunk, rest) =
         crate::listing::split_first_chunk(entries, crate::listing::LIST_CHUNK_SIZE);
     let done = rest.is_empty();
@@ -100,7 +128,7 @@ pub fn start_list_dir(
             let service = app.state::<ListingService>();
             let total_rest = rest.len();
             let mut emitted = 0usize;
-            for chunk in rest.chunks(crate::listing::LIST_CHUNK_SIZE) {
+            for (chunk_offset, chunk) in rest.chunks(crate::listing::LIST_CHUNK_SIZE).enumerate() {
                 // Bail as soon as a newer navigation for this tab supersedes us.
                 if !service.is_current(&tab_id, request_id) {
                     return;
@@ -111,6 +139,7 @@ pub fn start_list_dir(
                     request_id,
                     path: stream_path.clone(),
                     entries: chunk.to_vec(),
+                    chunk_index: chunk_offset as u64 + 1,
                     done: emitted >= total_rest,
                 };
                 let _ = app.emit(super::events::LIST_CHUNK, event);
@@ -118,13 +147,13 @@ pub fn start_list_dir(
         });
     }
 
-    Ok(StartListDirResponse {
+    Ok(StartListDirResponse::Head(StartListDirHead {
         path,
         total,
         request_id,
         first_chunk,
         done,
-    })
+    }))
 }
 
 /// `test-utils` variant: builds the same listing head (first chunk + totals)
@@ -136,22 +165,49 @@ pub fn start_list_dir(
 pub fn start_list_dir(
     payload: StartListDirRequest,
     state: State<'_, ListingService>,
+    item_counts: State<'_, ItemCountService>,
 ) -> Result<StartListDirResponse, String> {
-    let ListDirResponse { path, entries } =
-        fs::list_dir(&payload.to_options()).map_err(|error| error.to_string())?;
+    item_counts.cancel_tab(&payload.tab_id);
+    let session = state.begin_session(&payload.tab_id);
+    let outcome =
+        fs::list_dir_with_cancellation(&payload.to_options(), || state.is_cancelled(&session))
+            .map_err(|error| error.to_string())?;
+
+    let ListDirResponse { path, entries } = match outcome {
+        ListDirOutcome::Complete(response) => response,
+        ListDirOutcome::Cancelled => {
+            return Ok(StartListDirResponse::Superseded(StartListDirSuperseded {
+                request_id: session.request_id,
+            }));
+        }
+    };
 
     let total = entries.len() as u64;
-    let request_id = state.next_request_id(&payload.tab_id);
+    let request_id = session.request_id;
+    if !state.complete_session(
+        &session,
+        path.clone(),
+        payload.sort_key,
+        payload.sort_direction,
+        payload.filter.clone(),
+        payload.show_hidden,
+        payload.include_item_counts,
+        entries.clone(),
+    ) {
+        return Ok(StartListDirResponse::Superseded(StartListDirSuperseded {
+            request_id,
+        }));
+    }
     let (first_chunk, rest) =
         crate::listing::split_first_chunk(entries, crate::listing::LIST_CHUNK_SIZE);
 
-    Ok(StartListDirResponse {
+    Ok(StartListDirResponse::Head(StartListDirHead {
         path,
         total,
         request_id,
         done: rest.is_empty(),
         first_chunk,
-    })
+    }))
 }
 
 #[tauri::command]
@@ -634,6 +690,51 @@ pub fn request_icons(payload: RequestIconsRequest) -> Vec<Vec<IconStateEvent>> {
     batches
 }
 
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub fn request_visible_item_counts(
+    payload: VisibleItemCountsRequest,
+    app: AppHandle,
+    state: State<'_, ItemCountService>,
+) {
+    let plan = state.plan_automatic_request(&payload);
+    if plan.is_empty() {
+        return;
+    }
+
+    if !state.enqueue_automatic_request(plan) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let service = app.state::<ItemCountService>();
+        service.process_automatic_queue(|event| {
+            let _ = app.emit(super::events::ITEM_COUNT, event);
+        });
+    });
+}
+
+#[cfg(feature = "test-utils")]
+#[tauri::command]
+pub fn request_visible_item_counts(
+    payload: VisibleItemCountsRequest,
+    state: State<'_, ItemCountService>,
+) {
+    let plan = state.plan_automatic_request(&payload);
+    state.process_automatic_request(plan, |event| state.record_test_event(event));
+}
+
+#[tauri::command]
+pub fn sort_active_items(
+    payload: ActiveItemsSortRequest,
+    state: State<'_, ItemCountService>,
+) -> Result<ActiveItemsSortResponse, String> {
+    state.sort_active_items(&payload).map_err(|error| {
+        let message = format!("Failed to sort \"{}\" by Items: {error}", payload.context.path);
+        log::error!("{message}");
+        message
+    })
+}
+
 #[tauri::command]
 pub fn cancel_size(
     payload: CancelSizeRequest,
@@ -659,13 +760,16 @@ pub fn cancel_sizes(
 pub fn set_tab_watch(
     payload: SetTabWatchRequest,
     app: AppHandle,
+    listing_state: State<'_, ListingService>,
     state: State<'_, WatchService>,
 ) -> Result<(), String> {
     let patch_app = app.clone();
     let error_app = app;
+    let listing_seed_entries = valid_seed_entries(&payload, &listing_state);
 
     state.set_tab_watch(
         payload.target,
+        listing_seed_entries,
         payload.entries,
         Arc::new(move |patch| {
             let _ = patch_app.emit(
@@ -696,14 +800,34 @@ pub fn set_tab_watch(
     )
 }
 
+fn valid_seed_entries(
+    payload: &SetTabWatchRequest,
+    listing_state: &ListingService,
+) -> Option<Vec<DirectoryEntry>> {
+    let target = payload.target.as_ref()?;
+    let seed = payload.seed_reference.as_ref()?;
+    // A seed is only reusable for the exact watched tab/path context. A stale
+    // or cross-tab reference intentionally falls through to WatchService's
+    // resnapshot path instead of borrowing an unrelated listing baseline.
+    if seed.tab_id != target.tab_id
+        || !crate::listing::paths_match_for_context(&seed.path, &target.path)
+    {
+        return None;
+    }
+    listing_state.completed_seed_entries(&seed.tab_id, seed.request_id, target)
+}
+
 #[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn set_tab_watch(
     payload: SetTabWatchRequest,
+    listing_state: State<'_, ListingService>,
     state: State<'_, WatchService>,
 ) -> Result<(), String> {
+    let listing_seed_entries = valid_seed_entries(&payload, &listing_state);
     state.set_tab_watch(
         payload.target,
+        listing_seed_entries,
         payload.entries,
         Arc::new(noop_dir_patch),
         Arc::new(noop_watch_error),

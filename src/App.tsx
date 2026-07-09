@@ -15,10 +15,17 @@ import { hydrateAppConfig, persistAppConfig } from '@/lib/app-config'
 import { executeCommand } from '@/lib/commands'
 import { everythingStatus, listVolumes, loadConfig, loadSession } from '@/lib/ipc/commands'
 import { installCloseGuard } from '@/lib/close-guard'
-import { onDirPatch, onIconState, onListChunk, onSizeState, onVolumesChanged } from '@/lib/ipc/events'
+import {
+  onDirPatch,
+  onIconState,
+  onItemCountState,
+  onListChunk,
+  onSizeState,
+  onVolumesChanged,
+} from '@/lib/ipc/events'
 import { resolveCommandForEvent } from '@/lib/keymap'
 import { createRafBatcher } from '@/lib/raf-batcher'
-import type { IconStateEvent, ListChunkEvent, SizeStateEvent } from '@/lib/types/ipc'
+import type { IconStateEvent, ItemCountEvent, ListChunkEvent, SizeStateEvent } from '@/lib/types/ipc'
 import { UpdateBanner } from '@/components/states/UpdateBanner'
 import { useUpdaterStore } from '@/stores/updater-store'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
@@ -48,6 +55,7 @@ function App() {
   const treeRoots = usePanesStore((state) => state.treeRoots)
   const applySizeStates = usePanesStore((state) => state.applySizeStates)
   const applyIconStates = usePanesStore((state) => state.applyIconStates)
+  const applyItemCountEvents = usePanesStore((state) => state.applyItemCountEvents)
   const applyDirPatch = usePanesStore((state) => state.applyDirPatch)
   const applyListChunk = usePanesStore((state) => state.applyListChunk)
   const reloadPane = usePanesStore((state) => state.reloadPane)
@@ -219,6 +227,9 @@ function App() {
     const sizeBatcher = createRafBatcher<SizeStateEvent>((batch) => {
       applySizeStates(batch)
     })
+    const itemCountBatcher = createRafBatcher<ItemCountEvent>((batch) => {
+      applyItemCountEvents(batch)
+    })
     // Coalesce streamed listing chunks so several chunks landing in one frame
     // become a single store update (and one React commit) instead of one each.
     const listChunkBatcher = createRafBatcher<ListChunkEvent>((batch) => {
@@ -245,6 +256,10 @@ function App() {
       }
     })
 
+    const unlistenItemCountsPromise = onItemCountState((event) => {
+      itemCountBatcher.push(event)
+    })
+
     const unlistenPatchesPromise = onDirPatch((event) => {
       applyDirPatch(event)
     })
@@ -253,6 +268,7 @@ function App() {
       void unlistenVolumesPromise.then((unlisten) => unlisten())
       void unlistenSizesPromise.then((unlisten) => unlisten())
       void unlistenIconsPromise.then((unlisten) => unlisten())
+      void unlistenItemCountsPromise.then((unlisten) => unlisten())
       void unlistenPatchesPromise.then((unlisten) => unlisten())
       void unlistenListChunksPromise.then((unlisten) => unlisten())
       // Flush any buffered events before tearing down so a burst that lands
@@ -262,10 +278,19 @@ function App() {
       iconBatcher.cancel()
       sizeBatcher.flush()
       sizeBatcher.cancel()
+      itemCountBatcher.flush()
+      itemCountBatcher.cancel()
       listChunkBatcher.flush()
       listChunkBatcher.cancel()
     }
-  }, [applyDirPatch, applyIconStates, applyListChunk, applySizeStates, setVolumes])
+  }, [
+    applyDirPatch,
+    applyIconStates,
+    applyItemCountEvents,
+    applyListChunk,
+    applySizeStates,
+    setVolumes,
+  ])
 
   return (
     <main className="flex h-full select-none flex-col overflow-hidden overscroll-x-none bg-light-window font-ui text-light-text dark:bg-dark-window dark:text-dark-text">

@@ -15,6 +15,7 @@ use file_explorer_lib::ipc::types::{
     ReorderOpsRequest, RequestIconsRequest, ResolveConflictRequest, SaveConfigRequest,
     SaveSessionRequest, SessionState, SetTabWatchRequest, TrashEntriesRequest, WatchTarget,
 };
+use file_explorer_lib::listing::ListingService;
 use file_explorer_lib::ops::{OpItem, OpKind, OpStatus, OpsService, StartOpRequest};
 use file_explorer_lib::persist::{Config, PersistenceState, Session};
 use file_explorer_lib::size::{EverythingStatus, SizeService};
@@ -39,6 +40,7 @@ impl TestApp<tauri::test::MockRuntime> {
         let app = mock_builder()
             .manage(persistence)
             .manage(SizeService::default())
+            .manage(ListingService::default())
             .manage(WatchService::default())
             .manage(OpsService::new(Duration::from_secs(30)))
             .invoke_handler(tauri::generate_handler![
@@ -372,6 +374,7 @@ fn ipc_commands_cover_watch_size_and_logging_state() {
             "set_tab_watch",
             SetTabWatchRequest {
                 target: Some(watch_target.clone()),
+                seed_reference: None,
                 entries: None,
             },
         )
@@ -385,6 +388,7 @@ fn ipc_commands_cover_watch_size_and_logging_state() {
             "set_tab_watch",
             SetTabWatchRequest {
                 target: None,
+                seed_reference: None,
                 entries: None,
             },
         )

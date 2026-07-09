@@ -157,12 +157,19 @@ export async function invokePlaywrightCommand<CommandName extends keyof IpcComma
     const listOverride = readCommandOverride('list_dir')
     const listing = listOverride.found ? listOverride.value : getFixtureResponse('list_dir')
     return {
+      kind: 'head',
       path: listing.path,
       total: listing.entries.length,
       requestId: 1,
       firstChunk: listing.entries,
       done: true,
     } as IpcCommandMap[CommandName]['response']
+  }
+
+  // Explicit Items sorting reuses the shared fixture registry by default so a
+  // scenario can exercise the pending visual state with only a delay override.
+  if (command === 'sort_active_items' && !readCommandOverride('sort_active_items').found) {
+    return getFixtureResponse('sort_active_items') as IpcCommandMap[CommandName]['response']
   }
 
   const override = readCommandOverride(command)

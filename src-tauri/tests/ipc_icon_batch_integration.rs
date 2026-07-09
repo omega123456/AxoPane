@@ -28,7 +28,9 @@ mod ipc {
 }
 
 fn paths(count: usize) -> Vec<String> {
-    (0..count).map(|index| format!("/tmp/icon-{index}.bin")).collect()
+    (0..count)
+        .map(|index| format!("/tmp/icon-{index}.bin"))
+        .collect()
 }
 
 /// Resolving zero icons produces zero batches (nothing to flush).
@@ -43,7 +45,11 @@ fn request_icons_emits_no_batches_for_an_empty_request() {
 #[test]
 fn request_icons_batches_a_small_request_into_a_single_flush() {
     let batches = commands::request_icons(RequestIconsRequest { paths: paths(5) });
-    assert_eq!(batches.len(), 1, "expected a single remainder flush, not one event per path");
+    assert_eq!(
+        batches.len(),
+        1,
+        "expected a single remainder flush, not one event per path"
+    );
     assert_eq!(batches[0].len(), 5);
 }
 
@@ -52,7 +58,11 @@ fn request_icons_batches_a_small_request_into_a_single_flush() {
 #[test]
 fn request_icons_flushes_exactly_at_the_batch_boundary() {
     let batches = commands::request_icons(RequestIconsRequest { paths: paths(64) });
-    assert_eq!(batches.len(), 1, "64 icons should flush as exactly one full batch");
+    assert_eq!(
+        batches.len(),
+        1,
+        "64 icons should flush as exactly one full batch"
+    );
     assert_eq!(batches[0].len(), 64);
 }
 
@@ -63,7 +73,9 @@ fn request_icons_flushes_exactly_at_the_batch_boundary() {
 fn request_icons_emits_ceil_n_over_chunk_batches_not_n_events() {
     const CHUNK: usize = 64;
     let total = 2 * CHUNK + 2;
-    let batches = commands::request_icons(RequestIconsRequest { paths: paths(total) });
+    let batches = commands::request_icons(RequestIconsRequest {
+        paths: paths(total),
+    });
 
     let expected_batch_count = total.div_ceil(CHUNK);
     assert_eq!(batches.len(), expected_batch_count);
@@ -104,7 +116,10 @@ mod icon_batch_unit {
         for index in 0..MAX_BATCH - 1 {
             // Same instant every time: no time-based flush possible.
             let flushed = batcher.push(event(&format!("/tmp/{index}")), base);
-            assert!(flushed.is_none(), "should not flush before the count threshold");
+            assert!(
+                flushed.is_none(),
+                "should not flush before the count threshold"
+            );
         }
 
         let flushed = batcher.push(event("/tmp/last"), base);

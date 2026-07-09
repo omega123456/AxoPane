@@ -329,12 +329,13 @@ mod watch_src {
                 .set_tab_watch(
                     Some(target.clone()),
                     None,
+                    None,
                     Arc::new(|_| {}),
                     Arc::new(|_, _| {}),
                 )
                 .expect("set watch");
             service
-                .set_tab_watch(None, None, Arc::new(|_| {}), Arc::new(|_, _| {}))
+                .set_tab_watch(None, None, None, Arc::new(|_| {}), Arc::new(|_, _| {}))
                 .expect("clear watch");
         }
 
@@ -359,6 +360,7 @@ mod watch_src {
             service
                 .set_tab_watch(
                     Some(target.clone()),
+                    None,
                     None,
                     Arc::new(|_| {}),
                     Arc::new(|_, _| {}),
@@ -443,6 +445,7 @@ mod watch_src {
                 .set_tab_watch(
                     Some(base.clone()),
                     None,
+                    None,
                     Arc::new(|_| {}),
                     Arc::new(|_, _| {}),
                 )
@@ -450,6 +453,7 @@ mod watch_src {
             service
                 .set_tab_watch(
                     Some(base.clone()),
+                    None,
                     None,
                     Arc::new(|_| {}),
                     Arc::new(|_, _| {}),
@@ -470,6 +474,7 @@ mod watch_src {
                         ..base.clone()
                     }),
                     None,
+                    None,
                     Arc::new(|_| {}),
                     Arc::new(|_, _| {}),
                 )
@@ -489,6 +494,7 @@ mod watch_src {
                         path: left_c.to_string_lossy().into_owned(),
                         ..base
                     }),
+                    None,
                     None,
                     Arc::new(|_| {}),
                     Arc::new(|_, _| {}),
@@ -548,5 +554,145 @@ mod watch_src {
             remove_path(&mut next, &mut removed, &hidden);
             assert!(!next.contains_key(&direct));
         }
+
+        #[test]
+        fn patch_changed_path_builds_directory_entries_without_item_counts() {
+            let fixture = tempdir().expect("temp dir");
+            let root = fixture.path();
+            let child = root.join("child");
+            std::fs::create_dir(&child).expect("child dir");
+            std::fs::write(child.join("nested.txt"), b"nested").expect("nested");
+
+            let target = WatchTarget {
+                tab_id: "left-1".to_string(),
+                path: root.to_string_lossy().into_owned(),
+                sort_key: SortKey::Name,
+                sort_direction: SortDirection::Asc,
+                filter: String::new(),
+                show_hidden: true,
+                include_item_counts: true,
+            };
+
+            let mut next = HashMap::new();
+            let mut changed = Vec::new();
+            let mut removed = Vec::new();
+            patch_changed_path(&target, &mut next, &mut changed, &mut removed, &child)
+                .expect("directory patch");
+
+            let changed_entry = changed
+                .into_iter()
+                .find_map(|patch| patch.entry)
+                .expect("changed entry");
+            assert!(changed_entry.is_dir);
+            assert_eq!(changed_entry.item_count, None);
+        }
+
+        #[test]
+        fn items_sort_watch_baselines_stay_non_counting_and_order_agnostic() {
+            let fixture = tempdir().expect("temp dir");
+            let root = fixture.path();
+            let child = root.join("child");
+            std::fs::create_dir(&child).expect("child dir");
+            std::fs::write(child.join("nested.txt"), b"nested").expect("nested");
+
+            let target = WatchTarget {
+                tab_id: "left-1".to_string(),
+                path: root.to_string_lossy().into_owned(),
+                sort_key: SortKey::Items,
+                sort_direction: SortDirection::Desc,
+                filter: String::new(),
+                show_hidden: true,
+                include_item_counts: true,
+            };
+            let service = WatchService::default();
+
+            service
+                .set_tab_watch(
+                    Some(target.clone()),
+                    None,
+                    None,
+                    Arc::new(|_| {}),
+                    Arc::new(|_, _| {}),
+                )
+                .expect("set items watch");
+
+            let baseline = tab_snapshot_for_tests(&service, &target.tab_id).expect("baseline");
+            let child_entry = baseline
+                .values()
+                .find(|entry| entry.name == "child")
+                .expect("child entry");
+            assert_eq!(child_entry.item_count, None);
+        }
     }
+}
+
+use file_explorer_lib::ipc::commands;
+use file_explorer_lib::ipc::types::{SetTabWatchRequest, WatchSeedReference};
+use file_explorer_lib::listing::ListingService;
+use file_explorer_lib::watch::{tab_snapshot_for_tests, WatchService, WatchTarget};
+
+fn as_state<'a, T: Send + Sync + 'static>(value: &'a T) -> tauri::State<'a, T> {
+    unsafe { std::mem::transmute::<&'a T, tauri::State<'a, T>>(value) }
+}
+
+#[test]
+fn stale_seed_reference_falls_back_to_current_directory_snapshot() {
+    let fixture = tempfile::tempdir().expect("temp dir");
+    let root = fixture.path();
+    std::fs::write(root.join("real.txt"), b"real").expect("real file");
+
+    let listing_service = ListingService::default();
+    let session = listing_service.begin_session("left-1");
+    assert!(listing_service.complete_session(
+        &session,
+        root.to_string_lossy().into_owned(),
+        file_explorer_lib::fs::SortKey::Name,
+        file_explorer_lib::fs::SortDirection::Asc,
+        String::new(),
+        true,
+        true,
+        vec![file_explorer_lib::fs::DirectoryEntry {
+            id: root.join("phantom.txt").to_string_lossy().into_owned(),
+            name: "phantom.txt".to_string(),
+            path: root.join("phantom.txt").to_string_lossy().into_owned(),
+            is_dir: false,
+            icon_data_url: None,
+            size_bytes: Some(1),
+            item_count: None,
+            type_label: "TXT file".to_string(),
+            modified_at: None,
+            created_at: None,
+            attributes: Vec::new(),
+            is_hidden: false,
+            is_system: false,
+        }],
+    ));
+
+    let watch_service = WatchService::default();
+    commands::set_tab_watch(
+        SetTabWatchRequest {
+            target: Some(WatchTarget {
+                tab_id: "left-1".to_string(),
+                path: root.to_string_lossy().into_owned(),
+                sort_key: file_explorer_lib::fs::SortKey::Name,
+                sort_direction: file_explorer_lib::fs::SortDirection::Asc,
+                filter: String::new(),
+                show_hidden: true,
+                include_item_counts: true,
+            }),
+            seed_reference: Some(WatchSeedReference {
+                tab_id: "left-1".to_string(),
+                request_id: session.request_id + 1,
+                path: root.to_string_lossy().into_owned(),
+            }),
+            entries: None,
+        },
+        as_state(&listing_service),
+        as_state(&watch_service),
+    )
+    .expect("set watch with stale seed reference");
+
+    let baseline = tab_snapshot_for_tests(&watch_service, "left-1").expect("baseline recorded");
+    assert!(baseline.keys().any(|path| path.ends_with("real.txt")));
+    assert!(!baseline.keys().any(|path| path.ends_with("phantom.txt")));
 }

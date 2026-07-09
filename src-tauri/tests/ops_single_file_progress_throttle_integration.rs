@@ -179,8 +179,10 @@ mod tests {
     fn single_file_transfer_throttle_spaces_emissions_by_the_interval() {
         let (clock, instant_now) = controllable_clock();
         let base = *clock.lock().expect("clock lock");
-        let (_op_arc, _resolver, progress_log, ctx) =
-            make_ctx_with_clock(op_state_with_items(OpStatus::Active, vec![item(Path::new("/tmp/big.bin"), 30)]), instant_now);
+        let (_op_arc, _resolver, progress_log, ctx) = make_ctx_with_clock(
+            op_state_with_items(OpStatus::Active, vec![item(Path::new("/tmp/big.bin"), 30)]),
+            instant_now,
+        );
 
         let mut throttle = TransferThrottle::new(base, PROGRESS_EMIT_INTERVAL);
 
@@ -253,13 +255,16 @@ mod tests {
         std::fs::create_dir_all(&source_dir).expect("source dir");
         const MEMBER_COUNT: usize = 6;
         for index in 0..MEMBER_COUNT {
-            std::fs::write(source_dir.join(format!("member-{index}.txt")), b"x").expect("member file");
+            std::fs::write(source_dir.join(format!("member-{index}.txt")), b"x")
+                .expect("member file");
         }
 
         let archive_path = fixture.path().join("payload.zip");
         let source_item = item(&source_dir, 0);
-        let (_op_arc, _resolver, progress_log, ctx) =
-            make_ctx_with_clock(op_state_with_items(OpStatus::Active, vec![source_item.clone()]), Arc::new(Instant::now));
+        let (_op_arc, _resolver, progress_log, ctx) = make_ctx_with_clock(
+            op_state_with_items(OpStatus::Active, vec![source_item.clone()]),
+            Arc::new(Instant::now),
+        );
 
         compress_item_with_progress(&source_dir, &archive_path, &source_item, &ctx)
             .expect("compress many small members");
@@ -283,7 +288,8 @@ mod tests {
         std::fs::create_dir_all(&source_dir).expect("source dir");
         const MEMBER_COUNT: usize = 6;
         for index in 0..MEMBER_COUNT {
-            std::fs::write(source_dir.join(format!("member-{index}.txt")), b"x").expect("member file");
+            std::fs::write(source_dir.join(format!("member-{index}.txt")), b"x")
+                .expect("member file");
         }
 
         let archive_path = fixture.path().join("payload.zip");
@@ -292,8 +298,13 @@ mod tests {
             op_state_with_items(OpStatus::Active, vec![item(&source_dir, 0)]),
             Arc::new(Instant::now),
         );
-        compress_item_with_progress(&source_dir, &archive_path, &item(&source_dir, 0), &compress_ctx)
-            .expect("compress fixture archive");
+        compress_item_with_progress(
+            &source_dir,
+            &archive_path,
+            &item(&source_dir, 0),
+            &compress_ctx,
+        )
+        .expect("compress fixture archive");
         drop(compress_log);
 
         let extract_root = fixture.path().join("extract");

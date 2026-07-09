@@ -2,7 +2,8 @@ use std::fs;
 
 use file_explorer_lib::fs::{DirectoryEntry, SortDirection, SortKey};
 use file_explorer_lib::ipc::commands;
-use file_explorer_lib::ipc::types::StartListDirRequest;
+use file_explorer_lib::ipc::types::{StartListDirRequest, StartListDirResponse};
+use file_explorer_lib::item_counts::ItemCountService;
 use file_explorer_lib::listing::{split_first_chunk, ListingService, LIST_CHUNK_SIZE};
 use tempfile::tempdir;
 
@@ -35,31 +36,33 @@ fn entry(name: &str) -> DirectoryEntry {
 }
 
 fn entries(count: usize) -> Vec<DirectoryEntry> {
-    (0..count).map(|index| entry(&format!("file-{index}"))).collect()
+    (0..count)
+        .map(|index| entry(&format!("file-{index}")))
+        .collect()
 }
 
 #[test]
 fn request_ids_are_monotonic_per_tab_and_independent_across_tabs() {
     let service = ListingService::default();
 
-    assert_eq!(service.next_request_id("left-1"), 1);
-    assert_eq!(service.next_request_id("left-1"), 2);
+    assert_eq!(service.begin_session("left-1").request_id, 1);
+    assert_eq!(service.begin_session("left-1").request_id, 2);
     // A second tab keeps its own counter.
-    assert_eq!(service.next_request_id("right-1"), 1);
-    assert_eq!(service.next_request_id("left-1"), 3);
+    assert_eq!(service.begin_session("right-1").request_id, 1);
+    assert_eq!(service.begin_session("left-1").request_id, 3);
 }
 
 #[test]
 fn is_current_only_matches_the_latest_request_for_a_tab() {
     let service = ListingService::default();
 
-    let first = service.next_request_id("left-1");
-    assert!(service.is_current("left-1", first));
+    let first = service.begin_session("left-1");
+    assert!(service.is_current("left-1", first.request_id));
 
     // A newer navigation supersedes the earlier request.
-    let second = service.next_request_id("left-1");
-    assert!(service.is_current("left-1", second));
-    assert!(!service.is_current("left-1", first));
+    let second = service.begin_session("left-1");
+    assert!(service.is_current("left-1", second.request_id));
+    assert!(!service.is_current("left-1", first.request_id));
 
     // Unknown tabs / ids are never current.
     assert!(!service.is_current("right-1", 1));
@@ -89,6 +92,7 @@ fn split_first_chunk_splits_the_remainder_when_it_overflows() {
 #[test]
 fn start_list_dir_returns_a_complete_head_for_a_small_directory() {
     let service = ListingService::default();
+    let item_counts = ItemCountService::default();
     let dir = tempdir().expect("temp dir");
     for index in 0..3 {
         fs::write(dir.path().join(format!("f{index}.txt")), b"x").expect("write file");
@@ -104,22 +108,34 @@ fn start_list_dir_returns_a_complete_head_for_a_small_directory() {
         include_item_counts: false,
     };
 
-    let head = commands::start_list_dir(request.clone(), as_state(&service)).expect("start list dir");
+    let head = commands::start_list_dir(request.clone(), as_state(&service), as_state(&item_counts))
+        .expect("start list dir");
 
+    let StartListDirResponse::Head(head) = head else {
+        panic!("expected listing head");
+    };
     assert_eq!(head.total, 3);
     assert!(head.total as usize <= LIST_CHUNK_SIZE);
-    assert!(head.done, "a directory smaller than one chunk is complete at the head");
+    assert!(
+        head.done,
+        "a directory smaller than one chunk is complete at the head"
+    );
     assert_eq!(head.first_chunk.len(), 3);
     assert_eq!(head.request_id, 1);
 
     // A second listing for the same tab bumps the request id (superseding).
-    let next = commands::start_list_dir(request, as_state(&service)).expect("start list dir again");
+    let next = commands::start_list_dir(request, as_state(&service), as_state(&item_counts))
+        .expect("start list dir again");
+    let StartListDirResponse::Head(next) = next else {
+        panic!("expected listing head");
+    };
     assert_eq!(next.request_id, 2);
 }
 
 #[test]
 fn start_list_dir_reports_a_missing_directory_as_an_error() {
     let service = ListingService::default();
+    let item_counts = ItemCountService::default();
     let request = StartListDirRequest {
         tab_id: "left-1".to_string(),
         path: "C:\\definitely\\missing\\path".to_string(),
@@ -130,6 +146,6 @@ fn start_list_dir_reports_a_missing_directory_as_an_error() {
         include_item_counts: false,
     };
 
-    let result = commands::start_list_dir(request, as_state(&service));
+    let result = commands::start_list_dir(request, as_state(&service), as_state(&item_counts));
     assert!(result.is_err());
 }
