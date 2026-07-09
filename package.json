@@ -1,7 +1,7 @@
 {
   "name": "axopane",
   "private": true,
-  "version": "1.19.13",
+  "version": "1.19.14",
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
