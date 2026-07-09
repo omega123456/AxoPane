@@ -9,6 +9,7 @@ import {
 } from '@/lib/ipc/commands'
 import type { CommandId, DirectoryEntry } from '@/lib/types/ipc'
 import { isTrashPath } from '@/lib/trash'
+import { isNetworkPath } from '@/lib/volumes'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useClipboardStore } from '@/stores/clipboard-store'
 import { useErrorToastStore } from '@/stores/error-toast-store'
@@ -166,16 +167,35 @@ export function executeCommand(
         }
         break
       }
+      // Network volumes have no reliable OS trash/recycle-bin integration.
+      // Treat their ordinary Delete as an explicit permanent delete so users
+      // receive the same irreversible-action confirmation as Shift+Delete.
+      if (effectiveEntries.some((item) => isNetworkPath(item.path, panes.volumes))) {
+        useActionDialogStore.getState().open({
+          kind: 'delete',
+          paneId,
+          targets: effectiveEntries.map((item) => ({
+            id: item.id,
+            name: item.name,
+            path: item.path,
+            sizeBytes: item.sizeBytes,
+          })),
+        })
+        break
+      }
+
       // Default delete moves to the OS bin/Recycle Bin/Trash (reversible, no
       // confirmation — matching Explorer/Finder). The fs watcher refreshes the
       // listing once the items disappear.
       if (effectiveEntries.length > 0) {
         void moveToTrash({ paths: effectiveEntries.map((item) => item.path) }).catch((error) => {
+          const message = error instanceof Error ? error.message : String(error)
           log.error('move to trash failed', {
             paneId,
             paths: effectiveEntries.map((item) => item.path),
             error,
           })
+          useErrorToastStore.getState().show(message)
         })
       }
       break

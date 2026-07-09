@@ -42,6 +42,9 @@ function trashEntry(name: string, hasOriginalPath = true): DirectoryEntry {
 
 beforeEach(() => {
   ipc.install()
+  act(() => {
+    useErrorToastStore.getState().dismiss()
+  })
   usePanesStore.getState().reset()
   useSelectionStore.getState().reset()
   useActionDialogStore.getState().close()
@@ -185,6 +188,57 @@ describe('executeCommand file actions', () => {
       paths: ['C:\\root\\Alpha', 'C:\\root\\Beta'],
     })
     expect(useActionDialogStore.getState().dialog).toBeNull()
+  })
+
+  it('confirms permanent deletion instead of using trash for a network volume', () => {
+    const moveToTrash = vi.fn(() => undefined)
+    ipc.override('move_to_trash', moveToTrash)
+    usePanesStore.setState({
+      volumes: [
+        {
+          mountRoot: 'Z:\\',
+          label: 'Team share',
+          totalBytes: 0,
+          freeBytes: 0,
+          isNetwork: true,
+          isRemovable: false,
+        },
+      ],
+      panes: {
+        ...usePanesStore.getState().panes,
+        left: {
+          ...usePanesStore.getState().panes.left,
+          path: 'Z:\\Team',
+          entries: [
+            {
+              ...entry('Quarterly report.pdf', false),
+              path: 'Z:\\Team\\Quarterly report.pdf',
+            },
+          ],
+        },
+      },
+    })
+
+    executeCommand('delete', 'left', 'Quarterly report.pdf')
+
+    expect(moveToTrash).not.toHaveBeenCalled()
+    expect(useActionDialogStore.getState().dialog).toMatchObject({
+      kind: 'delete',
+      paneId: 'left',
+      targets: [{ name: 'Quarterly report.pdf', path: 'Z:\\Team\\Quarterly report.pdf' }],
+    })
+  })
+
+  it('shows a toast when moving an item to trash fails', async () => {
+    ipc.override('move_to_trash', () => {
+      throw new Error('The recycle bin is unavailable')
+    })
+
+    executeCommand('delete', 'left', 'Beta')
+
+    await waitFor(() =>
+      expect(useErrorToastStore.getState().message).toBe('The recycle bin is unavailable'),
+    )
   })
 
   it('opens a permanent delete confirmation for the selected entries', () => {

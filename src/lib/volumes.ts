@@ -55,6 +55,22 @@ export function findVolumeForPath(path: string, volumes: VolumeInfo[]): VolumeIn
   return match
 }
 
+/**
+ * Whether a path belongs to a network location. The volume inventory covers
+ * mapped Windows drives and mounted network volumes on macOS. A UNC path is
+ * unambiguously network-backed even if its share has not made it into the
+ * current inventory yet, so keep that small fallback for freshly connected
+ * shares and direct UNC navigation.
+ */
+export function isNetworkPath(path: string, volumes: VolumeInfo[]): boolean {
+  const volume = findVolumeForPath(path, volumes)
+  if (volume) {
+    return volume.isNetwork
+  }
+
+  return normalizeExtendedWindowsPath(path).startsWith('\\\\')
+}
+
 /** True when `path` is itself a volume's mount root (not a folder inside it). */
 export function isVolumeRoot(path: string, volume: VolumeInfo) {
   return normalizeRoot(path) === normalizeRoot(volume.mountRoot)

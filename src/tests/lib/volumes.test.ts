@@ -1,6 +1,7 @@
 import {
   findVolumeForPath,
   groupVolumesByCategory,
+  isNetworkPath,
   isVolumeRoot,
   volumeCategory,
 } from '@/lib/volumes'
@@ -73,6 +74,26 @@ describe('findVolumeForPath', () => {
 
   it('returns null when no volume matches', () => {
     expect(findVolumeForPath('D:\\x', [c])).toBeNull()
+  })
+})
+
+describe('isNetworkPath', () => {
+  it('uses the matching mounted volume on both supported platforms', () => {
+    expect(isNetworkPath('Z:\\shared\\report.txt', [volume({ mountRoot: 'Z:\\', isNetwork: true })])).toBe(
+      true,
+    )
+    expect(
+      isNetworkPath('/Volumes/team/project/report.txt', [
+        volume({ mountRoot: '/Volumes/team', isNetwork: true }),
+      ]),
+    ).toBe(true)
+    expect(isNetworkPath('C:\\Users\\me\\report.txt', [volume()])).toBe(false)
+  })
+
+  it('recognizes direct and extended UNC paths before volume discovery completes', () => {
+    expect(isNetworkPath('\\\\server\\share\\report.txt', [])).toBe(true)
+    expect(isNetworkPath('\\\\?\\UNC\\server\\share\\report.txt', [])).toBe(true)
+    expect(isNetworkPath('\\\\?\\C:\\Users\\me\\report.txt', [])).toBe(false)
   })
 })
 
