@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use file_explorer_lib::resource_coordinator::{JobClass, JobSpec, ResourceCoordinator};
 use file_explorer_lib::size::everything::EverythingAvailability;
 use file_explorer_lib::size::everything::{
     build_exact_folder_or_queries, escape_exact_folder_query_path, join_everything_result_path,
@@ -78,16 +79,17 @@ fn manual_size_error_formats_and_converts_io_failures() {
 }
 
 #[test]
-fn manual_size_error_converts_jwalk_failures() {
+fn manual_size_error_converts_shared_traversal_failures() {
     let fixture = tempdir().expect("temp dir");
     let missing = fixture.path().join("missing-root");
 
-    let mut iterator = jwalk::WalkDir::new(&missing)
-        .try_into_iter()
-        .expect("iterator construction");
-    let walk_error = match iterator.next() {
-        Some(Err(error)) => error,
-        other => panic!("missing root should yield a jwalk error, got {other:?}"),
+    let walk_error = match file_explorer_lib::traversal::walk(
+        &missing,
+        file_explorer_lib::traversal::TraversalOptions::default(),
+        Arc::new(AtomicBool::new(false)),
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("missing root should fail traversal"),
     };
     let error: ManualSizeError = walk_error.into();
 
@@ -841,6 +843,267 @@ fn wait_for_updates(
     }
 
     panic!("timed out waiting for size updates");
+}
+
+/// `SizeService::with_resource_coordinator` (and the injectable
+/// `with_everything_handle_and_coordinator` test constructor) must route
+/// manual-size traversal through the *caller-supplied* coordinator instead
+/// of a private one it builds internally. Proven here by pre-occupying every
+/// `Throughput` slot on an externally held coordinator and observing that a
+/// manual size request stays parked at `Calculating` (admission blocked)
+/// until the external holder releases its slots — a private coordinator
+/// would never see this occupancy and the job would complete immediately.
+#[test]
+fn size_service_manual_jobs_are_admitted_through_the_injected_coordinator() {
+    let coordinator = Arc::new(ResourceCoordinator::new());
+
+    // Saturate every throughput slot the coordinator has so any job routed
+    // through *this* coordinator instance cannot be admitted yet.
+    let mut occupying_handles = Vec::new();
+    for index in 0..file_explorer_lib::resource_coordinator::queue::MAX_THROUGHPUT_SLOTS {
+        occupying_handles.push(
+            coordinator
+                .submit(JobSpec::new(
+                    [JobClass::Throughput],
+                    [format!("occupy-{index}")],
+                ))
+                .expect("occupying throughput slot admitted"),
+        );
+    }
+
+    let service = SizeService::with_everything_handle_and_coordinator(
+        Duration::from_secs(5),
+        None,
+        Arc::clone(&coordinator),
+    );
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    fs::write(root.join("alpha.bin"), vec![1_u8; 4]).expect("alpha");
+    let target = root.to_string_lossy().into_owned();
+
+    let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
+    let updates_for_emitter = updates.clone();
+    service.request_paths(vec![target.clone()], move |update| {
+        updates_for_emitter
+            .lock()
+            .expect("updates lock")
+            .extend(update);
+    });
+
+    // Give the worker pool a bounded window to try (and fail) admission;
+    // it must not have produced a terminal Ready/Error/Na state yet because
+    // every throughput slot on the shared coordinator is still occupied.
+    thread::sleep(Duration::from_millis(150));
+    assert!(updates
+        .lock()
+        .expect("updates lock")
+        .iter()
+        .all(|update| update.state != SizeStateKind::Ready
+            && update.state != SizeStateKind::Error
+            && update.state != SizeStateKind::Na));
+
+    // Releasing the external occupancy frees the shared coordinator's
+    // throughput lane, letting the size worker's queued admission resolve
+    // and the job complete.
+    drop(occupying_handles);
+    wait_for_updates(&updates, |updates| {
+        updates
+            .iter()
+            .any(|update| update.state == SizeStateKind::Ready)
+    });
+}
+
+/// Regression test for the "phantom cancellation token" audit finding: two
+/// overlapping `request_paths` calls for the *same* still-in-flight path
+/// must coalesce onto one real job rather than the second call fabricating a
+/// disconnected token. Proven by holding the manual worker pool's only
+/// throughput admission open (a controlled first path occupies it) while a
+/// second request for a *different* long-running path is issued twice in a
+/// row before either could possibly complete — the second, duplicate
+/// request must not produce its own independent terminal event, and
+/// cancelling one of the two overlapping registrations must not orphan the
+/// other (the path must still resolve to exactly one terminal state).
+#[test]
+fn overlapping_requests_for_the_same_in_flight_path_coalesce_to_one_completion() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path().join("overlap");
+    fs::create_dir_all(&root).expect("root");
+    for index in 0..300 {
+        fs::write(root.join(format!("file-{index}.bin")), vec![1_u8; 4096]).expect("seed file");
+    }
+    let target = root.to_string_lossy().into_owned();
+
+    let service = SizeService::new(Duration::from_secs(5));
+    let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
+    let updates_for_emitter = updates.clone();
+
+    // First request registers and (once a pool worker claims it) starts
+    // walking `target`.
+    service.request_paths(vec![target.clone()], {
+        let updates_for_emitter = updates_for_emitter.clone();
+        move |update| {
+            updates_for_emitter
+                .lock()
+                .expect("updates lock")
+                .extend(update);
+        }
+    });
+
+    // A second, overlapping request for the exact same path arrives before
+    // the first could possibly have finished walking 300 files. Per the
+    // coalescing contract this must find the existing in-flight job and
+    // return its same tracked token rather than registering (or silently
+    // dropping) a second one.
+    service.request_paths(vec![target.clone()], move |update| {
+        updates_for_emitter
+            .lock()
+            .expect("updates lock")
+            .extend(update);
+    });
+
+    wait_for_updates(&updates, |updates| {
+        updates
+            .iter()
+            .any(|update| matches!(update.state, SizeStateKind::Ready | SizeStateKind::Na))
+    });
+
+    let recorded = updates.lock().expect("updates lock").clone();
+    let terminal_count = recorded
+        .iter()
+        .filter(|update| {
+            update.path == target
+                && matches!(update.state, SizeStateKind::Ready | SizeStateKind::Na)
+        })
+        .count();
+    assert_eq!(
+        terminal_count, 1,
+        "overlapping requests for the same path must resolve to exactly one \
+         terminal event, not one per request: {recorded:?}"
+    );
+
+    // The job is fully completed and untracked, not orphaned: a fresh
+    // request for the same path now starts a brand-new job instead of
+    // silently coalescing onto stale state.
+    assert!(!service.cancel(&target));
+}
+
+/// A path the scheduler cannot admit as a new entry (capacity exhausted)
+/// must not leave the caller with no terminal event at all — this was the
+/// concrete, reachable form of the phantom-token bug: `register_job`
+/// returning a freshly fabricated, disconnected cancel token for a path that
+/// was never actually tracked in the scheduler or `SizeService`'s own job
+/// map, so nothing would ever call `complete_job` for it and the request
+/// would silently vanish with the caller waiting forever. With the fix, a
+/// rejected path is reported as a terminal `Error` immediately instead.
+///
+/// Exercised end-to-end through `SizeService` itself (not just the
+/// scheduler in isolation) using the test-only capacity override, so this
+/// asserts the actual production `register_job`/`enqueue_manual_job` wiring,
+/// not just the underlying data structure.
+#[test]
+fn a_manual_job_rejected_for_capacity_still_reports_a_terminal_event() {
+    let coordinator = Arc::new(ResourceCoordinator::new());
+    // Capacity 1: the first path fills the only slot; a second, distinct
+    // path cannot be scheduled and must be rejected by `register_job`.
+    let service = SizeService::with_capacity_for_tests(Duration::from_secs(5), coordinator, 1);
+
+    let fixture = tempdir().expect("temp dir");
+    let first = fixture.path().join("first");
+    let second = fixture.path().join("second");
+    fs::create_dir_all(&first).expect("first");
+    fs::create_dir_all(&second).expect("second");
+    // Give the first job enough files that it is still in flight (occupying
+    // the scheduler's only slot) when the second request lands.
+    for index in 0..300 {
+        fs::write(first.join(format!("file-{index}.bin")), vec![1_u8; 4096]).expect("seed file");
+    }
+    let first_path = first.to_string_lossy().into_owned();
+    let second_path = second.to_string_lossy().into_owned();
+
+    let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
+    let updates_for_emitter = updates.clone();
+    service.request_paths(
+        vec![first_path.clone(), second_path.clone()],
+        move |update| {
+            updates_for_emitter
+                .lock()
+                .expect("updates lock")
+                .extend(update);
+        },
+    );
+
+    // The rejected second path must still resolve to a terminal state
+    // promptly — it never occupies a scheduler slot, so nothing needs to
+    // "finish" for it to report in.
+    wait_for_updates(&updates, |updates| {
+        updates.iter().any(|update| {
+            update.path == second_path
+                && matches!(
+                    update.state,
+                    SizeStateKind::Error | SizeStateKind::Ready | SizeStateKind::Na
+                )
+        })
+    });
+
+    let recorded = updates.lock().expect("updates lock").clone();
+    let second_terminal = recorded
+        .iter()
+        .find(|update| update.path == second_path)
+        .expect("second path must report a terminal event, not vanish silently");
+    assert_eq!(second_terminal.state, SizeStateKind::Error);
+    assert_eq!(second_terminal.source, SizeSource::Manual);
+
+    // The first path was unaffected by the rejection and still completes
+    // normally once the (only) worker pool slot processes it.
+    wait_for_updates(&updates, |updates| {
+        updates.iter().any(|update| {
+            update.path == first_path
+                && matches!(update.state, SizeStateKind::Ready | SizeStateKind::Na)
+        })
+    });
+}
+
+/// Confirms the manual worker pool actually joins (no leaked/blocked
+/// threads) when the owning `SizeService` is dropped, mirroring how
+/// `WatchRuntime`'s `Drop` shuts its scheduler/coordinator down
+/// deterministically. Proven by dropping a service with in-flight work
+/// still queued behind the (small) worker pool and observing `drop` itself
+/// returns promptly rather than hanging — if a worker were leaked blocked
+/// on `scheduler.next()`, the scheduler's internal state would still be
+/// reachable but the thread `JoinHandle`s would never resolve, and this
+/// call would hang past the test's own timeout.
+#[test]
+fn dropping_the_service_joins_the_worker_pool_deterministically() {
+    let fixture = tempdir().expect("temp dir");
+    let mut paths = Vec::new();
+    for index in 0..40 {
+        let dir = fixture.path().join(format!("folder-{index}"));
+        fs::create_dir_all(&dir).expect("folder");
+        fs::write(dir.join("file.bin"), vec![1_u8; 16]).expect("seed file");
+        paths.push(dir.to_string_lossy().into_owned());
+    }
+
+    let service = SizeService::new(Duration::from_secs(5));
+    let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
+    let updates_for_emitter = updates.clone();
+    service.request_paths(paths, move |update| {
+        updates_for_emitter
+            .lock()
+            .expect("updates lock")
+            .extend(update);
+    });
+
+    // Drop immediately, with most of the backlog still queued behind the
+    // bounded pool. This must return without hanging: the scheduler's
+    // shutdown wakes every worker parked in `next()`, and `Drop` joins them
+    // all before returning.
+    let started = Instant::now();
+    drop(service);
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "dropping SizeService must join its worker pool promptly, took {:?}",
+        started.elapsed()
+    );
 }
 
 fn local_volume_for(path: &std::path::Path) -> VolumeInfo {

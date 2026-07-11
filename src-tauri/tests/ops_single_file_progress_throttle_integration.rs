@@ -13,6 +13,16 @@ mod volumes {
     pub use file_explorer_lib::volumes::*;
 }
 
+// The source-included ops module uses the production crate-root traversal
+// path. Mirror that export for this whitebox integration crate.
+mod traversal {
+    pub use file_explorer_lib::traversal::*;
+}
+
+mod resource_coordinator {
+    pub use file_explorer_lib::resource_coordinator::*;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -7,6 +7,7 @@ use std::path::Path;
 use file_explorer_lib::fs::{
     canonicalize_dir, default_start_dir, display_path_from_text, expand_home_path_with, list_dir,
     list_tree_children, ListDirOptions, ListTreeChildrenOptions, SortDirection, SortKey,
+    TreeExpandability,
 };
 use tempfile::tempdir;
 
@@ -212,14 +213,17 @@ fn list_tree_children_returns_only_lightweight_directory_nodes() {
             .collect::<Vec<_>>(),
         vec!["folder2", "folder10"]
     );
-    assert!(
-        visible
-            .children
-            .iter()
-            .find(|child| child.name == "folder2")
-            .expect("folder2")
-            .has_children
+    let folder2 = visible
+        .children
+        .iter()
+        .find(|child| child.name == "folder2")
+        .expect("folder2");
+    // A parent listing does not open every child to probe grandchildren.
+    assert_eq!(
+        folder2.expandability,
+        file_explorer_lib::fs::TreeExpandability::Unknown
     );
+    assert!(!folder2.has_children);
     assert!(visible.children.iter().all(|child| child.name != ".hidden"));
 
     let with_hidden = list_tree_children(&ListTreeChildrenOptions {
@@ -256,11 +260,9 @@ fn list_tree_children_handles_hidden_only_and_missing_directories() {
 }
 
 #[test]
-fn list_tree_children_reports_no_children_when_only_grandchild_is_hidden() {
-    // `parent` has a single subdirectory whose name starts with a dot, which
-    // counts as hidden on both Windows and POSIX. With hidden entries excluded,
-    // `directory_has_visible_child_dirs` must walk that grandchild, see its
-    // "hidden" attribute, and conclude `parent` has no *visible* child folders.
+fn list_tree_children_leaves_child_expandability_unknown_without_probing() {
+    // A parent listing returns direct children only. It never probes each
+    // child to derive descendants; expansion resolves that state lazily.
     let fixture = tempdir().expect("temp dir");
     let root = fixture.path();
     let parent = root.join("parent");
@@ -277,25 +279,21 @@ fn list_tree_children_reports_no_children_when_only_grandchild_is_hidden() {
         .iter()
         .find(|child| child.name == "parent")
         .expect("parent node present");
-    assert!(
-        !parent_node.has_children,
-        "a lone hidden grandchild must not count as a visible child folder"
-    );
+    assert_eq!(parent_node.expandability, TreeExpandability::Unknown);
 
-    // When hidden entries are shown, the same grandchild now counts and the
-    // function short-circuits to `true`.
     let with_hidden = list_tree_children(&ListTreeChildrenOptions {
         path: root.to_string_lossy().into_owned(),
         show_hidden: true,
     })
     .expect("tree children with hidden");
-    assert!(
+    assert_eq!(
         with_hidden
             .children
             .iter()
             .find(|child| child.name == "parent")
             .expect("parent node present")
-            .has_children
+            .expandability,
+        TreeExpandability::Unknown
     );
 }
 

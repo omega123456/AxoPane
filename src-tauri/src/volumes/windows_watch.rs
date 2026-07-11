@@ -24,7 +24,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WNDCLASS_STYLES, WS_OVERLAPPED,
 };
 
-use super::VolumeMonitorState;
+use super::registry::RegistryReconcileBridge;
 
 const WINDOW_CLASS_NAME_STR: &str = "AxoPaneVolumeMonitorWindow";
 const CHANGE_MESSAGE_NAME: &str = "AxoPaneVolumeMonitorChanged";
@@ -42,17 +42,20 @@ pub struct Watcher {
 }
 
 struct ThreadContext {
-    state: Arc<VolumeMonitorState>,
+    bridge: Arc<RegistryReconcileBridge>,
     change_message: u32,
 }
 
 impl Watcher {
-    pub fn start(state: Arc<VolumeMonitorState>) -> Result<Self, String> {
+    /// Starts the message-only-window thread that calls back into the
+    /// volume registry on shell change notifications. `bridge` is kept
+    /// alive for the watcher's lifetime by this thread's `ThreadContext`.
+    pub fn start_for_registry(bridge: Arc<RegistryReconcileBridge>) -> Result<Self, String> {
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<u32, String>>();
 
         let handle = thread::Builder::new()
-            .name("volume-monitor".to_string())
-            .spawn(move || run(state, ready_tx))
+            .name("volume-registry".to_string())
+            .spawn(move || run(bridge, ready_tx))
             .map_err(|error| error.to_string())?;
 
         let thread_id = ready_rx
@@ -80,11 +83,11 @@ impl Drop for Watcher {
     }
 }
 
-fn run(state: Arc<VolumeMonitorState>, ready: Sender<Result<u32, String>>) {
+fn run(bridge: Arc<RegistryReconcileBridge>, ready: Sender<Result<u32, String>>) {
     // SAFETY: window class registration, window creation and shell
     // notification registration are only ever performed once per process,
     // synchronously, on this dedicated thread before any message is pumped.
-    let setup = unsafe { setup_window_and_registration(state) };
+    let setup = unsafe { setup_window_and_registration(bridge) };
     let (hwnd, notify_id, context_ptr) = match setup {
         Ok(parts) => parts,
         Err(error) => {
@@ -125,7 +128,7 @@ fn run(state: Arc<VolumeMonitorState>, ready: Sender<Result<u32, String>>) {
 /// Must be called at most once, before any message loop for the created
 /// window is running.
 unsafe fn setup_window_and_registration(
-    state: Arc<VolumeMonitorState>,
+    bridge: Arc<RegistryReconcileBridge>,
 ) -> Result<(HWND, u32, *mut ThreadContext), String> {
     let class_name = wide_null(WINDOW_CLASS_NAME_STR);
     let class_name_ptr = PCWSTR(class_name.as_ptr());
@@ -164,7 +167,7 @@ unsafe fn setup_window_and_registration(
     }
 
     let context = Box::into_raw(Box::new(ThreadContext {
-        state,
+        bridge,
         change_message,
     }));
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, context as isize);
@@ -209,7 +212,7 @@ unsafe extern "system" fn wnd_proc(
     if !context_ptr.is_null() {
         let context = &*context_ptr;
         if msg == context.change_message {
-            context.state.emit_if_changed();
+            context.bridge.reconcile();
             return LRESULT(0);
         }
     }

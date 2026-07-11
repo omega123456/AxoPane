@@ -3,8 +3,10 @@ mod common;
 
 use std::fs;
 
+use std::sync::Arc;
+
+use file_explorer_lib::directory_session::DirectorySessionService;
 use file_explorer_lib::fs::{SortDirection, SortKey};
-use file_explorer_lib::item_counts::ItemCountService;
 use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::events;
 use file_explorer_lib::ipc::mock;
@@ -13,6 +15,7 @@ use file_explorer_lib::ipc::types::{
     ItemCountRequestContext, ListDirRequest, ListTreeChildrenRequest, OpenPathRequest,
     RenameEntryRequest, TrashEntriesRequest, VisibleItemCountsRequest, WriteFileClipboardRequest,
 };
+use file_explorer_lib::item_counts::ItemCountService;
 use tempfile::tempdir;
 
 #[test]
@@ -246,6 +249,7 @@ fn request_visible_item_counts_records_batched_events_under_test_utils() {
     fs::write(child.join("seed.txt"), b"x").expect("seed");
 
     let service = ItemCountService::default();
+    let session_service = Arc::new(DirectorySessionService::default());
     commands::request_visible_item_counts(
         VisibleItemCountsRequest {
             context: ItemCountRequestContext {
@@ -257,6 +261,7 @@ fn request_visible_item_counts_records_batched_events_under_test_utils() {
             paths: vec![child.to_string_lossy().into_owned()],
         },
         as_state(&service),
+        as_state(&session_service),
     );
 
     let events = service.take_test_events();
@@ -276,6 +281,7 @@ fn sort_active_items_returns_ready_result_with_request_context() {
     fs::write(root.join("few").join("a.txt"), b"a").expect("few child");
 
     let service = ItemCountService::default();
+    let session_service = Arc::new(DirectorySessionService::default());
     let response = commands::sort_active_items(
         ActiveItemsSortRequest {
             context: ItemCountRequestContext {
@@ -289,6 +295,7 @@ fn sort_active_items_returns_ready_result_with_request_context() {
             show_hidden: true,
         },
         as_state(&service),
+        as_state(&session_service),
     )
     .expect("sort active items");
 
@@ -302,6 +309,9 @@ fn sort_active_items_returns_ready_result_with_request_context() {
             .iter()
             .map(|entry| (&entry.name, entry.item_count))
             .collect::<Vec<_>>(),
-        vec![(&"many".to_string(), Some(2)), (&"few".to_string(), Some(1))]
+        vec![
+            (&"many".to_string(), Some(2)),
+            (&"few".to_string(), Some(1))
+        ]
     );
 }

@@ -120,6 +120,7 @@ pub struct LogEntry {
 
 /// Shared logging handle managed by Tauri: the log directory and the live logger
 /// (for runtime level changes).
+#[derive(Clone)]
 pub struct LoggingState {
     pub dir: PathBuf,
     pub logger: Arc<FileLogger>,

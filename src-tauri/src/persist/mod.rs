@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use crossbeam_channel::{bounded, RecvTimeoutError, Sender};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -259,7 +260,9 @@ pub struct PersistedStore<T> {
     path: PathBuf,
     value: Arc<Mutex<T>>,
     write_generation: Arc<Mutex<u64>>,
-    debounce: Duration,
+    /// One coalescing wake slot owned by the store's dedicated persistence
+    /// worker. Replaces the former thread-per-mutation debounce scheme.
+    flush_wake: Sender<()>,
     _marker: PhantomData<T>,
 }
 
@@ -268,13 +271,41 @@ where
     T: Clone + Default + Serialize + DeserializeOwned + Send + 'static,
 {
     pub fn load(path: PathBuf, debounce: Duration) -> Result<Self, PersistError> {
-        let value = load_json_or_default(&path)?;
+        let value: T = load_json_or_default(&path)?;
+        let value = Arc::new(Mutex::new(value));
+        let (flush_wake, flush_rx) = bounded(1);
+        let worker_path = path.clone();
+        let worker_value = Arc::clone(&value);
+        thread::Builder::new()
+            .name("persistence-flush".to_string())
+            .spawn(move || {
+                // One worker per durable store, with a one-message wake
+                // queue. A burst resets the debounce window without creating
+                // threads or retaining an unbounded series of writes.
+                while flush_rx.recv().is_ok() {
+                    loop {
+                        match flush_rx.recv_timeout(debounce) {
+                            Ok(()) => continue,
+                            Err(RecvTimeoutError::Timeout) => {
+                                let snapshot = worker_value
+                                    .lock()
+                                    .expect("persist store mutex poisoned")
+                                    .clone();
+                                let _ = write_json_atomic(&worker_path, &snapshot);
+                                break;
+                            }
+                            Err(RecvTimeoutError::Disconnected) => return,
+                        }
+                    }
+                }
+            })
+            .expect("failed to spawn persistence worker");
 
         Ok(Self {
             path,
-            value: Arc::new(Mutex::new(value)),
+            value,
             write_generation: Arc::new(Mutex::new(0)),
-            debounce,
+            flush_wake,
             _marker: PhantomData,
         })
     }
@@ -310,28 +341,10 @@ where
             *current_generation
         };
 
-        let path = self.path.clone();
-        let value = Arc::clone(&self.value);
-        let generation_state = Arc::clone(&self.write_generation);
-        let debounce = self.debounce;
-
-        thread::spawn(move || {
-            thread::sleep(debounce);
-
-            let should_write = {
-                let latest_generation = generation_state
-                    .lock()
-                    .expect("persist generation mutex poisoned");
-                *latest_generation == generation
-            };
-
-            if !should_write {
-                return;
-            }
-
-            let snapshot = value.lock().expect("persist store mutex poisoned").clone();
-            let _ = write_json_atomic(&path, &snapshot);
-        });
+        let _ = generation;
+        // Full means the worker already has an outstanding debounce wake;
+        // it always snapshots the latest value after its quiet interval.
+        let _ = self.flush_wake.try_send(());
     }
 }
 

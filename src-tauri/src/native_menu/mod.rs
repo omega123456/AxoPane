@@ -1,4 +1,7 @@
 pub mod fake_provider;
+pub mod helper_entry;
+pub mod helper_protocol;
+pub mod helper_supervisor;
 #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
 pub mod macos;
 pub mod menu_cache;
@@ -20,6 +23,7 @@ pub mod windows_shell;
 
 use std::sync::Arc;
 
+use helper_supervisor::HelperRole;
 use menu_cache::MenuCache;
 use provider::{dedupe_provider_items, NativeMenuProvider, ProviderNativeMenuItem};
 use shell_executor::ShellExecutor;
@@ -78,15 +82,14 @@ impl NativeMenuService {
         // pays the full shell-enumeration cost; subsequent loads reuse the cached
         // structure with their paths rebound. Fresh invoke tokens are still
         // issued per request below, so cache hits never replay stale tokens.
-        let items = match self.cache.get(&request) {
-            Some(cached) => cached,
-            None => {
-                let fresh =
-                    dedupe_provider_items(self.provider.load_menu(&request, &self.executor));
-                self.cache.insert(&request, &fresh);
-                fresh
-            }
-        };
+        let (items, _) = self.cache.get_or_load(&request, || {
+            let fresh = dedupe_provider_items(self.provider.load_menu_for_role(
+                &request,
+                &self.executor,
+                HelperRole::Interactive,
+            ));
+            fresh
+        });
 
         LoadNativeMenuResponse {
             request_id: request.request_id.clone(),
@@ -112,7 +115,14 @@ impl NativeMenuService {
     pub fn show_properties(&self, request: ShowPropertiesRequest) -> MenuActionStatus {
         #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
         {
-            return windows::show_properties(&request);
+            return match helper_supervisor::shared().call(
+                HelperRole::Interactive,
+                helper_protocol::HelperOperation::Properties(request),
+                helper_supervisor::INVOCATION_DEADLINE,
+            ) {
+                Ok(helper_protocol::HelperResult::Status(status)) => status,
+                _ => MenuActionStatus::unsupported("native-helper-failed"),
+            };
         }
 
         #[cfg(any(feature = "test-utils", not(target_os = "windows")))]
@@ -124,7 +134,14 @@ impl NativeMenuService {
     pub fn open_with(&self, request: OpenWithRequest) -> MenuActionStatus {
         #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
         {
-            return windows::open_with(&request);
+            return match helper_supervisor::shared().call(
+                HelperRole::Interactive,
+                helper_protocol::HelperOperation::OpenWith(request),
+                helper_supervisor::INVOCATION_DEADLINE,
+            ) {
+                Ok(helper_protocol::HelperResult::Status(status)) => status,
+                _ => MenuActionStatus::unsupported("native-helper-failed"),
+            };
         }
 
         #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
@@ -189,29 +206,23 @@ impl NativeMenuWarmHandle {
     /// issues tokens — it produces no render payload, only a cache entry.
     pub fn warm(&self, request: &LoadNativeMenuRequest) -> Option<String> {
         let cache_key = menu_cache::cache_key(request);
-        if self.cache.contains(request) {
+        let (_, loaded) = self.cache.get_or_load(request, || {
             log::debug!(
-                "native menu warm skipped for already cached key {} (target_kind={:?}, target_path={:?})",
+                "native menu warm loading fresh menu for key {} (target_kind={:?}, target_path={:?})",
                 cache_key,
                 request.target_kind,
                 request.target_path
             );
+            dedupe_provider_items(self.provider.load_menu_for_role(
+                request,
+                &self.executor,
+                HelperRole::Warm,
+            ))
+        });
+        if !loaded {
             return None;
         }
-
-        log::debug!(
-            "native menu warm loading fresh menu for key {} (target_kind={:?}, target_path={:?})",
-            cache_key,
-            request.target_kind,
-            request.target_path
-        );
-        let fresh = dedupe_provider_items(self.provider.load_menu(request, &self.executor));
-        self.cache.insert(request, &fresh);
-        log::debug!(
-            "native menu warm cached key {} with {} root items",
-            cache_key,
-            fresh.len()
-        );
+        log::debug!("native menu warm cached key {}", cache_key,);
         Some(cache_key)
     }
 }

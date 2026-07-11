@@ -14,7 +14,7 @@ import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useClipboardStore } from '@/stores/clipboard-store'
 import { useErrorToastStore } from '@/stores/error-toast-store'
 import { useInlineRenameStore } from '@/stores/inline-rename-store'
-import { usePanesStore } from '@/stores/panes-store'
+import { indexEntriesById, usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useSettingsStore } from '@/stores/settings-store'
 
@@ -52,13 +52,12 @@ export function executeCommand(
   }
 
   const selection = useSelectionStore.getState().selections[paneId]
-  const entry = targetEntryId ? pane.entries.find((item) => item.id === targetEntryId) : undefined
+  const entriesById = indexEntriesById(pane.entries)
+  const entry = targetEntryId ? entriesById.get(targetEntryId) : undefined
   const selectedIdSet = new Set(selection.selectedIds)
   const selectedEntries = pane.entries.filter((item) => selectedIdSet.has(item.id))
   const effectiveEntries = entry ? [entry] : selectedEntries
-  const focusedEntry = pane.focusedEntryId
-    ? pane.entries.find((item) => item.id === pane.focusedEntryId)
-    : undefined
+  const focusedEntry = pane.focusedEntryId ? entriesById.get(pane.focusedEntryId) : undefined
   const transferEntries = entry
     ? [entry]
     : selectedEntries.length > 0
@@ -76,7 +75,7 @@ export function executeCommand(
           break
         }
 
-        const focused = pane.entries.find((item) => item.id === focusId)
+        const focused = entriesById.get(focusId)
         if (focused?.isDir) {
           void panes.navigatePane(paneId, focused.path)
         } else if (focused) {
@@ -348,7 +347,7 @@ export function canExecuteCommand(
   const pane = usePanesStore.getState().panes[paneId]
   const selection = useSelectionStore.getState().selections[paneId]
   const clipboard = useClipboardStore.getState()
-  const entry = targetEntryId ? pane.entries.find((item) => item.id === targetEntryId) : undefined
+  const entry = targetEntryId ? indexEntriesById(pane.entries).get(targetEntryId) : undefined
   const inTrashPane = isTrashPath(pane.path)
 
   if (inTrashPane && !trashPaneCommands.has(commandId)) {

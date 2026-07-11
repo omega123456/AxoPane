@@ -1,4 +1,5 @@
 pub mod eject;
+pub mod registry;
 
 use serde::{Deserialize, Serialize};
 
@@ -7,12 +8,6 @@ use std::cmp::Ordering;
 
 #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
 use std::ffi::CStr;
-
-#[cfg(not(feature = "test-utils"))]
-use std::sync::{
-    atomic::{AtomicBool, Ordering as AtomicOrdering},
-    Arc, Mutex,
-};
 
 #[cfg(all(not(feature = "test-utils"), not(windows)))]
 use sysinfo::Disks;
@@ -52,9 +47,6 @@ use windows_sys::Win32::Storage::FileSystem::{
     GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW,
 };
 
-#[cfg(not(feature = "test-utils"))]
-use tauri::{AppHandle, Emitter};
-
 #[cfg(all(not(feature = "test-utils"), windows))]
 const DRIVE_UNKNOWN: u32 = 0;
 #[cfg(all(not(feature = "test-utils"), windows))]
@@ -90,183 +82,15 @@ struct VolumeIdentity {
     is_removable: bool,
 }
 
-/// Shared, platform-agnostic monitor state: the last known volume inventory
-/// plus the `AppHandle` used to emit updates. Both the native OS event
-/// callbacks (Disk Arbitration on macOS, shell change notifications on
-/// Windows) and the window-focus reconcile safety net funnel through
-/// [`VolumeMonitorState::emit_if_changed`], so there is exactly one place
-/// that decides whether the frontend needs a `VOLUMES_CHANGED` event.
-#[cfg(not(feature = "test-utils"))]
-struct VolumeMonitorState {
-    app: AppHandle,
-    previous: Mutex<Vec<VolumeInfo>>,
-}
-
-#[cfg(not(feature = "test-utils"))]
-impl VolumeMonitorState {
-    fn emit_if_changed(&self) {
-        let next = list_volumes();
-        let mut previous = self.previous.lock().expect("volume monitor previous lock");
-        if !volume_inventory_changed(&previous, &next) {
-            return;
-        }
-
-        *previous = next.clone();
-        if let Err(error) = self.app.emit(
-            crate::ipc::events::VOLUMES_CHANGED,
-            crate::ipc::types::VolumesChangedEvent { volumes: next },
-        ) {
-            log::error!("volume monitor failed to emit update: {error}");
-        }
-    }
-}
-
+// Native mount/unmount registration lives entirely behind `VolumeRegistry`
+// now (see `registry.rs`): the registry constructs and owns exactly one
+// long-lived `disk_arbitration::Session` (macOS) or `windows_watch::Watcher`
+// (Windows) for the process lifetime and routes their callbacks through
+// `registry::RegistryReconcileBridge::reconcile`, rather than a separate
+// `VolumeMonitorService` re-deriving the same registration on every
+// `list_volumes` call.
 #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
 mod disk_arbitration;
-
-#[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
-pub struct VolumeMonitorService {
-    started: AtomicBool,
-    state: Mutex<Option<Arc<VolumeMonitorState>>>,
-    session: Mutex<Option<disk_arbitration::Session>>,
-}
-
-#[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
-impl Default for VolumeMonitorService {
-    fn default() -> Self {
-        Self {
-            started: AtomicBool::new(false),
-            state: Mutex::new(None),
-            session: Mutex::new(None),
-        }
-    }
-}
-
-#[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
-impl VolumeMonitorService {
-    pub fn start(&self, app: AppHandle) {
-        if self.started.swap(true, AtomicOrdering::SeqCst) {
-            return;
-        }
-
-        let state = Arc::new(VolumeMonitorState {
-            app,
-            previous: Mutex::new(list_volumes()),
-        });
-
-        match disk_arbitration::Session::start(&state) {
-            Ok(session) => {
-                *self.state.lock().expect("volume monitor state lock") = Some(state);
-                *self.session.lock().expect("volume monitor session lock") = Some(session);
-            }
-            Err(error) => {
-                self.started.store(false, AtomicOrdering::SeqCst);
-                log::error!("failed to start volume monitor: {error}");
-            }
-        }
-    }
-
-    /// Re-lists volumes and emits an update if anything changed. Used as a
-    /// reliability net (e.g. on window focus) for any native event Disk
-    /// Arbitration might have dropped; costs nothing at rest since it only
-    /// runs in response to another event.
-    pub fn reconcile(&self) {
-        if let Some(state) = self
-            .state
-            .lock()
-            .expect("volume monitor state lock")
-            .as_ref()
-        {
-            state.emit_if_changed();
-        }
-    }
-}
-
-#[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
-impl Drop for VolumeMonitorService {
-    fn drop(&mut self) {
-        if let Some(session) = self
-            .session
-            .get_mut()
-            .expect("volume monitor session lock")
-            .take()
-        {
-            drop(session);
-        }
-    }
-}
-
-#[cfg(all(not(feature = "test-utils"), windows))]
-pub struct VolumeMonitorService {
-    started: AtomicBool,
-    state: Mutex<Option<Arc<VolumeMonitorState>>>,
-    watcher: Mutex<Option<windows_watch::Watcher>>,
-}
-
-#[cfg(all(not(feature = "test-utils"), windows))]
-impl Default for VolumeMonitorService {
-    fn default() -> Self {
-        Self {
-            started: AtomicBool::new(false),
-            state: Mutex::new(None),
-            watcher: Mutex::new(None),
-        }
-    }
-}
-
-#[cfg(all(not(feature = "test-utils"), windows))]
-impl VolumeMonitorService {
-    pub fn start(&self, app: AppHandle) {
-        if self.started.swap(true, AtomicOrdering::SeqCst) {
-            return;
-        }
-
-        let state = Arc::new(VolumeMonitorState {
-            app,
-            previous: Mutex::new(list_volumes()),
-        });
-
-        match windows_watch::Watcher::start(Arc::clone(&state)) {
-            Ok(watcher) => {
-                *self.state.lock().expect("volume monitor state lock") = Some(state);
-                *self.watcher.lock().expect("volume monitor watcher lock") = Some(watcher);
-            }
-            Err(error) => {
-                self.started.store(false, AtomicOrdering::SeqCst);
-                log::error!("failed to start volume monitor: {error}");
-            }
-        }
-    }
-
-    /// Re-lists volumes and emits an update if anything changed. Used as a
-    /// reliability net (e.g. on window focus) for any native event the shell
-    /// change-notification thread might have dropped; costs nothing at rest
-    /// since it only runs in response to another event.
-    pub fn reconcile(&self) {
-        if let Some(state) = self
-            .state
-            .lock()
-            .expect("volume monitor state lock")
-            .as_ref()
-        {
-            state.emit_if_changed();
-        }
-    }
-}
-
-#[cfg(all(not(feature = "test-utils"), windows))]
-impl Drop for VolumeMonitorService {
-    fn drop(&mut self) {
-        if let Some(watcher) = self
-            .watcher
-            .get_mut()
-            .expect("volume monitor watcher lock")
-            .take()
-        {
-            drop(watcher);
-        }
-    }
-}
 
 #[cfg(all(not(feature = "test-utils"), windows))]
 mod windows_watch;

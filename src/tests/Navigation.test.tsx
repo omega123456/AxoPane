@@ -3,9 +3,10 @@ import userEvent from '@testing-library/user-event'
 import { ipc } from './ipc-mock'
 import type {
   DirectoryEntry,
-  DirPatchEvent,
   ListDirRequest,
   ListDirResponse,
+  SessionBaseline,
+  SessionPatchEvent,
   SessionState,
 } from '@/lib/types/ipc'
 import { usePanesStore } from '@/stores/panes-store'
@@ -29,11 +30,17 @@ function makeEntry(name: string, isDir: boolean): DirectoryEntry {
   }
 }
 
-const rootEntries = [makeEntry('Documents', true), makeEntry('Media', true), makeEntry('Report.txt', false)]
+const rootEntries = [
+  makeEntry('Documents', true),
+  makeEntry('Media', true),
+  makeEntry('Report.txt', false),
+]
 
 function listDirResponder(payload: ListDirRequest): ListDirResponse {
   const isRoot =
-    payload.path === 'C:\\Users\\Omega' || payload.path === 'D:\\projects' || payload.path === 'C:\\'
+    payload.path === 'C:\\Users\\Omega' ||
+    payload.path === 'D:\\projects' ||
+    payload.path === 'C:\\'
   const entries = isRoot ? rootEntries : []
   const filtered = entries.filter((entry) =>
     payload.filter ? entry.name.toLowerCase().includes(payload.filter.toLowerCase()) : true,
@@ -157,22 +164,47 @@ describe('Navigation: tabs, breadcrumb, session, live patching', () => {
   })
 
   it('applies an incremental add patch without a full reload', async () => {
+    const baseline: SessionBaseline = {
+      sessionId: 501,
+      navigationRevision: 1,
+      watchRevision: 0,
+      viewRevision: 0,
+    }
     installDefaults()
+    ipc.override('begin_directory_session', (payload) => ({
+      paneId: payload.paneId,
+      tabId: payload.tabId,
+      path: payload.path,
+      baseline,
+      totalRows: rootEntries.length,
+      pageSize: 500,
+      firstPage: { pageIndex: 0, entries: rootEntries },
+    }))
     renderApp()
 
     await waitFor(() => expect(getRow('Left pane', 'Documents')).toBeTruthy())
 
     const newEntry = makeEntry('Brand-New', true)
-    const patch: DirPatchEvent = {
+    const nextBaseline: SessionBaseline = { ...baseline, watchRevision: baseline.watchRevision + 1 }
+    ipc.override('get_directory_session_range', {
+      baseline: nextBaseline,
+      totalRows: rootEntries.length + 1,
+      page: { pageIndex: 0, entries: [...rootEntries, newEntry] },
+    })
+
+    const patch: SessionPatchEvent = {
+      mode: 'delta',
+      paneId: 'left',
       tabId: useTabsStore.getState().panes.left.tabs[0].id,
       path: 'C:\\Users\\Omega',
-      reason: 'watch',
-      changed: [{ path: newEntry.path, entry: newEntry }],
-      removed: [],
+      previousBaseline: baseline,
+      nextBaseline,
+      totalRows: rootEntries.length + 1,
+      deltas: [{ kind: 'inserted', rowIndex: rootEntries.length, entry: newEntry }],
     }
 
     act(() => {
-      ipc.emit('dir://patch', patch)
+      ipc.emit('dir://session-patch', patch)
     })
 
     await waitFor(() => {
@@ -181,18 +213,45 @@ describe('Navigation: tabs, breadcrumb, session, live patching', () => {
   })
 
   it('applies an incremental remove patch', async () => {
+    const baseline: SessionBaseline = {
+      sessionId: 502,
+      navigationRevision: 1,
+      watchRevision: 0,
+      viewRevision: 0,
+    }
     installDefaults()
+    ipc.override('begin_directory_session', (payload) => ({
+      paneId: payload.paneId,
+      tabId: payload.tabId,
+      path: payload.path,
+      baseline,
+      totalRows: rootEntries.length,
+      pageSize: 500,
+      firstPage: { pageIndex: 0, entries: rootEntries },
+    }))
     renderApp()
 
     await waitFor(() => expect(getRow('Left pane', 'Media')).toBeTruthy())
 
+    const remainingEntries = rootEntries.filter((entry) => entry.name !== 'Media')
+    const mediaRowIndex = rootEntries.findIndex((entry) => entry.name === 'Media')
+    const nextBaseline: SessionBaseline = { ...baseline, watchRevision: baseline.watchRevision + 1 }
+    ipc.override('get_directory_session_range', {
+      baseline: nextBaseline,
+      totalRows: remainingEntries.length,
+      page: { pageIndex: 0, entries: remainingEntries },
+    })
+
     act(() => {
-      ipc.emit('dir://patch', {
+      ipc.emit('dir://session-patch', {
+        mode: 'delta',
+        paneId: 'left',
         tabId: useTabsStore.getState().panes.left.tabs[0].id,
         path: 'C:\\Users\\Omega',
-        reason: 'watch',
-        changed: [],
-        removed: ['C:\\Users\\Omega\\Media'],
+        previousBaseline: baseline,
+        nextBaseline,
+        totalRows: remainingEntries.length,
+        deltas: [{ kind: 'removed', rowIndex: mediaRowIndex, path: 'C:\\Users\\Omega\\Media' }],
       })
     })
 

@@ -201,16 +201,26 @@ export function FilePane({ paneId }: FilePaneProps) {
     overscan: 10,
   })
   const virtualItems = rowVirtualizer.getVirtualItems()
+  // `getVirtualItems()` legitimately returns `[]` in two different cases that
+  // must NOT be conflated:
+  //   1. `rowCount === 0` (an empty directory / empty view) — the correct
+  //      render is zero rows, not a fallback.
+  //   2. The scroll element has not been measured yet (`outerSize === 0`,
+  //      e.g. the very first render before layout) — a small bounded
+  //      "first paint" fallback avoids a blank flash, but must stay capped at
+  //      a fixed number of rows, never grow to `rowCount` (a directory with
+  //      thousands of rows must never render "everything" as an unbounded
+  //      fallback; Functional Requirement 11 / Phase 4 acceptance).
+  const unmeasuredFallbackRowCount = Math.min(rowCount, 30)
   const itemsToRender =
-    virtualItems.length > 0
+    virtualItems.length > 0 || rowCount === 0
       ? virtualItems
-      : Array.from({ length: rowCount }, (_, index) => ({
+      : Array.from({ length: unmeasuredFallbackRowCount }, (_, index) => ({
           key: `row-${index}`,
           index,
           start: index * rowHeightPx,
         }))
-  const totalHeight =
-    virtualItems.length > 0 ? rowVirtualizer.getTotalSize() : rowCount * rowHeightPx
+  const totalHeight = rowCount === 0 ? 0 : rowVirtualizer.getTotalSize() || rowCount * rowHeightPx
   const savedScrollTop = pane.scrollPositions[pane.path] ?? 0
 
   useEffect(() => {

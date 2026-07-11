@@ -1,14 +1,27 @@
+// `#[allow(dead_code)]`: these two submodules are fully used from
+// `directory_session`/`lib.rs` in the real crate build. The `allow` only
+// matters for `tests/watch_private_integration.rs`, which `include!`s this
+// entire file verbatim into an isolated single-purpose test binary that
+// never references either module — without it, that binary's own
+// `-D warnings` dead-code lint would fail on code that is very much alive in
+// the real crate.
+#[allow(dead_code)]
+pub mod coordinator;
+#[allow(dead_code)]
+pub mod patch;
+
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
-use std::time::Duration;
 
 use notify::event::{EventKind, ModifyKind, RenameMode};
 use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 
+use self::coordinator::{
+    CompactedBatch, MutationKind, RawMutation, WatchCoordinator, WatchId,
+};
 use crate::fs::{self, DirectoryEntry, ListDirOptions, ListDirResponse, SortDirection, SortKey};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -48,36 +61,24 @@ pub struct WatchService {
     inner: Mutex<Option<WatchRuntime>>,
 }
 
-/// The debounce/coalescing window: watch events for a given directory are
-/// batched for this long after the first event arrives before being
-/// processed together, mirroring the coalescing behavior `notify-debouncer-full`
-/// previously provided (but without its unconditional polling loop).
-const DEBOUNCE_WINDOW: Duration = Duration::from_millis(150);
-
-enum WatchMsg {
-    Event(Result<notify::Event, notify::Error>),
-    Shutdown,
-}
+static NEXT_WATCH_ID: AtomicU64 = AtomicU64::new(1);
 
 pub struct WatchRuntime {
     pub watcher: notify::RecommendedWatcher,
-    tx: mpsc::Sender<WatchMsg>,
-    coalescing_thread: Option<JoinHandle<()>>,
+    coordinator: WatchCoordinator,
     tabs: Arc<Mutex<HashMap<String, WatchedTab>>>,
     pub watch_counts: HashMap<PathBuf, usize>,
 }
 
 impl Drop for WatchRuntime {
     fn drop(&mut self) {
-        let _ = self.tx.send(WatchMsg::Shutdown);
-        if let Some(handle) = self.coalescing_thread.take() {
-            let _ = handle.join();
-        }
+        self.coordinator.shutdown();
     }
 }
 
 #[derive(Clone)]
 struct WatchedTab {
+    watch_id: WatchId,
     target: WatchTarget,
     snapshot: HashMap<String, DirectoryEntry>,
 }
@@ -109,8 +110,9 @@ impl WatchService {
             let runtime = guard.as_mut().expect("watch runtime");
             let path = PathBuf::from(&target.path);
             let snapshot = match (listing_seed_entries, entries) {
-                (Some(entries), _) => snapshot_from_entries_for_watch(&target, entries),
-                (None, Some(entries)) => snapshot_from_entries_for_watch(&target, entries),
+                (Some(entries), _) | (None, Some(entries)) => {
+                    snapshot_from_entries_for_watch(&target, entries)
+                }
                 (None, None) => snapshot_for_watch_baseline(&target)?,
             };
             let pane_name = pane_scope(&target.tab_id).to_string();
@@ -149,7 +151,21 @@ impl WatchService {
             for (stale_tab_id, _) in stale_tabs {
                 tabs.remove(&stale_tab_id);
             }
-            tabs.insert(target.tab_id.clone(), WatchedTab { target, snapshot });
+            let watch_id = WatchId(NEXT_WATCH_ID.fetch_add(1, Ordering::SeqCst));
+            // This is a brand-new generation, so it cannot have coordinator
+            // state to clear. Do not enqueue `Replace(watch_id)` here: the
+            // native watch is already armed, and a child event can reach the
+            // raw lane before that control message is drained. Clearing the
+            // new ID afterward would discard the first real create/delete
+            // batch and leave the pane stale until an explicit refresh.
+            tabs.insert(
+                target.tab_id.clone(),
+                WatchedTab {
+                    watch_id,
+                    target,
+                    snapshot,
+                },
+            );
         } else if let Some(runtime) = guard.as_mut() {
             let watched_paths = {
                 let tabs = runtime.tabs.lock().expect("watch tabs lock");
@@ -191,58 +207,82 @@ pub fn create_runtime(
     emit_error: Arc<dyn Fn(String, String) + Send + Sync>,
 ) -> Result<WatchRuntime, String> {
     let tabs = Arc::new(Mutex::new(HashMap::<String, WatchedTab>::new()));
-    let (tx, rx) = mpsc::channel::<WatchMsg>();
-    let watcher_tx = tx.clone();
+    let tabs_for_compactor = Arc::clone(&tabs);
+    let coordinator = WatchCoordinator::spawn(Arc::new(move |batch| {
+        process_compacted_batch(&tabs_for_compactor, batch, &emit_patch, &emit_error);
+    }));
+    let raw_sender = coordinator.raw_sender();
+    let tabs_for_callback = Arc::clone(&tabs);
 
     let watcher =
         notify::recommended_watcher(move |result: Result<notify::Event, notify::Error>| {
-            let _ = watcher_tx.send(WatchMsg::Event(result));
-        })
-        .map_err(|error| error.to_string())?;
-
-    let tabs_for_thread = tabs.clone();
-    let coalescing_thread = std::thread::Builder::new()
-        .name("watch-coalescer".to_string())
-        .spawn(move || {
-            while let Ok(first) = rx.recv() {
-                let first_event = match first {
-                    WatchMsg::Event(event) => event,
-                    WatchMsg::Shutdown => break,
-                };
-
-                let mut batch = vec![first_event];
-                let mut stop = false;
-                loop {
-                    match rx.recv_timeout(DEBOUNCE_WINDOW) {
-                        Ok(WatchMsg::Event(event)) => batch.push(event),
-                        Ok(WatchMsg::Shutdown) => {
-                            stop = true;
-                            break;
-                        }
-                        Err(RecvTimeoutError::Timeout) => break,
-                        Err(RecvTimeoutError::Disconnected) => {
-                            stop = true;
-                            break;
-                        }
-                    }
-                }
-
-                process_results(&tabs_for_thread, batch, &emit_patch, &emit_error);
-
-                if stop {
-                    break;
-                }
-            }
+            forward_notify_result(&tabs_for_callback, &raw_sender, result);
         })
         .map_err(|error| error.to_string())?;
 
     Ok(WatchRuntime {
         watcher,
-        tx,
-        coalescing_thread: Some(coalescing_thread),
+        coordinator,
         tabs,
         watch_counts: HashMap::new(),
     })
+}
+
+/// Forwards a notify callback through the bounded coordinator. The callback
+/// takes a short registration snapshot before classifying events, then drops
+/// the tabs lock before touching the coordinator. This deliberately waits for
+/// that brief snapshot rather than using `try_lock`: losing an OS mutation is
+/// worse than briefly delaying a callback, and tab locks never cover I/O.
+fn forward_notify_result(
+    tabs: &Arc<Mutex<HashMap<String, WatchedTab>>>,
+    raw_sender: &coordinator::RawLaneSender,
+    result: Result<notify::Event, notify::Error>,
+) {
+    forward_notify_result_after_before_lock(tabs, raw_sender, result, || {});
+}
+
+fn forward_notify_result_after_before_lock<F>(
+    tabs: &Arc<Mutex<HashMap<String, WatchedTab>>>,
+    raw_sender: &coordinator::RawLaneSender,
+    result: Result<notify::Event, notify::Error>,
+    before_lock: F,
+) where
+    F: FnOnce(),
+{
+    before_lock();
+    let registrations = {
+        let tabs = tabs.lock().expect("watch tabs lock");
+        tabs.values()
+            .map(|watched| (watched.watch_id, watched.target.clone()))
+            .collect::<Vec<_>>()
+    };
+
+    match result {
+        Ok(event) => {
+            for (watch_id, target) in registrations {
+                let watched = WatchedTab {
+                    watch_id,
+                    target,
+                    snapshot: HashMap::new(),
+                };
+                for mutation in raw_mutations_for_event(&event, &watched) {
+                    raw_sender.push(mutation);
+                }
+            }
+        }
+        Err(_) => {
+            // An unresolvable notify error has no stable child identity;
+            // mark every active watch dirty so the bounded coordinator
+            // schedules authoritative recovery instead of retaining it.
+            for (watch_id, _) in registrations {
+                raw_sender.push(RawMutation {
+                    watch_id,
+                    child_path: PathBuf::new(),
+                    kind: MutationKind::Unresolved,
+                });
+            }
+        }
+    }
 }
 
 pub fn pane_scope(tab_id: &str) -> &str {
@@ -256,6 +296,7 @@ pub fn pane_scope(tab_id: &str) -> &str {
 #[inline(never)]
 fn noop_watch_error(_: String, _: String) {}
 
+#[cfg(feature = "test-utils")]
 fn process_results(
     tabs: &Arc<Mutex<HashMap<String, WatchedTab>>>,
     batch: Vec<Result<notify::Event, notify::Error>>,
@@ -319,6 +360,130 @@ fn process_results(
     }
 }
 
+fn raw_mutations_for_event(event: &notify::Event, watched: &WatchedTab) -> Vec<RawMutation> {
+    let kind = match event.kind {
+        EventKind::Access(_) => return Vec::new(),
+        EventKind::Remove(_) => MutationKind::Removed,
+        EventKind::Any
+        | EventKind::Other
+        | EventKind::Modify(ModifyKind::Any | ModifyKind::Other)
+        | EventKind::Modify(ModifyKind::Name(_))
+            if event.kind != EventKind::Modify(ModifyKind::Name(RenameMode::Both)) =>
+        {
+            MutationKind::Unresolved
+        }
+        _ if event.need_rescan() => MutationKind::Unresolved,
+        _ => MutationKind::Changed,
+    };
+    // macOS FSEvents can report a direct-child mutation as a modification of
+    // the watched directory itself. That path does not identify one child,
+    // so treating it as an ordinary changed path would filter it out below
+    // and silently lose the update. Mark it unresolved instead: the bounded
+    // coordinator will perform one authoritative non-recursive resnapshot.
+    if event
+        .paths
+        .iter()
+        .any(|path| canonical_dir(path) == canonical_dir(Path::new(&watched.target.path)))
+    {
+        return vec![RawMutation {
+            watch_id: watched.watch_id,
+            child_path: PathBuf::new(),
+            kind: MutationKind::Unresolved,
+        }];
+    }
+    if kind == MutationKind::Unresolved {
+        return vec![RawMutation {
+            watch_id: watched.watch_id,
+            child_path: PathBuf::new(),
+            kind,
+        }];
+    }
+    event
+        .paths
+        .iter()
+        .filter(|path| is_direct_child(path, Path::new(&watched.target.path)))
+        .map(|child_path| RawMutation {
+            watch_id: watched.watch_id,
+            child_path: child_path.clone(),
+            kind,
+        })
+        .collect()
+}
+
+fn process_compacted_batch(
+    tabs: &Arc<Mutex<HashMap<String, WatchedTab>>>,
+    batch: CompactedBatch,
+    patch_emitter: &Arc<dyn Fn(DirPatch) + Send + Sync>,
+    error_emitter: &Arc<dyn Fn(String, String) + Send + Sync>,
+) {
+    let Some(watched) = ({
+        let tabs = tabs.lock().expect("watch tabs lock");
+        tabs.values()
+            .find(|watched| {
+                watched.watch_id
+                    == match &batch {
+                        CompactedBatch::Targeted { watch_id, .. }
+                        | CompactedBatch::Dirty { watch_id, .. } => *watch_id,
+                    }
+            })
+            .cloned()
+    }) else {
+        return;
+    };
+    let next = match batch {
+        CompactedBatch::Dirty { .. } => snapshot_for_watch_baseline(&watched.target),
+        CompactedBatch::Targeted {
+            changed, removed, ..
+        } => {
+            let mut next = watched.snapshot.clone();
+            let mut changed_entries = Vec::new();
+            let mut removed_paths = Vec::new();
+            for path in removed {
+                remove_path(&mut next, &mut removed_paths, &path);
+            }
+            for path in changed {
+                if let Err(error) = patch_changed_path(
+                    &watched.target,
+                    &mut next,
+                    &mut changed_entries,
+                    &mut removed_paths,
+                    &path,
+                ) {
+                    error_emitter(watched.target.path.clone(), error);
+                    return;
+                }
+            }
+            Ok(next)
+        }
+    };
+    match next {
+        Ok(next) => {
+            let patch = diff_entries(
+                &watched.target.tab_id,
+                &watched.target.path,
+                "watch",
+                &watched.snapshot,
+                &next,
+            );
+            let applied = {
+                let mut tabs = tabs.lock().expect("watch tabs lock");
+                let Some(current) = tabs
+                    .values_mut()
+                    .find(|current| current.watch_id == watched.watch_id)
+                else {
+                    return;
+                };
+                current.snapshot = next;
+                true
+            };
+            if applied && (!patch.changed.is_empty() || !patch.removed.is_empty()) {
+                patch_emitter(patch);
+            }
+        }
+        Err(error) => error_emitter(watched.target.path.clone(), error),
+    }
+}
+
 fn reconcile_tabs(
     tabs: &Arc<Mutex<HashMap<String, WatchedTab>>>,
     reason: &str,
@@ -352,12 +517,17 @@ pub fn insert_tab_for_tests(
     runtime: &mut WatchRuntime,
     target: WatchTarget,
     snapshot: HashMap<String, DirectoryEntry>,
-) {
-    runtime
-        .tabs
-        .lock()
-        .expect("watch tabs lock")
-        .insert(target.tab_id.clone(), WatchedTab { target, snapshot });
+) -> WatchId {
+    let watch_id = WatchId(NEXT_WATCH_ID.fetch_add(1, Ordering::SeqCst));
+    runtime.tabs.lock().expect("watch tabs lock").insert(
+        target.tab_id.clone(),
+        WatchedTab {
+            watch_id,
+            target,
+            snapshot,
+        },
+    );
+    watch_id
 }
 
 /// Returns the current baseline snapshot stored for `tab_id`, or `None` if the
@@ -424,6 +594,7 @@ fn canonical_dir(path: &Path) -> PathBuf {
     }
 }
 
+#[cfg(feature = "test-utils")]
 fn matches_watched_parent(changed_paths: &HashSet<PathBuf>, watched_path: &str) -> bool {
     let watched_parent = canonical_dir(Path::new(watched_path));
     for changed_path in changed_paths {
@@ -436,6 +607,7 @@ fn matches_watched_parent(changed_paths: &HashSet<PathBuf>, watched_path: &str) 
     false
 }
 
+#[cfg(feature = "test-utils")]
 enum PatchResult {
     Targeted {
         patch: DirPatch,
@@ -444,6 +616,7 @@ enum PatchResult {
     NeedsResnapshot,
 }
 
+#[cfg(feature = "test-utils")]
 fn patch_for_events(
     target: &WatchTarget,
     previous: &HashMap<String, DirectoryEntry>,
@@ -593,6 +766,7 @@ fn matches_target_filter(entry: &DirectoryEntry, target: &WatchTarget) -> bool {
             .contains(&target.filter.to_lowercase())
 }
 
+#[cfg(feature = "test-utils")]
 #[inline(never)]
 fn first_error_path(error: &notify::Error) -> String {
     match error.paths.first() {
@@ -722,6 +896,205 @@ fn watch_path(watcher: &mut notify::RecommendedWatcher, path: &Path) -> Result<(
 
 fn unwatch_path(watcher: &mut notify::RecommendedWatcher, path: &Path) -> Result<(), String> {
     watcher.unwatch(path).map_err(|error| error.to_string())
+}
+
+// ---------------------------------------------------------------------
+// Watch-first session capture (Phase 3: directory_session)
+// ---------------------------------------------------------------------
+//
+// `DirectorySessionService` needs to register a native watch and start
+// buffering direct-child mutations *before* it enumerates a directory, so a
+// create/delete that races the enumeration is never silently lost (it is
+// either folded into the initial snapshot or triggers a resnapshot). This is
+// intentionally independent from `WatchService`/`WatchRuntime` above (which
+// remains the long-lived, tab-scoped v1 watch runtime): a session capture is
+// short-lived (its own single-purpose `notify` watcher, torn down once the
+// caller finishes reconciling), so it does not need to share state with the
+// v1 per-tab watch map.
+
+/// A short-lived native watch used only to capture direct-child mutation
+/// paths for the duration of establishing a directory-session baseline. Not
+/// intended for long-term use — [`DirectorySessionService`](crate::directory_session)
+/// tears this down as soon as the session/watch/view baseline is published
+/// and re-arms a normal watch afterward if needed.
+///
+/// Uses a bounded lane (capacity [`coordinator::RAW_LANE_CAPACITY`], matching
+/// the long-lived compactor's raw-lane bound) rather than an unbounded
+/// channel: the platform `notify` callback must never be able to grow memory
+/// without bound during a pathological event burst that races enumeration.
+/// Overflow (a full lane) is reported as `None` from
+/// [`drain_captured_mutations`], which callers already treat as "resnapshot
+/// required" — exactly the correct behavior for "too much happened to trust
+/// a partial event list".
+pub struct CaptureHandle {
+    watcher: notify::RecommendedWatcher,
+    watched_path: PathBuf,
+    rx: crossbeam_channel::Receiver<Result<notify::Event, notify::Error>>,
+    overflowed: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// Begins buffering filesystem events for direct children of `path`. Returns
+/// a [`CaptureHandle`] whose buffered mutation paths can be read with
+/// [`drain_captured_mutations`] once enumeration completes.
+pub fn begin_capture(path: &Path) -> Result<CaptureHandle, String> {
+    let (tx, rx) = crossbeam_channel::bounded(coordinator::RAW_LANE_CAPACITY);
+    let overflowed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let overflowed_for_callback = Arc::clone(&overflowed);
+    let mut watcher = notify::recommended_watcher(move |result| {
+        // Non-blocking push: a full lane during capture marks the capture
+        // overflowed (forcing a resnapshot) instead of blocking the
+        // platform callback thread, matching the same non-blocking
+        // contract the long-lived `WatchCoordinator` compactor lane uses.
+        if tx.try_send(result).is_err() {
+            overflowed_for_callback.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    })
+    .map_err(|error| error.to_string())?;
+    watcher
+        .watch(path, RecursiveMode::NonRecursive)
+        .map_err(|error| error.to_string())?;
+
+    Ok(CaptureHandle {
+        watcher,
+        watched_path: path.to_path_buf(),
+        rx,
+        overflowed,
+    })
+}
+
+/// Stops the capture watch and returns the set of direct-child paths that
+/// changed (created/removed/modified/renamed) while it was active. A
+/// `need_rescan`/`Any`/`Other` event, a lane overflow, or a rename this
+/// function cannot fully resolve, is reported as `None` — the caller must
+/// treat that as "resnapshot required" rather than trusting the partial path
+/// list.
+pub fn drain_captured_mutations(mut handle: CaptureHandle) -> Option<HashSet<PathBuf>> {
+    let _ = handle.watcher.unwatch(&handle.watched_path);
+
+    if handle.overflowed.load(std::sync::atomic::Ordering::SeqCst) {
+        return None;
+    }
+
+    let mut mutated = HashSet::new();
+    while let Ok(result) = handle.rx.try_recv() {
+        let event = match result {
+            Ok(event) => event,
+            Err(_) => return None,
+        };
+
+        if event.need_rescan() {
+            return None;
+        }
+
+        match event.kind {
+            EventKind::Access(_) => {}
+            EventKind::Any | EventKind::Other => return None,
+            EventKind::Modify(ModifyKind::Name(RenameMode::Both)) => {
+                if event.paths.len() < 2 {
+                    return None;
+                }
+                mutated.insert(event.paths[0].clone());
+                mutated.insert(event.paths[1].clone());
+            }
+            EventKind::Modify(ModifyKind::Name(_)) | EventKind::Modify(ModifyKind::Any) => {
+                return None;
+            }
+            EventKind::Modify(ModifyKind::Other) => return None,
+            EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(_) => {
+                for changed_path in &event.paths {
+                    if is_direct_child(changed_path, &handle.watched_path) {
+                        mutated.insert(changed_path.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    Some(mutated)
+}
+
+/// Test-only wrapper around the private `raw_mutations_for_event` so
+/// coverage/behavior tests can exercise the real `notify::Event` ->
+/// `RawMutation` classification (Access/Remove/Unresolved/Changed, direct-
+/// child filtering, `need_rescan`) without needing a live OS watcher thread
+/// to deliver the event. `watch_id`/`target` are the same fields
+/// `WatchedTab` stores; this constructs one internally since `WatchedTab`
+/// itself is module-private.
+#[cfg(feature = "test-utils")]
+#[allow(dead_code)]
+pub fn raw_mutations_for_event_for_tests(
+    event: &notify::Event,
+    watch_id: WatchId,
+    target: WatchTarget,
+) -> Vec<RawMutation> {
+    let watched = WatchedTab {
+        watch_id,
+        target,
+        snapshot: HashMap::new(),
+    };
+    raw_mutations_for_event(event, &watched)
+}
+
+/// Test-only wrapper around the private `process_compacted_batch`, driving
+/// it against a real [`WatchRuntime`]'s tab map so coverage/behavior tests
+/// can exercise targeted-patch application, dirty-resnapshot, and the
+/// unknown-watch-id no-op branch without a live OS watcher thread producing
+/// the [`CompactedBatch`].
+#[cfg(feature = "test-utils")]
+#[allow(dead_code)]
+pub fn process_compacted_batch_for_tests(
+    runtime: &WatchRuntime,
+    batch: CompactedBatch,
+    emit_patch: Arc<dyn Fn(DirPatch) + Send + Sync>,
+    emit_error: Arc<dyn Fn(String, String) + Send + Sync>,
+) {
+    process_compacted_batch(&runtime.tabs, batch, &emit_patch, &emit_error);
+}
+
+/// Drives the same callback forwarding path used by `notify`, allowing
+/// integration tests to verify that a callback is retained until it can take
+/// the brief registration snapshot.
+#[cfg(feature = "test-utils")]
+#[allow(dead_code)]
+pub fn forward_notify_result_for_tests(
+    runtime: &WatchRuntime,
+    result: Result<notify::Event, notify::Error>,
+) {
+    forward_notify_result(&runtime.tabs, &runtime.coordinator.raw_sender(), result);
+}
+
+#[cfg(feature = "test-utils")]
+#[allow(dead_code)]
+pub fn forward_notify_result_with_before_lock_for_tests(
+    runtime: &WatchRuntime,
+    result: Result<notify::Event, notify::Error>,
+    before_lock: impl FnOnce(),
+) {
+    forward_notify_result_after_before_lock(
+        &runtime.tabs,
+        &runtime.coordinator.raw_sender(),
+        result,
+        before_lock,
+    );
+}
+
+#[cfg(feature = "test-utils")]
+#[allow(dead_code)]
+pub fn while_tabs_locked_for_tests(runtime: &WatchRuntime, action: impl FnOnce()) {
+    let _tabs = runtime.tabs.lock().expect("watch tabs lock");
+    action();
+}
+
+#[cfg(feature = "test-utils")]
+#[allow(dead_code)]
+pub fn capture_handle_for_tests(path: &Path) -> Result<CaptureHandle, String> {
+    begin_capture(path)
+}
+
+#[cfg(feature = "test-utils")]
+#[allow(dead_code)]
+pub fn drain_captured_mutations_for_tests(handle: CaptureHandle) -> Option<HashSet<PathBuf>> {
+    drain_captured_mutations(handle)
 }
 
 pub fn diff_entries(

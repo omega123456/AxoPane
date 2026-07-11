@@ -19,7 +19,6 @@ import {
   saveConfig,
   saveSession,
   sortActiveItems,
-  startListDir,
   setTabWatch,
 } from '@/lib/ipc/commands'
 import {
@@ -63,33 +62,6 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
         includeItemCounts: true,
       }),
     ).resolves.toEqual({ path: 'C:\\x', entries: [] })
-
-    ipc.override('start_list_dir', (payload) => ({
-      kind: 'head',
-      path: payload.path,
-      total: 0,
-      requestId: 4,
-      firstChunk: [],
-      done: true,
-    }))
-    await expect(
-      startListDir({
-        tabId: 'left-1',
-        path: 'C:\\x',
-        sortKey: 'name',
-        sortDirection: 'asc',
-        filter: '',
-        showHidden: false,
-        includeItemCounts: true,
-      }),
-    ).resolves.toEqual({
-      kind: 'head',
-      path: 'C:\\x',
-      total: 0,
-      requestId: 4,
-      firstChunk: [],
-      done: true,
-    })
 
     ipc.override('cancel_size', (payload) => ({ cancelled: payload.path === 'C:\\x' }))
     await expect(cancelSize('C:\\x')).resolves.toEqual({ cancelled: true })
@@ -292,17 +264,6 @@ describe('playwright ipc mock module', () => {
 
   it('returns fixture responses and manages listeners', async () => {
     await expect(invokePlaywrightCommand('list_volumes', undefined)).resolves.toBeInstanceOf(Array)
-    await expect(
-      invokePlaywrightCommand('start_list_dir', {
-        tabId: 'left-1',
-        path: 'C:\\Users\\Omega',
-        sortKey: 'name',
-        sortDirection: 'asc',
-        filter: '',
-        showHidden: false,
-        includeItemCounts: true,
-      }),
-    ).resolves.toHaveProperty('kind', 'head')
     const handler = vi.fn()
     const unlisten = await listenPlaywrightEvent('dir://patch', handler)
     unlisten()

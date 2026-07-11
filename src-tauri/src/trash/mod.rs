@@ -19,6 +19,9 @@ use serde::{Deserialize, Serialize};
 #[cfg(any(feature = "test-utils", target_os = "macos"))]
 mod manifest;
 
+#[cfg(any(feature = "test-utils", target_os = "macos"))]
+mod macos_adapter;
+
 // Available under `test-utils` (any OS) so its parsing logic is unit-testable
 // and counted toward coverage, even though it's only ever wired up on macOS.
 #[cfg(any(feature = "test-utils", target_os = "macos"))]
@@ -51,10 +54,30 @@ pub struct TrashEntry {
 /// Move the given paths to the OS trash. Best-effort: the first failure aborts
 /// and is reported. An empty list is a no-op.
 pub fn move_to_trash(paths: &[String]) -> Result<(), String> {
+    move_to_trash_cancellable(paths, || false)
+}
+
+/// Cooperative batch boundary for the latency IPC owner. Platform trash APIs
+/// can only cancel between calls, while the deterministic fake also checks
+/// between individual relocations.
+pub fn move_to_trash_cancellable<F>(paths: &[String], is_cancelled: F) -> Result<(), String>
+where
+    F: Fn() -> bool,
+{
+    if is_cancelled() {
+        return Err("trash request cancelled".to_string());
+    }
     if paths.is_empty() {
         return Ok(());
     }
-    move_to_trash_impl(paths)
+    #[cfg(feature = "test-utils")]
+    {
+        return move_to_trash_impl_cancellable(paths, &fake_trash_dir(), &is_cancelled);
+    }
+    #[cfg(not(feature = "test-utils"))]
+    {
+        move_to_trash_impl(paths)
+    }
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]
@@ -62,40 +85,16 @@ fn move_to_trash_impl(paths: &[String]) -> Result<(), String> {
     trash::delete_all(paths).map_err(|error| error.to_string())
 }
 
-// macOS deletes one path at a time (rather than the crate's batch
-// `delete_all`) so each move can be paired with a before/after directory
-// snapshot to learn the (possibly de-duplicated) name it landed under in
-// `~/.Trash`, which `manifest` needs to track the original location.
-//
-// The crate's default delete method shells out to Finder via `osascript`
-// (`tell application "Finder" to delete ...`), which can return before the
-// item has actually landed in `~/.Trash` — Finder's own trash bookkeeping is
-// asynchronous. That race made the before/after diff below observe no new
-// file, silently skipping the manifest write. `NsFileManager` calls
-// `trashItemAtURL` directly and only returns once the move is complete, so
-// the diff is deterministic. We give up Finder's native "Put Back" menu
-// item, but restoring is handled by our own manifest-backed UI anyway.
+// `NsFileManager` is the macOS deletion authority. The adapter observes the
+// home Trash once before and once after the complete batch, preserving Finder
+// and third-party entries while avoiding per-item rescans.
 #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
 fn move_to_trash_impl(paths: &[String]) -> Result<(), String> {
-    use trash::macos::{DeleteMethod, TrashContextExtMacos};
-    use trash::TrashContext;
-
-    let trash_dir = macos_bin::home_trash_dir()?;
-    let mut context = TrashContext::default();
-    context.set_delete_method(DeleteMethod::NsFileManager);
-
-    for path in paths {
-        let before = macos_bin::snapshot_names(&trash_dir);
-        context.delete(path).map_err(|error| error.to_string())?;
-        // Best-effort: the item is already trashed at this point, so a
-        // bookkeeping failure here shouldn't be reported as a failed delete.
-        // It only means this particular item won't be restorable to its
-        // original path later.
-        if let Err(error) = macos_bin::record_deletion(&before, &trash_dir, path) {
-            log::warn!("Failed to record trash manifest entry for '{path}': {error}");
-        }
+    let mut adapter = macos_adapter::MacosSystemTrashAdapter::new();
+    let result = macos_adapter::delete_batch(&mut adapter, paths);
+    if let Some((_, error)) = result.failures.into_iter().next() {
+        return Err(error);
     }
-
     Ok(())
 }
 
@@ -127,6 +126,20 @@ pub fn ensure_fake_trash_dir_for_tests(path: &std::path::Path) -> Result<(), Str
 
 #[cfg(feature = "test-utils")]
 pub use dsstore::PutBack;
+
+#[cfg(feature = "test-utils")]
+pub use macos_adapter::{
+    BatchCorrelation, BatchDeletionResult, StableFileIdentity, SystemTrashAdapter, TrashFacts,
+    TrashSnapshotEntry,
+};
+
+#[cfg(feature = "test-utils")]
+pub fn delete_batch_with_adapter_for_tests<A: SystemTrashAdapter>(
+    adapter: &mut A,
+    paths: &[String],
+) -> BatchDeletionResult {
+    macos_adapter::delete_batch(adapter, paths)
+}
 
 /// Exposes [`dsstore::parse_put_back`] to integration tests, which only see
 /// the crate's public API.
@@ -163,17 +176,23 @@ pub fn move_to_fake_trash_path_for_tests(
 }
 
 #[cfg(feature = "test-utils")]
-fn move_to_trash_impl(paths: &[String]) -> Result<(), String> {
-    move_to_trash_impl_in(paths, &fake_trash_dir())
-}
-
-#[cfg(feature = "test-utils")]
-fn move_to_trash_impl_in(paths: &[String], trash_dir: &std::path::Path) -> Result<(), String> {
+fn move_to_trash_impl_cancellable<F>(
+    paths: &[String],
+    trash_dir: &std::path::Path,
+    is_cancelled: &F,
+) -> Result<(), String>
+where
+    F: Fn() -> bool,
+{
     use std::path::Path;
 
     ensure_fake_trash_dir(trash_dir)?;
 
+    let mut manifest_entries = Vec::with_capacity(paths.len());
     for path in paths {
+        if is_cancelled() {
+            return Err("trash request cancelled".to_string());
+        }
         let source = Path::new(path);
         let file_name = source
             .file_name()
@@ -199,12 +218,12 @@ fn move_to_trash_impl_in(paths: &[String], trash_dir: &std::path::Path) -> Resul
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_secs() as i64)
             .unwrap_or(0);
-        // Best-effort, matching the real macOS path: the item is already
-        // relocated at this point, and `fake_trash_dir()` is shared across
-        // concurrently-running test processes, so a manifest write racing
-        // with another process's write shouldn't fail this move.
-        let _ = manifest::record(trash_dir, &target_name, path, deleted_at);
+        manifest_entries.push((target_name, path.to_string(), deleted_at));
     }
+
+    // Best-effort, matching the real macOS path: all successfully relocated
+    // items share one manifest read/modify/write transaction.
+    let _ = manifest::record_batch(trash_dir, manifest_entries);
 
     Ok(())
 }
@@ -217,7 +236,7 @@ pub fn move_to_trash_into_for_tests(
     paths: &[String],
     trash_dir: &std::path::Path,
 ) -> Result<(), String> {
-    move_to_trash_impl_in(paths, trash_dir)
+    move_to_trash_impl_cancellable(paths, trash_dir, &|| false)
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]
@@ -268,6 +287,7 @@ fn list_trash_in(trash_dir: &std::path::Path) -> Result<Vec<TrashEntry>, String>
 
     let entries = std::fs::read_dir(trash_dir)
         .map_err(|error| format!("{}: {error}", trash_dir.display()))?;
+    let manifest = manifest::Transaction::load(trash_dir)?;
     let mut result = Vec::new();
 
     for entry in entries {
@@ -310,7 +330,7 @@ fn list_trash_in(trash_dir: &std::path::Path) -> Result<Vec<TrashEntry>, String>
             }
         };
         let is_dir = file_type.is_dir();
-        let (original_path, deleted_at) = match manifest::lookup(trash_dir, name) {
+        let (original_path, deleted_at) = match manifest.lookup(name) {
             Some((original_path, deleted_at)) => (Some(original_path), Some(deleted_at)),
             None => (None, None),
         };
@@ -332,8 +352,9 @@ fn list_trash_in(trash_dir: &std::path::Path) -> Result<Vec<TrashEntry>, String>
 
 #[cfg(feature = "test-utils")]
 fn restore_from_trash_in(ids: &[String], trash_dir: &std::path::Path) -> Result<(), String> {
+    let mut manifest = manifest::Transaction::load(trash_dir)?;
     for id in ids {
-        let Some((original_path, _)) = manifest::lookup(trash_dir, id) else {
+        let Some((original_path, _)) = manifest.lookup(id) else {
             return Err(format!(
                 "'{id}' has no known original location and cannot be restored"
             ));
@@ -351,10 +372,9 @@ fn restore_from_trash_in(ids: &[String], trash_dir: &std::path::Path) -> Result<
         }
 
         std::fs::rename(&source, &target).map_err(|error| error.to_string())?;
-        manifest::remove(trash_dir, id)?;
+        manifest.remove(id);
     }
-
-    Ok(())
+    manifest.commit()
 }
 
 #[cfg(feature = "test-utils")]
@@ -370,10 +390,15 @@ fn delete_from_trash_in(ids: &[String], trash_dir: &std::path::Path) -> Result<(
         } else {
             std::fs::remove_file(&path).map_err(|error| error.to_string())?;
         }
-        manifest::remove(trash_dir, id)?;
     }
-
-    Ok(())
+    // Purging does not need provenance to remove an item.  Preserve that
+    // behavior if a corrupt manifest is discovered only after the filesystem
+    // mutations, then perform one sidecar transaction for the whole command.
+    let mut manifest = manifest::Transaction::load(trash_dir)?;
+    for id in ids {
+        manifest.remove(id);
+    }
+    manifest.force_commit()
 }
 
 #[cfg(feature = "test-utils")]
@@ -383,6 +408,7 @@ fn empty_trash_in(trash_dir: &std::path::Path) -> Result<(), String> {
     }
 
     let entries = std::fs::read_dir(trash_dir).map_err(|error| error.to_string())?;
+    let mut manifest = manifest::Transaction::load(trash_dir)?;
     for entry in entries.flatten() {
         let path = entry.path();
         let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
@@ -399,7 +425,7 @@ fn empty_trash_in(trash_dir: &std::path::Path) -> Result<(), String> {
         }
     }
 
-    manifest::clear(trash_dir)
+    manifest.force_clear_commit()
 }
 
 #[cfg(feature = "test-utils")]

@@ -13,7 +13,6 @@ use file_explorer_lib::ipc::types::{
     OpenPathRequest, ReorderOpsRequest, ResolveConflictRequest, SaveConfigRequest,
     SaveSessionRequest, SetTabWatchRequest, TrashEntriesRequest,
 };
-use file_explorer_lib::listing::ListingService;
 use file_explorer_lib::ops::{
     ConflictResolution, OpItem, OpKind, OpStatus, OpsService, StartOpRequest,
 };
@@ -192,7 +191,7 @@ fn commands_cover_filesystem_and_persistence_state() {
 #[test]
 fn commands_cover_size_and_logging_state() {
     let size_service = SizeService::default();
-    let watch_service = file_explorer_lib::watch::WatchService::default();
+    let watch_service = std::sync::Arc::new(file_explorer_lib::watch::WatchService::default());
 
     let fixture = tempdir().expect("temp dir");
     let size_root = fixture.path().join("sizes");
@@ -314,14 +313,11 @@ fn commands_cover_size_and_logging_state() {
         show_hidden: true,
         include_item_counts: true,
     };
-    let listing_service = ListingService::default();
     commands::set_tab_watch(
         SetTabWatchRequest {
             target: Some(watch_target.clone()),
-            seed_reference: None,
             entries: None,
         },
-        as_state(&listing_service),
         as_state(&watch_service),
     )
     .expect("set tab watch");
@@ -329,10 +325,8 @@ fn commands_cover_size_and_logging_state() {
     commands::set_tab_watch(
         SetTabWatchRequest {
             target: Some(watch_target.clone()),
-            seed_reference: None,
             entries: None,
         },
-        as_state(&listing_service),
         as_state(&watch_service),
     )
     .expect("reseed tab watch after file write");
@@ -343,10 +337,8 @@ fn commands_cover_size_and_logging_state() {
     commands::set_tab_watch(
         SetTabWatchRequest {
             target: None,
-            seed_reference: None,
             entries: None,
         },
-        as_state(&listing_service),
         as_state(&watch_service),
     )
     .expect("clear tab watch");

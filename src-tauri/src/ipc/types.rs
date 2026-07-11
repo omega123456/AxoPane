@@ -4,9 +4,14 @@ pub use crate::app_picker::types::{
     GetDefaultApplicationRequest, GetDefaultApplicationResponse, ListApplicationsResponse, MacApp,
     SetDefaultApplicationRequest,
 };
+pub use crate::directory_session::{
+    BeginNavigationRequest, BeginNavigationResponse, GetSessionRangeRequest, ReleaseSessionRequest,
+    ReleaseSessionResponse, ReviseSessionViewRequest, SessionBaseline, SessionRangePage,
+    SessionRangeResponse, SessionRejection, ViewParams, SESSION_PAGE_SIZE,
+};
 pub use crate::fs::{
     DirectoryEntry, ListDirOptions, ListDirResponse, ListTreeChildrenOptions,
-    ListTreeChildrenResponse, SortDirection, SortKey, TreeChildEntry,
+    ListTreeChildrenResponse, SortDirection, SortKey, TreeChildEntry, TreeExpandability,
 };
 pub use crate::item_counts::{
     ActiveItemsSortReady, ActiveItemsSortRequest, ActiveItemsSortResponse,
@@ -26,6 +31,7 @@ pub use crate::persist::{Config as AppConfig, Session as SessionState};
 pub use crate::size::{EverythingStatus, SizeSource, SizeStateKind};
 pub use crate::trash::TrashEntry;
 pub use crate::volumes::VolumeInfo;
+pub use crate::watch::patch::{MetadataDelta, RowDelta, SessionPatch};
 pub use crate::watch::{DirPatch as WatchDirPatch, WatchTarget};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,75 +73,6 @@ pub struct LogFrontendRequest {
 
 pub type ListDirRequest = ListDirOptions;
 pub type ListTreeChildrenRequest = ListTreeChildrenOptions;
-
-/// Starts a chunked/streamed directory listing for a tab. Mirrors
-/// [`ListDirOptions`] plus the `tab_id` used to scope streaming cancellation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StartListDirRequest {
-    pub tab_id: String,
-    pub path: String,
-    pub sort_key: SortKey,
-    pub sort_direction: SortDirection,
-    pub filter: String,
-    pub show_hidden: bool,
-    pub include_item_counts: bool,
-}
-
-impl StartListDirRequest {
-    pub fn to_options(&self) -> ListDirOptions {
-        ListDirOptions {
-            path: self.path.clone(),
-            sort_key: self.sort_key,
-            sort_direction: self.sort_direction,
-            filter: self.filter.clone(),
-            show_hidden: self.show_hidden,
-            include_item_counts: self.include_item_counts,
-        }
-    }
-}
-
-/// Head of a chunked listing when the backend completed filesystem work
-/// without being superseded by a newer request for the same tab.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StartListDirHead {
-    pub path: String,
-    pub total: u64,
-    pub request_id: u64,
-    pub first_chunk: Vec<DirectoryEntry>,
-    pub done: bool,
-}
-
-/// A `start_list_dir` request that was superseded by a newer request for the
-/// same tab before the backend finished enumeration/count/sort work.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StartListDirSuperseded {
-    pub request_id: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum StartListDirResponse {
-    Head(StartListDirHead),
-    Superseded(StartListDirSuperseded),
-}
-
-/// A streamed slice of a directory listing following the `start_list_dir` head.
-/// `done` marks the final chunk for this `request_id`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ListChunkEvent {
-    pub tab_id: String,
-    pub request_id: u64,
-    pub path: String,
-    pub entries: Vec<DirectoryEntry>,
-    /// Monotonic within a listing request (the inline head is index 0).
-    /// Consumers must accept each index at most once.
-    pub chunk_index: u64,
-    pub done: bool,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -338,20 +275,6 @@ pub struct OpenWithRequest {
     pub path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct CompressArchiveRequest {
-    pub paths: Vec<String>,
-    pub destination_dir: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ExtractArchiveRequest {
-    pub paths: Vec<String>,
-    pub destination_dir: String,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CancelSizeResponse {
@@ -366,25 +289,10 @@ pub struct CancelSizesResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct WatchSeedReference {
-    pub tab_id: String,
-    pub request_id: u64,
-    pub path: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct SetTabWatchRequest {
     pub target: Option<WatchTarget>,
-    /// Reference to a completed listing snapshot retained on the Rust side.
-    /// When valid for the same tab/request/path context, watcher arming can
-    /// reuse that baseline instead of re-enumerating the directory or
-    /// requiring the frontend to echo a full listing back across IPC.
-    pub seed_reference: Option<WatchSeedReference>,
-    /// The already-listed, post-filter/sort entries for `target.path` (the
-    /// listing the frontend just fetched via `list_dir`). When present, the
-    /// watcher seeds its baseline snapshot from these entries instead of
-    /// re-reading the directory, eliminating a redundant enumeration.
+    /// Optional already-published session entries for `target.path`. When
+    /// supplied, these establish the watch baseline without a second scan.
     pub entries: Option<Vec<DirectoryEntry>>,
 }
 

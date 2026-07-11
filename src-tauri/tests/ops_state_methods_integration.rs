@@ -4,6 +4,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use file_explorer_lib::ops::manifest::ProgressiveManifest;
 use file_explorer_lib::ops::{
     archive_root_name_for_tests, archive_stem_for_item_for_tests, begin_file_progress_for_tests,
     copy_dir_recursive, copy_file_with_progress, copy_path, delete_path_with_progress, move_path,
@@ -406,6 +407,7 @@ fn file_operation_helpers_surface_io_errors_directly() {
         false,
         &ctx,
         None,
+        None,
     )
     .expect_err("copy missing dir");
     assert!(!copy_dir_error.is_empty());
@@ -447,6 +449,7 @@ fn copy_dir_recursive_surfaces_create_dir_all_errors_for_the_target() {
         &mut visited,
         false,
         &ctx,
+        None,
         None,
     )
     .expect_err("target parent is a file");
@@ -1121,4 +1124,87 @@ fn ops_test_hooks_cover_archive_name_fallback_paths() {
 #[test]
 fn test_utils_run_is_a_safe_noop() {
     file_explorer_lib::run();
+}
+
+/// Mirrors what `move_path_with_total_discovery`'s cross-device fallback does
+/// internally: walk a directory tree with `copy_dir_recursive` while threading
+/// a live `ProgressiveManifest`, exactly the pattern `throttle` already uses.
+/// Proves discovery genuinely populates the manifest (one entry per file,
+/// correct root-relative paths, an accurate `discovered_bytes()` total, and a
+/// symlink correctly flagged) rather than the type staying dead scaffolding.
+#[test]
+fn copy_dir_recursive_populates_a_progressive_manifest_during_discovery() {
+    let fixture = tempfile::tempdir().expect("temp dir");
+    let root = fixture.path().join("source");
+    std::fs::create_dir_all(root.join("nested")).expect("source tree");
+    std::fs::write(root.join("a.txt"), b"hello").expect("a.txt"); // 5 bytes
+    std::fs::write(root.join("nested/b.txt"), b"worldly!").expect("b.txt"); // 8 bytes
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        symlink(root.join("a.txt"), root.join("nested/link.txt")).expect("symlink");
+    }
+
+    let target = fixture.path().join("dest");
+    let (_op_arc, _resolver, ctx) = worker_ctx(state());
+    // `copy_path_with_total_discovery` always canonicalizes the *walked*
+    // source path itself before recursing (not just the `root` it passes
+    // down), so mirror that here: on macOS the temp dir lives under a
+    // symlinked prefix (`/tmp` -> `/private/tmp`), and passing the
+    // non-canonical `root` as the walk root while `root` is canonical would
+    // make every discovered path fail `strip_prefix`.
+    let canonical_root = root.canonicalize().expect("canonicalize root");
+    let mut visited = HashSet::from([canonical_root.clone()]);
+    let mut manifest = ProgressiveManifest::default();
+
+    copy_dir_recursive(
+        &canonical_root,
+        &target,
+        &canonical_root,
+        &mut visited,
+        false,
+        &ctx,
+        None,
+        Some(&mut manifest),
+    )
+    .expect("copy dir recursive");
+
+    let expected_files = if cfg!(unix) { 3 } else { 2 };
+    assert_eq!(manifest.entries().len(), expected_files);
+    // 5 (a.txt) + 8 (nested/b.txt), plus the symlink's own on-disk length on
+    // unix (the link records `symlink_metadata().len()`, i.e. the length of
+    // the link itself rather than its target).
+    let expected_bytes: u64 = 13
+        + manifest
+            .entries()
+            .iter()
+            .find(|entry| entry.is_link)
+            .map(|entry| entry.bytes)
+            .unwrap_or(0);
+    assert_eq!(manifest.discovered_bytes(), expected_bytes);
+
+    let relative_paths: HashSet<PathBuf> = manifest
+        .entries()
+        .iter()
+        .map(|entry| entry.relative_path.clone())
+        .collect();
+    assert!(relative_paths.contains(&PathBuf::from("a.txt")));
+    assert!(relative_paths.contains(&PathBuf::from("nested/b.txt")));
+
+    #[cfg(unix)]
+    {
+        let link_entry = manifest
+            .entries()
+            .iter()
+            .find(|entry| entry.relative_path == PathBuf::from("nested/link.txt"))
+            .expect("link entry present");
+        assert!(link_entry.is_link);
+    }
+
+    for entry in manifest.entries() {
+        if entry.relative_path != PathBuf::from("nested/link.txt") {
+            assert!(!entry.is_link);
+        }
+    }
 }

@@ -1,8 +1,12 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Condvar, Mutex};
 
 use super::provider::{ProviderInvocation, ProviderNativeMenuItem};
 use super::types::{LoadNativeMenuRequest, NativeMenuTargetKind};
+use crate::bounded_cache::BoundedCache;
+
+const MAX_CACHE_ENTRIES: usize = 128;
+const MAX_CACHE_WEIGHT: usize = 16 * 1024 * 1024;
 
 /// In-memory, per-file-type cache for the (expensive) native shell-menu
 /// enumeration. Entries are keyed on the menu's *structure inputs* — the target
@@ -13,9 +17,23 @@ use super::types::{LoadNativeMenuRequest, NativeMenuTargetKind};
 ///
 /// The cache lives for the lifetime of the [`super::NativeMenuService`], which is
 /// a single app-managed instance, so it is naturally discarded on app restart.
-#[derive(Default)]
 pub struct MenuCache {
-    entries: Mutex<HashMap<String, Vec<ProviderNativeMenuItem>>>,
+    entries: Mutex<BoundedCache<String, Vec<ProviderNativeMenuItem>>>,
+    in_flight: Mutex<HashMap<String, Arc<CacheFlight>>>,
+}
+
+struct CacheFlight {
+    result: Mutex<Option<Vec<ProviderNativeMenuItem>>>,
+    ready: Condvar,
+}
+
+impl Default for MenuCache {
+    fn default() -> Self {
+        Self {
+            entries: Mutex::new(BoundedCache::new(MAX_CACHE_ENTRIES, MAX_CACHE_WEIGHT)),
+            in_flight: Mutex::new(HashMap::new()),
+        }
+    }
 }
 
 impl MenuCache {
@@ -23,7 +41,7 @@ impl MenuCache {
     /// invocation rebound to the request's live paths, or `None` on a miss.
     pub fn get(&self, request: &LoadNativeMenuRequest) -> Option<Vec<ProviderNativeMenuItem>> {
         let key = cache_key(request);
-        let entries = self.entries.lock().expect("menu cache lock");
+        let mut entries = self.entries.lock().expect("menu cache lock");
         entries.get(&key).map(|items| rebind_items(items, request))
     }
 
@@ -31,7 +49,67 @@ impl MenuCache {
     pub fn insert(&self, request: &LoadNativeMenuRequest, items: &[ProviderNativeMenuItem]) {
         let key = cache_key(request);
         let mut entries = self.entries.lock().expect("menu cache lock");
-        entries.insert(key, items.to_vec());
+        let weight = estimated_weight(&key, items);
+        entries.insert(key, structuralize_items(items), weight);
+    }
+
+    /// Gets a path-rebound cached structure or makes exactly one caller load it.
+    /// Concurrent equivalent warm (or interactive) requests wait for the same
+    /// structural result instead of independently invoking shell extensions.
+    pub fn get_or_load<F>(
+        &self,
+        request: &LoadNativeMenuRequest,
+        load: F,
+    ) -> (Vec<ProviderNativeMenuItem>, bool)
+    where
+        F: FnOnce() -> Vec<ProviderNativeMenuItem>,
+    {
+        if let Some(items) = self.get(request) {
+            return (items, false);
+        }
+
+        let key = cache_key(request);
+        let (flight, leader) = {
+            let mut flights = self.in_flight.lock().expect("menu cache flights lock");
+            match flights.get(&key) {
+                Some(flight) => (Arc::clone(flight), false),
+                None => {
+                    let flight = Arc::new(CacheFlight {
+                        result: Mutex::new(None),
+                        ready: Condvar::new(),
+                    });
+                    flights.insert(key.clone(), Arc::clone(&flight));
+                    (flight, true)
+                }
+            }
+        };
+
+        if leader {
+            let fresh = load();
+            self.insert(request, &fresh);
+            let structure = self
+                .entries
+                .lock()
+                .expect("menu cache lock")
+                .get(&key)
+                .expect("fresh native menu cache entry")
+                .to_vec();
+            *flight.result.lock().expect("menu cache flight result lock") = Some(structure);
+            flight.ready.notify_all();
+            self.in_flight
+                .lock()
+                .expect("menu cache flights lock")
+                .remove(&key);
+        }
+
+        let mut result = flight.result.lock().expect("menu cache flight result lock");
+        while result.is_none() {
+            result = flight.ready.wait(result).expect("menu cache flight wait");
+        }
+        (
+            rebind_items(result.as_ref().expect("menu cache flight result"), request),
+            leader,
+        )
     }
 
     /// Number of distinct file-type entries currently cached.
@@ -52,8 +130,23 @@ impl MenuCache {
         self.entries
             .lock()
             .expect("menu cache lock")
-            .contains_key(&key)
+            .get(&key)
+            .is_some()
     }
+}
+
+fn estimated_weight(key: &str, items: &[ProviderNativeMenuItem]) -> usize {
+    key.len() + items.iter().map(item_weight).sum::<usize>()
+}
+
+fn item_weight(item: &ProviderNativeMenuItem) -> usize {
+    item.id.len()
+        + item.label.len()
+        + item.normalized_verb.as_ref().map_or(0, String::len)
+        + item.icon.as_ref().map_or(0, |icon| {
+            icon.data_url.len() + icon.alt.as_ref().map_or(0, String::len)
+        })
+        + item.children.iter().map(item_weight).sum::<usize>()
 }
 
 pub(crate) fn cache_key(request: &LoadNativeMenuRequest) -> String {
@@ -112,6 +205,60 @@ fn rebind_items(
         .iter()
         .map(|item| rebind_item(item, request))
         .collect()
+}
+
+fn structuralize_items(items: &[ProviderNativeMenuItem]) -> Vec<ProviderNativeMenuItem> {
+    items.iter().map(structuralize_item).collect()
+}
+
+fn structuralize_item(item: &ProviderNativeMenuItem) -> ProviderNativeMenuItem {
+    ProviderNativeMenuItem {
+        id: item.id.clone(),
+        label: item.label.clone(),
+        enabled: item.enabled,
+        danger: item.danger,
+        canonical_action_kind: item.canonical_action_kind.clone(),
+        normalized_verb: item.normalized_verb.clone(),
+        icon: item.icon.clone(),
+        invocation: item.invocation.as_ref().map(structuralize_invocation),
+        children: structuralize_items(&item.children),
+    }
+}
+
+fn structuralize_invocation(invocation: &ProviderInvocation) -> ProviderInvocation {
+    match invocation {
+        ProviderInvocation::Windows {
+            request,
+            command_path,
+        } => ProviderInvocation::Windows {
+            request: structural_request(request),
+            command_path: command_path.clone(),
+        },
+        ProviderInvocation::WindowsModern {
+            clsid,
+            packaged,
+            request,
+            command_path,
+        } => ProviderInvocation::WindowsModern {
+            clsid: *clsid,
+            packaged: *packaged,
+            request: structural_request(request),
+            command_path: command_path.clone(),
+        },
+        ProviderInvocation::Fake { action_id } => ProviderInvocation::Fake {
+            action_id: action_id.clone(),
+        },
+    }
+}
+
+fn structural_request(request: &LoadNativeMenuRequest) -> LoadNativeMenuRequest {
+    LoadNativeMenuRequest {
+        request_id: String::new(),
+        target_kind: request.target_kind.clone(),
+        target_path: None,
+        folder_path: None,
+        selected_paths: Vec::new(),
+    }
 }
 
 fn rebind_item(

@@ -47,46 +47,33 @@ fn read_icon_data_url(icon_path: Option<&Path>) -> Option<String> {
 /// Enumerates candidate apps for the "Set Default Application…" picker.
 ///
 /// The actual bundle scan + `Info.plist` parsing + icon resolution is
-/// synchronous and can take multiple seconds (shelling out to `plutil` per
-/// bundle, decoding `.icns` icons), so it is dispatched onto a dedicated
-/// `tauri::async_runtime::spawn_blocking` thread and `.await`ed here rather
-/// than run inline. The calling `list_applications` Tauri command is itself a
-/// genuine `async fn`, so Tauri's macro-generated `body_async` already
-/// dispatches it off the IPC-dispatch/main thread from the start; this
-/// additional `spawn_blocking` hop ensures the (already off-main) async task
-/// itself never blocks its executor thread for the whole scan duration -
-/// mirroring the `set_default_application` NSWorkspace write's dispatch
-/// pattern in this module.
-pub async fn list_applications() -> ListApplicationsResponse {
-    let task = tauri::async_runtime::spawn_blocking(|| {
-        let bundles = scan::scan_app_roots(&application_roots());
+/// synchronous and can take multiple seconds. The IPC command submits this
+/// function to its named bounded execution owner; this module deliberately
+/// does not create an ad-hoc blocking task/pool.
+pub fn list_applications() -> ListApplicationsResponse {
+    let bundles = scan::scan_app_roots(&application_roots());
 
-        let mut apps: Vec<MacApp> = bundles
-            .into_iter()
-            .map(|bundle_path| {
-                let plist_json =
-                    read_info_plist_json(&bundle_path).unwrap_or(serde_json::json!({}));
-                let meta = bundle::parse_bundle_metadata(&plist_json, &bundle_path);
-                MacApp {
-                    name: meta.name,
-                    bundle_path: bundle_path.to_string_lossy().into_owned(),
-                    bundle_id: meta.bundle_id,
-                    icon_data_url: read_icon_data_url(meta.icon_path.as_deref()),
-                }
-            })
-            .collect();
+    let mut apps: Vec<MacApp> = bundles
+        .into_iter()
+        .map(|bundle_path| {
+            let plist_json = read_info_plist_json(&bundle_path).unwrap_or(serde_json::json!({}));
+            let meta = bundle::parse_bundle_metadata(&plist_json, &bundle_path);
+            MacApp {
+                name: meta.name,
+                bundle_path: bundle_path.to_string_lossy().into_owned(),
+                bundle_id: meta.bundle_id,
+                icon_data_url: read_icon_data_url(meta.icon_path.as_deref()),
+            }
+        })
+        .collect();
 
-        apps.sort_by(|a, b| {
-            a.name
-                .to_ascii_lowercase()
-                .cmp(&b.name.to_ascii_lowercase())
-        });
-
-        ListApplicationsResponse { apps }
+    apps.sort_by(|a, b| {
+        a.name
+            .to_ascii_lowercase()
+            .cmp(&b.name.to_ascii_lowercase())
     });
 
-    task.await
-        .unwrap_or_else(|_| ListApplicationsResponse { apps: Vec::new() })
+    ListApplicationsResponse { apps }
 }
 
 /// Permanently associates the file's extension/type with the chosen app via

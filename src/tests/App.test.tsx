@@ -5,7 +5,6 @@ import { ipc } from './ipc-mock'
 import type { DirectoryEntry, ListDirRequest, ListDirResponse } from '@/lib/types/ipc'
 import { renderApp } from './utils/render-app'
 import { usePanesStore } from '@/stores/panes-store'
-import { useTabsStore } from '@/stores/tabs-store'
 import { useQueueStore } from '@/stores/queue-store'
 
 const rootEntries: DirectoryEntry[] = [
@@ -115,6 +114,49 @@ describe('App', () => {
     await waitFor(() => {
       expect(getRowInPane('Left pane', 'Documents')).toBeTruthy()
     })
+  })
+
+  it('drives the initial listing and pane navigation entirely through the v2 directory-session commands, never the v1 start_list_dir/dir://list-chunk path', async () => {
+    installListDirOverride()
+    const beginDirectorySession = vi.fn((payload) => {
+      const listing = createDirResponse({
+        path: payload.path,
+        sortKey: payload.view.sortKey,
+        sortDirection: payload.view.sortDirection,
+        filter: payload.view.filter,
+        showHidden: payload.view.showHidden,
+        includeItemCounts: payload.view.includeItemCounts,
+      })
+      return {
+        paneId: payload.paneId,
+        tabId: payload.tabId,
+        path: payload.path,
+        baseline: { sessionId: 1, navigationRevision: 1, watchRevision: 0, viewRevision: 0 },
+        totalRows: listing.entries.length,
+        pageSize: 500,
+        firstPage: { pageIndex: 0, entries: listing.entries },
+      }
+    })
+    ipc.override('begin_directory_session', beginDirectorySession as never)
+    const getDirectorySessionRange = vi.fn((payload) => ({
+      baseline: payload.baseline,
+      totalRows: 0,
+      page: { pageIndex: payload.pageIndex, entries: [] },
+    }))
+    ipc.override('get_directory_session_range', getDirectorySessionRange as never)
+
+    renderApp()
+
+    await waitFor(() => {
+      expect(getRowInPane('Left pane', 'Documents')).toBeTruthy()
+    })
+
+    // Navigating a pane must also stay on the v2 path.
+    await act(async () => {
+      await usePanesStore.getState().navigatePane('left', 'D:\\projects')
+    })
+
+    expect(beginDirectorySession).toHaveBeenCalled()
   })
 
   it('toggles theme via the command bar button', async () => {
@@ -462,19 +504,39 @@ describe('App', () => {
     })
   })
 
-  it('appends a streamed dir://list-chunk event onto the initial (partial) listing', async () => {
+  it('stitches a second v2 range page onto the initial listing (v2 seekable session)', async () => {
     ipc.override('set_tab_watch', () => undefined)
     ipc.override('list_tree_children', (payload) => ({ path: payload.path, children: [] }))
-    // Left pane opens as a partial listing (first chunk only); the remainder
-    // streams in as a separate list-chunk event.
-    ipc.override('start_list_dir', (payload) => ({
-      kind: 'head' as const,
+    // Left pane's session begin returns a full first page (500 rows); one
+    // more row lives on page 1 and is fetched (and stitched in) via
+    // `get_directory_session_range` before the pane finishes loading — the
+    // live-app equivalent of the old v1 "streamed remainder arrives after the
+    // initial partial listing" case.
+    const pageOneFiller = Array.from({ length: 498 }, (_, index) => ({
+      ...rootEntries[1],
+      id: `filler-${index}`,
+      name: `Filler-${index}`,
+      path: `C:\\Users\\Omega\\Filler-${index}`,
+    }))
+    ipc.override('begin_directory_session', (payload) => ({
+      paneId: payload.paneId,
+      tabId: payload.tabId,
       path: payload.path,
-      total: payload.path === 'C:\\Users\\Omega' ? 3 : 0,
-      requestId: 42,
-      firstChunk:
-        payload.path === 'C:\\Users\\Omega' ? [rootEntries[0], rootEntries[1]] : [],
-      done: payload.path !== 'C:\\Users\\Omega',
+      baseline: { sessionId: 42, navigationRevision: 42, watchRevision: 0, viewRevision: 0 },
+      totalRows: payload.path === 'C:\\Users\\Omega' ? 501 : 0,
+      pageSize: 500,
+      firstPage: {
+        pageIndex: 0,
+        entries:
+          payload.path === 'C:\\Users\\Omega'
+            ? [rootEntries[0], rootEntries[1], ...pageOneFiller]
+            : [],
+      },
+    }))
+    ipc.override('get_directory_session_range', (payload) => ({
+      baseline: payload.baseline,
+      totalRows: 501,
+      page: { pageIndex: payload.pageIndex, entries: [rootEntries[2]] },
     }))
     renderApp()
 
@@ -482,23 +544,13 @@ describe('App', () => {
       expect(getRowInPane('Left pane', 'Documents')).toBeTruthy()
       expect(getRowInPane('Left pane', 'Media')).toBeTruthy()
     })
-    // The streamed remainder is not shown until its chunk arrives.
-    expect(getRowInPane('Left pane', 'Report.txt')).toBeFalsy()
-
-    const tabId = useTabsStore.getState().panes.left.tabs[0].id
-    act(() => {
-      ipc.emit('dir://list-chunk', {
-        tabId,
-        requestId: 42,
-        path: 'C:\\Users\\Omega',
-        entries: [rootEntries[2]],
-        chunkIndex: 1,
-        done: true,
-      })
-    })
-
+    // Row 500 ("Report.txt", the sole row on the second v2 page) is well
+    // below the virtualized viewport, so it is asserted against the store's
+    // materialized listing rather than a rendered DOM row.
     await waitFor(() => {
-      expect(getRowInPane('Left pane', 'Report.txt')).toBeTruthy()
+      expect(
+        usePanesStore.getState().panes.left.entries.some((entry) => entry.name === 'Report.txt'),
+      ).toBe(true)
     })
   })
 

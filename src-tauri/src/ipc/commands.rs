@@ -1,8 +1,7 @@
 use crate::app_picker;
-use crate::archive;
 use crate::fs;
-use crate::item_counts::ItemCountService;
 use crate::ipc::icon_batch::IconBatcher;
+use crate::item_counts::ItemCountService;
 use crate::native_menu::NativeMenuService;
 use crate::ops::{OpSnapshot, OpsService};
 use crate::persist::{PersistedStore, PersistenceState};
@@ -21,24 +20,25 @@ use super::mock;
 #[cfg(feature = "test-utils")]
 use super::types::WarmNativeMenusResponse;
 use super::types::{
-    AppConfig, CancelSizeRequest, CancelSizeResponse, CancelSizesRequest, CancelSizesResponse,
-    CompressArchiveRequest, CreateEntryRequest, DeleteFromTrashRequest, EjectVolumeRequest,
-    ExtractArchiveRequest, FileClipboardMode, FolderSizeRequest, FolderSizesRequest,
-    GetDefaultApplicationRequest, GetDefaultApplicationResponse, IconStateEvent,
-    InitialShellResponse, InvokeNativeMenuRequest, ListApplicationsResponse, ListDirRequest,
-    ListDirResponse, ListTrashResponse, ListTreeChildrenRequest, ListTreeChildrenResponse,
-    LoadNativeMenuRequest, LoadNativeMenuResponse, LogFrontendRequest, MenuActionStatus,
-    OpIdRequest, OpenPathRequest, OpenWithRequest, RenameEntryRequest, ReorderOpsRequest,
-    RequestIconsRequest, ResolveConflictRequest, RestoreTrashRequest, SaveConfigRequest,
-    ActiveItemsSortRequest, ActiveItemsSortResponse, SaveSessionRequest, SessionState,
-    SetDefaultApplicationRequest, SetLogLevelRequest, SetTabWatchRequest, ShowPropertiesRequest,
-    SizeStateEvent, StartListDirHead, StartListDirRequest, StartListDirResponse,
-    StartListDirSuperseded, StartOpRequest, TrashEntriesRequest, VisibleItemCountsRequest,
-    VolumeInfo, WarmNativeMenusRequest, WriteFileClipboardRequest,
+    ActiveItemsSortRequest, ActiveItemsSortResponse, AppConfig, BeginNavigationRequest,
+    BeginNavigationResponse, CancelSizeRequest, CancelSizeResponse, CancelSizesRequest,
+    CancelSizesResponse, CreateEntryRequest, DeleteFromTrashRequest, EjectVolumeRequest,
+    FileClipboardMode, FolderSizeRequest, FolderSizesRequest, GetDefaultApplicationRequest,
+    GetDefaultApplicationResponse, GetSessionRangeRequest, IconStateEvent, InitialShellResponse,
+    InvokeNativeMenuRequest, ListApplicationsResponse, ListDirRequest, ListDirResponse,
+    ListTrashResponse, ListTreeChildrenRequest, ListTreeChildrenResponse, LoadNativeMenuRequest,
+    LoadNativeMenuResponse, LogFrontendRequest, MenuActionStatus, OpIdRequest, OpenPathRequest,
+    OpenWithRequest, ReleaseSessionRequest, ReleaseSessionResponse, RenameEntryRequest,
+    ReorderOpsRequest, RequestIconsRequest, ResolveConflictRequest, RestoreTrashRequest,
+    ReviseSessionViewRequest, SaveConfigRequest, SaveSessionRequest, SessionRangeResponse,
+    SessionRejection, SessionState, SetDefaultApplicationRequest, SetLogLevelRequest,
+    SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent, StartOpRequest, TrashEntriesRequest,
+    VisibleItemCountsRequest, VolumeInfo, WarmNativeMenusRequest, WriteFileClipboardRequest,
 };
-use crate::fs::{DirectoryEntry, ListDirOutcome};
-use crate::listing::ListingService;
+use crate::fs::DirectoryEntry;
 use std::path::Path;
+#[cfg(not(feature = "test-utils"))]
+use std::time::Duration;
 use tauri::State;
 #[cfg(not(feature = "test-utils"))]
 use tauri::{AppHandle, Emitter, Manager};
@@ -51,13 +51,81 @@ pub fn noop_dir_patch(_: crate::watch::DirPatch) {}
 #[inline(never)]
 pub fn noop_watch_error(_: String, _: String) {}
 
+/// Runs bounded, single-request filesystem work through the owned IPC
+/// latency executor. Command handlers only validate/capture payloads before
+/// entering this boundary; the executor has a fixed queue/workers, shared
+/// coordinator admission, deadline, and deterministic shutdown contract.
+///
+/// Long-running transfers deliberately do not use this helper; they belong to
+/// `OpsService`, which owns cancellation, progress and shutdown instead.
+#[cfg(not(feature = "test-utils"))]
+async fn latency_filesystem<T: Send + 'static>(
+    executor: &crate::ipc::executor::IpcExecutor,
+    resource_key: String,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, String> {
+    executor.latency(resource_key, move || Ok(work())).await
+}
+
+/// Variant for bounded mutations that can observe cancellation before they
+/// touch an OS API and at their own safe internal checkpoints.
+#[cfg(not(feature = "test-utils"))]
+async fn latency_filesystem_cancellable<T: Send + 'static>(
+    executor: &crate::ipc::executor::IpcExecutor,
+    resource_key: String,
+    work: impl FnOnce(&crate::ipc::executor::Cancellation) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    executor
+        .latency_cancellable(
+            resource_key,
+            crate::ipc::executor::Cancellation::default(),
+            work,
+        )
+        .await
+}
+
 #[tauri::command]
 pub fn get_initial_shell() -> InitialShellResponse {
     mock::initial_shell()
 }
 
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn list_dir(
+    payload: ListDirRequest,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<ListDirResponse, String> {
+    let key = payload.path.clone();
+    executor
+        .latency_cancellable(
+            key,
+            crate::ipc::executor::Cancellation::default(),
+            move |cancel| {
+                fs::list_dir_with_cancellation(&payload, || cancel.is_cancelled())
+                    .map_err(|error| {
+                        let message = format!("Failed to load \"{}\": {error}", payload.path);
+                        log::error!("{message}");
+                        message
+                    })
+                    .and_then(|outcome| match outcome {
+                        fs::ListDirOutcome::Complete(response) => Ok(response),
+                        fs::ListDirOutcome::Cancelled => {
+                            Err("directory listing cancelled".to_string())
+                        }
+                    })
+            },
+        )
+        .await
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn list_dir(payload: ListDirRequest) -> Result<ListDirResponse, String> {
+    list_dir_impl(payload)
+}
+
+#[cfg(feature = "test-utils")]
+fn list_dir_impl(payload: ListDirRequest) -> Result<ListDirResponse, String> {
     fs::list_dir(&payload).map_err(|error| {
         let message = format!("Failed to load \"{}\": {error}", payload.path);
         log::error!("{message}");
@@ -65,153 +133,101 @@ pub fn list_dir(payload: ListDirRequest) -> Result<ListDirResponse, String> {
     })
 }
 
-/// Streams a directory listing to the frontend in chunks.
-///
-/// Enumerating + sorting the whole directory happens here on a Tauri worker
-/// thread (never the UI thread), then the response carries only the inline
-/// first chunk; any remaining entries are emitted as `list_chunk` events from a
-/// background thread. This keeps the webview from parsing a single multi-MB
-/// listing array in one blocking `JSON.parse`. A per-tab request id (via
-/// [`ListingService`]) lets a superseding navigation cancel the in-flight
-/// stream so abandoned listings stop emitting.
+/// Establishes (or replaces) the directory session for a pane.
 #[cfg(not(feature = "test-utils"))]
 #[tauri::command]
-pub fn start_list_dir(
-    payload: StartListDirRequest,
-    app: AppHandle,
-    state: State<'_, ListingService>,
-    item_counts: State<'_, ItemCountService>,
-) -> Result<StartListDirResponse, String> {
-    item_counts.cancel_tab(&payload.tab_id);
-    let session = state.begin_session(&payload.tab_id);
-    let outcome =
-        fs::list_dir_with_cancellation(&payload.to_options(), || state.is_cancelled(&session))
-            .map_err(|error| {
-                let message = format!("Failed to load \"{}\": {error}", payload.path);
-                log::error!("{message}");
-                message
-            })?;
-
-    let ListDirResponse { path, entries } = match outcome {
-        ListDirOutcome::Complete(response) => response,
-        ListDirOutcome::Cancelled => {
-            return Ok(StartListDirResponse::Superseded(StartListDirSuperseded {
-                request_id: session.request_id,
-            }));
-        }
-    };
-
-    let total = entries.len() as u64;
-    let request_id = session.request_id;
-    if !state.complete_session(
-        &session,
-        path.clone(),
-        payload.sort_key,
-        payload.sort_direction,
-        payload.filter.clone(),
-        payload.show_hidden,
-        payload.include_item_counts,
-        entries.clone(),
-    ) {
-        return Ok(StartListDirResponse::Superseded(StartListDirSuperseded {
-            request_id,
-        }));
-    }
-    let (first_chunk, rest) =
-        crate::listing::split_first_chunk(entries, crate::listing::LIST_CHUNK_SIZE);
-    let done = rest.is_empty();
-
-    if !done {
-        let tab_id = payload.tab_id.clone();
-        let stream_path = path.clone();
-        std::thread::spawn(move || {
-            let service = app.state::<ListingService>();
-            let total_rest = rest.len();
-            let mut emitted = 0usize;
-            for (chunk_offset, chunk) in rest.chunks(crate::listing::LIST_CHUNK_SIZE).enumerate() {
-                // Bail as soon as a newer navigation for this tab supersedes us.
-                if !service.is_current(&tab_id, request_id) {
-                    return;
-                }
-                emitted += chunk.len();
-                let event = super::types::ListChunkEvent {
-                    tab_id: tab_id.clone(),
-                    request_id,
-                    path: stream_path.clone(),
-                    entries: chunk.to_vec(),
-                    chunk_index: chunk_offset as u64 + 1,
-                    done: emitted >= total_rest,
-                };
-                let _ = app.emit(super::events::LIST_CHUNK, event);
-            }
-        });
-    }
-
-    Ok(StartListDirResponse::Head(StartListDirHead {
-        path,
-        total,
-        request_id,
-        first_chunk,
-        done,
-    }))
+pub async fn begin_directory_session(
+    payload: BeginNavigationRequest,
+    state: State<'_, Arc<crate::directory_session::DirectorySessionService>>,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+    registry: State<'_, Arc<volumes::registry::VolumeRegistry>>,
+) -> Result<BeginNavigationResponse, String> {
+    let resource_key = registry.resolve_resource_key(&payload.path);
+    let key = resource_key.clone().unwrap_or_else(|| payload.path.clone());
+    let sessions = Arc::clone(state.inner());
+    executor
+        .latency(key, move || {
+            sessions.begin_navigation(payload, None, resource_key)
+        })
+        .await
 }
 
-/// `test-utils` variant: builds the same listing head (first chunk + totals)
-/// without an `AppHandle`, so the streamed remainder is never emitted. The
-/// chunk-splitting and request-id logic it shares with the production command
-/// live in [`crate::listing`] and are covered directly by integration tests.
 #[cfg(feature = "test-utils")]
 #[tauri::command]
-pub fn start_list_dir(
-    payload: StartListDirRequest,
-    state: State<'_, ListingService>,
-    item_counts: State<'_, ItemCountService>,
-) -> Result<StartListDirResponse, String> {
-    item_counts.cancel_tab(&payload.tab_id);
-    let session = state.begin_session(&payload.tab_id);
-    let outcome =
-        fs::list_dir_with_cancellation(&payload.to_options(), || state.is_cancelled(&session))
-            .map_err(|error| error.to_string())?;
-
-    let ListDirResponse { path, entries } = match outcome {
-        ListDirOutcome::Complete(response) => response,
-        ListDirOutcome::Cancelled => {
-            return Ok(StartListDirResponse::Superseded(StartListDirSuperseded {
-                request_id: session.request_id,
-            }));
-        }
-    };
-
-    let total = entries.len() as u64;
-    let request_id = session.request_id;
-    if !state.complete_session(
-        &session,
-        path.clone(),
-        payload.sort_key,
-        payload.sort_direction,
-        payload.filter.clone(),
-        payload.show_hidden,
-        payload.include_item_counts,
-        entries.clone(),
-    ) {
-        return Ok(StartListDirResponse::Superseded(StartListDirSuperseded {
-            request_id,
-        }));
-    }
-    let (first_chunk, rest) =
-        crate::listing::split_first_chunk(entries, crate::listing::LIST_CHUNK_SIZE);
-
-    Ok(StartListDirResponse::Head(StartListDirHead {
-        path,
-        total,
-        request_id,
-        done: rest.is_empty(),
-        first_chunk,
-    }))
+pub fn begin_directory_session(
+    payload: BeginNavigationRequest,
+    state: State<'_, Arc<crate::directory_session::DirectorySessionService>>,
+    coordinator: State<'_, Arc<crate::resource_coordinator::ResourceCoordinator>>,
+    registry: State<'_, Arc<volumes::registry::VolumeRegistry>>,
+) -> Result<BeginNavigationResponse, String> {
+    let resource_key = registry.resolve_resource_key(&payload.path);
+    state.begin_navigation(payload, Some(&coordinator), resource_key)
 }
 
+/// Idempotent page-index range fetch for an established v2 directory
+/// session. Any valid page index may be retried for the same baseline; a
+/// stale baseline field is rejected (not served) per Functional Requirement 1.
+///
+/// The error is the typed [`SessionRejection`] (not a stringified message) so
+/// the frontend can branch on `kind` (e.g. "stale, silently re-navigate" vs.
+/// "page out of range, a real bug") instead of string-matching.
+#[tauri::command]
+pub fn get_directory_session_range(
+    payload: GetSessionRangeRequest,
+    state: State<'_, Arc<crate::directory_session::DirectorySessionService>>,
+) -> Result<SessionRangeResponse, SessionRejection> {
+    state.get_range(&payload)
+}
+
+/// Revises the sort/filter/show-hidden/item-count view of an already-active
+/// v2 directory session without re-enumerating the filesystem (Phase 4: the
+/// frontend calls this instead of re-running `begin_directory_session` for a
+/// plain sort/filter change on the same directory). Returns the same shape as
+/// `begin_directory_session` (a fresh baseline + first page) so callers can
+/// treat "new session" and "revised view" uniformly.
+#[tauri::command]
+pub fn revise_directory_session_view(
+    payload: ReviseSessionViewRequest,
+    state: State<'_, Arc<crate::directory_session::DirectorySessionService>>,
+) -> Result<BeginNavigationResponse, SessionRejection> {
+    state.revise_view(
+        &payload.pane_id,
+        &payload.tab_id,
+        payload.session_id,
+        payload.view,
+    )
+}
+
+/// Idempotent release of a v2 directory session. Safe to call more than once
+/// (e.g. tab close racing app teardown) — a release for an
+/// already-superseded/absent session simply reports `released: false`.
+#[tauri::command]
+pub fn release_directory_session(
+    payload: ReleaseSessionRequest,
+    state: State<'_, Arc<crate::directory_session::DirectorySessionService>>,
+) -> ReleaseSessionResponse {
+    state.release_session(&payload)
+}
+
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn list_tree_children(
+    payload: ListTreeChildrenRequest,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<ListTreeChildrenResponse, String> {
+    let key = payload.path.clone();
+    latency_filesystem(&executor, key, move || list_tree_children_impl(payload)).await?
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn list_tree_children(
+    payload: ListTreeChildrenRequest,
+) -> Result<ListTreeChildrenResponse, String> {
+    list_tree_children_impl(payload)
+}
+
+fn list_tree_children_impl(
     payload: ListTreeChildrenRequest,
 ) -> Result<ListTreeChildrenResponse, String> {
     fs::list_tree_children(&payload).map_err(|error| {
@@ -224,8 +240,29 @@ pub fn list_tree_children(
     })
 }
 
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn create_folder(
+    payload: CreateEntryRequest,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<DirectoryEntry, String> {
+    let key = payload.parent.clone();
+    latency_filesystem_cancellable(&executor, key, move |cancel| {
+        if cancel.is_cancelled() {
+            return Err("create folder cancelled".to_string());
+        }
+        create_folder_impl(payload)
+    })
+    .await
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn create_folder(payload: CreateEntryRequest) -> Result<DirectoryEntry, String> {
+    create_folder_impl(payload)
+}
+
+fn create_folder_impl(payload: CreateEntryRequest) -> Result<DirectoryEntry, String> {
     fs::create_directory(&payload.parent, &payload.name).map_err(|error| {
         let message = format!("Failed to create folder \"{}\": {error}", payload.name);
         log::error!("{message}");
@@ -233,8 +270,29 @@ pub fn create_folder(payload: CreateEntryRequest) -> Result<DirectoryEntry, Stri
     })
 }
 
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn create_file(
+    payload: CreateEntryRequest,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<DirectoryEntry, String> {
+    let key = payload.parent.clone();
+    latency_filesystem_cancellable(&executor, key, move |cancel| {
+        if cancel.is_cancelled() {
+            return Err("create file cancelled".to_string());
+        }
+        create_file_impl(payload)
+    })
+    .await
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn create_file(payload: CreateEntryRequest) -> Result<DirectoryEntry, String> {
+    create_file_impl(payload)
+}
+
+fn create_file_impl(payload: CreateEntryRequest) -> Result<DirectoryEntry, String> {
     fs::create_file(&payload.parent, &payload.name).map_err(|error| {
         let message = format!("Failed to create file \"{}\": {error}", payload.name);
         log::error!("{message}");
@@ -242,8 +300,29 @@ pub fn create_file(payload: CreateEntryRequest) -> Result<DirectoryEntry, String
     })
 }
 
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn rename_entry(
+    payload: RenameEntryRequest,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<DirectoryEntry, String> {
+    let key = payload.path.clone();
+    latency_filesystem_cancellable(&executor, key, move |cancel| {
+        if cancel.is_cancelled() {
+            return Err("rename cancelled".to_string());
+        }
+        rename_entry_impl(payload)
+    })
+    .await
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn rename_entry(payload: RenameEntryRequest) -> Result<DirectoryEntry, String> {
+    rename_entry_impl(payload)
+}
+
+fn rename_entry_impl(payload: RenameEntryRequest) -> Result<DirectoryEntry, String> {
     fs::rename_entry(&payload.path, &payload.new_name).map_err(|error| {
         let message = format!("Failed to rename \"{}\": {error}", payload.path);
         log::error!("{message}");
@@ -251,8 +330,31 @@ pub fn rename_entry(payload: RenameEntryRequest) -> Result<DirectoryEntry, Strin
     })
 }
 
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn move_to_trash(
+    payload: TrashEntriesRequest,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<(), String> {
+    let key = payload
+        .paths
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "trash".into());
+    latency_filesystem_cancellable(&executor, key, move |cancel| {
+        move_to_trash_impl_cancellable(payload, cancel)
+    })
+    .await
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn move_to_trash(payload: TrashEntriesRequest) -> Result<(), String> {
+    move_to_trash_impl(payload)
+}
+
+#[cfg(feature = "test-utils")]
+fn move_to_trash_impl(payload: TrashEntriesRequest) -> Result<(), String> {
     crate::trash::move_to_trash(&payload.paths).map_err(|error| {
         let message = format!("Failed to move items to trash: {error}");
         log::error!("{message}");
@@ -260,8 +362,35 @@ pub fn move_to_trash(payload: TrashEntriesRequest) -> Result<(), String> {
     })
 }
 
+#[cfg(not(feature = "test-utils"))]
+fn move_to_trash_impl_cancellable(
+    payload: TrashEntriesRequest,
+    cancellation: &crate::ipc::executor::Cancellation,
+) -> Result<(), String> {
+    crate::trash::move_to_trash_cancellable(&payload.paths, || cancellation.is_cancelled()).map_err(
+        |error| {
+            let message = format!("Failed to move items to trash: {error}");
+            log::error!("{message}");
+            message
+        },
+    )
+}
+
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn list_trash(
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<ListTrashResponse, String> {
+    latency_filesystem(&executor, "trash".into(), list_trash_impl).await?
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn list_trash() -> Result<ListTrashResponse, String> {
+    list_trash_impl()
+}
+
+fn list_trash_impl() -> Result<ListTrashResponse, String> {
     crate::trash::list_trash()
         .map(|entries| ListTrashResponse { entries })
         .map_err(|error| {
@@ -271,8 +400,25 @@ pub fn list_trash() -> Result<ListTrashResponse, String> {
         })
 }
 
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn restore_from_trash(
+    payload: RestoreTrashRequest,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<(), String> {
+    latency_filesystem(&executor, "trash".into(), move || {
+        restore_from_trash_impl(payload)
+    })
+    .await?
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn restore_from_trash(payload: RestoreTrashRequest) -> Result<(), String> {
+    restore_from_trash_impl(payload)
+}
+
+fn restore_from_trash_impl(payload: RestoreTrashRequest) -> Result<(), String> {
     crate::trash::restore_from_trash(&payload.ids).map_err(|error| {
         let message = format!("Failed to restore items from trash: {error}");
         log::error!("{message}");
@@ -280,8 +426,21 @@ pub fn restore_from_trash(payload: RestoreTrashRequest) -> Result<(), String> {
     })
 }
 
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn empty_trash(
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<(), String> {
+    latency_filesystem(&executor, "trash".into(), empty_trash_impl).await?
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn empty_trash() -> Result<(), String> {
+    empty_trash_impl()
+}
+
+fn empty_trash_impl() -> Result<(), String> {
     crate::trash::empty_trash().map_err(|error| {
         let message = format!("Failed to empty trash: {error}");
         log::error!("{message}");
@@ -289,8 +448,25 @@ pub fn empty_trash() -> Result<(), String> {
     })
 }
 
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn delete_from_trash(
+    payload: DeleteFromTrashRequest,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<(), String> {
+    latency_filesystem(&executor, "trash".into(), move || {
+        delete_from_trash_impl(payload)
+    })
+    .await?
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn delete_from_trash(payload: DeleteFromTrashRequest) -> Result<(), String> {
+    delete_from_trash_impl(payload)
+}
+
+fn delete_from_trash_impl(payload: DeleteFromTrashRequest) -> Result<(), String> {
     crate::trash::delete_from_trash(&payload.ids).map_err(|error| {
         let message = format!("Failed to permanently delete items from trash: {error}");
         log::error!("{message}");
@@ -298,8 +474,23 @@ pub fn delete_from_trash(payload: DeleteFromTrashRequest) -> Result<(), String> 
     })
 }
 
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn open_path(
+    payload: OpenPathRequest,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<(), String> {
+    let key = payload.path.clone();
+    latency_filesystem(&executor, key, move || open_path_impl(payload)).await?
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn open_path(payload: OpenPathRequest) -> Result<(), String> {
+    open_path_impl(payload)
+}
+
+fn open_path_impl(payload: OpenPathRequest) -> Result<(), String> {
     crate::launch::open_path(Path::new(&payload.path)).map_err(|error| {
         let message = format!("Failed to open \"{}\": {error}", payload.path);
         log::error!("{message}");
@@ -307,8 +498,28 @@ pub fn open_path(payload: OpenPathRequest) -> Result<(), String> {
     })
 }
 
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn write_file_clipboard(
+    payload: WriteFileClipboardRequest,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<(), String> {
+    latency_filesystem_cancellable(&executor, "clipboard".into(), move |cancel| {
+        if cancel.is_cancelled() {
+            return Err("clipboard write cancelled".to_string());
+        }
+        write_file_clipboard_impl(payload)
+    })
+    .await
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn write_file_clipboard(payload: WriteFileClipboardRequest) -> Result<(), String> {
+    write_file_clipboard_impl(payload)
+}
+
+fn write_file_clipboard_impl(payload: WriteFileClipboardRequest) -> Result<(), String> {
     crate::clipboard::write_paths(
         match payload.mode {
             FileClipboardMode::Copy => crate::clipboard::ClipboardMode::Copy,
@@ -323,8 +534,21 @@ pub fn write_file_clipboard(payload: WriteFileClipboardRequest) -> Result<(), St
     })
 }
 
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn clear_file_clipboard(
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<(), String> {
+    latency_filesystem(&executor, "clipboard".into(), clear_file_clipboard_impl).await?
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn clear_file_clipboard() -> Result<(), String> {
+    clear_file_clipboard_impl()
+}
+
+fn clear_file_clipboard_impl() -> Result<(), String> {
     crate::clipboard::clear().map_err(|error| {
         let message = format!("Failed to clear OS clipboard: {error}");
         log::warn!("{message}");
@@ -332,6 +556,21 @@ pub fn clear_file_clipboard() -> Result<(), String> {
     })
 }
 
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn load_native_menu(
+    payload: LoadNativeMenuRequest,
+    state: State<'_, Arc<NativeMenuService>>,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<LoadNativeMenuResponse, String> {
+    let service = Arc::clone(state.inner());
+    latency_filesystem(&executor, "native-menu".into(), move || {
+        service.load_menu(payload)
+    })
+    .await
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn load_native_menu(
     payload: LoadNativeMenuRequest,
@@ -340,6 +579,21 @@ pub fn load_native_menu(
     state.load_menu(payload)
 }
 
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn invoke_native_menu_action(
+    payload: InvokeNativeMenuRequest,
+    state: State<'_, Arc<NativeMenuService>>,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<MenuActionStatus, String> {
+    let service = Arc::clone(state.inner());
+    latency_filesystem(&executor, "native-menu".into(), move || {
+        service.invoke_menu_action(payload)
+    })
+    .await
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn invoke_native_menu_action(
     payload: InvokeNativeMenuRequest,
@@ -348,6 +602,21 @@ pub fn invoke_native_menu_action(
     state.invoke_menu_action(payload)
 }
 
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn show_properties(
+    payload: ShowPropertiesRequest,
+    state: State<'_, Arc<NativeMenuService>>,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<MenuActionStatus, String> {
+    let service = Arc::clone(state.inner());
+    latency_filesystem(&executor, "native-menu".into(), move || {
+        service.show_properties(payload)
+    })
+    .await
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn show_properties(
     payload: ShowPropertiesRequest,
@@ -356,6 +625,21 @@ pub fn show_properties(
     state.show_properties(payload)
 }
 
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn open_with(
+    payload: OpenWithRequest,
+    state: State<'_, Arc<NativeMenuService>>,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<MenuActionStatus, String> {
+    let service = Arc::clone(state.inner());
+    latency_filesystem(&executor, "native-menu".into(), move || {
+        service.open_with(payload)
+    })
+    .await
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn open_with(
     payload: OpenWithRequest,
@@ -370,7 +654,10 @@ pub fn open_with(
 /// never touches the invoke-token store, and emits no events.
 #[cfg(not(feature = "test-utils"))]
 #[tauri::command]
-pub fn warm_native_menus(payload: WarmNativeMenusRequest, state: State<'_, NativeMenuService>) {
+pub fn warm_native_menus(
+    payload: WarmNativeMenusRequest,
+    state: State<'_, Arc<NativeMenuService>>,
+) {
     log::debug!(
         "received native menu warm batch with {} requests",
         payload.requests.len()
@@ -421,13 +708,55 @@ pub fn warm_native_menus(
     WarmNativeMenusResponse { warmed_keys }
 }
 
+#[cfg(not(feature = "test-utils"))]
 #[tauri::command]
-pub async fn list_applications() -> ListApplicationsResponse {
-    app_picker::list_applications().await
+pub async fn list_applications(
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<ListApplicationsResponse, String> {
+    latency_filesystem(
+        &executor,
+        "app-picker".into(),
+        app_picker::list_applications,
+    )
+    .await
 }
 
+#[cfg(feature = "test-utils")]
+#[tauri::command]
+pub async fn list_applications() -> ListApplicationsResponse {
+    app_picker::list_applications()
+}
+
+/// LaunchServices has an asynchronous completion callback and may involve a
+/// system confirmation dialog. The named app-picker executor owns admission,
+/// caller deadline, and cooperative cancellation; the platform request itself
+/// is deliberately not force-killed once issued.
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn set_default_application(
+    payload: SetDefaultApplicationRequest,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<MenuActionStatus, String> {
+    executor
+        .latency_async_cancellable_with_deadline(
+            "app-picker-launch-services".into(),
+            crate::ipc::executor::Cancellation::default(),
+            // LaunchServices may keep its OS-owned confirmation UI open for
+            // longer than the normal short IPC deadline. The macOS adapter
+            // still has its own 10-second completion safeguard, so this is a
+            // margin for scheduling/serialization rather than unbounded work.
+            Duration::from_secs(15),
+            move |cancellation| async move {
+                Ok(app_picker::set_default_application_cancellable(payload, cancellation).await)
+            },
+        )
+        .await
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub async fn set_default_application(payload: SetDefaultApplicationRequest) -> MenuActionStatus {
+    // The deterministic fake has no platform work to enqueue.
     app_picker::set_default_application(payload).await
 }
 
@@ -438,32 +767,26 @@ pub fn get_default_application(
     app_picker::get_default_application(payload)
 }
 
-#[tauri::command]
-pub fn compress_archive(payload: CompressArchiveRequest) -> MenuActionStatus {
-    archive::compress_archive(payload)
-}
-
-#[tauri::command]
-pub fn extract_archive(payload: ExtractArchiveRequest) -> MenuActionStatus {
-    archive::extract_archive(payload)
-}
-
+/// Reads the registry's current snapshot; performs no platform volume
+/// discovery on this path. The registry itself keeps the snapshot current
+/// via its long-lived native registrations and the window-focus reconcile
+/// safety net (see `lib.rs`), so a plain command invocation here is always a
+/// read of already-owned state, matching the IPC execution matrix's "bounded
+/// reads of already-owned immutable memory" carve-out.
 #[cfg(not(feature = "test-utils"))]
 #[tauri::command]
-pub fn list_volumes(app: AppHandle) -> Result<Vec<VolumeInfo>, String> {
-    let volumes = volumes::list_volumes();
-
-    app.emit(
-        super::events::VOLUMES_CHANGED,
-        super::types::VolumesChangedEvent {
-            volumes: volumes.clone(),
-        },
-    )
-    .map_err(|error| error.to_string())?;
-
-    Ok(volumes)
+pub fn list_volumes(
+    registry: State<'_, Arc<volumes::registry::VolumeRegistry>>,
+) -> Result<Vec<VolumeInfo>, String> {
+    Ok(registry.snapshot().to_volume_infos())
 }
 
+/// Under `test-utils`, no `VolumeRegistry` is managed as Tauri state (the
+/// registry's `test-utils` variant is exercised directly by
+/// `volume_registry_integration.rs`, not through IPC state management), so
+/// this keeps the previous direct-enumeration behavior — reading the same
+/// deterministic fixture inventory `volumes::list_volumes()` always returns
+/// under `test-utils`.
 #[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn list_volumes() -> Result<Vec<VolumeInfo>, String> {
@@ -472,17 +795,21 @@ pub fn list_volumes() -> Result<Vec<VolumeInfo>, String> {
 
 #[cfg(not(feature = "test-utils"))]
 #[tauri::command]
-pub fn eject_volume(
-    app: AppHandle,
+pub async fn eject_volume(
+    registry: State<'_, Arc<volumes::registry::VolumeRegistry>>,
     payload: EjectVolumeRequest,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
 ) -> Result<MenuActionStatus, String> {
-    let status = volumes::eject::eject_volume(&payload.mount_root);
+    let mount_root = payload.mount_root;
+    let status = latency_filesystem(&executor, mount_root.clone(), move || {
+        volumes::eject::eject_volume(&mount_root)
+    })
+    .await?;
     if status.handled {
-        let volumes = volumes::list_volumes();
-        let _ = app.emit(
-            super::events::VOLUMES_CHANGED,
-            super::types::VolumesChangedEvent { volumes },
-        );
+        // A successful eject changes the mounted inventory; ask the
+        // registry to re-enumerate and publish (bounded by its own refresh
+        // deadline) rather than reading/emitting a one-off snapshot here.
+        registry.refresh();
     }
     Ok(status)
 }
@@ -618,23 +945,26 @@ fn size_state_event_from_update(update: crate::size::SizeUpdate) -> SizeStateEve
 /// final flush of any remainder.
 #[cfg(not(feature = "test-utils"))]
 #[tauri::command]
-pub fn request_icons(payload: RequestIconsRequest, app: AppHandle) {
+pub fn request_icons(
+    payload: RequestIconsRequest,
+    app: AppHandle,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) {
     let Some(pool) = crate::file_icons::icon_pool() else {
         let app_handle = app.clone();
-        let mut batcher = IconBatcher::new(Instant::now());
-        for path in payload.paths {
-            let icon_data_url = crate::file_icons::resolve_icon(Path::new(&path), false);
-            let event = IconStateEvent {
-                path,
-                icon_data_url,
-            };
-            if let Some(batch) = batcher.push(event, Instant::now()) {
-                let _ = app_handle.emit(super::events::ICON_STATE, batch);
-            }
-        }
-        if let Some(batch) = batcher.drain_remainder() {
-            let _ = app_handle.emit(super::events::ICON_STATE, batch);
-        }
+        let executor = Arc::clone(executor.inner());
+        // The fallback must not resolve native icons on the IPC dispatcher.
+        // It has the same event contract as the Rayon path, but is owned by
+        // the bounded latency executor when the specialized icon pool cannot
+        // be created.
+        tauri::async_runtime::spawn(async move {
+            let _ = executor
+                .latency("icons".into(), move || {
+                    emit_icons(payload.paths, &app_handle);
+                    Ok(())
+                })
+                .await;
+        });
         return;
     };
 
@@ -664,6 +994,24 @@ pub fn request_icons(payload: RequestIconsRequest, app: AppHandle) {
             let _ = app_handle.emit(super::events::ICON_STATE, batch);
         }
     });
+}
+
+#[cfg(not(feature = "test-utils"))]
+fn emit_icons(paths: Vec<String>, app: &AppHandle) {
+    let mut batcher = IconBatcher::new(Instant::now());
+    for path in paths {
+        let icon_data_url = crate::file_icons::resolve_icon(Path::new(&path), false);
+        let event = IconStateEvent {
+            path,
+            icon_data_url,
+        };
+        if let Some(batch) = batcher.push(event, Instant::now()) {
+            let _ = app.emit(super::events::ICON_STATE, batch);
+        }
+    }
+    if let Some(batch) = batcher.drain_remainder() {
+        let _ = app.emit(super::events::ICON_STATE, batch);
+    }
 }
 
 /// `test-utils` synchronous variant: returns the same batched shape the
@@ -696,8 +1044,13 @@ pub fn request_visible_item_counts(
     payload: VisibleItemCountsRequest,
     app: AppHandle,
     state: State<'_, ItemCountService>,
+    session_state: State<'_, Arc<crate::directory_session::DirectorySessionService>>,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
 ) {
-    let plan = state.plan_automatic_request(&payload);
+    let generation = session_state
+        .watch_revision_for_pane_path(&payload.context.pane_id, &payload.context.path)
+        .unwrap_or(payload.context.request_id);
+    let plan = state.plan_automatic_request_with_generation(&payload, generation);
     if plan.is_empty() {
         return;
     }
@@ -705,11 +1058,20 @@ pub fn request_visible_item_counts(
     if !state.enqueue_automatic_request(plan) {
         return;
     }
-    std::thread::spawn(move || {
-        let service = app.state::<ItemCountService>();
-        service.process_automatic_queue(|event| {
-            let _ = app.emit(super::events::ITEM_COUNT, event);
-        });
+    let executor = Arc::clone(executor.inner());
+    tauri::async_runtime::spawn(async move {
+        // `enqueue_automatic_request` grants at most two drainers; every
+        // drainer itself runs in the fixed IPC owner rather than a new OS
+        // thread per viewport request.
+        let _ = executor
+            .latency("item-counts".into(), move || {
+                let service = app.state::<ItemCountService>();
+                service.process_automatic_queue(|event| {
+                    let _ = app.emit(super::events::ITEM_COUNT, event);
+                });
+                Ok(())
+            })
+            .await;
     });
 }
 
@@ -718,21 +1080,59 @@ pub fn request_visible_item_counts(
 pub fn request_visible_item_counts(
     payload: VisibleItemCountsRequest,
     state: State<'_, ItemCountService>,
+    session_state: State<'_, Arc<crate::directory_session::DirectorySessionService>>,
 ) {
-    let plan = state.plan_automatic_request(&payload);
+    let generation = session_state
+        .watch_revision_for_pane_path(&payload.context.pane_id, &payload.context.path)
+        .unwrap_or(payload.context.request_id);
+    let plan = state.plan_automatic_request_with_generation(&payload, generation);
     state.process_automatic_request(plan, |event| state.record_test_event(event));
 }
 
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn sort_active_items(
+    payload: ActiveItemsSortRequest,
+    state: State<'_, ItemCountService>,
+    session_state: State<'_, Arc<crate::directory_session::DirectorySessionService>>,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<ActiveItemsSortResponse, String> {
+    let key = payload.context.path.clone();
+    let item_counts = state.inner().clone();
+    let sessions = Arc::clone(session_state.inner());
+    executor
+        .latency(key, move || {
+            item_counts
+                .sort_active_items_with_session(&payload, Some(&sessions))
+                .map_err(|error| {
+                    let message = format!(
+                        "Failed to sort \"{}\" by Items: {error}",
+                        payload.context.path
+                    );
+                    log::error!("{message}");
+                    message
+                })
+        })
+        .await
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn sort_active_items(
     payload: ActiveItemsSortRequest,
     state: State<'_, ItemCountService>,
+    session_state: State<'_, Arc<crate::directory_session::DirectorySessionService>>,
 ) -> Result<ActiveItemsSortResponse, String> {
-    state.sort_active_items(&payload).map_err(|error| {
-        let message = format!("Failed to sort \"{}\" by Items: {error}", payload.context.path);
-        log::error!("{message}");
-        message
-    })
+    state
+        .sort_active_items_with_session(&payload, Some(session_state.inner()))
+        .map_err(|error| {
+            let message = format!(
+                "Failed to sort \"{}\" by Items: {error}",
+                payload.context.path
+            );
+            log::error!("{message}");
+            message
+        })
 }
 
 #[tauri::command]
@@ -755,40 +1155,159 @@ pub fn cancel_sizes(
     }
 }
 
+/// Folds a legacy [`crate::watch::DirPatch`] into the v2
+/// `DirectorySessionService`, if the reporting tab has an active v2 session
+/// for the corresponding pane (Phase 5: closes the gap where watch-driven
+/// mutations previously left `PaneEntryCollection` stale until the next full
+/// reload — see the Phase 4 stopgap notes). Reuses `WatchService`'s
+/// already-tested long-lived per-tab watch as the mutation source rather than
+/// standing up a second independent long-lived watcher; the v2 session only
+/// consumes the *result*, computing its own Rust-authoritative
+/// [`SessionPatch`] rather than trusting the legacy patch's already-applied
+/// v1 ordering. Returns `None` when there is no active v2 session for the
+/// pane, the path does not match, or nothing changed in the derived view —
+/// all silent no-ops, matching "stale/path-mismatched patches affect neither
+/// pane nor tree" (this function only ever *adds* a session patch on top of
+/// the legacy patch, never suppresses it).
+pub fn fold_dir_patch_into_session(
+    session_state: &crate::directory_session::DirectorySessionService,
+    item_count_state: &ItemCountService,
+    patch: &crate::watch::DirPatch,
+) -> Option<super::types::SessionPatch> {
+    fold_dir_patch_into_session_core(session_state, item_count_state, patch)
+}
+
+/// Cfg-agnostic core shared by the real (non-`test-utils`) `set_tab_watch`
+/// callback and [`fold_dir_patch_into_session_for_tests`], so the fold ->
+/// invalidate pipeline is exercised identically by both — see
+/// [`fold_dir_patch_into_session`]'s docs for the full contract.
+fn fold_dir_patch_into_session_core(
+    session_state: &crate::directory_session::DirectorySessionService,
+    item_count_state: &ItemCountService,
+    patch: &crate::watch::DirPatch,
+) -> Option<super::types::SessionPatch> {
+    let pane_id = crate::watch::pane_scope(&patch.tab_id).to_string();
+    let changed_entries: Vec<DirectoryEntry> = patch
+        .changed
+        .iter()
+        .filter_map(|change| change.entry.clone())
+        .collect();
+    let changed_dirs: Vec<String> = patch
+        .changed
+        .iter()
+        .filter_map(|change| {
+            change
+                .entry
+                .as_ref()
+                .filter(|entry| entry.is_dir)
+                .map(|entry| entry.path.clone())
+        })
+        .collect();
+    let session_patch = session_state.apply_watch_mutation(
+        &pane_id,
+        &patch.path,
+        changed_entries,
+        patch.removed.clone(),
+    )?;
+    invalidate_item_counts_for_patch(item_count_state, &session_patch, &changed_dirs);
+    Some(session_patch)
+}
+
+/// Matches invalidation breadth to a folded [`super::types::SessionPatch`]:
+/// an unambiguous `Delta` (single direct-child add/remove/update) only makes
+/// the mutated directory's own item count stale (its child count changed by
+/// exactly one), so only that directory is invalidated. A `ReplaceView`
+/// (multiple or order-ambiguous changes) additionally invalidates every
+/// changed *directory* row itself, since a broader/ambiguous batch cannot
+/// prove those child directories' own cached counts are still accurate
+/// (e.g. a rename-in-place can carry a different identity than the cache
+/// key remembers). `MetadataOnly` patches never touch child membership, so
+/// they are intentionally left alone (Items counts are unaffected by a
+/// field-only update).
+///
+/// The generation key is each patch's post-mutation `watch_revision` — a
+/// per-session, mutation-driven counter that only advances when
+/// `apply_watch_mutation`/`resnapshot` actually changes the session's
+/// derived view (see `directory_session::mod`'s `ActiveSession::baseline`).
+/// Unlike `process_automatic_request`'s `request_id` (a frontend-supplied
+/// per-request counter that happens to always be "fresh" because every
+/// viewport request gets a new one), `watch_revision` is the only signal in
+/// this codebase that actually represents "this directory's on-disk content
+/// generation as last observed by the owning session" — exactly the
+/// invariant `ItemCountCache::invalidate_generation` needs to drop stale
+/// counts without needing every viewport request to also relitigate
+/// freshness.
+fn invalidate_item_counts_for_patch(
+    item_count_state: &ItemCountService,
+    patch: &super::types::SessionPatch,
+    changed_dirs: &[String],
+) {
+    use super::types::SessionPatch;
+
+    match patch {
+        SessionPatch::Delta {
+            path,
+            next_baseline,
+            ..
+        } => {
+            item_count_state.invalidate_directory_generation(path, next_baseline.watch_revision.0);
+        }
+        SessionPatch::ReplaceView {
+            path,
+            next_baseline,
+            ..
+        } => {
+            let generation = next_baseline.watch_revision.0;
+            item_count_state.invalidate_directory_generation(path, generation);
+            for changed_dir in changed_dirs {
+                item_count_state.invalidate_directory_generation(changed_dir, generation);
+            }
+        }
+        SessionPatch::MetadataOnly { .. } => {}
+    }
+}
+
+/// Test-only entry point that exercises the exact same watch-patch ->
+/// session-fold -> item-count-invalidation pipeline as the real (non-
+/// `test-utils`) `set_tab_watch` callback above, without requiring a live
+/// `AppHandle`/event emission. `fold_dir_patch_into_session` itself stays
+/// `#[cfg(not(feature = "test-utils"))]`-gated because it is only ever
+/// reached through the real Tauri command in production; this wrapper lets
+/// integration tests prove the invalidation-breadth contract
+/// (`invalidate_item_counts_for_patch`) against a real folded
+/// [`crate::watch::patch::SessionPatch`] instead of constructing one by hand.
+#[cfg(feature = "test-utils")]
+pub fn fold_dir_patch_into_session_for_tests(
+    session_state: &crate::directory_session::DirectorySessionService,
+    item_count_state: &ItemCountService,
+    patch: &crate::watch::DirPatch,
+) -> Option<super::types::SessionPatch> {
+    fold_dir_patch_into_session_core(session_state, item_count_state, patch)
+}
+
 #[cfg(not(feature = "test-utils"))]
 #[tauri::command]
 pub fn set_tab_watch(
     payload: SetTabWatchRequest,
     app: AppHandle,
-    listing_state: State<'_, ListingService>,
-    state: State<'_, WatchService>,
+    state: State<'_, Arc<WatchService>>,
+    session_state: State<'_, Arc<crate::directory_session::DirectorySessionService>>,
 ) -> Result<(), String> {
     let patch_app = app.clone();
     let error_app = app;
-    let listing_seed_entries = valid_seed_entries(&payload, &listing_state);
+    let session_state = Arc::clone(session_state.inner());
 
     state.set_tab_watch(
         payload.target,
-        listing_seed_entries,
+        None,
         payload.entries,
         Arc::new(move |patch| {
-            let _ = patch_app.emit(
-                super::events::DIR_PATCH,
-                super::types::DirPatchEvent {
-                    tab_id: patch.tab_id,
-                    path: patch.path,
-                    reason: patch.reason,
-                    changed: patch
-                        .changed
-                        .into_iter()
-                        .map(|change| super::types::DirEntryPatch {
-                            path: change.path,
-                            entry: change.entry,
-                        })
-                        .collect(),
-                    removed: patch.removed,
-                },
-            );
+            let item_count_state = patch_app.state::<ItemCountService>();
+            if let Some(session_patch) =
+                fold_dir_patch_into_session(&session_state, &item_count_state, &patch)
+            {
+                let _ = patch_app.emit(super::events::DIR_SESSION_PATCH, session_patch);
+            }
         }),
         Arc::new(move |path, message| {
             log::warn!("watch error for {path}: {message}");
@@ -800,34 +1319,15 @@ pub fn set_tab_watch(
     )
 }
 
-fn valid_seed_entries(
-    payload: &SetTabWatchRequest,
-    listing_state: &ListingService,
-) -> Option<Vec<DirectoryEntry>> {
-    let target = payload.target.as_ref()?;
-    let seed = payload.seed_reference.as_ref()?;
-    // A seed is only reusable for the exact watched tab/path context. A stale
-    // or cross-tab reference intentionally falls through to WatchService's
-    // resnapshot path instead of borrowing an unrelated listing baseline.
-    if seed.tab_id != target.tab_id
-        || !crate::listing::paths_match_for_context(&seed.path, &target.path)
-    {
-        return None;
-    }
-    listing_state.completed_seed_entries(&seed.tab_id, seed.request_id, target)
-}
-
 #[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn set_tab_watch(
     payload: SetTabWatchRequest,
-    listing_state: State<'_, ListingService>,
-    state: State<'_, WatchService>,
+    state: State<'_, Arc<WatchService>>,
 ) -> Result<(), String> {
-    let listing_seed_entries = valid_seed_entries(&payload, &listing_state);
     state.set_tab_watch(
         payload.target,
-        listing_seed_entries,
+        None,
         payload.entries,
         Arc::new(noop_dir_patch),
         Arc::new(noop_watch_error),
@@ -963,6 +1463,20 @@ pub fn apply_log_level(
 }
 
 /// Read and parse the current day's log file for the in-app log viewer.
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn read_logs(
+    logging: State<'_, Arc<crate::logging::LoggingState>>,
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<Vec<crate::logging::LogEntry>, String> {
+    let logging = Arc::clone(logging.inner());
+    latency_filesystem(&executor, "logs".into(), move || {
+        crate::logging::read_current_day_logs(&logging.dir, crate::logging::current_local_date())
+    })
+    .await
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn read_logs(
     logging: State<'_, crate::logging::LoggingState>,
@@ -971,6 +1485,20 @@ pub fn read_logs(
 }
 
 /// Set the minimum backend capture level (applied immediately and persisted).
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub fn set_log_level(
+    payload: SetLogLevelRequest,
+    logging: State<'_, Arc<crate::logging::LoggingState>>,
+    persistence: State<'_, PersistenceState>,
+) -> Result<(), String> {
+    let parsed = crate::logging::LogLevel::parse(&payload.level)
+        .ok_or_else(|| format!("invalid log level: {}", payload.level))?;
+    apply_log_level(&persistence.config, &logging.logger, parsed);
+    Ok(())
+}
+
+#[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn set_log_level(
     payload: SetLogLevelRequest,

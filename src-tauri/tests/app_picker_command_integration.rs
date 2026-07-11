@@ -6,6 +6,7 @@
 //! API success" branch — per the project's machine-global-state testing rule.
 
 use file_explorer_lib::ipc::commands;
+use file_explorer_lib::ipc::executor::Cancellation;
 use file_explorer_lib::ipc::types::{GetDefaultApplicationRequest, SetDefaultApplicationRequest};
 
 #[test]
@@ -34,6 +35,28 @@ fn set_default_application_never_writes_real_launch_services_state_under_test_ut
         "test-utils builds must never report a real LaunchServices write as handled"
     );
     assert_eq!(response.message.as_deref(), Some("unsupported"));
+}
+
+#[test]
+fn default_application_owner_rejects_cancelled_request_before_platform_work() {
+    let cancellation = Cancellation::default();
+    cancellation.cancel();
+    let response = tauri::async_runtime::block_on(
+        file_explorer_lib::app_picker::set_default_application_cancellable(
+            SetDefaultApplicationRequest {
+                path: "/Users/example/report.pdf".to_string(),
+                bundle_path: "/Applications/Fake Preview.app".to_string(),
+            },
+            cancellation,
+        ),
+    );
+
+    assert!(!response.handled);
+    assert_eq!(
+        response.message.as_deref(),
+        Some("default-application-cancelled"),
+        "cancellation is checked before a LaunchServices request can begin"
+    );
 }
 
 #[test]

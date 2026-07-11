@@ -1,3 +1,5 @@
+use super::helper_protocol::{HelperOperation, HelperResult};
+use super::helper_supervisor::{HelperRole, DISCOVERY_DEADLINE, INVOCATION_DEADLINE};
 use super::provider::{NativeMenuProvider, ProviderInvocation, ProviderNativeMenuItem};
 use super::shell_executor::ShellExecutor;
 use super::types::LoadNativeMenuRequest;
@@ -14,6 +16,19 @@ impl NativeMenuProvider for WindowsNativeMenuProvider {
         request: &LoadNativeMenuRequest,
         executor: &ShellExecutor,
     ) -> Vec<ProviderNativeMenuItem> {
+        #[cfg(not(feature = "test-utils"))]
+        {
+            let _ = executor;
+            return match super::helper_supervisor::shared().call(
+                HelperRole::Interactive,
+                HelperOperation::Discover(request.clone()),
+                DISCOVERY_DEADLINE,
+            ) {
+                Ok(HelperResult::Items(items)) => items,
+                _ => Vec::new(),
+            };
+        }
+        #[cfg(feature = "test-utils")]
         executor.execute({
             let request = request.clone();
             move || load_menu_impl(&request)
@@ -25,8 +40,47 @@ impl NativeMenuProvider for WindowsNativeMenuProvider {
         invocation: &ProviderInvocation,
         executor: &ShellExecutor,
     ) -> MenuActionStatus {
-        let invocation = invocation.clone();
-        executor.execute(move || invoke_impl(invocation))
+        #[cfg(not(feature = "test-utils"))]
+        {
+            let _ = executor;
+            return match super::helper_supervisor::shared().call(
+                HelperRole::Interactive,
+                HelperOperation::Invoke(invocation.clone()),
+                INVOCATION_DEADLINE,
+            ) {
+                Ok(HelperResult::Status(status)) => status,
+                _ => MenuActionStatus::unsupported("native-helper-failed"),
+            };
+        }
+        #[cfg(feature = "test-utils")]
+        {
+            let invocation = invocation.clone();
+            executor.execute(move || invoke_impl(invocation))
+        }
+    }
+
+    fn load_menu_for_role(
+        &self,
+        request: &LoadNativeMenuRequest,
+        executor: &ShellExecutor,
+        role: HelperRole,
+    ) -> Vec<ProviderNativeMenuItem> {
+        #[cfg(not(feature = "test-utils"))]
+        {
+            let _ = executor;
+            return match super::helper_supervisor::shared().call(
+                role,
+                HelperOperation::Discover(request.clone()),
+                DISCOVERY_DEADLINE,
+            ) {
+                Ok(HelperResult::Items(items)) => items,
+                _ => Vec::new(),
+            };
+        }
+        #[cfg(feature = "test-utils")]
+        {
+            self.load_menu(request, executor)
+        }
     }
 }
 
@@ -54,6 +108,16 @@ pub fn open_with(request: &OpenWithRequest) -> MenuActionStatus {
         let _ = request;
         MenuActionStatus::unsupported(UNSUPPORTED_MESSAGE)
     }
+}
+
+#[cfg(all(target_os = "windows", not(feature = "test-utils")))]
+pub(crate) fn helper_load_menu(request: &LoadNativeMenuRequest) -> Vec<ProviderNativeMenuItem> {
+    load_menu_impl(request)
+}
+
+#[cfg(all(target_os = "windows", not(feature = "test-utils")))]
+pub(crate) fn helper_invoke(invocation: ProviderInvocation) -> MenuActionStatus {
+    invoke_impl(invocation)
 }
 
 #[cfg(feature = "test-utils")]

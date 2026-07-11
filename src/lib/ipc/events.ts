@@ -5,8 +5,8 @@ export function onDirPatch(handler: (payload: IpcEventMap['dir://patch']) => voi
   return subscribeToEvent('dir://patch', handler)
 }
 
-export function onListChunk(handler: (payload: IpcEventMap['dir://list-chunk']) => void) {
-  return subscribeToEvent('dir://list-chunk', handler)
+export function onDirSessionPatch(handler: (payload: IpcEventMap['dir://session-patch']) => void) {
+  return subscribeToEvent('dir://session-patch', handler)
 }
 
 export function onSizeState(handler: (payload: IpcEventMap['size://state']) => void) {

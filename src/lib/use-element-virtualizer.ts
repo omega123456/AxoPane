@@ -54,9 +54,18 @@ export function useElementVirtualizer(options: ElementVirtualizerOptions) {
 
   useEffect(() => instance._didMount(), [instance])
   useLayoutEffect(() => instance._willUpdate())
-  useLayoutEffect(() => {
-    instance.measure()
-  }, [instance, options.count])
+
+  // Deliberately no `instance.measure()` call here: `measure()` clears the
+  // virtualizer's entire cached-size table (`itemSizeCache`), forcing every
+  // already-measured row to be re-measured from scratch. `setOptions` above
+  // already applies a changed `count` (e.g. a newly loaded sparse range page
+  // bumping total rows) and is enough for `getVirtualItems`/`getTotalSize` to
+  // reflect it on next read — for the fixed-height row estimators this app
+  // uses (`estimateSize: () => rowHeightPx` / `treeRowHeight`), there is
+  // nothing stale to correct. A full remeasure on every row-count change was
+  // wasted work that scaled with total rendered rows on every page load
+  // (Functional Requirement 11 / Phase 4 acceptance: "fixed-height row-count
+  // changes must not trigger full measurement resets").
 
   return instance
 }

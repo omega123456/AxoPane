@@ -72,16 +72,56 @@ export const fixtures: {
       },
     ],
   },
-  // Placeholder only: the shared harness derives the real `start_list_dir` head
-  // from whatever `list_dir` responder is active (see `ipc-mock.ts`), so tests
-  // that mock `list_dir` transparently drive the streamed listing path too.
-  start_list_dir: {
-    kind: 'head',
+  // V2 seekable directory-session fixtures.
+  begin_directory_session: {
+    paneId: 'left',
+    tabId: 'left-tab-1',
     path: 'C:\\Users\\Omega',
-    total: 0,
-    requestId: 1,
-    firstChunk: [],
-    done: true,
+    baseline: {
+      sessionId: 1,
+      navigationRevision: 1,
+      watchRevision: 0,
+      viewRevision: 0,
+    },
+    totalRows: 0,
+    pageSize: 500,
+    firstPage: {
+      pageIndex: 0,
+      entries: [],
+    },
+  },
+  get_directory_session_range: {
+    baseline: {
+      sessionId: 1,
+      navigationRevision: 1,
+      watchRevision: 0,
+      viewRevision: 0,
+    },
+    totalRows: 0,
+    page: {
+      pageIndex: 0,
+      entries: [],
+    },
+  },
+  revise_directory_session_view: {
+    paneId: 'left',
+    tabId: 'left-tab-1',
+    path: 'C:\\Users\\Omega',
+    baseline: {
+      sessionId: 1,
+      navigationRevision: 1,
+      watchRevision: 0,
+      viewRevision: 1,
+    },
+    totalRows: 0,
+    pageSize: 500,
+    firstPage: {
+      pageIndex: 0,
+      entries: [],
+    },
+  },
+  release_directory_session: {
+    released: true,
   },
   list_tree_children: {
     path: 'C:\\Users\\Omega',
@@ -89,12 +129,12 @@ export const fixtures: {
       {
         name: 'Documents',
         path: 'C:\\Users\\Omega\\Documents',
-        hasChildren: true,
+        expandability: 'nonEmpty',
       },
       {
         name: 'Media',
         path: 'C:\\Users\\Omega\\Media',
-        hasChildren: false,
+        expandability: 'unknown',
       },
     ],
   },
@@ -283,14 +323,6 @@ export const fixtures: {
       bundleId: 'com.example.fixture-preview',
       iconDataUrl: 'data:image/png;base64,RkFLRQ==',
     },
-  },
-  compress_archive: {
-    handled: false,
-    message: 'unsupported',
-  },
-  extract_archive: {
-    handled: false,
-    message: 'unsupported',
   },
   list_volumes: [
     {

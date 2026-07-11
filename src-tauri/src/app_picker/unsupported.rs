@@ -12,7 +12,7 @@ use crate::ipc::types::MenuActionStatus;
 /// dispatches between. No actual asynchronous work happens here - this is a
 /// fixed fake - so this resolves immediately.
 #[cfg(feature = "test-utils")]
-pub async fn list_applications() -> ListApplicationsResponse {
+pub fn list_applications() -> ListApplicationsResponse {
     ListApplicationsResponse {
         apps: vec![MacApp {
             name: "Fake Preview".to_string(),

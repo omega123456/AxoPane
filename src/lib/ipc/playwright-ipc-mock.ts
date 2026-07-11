@@ -1,8 +1,16 @@
 import type { IpcCommandMap, IpcEventMap } from '@/lib/types/ipc'
+import { SESSION_PAGE_SIZE } from '@/lib/types/ipc'
 import { TRASH_PATH } from '@/lib/trash'
 import { getFixtureResponse } from '@/tests/playwright-fixtures'
 import type { PlaywrightScenario } from '@/tests/playwright-fixtures/e2e'
 import type { TreeChildrenByPath } from '@/tests/playwright-fixtures/tree-states'
+
+/**
+ * A monotonic session-id counter for the `begin_directory_session`/
+ * `revise_directory_session_view` derivation below, so successive
+ * navigations/view-revisions within one spec never collide on `sessionId: 1`.
+ */
+let v2SessionIdCounter = 0
 
 type ListenerMap = {
   [eventName: string]: Set<(payload: unknown) => void> | undefined
@@ -104,18 +112,16 @@ export async function invokePlaywrightCommand<CommandName extends keyof IpcComma
   command: CommandName,
   payload: IpcCommandMap[CommandName]['request'],
 ) {
-  // `start_list_dir` replaced `list_dir` as the listing entrypoint, so it
-  // inherits any scenario delay/error configured for `list_dir` (loading,
-  // error, and permission-denied fixtures still target `list_dir`).
-  const delayMs =
-    readDelay(command) || (command === 'start_list_dir' ? readDelay('list_dir') : 0)
+  // The live directory-session entrypoint inherits any scenario delay/error configured for `list_dir`
+  // (loading, error, and permission-denied fixtures still target `list_dir`).
+  const inheritsListDirTiming = command === 'begin_directory_session'
+  const delayMs = readDelay(command) || (inheritsListDirTiming ? readDelay('list_dir') : 0)
   if (delayMs > 0) {
     await new Promise((resolve) => window.setTimeout(resolve, delayMs))
   }
 
   const message =
-    readCommandError(command) ??
-    (command === 'start_list_dir' ? readCommandError('list_dir') : undefined)
+    readCommandError(command) ?? (inheritsListDirTiming ? readCommandError('list_dir') : undefined)
   if (message) {
     throw new Error(message)
   }
@@ -149,20 +155,44 @@ export async function invokePlaywrightCommand<CommandName extends keyof IpcComma
     } as IpcCommandMap[CommandName]['response']
   }
 
-  // `start_list_dir` derives a "complete head" from whatever `list_dir` a
-  // scenario provides, so every existing e2e fixture drives the streamed
-  // listing path without declaring a separate head (mirrors the Vitest
-  // harness). An explicit `start_list_dir` scenario override still wins below.
-  if (command === 'start_list_dir' && !readCommandOverride('start_list_dir').found) {
+  // `begin_directory_session` / `revise_directory_session_view` derive a v2
+  // response from whatever `list_dir` a scenario provides, mirroring
+  // the normal listing fixture, so the live app's v2 navigation path is driven by
+  // the same per-spec fixtures without a separate v2 fixture to maintain. An
+  // explicit scenario override for either v2 command still wins below.
+  if (
+    (command === 'begin_directory_session' || command === 'revise_directory_session_view') &&
+    !readCommandOverride(command).found
+  ) {
     const listOverride = readCommandOverride('list_dir')
     const listing = listOverride.found ? listOverride.value : getFixtureResponse('list_dir')
+    const beginPayload = payload as IpcCommandMap['begin_directory_session']['request']
+    v2SessionIdCounter += 1
     return {
-      kind: 'head',
+      paneId: beginPayload.paneId,
+      tabId: beginPayload.tabId,
       path: listing.path,
-      total: listing.entries.length,
-      requestId: 1,
-      firstChunk: listing.entries,
-      done: true,
+      baseline: {
+        sessionId: v2SessionIdCounter,
+        navigationRevision: v2SessionIdCounter,
+        watchRevision: 0,
+        viewRevision: 0,
+      },
+      totalRows: listing.entries.length,
+      pageSize: SESSION_PAGE_SIZE,
+      firstPage: { pageIndex: 0, entries: listing.entries.slice(0, SESSION_PAGE_SIZE) },
+    } as IpcCommandMap[CommandName]['response']
+  }
+
+  // `get_directory_session_range` for an unmocked page defaults to an empty
+  // page at whatever baseline the caller already has; every e2e fixture
+  // listing is small enough to resolve fully from `firstPage` above.
+  if (command === 'get_directory_session_range' && !readCommandOverride(command).found) {
+    const request = payload as IpcCommandMap['get_directory_session_range']['request']
+    return {
+      baseline: request.baseline,
+      totalRows: 0,
+      page: { pageIndex: request.pageIndex, entries: [] },
     } as IpcCommandMap[CommandName]['response']
   }
 

@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach } from 'vitest'
+import { afterEach, beforeEach, vi } from 'vitest'
 import { DefaultAppDialog } from '@/components/dialogs/DefaultAppDialog'
 import { useDefaultAppDialogStore } from '@/stores/default-app-dialog-store'
 import { ipc } from '@/tests/ipc-mock'
@@ -88,6 +88,27 @@ describe('DefaultAppDialog', () => {
       path: '/Users/example/Report.pdf',
       bundlePath: '/Applications/Fixture Preview.app',
     })
+  })
+
+  it('only selects an application while browsing, even on a double click', async () => {
+    const user = userEvent.setup()
+    const setDefaultApplication = vi.fn(() => ({
+      handled: true,
+      message: 'default-application-set',
+    }))
+    ipc.override('set_default_application', setDefaultApplication)
+
+    render(<DefaultAppDialog />)
+    openDialog()
+
+    await user.dblClick(await screen.findByRole('option', { name: 'Fixture Preview' }))
+
+    expect(screen.getByRole('option', { name: 'Fixture Preview' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    expect(setDefaultApplication).not.toHaveBeenCalled()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('shows the mapped inline error and stays open when the backend reports a failure', async () => {

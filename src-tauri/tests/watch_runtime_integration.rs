@@ -1,12 +1,16 @@
 use file_explorer_lib::fs::{SortDirection, SortKey};
+use file_explorer_lib::watch::coordinator::{CompactedBatch, MutationKind, WatchId};
 use file_explorer_lib::watch::{
     add_watch, canonical_dir_for_tests, create_runtime, first_error_path_for_tests,
     handle_debounce_result_for_tests, insert_tab_for_tests, noop_watch_error_for_tests,
-    remove_watch, snapshot_for_target, DirPatch, WatchTarget,
+    process_compacted_batch_for_tests, raw_mutations_for_event_for_tests, remove_watch,
+    snapshot_for_target, DirPatch, WatchTarget,
 };
-use notify::event::{CreateKind, DataChange, EventKind, ModifyKind, RemoveKind, RenameMode};
+use notify::event::{
+    AccessKind, CreateKind, DataChange, EventKind, ModifyKind, RemoveKind, RenameMode,
+};
 use notify::Event;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tempfile::tempdir;
 
@@ -391,4 +395,149 @@ fn watch_runtime_test_hooks_cover_filtered_nonmatching_and_error_branches() {
         include_item_counts: true,
     })
     .is_err());
+}
+
+fn watch_target(root: &Path) -> WatchTarget {
+    WatchTarget {
+        tab_id: "left-1".to_string(),
+        path: root.to_string_lossy().into_owned(),
+        sort_key: SortKey::Name,
+        sort_direction: SortDirection::Asc,
+        filter: String::new(),
+        show_hidden: true,
+        include_item_counts: false,
+    }
+}
+
+#[test]
+fn raw_mutations_for_event_classifies_every_kind_through_the_public_test_hook() {
+    let target = watch_target(Path::new("/watched"));
+    let watch_id = WatchId(123);
+
+    let access = Event::new(EventKind::Access(AccessKind::Read));
+    assert!(raw_mutations_for_event_for_tests(&access, watch_id, target.clone()).is_empty());
+
+    let removed_child = PathBuf::from("/watched/gone.txt");
+    let remove_event =
+        Event::new(EventKind::Remove(RemoveKind::File)).add_path(removed_child.clone());
+    let removed = raw_mutations_for_event_for_tests(&remove_event, watch_id, target.clone());
+    assert_eq!(removed.len(), 1);
+    assert_eq!(removed[0].kind, MutationKind::Removed);
+    assert_eq!(removed[0].child_path, removed_child);
+
+    let unresolved_event = Event::new(EventKind::Any).add_path(PathBuf::from("/watched/a.txt"));
+    let unresolved = raw_mutations_for_event_for_tests(&unresolved_event, watch_id, target.clone());
+    assert_eq!(unresolved.len(), 1);
+    assert_eq!(unresolved[0].kind, MutationKind::Unresolved);
+    assert_eq!(unresolved[0].child_path, PathBuf::new());
+
+    let changed_child = PathBuf::from("/watched/changed.txt");
+    let changed_event = Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Content)))
+        .add_path(changed_child.clone());
+    let changed = raw_mutations_for_event_for_tests(&changed_event, watch_id, target);
+    assert_eq!(changed.len(), 1);
+    assert_eq!(changed[0].kind, MutationKind::Changed);
+    assert_eq!(changed[0].child_path, changed_child);
+}
+
+#[test]
+fn watched_directory_events_force_an_authoritative_resnapshot() {
+    let fixture = tempdir().expect("temp dir");
+    let target = watch_target(fixture.path());
+    let root_event = Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Content)))
+        .add_path(fixture.path().to_path_buf());
+
+    let mutations = raw_mutations_for_event_for_tests(&root_event, WatchId(11), target);
+
+    assert_eq!(mutations.len(), 1);
+    assert_eq!(mutations[0].kind, MutationKind::Unresolved);
+    assert!(mutations[0].child_path.as_os_str().is_empty());
+}
+
+#[test]
+fn process_compacted_batch_ignores_unknown_watch_ids_through_the_public_test_hook() {
+    let mut runtime = create_runtime(Arc::new(|_| {}), Arc::new(|_, _| {})).expect("runtime");
+    let patches = Arc::new(Mutex::new(Vec::<DirPatch>::new()));
+    let errors = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+    let patches_for_emit = patches.clone();
+    let errors_for_emit = errors.clone();
+
+    let fixture = tempdir().expect("temp dir");
+    let target = watch_target(fixture.path());
+    insert_tab_for_tests(&mut runtime, target, Default::default());
+
+    process_compacted_batch_for_tests(
+        &runtime,
+        CompactedBatch::Targeted {
+            watch_id: WatchId(999_999),
+            changed: Vec::new(),
+            removed: Vec::new(),
+        },
+        Arc::new(move |patch| patches_for_emit.lock().expect("patches lock").push(patch)),
+        Arc::new(move |path, error| {
+            errors_for_emit
+                .lock()
+                .expect("errors lock")
+                .push((path, error))
+        }),
+    );
+
+    assert!(patches.lock().expect("patches lock").is_empty());
+    assert!(errors.lock().expect("errors lock").is_empty());
+}
+
+#[test]
+fn process_compacted_batch_applies_targeted_and_dirty_batches_through_the_public_test_hook() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    let new_file = root.join("new.txt");
+    std::fs::write(&new_file, b"new").expect("write new file");
+
+    let mut runtime = create_runtime(Arc::new(|_| {}), Arc::new(|_, _| {})).expect("runtime");
+    let target = watch_target(root);
+    let watch_id = insert_tab_for_tests(&mut runtime, target, Default::default());
+
+    let patches = Arc::new(Mutex::new(Vec::<DirPatch>::new()));
+    let patches_for_emit = patches.clone();
+    process_compacted_batch_for_tests(
+        &runtime,
+        CompactedBatch::Targeted {
+            watch_id,
+            changed: vec![new_file.clone()],
+            removed: Vec::new(),
+        },
+        Arc::new(move |patch| patches_for_emit.lock().expect("patches lock").push(patch)),
+        Arc::new(|_, _| {}),
+    );
+    assert!(patches
+        .lock()
+        .expect("patches lock")
+        .iter()
+        .any(|patch| patch
+            .changed
+            .iter()
+            .any(|item| item.path.ends_with("new.txt"))));
+
+    // A dirty batch forces an authoritative resnapshot from disk.
+    let dirty_patches = Arc::new(Mutex::new(Vec::<DirPatch>::new()));
+    let dirty_patches_for_emit = dirty_patches.clone();
+    process_compacted_batch_for_tests(
+        &runtime,
+        CompactedBatch::Dirty {
+            watch_id,
+            generation: 1,
+        },
+        Arc::new(move |patch| {
+            dirty_patches_for_emit
+                .lock()
+                .expect("dirty patches lock")
+                .push(patch)
+        }),
+        Arc::new(|_, _| {}),
+    );
+    // The resnapshot reflects the same file already folded in by the
+    // targeted batch, so no new changes to report is an acceptable and
+    // deterministic outcome — the call completing without panicking is
+    // what's covered here.
+    assert!(dirty_patches.lock().expect("dirty patches lock").len() <= 1);
 }

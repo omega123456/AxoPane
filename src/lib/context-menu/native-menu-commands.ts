@@ -1,12 +1,11 @@
 import {
-  compressArchive,
-  extractArchive,
   invokeNativeMenuAction,
   loadNativeMenu,
   openWith,
   showProperties,
   warmNativeMenus,
 } from '@/lib/ipc/commands'
+import { startOp } from '@/lib/queue-commands'
 import type {
   CompressArchiveRequest,
   ExtractArchiveRequest,
@@ -14,6 +13,7 @@ import type {
   LoadNativeMenuRequest,
   LoadNativeMenuResponse,
   MenuActionStatus,
+  StartOpRequest,
   OpenWithRequest,
   ShowPropertiesRequest,
   WarmNativeMenusRequest,
@@ -39,10 +39,26 @@ export function showNativeOpenWith(payload: OpenWithRequest): Promise<MenuAction
   return openWith(payload)
 }
 
-export function requestCompressArchive(payload: CompressArchiveRequest): Promise<MenuActionStatus> {
-  return compressArchive(payload)
+function archiveItems(paths: string[]) {
+  return paths.map((sourcePath) => ({
+    sourcePath,
+    name: sourcePath.replace(/\\/g, '/').split('/').filter(Boolean).at(-1) || 'Archive',
+    // The queue discovers archive sizes progressively; callers must not scan.
+    sizeBytes: 0,
+  }))
 }
 
-export function requestExtractArchive(payload: ExtractArchiveRequest): Promise<MenuActionStatus> {
-  return extractArchive(payload)
+async function requestArchiveOperation(
+  kind: StartOpRequest['kind'],
+  payload: CompressArchiveRequest | ExtractArchiveRequest,
+): Promise<string> {
+  return startOp({ kind, destinationDir: payload.destinationDir, items: archiveItems(payload.paths) })
+}
+
+export function requestCompressArchive(payload: CompressArchiveRequest): Promise<string> {
+  return requestArchiveOperation('compress', payload)
+}
+
+export function requestExtractArchive(payload: ExtractArchiveRequest): Promise<string> {
+  return requestArchiveOperation('extract', payload)
 }

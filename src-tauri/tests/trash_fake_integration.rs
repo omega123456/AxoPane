@@ -2,7 +2,7 @@ use std::fs;
 
 use file_explorer_lib::trash::{
     ensure_fake_trash_dir_for_tests, fake_trash_dir, move_to_fake_trash_path_for_tests,
-    move_to_trash,
+    move_to_trash, move_to_trash_cancellable,
 };
 use tempfile::tempdir;
 
@@ -84,6 +84,22 @@ fn fake_trash_surfaces_missing_path_errors() {
     let error = move_to_trash(&[missing.to_string_lossy().into_owned()]).expect_err("missing path");
 
     assert!(error.contains("No such file") || error.contains("os error"));
+}
+
+#[test]
+fn fake_trash_observes_cancellation_before_relocating_any_source() {
+    let fixture = tempdir().expect("temp dir");
+    let source = fixture.path().join("cancelled.txt");
+    fs::write(&source, b"payload").expect("source");
+
+    let error = move_to_trash_cancellable(&[source.to_string_lossy().into_owned()], || true)
+        .expect_err("cancelled batch");
+
+    assert_eq!(error, "trash request cancelled");
+    assert!(
+        source.exists(),
+        "cancellation happens before the first mutation"
+    );
 }
 
 #[test]

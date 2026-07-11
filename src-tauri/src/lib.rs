@@ -1,18 +1,21 @@
 pub mod app_picker;
-pub mod archive;
+pub mod bounded_cache;
 mod clipboard;
+pub mod directory_session;
 pub mod file_icons;
 pub mod fs;
 pub mod ipc;
 pub mod item_counts;
 pub mod launch;
-pub mod listing;
 pub mod logging;
 pub mod native_menu;
 pub mod ops;
 pub mod persist;
+pub mod reconcile;
+pub mod resource_coordinator;
 pub mod size;
 pub mod trash;
+pub mod traversal;
 pub mod volumes;
 pub mod watch;
 
@@ -47,11 +50,17 @@ use ops::OpsService;
 #[cfg(not(feature = "test-utils"))]
 use persist::PersistenceState;
 #[cfg(not(feature = "test-utils"))]
+use resource_coordinator::ResourceCoordinator;
+#[cfg(not(feature = "test-utils"))]
 use size::SizeService;
 #[cfg(not(feature = "test-utils"))]
 use std::sync::Arc;
 #[cfg(not(feature = "test-utils"))]
+use std::time::Duration;
+#[cfg(not(feature = "test-utils"))]
 use tauri::{Emitter, Manager};
+#[cfg(not(feature = "test-utils"))]
+use volumes::registry::VolumeRegistry;
 #[cfg(not(feature = "test-utils"))]
 use watch::WatchService;
 
@@ -124,47 +133,104 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .on_window_event(|window, event| {
-            // Reliability net for any native volume-change event the OS
+            // Reliability net for any native volume-change/watch event the OS
             // dropped while the window was unfocused: reconciling here costs
             // nothing at rest since it only runs in response to another
             // event (focus), never on a timer.
+            //
+            // Phase 5 / Functional Requirement 3: this callback must only
+            // *submit* work and return — no volume discovery or filesystem
+            // snapshot I/O may run synchronously on the Tauri event thread.
+            // `ReconcileCoordinator::request_reconcile` bumps a generation,
+            // submits a `Latency`-class coordinator job, and runs the actual
+            // (potentially slow) comparison on a spawned thread once
+            // admitted; a stale generation's result is discarded rather than
+            // published, so rapid repeated focus events coalesce onto only
+            // the latest one committing.
             if let tauri::WindowEvent::Focused(true) = event {
-                if let Some(monitor) = window
+                let reconcile = window
                     .app_handle()
-                    .try_state::<volumes::VolumeMonitorService>()
-                {
-                    monitor.reconcile();
+                    .try_state::<Arc<reconcile::ReconcileCoordinator>>();
+                let coordinator = window.app_handle().try_state::<Arc<ResourceCoordinator>>();
+                let (Some(reconcile), Some(coordinator)) = (reconcile, coordinator) else {
+                    return;
+                };
+                let reconcile = Arc::clone(&reconcile);
+                let coordinator = Arc::clone(&coordinator);
+
+                if let Some(registry) = window.app_handle().try_state::<Arc<VolumeRegistry>>() {
+                    let registry = Arc::clone(&registry);
+                    reconcile.request_reconcile(
+                        Arc::clone(&coordinator),
+                        "volume-registry".to_string(),
+                        move |_generation| {
+                            // Background reconcile: never do volume discovery
+                            // synchronously on the window-focus callback. This
+                            // is the same reliability net the previous
+                            // `VolumeMonitorService::reconcile` provided for
+                            // any native mount/unmount event dropped while the
+                            // window was unfocused, now routed through the
+                            // registry's bounded-deadline `refresh`.
+                            registry.refresh();
+                        },
+                    );
                 }
-                if let Some(watch) = window.app_handle().try_state::<WatchService>() {
+
+                if let Some(watch) = window.app_handle().try_state::<Arc<WatchService>>() {
+                    let watch = Arc::clone(&watch);
                     let patch_handle = window.app_handle().clone();
                     let error_handle = window.app_handle().clone();
-                    watch.reconcile(
-                        Arc::new(move |patch| {
-                            let _ = patch_handle.emit(
-                                ipc::events::DIR_PATCH,
-                                ipc::types::DirPatchEvent {
-                                    tab_id: patch.tab_id,
-                                    path: patch.path,
-                                    reason: patch.reason,
-                                    changed: patch
-                                        .changed
-                                        .into_iter()
-                                        .map(|change| ipc::types::DirEntryPatch {
-                                            path: change.path,
-                                            entry: change.entry,
-                                        })
-                                        .collect(),
-                                    removed: patch.removed,
-                                },
+                    let session_state = window
+                        .app_handle()
+                        .try_state::<Arc<directory_session::DirectorySessionService>>()
+                        .map(|state| Arc::clone(&state));
+                    let reconcile_for_check = Arc::clone(&reconcile);
+                    reconcile.request_reconcile(
+                        coordinator,
+                        "watch-service".to_string(),
+                        move |generation| {
+                            // Re-checked once more immediately before
+                            // publishing any event: a slower generation must
+                            // never overwrite a newer one's result, even
+                            // though it already passed the pre-admission
+                            // check in `request_reconcile`.
+                            if !reconcile_for_check.is_current("watch-service", generation) {
+                                return;
+                            }
+                            // `request_reconcile` retains an `Fn` callback
+                            // so the coalescing drain can run the latest
+                            // generation after a stale pass. Clone the app
+                            // handles for this invocation before moving them
+                            // into the per-event emit closures.
+                            let patch_handle = patch_handle.clone();
+                            let error_handle = error_handle.clone();
+                            let session_state = session_state.clone();
+                            watch.reconcile(
+                                Arc::new(move |patch| {
+                                    let Some(session_state) = session_state.as_ref() else {
+                                        return;
+                                    };
+                                    let item_counts = patch_handle.state::<ItemCountService>();
+                                    if let Some(session_patch) =
+                                        ipc::commands::fold_dir_patch_into_session(
+                                            session_state,
+                                            &item_counts,
+                                            &patch,
+                                        )
+                                    {
+                                        let _ = patch_handle
+                                            .emit(ipc::events::DIR_SESSION_PATCH, session_patch);
+                                    }
+                                }),
+                                Arc::new(move |path, message| {
+                                    log::warn!("watch reconcile error for {path}: {message}");
+                                    let _ = error_handle.emit(
+                                        ipc::events::WATCH_ERROR,
+                                        ipc::types::WatchErrorEvent { path, message },
+                                    );
+                                }),
                             );
-                        }),
-                        Arc::new(move |path, message| {
-                            log::warn!("watch reconcile error for {path}: {message}");
-                            let _ = error_handle.emit(
-                                ipc::events::WATCH_ERROR,
-                                ipc::types::WatchErrorEvent { path, message },
-                            );
-                        }),
+                        },
                     );
                 }
             }
@@ -180,22 +246,53 @@ pub fn run() {
             let logger = logging::FileLogger::new(&log_dir, initial_level)
                 .map_err(|error| -> Box<dyn std::error::Error> { Box::new(error) })?;
             logging::logger::install_global(Arc::clone(&logger), initial_level);
-            app.manage(logging::LoggingState {
+            app.manage(Arc::new(logging::LoggingState {
                 dir: log_dir,
                 logger,
-            });
+            }));
 
             app.manage(persistence);
-            app.manage(NativeMenuService::default());
+            app.manage(Arc::new(NativeMenuService::default()));
             app.manage(ItemCountService::default());
-            app.manage(SizeService::default());
-            app.manage(WatchService::default());
-            app.manage(listing::ListingService::default());
-            let volume_monitor = volumes::VolumeMonitorService::default();
-            volume_monitor.start(app.handle().clone());
-            app.manage(volume_monitor);
+            app.manage(Arc::new(WatchService::default()));
+            app.manage(Arc::new(
+                directory_session::DirectorySessionService::default(),
+            ));
+            let volume_registry = Arc::new(VolumeRegistry::default());
+            volume_registry.start(app.handle().clone());
+            app.manage(volume_registry);
 
-            let ops = OpsService::default();
+            // Phase 2 of the performance remediation plan: the coordinator
+            // is registered here so it lives for the app's lifetime and is
+            // available as `tauri::State<'_, Arc<ResourceCoordinator>>`.
+            // Phase 5 is the first subsystem migrated onto it: window-focus
+            // reconciliation (`ReconcileCoordinator`, below) routes its
+            // background comparison work through this coordinator's
+            // `Latency` lane instead of running synchronously on the
+            // Tauri event thread. Its `Drop` impl shuts the dispatcher
+            // thread down deterministically when this `Arc` is finally
+            // dropped (app teardown).
+            let resource_coordinator = Arc::new(ResourceCoordinator::new());
+            app.manage(Arc::clone(&resource_coordinator));
+            app.manage(Arc::new(ipc::executor::IpcExecutor::new(Arc::clone(
+                &resource_coordinator,
+            ))));
+            app.manage(Arc::new(reconcile::ReconcileCoordinator::default()));
+
+            // `SizeService` is constructed here (after the shared coordinator
+            // exists) rather than at its own `app.manage(...)` call further
+            // up, specifically so it can be handed the same shared
+            // coordinator `OpsService` uses below instead of building a
+            // private one — folder-size traversal is then fairly scheduled
+            // against the same throughput/CPU/latency lanes as every other
+            // subsystem instead of having its own independent admission
+            // budget.
+            app.manage(SizeService::with_resource_coordinator(
+                Duration::from_secs(2),
+                Arc::clone(&resource_coordinator),
+            ));
+
+            let ops = OpsService::with_resource_coordinator(resource_coordinator);
             let progress_handle = app.handle().clone();
             ops.set_progress_emitter(Arc::new(move |progress| {
                 let _ = progress_handle.emit(ipc::events::QUEUE_PROGRESS, progress);
@@ -215,7 +312,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_initial_shell,
             commands::list_dir,
-            commands::start_list_dir,
+            commands::begin_directory_session,
+            commands::get_directory_session_range,
+            commands::revise_directory_session_view,
+            commands::release_directory_session,
             commands::list_tree_children,
             commands::create_folder,
             commands::create_file,
@@ -236,8 +336,6 @@ pub fn run() {
             commands::list_applications,
             commands::set_default_application,
             commands::get_default_application,
-            commands::compress_archive,
-            commands::extract_archive,
             commands::list_volumes,
             commands::eject_volume,
             commands::everything_status,

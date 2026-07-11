@@ -5,11 +5,10 @@
 //! [`manifest`](super::manifest) alongside it, written whenever this app
 //! moves something to the trash.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{dsstore, manifest, TrashEntry};
 
@@ -23,45 +22,45 @@ fn put_back_index(trash_dir: &Path) -> HashMap<String, dsstore::PutBack> {
         .unwrap_or_default()
 }
 
+/// Metadata loaded once for the lifetime of one public Trash command.
+struct CommandIndexes {
+    manifest: manifest::Transaction,
+    put_back: HashMap<String, dsstore::PutBack>,
+}
+
+impl CommandIndexes {
+    fn load(trash_dir: &Path) -> Result<Self, String> {
+        Ok(Self {
+            manifest: manifest::Transaction::load(trash_dir)?,
+            put_back: put_back_index(trash_dir),
+        })
+    }
+
+    fn original_path(&self, id: &str) -> Option<(String, Option<i64>)> {
+        match self.manifest.lookup(id) {
+            Some((original_path, deleted_at)) => Some((original_path, Some(deleted_at))),
+            None => self.put_back.get(id).map(|put_back| {
+                (
+                    dsstore::resolve_original_path(
+                        Path::new("/"),
+                        &put_back.original_dir,
+                        &put_back.original_name,
+                    ),
+                    None,
+                )
+            }),
+        }
+    }
+
+    fn commit(&mut self) -> Result<(), String> {
+        self.manifest.commit()
+    }
+}
+
 pub fn home_trash_dir() -> Result<PathBuf, String> {
     std::env::var_os("HOME")
         .map(|home| PathBuf::from(home).join(".Trash"))
         .ok_or_else(|| "could not resolve home directory".to_string())
-}
-
-pub fn snapshot_names(trash_dir: &std::path::Path) -> HashSet<String> {
-    let Ok(entries) = fs::read_dir(trash_dir) else {
-        return HashSet::new();
-    };
-
-    entries
-        .flatten()
-        .filter_map(|entry| entry.file_name().into_string().ok())
-        .filter(|name| !manifest::is_manifest_file(name))
-        .collect()
-}
-
-/// Diffs the trash directory against a pre-deletion snapshot to find the
-/// name the just-moved item landed under (Finder may have de-duplicated a
-/// collision, e.g. `report.txt` -> `report.txt 2`), then records it.
-pub fn record_deletion(
-    before: &HashSet<String>,
-    trash_dir: &std::path::Path,
-    original_path: &str,
-) -> Result<(), String> {
-    let after = snapshot_names(trash_dir);
-    let Some(new_name) = after.difference(before).next() else {
-        return Err(format!(
-            "could not detect the trashed name for '{original_path}' in {trash_dir:?}; it will show up in the trash without a known original location"
-        ));
-    };
-
-    let deleted_at = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs() as i64)
-        .unwrap_or(0);
-
-    manifest::record(trash_dir, new_name, original_path, deleted_at)
 }
 
 pub fn list_trash() -> Result<Vec<TrashEntry>, String> {
@@ -73,7 +72,7 @@ pub fn list_trash() -> Result<Vec<TrashEntry>, String> {
     let entries =
         fs::read_dir(&trash_dir).map_err(|error| format!("{}: {error}", trash_dir.display()))?;
     let mut result = Vec::new();
-    let put_back_index = put_back_index(&trash_dir);
+    let indexes = CommandIndexes::load(&trash_dir)?;
 
     for entry in entries {
         let entry = match entry {
@@ -115,20 +114,15 @@ pub fn list_trash() -> Result<Vec<TrashEntry>, String> {
             }
         };
         let is_dir = file_type.is_dir();
-        let (original_path, deleted_at) = match manifest::lookup(&trash_dir, name) {
-            Some((original_path, deleted_at)) => (Some(original_path), Some(deleted_at)),
-            None => match put_back_index.get(name) {
-                Some(put_back) => (
-                    Some(dsstore::resolve_original_path(
-                        Path::new("/"),
-                        &put_back.original_dir,
-                        &put_back.original_name,
-                    )),
-                    metadata.as_ref().map(|metadata| metadata.ctime()),
-                ),
-                None => (None, None),
+        let (original_path, deleted_at) = indexes.original_path(name).map_or_else(
+            || (None, None),
+            |(original_path, manifest_deleted_at)| {
+                (
+                    Some(original_path),
+                    manifest_deleted_at.or_else(|| metadata.as_ref().map(|value| value.ctime())),
+                )
             },
-        };
+        );
 
         result.push(TrashEntry {
             id: name.to_string(),
@@ -147,23 +141,13 @@ pub fn list_trash() -> Result<Vec<TrashEntry>, String> {
 
 pub fn restore_from_trash(ids: &[String]) -> Result<(), String> {
     let trash_dir = home_trash_dir()?;
-    let put_back_index = put_back_index(&trash_dir);
+    let mut indexes = CommandIndexes::load(&trash_dir)?;
 
     for id in ids {
-        let original_path = match manifest::lookup(&trash_dir, id) {
-            Some((original_path, _)) => original_path,
-            None => match put_back_index.get(id) {
-                Some(put_back) => dsstore::resolve_original_path(
-                    Path::new("/"),
-                    &put_back.original_dir,
-                    &put_back.original_name,
-                ),
-                None => {
-                    return Err(format!(
-                        "'{id}' has no known original location and cannot be restored"
-                    ))
-                }
-            },
+        let Some((original_path, _)) = indexes.original_path(id) else {
+            return Err(format!(
+                "'{id}' has no known original location and cannot be restored"
+            ));
         };
 
         let source = trash_dir.join(id);
@@ -178,10 +162,9 @@ pub fn restore_from_trash(ids: &[String]) -> Result<(), String> {
         }
 
         fs::rename(&source, &target).map_err(|error| error.to_string())?;
-        manifest::remove(&trash_dir, id)?;
+        indexes.manifest.remove(id);
     }
-
-    Ok(())
+    indexes.commit()
 }
 
 pub fn empty_trash() -> Result<(), String> {
@@ -191,6 +174,7 @@ pub fn empty_trash() -> Result<(), String> {
     }
 
     let entries = fs::read_dir(&trash_dir).map_err(|error| error.to_string())?;
+    let mut indexes = CommandIndexes::load(&trash_dir)?;
     for entry in entries.flatten() {
         let path = entry.path();
         let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
@@ -207,7 +191,7 @@ pub fn empty_trash() -> Result<(), String> {
         }
     }
 
-    manifest::clear(&trash_dir)
+    indexes.manifest.force_clear_commit()
 }
 
 pub fn delete_from_trash(ids: &[String]) -> Result<(), String> {
@@ -224,8 +208,10 @@ pub fn delete_from_trash(ids: &[String]) -> Result<(), String> {
         } else {
             fs::remove_file(&path).map_err(|error| error.to_string())?;
         }
-        manifest::remove(&trash_dir, id)?;
     }
-
-    Ok(())
+    let mut indexes = CommandIndexes::load(&trash_dir)?;
+    for id in ids {
+        indexes.manifest.remove(id);
+    }
+    indexes.manifest.force_commit()
 }

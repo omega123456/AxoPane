@@ -2,6 +2,12 @@ mod fs {
     pub use file_explorer_lib::fs::*;
 }
 
+mod directory_session {
+    pub mod model {
+        pub use file_explorer_lib::directory_session::model::*;
+    }
+}
+
 mod watch_src {
     include!("../src/watch/mod.rs");
 
@@ -623,76 +629,289 @@ mod watch_src {
                 .expect("child entry");
             assert_eq!(child_entry.item_count, None);
         }
-    }
-}
 
-use file_explorer_lib::ipc::commands;
-use file_explorer_lib::ipc::types::{SetTabWatchRequest, WatchSeedReference};
-use file_explorer_lib::listing::ListingService;
-use file_explorer_lib::watch::{tab_snapshot_for_tests, WatchService, WatchTarget};
+        #[test]
+        fn raw_mutations_for_event_covers_access_remove_unresolved_and_changed_kinds() {
+            let watched = WatchedTab {
+                watch_id: WatchId(7),
+                target: WatchTarget {
+                    tab_id: "left-1".to_string(),
+                    path: "/watched".to_string(),
+                    sort_key: SortKey::Name,
+                    sort_direction: SortDirection::Asc,
+                    filter: String::new(),
+                    show_hidden: true,
+                    include_item_counts: false,
+                },
+                snapshot: HashMap::new(),
+            };
 
-fn as_state<'a, T: Send + Sync + 'static>(value: &'a T) -> tauri::State<'a, T> {
-    unsafe { std::mem::transmute::<&'a T, tauri::State<'a, T>>(value) }
-}
+            // Access events never produce a mutation.
+            let access = Event::new(EventKind::Access(notify::event::AccessKind::Read));
+            assert!(raw_mutations_for_event(&access, &watched).is_empty());
 
-#[test]
-fn stale_seed_reference_falls_back_to_current_directory_snapshot() {
-    let fixture = tempfile::tempdir().expect("temp dir");
-    let root = fixture.path();
-    std::fs::write(root.join("real.txt"), b"real").expect("real file");
+            // A remove event for a direct child becomes a `Removed` mutation.
+            let removed_child = PathBuf::from("/watched/gone.txt");
+            let remove_event =
+                Event::new(EventKind::Remove(RemoveKind::File)).add_path(removed_child.clone());
+            let removed = raw_mutations_for_event(&remove_event, &watched);
+            assert_eq!(removed.len(), 1);
+            assert_eq!(removed[0].kind, MutationKind::Removed);
+            assert_eq!(removed[0].child_path, removed_child);
 
-    let listing_service = ListingService::default();
-    let session = listing_service.begin_session("left-1");
-    assert!(listing_service.complete_session(
-        &session,
-        root.to_string_lossy().into_owned(),
-        file_explorer_lib::fs::SortKey::Name,
-        file_explorer_lib::fs::SortDirection::Asc,
-        String::new(),
-        true,
-        true,
-        vec![file_explorer_lib::fs::DirectoryEntry {
-            id: root.join("phantom.txt").to_string_lossy().into_owned(),
-            name: "phantom.txt".to_string(),
-            path: root.join("phantom.txt").to_string_lossy().into_owned(),
-            is_dir: false,
-            icon_data_url: None,
-            size_bytes: Some(1),
-            item_count: None,
-            type_label: "TXT file".to_string(),
-            modified_at: None,
-            created_at: None,
-            attributes: Vec::new(),
-            is_hidden: false,
-            is_system: false,
-        }],
-    ));
+            // An `Any`/`Other`-shaped event cannot be resolved into a definite
+            // child identity: exactly one `Unresolved` mutation with an empty
+            // child path, regardless of how many paths the event carried.
+            let unresolved_event = Event::new(EventKind::Any)
+                .add_path(PathBuf::from("/watched/a.txt"))
+                .add_path(PathBuf::from("/watched/b.txt"));
+            let unresolved = raw_mutations_for_event(&unresolved_event, &watched);
+            assert_eq!(unresolved.len(), 1);
+            assert_eq!(unresolved[0].kind, MutationKind::Unresolved);
+            assert_eq!(unresolved[0].child_path, PathBuf::new());
 
-    let watch_service = WatchService::default();
-    commands::set_tab_watch(
-        SetTabWatchRequest {
-            target: Some(WatchTarget {
+            // A rename-both event that resolves both paths but is not a
+            // direct child of the watched target contributes nothing.
+            let outside_child = PathBuf::from("/elsewhere/child.txt");
+            let outside_rename = Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Both)))
+                .add_path(outside_child.clone())
+                .add_path(PathBuf::from("/elsewhere/child2.txt"));
+            assert!(raw_mutations_for_event(&outside_rename, &watched).is_empty());
+
+            // A direct-child data-change event resolves to one `Changed`
+            // mutation carrying the child path.
+            let changed_child = PathBuf::from("/watched/changed.txt");
+            let changed_event =
+                Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Content)))
+                    .add_path(changed_child.clone());
+            let changed = raw_mutations_for_event(&changed_event, &watched);
+            assert_eq!(changed.len(), 1);
+            assert_eq!(changed[0].kind, MutationKind::Changed);
+            assert_eq!(changed[0].child_path, changed_child);
+        }
+
+        #[test]
+        fn raw_mutations_for_event_flags_need_rescan_events_as_unresolved() {
+            let watched = WatchedTab {
+                watch_id: WatchId(9),
+                target: WatchTarget {
+                    tab_id: "left-1".to_string(),
+                    path: "/watched".to_string(),
+                    sort_key: SortKey::Name,
+                    sort_direction: SortDirection::Asc,
+                    filter: String::new(),
+                    show_hidden: true,
+                    include_item_counts: false,
+                },
+                snapshot: HashMap::new(),
+            };
+            let mut rescan_event =
+                Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Content)))
+                    .add_path(PathBuf::from("/watched/x.txt"));
+            rescan_event = rescan_event.set_flag(Flag::Rescan);
+
+            let mutations = raw_mutations_for_event(&rescan_event, &watched);
+            assert_eq!(mutations.len(), 1);
+            assert_eq!(mutations[0].kind, MutationKind::Unresolved);
+        }
+
+        #[test]
+        fn process_compacted_batch_ignores_batches_for_unknown_watch_ids() {
+            let tabs = Arc::new(Mutex::new(HashMap::<String, WatchedTab>::new()));
+            let patches = Arc::new(Mutex::new(Vec::<DirPatch>::new()));
+            let errors = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+            let patches_for_emit = Arc::clone(&patches);
+            let errors_for_emit = Arc::clone(&errors);
+            let patch_emitter: Arc<dyn Fn(DirPatch) + Send + Sync> =
+                Arc::new(move |patch| patches_for_emit.lock().unwrap().push(patch));
+            let error_emitter: Arc<dyn Fn(String, String) + Send + Sync> =
+                Arc::new(move |path, error| errors_for_emit.lock().unwrap().push((path, error)));
+
+            // No tab is registered for this watch id at all: the batch is
+            // silently dropped (a stale/superseded watch generation).
+            process_compacted_batch(
+                &tabs,
+                CompactedBatch::Targeted {
+                    watch_id: WatchId(42),
+                    changed: Vec::new(),
+                    removed: Vec::new(),
+                },
+                &patch_emitter,
+                &error_emitter,
+            );
+            assert!(patches.lock().unwrap().is_empty());
+            assert!(errors.lock().unwrap().is_empty());
+        }
+
+        #[test]
+        fn process_compacted_batch_applies_targeted_changes_and_emits_a_patch() {
+            let fixture = tempdir().expect("temp dir");
+            let root = fixture.path();
+            let new_file = root.join("new.txt");
+            std::fs::write(&new_file, b"new").expect("write new file");
+
+            let target = WatchTarget {
                 tab_id: "left-1".to_string(),
                 path: root.to_string_lossy().into_owned(),
-                sort_key: file_explorer_lib::fs::SortKey::Name,
-                sort_direction: file_explorer_lib::fs::SortDirection::Asc,
+                sort_key: SortKey::Name,
+                sort_direction: SortDirection::Asc,
                 filter: String::new(),
                 show_hidden: true,
-                include_item_counts: true,
-            }),
-            seed_reference: Some(WatchSeedReference {
-                tab_id: "left-1".to_string(),
-                request_id: session.request_id + 1,
-                path: root.to_string_lossy().into_owned(),
-            }),
-            entries: None,
-        },
-        as_state(&listing_service),
-        as_state(&watch_service),
-    )
-    .expect("set watch with stale seed reference");
+                include_item_counts: false,
+            };
+            let watch_id = WatchId(1);
+            let tabs = Arc::new(Mutex::new(HashMap::from([(
+                target.tab_id.clone(),
+                WatchedTab {
+                    watch_id,
+                    target: target.clone(),
+                    snapshot: HashMap::new(),
+                },
+            )])));
 
-    let baseline = tab_snapshot_for_tests(&watch_service, "left-1").expect("baseline recorded");
-    assert!(baseline.keys().any(|path| path.ends_with("real.txt")));
-    assert!(!baseline.keys().any(|path| path.ends_with("phantom.txt")));
+            let patches = Arc::new(Mutex::new(Vec::<DirPatch>::new()));
+            let patches_for_emit = Arc::clone(&patches);
+            let patch_emitter: Arc<dyn Fn(DirPatch) + Send + Sync> =
+                Arc::new(move |patch| patches_for_emit.lock().unwrap().push(patch));
+            let error_emitter: Arc<dyn Fn(String, String) + Send + Sync> = Arc::new(|_, _| {});
+
+            process_compacted_batch(
+                &tabs,
+                CompactedBatch::Targeted {
+                    watch_id,
+                    changed: vec![new_file.clone()],
+                    removed: Vec::new(),
+                },
+                &patch_emitter,
+                &error_emitter,
+            );
+
+            let emitted = patches.lock().unwrap();
+            assert_eq!(emitted.len(), 1);
+            assert!(emitted[0]
+                .changed
+                .iter()
+                .any(|item| item.path.ends_with("new.txt")));
+            let guard = tabs.lock().unwrap();
+            let stored_snapshot = &guard.get(&target.tab_id).unwrap().snapshot;
+            assert!(stored_snapshot.keys().any(|path| path.ends_with("new.txt")));
+        }
+
+        #[test]
+        fn process_compacted_batch_dirty_resnapshots_from_disk() {
+            let fixture = tempdir().expect("temp dir");
+            let root = fixture.path();
+            std::fs::write(root.join("existing.txt"), b"x").expect("existing file");
+
+            let target = WatchTarget {
+                tab_id: "left-1".to_string(),
+                path: root.to_string_lossy().into_owned(),
+                sort_key: SortKey::Name,
+                sort_direction: SortDirection::Asc,
+                filter: String::new(),
+                show_hidden: true,
+                include_item_counts: false,
+            };
+            let watch_id = WatchId(2);
+            let tabs = Arc::new(Mutex::new(HashMap::from([(
+                target.tab_id.clone(),
+                WatchedTab {
+                    watch_id,
+                    target: target.clone(),
+                    snapshot: HashMap::new(),
+                },
+            )])));
+
+            let patches = Arc::new(Mutex::new(Vec::<DirPatch>::new()));
+            let patches_for_emit = Arc::clone(&patches);
+            let patch_emitter: Arc<dyn Fn(DirPatch) + Send + Sync> =
+                Arc::new(move |patch| patches_for_emit.lock().unwrap().push(patch));
+            let error_emitter: Arc<dyn Fn(String, String) + Send + Sync> = Arc::new(|_, _| {});
+
+            process_compacted_batch(
+                &tabs,
+                CompactedBatch::Dirty {
+                    watch_id,
+                    generation: 1,
+                },
+                &patch_emitter,
+                &error_emitter,
+            );
+
+            let guard = tabs.lock().unwrap();
+            let stored_snapshot = &guard.get(&target.tab_id).unwrap().snapshot;
+            assert!(stored_snapshot
+                .keys()
+                .any(|path| path.ends_with("existing.txt")));
+        }
+
+        #[test]
+        fn process_compacted_batch_treats_a_missing_changed_path_as_a_removal() {
+            let fixture = tempdir().expect("temp dir");
+            let root = fixture.path();
+            let target = WatchTarget {
+                tab_id: "left-1".to_string(),
+                path: root.to_string_lossy().into_owned(),
+                sort_key: SortKey::Name,
+                sort_direction: SortDirection::Asc,
+                filter: String::new(),
+                show_hidden: true,
+                include_item_counts: false,
+            };
+            let watch_id = WatchId(3);
+            let missing = root.join("never-existed.txt");
+            let tabs = Arc::new(Mutex::new(HashMap::from([(
+                target.tab_id.clone(),
+                WatchedTab {
+                    watch_id,
+                    target: target.clone(),
+                    snapshot: HashMap::from([(
+                        fs::display_path_from_path(&missing),
+                        fs::DirectoryEntry {
+                            id: missing.to_string_lossy().into_owned(),
+                            name: "never-existed.txt".to_string(),
+                            path: fs::display_path_from_path(&missing),
+                            is_dir: false,
+                            icon_data_url: None,
+                            size_bytes: Some(0),
+                            item_count: None,
+                            type_label: "TXT file".to_string(),
+                            modified_at: None,
+                            created_at: None,
+                            attributes: Vec::new(),
+                            is_hidden: false,
+                            is_system: false,
+                        },
+                    )]),
+                },
+            )])));
+
+            let patches = Arc::new(Mutex::new(Vec::<DirPatch>::new()));
+            let patches_for_emit = Arc::clone(&patches);
+            let patch_emitter: Arc<dyn Fn(DirPatch) + Send + Sync> =
+                Arc::new(move |patch| patches_for_emit.lock().unwrap().push(patch));
+            let error_emitter: Arc<dyn Fn(String, String) + Send + Sync> = Arc::new(|_, _| {});
+
+            process_compacted_batch(
+                &tabs,
+                CompactedBatch::Targeted {
+                    watch_id,
+                    changed: vec![missing.clone()],
+                    removed: Vec::new(),
+                },
+                &patch_emitter,
+                &error_emitter,
+            );
+
+            let emitted = patches.lock().unwrap();
+            assert_eq!(emitted.len(), 1);
+            assert!(emitted[0]
+                .removed
+                .iter()
+                .any(|path| path.ends_with("never-existed.txt")));
+            let guard = tabs.lock().unwrap();
+            let stored_snapshot = &guard.get(&target.tab_id).unwrap().snapshot;
+            assert!(stored_snapshot.is_empty());
+        }
+    }
 }

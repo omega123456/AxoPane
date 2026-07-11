@@ -3,7 +3,7 @@ import { CopyIcon, FolderOpenIcon, InfoIcon } from '@/components/icons'
 import { executeCommand } from '@/lib/commands'
 import { copyPathsToClipboard } from '@/lib/path-clipboard'
 import { showPropertiesDialog, toPropertiesDialogItem } from '@/lib/properties-commands'
-import { usePanesStore } from '@/stores/panes-store'
+import { indexEntriesById, usePanesStore } from '@/stores/panes-store'
 import type { PaneId } from '@/types/pane'
 
 type DetailsPanelProps = {
@@ -12,7 +12,9 @@ type DetailsPanelProps = {
 
 export function DetailsPanel({ paneId }: DetailsPanelProps) {
   const pane = usePanesStore((state) => state.panes[paneId])
-  const entry = pane.entries.find((item) => item.id === pane.focusedEntryId) ?? pane.entries[0]
+  const entry =
+    (pane.focusedEntryId ? indexEntriesById(pane.entries).get(pane.focusedEntryId) : undefined) ??
+    pane.entries[0]
 
   if (!entry) {
     return (

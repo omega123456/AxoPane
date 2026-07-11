@@ -24,6 +24,34 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::volumes::VolumeInfo;
 
+pub mod archive;
+pub mod manifest;
+pub mod transfer;
+pub mod worker;
+
+use manifest::ProgressiveManifest;
+#[cfg(target_os = "macos")]
+use transfer::macos::MacosCapabilities;
+#[cfg(not(any(target_os = "macos", windows)))]
+use transfer::portable::PortableAdapter;
+#[cfg(windows)]
+use transfer::windows::WindowsCapabilities;
+use transfer::TransferRequirements;
+
+/// Test-only hook proving the capability-adapter selection genuinely
+/// executes along the real copy path. `select_adapter` is `test-utils`-gated
+/// to always resolve to `Portable(UnsupportedPlatform)`, so this counter is
+/// the only way an integration test can distinguish "the decision ran" from
+/// "the decision was skipped".
+#[cfg(feature = "test-utils")]
+static ADAPTER_SELECTION_CALLS: AtomicU64 = AtomicU64::new(0);
+
+/// Number of times a real file transfer has invoked [`worker::select_adapter`].
+#[cfg(feature = "test-utils")]
+pub fn adapter_selection_calls_for_tests() -> u64 {
+    ADAPTER_SELECTION_CALLS.load(Ordering::Relaxed)
+}
+
 /// How long a completed or cancelled operation lingers in the queue before being auto-removed.
 pub const DEFAULT_COMPLETED_RETENTION: Duration = Duration::from_secs(4);
 /// How often active operations recompute their short-window instantaneous rate.
@@ -336,6 +364,7 @@ pub struct OpsService {
     rate_window: Duration,
     instant_now: InstantNow,
     volumes: Mutex<Vec<VolumeInfo>>,
+    coordinator: Arc<crate::resource_coordinator::ResourceCoordinator>,
 }
 
 impl Default for OpsService {
@@ -350,6 +379,28 @@ impl OpsService {
     }
 
     pub fn with_rate_window(completed_retention: Duration, rate_window: Duration) -> Self {
+        Self::with_rate_window_and_coordinator(
+            completed_retention,
+            rate_window,
+            Arc::new(crate::resource_coordinator::ResourceCoordinator::new()),
+        )
+    }
+
+    pub fn with_resource_coordinator(
+        coordinator: Arc<crate::resource_coordinator::ResourceCoordinator>,
+    ) -> Self {
+        Self::with_rate_window_and_coordinator(
+            DEFAULT_COMPLETED_RETENTION,
+            DEFAULT_RATE_WINDOW,
+            coordinator,
+        )
+    }
+
+    fn with_rate_window_and_coordinator(
+        completed_retention: Duration,
+        rate_window: Duration,
+        coordinator: Arc<crate::resource_coordinator::ResourceCoordinator>,
+    ) -> Self {
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 ops: HashMap::new(),
@@ -366,6 +417,7 @@ impl OpsService {
             rate_window,
             instant_now: Arc::new(Instant::now),
             volumes: Mutex::new(crate::volumes::list_volumes()),
+            coordinator,
         }
     }
 
@@ -541,10 +593,15 @@ impl OpsService {
             retention: self.completed_retention,
             rate_window: self.rate_window,
             instant_now: self.instant_now.clone(),
+            coordinator: Arc::clone(&self.coordinator),
         };
-
         let handle = thread::spawn(move || {
-            run_operation(id.clone(), &inner, &runtime);
+            // All source/destination resource keys are admitted as one
+            // duplicate-collapsed set through the shared resource
+            // coordinator, whether this is `id`'s first dispatch or a
+            // rescheduled run after another operation released its
+            // volumes — see `admit_and_run_operation`.
+            admit_and_run_operation(id.clone(), &inner, &runtime);
             release_and_reschedule(&id, &inner, &runtime);
         });
 
@@ -777,6 +834,7 @@ impl OpsService {
             retention: self.completed_retention,
             rate_window: self.rate_window,
             instant_now: self.instant_now.clone(),
+            coordinator: Arc::clone(&self.coordinator),
         };
         run_operation(id.to_string(), &self.inner, &runtime);
     }
@@ -802,6 +860,7 @@ impl OpsService {
             retention: self.completed_retention,
             rate_window: self.rate_window,
             instant_now: self.instant_now.clone(),
+            coordinator: Arc::clone(&self.coordinator),
         };
         release_and_reschedule(id, &self.inner, &runtime);
     }
@@ -826,6 +885,7 @@ struct WorkerRuntime {
     retention: Duration,
     rate_window: Duration,
     instant_now: InstantNow,
+    coordinator: Arc<crate::resource_coordinator::ResourceCoordinator>,
 }
 
 /// Run a single operation to completion / failure / cancel. Blocks the worker
@@ -1072,7 +1132,7 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
     let result = if matches!(kind, OpKind::Move) {
         move_path_with_total_discovery(&source, &target, false, ctx)
     } else {
-        copy_path_with_total_discovery(&source, &target, false, ctx)
+        copy_path_with_total_discovery(&source, &target, false, ctx, None)
     };
 
     match result {
@@ -1134,15 +1194,15 @@ fn measure_totals_up_front(
         let op = op_arc.lock().expect("op lock");
         (op.kind, op.cancel.clone())
     };
-    if !matches!(kind, OpKind::Delete | OpKind::Copy | OpKind::Move) {
+    if !matches!(kind, OpKind::Delete | OpKind::Copy) {
         return;
     }
 
-    // Copy/move read through a symlink and transfer its target's bytes, so
+    // Copy reads through a symlink and transfers its target's bytes, so
     // their pre-measurement must follow links too or a symlink-heavy tree
     // would undercount the total the same way an un-measured folder did.
     // Delete removes the link itself, so it does not.
-    let follow_symlinks = matches!(kind, OpKind::Copy | OpKind::Move);
+    let follow_symlinks = matches!(kind, OpKind::Copy);
     let mut discovered_bytes = 0_u64;
     for item in items.iter().filter(|item| item.size_bytes == 0) {
         if cancel.load(Ordering::Relaxed) {
@@ -1326,6 +1386,41 @@ fn refresh_rate_locked_with_now(
     }
 }
 
+/// Admits `id`'s declared resource keys through the shared resource
+/// coordinator before actually running it. Used by both the initial
+/// dispatch path (`spawn_worker`) and by `release_and_reschedule` once
+/// previously-blocked work becomes eligible, so a rescheduled run contends
+/// for the same global latency/throughput/CPU admission caps as a
+/// first-dispatch run rather than only the legacy per-volume
+/// `busy_volumes` gate. A denied admission (coordinator shut down or the
+/// job was cancelled while queued for admission) marks the operation
+/// cancelled instead of running it.
+fn admit_and_run_operation(id: String, inner: &Arc<Mutex<Inner>>, runtime: &WorkerRuntime) {
+    let Some((resources, archive_cpu)) = ({
+        let guard = inner.lock().expect("ops lock");
+        guard.ops.get(&id).map(|op_arc| {
+            let op = op_arc.lock().expect("op lock");
+            (
+                op.volumes.iter().cloned().collect::<Vec<_>>(),
+                archive::needs_cpu_admission(op.kind),
+            )
+        })
+    }) else {
+        return;
+    };
+
+    let admission = runtime
+        .coordinator
+        .submit(worker::transfer_admission(resources, archive_cpu));
+    if admission.is_ok() {
+        run_operation(id, inner, runtime);
+    } else if let Some(op) = inner.lock().expect("ops lock").ops.get(&id).cloned() {
+        let mut op = op.lock().expect("op lock");
+        op.status = OpStatus::Cancelled;
+        op.error_message = Some("Transfer admission was cancelled or shut down.".to_string());
+    }
+}
+
 /// Once a worker finishes, free its volumes and try to schedule waiting work.
 fn release_and_reschedule(id: &str, inner: &Arc<Mutex<Inner>>, runtime: &WorkerRuntime) {
     let volumes = {
@@ -1344,13 +1439,15 @@ fn release_and_reschedule(id: &str, inner: &Arc<Mutex<Inner>>, runtime: &WorkerR
         }
     }
 
-    // Dispatch any newly-eligible pending operations.
+    // Dispatch any newly-eligible pending operations. Each still contends
+    // for the shared resource coordinator's global admission caps, not just
+    // the legacy per-volume `busy_volumes` gate freed above.
     let to_start = collect_startable(inner);
     for next in to_start {
         let inner = inner.clone();
         let runtime = runtime.clone();
         thread::spawn(move || {
-            run_operation(next.clone(), &inner, &runtime);
+            admit_and_run_operation(next.clone(), &inner, &runtime);
             release_and_reschedule(&next, &inner, &runtime);
         });
     }
@@ -1540,7 +1637,8 @@ fn extract_item_with_progress(
             .enclosed_name()
             .ok_or_else(|| "Archive contains an unsafe entry path.".to_string())?;
         let relative_name = strip_wrapper_root(&enclosed_name, wrapper_root.as_deref());
-        let output_path = output_root.join(relative_name);
+        let output_path = crate::traversal::safe_destination(&output_root, relative_name)
+            .map_err(|error| error.to_string())?;
 
         if entry.is_dir() {
             fs::create_dir_all(&output_path).map_err(|error| error.to_string())?;
@@ -1562,10 +1660,16 @@ fn extract_item_with_progress(
     Ok(())
 }
 
-/// Appends `source` (a file or, recursively, a directory tree) to `writer`.
+/// Appends `source` (a file, a symlink, or a directory tree) to `writer`.
 /// `throttle` is shared across the *whole* member loop of one compress
-/// operation (threaded through every recursive call) so a many-small-member
-/// source tree does not re-flood by minting a fresh throttle per member.
+/// operation (threaded through the directory walk below) so a
+/// many-small-member source tree does not re-flood by minting a fresh
+/// throttle per member.
+///
+/// The directory branch walks the whole subtree with the shared
+/// `crate::traversal::walk` service (flat, bounded, non-recursive-call
+/// iteration) instead of self-recursing per `fs::read_dir` child, matching
+/// how `measure_tree_size` already walks trees elsewhere in this file.
 fn append_archive_path(
     writer: &mut ZipWriter<fs::File>,
     source: &Path,
@@ -1575,17 +1679,26 @@ fn append_archive_path(
     mut throttle: Option<&mut TransferThrottle>,
 ) -> Result<(), String> {
     wait_while_paused(ctx.op_arc, ctx.resolver);
-    if ctx
-        .op_arc
-        .lock()
-        .expect("op lock")
-        .cancel
-        .load(Ordering::Relaxed)
-    {
+    if is_op_cancelled(ctx) {
         return Ok(());
     }
 
-    if source.is_dir() {
+    // Never follow a directory link while archiving.  ZIP stores the link as
+    // a link entry (its payload is the link target), so cycles and targets
+    // outside the selected root cannot become archived content.
+    let metadata = fs::symlink_metadata(source).map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() {
+        return append_archive_symlink(
+            writer,
+            source,
+            archive_path,
+            add_discovered_totals,
+            ctx,
+            throttle,
+        );
+    }
+
+    if metadata.is_dir() {
         let mut directory_name = to_zip_path(archive_path)?;
         if !directory_name.ends_with('/') {
             directory_name.push('/');
@@ -1594,27 +1707,134 @@ fn append_archive_path(
             .add_directory(directory_name, zip_dir_options())
             .map_err(|error| error.to_string())?;
 
-        let mut children = fs::read_dir(source)
-            .map_err(|error| error.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| error.to_string())?;
-        children.sort_by_key(|entry| entry.file_name());
+        // Archive member order is intentionally not a contract. The flat
+        // walk below avoids materializing/sorting an unbounded wide
+        // directory solely for a cosmetic order (same rationale as the
+        // former per-directory `fs::read_dir` loop it replaces).
+        let cancel = Arc::clone(&ctx.op_arc.lock().expect("op lock").cancel);
+        let entries = crate::traversal::walk(
+            source,
+            crate::traversal::TraversalOptions::default(),
+            cancel,
+        )
+        .map_err(|error| error.to_string())?;
+        for entry in entries {
+            wait_while_paused(ctx.op_arc, ctx.resolver);
+            if is_op_cancelled(ctx) {
+                return Ok(());
+            }
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(crate::traversal::TraversalError::Cancelled) => return Ok(()),
+                Err(error) => return Err(error.to_string()),
+            };
+            let relative = entry
+                .path
+                .strip_prefix(source)
+                .map_err(|error| error.to_string())?;
+            let member_archive_path = archive_path.join(relative);
 
-        for child in children {
-            let child_source = child.path();
-            let child_archive_path = archive_path.join(child.file_name());
-            append_archive_path(
-                writer,
-                &child_source,
-                &child_archive_path,
-                add_discovered_totals,
-                ctx,
-                throttle.as_deref_mut(),
-            )?;
+            if entry.file_type.is_symlink() {
+                append_archive_symlink(
+                    writer,
+                    &entry.path,
+                    &member_archive_path,
+                    add_discovered_totals,
+                    ctx,
+                    throttle.as_deref_mut(),
+                )?;
+            } else if entry.file_type.is_dir() {
+                let mut member_directory_name = to_zip_path(&member_archive_path)?;
+                if !member_directory_name.ends_with('/') {
+                    member_directory_name.push('/');
+                }
+                writer
+                    .add_directory(member_directory_name, zip_dir_options())
+                    .map_err(|error| error.to_string())?;
+            } else {
+                append_archive_file(
+                    writer,
+                    &entry.path,
+                    &member_archive_path,
+                    add_discovered_totals,
+                    ctx,
+                    throttle.as_deref_mut(),
+                )?;
+            }
         }
         return Ok(());
     }
 
+    append_archive_file(
+        writer,
+        source,
+        archive_path,
+        add_discovered_totals,
+        ctx,
+        throttle,
+    )
+}
+
+/// `true` when the operation backing `ctx` has been cancelled. Small helper
+/// so both the top-of-function check and the per-entry check inside the
+/// directory walk loop stay in sync.
+fn is_op_cancelled(ctx: &WorkerCtx<'_>) -> bool {
+    ctx.op_arc
+        .lock()
+        .expect("op lock")
+        .cancel
+        .load(Ordering::Relaxed)
+}
+
+/// Append a symlink `source` to `writer` at `archive_path`, storing the link
+/// target as the entry's content (ZIP symlink convention). Shared by the
+/// root-level call in `append_archive_path` and the directory-walk loop.
+fn append_archive_symlink(
+    writer: &mut ZipWriter<fs::File>,
+    source: &Path,
+    archive_path: &Path,
+    add_discovered_totals: bool,
+    ctx: &WorkerCtx<'_>,
+    mut throttle: Option<&mut TransferThrottle>,
+) -> Result<(), String> {
+    let target = fs::read_link(source).map_err(|error| error.to_string())?;
+    let target = target.to_string_lossy();
+    let target_bytes = target.as_bytes();
+    if add_discovered_totals {
+        add_discovered_total(ctx, target_bytes.len() as u64, throttle.as_deref_mut());
+    }
+    begin_file_progress(
+        ctx,
+        source,
+        target_bytes.len() as u64,
+        throttle.as_deref_mut(),
+    );
+    writer
+        .start_file(
+            to_zip_path(archive_path)?,
+            SimpleFileOptions::default()
+                .compression_method(CompressionMethod::Stored)
+                .unix_permissions(0o120777),
+        )
+        .map_err(|error| error.to_string())?;
+    writer
+        .write_all(target_bytes)
+        .map_err(|error| error.to_string())?;
+    report_chunk_progress(ctx, target_bytes.len() as u64, throttle.as_deref_mut());
+    finish_file_progress(ctx, throttle);
+    Ok(())
+}
+
+/// Append a regular file `source` to `writer` at `archive_path`. Shared by
+/// the root-level call in `append_archive_path` and the directory-walk loop.
+fn append_archive_file(
+    writer: &mut ZipWriter<fs::File>,
+    source: &Path,
+    archive_path: &Path,
+    add_discovered_totals: bool,
+    ctx: &WorkerCtx<'_>,
+    mut throttle: Option<&mut TransferThrottle>,
+) -> Result<(), String> {
     let file_size = fs::metadata(source)
         .map(|metadata| metadata.len())
         .unwrap_or(0);
@@ -1823,6 +2043,27 @@ fn zip_dir_options() -> SimpleFileOptions {
 /// use of `symlink_metadata`), so it passes `false` and symlinks are skipped
 /// entirely. IO errors are skipped so measurement never aborts the op.
 pub fn measure_tree_size(path: &Path, cancel: &Arc<AtomicBool>, follow_symlinks: bool) -> u64 {
+    if !follow_symlinks {
+        return crate::traversal::walk(
+            path,
+            crate::traversal::TraversalOptions::default(),
+            Arc::clone(cancel),
+        )
+        .map(|entries| {
+            entries
+                .take_while(|entry| {
+                    !matches!(entry, Err(crate::traversal::TraversalError::Cancelled))
+                })
+                .filter_map(Result::ok)
+                .filter_map(|entry| {
+                    (!entry.file_type.is_dir() && !entry.file_type.is_symlink())
+                        .then(|| fs::metadata(entry.path).ok().map(|metadata| metadata.len()))
+                        .flatten()
+                })
+                .fold(0_u64, u64::saturating_add)
+        })
+        .unwrap_or(0);
+    }
     // Seed the starting directory itself (like `copy_dir_recursive`'s `visited`
     // guard) so a symlink cycling straight back to `path` is caught on its
     // first hop rather than being traversed once before detection.
@@ -1920,7 +2161,7 @@ fn measure_path_size(path: &Path, cancel: &Arc<AtomicBool>, follow_symlinks: boo
 }
 
 pub fn copy_path(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(), String> {
-    copy_path_with_total_discovery(source, target, false, ctx)
+    copy_path_with_total_discovery(source, target, false, ctx, None)
 }
 
 fn copy_path_with_total_discovery(
@@ -1928,6 +2169,7 @@ fn copy_path_with_total_discovery(
     target: &Path,
     add_discovered_totals: bool,
     ctx: &WorkerCtx<'_>,
+    mut manifest: Option<&mut ProgressiveManifest>,
 ) -> Result<(), String> {
     if source.is_dir() {
         let root = source.canonicalize().map_err(|error| error.to_string())?;
@@ -1943,6 +2185,7 @@ fn copy_path_with_total_discovery(
             add_discovered_totals,
             ctx,
             Some(&mut throttle),
+            manifest.as_deref_mut(),
         )
     } else {
         // A single top-level file transfer gets its own throttle: a large
@@ -1959,6 +2202,7 @@ fn copy_path_with_total_discovery(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn copy_dir_recursive(
     source: &Path,
     target: &Path,
@@ -1967,6 +2211,7 @@ pub fn copy_dir_recursive(
     add_discovered_totals: bool,
     ctx: &WorkerCtx<'_>,
     mut throttle: Option<&mut TransferThrottle>,
+    mut manifest: Option<&mut ProgressiveManifest>,
 ) -> Result<(), String> {
     fs::create_dir_all(target).map_err(|error| error.to_string())?;
     for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
@@ -2007,9 +2252,17 @@ pub fn copy_dir_recursive(
                 add_discovered_totals,
                 ctx,
                 throttle.as_deref_mut(),
+                manifest.as_deref_mut(),
             )?;
             visited.remove(&canonical_child);
         } else {
+            if let Some(manifest) = manifest.as_deref_mut() {
+                let link_metadata =
+                    fs::symlink_metadata(entry.path()).map_err(|error| error.to_string())?;
+                let bytes = link_metadata.len();
+                let is_link = link_metadata.file_type().is_symlink();
+                manifest.record(root, entry.path(), bytes, is_link);
+            }
             copy_file_with_total_discovery(
                 &entry.path(),
                 &child_target,
@@ -2176,23 +2429,36 @@ fn move_path_with_total_discovery(
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    match fs::rename(source, target) {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            // Cross-volume move: copy then delete the source.
-            copy_path_with_total_discovery(source, target, add_discovered_totals, ctx)?;
-            if ctx
-                .op_arc
-                .lock()
-                .expect("op lock")
-                .cancel
-                .load(Ordering::Relaxed)
-            {
-                return Ok(());
-            }
-            remove_source(source)
-        }
+    // `same_resource: true` preserves current behavior: rename is always
+    // attempted first regardless of resource identity, and only an
+    // OS-confirmed cross-device error falls back to copy+delete.
+    let renamed =
+        worker::rename_or_cross_device(source, target, true, |src, dst| fs::rename(src, dst))?;
+    if renamed {
+        return Ok(());
     }
+    // The progressive copy path grows totals while it discovers files, and
+    // source removal happens only after destination completion. A fresh
+    // manifest records every file discovered along this fallback walk so the
+    // cross-device copy leaves a real, inspectable transfer record behind.
+    let mut manifest = ProgressiveManifest::default();
+    copy_path_with_total_discovery(
+        source,
+        target,
+        add_discovered_totals,
+        ctx,
+        Some(&mut manifest),
+    )?;
+    if ctx
+        .op_arc
+        .lock()
+        .expect("op lock")
+        .cancel
+        .load(Ordering::Relaxed)
+    {
+        return Ok(());
+    }
+    remove_source(source)
 }
 
 pub fn copy_file_with_progress(
@@ -2201,6 +2467,54 @@ pub fn copy_file_with_progress(
     ctx: &WorkerCtx<'_>,
 ) -> Result<(), String> {
     copy_file_with_total_discovery(source, target, false, ctx, None)
+}
+
+/// Runs the capability-adapter selection decision for a single file transfer
+/// and logs the outcome at debug level. The actual byte transfer always runs
+/// through the portable streaming loop below regardless of the selection
+/// result — no native `CopyFile2`/`copyfile` implementation exists yet, so
+/// every real platform resolves to `Portable(..)` today. This makes the
+/// selection scaffolding in `worker::select_adapter` and the platform
+/// capability structs genuinely execute on the real copy path instead of
+/// sitting unreachable.
+fn log_transfer_adapter_selection(source: &Path) {
+    #[cfg(target_os = "macos")]
+    let adapter: MacosCapabilities = MacosCapabilities::default();
+    #[cfg(windows)]
+    let adapter: WindowsCapabilities = WindowsCapabilities::default();
+    #[cfg(not(any(target_os = "macos", windows)))]
+    let adapter: PortableAdapter = PortableAdapter;
+
+    let requirements = TransferRequirements {
+        progress: true,
+        cancellation: true,
+        ..TransferRequirements::default()
+    };
+    let selection = worker::select_adapter(&adapter, requirements);
+
+    #[cfg(feature = "test-utils")]
+    ADAPTER_SELECTION_CALLS.fetch_add(1, Ordering::Relaxed);
+
+    match &selection {
+        transfer::AdapterSelection::Portable(reason) => {
+            log::debug!(
+                "transfer adapter selection for \"{}\": portable fallback ({reason:?})",
+                source.display()
+            );
+        }
+        transfer::AdapterSelection::WindowsCopyFile2 => {
+            log::debug!(
+                "transfer adapter selection for \"{}\": WindowsCopyFile2",
+                source.display()
+            );
+        }
+        transfer::AdapterSelection::MacosCopyfile => {
+            log::debug!(
+                "transfer adapter selection for \"{}\": MacosCopyfile",
+                source.display()
+            );
+        }
+    }
 }
 
 fn copy_file_with_total_discovery(
@@ -2213,6 +2527,8 @@ fn copy_file_with_total_discovery(
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
+
+    log_transfer_adapter_selection(source);
 
     let file_size = fs::metadata(source)
         .map(|metadata| metadata.len())

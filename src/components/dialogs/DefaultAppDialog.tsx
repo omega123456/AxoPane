@@ -120,7 +120,6 @@ export function DefaultAppDialog() {
                     role="option"
                     aria-selected={selected}
                     onClick={() => selectApp(app.bundlePath)}
-                    onDoubleClick={() => void confirm()}
                     className={`flex w-full items-center gap-2 rounded-tab px-2 py-1.5 text-left text-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border ${
                       selected
                         ? 'bg-accent-blue-soft text-accent-blue-light dark:text-accent-blue'

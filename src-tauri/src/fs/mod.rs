@@ -71,7 +71,21 @@ pub struct ListDirResponse {
 pub struct TreeChildEntry {
     pub name: String,
     pub path: String,
+    pub expandability: TreeExpandability,
+    /// Compatibility field retained through Phase 13.  A false value means
+    /// "not proven non-empty", not that the directory is empty.
     pub has_children: bool,
+}
+
+/// The lazy tree contract deliberately distinguishes a directory we have not
+/// opened from one we have opened and found empty.  Listing a parent must not
+/// open every child merely to manufacture an expander boolean.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TreeExpandability {
+    Unknown,
+    Empty,
+    NonEmpty,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -223,6 +237,30 @@ pub fn expand_home_path_with(path: &str, home: Option<&Path>) -> PathBuf {
     }
 }
 
+/// Test-only call counter for [`list_dir_with_cancellation`]. Lets
+/// integration tests prove a full directory relisting was (or was not)
+/// performed — e.g. `ItemCountService::sort_active_items` deriving its
+/// result from an existing `DirectorySessionService` snapshot must never
+/// bump this counter, while its no-matching-session fallback must.
+#[cfg(feature = "test-utils")]
+static LIST_DIR_CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(feature = "test-utils")]
+pub fn list_dir_calls_for_tests() -> u64 {
+    LIST_DIR_CALLS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Test-only call counter for [`read_item_count`]. Lets integration tests
+/// prove a directory's item count was actually recomputed from disk (a
+/// cache miss) rather than served from [`crate::item_counts::cache::ItemCountCache`].
+#[cfg(feature = "test-utils")]
+static READ_ITEM_COUNT_CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(feature = "test-utils")]
+pub fn read_item_count_calls_for_tests() -> u64 {
+    READ_ITEM_COUNT_CALLS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 pub fn list_dir(options: &ListDirOptions) -> Result<ListDirResponse, FsError> {
     match list_dir_with_cancellation(options, || false)? {
         ListDirOutcome::Complete(response) => Ok(response),
@@ -237,6 +275,8 @@ pub fn list_dir_with_cancellation<F>(
 where
     F: Fn() -> bool + Sync,
 {
+    #[cfg(feature = "test-utils")]
+    LIST_DIR_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let requested = Path::new(&options.path);
     let directory = canonicalize_dir(requested).map_err(|error| {
         log::warn!(
@@ -330,7 +370,11 @@ pub fn list_tree_children(
         children.push(TreeChildEntry {
             name,
             path: display_path_from_path(&path),
-            has_children: directory_has_visible_child_dirs(&path, options.show_hidden),
+            // Do not probe every child directory here: that was an N+1 tree
+            // listing. The child request establishes Empty/NonEmpty when it
+            // is expanded; until then the state is explicitly unknown.
+            expandability: TreeExpandability::Unknown,
+            has_children: false,
         });
     }
 
@@ -558,6 +602,8 @@ where
 /// A failure to count one child must not abort the entire parent listing, so an
 /// unreadable directory simply reports an unknown count (`None`).
 pub fn read_item_count(path: &Path) -> Option<u64> {
+    #[cfg(feature = "test-utils")]
+    READ_ITEM_COUNT_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     match fs::read_dir(path) {
         Ok(entries) => Some(entries.count() as u64),
         Err(error) => {
@@ -565,34 +611,6 @@ pub fn read_item_count(path: &Path) -> Option<u64> {
             None
         }
     }
-}
-
-fn directory_has_visible_child_dirs(path: &Path, show_hidden: bool) -> bool {
-    let Ok(entries) = fs::read_dir(path) else {
-        return false;
-    };
-
-    for entry in entries.flatten() {
-        let child_path = entry.path();
-        let Ok(metadata) = entry.metadata() else {
-            continue;
-        };
-        if !resolve_is_dir(&child_path, &metadata) {
-            continue;
-        }
-        if show_hidden {
-            return true;
-        }
-        let attributes = collect_attributes(&child_path, &metadata);
-        if !attributes
-            .iter()
-            .any(|attribute| is_hidden_or_system_attribute(attribute))
-        {
-            return true;
-        }
-    }
-
-    false
 }
 
 pub fn infer_type_label(name: &str, is_dir: bool) -> String {
@@ -619,12 +637,31 @@ pub fn compare_entries(
         non_equal => return non_equal,
     }
 
+    if sort_key == SortKey::Items {
+        // Count work is deliberately asynchronous. Keep unresolved folders at
+        // the end for both directions so a pending result only moves its own
+        // row into the known-count region; it must not make the whole view
+        // jump ahead of known values while background work is still running.
+        let count_order = match (left.item_count, right.item_count) {
+            (Some(left), Some(right)) => match sort_direction {
+                SortDirection::Asc => left.cmp(&right),
+                SortDirection::Desc => right.cmp(&left),
+            },
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        };
+        return count_order.then_with(|| match sort_direction {
+            SortDirection::Asc => natural_name_compare(&left.name, &right.name),
+            SortDirection::Desc => natural_name_compare(&right.name, &left.name),
+        });
+    }
+
     let base_order = match sort_key {
         SortKey::Name => natural_name_compare(&left.name, &right.name),
         SortKey::Size => compare_optional_u64(left.size_bytes, right.size_bytes)
             .then_with(|| natural_name_compare(&left.name, &right.name)),
-        SortKey::Items => compare_optional_u64(left.item_count, right.item_count)
-            .then_with(|| natural_name_compare(&left.name, &right.name)),
+        SortKey::Items => unreachable!("Items ordering is handled above"),
         SortKey::Type => natural_name_compare(&left.type_label, &right.type_label)
             .then_with(|| natural_name_compare(&left.name, &right.name)),
         SortKey::Modified => compare_with_name_tiebreak(
@@ -653,10 +690,6 @@ fn canonicalize_tree_dir(requested: &Path, display_path: &str) -> Result<PathBuf
         );
         error
     })
-}
-
-fn is_hidden_or_system_attribute(attribute: &str) -> bool {
-    attribute == "hidden" || attribute == "system"
 }
 
 fn compare_with_name_tiebreak(base: Ordering, left_name: &str, right_name: &str) -> Ordering {

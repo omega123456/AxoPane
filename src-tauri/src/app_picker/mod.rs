@@ -24,15 +24,15 @@ use types::{
 /// (potentially main/UI) thread - see `macos::list_applications` for how the
 /// underlying blocking enumeration/icon-resolution work is dispatched
 /// off-thread.
-pub async fn list_applications() -> ListApplicationsResponse {
+pub fn list_applications() -> ListApplicationsResponse {
     #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
     {
-        return macos::list_applications().await;
+        return macos::list_applications();
     }
 
     #[cfg(any(feature = "test-utils", not(target_os = "macos")))]
     {
-        unsupported::list_applications().await
+        unsupported::list_applications()
     }
 }
 
@@ -46,14 +46,35 @@ pub async fn list_applications() -> ListApplicationsResponse {
 /// (potentially main/UI) thread - see `macos::set_default_application` for
 /// how the underlying blocking `NSWorkspace` wait is dispatched off-thread.
 pub async fn set_default_application(request: SetDefaultApplicationRequest) -> MenuActionStatus {
+    set_default_application_cancellable(request, crate::ipc::executor::Cancellation::default())
+        .await
+}
+
+/// App-picker execution contract used by the named IPC app-picker owner.
+/// Cancellation is cooperative: it prevents a request from entering
+/// LaunchServices and prevents a late completion from being returned. An
+/// already-issued LaunchServices request is OS-owned and cannot safely be
+/// force-killed, so it may complete after the IPC caller's deadline.
+pub async fn set_default_application_cancellable(
+    request: SetDefaultApplicationRequest,
+    cancellation: crate::ipc::executor::Cancellation,
+) -> MenuActionStatus {
+    if cancellation.is_cancelled() {
+        return MenuActionStatus::unsupported("default-application-cancelled");
+    }
     #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
     {
-        return macos::set_default_application(&request).await;
+        let result = macos::set_default_application(&request).await;
+        if cancellation.is_cancelled() {
+            return MenuActionStatus::unsupported("default-application-cancelled");
+        }
+        return result;
     }
 
     #[cfg(any(feature = "test-utils", not(target_os = "macos")))]
     {
         let _ = request;
+        let _ = cancellation;
         unsupported::set_default_application().await
     }
 }

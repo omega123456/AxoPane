@@ -1,5 +1,6 @@
 import { afterEach, vi } from 'vitest'
 import type { IpcCommandMap, IpcEventMap, ListDirResponse } from '@/lib/types/ipc'
+import { SESSION_PAGE_SIZE } from '@/lib/types/ipc'
 import { fixtures } from './fixtures'
 
 type OverrideMap = Partial<{
@@ -33,6 +34,59 @@ function resolveListDir(payload: IpcCommandMap['list_dir']['request']): ListDirR
   return cloneValue(fixtures.list_dir)
 }
 
+/**
+ * A monotonic session-id counter shared by the `begin_directory_session`/
+ * `revise_directory_session_view` derivations below, so successive
+ * navigations/view-revisions in one test never collide on `sessionId: 1` (the
+ * `ListingSession` staleness guard compares baselines by value).
+ */
+let v2SessionIdCounter = 0
+/** `sessionId -> path`, so `revise_directory_session_view` (no `path` field) can resolve the session's path. */
+const sessionPathBySessionId = new Map<number, string>()
+
+/**
+ * `begin_directory_session` and `revise_directory_session_view` default to a
+ * v2 response derived from whatever `list_dir` responder is active, mirroring
+ * `start_list_dir`'s derivation below — the many tests that mock `list_dir`
+ * transparently drive the live v2 session path too, with no separate v2
+ * fixture to maintain. The caller's real `view` (sort/filter/showHidden) is
+ * forwarded into the synthesized `list_dir` request so a `list_dir` responder
+ * or spy that inspects its request payload still sees the actual pane view,
+ * not a hardcoded default. An explicit override for either v2 command
+ * (handled above) still wins, and a thrown `list_dir` responder propagates
+ * here just as the real command would surface a listing failure.
+ */
+function deriveBeginNavigationResponse(
+  paneId: string,
+  tabId: string,
+  path: string,
+  view: IpcCommandMap['begin_directory_session']['request']['view'],
+): IpcCommandMap['begin_directory_session']['response'] {
+  const listing = resolveListDir({
+    path,
+    sortKey: view.sortKey,
+    sortDirection: view.sortDirection,
+    filter: view.filter,
+    showHidden: view.showHidden,
+    includeItemCounts: view.includeItemCounts,
+  })
+  v2SessionIdCounter += 1
+  return {
+    paneId,
+    tabId,
+    path: listing.path,
+    baseline: {
+      sessionId: v2SessionIdCounter,
+      navigationRevision: v2SessionIdCounter,
+      watchRevision: 0,
+      viewRevision: 0,
+    },
+    totalRows: listing.entries.length,
+    pageSize: SESSION_PAGE_SIZE,
+    firstPage: { pageIndex: 0, entries: listing.entries.slice(0, SESSION_PAGE_SIZE) },
+  }
+}
+
 function getResponse<CommandName extends keyof IpcCommandMap>(
   command: CommandName,
   payload: IpcCommandMap[CommandName]['request'],
@@ -47,23 +101,47 @@ function getResponse<CommandName extends keyof IpcCommandMap>(
     return cloneValue(override)
   }
 
-  // `start_list_dir` defaults to a "complete head" derived from whatever
-  // `list_dir` responder is active, so the many tests that mock `list_dir`
-  // transparently drive the streamed listing path without each re-mocking the
-  // head. An explicit `start_list_dir` override (handled above) still wins, and
-  // a thrown `list_dir` responder propagates here just as the real command
-  // would surface a listing failure.
-  if (command === 'start_list_dir') {
-    const listing = resolveListDir(payload as IpcCommandMap['list_dir']['request'])
-    const head: IpcCommandMap['start_list_dir']['response'] = {
-      kind: 'head',
-      path: listing.path,
-      total: listing.entries.length,
-      requestId: 1,
-      firstChunk: listing.entries,
-      done: true,
+  if (command === 'begin_directory_session') {
+    const request = payload as IpcCommandMap['begin_directory_session']['request']
+    const response = deriveBeginNavigationResponse(
+      request.paneId,
+      request.tabId,
+      request.path,
+      request.view,
+    )
+    sessionPathBySessionId.set(response.baseline.sessionId, response.path)
+    return response as IpcCommandMap[CommandName]['response']
+  }
+
+  // `revise_directory_session_view` has no `path` field (a real session
+  // revision reuses whatever path its session already has server-side) — the
+  // mock looks the path up from the `sessionId` recorded by whichever
+  // `begin_directory_session` response established it.
+  if (command === 'revise_directory_session_view') {
+    const request = payload as IpcCommandMap['revise_directory_session_view']['request']
+    const path = sessionPathBySessionId.get(request.sessionId) ?? ''
+    const response = deriveBeginNavigationResponse(
+      request.paneId,
+      request.tabId,
+      path,
+      request.view,
+    )
+    sessionPathBySessionId.set(response.baseline.sessionId, response.path)
+    return response as IpcCommandMap[CommandName]['response']
+  }
+
+  // `get_directory_session_range` for an unmocked page defaults to an empty
+  // page at whatever baseline/total the caller already has (real navigation
+  // fixtures are small enough to resolve fully from `firstPage`, so this only
+  // matters for a test that explicitly requests a page beyond it).
+  if (command === 'get_directory_session_range') {
+    const request = payload as IpcCommandMap['get_directory_session_range']['request']
+    const response: IpcCommandMap['get_directory_session_range']['response'] = {
+      baseline: request.baseline,
+      totalRows: 0,
+      page: { pageIndex: request.pageIndex, entries: [] },
     }
-    return head
+    return response as IpcCommandMap[CommandName]['response']
   }
 
   // Unmocked `list_tree_children` calls default to the fixture only for the
@@ -140,6 +218,8 @@ export const ipc = {
     for (const eventName of Object.keys(listeners) as (keyof EventListeners)[]) {
       listeners[eventName]?.clear()
     }
+
+    sessionPathBySessionId.clear()
   },
 }
 

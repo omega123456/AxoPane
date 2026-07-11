@@ -4,6 +4,16 @@ mod volumes {
     pub use file_explorer_lib::volumes::*;
 }
 
+// The source-included ops module uses the production crate-root traversal
+// path. Mirror that export for this whitebox integration crate.
+mod traversal {
+    pub use file_explorer_lib::traversal::*;
+}
+
+mod resource_coordinator {
+    pub use file_explorer_lib::resource_coordinator::*;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -523,6 +533,7 @@ mod tests {
             retention: Duration::from_millis(5),
             rate_window: Duration::ZERO,
             instant_now: Arc::new(Instant::now),
+            coordinator: Arc::new(resource_coordinator::ResourceCoordinator::new()),
         };
 
         run_operation("op-1".to_string(), &inner, &runtime);
@@ -585,6 +596,7 @@ mod tests {
             retention: Duration::from_millis(10),
             rate_window: Duration::ZERO,
             instant_now: Arc::new(Instant::now),
+            coordinator: Arc::new(resource_coordinator::ResourceCoordinator::new()),
         };
 
         release_and_reschedule("op-1", &inner, &runtime);
@@ -600,5 +612,96 @@ mod tests {
             .expect("removed lock")
             .iter()
             .any(|id| id == "op-1"));
+    }
+
+    #[test]
+    fn release_and_reschedule_admits_rescheduled_work_through_the_resource_coordinator() {
+        let fixture = tempdir().expect("temp dir");
+        let completed_file = fixture.path().join("completed.txt");
+        let pending_file = fixture.path().join("pending.txt");
+        std::fs::write(&completed_file, b"done").expect("completed");
+        std::fs::write(&pending_file, b"wait").expect("pending");
+
+        let mut completed_state = op_state(OpStatus::Completed, &["alpha"]);
+        completed_state.kind = OpKind::Delete;
+        completed_state.items = vec![item(&completed_file, 4)];
+        let mut pending_state = op_state(OpStatus::Pending, &["beta"]);
+        pending_state.kind = OpKind::Delete;
+        pending_state.items = vec![item(&pending_file, 4)];
+        pending_state.id = "op-2".to_string();
+
+        let completed_op = Arc::new(Mutex::new(completed_state));
+        let pending_op = Arc::new(Mutex::new(pending_state));
+
+        let inner = Arc::new(Mutex::new(Inner {
+            ops: HashMap::from([
+                ("op-1".to_string(), completed_op),
+                ("op-2".to_string(), pending_op.clone()),
+            ]),
+            signals: HashMap::from([
+                ("op-1".to_string(), Arc::new(Condvar::new())),
+                ("op-2".to_string(), Arc::new(Condvar::new())),
+            ]),
+            order: VecDeque::from(["op-1".to_string(), "op-2".to_string()]),
+            // "beta" is not legacy-busy: `collect_startable` alone would
+            // consider op-2 immediately eligible. The coordinator hold
+            // below is the only thing standing between it and admission,
+            // which is exactly what this test is proving is now honored.
+            busy_volumes: HashSet::from(["alpha".to_string()]),
+            workers: Vec::new(),
+        }));
+
+        let coordinator = Arc::new(resource_coordinator::ResourceCoordinator::new());
+        let runtime = WorkerRuntime {
+            progress: None,
+            conflict: None,
+            removed: None,
+            retention: Duration::from_millis(10),
+            rate_window: Duration::ZERO,
+            instant_now: Arc::new(Instant::now),
+            coordinator: Arc::clone(&coordinator),
+        };
+
+        // Hold "beta"'s only throughput slot directly through the
+        // coordinator before op-2 ever becomes startable, simulating an
+        // unrelated in-flight job on that resource.
+        let hold = coordinator
+            .submit(resource_coordinator::JobSpec::new(
+                [resource_coordinator::JobClass::Throughput],
+                ["beta".to_string()],
+            ))
+            .expect("holder granted");
+
+        release_and_reschedule("op-1", &inner, &runtime);
+
+        // Give the rescheduled dispatch thread every chance to run; if it
+        // bypassed coordinator admission (the bug this test guards against)
+        // op-2 would complete almost immediately despite "beta" being held.
+        std::thread::sleep(Duration::from_millis(80));
+        assert_eq!(
+            pending_op.lock().expect("pending lock").status,
+            OpStatus::Pending,
+            "op-2 must stay pending while its resource's coordinator slot is held, \
+             even though it is not in the legacy busy_volumes set"
+        );
+        assert!(
+            pending_file.exists(),
+            "op-2 must not have run while admission was denied"
+        );
+
+        drop(hold);
+
+        let deadline = std::time::Instant::now() + Duration::from_millis(500);
+        while pending_op.lock().expect("pending lock").status == OpStatus::Pending
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            pending_op.lock().expect("pending lock").status,
+            OpStatus::Completed,
+            "op-2 must run once the coordinator admits it"
+        );
+        assert!(!pending_file.exists());
     }
 }

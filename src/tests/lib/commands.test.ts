@@ -393,23 +393,22 @@ describe('executeCommand file actions', () => {
 })
 
 describe('archive and properties helpers', () => {
-  it('returns handled archive responses through the centralized IPC wrapper', async () => {
-    ipc.override('compress_archive', () => ({ handled: true, message: 'C:\\root\\Alpha.zip' }))
-    ipc.override('extract_archive', () => ({ handled: true, message: 'C:\\root\\Alpha' }))
+  it('acknowledges queued archive operations without claiming final completion', async () => {
+    ipc.override('start_op', () => 'op-archive-1')
 
     await expect(
       runCompressCommand({
         paths: ['C:\\root\\Alpha'],
         destinationDir: 'C:\\root',
       }),
-    ).resolves.toMatchObject({ handled: true, message: 'C:\\root\\Alpha.zip' })
+    ).resolves.toBe('op-archive-1')
 
     await expect(
       runExtractCommand({
         paths: ['C:\\root\\Alpha.zip'],
         destinationDir: 'C:\\root',
       }),
-    ).resolves.toMatchObject({ handled: true, message: 'C:\\root\\Alpha' })
+    ).resolves.toBe('op-archive-1')
   })
 
   it('opens the fallback properties dialog when native properties are unsupported', async () => {

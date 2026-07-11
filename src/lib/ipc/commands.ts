@@ -2,26 +2,25 @@ import type {
   AppConfig,
   ActiveItemsSortRequest,
   ActiveItemsSortResponse,
+  BeginNavigationRequest,
+  BeginNavigationResponse,
   CancelSizeResponse,
   CancelSizesResponse,
-  CompressArchiveRequest,
   CreateEntryRequest,
   DeleteFromTrashRequest,
   DirectoryEntry,
   EjectVolumeRequest,
   EverythingStatus,
-  ExtractArchiveRequest,
   FolderSizeRequest,
   FolderSizesRequest,
   GetDefaultApplicationRequest,
   GetDefaultApplicationResponse,
+  GetSessionRangeRequest,
   InitialShellResponse,
   InvokeNativeMenuRequest,
   ListApplicationsResponse,
   ListDirRequest,
   ListDirResponse,
-  StartListDirRequest,
-  StartListDirResponse,
   ListTreeChildrenRequest,
   ListTreeChildrenResponse,
   ListTrashResponse,
@@ -32,9 +31,13 @@ import type {
   MenuActionStatus,
   OpenWithRequest,
   OpenPathRequest,
+  ReleaseSessionRequest,
+  ReleaseSessionResponse,
   RenameEntryRequest,
   RequestIconsRequest,
   RestoreTrashRequest,
+  ReviseSessionViewRequest,
+  SessionRangeResponse,
   SetDefaultApplicationRequest,
   ShowPropertiesRequest,
   TrashEntriesRequest,
@@ -56,8 +59,39 @@ export function listDir(payload: ListDirRequest) {
   return invokeCommand({ command: 'list_dir', payload }) as Promise<ListDirResponse>
 }
 
-export function startListDir(payload: StartListDirRequest) {
-  return invokeCommand({ command: 'start_list_dir', payload }) as Promise<StartListDirResponse>
+/**
+ * v2 seekable directory-session commands (Phase 3 backend, Phase 4
+ * frontend). `getDirectorySessionRange` and `reviseDirectorySessionView`
+ * reject with the typed `SessionRejection` shape (see `lib/types/ipc.ts`),
+ * not a plain string — callers should branch on `error.kind` rather than
+ * string-matching.
+ */
+export function beginDirectorySession(payload: BeginNavigationRequest) {
+  return invokeCommand({
+    command: 'begin_directory_session',
+    payload,
+  }) as Promise<BeginNavigationResponse>
+}
+
+export function getDirectorySessionRange(payload: GetSessionRangeRequest) {
+  return invokeCommand({
+    command: 'get_directory_session_range',
+    payload,
+  }) as Promise<SessionRangeResponse>
+}
+
+export function reviseDirectorySessionView(payload: ReviseSessionViewRequest) {
+  return invokeCommand({
+    command: 'revise_directory_session_view',
+    payload,
+  }) as Promise<BeginNavigationResponse>
+}
+
+export function releaseDirectorySession(payload: ReleaseSessionRequest) {
+  return invokeCommand({
+    command: 'release_directory_session',
+    payload,
+  }) as Promise<ReleaseSessionResponse>
 }
 
 export function listTreeChildren(payload: ListTreeChildrenRequest) {
@@ -147,14 +181,6 @@ export function getDefaultApplication(payload: GetDefaultApplicationRequest) {
     command: 'get_default_application',
     payload,
   }) as Promise<GetDefaultApplicationResponse>
-}
-
-export function compressArchive(payload: CompressArchiveRequest) {
-  return invokeCommand({ command: 'compress_archive', payload }) as Promise<MenuActionStatus>
-}
-
-export function extractArchive(payload: ExtractArchiveRequest) {
-  return invokeCommand({ command: 'extract_archive', payload }) as Promise<MenuActionStatus>
 }
 
 export function listVolumes() {

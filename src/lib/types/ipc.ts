@@ -85,9 +85,28 @@ export type ListDirResponse = {
   entries: DirectoryEntry[]
 }
 
-export type StartListDirRequest = {
-  tabId: string
-  path: string
+// -----------------------------------------------------------------------
+// Version-2 directory-session contract (Phase 3 backend, Phase 4 frontend).
+// Mirrors `src-tauri/src/directory_session/model.rs` field-for-field; Rust
+// serializes every one of these with `#[serde(rename_all = "camelCase")]`.
+// -----------------------------------------------------------------------
+
+/** Row page size for every v2 range response. Matches Rust `SESSION_PAGE_SIZE`. */
+export const SESSION_PAGE_SIZE = 500
+
+export type SessionId = number
+export type NavigationRevision = number
+export type WatchRevision = number
+export type ViewRevision = number
+
+export type SessionBaseline = {
+  sessionId: SessionId
+  navigationRevision: NavigationRevision
+  watchRevision: WatchRevision
+  viewRevision: ViewRevision
+}
+
+export type SessionViewParams = {
   sortKey: SortKey
   sortDirection: SortDirection
   filter: string
@@ -95,37 +114,116 @@ export type StartListDirRequest = {
   includeItemCounts: boolean
 }
 
-export type StartListDirHead = {
-  kind: 'head'
-  path: string
-  total: number
-  requestId: number
-  firstChunk: DirectoryEntry[]
-  done: boolean
-}
-
-export type StartListDirSuperseded = {
-  kind: 'superseded'
-  requestId: number
-}
-
-export type StartListDirResponse = StartListDirHead | StartListDirSuperseded
-
-export type ListChunkEvent = {
+export type BeginNavigationRequest = {
+  paneId: string
   tabId: string
-  requestId: number
   path: string
-  entries: DirectoryEntry[]
-  /** Monotonic within a request; the inline listing head is chunk 0. */
-  chunkIndex: number
-  done: boolean
+  view: SessionViewParams
 }
+
+export type SessionRangePage = {
+  pageIndex: number
+  entries: DirectoryEntry[]
+}
+
+export type BeginNavigationResponse = {
+  paneId: string
+  tabId: string
+  path: string
+  baseline: SessionBaseline
+  totalRows: number
+  pageSize: number
+  firstPage: SessionRangePage
+}
+
+export type GetSessionRangeRequest = {
+  paneId: string
+  tabId: string
+  baseline: SessionBaseline
+  pageIndex: number
+}
+
+export type SessionRangeResponse = {
+  baseline: SessionBaseline
+  totalRows: number
+  page: SessionRangePage
+}
+
+export type ReviseSessionViewRequest = {
+  paneId: string
+  tabId: string
+  sessionId: SessionId
+  view: SessionViewParams
+}
+
+export type ReleaseSessionRequest = {
+  paneId: string
+  tabId: string
+  sessionId: SessionId
+  navigationRevision: NavigationRevision
+}
+
+export type ReleaseSessionResponse = {
+  released: boolean
+}
+
+/**
+ * Typed rejection returned by `get_directory_session_range` and
+ * `revise_directory_session_view` instead of a plain error string, mirroring
+ * Rust's `#[serde(tag = "kind")] SessionRejection` enum exactly. Every
+ * variant except `pageOutOfRange` means "this baseline/session is stale —
+ * silently re-navigate/re-fetch", not a user-facing failure.
+ */
+export type SessionRejection =
+  | { kind: 'noActiveSession' }
+  | { kind: 'staleSession' }
+  | { kind: 'staleNavigation' }
+  | { kind: 'staleWatch' }
+  | { kind: 'staleView' }
+  | { kind: 'pageOutOfRange' }
+
+/** Rust-authored, revisioned watch update for an active directory session. */
+export type SessionRowDelta =
+  | { kind: 'inserted'; rowIndex: number; entry: DirectoryEntry }
+  | { kind: 'removed'; rowIndex: number; path: string }
+  | { kind: 'updated'; rowIndex: number; entry: DirectoryEntry }
+
+export type SessionPatchEvent =
+  | {
+      mode: 'delta'
+      paneId: string
+      tabId: string
+      path: string
+      previousBaseline: SessionBaseline
+      nextBaseline: SessionBaseline
+      totalRows: number
+      deltas: SessionRowDelta[]
+    }
+  | {
+      mode: 'replaceView'
+      paneId: string
+      tabId: string
+      path: string
+      previousBaseline: SessionBaseline
+      nextBaseline: SessionBaseline
+      totalRows: number
+    }
+  | {
+      mode: 'metadataOnly'
+      paneId: string
+      tabId: string
+      path: string
+      baseline: SessionBaseline
+      updates: Array<{ path: string; entry: DirectoryEntry }>
+    }
 
 export type TreeChildEntry = {
   name: string
   path: string
-  hasChildren: boolean
+  expandability: TreeExpandability
 }
+
+export type TreeExpandability = 'unknown' | 'empty' | 'nonEmpty'
 
 export type ListTreeChildrenRequest = {
   path: string
@@ -636,9 +734,21 @@ export type IpcCommandMap = {
     request: ListDirRequest
     response: ListDirResponse
   }
-  start_list_dir: {
-    request: StartListDirRequest
-    response: StartListDirResponse
+  begin_directory_session: {
+    request: BeginNavigationRequest
+    response: BeginNavigationResponse
+  }
+  get_directory_session_range: {
+    request: GetSessionRangeRequest
+    response: SessionRangeResponse
+  }
+  revise_directory_session_view: {
+    request: ReviseSessionViewRequest
+    response: BeginNavigationResponse
+  }
+  release_directory_session: {
+    request: ReleaseSessionRequest
+    response: ReleaseSessionResponse
   }
   list_tree_children: {
     request: ListTreeChildrenRequest
@@ -719,14 +829,6 @@ export type IpcCommandMap = {
   get_default_application: {
     request: GetDefaultApplicationRequest
     response: GetDefaultApplicationResponse
-  }
-  compress_archive: {
-    request: CompressArchiveRequest
-    response: MenuActionStatus
-  }
-  extract_archive: {
-    request: ExtractArchiveRequest
-    response: MenuActionStatus
   }
   list_volumes: {
     request: undefined
@@ -840,8 +942,7 @@ export type IpcCommandMap = {
 
 export type IpcEventMap = {
   'dir://patch': DirPatchEvent
-  /** A streamed slice of a directory listing following the `start_list_dir` head. */
-  'dir://list-chunk': ListChunkEvent
+  'dir://session-patch': SessionPatchEvent
   /** Batched: the backend flushes folder-size state changes in arrays to avoid IPC floods. */
   'size://state': SizeStateEvent[]
   /** Batched: the backend flushes resolved icons in chunks (see Phase 3 backend batching). */

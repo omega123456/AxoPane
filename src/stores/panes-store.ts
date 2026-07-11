@@ -4,7 +4,6 @@ import {
   listTreeChildren,
   requestVisibleItemCounts as requestVisibleItemCountsCommand,
   sortActiveItems,
-  startListDir,
   listTrash,
   requestFolderSize,
   requestFolderSizes,
@@ -13,6 +12,7 @@ import {
   setTabWatch,
 } from '@/lib/ipc/commands'
 import { isTrashPath, trashEntryToDirectoryEntry } from '@/lib/trash'
+import { SESSION_PAGE_SIZE } from '@/lib/types/ipc'
 import type {
   DirectoryEntry,
   DirPatchEvent,
@@ -20,8 +20,9 @@ import type {
   IconStateEvent,
   ItemCountEvent,
   ItemCountRequestContext,
-  ListChunkEvent,
+  SessionPatchEvent,
   SessionState,
+  SessionViewParams,
   SizeStateEvent,
   SortDirection,
   SortKey,
@@ -38,6 +39,14 @@ import {
   sortVolumesForTree,
 } from '@/lib/volumes'
 import { useSelectionStore } from '@/stores/selection-store'
+import { ListingSession } from '@/stores/panes/listing-session'
+import { expandabilityOf, pruneTreeCache, type LazyTreeNode } from '@/stores/panes/tree-cache'
+import {
+  iconCacheNow,
+  iconWeight,
+  pruneIconCache,
+  pruneSizeCache,
+} from '@/stores/panes/cache-policy'
 
 type PaneId = 'left' | 'right'
 type SizeStateKind = SizeStateEvent['state']
@@ -46,14 +55,9 @@ type SizeStateKind = SizeStateEvent['state']
 // rewrite the pane's history stack (the index has already been moved).
 type NavigateOptions = { viaHistory?: boolean }
 
-export type TreeNodeState = {
-  id: string
-  name: string
-  path: string
-  parentPath: string | null
-  children: string[]
-  expanded: boolean
-  loaded: boolean
+export type TreeNodeState = Omit<LazyTreeNode, 'expandability' | 'lastAccess'> & {
+  expandability?: LazyTreeNode['expandability']
+  lastAccess?: number
 }
 
 type EntrySizeState = {
@@ -132,10 +136,10 @@ type PanesStore = {
   pendingIconRequests: PendingIconRequests
   passiveItemCountRequests: PassiveItemCountRequests
   resolvedIconPaths: ResolvedIconPaths
+  iconCacheTouched: Record<string, number>
   treeNodes: Record<string, TreeNodeState>
   treeRoots: string[]
   filterTimers: Partial<Record<PaneId, number>>
-  pendingListChunks: Record<string, ListChunkEvent[]>
   initialize: (payload: InitializePayload) => void
   setActivePane: (paneId: PaneId) => void
   reloadPane: (paneId: PaneId) => Promise<void>
@@ -147,11 +151,10 @@ type PanesStore = {
   closeTab: (paneId: PaneId, tabId: string) => Promise<void>
   switchTab: (paneId: PaneId, tabId: string) => Promise<void>
   refreshEverything: (paneId: PaneId) => Promise<void>
-  /** Appends a batch of streamed listing chunks to their pane, ignoring superseded ones. */
-  applyListChunk: (events: ListChunkEvent[]) => void
   /** Runs the post-listing tail (arm fs-watch, eager folder sizes, tree children) once a listing is complete. */
   finalizeListing: (paneId: PaneId) => Promise<void>
   applyDirPatch: (event: DirPatchEvent) => void
+  applySessionPatch: (event: SessionPatchEvent) => void
   setSort: (paneId: PaneId, sortKey: SortKey) => Promise<void>
   setFilterDraft: (paneId: PaneId, value: string) => void
   clearFilter: (paneId: PaneId) => void
@@ -187,11 +190,146 @@ type PanesStore = {
 
 const filterDelayMs = 180
 const AUTO_VISIBLE_ITEM_COUNT_LIMIT = 200
-// A list_chunk can race ahead of its start_list_dir head. Retain a bounded
-// amount of that pre-head data so an abandoned invoke response cannot retain
-// arbitrarily many stale payloads in the renderer.
-const MAX_PENDING_LIST_CHUNK_BUFFERS = 8
-const MAX_PENDING_LIST_CHUNKS_PER_BUFFER = 32
+// Each path has one owner while its direct children are loading. Callers share
+// that promise, preventing double expands/reveals from issuing duplicate IPC.
+const treeLoadFlights = new Map<string, Promise<void>>()
+let treeLoadGeneration = 0
+
+// ---------------------------------------------------------------------------
+// v2 directory-session integration (Phase 4 live-app wiring).
+//
+// One `ListingSession` per pane (matching Rust, which retires the prior
+// session for a pane inside `begin_navigation` — see `ListingSession.begin`'s
+// docstring) drives navigation instead of `start_list_dir`/`dir://list-chunk`.
+// `panes-store.ts` still exposes `pane.entries: DirectoryEntry[]` as a fully
+// resident flat array to the rest of the app (`FilePane`, `DetailsPanel`,
+// `StatusBar`, selection, marquee, drag-and-drop, keyboard navigation) — none
+// of that call surface needs to change, since `selection-store.ts` already
+// tracks selection by entry id/path rather than array index.
+//
+// STOPGAP(phase-5): materializing the full listing eagerly (walking every v2
+// page until `loadedRowCount === totalRows`) is the pragmatic bridge until
+// Phase 5 teaches `FilePane`/marquee/drag-and-drop/keyboard navigation to
+// read directly from a sparse `PaneEntryCollection` (see
+// `ensureSessionFullyLoaded` below). This still avoids the old streamed-chunk
+// event fan-out, and Rust's v2 session model already holds the fully sorted
+// listing in memory server-side (paging only slices an already-materialized
+// vector), so eagerly walking pages here does no more enumeration/sorting
+// work than the old `start_list_dir` + chunk-stream path did — it just
+// fetches it through the range API instead of the chunk-stream API.
+// ---------------------------------------------------------------------------
+// `ListingSession.onChange` fires synchronously from within `set()`-adjacent
+// IPC resolution handlers (`adoptBeginResponse`, the range-request `.then`).
+// Each pane's session is constructed once at module scope with a callback
+// that just notifies whichever `ensureSessionFullyLoaded` walk is currently
+// awaiting a change, rather than a store `set()` directly — the flat
+// `pane.entries` materialization only ever happens explicitly, once, at the
+// end of that walk (see `reloadPane`/`reviseSessionView` below), so a partial
+// page arriving mid-walk never produces a half-updated `pane.entries`.
+const sessionChangeWaiters: Record<PaneId, Set<() => void>> = { left: new Set(), right: new Set() }
+
+function notifySessionChange(paneId: PaneId) {
+  for (const waiter of sessionChangeWaiters[paneId]) {
+    waiter()
+  }
+}
+
+const listingSessions: Record<PaneId, ListingSession> = {
+  left: new ListingSession('left', 'left', { onChange: () => notifySessionChange('left') }),
+  right: new ListingSession('right', 'right', { onChange: () => notifySessionChange('right') }),
+}
+
+// Monotonic identity for each successful v2-backed listing, replacing the old
+// `head.requestId` assigned by `start_list_dir`. Kept as a frontend-local
+// counter (not read from the v2 response) purely to preserve the existing
+// staleness-guard contract used by `finalizeListing`'s `set_tab_watch` seed
+// reference and by `requestVisibleItemCounts`/`applyItemCountEvents`.
+let listRequestIdCounter = 0
+
+function currentViewParams(pane: PaneState, showHiddenFiles: boolean): SessionViewParams {
+  return {
+    sortKey: pane.sortKey,
+    sortDirection: pane.sortDirection,
+    filter: pane.filterApplied,
+    showHidden: showHiddenFiles,
+    includeItemCounts: false,
+  }
+}
+
+/**
+ * Waits for one `onChange` notification from `paneId`'s session (or resolves
+ * immediately if `check()` already passes). Callers include terminal session
+ * states in `check`, so failed range requests always wake the waiter.
+ */
+function waitForSessionChange(paneId: PaneId, check: () => boolean): Promise<void> {
+  if (check()) {
+    return Promise.resolve()
+  }
+  return new Promise<void>((resolve) => {
+    const waiter = () => {
+      if (!check()) {
+        return
+      }
+      sessionChangeWaiters[paneId].delete(waiter)
+      resolve()
+    }
+    sessionChangeWaiters[paneId].add(waiter)
+  })
+}
+
+/**
+ * STOPGAP(phase-5): walks every page of `session`'s active collection until
+ * every row is loaded, pinning every page for the duration so the 12-page LRU
+ * retention in `PaneEntryCollection` cannot evict an earlier page while a
+ * later one is still being fetched (a real risk for directories over 6000
+ * entries, since only the viewport +/- 1 page is pinned by default). Once
+ * fully loaded, pins are reset back to just the viewport (page 0). Resolves
+ * early if the session's baseline moves on (a newer navigation/view revision
+ * superseded this walk) so a stale materialization request can never hang.
+ * Phase 5's real sparse-rendering integration replaces this whole helper with
+ * bounded, on-demand page loads driven by the visible viewport instead of
+ * eagerly loading everything up front.
+ */
+async function ensureSessionFullyLoaded(paneId: PaneId, session: ListingSession): Promise<void> {
+  const baselineAtStart = session.currentBaseline
+  const { collection } = session
+  if (collection.totalRows === 0 || !baselineAtStart) {
+    return
+  }
+
+  const stillCurrent = () => session.currentBaseline === baselineAtStart
+  const lastPageIndex = Math.floor((collection.totalRows - 1) / SESSION_PAGE_SIZE)
+  const allPageIndexes = Array.from({ length: lastPageIndex + 1 }, (_, index) => index)
+  collection.setPinnedPages(allPageIndexes)
+
+  for (const pageIndex of allPageIndexes) {
+    if (!stillCurrent()) {
+      return
+    }
+    if (collection.isPageLoaded(pageIndex)) {
+      continue
+    }
+
+    // Pages are requested and awaited one at a time on purpose:
+    // `ensurePageLoaded` self-limits concurrent requests via
+    // `MAX_IN_FLIGHT_REQUESTS`, so sequentially awaiting here still lets
+    // multiple requests be in flight together while keeping this walk's own
+    // bookkeeping (which page comes next) simple.
+    session.ensurePageLoaded(pageIndex)
+    await waitForSessionChange(
+      paneId,
+      () =>
+        !stillCurrent() || collection.isPageLoaded(pageIndex) || session.currentStatus === 'error',
+    )
+    if (session.currentStatus === 'error') {
+      throw new Error(session.currentError ?? 'Failed to load directory range')
+    }
+  }
+
+  if (stillCurrent()) {
+    session.pinViewportPages(0)
+  }
+}
 
 function createPane(id: PaneId, title: string, path = '.'): PaneState {
   return {
@@ -236,10 +374,10 @@ function defaultState() {
     pendingIconRequests: {} as PendingIconRequests,
     passiveItemCountRequests: {} as PassiveItemCountRequests,
     resolvedIconPaths: {} as ResolvedIconPaths,
+    iconCacheTouched: {} as Record<string, number>,
     treeNodes: {} as Record<string, TreeNodeState>,
     treeRoots: [] as string[],
     filterTimers: {} as Partial<Record<PaneId, number>>,
-    pendingListChunks: {} as Record<string, ListChunkEvent[]>,
   }
 }
 
@@ -470,6 +608,28 @@ export const AUTO_FOLDER_SIZE_MAX_DIRECTORIES = 500
 let sizeEventsProcessed = 0
 const SIZE_EVENT_LOG_INTERVAL = 2000
 
+/**
+ * Memoized `id -> entry` index for a pane's `entries` array, keyed by array
+ * identity so repeated lookups against the same (immutable, Zustand-updated)
+ * array reference reuse one `Map` instead of each caller re-scanning
+ * `entries` with its own `.find()`. Building the index is still O(n), but it
+ * happens at most once per distinct `entries` reference rather than once per
+ * lookup — callers that need several ids from the same array (e.g.
+ * `executeCommand` resolving the target, focused, and selected entries in
+ * one dispatch) turn what was 2-3 separate O(n) scans into one O(n) build
+ * plus O(1) lookups.
+ */
+const entryIndexByArray = new WeakMap<DirectoryEntry[], Map<string, DirectoryEntry>>()
+
+export function indexEntriesById(entries: DirectoryEntry[]): Map<string, DirectoryEntry> {
+  let index = entryIndexByArray.get(entries)
+  if (!index) {
+    index = new Map(entries.map((entry) => [entry.id, entry]))
+    entryIndexByArray.set(entries, index)
+  }
+  return index
+}
+
 /** Number of folders in a pane, used to gate per-pane auto folder sizing. */
 export function paneDirectoryCount(entries: DirectoryEntry[]): number {
   return entries.reduce((count, entry) => (entry.isDir ? count + 1 : count), 0)
@@ -574,58 +734,6 @@ function itemCountRequestKey(context: ItemCountRequestContext, path: string) {
   return `${itemCountContextKey(context)}::${pathKey(path)}`
 }
 
-function listChunkBufferKey(event: Pick<ListChunkEvent, 'tabId' | 'requestId' | 'path'>) {
-  return `${event.tabId}::${event.requestId}::${pathKey(event.path)}`
-}
-
-function boundedPendingListChunks(
-  pendingListChunks: Record<string, ListChunkEvent[]>,
-  tabId: string,
-) {
-  const tabPrefix = `${tabId}::`
-  const candidates = Object.entries(pendingListChunks)
-    .filter(([, events]) => events[0]?.tabId === tabId)
-    .sort(([, left], [, right]) => (right[0]?.requestId ?? 0) - (left[0]?.requestId ?? 0))
-    .slice(0, MAX_PENDING_LIST_CHUNK_BUFFERS)
-
-  const next = Object.fromEntries(
-    candidates.map(([key, events]) => [
-      key,
-      [...events]
-        .sort((left, right) => left.chunkIndex - right.chunkIndex)
-        .slice(0, MAX_PENDING_LIST_CHUNKS_PER_BUFFER),
-    ]),
-  ) as Record<string, ListChunkEvent[]>
-
-  // Buffers belonging to the other pane cannot ever be adopted by this
-  // navigation. Keep them untouched; that pane will prune its own scope.
-  for (const [key, events] of Object.entries(pendingListChunks)) {
-    if (!key.startsWith(tabPrefix)) {
-      next[key] = events
-    }
-  }
-
-  return next
-}
-
-function clearPendingListChunksForTab(
-  pendingListChunks: Record<string, ListChunkEvent[]>,
-  tabId: string,
-) {
-  return Object.fromEntries(
-    Object.entries(pendingListChunks).filter(([, events]) => events[0]?.tabId !== tabId),
-  ) as Record<string, ListChunkEvent[]>
-}
-
-function isChunkForPane(paneId: PaneId, pane: PaneState, event: ListChunkEvent) {
-  return (
-    paneIdFromTabId(event.tabId) === paneId &&
-    event.tabId === activeTab(paneId).id &&
-    event.requestId === pane.listRequestId &&
-    pathsMatch(event.path, pane.path)
-  )
-}
-
 function clearPassiveItemCountRequestsForPane(
   passiveItemCountRequests: PassiveItemCountRequests,
   paneId: PaneId,
@@ -725,8 +833,11 @@ async function runActiveItemsSort(
         if (
           !itemsSortContextMatches(paneId, currentPane, response.context, expected) ||
           currentPane.itemsSortOperationId !== operationId
-        ) return current
-        return { panes: { ...current.panes, [paneId]: { ...currentPane, itemsSortStatus: 'stale' } } }
+        )
+          return current
+        return {
+          panes: { ...current.panes, [paneId]: { ...currentPane, itemsSortStatus: 'stale' } },
+        }
       })
       return
     }
@@ -882,6 +993,8 @@ function buildRootTreeState(
       children: existing?.children ?? [],
       expanded: existing?.expanded ?? false,
       loaded: existing?.loaded ?? false,
+      expandability: existing?.expandability ?? 'unknown',
+      lastAccess: existing?.lastAccess ?? Date.now(),
     }
   }
 
@@ -1156,6 +1269,8 @@ function applyTreeDirPatch(state: PanesStore, event: DirPatchEvent) {
       children: existingBeforeRemove?.children ?? existing?.children ?? [],
       expanded: existingBeforeRemove?.expanded ?? existing?.expanded ?? false,
       loaded: existingBeforeRemove?.loaded ?? existing?.loaded ?? false,
+      expandability: existingBeforeRemove?.expandability ?? existing?.expandability ?? 'unknown',
+      lastAccess: Date.now(),
     }
 
     if (!childPathInList(nextChildren, entry.path)) {
@@ -1243,13 +1358,6 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     }
     const selection = useSelectionStore.getState().selections[paneId]
     set((state) => ({
-      // This invocation supersedes any unresolved head for the active tab.
-      // Chunks emitted by the new request are buffered after this transition,
-      // so they remain available for matching-head adoption.
-      pendingListChunks: clearPendingListChunksForTab(
-        state.pendingListChunks,
-        activeTab(paneId).id,
-      ),
       panes: {
         ...state.panes,
         [paneId]: {
@@ -1320,22 +1428,28 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         return
       }
 
-      // Stream the listing: Rust enumerates + sorts on its worker thread and
-      // returns only the inline first chunk here; any remaining entries arrive
-      // as `list_chunk` events (see `applyListChunk`). This keeps the webview
-      // from parsing a single multi-MB listing array in one blocking task.
-      const head = await startListDir({
-        tabId,
-        path: pane.path,
-        sortKey: pane.sortKey,
-        sortDirection: pane.sortDirection,
-        filter: pane.filterApplied,
-        showHidden: get().showHiddenFiles,
-        includeItemCounts: false,
-      })
-
-      if (head.kind === 'superseded') {
-        return
+      // v2 seekable directory session: Rust enumerates + sorts the whole
+      // listing once on `begin_directory_session` and holds it server-side;
+      // the frontend walks it page-by-page via `getDirectorySessionRange`
+      // (STOPGAP(phase-5): eagerly, via `ensureSessionFullyLoaded`, until
+      // `pane.entries` is taught to read a sparse `PaneEntryCollection`
+      // directly) instead of the old `start_list_dir` + `dir://list-chunk`
+      // stream. A path change (or the pane/tab's very first listing) begins a
+      // fresh session; an unchanged path with a different sort/filter/hidden
+      // view revises the already-active session instead, per the plan's
+      // "path changes create a new session; sort/filter changes revise the
+      // current session's view".
+      const session = listingSessions[paneId]
+      const view = currentViewParams(pane, get().showHiddenFiles)
+      const isSamePathRevision =
+        session.currentBaseline != null &&
+        session.currentPath != null &&
+        pathsMatch(session.currentPath, pane.path) &&
+        activeTab(paneId).id === tabId
+      if (isSamePathRevision) {
+        await session.reviseView(view)
+      } else {
+        await session.begin(tabId, pane.path, view)
       }
 
       const currentTabId = activeTab(paneId).id
@@ -1348,31 +1462,50 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         return
       }
 
-      // Rust is the canonical sort authority, so only the size column needs a
-      // client re-sort (folder sizes resolve asynchronously and can reorder
-      // entries Rust couldn't know about yet).
-      const firstChunk =
+      if (session.currentStatus === 'error') {
+        throw new Error(session.currentError ?? 'Failed to load directory')
+      }
+
+      await ensureSessionFullyLoaded(paneId, session)
+
+      // Re-check staleness after the (possibly multi-page) materialization
+      // walk: a newer navigation/sort/filter may have superseded this one
+      // while pages were still loading.
+      if (
+        activeTab(paneId).id !== tabId ||
+        get().panes[paneId].listingGeneration !== listingGeneration ||
+        !matchesListingContext(get().panes[paneId], requestContext) ||
+        session.currentBaseline == null
+      ) {
+        return
+      }
+
+      const resolvedPath = session.currentPath ?? pane.path
+      // STOPGAP(phase-5): Rust is the canonical sort authority for every key
+      // the v2 `SessionViewParams` contract knows about, but folder sizes
+      // resolve asynchronously after the listing (and are not a
+      // `SessionViewParams` field), so the size key still needs the same
+      // client-side re-sort of the resident rows the v1 path used, applied
+      // here to the fully-materialized `loadedEntries` instead of a streamed
+      // chunk array. Items sort is unaffected — it already runs as a
+      // separate backend count-then-sort pass via `runActiveItemsSort` below,
+      // which replaces `pane.entries` wholesale once ready.
+      const loadedEntries = session.loadedEntries()
+      const sortedEntries =
         pane.sortKey === 'size'
-          ? sortEntries(head.firstChunk, pane.sortKey, pane.sortDirection, get().sizeStates)
-          : head.firstChunk
+          ? sortEntries(loadedEntries, pane.sortKey, pane.sortDirection, get().sizeStates)
+          : loadedEntries
+
+      // A monotonic identity for this successful listing, matching the old
+      // `head.requestId` semantics: `finalizeListing`/`requestVisibleItemCounts`
+      // compare it to reject stale item-count/watch-seed responses.
+      listRequestIdCounter += 1
+      const requestId = listRequestIdCounter
 
       set((state) => {
         const previous = state.panes[paneId]
-        const bufferKey = listChunkBufferKey({ tabId, requestId: head.requestId, path: head.path })
-        const buffered = [...(state.pendingListChunks[bufferKey] ?? [])]
-          .filter((event) => event.chunkIndex > 0)
-          .sort((left, right) => left.chunkIndex - right.chunkIndex)
-        const acceptedChunkIndexes = new Set<number>([0])
-        let adoptedEntries = firstChunk
-        let listingComplete = head.done
-        for (const event of buffered) {
-          if (acceptedChunkIndexes.has(event.chunkIndex)) continue
-          acceptedChunkIndexes.add(event.chunkIndex)
-          adoptedEntries = [...adoptedEntries, ...event.entries]
-          listingComplete ||= event.done
-        }
-        const entries = withResolvedIcons(adoptedEntries, state.resolvedIconPaths)
-        const restoredFocusId = findMatchingEntryId(firstChunk, [
+        const entries = withResolvedIcons(sortedEntries, state.resolvedIconPaths)
+        const restoredFocusId = findMatchingEntryId(sortedEntries, [
           selection.focusedId,
           previous.focusedEntryId,
           ...selection.selectedIds,
@@ -1381,15 +1514,10 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         // (initial load, or after a tab switch reset its history to empty).
         const seeded =
           previous.historyIndex === -1
-            ? { history: [head.path], historyIndex: 0 }
+            ? { history: [resolvedPath], historyIndex: 0 }
             : { history: previous.history, historyIndex: previous.historyIndex }
 
         return {
-          // Adoption resolves the only pre-head buffer that can belong to
-          // this listing. Discard every buffer for the tab, including stale
-          // superseded requests, while preserving the matching early chunks
-          // above before this purge.
-          pendingListChunks: clearPendingListChunksForTab(state.pendingListChunks, tabId),
           passiveItemCountRequests: clearPassiveItemCountRequestsForPane(
             state.passiveItemCountRequests,
             paneId,
@@ -1398,14 +1526,13 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
             ...state.panes,
             [paneId]: {
               ...previous,
-              path: head.path,
+              path: resolvedPath,
               entries,
-              focusedEntryId: restoredFocusId ?? adoptedEntries[0]?.id ?? null,
+              focusedEntryId: restoredFocusId ?? sortedEntries[0]?.id ?? null,
               loading: false,
               itemsSortStatus: 'idle',
-              listRequestId: head.requestId,
-              acceptedChunkIndexes: [...acceptedChunkIndexes],
-              listingComplete,
+              listRequestId: requestId,
+              listingComplete: true,
               ...seeded,
             },
           },
@@ -1421,15 +1548,11 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       })
       schedulePersistSession(get().activePaneId)
 
-      // When the listing already fits in the first chunk the tail runs now;
-      // otherwise it runs from `applyListChunk` once the final chunk arrives.
-      if (get().panes[paneId].listingComplete) {
-        await runActiveItemsSort(paneId, currentItemCountContext(paneId, nextPane), {
-          filterApplied: nextPane.filterApplied,
-          sortDirection: nextPane.sortDirection,
-        })
-        await get().finalizeListing(paneId)
-      }
+      await runActiveItemsSort(paneId, currentItemCountContext(paneId, nextPane), {
+        filterApplied: nextPane.filterApplied,
+        sortDirection: nextPane.sortDirection,
+      })
+      await get().finalizeListing(paneId)
     } catch (error) {
       const currentTabId = activeTab(paneId).id
       const currentPane = get().panes[paneId]
@@ -1447,7 +1570,6 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         error,
       })
       set((state) => ({
-        pendingListChunks: clearPendingListChunksForTab(state.pendingListChunks, tabId),
         panes: {
           ...state.panes,
           [paneId]: {
@@ -1636,6 +1758,9 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       },
     }))
 
+    // Best-effort: release the previously active tab's v2 session before the
+    // new tab's `begin_directory_session` replaces it.
+    void listingSessions[paneId].release()
     await get().reloadPane(paneId)
   },
   closeTab: async (paneId, tabId) => {
@@ -1678,6 +1803,9 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       },
     }))
 
+    // Best-effort: release the closed tab's v2 session so Rust can drop it
+    // promptly rather than waiting for the pane's next `begin` to replace it.
+    void listingSessions[paneId].release()
     await get().reloadPane(paneId)
   },
   switchTab: async (paneId, tabId) => {
@@ -1717,6 +1845,9 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       },
     }))
 
+    // Best-effort: release the previous tab's v2 session before switching so
+    // its stale rows can never bleed into the newly active tab's collection.
+    void listingSessions[paneId].release()
     // `reloadPane` performs the single directory enumeration for the newly
     // active tab and re-arms its watcher (seeded from that same listing), so
     // no separate recheck/patch step is needed here.
@@ -1736,101 +1867,13 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       return { sizeStates: nextSizeStates, pendingSizeRequests }
     })
 
+    // `revise_directory_session_view` re-derives sort/filter from Rust's
+    // already-cached enumeration snapshot without touching the filesystem
+    // again — wrong for an explicit "refresh from disk" action. Releasing the
+    // session first forces `reloadPane`'s same-path check to fall through to
+    // `begin_directory_session`, which re-enumerates.
+    await listingSessions[paneId].release()
     await get().reloadPane(paneId)
-  },
-  applyListChunk: (events) => {
-    if (events.length === 0) {
-      return
-    }
-
-    const completedPanes = new Set<PaneId>()
-    set((state) => {
-      const nextPanes = { ...state.panes }
-      let pendingListChunks = state.pendingListChunks
-      let changed = false
-
-      for (const paneId of Object.keys(nextPanes) as PaneId[]) {
-        const pane = nextPanes[paneId]
-        const activeTabId = activeTab(paneId).id
-        let entries: DirectoryEntry[] | null = null
-        let completed = pane.listingComplete
-        const acceptedChunkIndexes = new Set(pane.acceptedChunkIndexes)
-
-        for (const event of events) {
-          if (paneIdFromTabId(event.tabId) !== paneId || event.tabId !== activeTabId) {
-            continue
-          }
-
-          // Tauri may deliver an emitted tail before the invoke response. Keep
-          // it until its exact request/path head is adopted. A request id of 0
-          // means this navigation intentionally invalidated the old identity.
-          if (pane.listRequestId === 0) {
-            const key = listChunkBufferKey(event)
-            const existing = pendingListChunks[key] ?? []
-            if (!existing.some((candidate) => candidate.chunkIndex === event.chunkIndex)) {
-              if (pendingListChunks === state.pendingListChunks) pendingListChunks = { ...pendingListChunks }
-              pendingListChunks[key] = [...existing, event]
-              pendingListChunks = boundedPendingListChunks(pendingListChunks, activeTabId)
-            }
-            continue
-          }
-
-          if (!isChunkForPane(paneId, pane, event) || pane.listingComplete || completed) continue
-          // Explicit backend chunk identity rejects duplicate non-terminal
-          // events without relying on entry equality.
-          if (acceptedChunkIndexes.has(event.chunkIndex)) continue
-
-          // Rust streams globally-sorted chunks, so appending keeps order.
-          if (!entries) {
-            entries = [...pane.entries]
-          }
-          acceptedChunkIndexes.add(event.chunkIndex)
-          for (const entry of event.entries) {
-            entries.push(hydrateEntryIcon(entry, state.resolvedIconPaths))
-          }
-          if (event.done) {
-            completed = true
-          }
-        }
-
-        if (!entries) {
-          continue
-        }
-
-        // Folder sizes resolve asynchronously and are not continuously
-        // re-sorted into the listing, so re-sort the whole accumulated list
-        // once on completion for the size key (mirrors `patchEntries`).
-        if (completed && pane.sortKey === 'size') {
-          entries = sortEntries(entries, pane.sortKey, pane.sortDirection, state.sizeStates)
-        }
-
-        nextPanes[paneId] = {
-          ...pane,
-          entries,
-          acceptedChunkIndexes: [...acceptedChunkIndexes],
-          listingComplete: completed,
-        }
-        changed = true
-        if (completed) {
-          completedPanes.add(paneId)
-        }
-      }
-
-      return changed || pendingListChunks !== state.pendingListChunks
-        ? { panes: nextPanes, pendingListChunks }
-        : state
-    })
-
-    for (const paneId of completedPanes) {
-      const pane = get().panes[paneId]
-      if (pane.sortKey === 'items') {
-        void runActiveItemsSort(paneId, currentItemCountContext(paneId, pane), {
-          filterApplied: pane.filterApplied,
-          sortDirection: pane.sortDirection,
-        })
-      }
-      void get().finalizeListing(paneId)
-    }
   },
   finalizeListing: async (paneId) => {
     const pane = get().panes[paneId]
@@ -1907,6 +1950,21 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       log.error('finalizeListing failed', { paneId, path: pane.path, error })
     }
   },
+  // STOPGAP(phase-5): `dir://patch` watcher events are applied by splicing
+  // the affected rows directly into `pane.entries` in place (see
+  // `patchEntries` below), not by tearing down and re-running
+  // `beginDirectorySession`/`ListingSession.begin` for the pane on every
+  // watch tick — avoiding exactly the full-session-refetch-on-every-mutation
+  // regression the stopgap policy calls out. The v2 `ListingSession`'s
+  // `PaneEntryCollection` is intentionally left un-patched here (it has no
+  // incremental single-row patch API yet — only a full-page `installPage`
+  // replace); it is fully re-materialized from a fresh
+  // `begin_directory_session`/`reviseDirectorySessionView` call the next time
+  // `reloadPane` runs for this pane (navigation, sort/filter change, or
+  // explicit refresh), so it can only ever be transiently behind
+  // `pane.entries` between a watch patch and the pane's next reload. Phase 5
+  // should add a real incremental patch method to `PaneEntryCollection` and
+  // apply patches to both here in the same pass.
   applyDirPatch: (event) =>
     set((state) => {
       const paneId = paneIdFromTabId(event.tabId)
@@ -1932,7 +1990,11 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       // inserting patch rows would show an untrustworthy transient order.
       if (pane.sortKey === 'items') {
         if (!pathsMatch(pane.path, event.path)) {
-          log.debug('applyDirPatch skipped (path mismatch)', { paneId, panePath: pane.path, eventPath: event.path })
+          log.debug('applyDirPatch skipped (path mismatch)', {
+            paneId,
+            panePath: pane.path,
+            eventPath: event.path,
+          })
           return state
         }
         const treeNodes = applyTreeDirPatch(state, event)
@@ -2006,6 +2068,46 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         ...(treeNodes ? { treeNodes } : {}),
       }
     }),
+  applySessionPatch: (event) => {
+    const paneId = event.paneId === 'left' || event.paneId === 'right' ? event.paneId : null
+    if (!paneId || activeTab(paneId).id !== event.tabId) {
+      return
+    }
+    const session = listingSessions[paneId]
+    const pane = get().panes[paneId]
+    if (!pathsMatch(pane.path, event.path) || !session.applyPatch(event)) {
+      return
+    }
+
+    // Apply the renderer-facing rows and the lazy tree only after the same
+    // baseline gate above has accepted the session patch.  This prevents one
+    // stale event from updating either half independently.
+    if (event.mode === 'replaceView') {
+      void get().reloadPane(paneId)
+      return
+    }
+    const changed =
+      event.mode === 'metadataOnly'
+        ? event.updates.map((update) => ({ path: update.path, entry: update.entry }))
+        : event.deltas
+            .filter(
+              (delta): delta is Extract<typeof delta, { entry: DirectoryEntry }> =>
+                'entry' in delta,
+            )
+            .map((delta) => ({ path: delta.entry.path, entry: delta.entry }))
+    const removed =
+      event.mode === 'delta'
+        ? event.deltas.filter((delta) => delta.kind === 'removed').map((delta) => delta.path)
+        : []
+    const legacyShape: DirPatchEvent = {
+      tabId: event.tabId,
+      path: event.path,
+      reason: 'watch',
+      changed,
+      removed,
+    }
+    get().applyDirPatch(legacyShape)
+  },
   setSort: async (paneId, sortKey) => {
     // A streamed listing owns the entries until its terminal chunk. Rust's
     // tail remains ordered for the sort requested by its head, so accepting a
@@ -2016,8 +2118,26 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     if (isTrashPath(get().panes[paneId].path)) {
       set((state) => {
         const pane = state.panes[paneId]
-        const sortDirection = pane.sortKey === sortKey ? (pane.sortDirection === 'asc' ? 'desc' : 'asc') : sortKey === 'name' || sortKey === 'type' ? 'asc' : 'desc'
-        return { panes: { ...state.panes, [paneId]: { ...pane, sortKey, sortDirection, entries: sortEntries(pane.entries, sortKey, sortDirection, state.sizeStates), itemsSortStatus: 'complete' } } }
+        const sortDirection =
+          pane.sortKey === sortKey
+            ? pane.sortDirection === 'asc'
+              ? 'desc'
+              : 'asc'
+            : sortKey === 'name' || sortKey === 'type'
+              ? 'asc'
+              : 'desc'
+        return {
+          panes: {
+            ...state.panes,
+            [paneId]: {
+              ...pane,
+              sortKey,
+              sortDirection,
+              entries: sortEntries(pane.entries, sortKey, sortDirection, state.sizeStates),
+              itemsSortStatus: 'complete',
+            },
+          },
+        }
       })
       return
     }
@@ -2198,12 +2318,19 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         })
       }
 
+      const protectedSizePaths = new Set<string>()
+      for (const pane of Object.values(state.panes)) {
+        for (const entry of pane.entries) {
+          if (entry.id === pane.focusedEntryId) protectedSizePaths.add(entry.path)
+        }
+      }
+
       return {
         pendingSizeRequests:
           terminalPaths.length > 0
             ? withPendingSizeRequests(state.pendingSizeRequests, terminalPaths, false)
             : state.pendingSizeRequests,
-        sizeStates: nextSizeStates,
+        sizeStates: pruneSizeCache(nextSizeStates, protectedSizePaths),
       }
     }),
   requestVisibleItemCounts: async (paneId, visibleStartIndex, visibleEndIndex, viewportCount) => {
@@ -2423,30 +2550,63 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       }
 
       const resolvedIconPaths = { ...state.resolvedIconPaths }
+      const iconCacheTouched = { ...state.iconCacheTouched }
+      const now = iconCacheNow()
       const paths: string[] = []
       for (const event of events) {
         paths.push(event.path)
         // Recorded even when `iconDataUrl` is null: a resolved-to-nothing
         // result must stop future requests just as much as a real icon does.
         resolvedIconPaths[event.path] = event.iconDataUrl
+        iconCacheTouched[event.path] = now
       }
+
+      const protectedIconPaths = new Set<string>()
+      for (const pane of Object.values(state.panes)) {
+        for (const entry of pane.entries) protectedIconPaths.add(entry.path)
+      }
+      const iconRecords = Object.fromEntries(
+        Object.entries(resolvedIconPaths).map(([path, value]) => [
+          path,
+          { value, touched: iconCacheTouched[path] ?? now, weight: iconWeight(value) },
+        ]),
+      )
+      const retainedIcons = pruneIconCache(
+        iconRecords,
+        protectedIconPaths,
+        now,
+        typeof navigator !== 'undefined' && navigator.platform.startsWith('Win'),
+      )
+      const boundedResolvedIconPaths = Object.fromEntries(
+        Object.entries(retainedIcons).map(([path, record]) => [path, record.value]),
+      ) as ResolvedIconPaths
+      const boundedIconCacheTouched = Object.fromEntries(
+        Object.keys(retainedIcons).map((path) => [path, iconCacheTouched[path] ?? now]),
+      ) as Record<string, number>
 
       return {
         panes: panesChanged ? nextPanes : state.panes,
         pendingIconRequests: withPendingIconRequests(state.pendingIconRequests, paths, false),
-        resolvedIconPaths,
+        resolvedIconPaths: boundedResolvedIconPaths,
+        iconCacheTouched: boundedIconCacheTouched,
       }
     }),
   setEverythingStatus: (everythingStatus) => set({ everythingStatus }),
-  setVolumes: (volumes) =>
-    set((state) => {
+  setVolumes: (volumes) => {
+    treeLoadGeneration += 1
+    return set((state) => {
       const nextTree = buildRootTreeState(volumes, state.treeNodes)
       return {
         volumes,
         treeRoots: nextTree.treeRoots,
-        treeNodes: nextTree.treeNodes,
+        treeNodes: pruneTreeCache(nextTree.treeNodes as Record<string, LazyTreeNode>, [
+          state.panes.left.path,
+          state.panes.right.path,
+          ...nextTree.treeRoots,
+        ]) as Record<string, TreeNodeState>,
       }
-    }),
+    })
+  },
   setShowHiddenFiles: async (showHiddenFiles) => {
     if (get().showHiddenFiles === showHiddenFiles) {
       return
@@ -2511,6 +2671,18 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       return
     }
 
+    const existingFlight = treeLoadFlights.get(path)
+    if (existingFlight) {
+      return existingFlight
+    }
+
+    let settleFlight: () => void = () => undefined
+    const flight = new Promise<void>((resolve) => {
+      settleFlight = resolve
+    })
+    treeLoadFlights.set(path, flight)
+    const requestGeneration = treeLoadGeneration
+
     try {
       const response = await listTreeChildren({
         path,
@@ -2519,78 +2691,111 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
 
       const directoryChildren = response.children
       set((state) => ({
-        treeNodes: {
-          ...state.treeNodes,
-          [path]: {
-            id: path,
-            name: currentNode?.name ?? basenameFromPath(path),
-            path,
-            parentPath: treeRootForPath(state.treeRoots, path)
-              ? null
-              : (currentNode?.parentPath ?? getParentPath(path)),
-            children: directoryChildren.map(
-              (entry) => treeRootForPath(state.treeRoots, entry.path) ?? entry.path,
-            ),
-            // Newly-seen volume roots should open on first hydration just like
-            // the initial roots. Once a root has loaded, preserve the user's
-            // explicit expanded/collapsed choice on later refreshes.
-            expanded:
-              currentNode == null
-                ? true
-                : currentNode.expanded || (currentNode.parentPath === null && !currentNode.loaded),
-            loaded: true,
-          },
-          // Always refresh name/parentPath from this fresh listing (the source
-          // of truth) rather than trusting an existing node, which may be a
-          // placeholder created before its parent was ever listed (e.g. a pane
-          // navigated straight to it) and so was named from its raw path.
-          ...Object.fromEntries(
-            directoryChildren.map((entry) => {
-              const volumeRoot = treeRootForPath(state.treeRoots, entry.path)
-              const nodePath = volumeRoot ?? entry.path
-              const existing = state.treeNodes[nodePath] ?? state.treeNodes[entry.path]
-              return [
-                nodePath,
-                existing
-                  ? {
-                      ...existing,
-                      name: volumeRoot ? existing.name : entry.name,
-                      parentPath: volumeRoot ? null : path,
-                    }
-                  : {
-                      id: nodePath,
-                      name: entry.name,
-                      path: nodePath,
-                      parentPath: volumeRoot ? null : path,
-                      children: [],
-                      expanded: false,
-                      loaded: false,
-                    },
-              ]
+        // A reset/volume replacement superseded this request. Do not revive a
+        // retired subtree from a late IPC response.
+        ...(requestGeneration !== treeLoadGeneration
+          ? {}
+          : {
+              treeNodes: {
+                ...state.treeNodes,
+                [path]: {
+                  id: path,
+                  name: currentNode?.name ?? basenameFromPath(path),
+                  path,
+                  parentPath: treeRootForPath(state.treeRoots, path)
+                    ? null
+                    : (currentNode?.parentPath ?? getParentPath(path)),
+                  children: directoryChildren.map(
+                    (entry) => treeRootForPath(state.treeRoots, entry.path) ?? entry.path,
+                  ),
+                  // Newly-seen volume roots should open on first hydration just like
+                  // the initial roots. Once a root has loaded, preserve the user's
+                  // explicit expanded/collapsed choice on later refreshes.
+                  expanded:
+                    currentNode == null
+                      ? true
+                      : currentNode.expanded ||
+                        (currentNode.parentPath === null && !currentNode.loaded),
+                  loaded: true,
+                  // This request is the only evidence needed for the node
+                  // itself: no child directory has been probed.
+                  expandability: directoryChildren.length === 0 ? 'empty' : 'nonEmpty',
+                  lastAccess: Date.now(),
+                },
+                // Always refresh name/parentPath from this fresh listing (the source
+                // of truth) rather than trusting an existing node, which may be a
+                // placeholder created before its parent was ever listed (e.g. a pane
+                // navigated straight to it) and so was named from its raw path.
+                ...Object.fromEntries(
+                  directoryChildren.map((entry) => {
+                    const volumeRoot = treeRootForPath(state.treeRoots, entry.path)
+                    const nodePath = volumeRoot ?? entry.path
+                    const existing = state.treeNodes[nodePath] ?? state.treeNodes[entry.path]
+                    return [
+                      nodePath,
+                      existing
+                        ? {
+                            ...existing,
+                            name: volumeRoot ? existing.name : entry.name,
+                            parentPath: volumeRoot ? null : path,
+                          }
+                        : {
+                            id: nodePath,
+                            name: entry.name,
+                            path: nodePath,
+                            parentPath: volumeRoot ? null : path,
+                            children: [],
+                            expanded: false,
+                            loaded: false,
+                            expandability: expandabilityOf(entry),
+                            lastAccess: Date.now(),
+                          },
+                    ]
+                  }),
+                ),
+              },
             }),
-          ),
-        },
       }))
     } catch {
       set((state) => ({
-        treeNodes: {
-          ...state.treeNodes,
-          [path]: {
-            id: path,
-            name: currentNode?.name ?? basenameFromPath(path),
-            path,
-            parentPath: treeRootForPath(state.treeRoots, path)
-              ? null
-              : (currentNode?.parentPath ?? getParentPath(path)),
-            children: [],
-            expanded:
-              currentNode == null
-                ? false
-                : currentNode.expanded || (currentNode.parentPath === null && !currentNode.loaded),
-            loaded: true,
-          },
-        },
+        ...(requestGeneration !== treeLoadGeneration
+          ? {}
+          : {
+              treeNodes: {
+                ...state.treeNodes,
+                [path]: {
+                  id: path,
+                  name: currentNode?.name ?? basenameFromPath(path),
+                  path,
+                  parentPath: treeRootForPath(state.treeRoots, path)
+                    ? null
+                    : (currentNode?.parentPath ?? getParentPath(path)),
+                  children: [],
+                  expanded:
+                    currentNode == null
+                      ? false
+                      : currentNode.expanded ||
+                        (currentNode.parentPath === null && !currentNode.loaded),
+                  loaded: true,
+                  expandability: currentNode?.expandability ?? 'empty',
+                  lastAccess: Date.now(),
+                },
+              },
+            }),
       }))
+    } finally {
+      // Retention is enforced after every completed direct-child load, not
+      // only when volume topology changes. Active pane paths and roots are
+      // protected; all other least-recent nodes are evictable.
+      set((state) => ({
+        treeNodes: pruneTreeCache(state.treeNodes as Record<string, LazyTreeNode>, [
+          state.panes.left.path,
+          state.panes.right.path,
+          ...state.treeRoots,
+        ]) as Record<string, TreeNodeState>,
+      }))
+      treeLoadFlights.delete(path)
+      settleFlight()
     }
   },
   revealPath: async (path) => {
@@ -2658,6 +2863,8 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
             parentPath: getParentPath(path),
             children: [],
             loaded: false,
+            expandability: 'unknown',
+            lastAccess: Date.now(),
           }),
           expanded: !state.treeNodes[path]?.expanded,
         },
@@ -2665,7 +2872,14 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     }))
   },
   reset: () => {
+    treeLoadGeneration += 1
+    treeLoadFlights.clear()
     useTabsStore.getState().reset()
+    // `release()` resets each session's baseline/collection synchronously
+    // before its own (best-effort) async IPC call, so this clears in-memory
+    // v2 session state immediately even though the call isn't awaited here.
+    void listingSessions.left.release()
+    void listingSessions.right.release()
     set(defaultState())
   },
 }))

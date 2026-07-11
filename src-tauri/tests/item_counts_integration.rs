@@ -1,11 +1,16 @@
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use file_explorer_lib::fs::SortDirection;
+use file_explorer_lib::directory_session::{
+    BeginNavigationRequest, DirectorySessionService, ViewParams,
+};
+use file_explorer_lib::fs::{self as explorer_fs, SortDirection, SortKey};
+use file_explorer_lib::item_counts::cache::{
+    ItemCountCache, ItemCountState, ITEM_COUNT_CACHE_LIMIT,
+};
 use file_explorer_lib::item_counts::{
     ActiveItemsSortRequest, ActiveItemsSortResponse, ItemCountRequestContext, ItemCountService,
-    VisibleItemCountsRequest, AUTO_ITEM_COUNT_LIMIT,
-    MAX_AUTOMATIC_ITEM_COUNT_QUEUE,
+    VisibleItemCountsRequest, AUTO_ITEM_COUNT_LIMIT, MAX_AUTOMATIC_ITEM_COUNT_QUEUE,
 };
 use tempfile::tempdir;
 
@@ -39,17 +44,24 @@ fn automatic_requests_are_bounded_and_batched() {
     let mut events = Vec::new();
     service.process_automatic_request(plan, |event| events.push(event));
 
-    let total_results = events.iter().map(|event| event.results.len()).sum::<usize>();
+    let total_results = events
+        .iter()
+        .map(|event| event.results.len())
+        .sum::<usize>();
     assert_eq!(total_results, AUTO_ITEM_COUNT_LIMIT);
-    assert!(events.len() >= 2, "large requests should flush multiple batches");
-    assert!(events.iter().take(events.len() - 1).all(|event| !event.done));
-    assert!(events.last().is_some_and(|event| event.done));
     assert!(
-        events
-            .iter()
-            .flat_map(|event| event.results.iter())
-            .all(|result| result.item_count == Some(1))
+        events.len() >= 2,
+        "large requests should flush multiple batches"
     );
+    assert!(events
+        .iter()
+        .take(events.len() - 1)
+        .all(|event| !event.done));
+    assert!(events.last().is_some_and(|event| event.done));
+    assert!(events
+        .iter()
+        .flat_map(|event| event.results.iter())
+        .all(|result| result.item_count == Some(1)));
 }
 
 #[test]
@@ -66,7 +78,11 @@ fn automatic_requests_cancel_only_the_stale_scope() {
     let stale_request = VisibleItemCountsRequest {
         context: context(&root.to_string_lossy()),
         paths: (0..80)
-            .map(|index| root.join(format!("dir-{index}")).to_string_lossy().into_owned())
+            .map(|index| {
+                root.join(format!("dir-{index}"))
+                    .to_string_lossy()
+                    .into_owned()
+            })
             .collect(),
     };
     let stale_plan = service.plan_automatic_request(&stale_request);
@@ -86,7 +102,11 @@ fn automatic_requests_cancel_only_the_stale_scope() {
         }
     });
 
-    assert_eq!(stale_events.len(), 1, "stale work should stop after supersession");
+    assert_eq!(
+        stale_events.len(),
+        1,
+        "stale work should stop after supersession"
+    );
     assert!(
         !stale_events[0].done,
         "cancelled work must not emit a terminal done batch"
@@ -120,7 +140,11 @@ fn cancelled_automatic_paths_are_released_for_a_later_retry() {
 
     let service = ItemCountService::default();
     let paths = (0..65)
-        .map(|index| root.join(format!("dir-{index}")).to_string_lossy().into_owned())
+        .map(|index| {
+            root.join(format!("dir-{index}"))
+                .to_string_lossy()
+                .into_owned()
+        })
         .collect::<Vec<_>>();
     let stale = service.plan_automatic_request(&VisibleItemCountsRequest {
         context: context(&root.to_string_lossy()),
@@ -161,23 +185,32 @@ fn queued_automatic_work_is_coalesced_bounded_and_keeps_latest_paths() {
     }
     let service = ItemCountService::default();
     let first = service.plan_automatic_request(&VisibleItemCountsRequest {
-        context: context(&root.to_string_lossy()), paths: vec![root.join("first").to_string_lossy().into_owned()],
+        context: context(&root.to_string_lossy()),
+        paths: vec![root.join("first").to_string_lossy().into_owned()],
     });
     assert!(service.enqueue_automatic_request(first));
     let latest = service.plan_automatic_request(&VisibleItemCountsRequest {
-        context: context(&root.to_string_lossy()), paths: vec![root.join("latest").to_string_lossy().into_owned()],
+        context: context(&root.to_string_lossy()),
+        paths: vec![root.join("latest").to_string_lossy().into_owned()],
     });
     let _ = service.enqueue_automatic_request(latest);
     assert_eq!(service.automatic_queue_len(), 1);
     let mut events = Vec::new();
     service.process_automatic_queue(|event| events.push(event));
-    let paths = events.into_iter().flat_map(|event| event.results).map(|result| result.path).collect::<Vec<_>>();
+    let paths = events
+        .into_iter()
+        .flat_map(|event| event.results)
+        .map(|result| result.path)
+        .collect::<Vec<_>>();
     assert!(paths.iter().any(|path| path.ends_with("first")));
     assert!(paths.iter().any(|path| path.ends_with("latest")));
 
     for index in 0..(MAX_AUTOMATIC_ITEM_COUNT_QUEUE + 8) {
         let plan = service.plan_automatic_request(&VisibleItemCountsRequest {
-            context: ItemCountRequestContext { pane_id: format!("pane-{index}"), ..context(&root.to_string_lossy()) },
+            context: ItemCountRequestContext {
+                pane_id: format!("pane-{index}"),
+                ..context(&root.to_string_lossy())
+            },
             paths: vec![root.join("latest").to_string_lossy().into_owned()],
         });
         let _ = service.enqueue_automatic_request(plan);
@@ -288,7 +321,10 @@ fn explicit_items_sort_serves_full_relisting_and_path_matching_is_case_fallback_
             "the latest coalesced plan carries the earlier visible path forward"
         );
     } else {
-        assert!(!first.is_empty() && !second.is_empty(), "POSIX paths remain distinct");
+        assert!(
+            !first.is_empty() && !second.is_empty(),
+            "POSIX paths remain distinct"
+        );
     }
 
     let response = service
@@ -348,4 +384,113 @@ fn automatic_context_keeps_pane_and_tab_ids_exact() {
 
     assert!(!first.is_empty());
     assert!(!second.is_empty());
+}
+
+#[test]
+fn generation_cache_coalesces_pending_work_and_invalidates_only_the_changed_directory() {
+    let mut cache = ItemCountCache::new(4);
+    assert!(cache.begin("/one", 3));
+    assert!(!cache.begin("/one", 3));
+    cache.resolve("/one", 3, ItemCountState::Exact { value: 2 });
+    cache.resolve("/two", 3, ItemCountState::Exact { value: 7 });
+    assert_eq!(cache.state("/one", 3).value(), Some(2));
+    cache.invalidate_generation("/one", 3);
+    assert_eq!(cache.state("/one", 3), ItemCountState::Unknown);
+    assert_eq!(cache.state("/two", 3).value(), Some(7));
+}
+
+#[test]
+fn item_count_cache_never_exceeds_approved_entry_limit() {
+    let mut cache = ItemCountCache::default();
+    for index in 0..(ITEM_COUNT_CACHE_LIMIT + 5) {
+        cache.resolve(
+            &format!("/count-{index}"),
+            1,
+            ItemCountState::Exact {
+                value: index as u64,
+            },
+        );
+    }
+    assert_eq!(cache.len(), ITEM_COUNT_CACHE_LIMIT);
+}
+
+#[test]
+fn items_sort_reuses_active_session_snapshot_and_viewport_count_cache() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    let alpha = root.join("alpha");
+    let beta = root.join("beta");
+    fs::create_dir(&alpha).expect("alpha");
+    fs::create_dir(&beta).expect("beta");
+    fs::write(alpha.join("a"), b"a").expect("alpha child");
+    fs::write(beta.join("a"), b"a").expect("beta child");
+    fs::write(beta.join("b"), b"b").expect("beta child");
+
+    let path = root.to_string_lossy().into_owned();
+    let sessions = DirectorySessionService::default();
+    sessions
+        .begin_navigation(
+            BeginNavigationRequest {
+                pane_id: "left".to_string(),
+                tab_id: "left-1".to_string(),
+                path: path.clone(),
+                view: ViewParams {
+                    sort_key: SortKey::Name,
+                    sort_direction: SortDirection::Asc,
+                    filter: String::new(),
+                    show_hidden: true,
+                    include_item_counts: false,
+                },
+            },
+            None,
+            None,
+        )
+        .expect("start session");
+
+    let service = ItemCountService::default();
+    let generation = sessions
+        .watch_revision_for_pane_path(&"left".to_string(), &path)
+        .expect("active session generation");
+    let plan = service.plan_automatic_request_with_generation(
+        &VisibleItemCountsRequest {
+            context: context(&path),
+            paths: vec![
+                alpha.to_string_lossy().into_owned(),
+                beta.to_string_lossy().into_owned(),
+            ],
+        },
+        generation,
+    );
+    service.process_automatic_request(plan, |_| {});
+
+    let list_calls_before = explorer_fs::list_dir_calls_for_tests();
+    let count_calls_before = explorer_fs::read_item_count_calls_for_tests();
+    let response = service
+        .sort_active_items_with_session(
+            &ActiveItemsSortRequest {
+                context: context(&path),
+                sort_direction: SortDirection::Desc,
+                filter: String::new(),
+                show_hidden: true,
+            },
+            Some(&sessions),
+        )
+        .expect("sort from snapshot");
+
+    let ActiveItemsSortResponse::Ready(ready) = response else {
+        panic!("expected ready result");
+    };
+    assert_eq!(
+        ready
+            .entries
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["beta", "alpha"]
+    );
+    assert_eq!(explorer_fs::list_dir_calls_for_tests(), list_calls_before);
+    assert_eq!(
+        explorer_fs::read_item_count_calls_for_tests(),
+        count_calls_before
+    );
 }

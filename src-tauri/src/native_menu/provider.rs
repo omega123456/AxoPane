@@ -1,6 +1,8 @@
+use super::helper_supervisor::HelperRole;
 use super::shell_executor::ShellExecutor;
 use super::types::{LoadNativeMenuRequest, NativeMenuCanonicalActionKind, NativeMenuIcon};
 use crate::ipc::types::MenuActionStatus;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 const APP_OWNED_CANONICAL_ACTION_KINDS: &[NativeMenuCanonicalActionKind] = &[
@@ -49,7 +51,7 @@ const ALWAYS_EXCLUDED_NORMALIZED_LABELS: &[&str] = &[
     "includeinlibrary",
 ];
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ProviderInvocation {
     Fake {
         action_id: String,
@@ -71,7 +73,7 @@ pub enum ProviderInvocation {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderNativeMenuItem {
     pub id: String,
     pub label: String,
@@ -93,6 +95,15 @@ pub trait NativeMenuProvider: Send + Sync {
 
     fn invoke(&self, invocation: &ProviderInvocation, executor: &ShellExecutor)
         -> MenuActionStatus;
+
+    fn load_menu_for_role(
+        &self,
+        request: &LoadNativeMenuRequest,
+        executor: &ShellExecutor,
+        _role: HelperRole,
+    ) -> Vec<ProviderNativeMenuItem> {
+        self.load_menu(request, executor)
+    }
 }
 
 pub fn dedupe_provider_items(items: Vec<ProviderNativeMenuItem>) -> Vec<ProviderNativeMenuItem> {

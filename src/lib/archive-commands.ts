@@ -20,24 +20,16 @@ export async function runCompressCommand({ paths, destinationDir }: ArchiveActio
   }
 
   try {
-    const response = await requestCompressArchive({ paths, destinationDir })
-    if (!response.handled) {
-      log.info('compress command unavailable', {
-        ...summarize(paths),
-        destinationDir,
-        message: response.message ?? null,
-      })
-      return response
-    }
+    const operationId = await requestCompressArchive({ paths, destinationDir })
 
-    log.info('compress command completed', {
+    log.info('compress command queued', {
       ...summarize(paths),
       destinationDir,
-      archivePath: response.message ?? null,
+      operationId,
     })
-    return response
+    return operationId
   } catch (error) {
-    log.warn('compress_archive IPC failed', {
+    log.warn('compress archive queue submission failed', {
       ...summarize(paths),
       destinationDir,
       error,
@@ -53,24 +45,16 @@ export async function runExtractCommand({ paths, destinationDir }: ArchiveAction
   }
 
   try {
-    const response = await requestExtractArchive({ paths, destinationDir })
-    if (!response.handled) {
-      log.info('extract command unavailable', {
-        ...summarize(paths),
-        destinationDir,
-        message: response.message ?? null,
-      })
-      return response
-    }
+    const operationId = await requestExtractArchive({ paths, destinationDir })
 
-    log.info('extract command completed', {
+    log.info('extract command queued', {
       ...summarize(paths),
       destinationDir,
-      extractedPath: response.message ?? null,
+      operationId,
     })
-    return response
+    return operationId
   } catch (error) {
-    log.warn('extract_archive IPC failed', {
+    log.warn('extract archive queue submission failed', {
       ...summarize(paths),
       destinationDir,
       error,

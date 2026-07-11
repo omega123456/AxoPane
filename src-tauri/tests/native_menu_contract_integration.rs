@@ -3,8 +3,8 @@ mod common;
 
 use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::types::{
-    CompressArchiveRequest, ExtractArchiveRequest, InvokeNativeMenuRequest, LoadNativeMenuRequest,
-    NativeMenuIconKind, NativeMenuTargetKind, OpenWithRequest, ShowPropertiesRequest,
+    InvokeNativeMenuRequest, LoadNativeMenuRequest, NativeMenuIconKind, NativeMenuTargetKind,
+    OpenWithRequest, ShowPropertiesRequest,
 };
 use file_explorer_lib::native_menu::NativeMenuService;
 
@@ -78,18 +78,4 @@ fn command_contracts_return_safe_test_utils_behavior() {
     );
     assert!(!open_with.handled);
     assert_eq!(open_with.message.as_deref(), Some("unsupported"));
-
-    let compress = commands::compress_archive(CompressArchiveRequest {
-        paths: vec!["C:\\fixture\\report.txt".to_string()],
-        destination_dir: "C:\\fixture".to_string(),
-    });
-    assert!(!compress.handled);
-    assert_eq!(compress.message.as_deref(), Some("unsupported"));
-
-    let extract = commands::extract_archive(ExtractArchiveRequest {
-        paths: vec!["C:\\fixture\\archive.zip".to_string()],
-        destination_dir: "C:\\fixture".to_string(),
-    });
-    assert!(!extract.handled);
-    assert_eq!(extract.message.as_deref(), Some("unsupported"));
 }
