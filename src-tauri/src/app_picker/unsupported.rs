@@ -25,12 +25,11 @@ pub fn list_applications() -> ListApplicationsResponse {
 
 /// On real, non-macOS builds (e.g. Windows) there is no app picker at all.
 ///
-/// `async` to keep an identical signature to `macos::list_applications`
-/// across both `cfg`-gated implementations `app_picker::list_applications`
-/// dispatches between. No actual asynchronous work happens here - Windows has
-/// no real enumeration to perform - so this resolves immediately.
+/// Kept synchronous to match the signature `app_picker::list_applications`
+/// dispatches to across both `cfg`-gated implementations - Windows has no
+/// real enumeration to perform, so this resolves immediately.
 #[cfg(not(feature = "test-utils"))]
-pub async fn list_applications() -> ListApplicationsResponse {
+pub fn list_applications() -> ListApplicationsResponse {
     ListApplicationsResponse { apps: Vec::new() }
 }
 
