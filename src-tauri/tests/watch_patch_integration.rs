@@ -38,6 +38,52 @@ fn entry(path: &str, name: &str) -> DirectoryEntry {
     }
 }
 
+/// Guards the Rust->TypeScript wire contract: the frontend reads `paneId` /
+/// `tabId` / `previousBaseline` / `nextBaseline` / `totalRows` (and, for the
+/// nested row deltas, `rowIndex`). A plain `#[serde(rename_all = "camelCase")]`
+/// on a tagged enum only renames the *variant tags*, not the fields inside
+/// struct variants, so without `rename_all_fields` these serialize as
+/// snake_case and the frontend silently drops every patch (its pane/tab guard
+/// sees `undefined`). This asserts the serialized JSON, not a Rust round-trip
+/// (a round-trip agrees with itself regardless of casing and would not catch
+/// the cross-language mismatch).
+#[test]
+fn session_patch_serializes_struct_variant_fields_as_camel_case() {
+    let patch = classify_patch(ClassifyPatchInput {
+        pane_id: "left",
+        tab_id: "left-tab-10",
+        path: "/dir",
+        previous_baseline: baseline(0),
+        next_baseline: baseline(1),
+        previous_view: &[entry("/a", "a")],
+        next_view: &[entry("/a", "a"), entry("/b", "b")],
+        changed_paths: &["/b".to_string()],
+        removed_paths: &[],
+    })
+    .expect("single insert should classify as a delta");
+
+    let json = serde_json::to_value(&patch).expect("serialize session patch");
+    let object = json.as_object().expect("patch serializes to a JSON object");
+
+    assert_eq!(object.get("mode").and_then(|v| v.as_str()), Some("delta"));
+    for key in ["paneId", "tabId", "previousBaseline", "nextBaseline", "totalRows", "deltas"] {
+        assert!(object.contains_key(key), "expected camelCase key `{key}` in {json}");
+    }
+    for snake in ["pane_id", "tab_id", "previous_baseline", "next_baseline", "total_rows"] {
+        assert!(!object.contains_key(snake), "unexpected snake_case key `{snake}` in {json}");
+    }
+
+    let first_delta = object
+        .get("deltas")
+        .and_then(|v| v.as_array())
+        .and_then(|deltas| deltas.first())
+        .and_then(|delta| delta.as_object())
+        .expect("delta row present");
+    assert_eq!(first_delta.get("kind").and_then(|v| v.as_str()), Some("inserted"));
+    assert!(first_delta.contains_key("rowIndex"), "row delta field must be camelCase: {json}");
+    assert!(!first_delta.contains_key("row_index"), "row delta must not be snake_case: {json}");
+}
+
 #[test]
 fn classify_patch_returns_none_when_nothing_touched() {
     let previous = vec![entry("/a", "a")];
