@@ -252,6 +252,14 @@ fn spawn_worker(
                 let Ok(message) = receiver.recv_timeout(Duration::from_millis(25)) else {
                     continue;
                 };
+                // Shutdown may begin after the loop condition is checked but
+                // before this worker receives a queued job. Do not start work
+                // across that boundary; dropping the message closes its reply
+                // channel and lets the waiting caller return an error.
+                if shutting_down.load(Ordering::Acquire) {
+                    drop(message);
+                    break;
+                }
                 match message {
                     Message::Run(job) => job(),
                 }

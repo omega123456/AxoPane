@@ -1074,7 +1074,10 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
 
     let mut target = destination_dir.join(&item.name);
 
-    if source.is_dir() && is_nested_copy_target(&source, &target) {
+    let source_is_real_directory = fs::symlink_metadata(&source)
+        .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+        .unwrap_or(false);
+    if source_is_real_directory && is_nested_copy_target(&source, &target) {
         let action = match kind {
             OpKind::Copy => "copy",
             OpKind::Move => "move",
@@ -1091,8 +1094,9 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
         return;
     }
 
-    // Conflict detection + resolution.
-    if target.exists() {
+    // Conflict detection + resolution. `Path::exists` follows links and
+    // misses dangling symlinks, so inspect the directory entry as well.
+    if target.exists() || fs::symlink_metadata(&target).is_ok() {
         let resolution = resolve_or_park(ctx, item, &target, conflict);
         match resolution {
             Some((ConflictResolution::Skip, _)) => {
@@ -1101,7 +1105,10 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
                 return;
             }
             Some((ConflictResolution::Replace, _)) => {
-                let _ = remove_target(&target);
+                if let Err(error) = remove_target(&target) {
+                    record_transfer_failure(op_arc, kind, &source, &target, &error);
+                    return;
+                }
             }
             Some((ConflictResolution::Rename, rename_to)) => {
                 let new_name =
@@ -1147,11 +1154,38 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
             }
             advance_item(ctx, item)
         }
-        Err(message) => {
-            let mut op = op_arc.lock().expect("op lock");
-            op.error_message = Some(message);
-        }
+        Err(message) => record_transfer_failure(op_arc, kind, &source, &target, &message),
     }
+}
+
+/// Record a transfer failure with the context that turns an opaque OS error
+/// into an actionable log entry. The queue keeps a concise version for the UI,
+/// while the error log retains the operation id and both filesystem paths.
+fn record_transfer_failure(
+    op_arc: &Arc<Mutex<OpState>>,
+    kind: OpKind,
+    source: &Path,
+    target: &Path,
+    error: &str,
+) {
+    let action = match kind {
+        OpKind::Copy => "copy",
+        OpKind::Move => "move",
+        OpKind::Delete | OpKind::Compress | OpKind::Extract => return,
+    };
+    let mut op = op_arc.lock().expect("op lock");
+    let message = format!(
+        "{action} operation {} failed: source=\"{}\", destination=\"{}\", error={error}",
+        op.id,
+        source.display(),
+        target.display(),
+    );
+    log::error!("{message}");
+    op.error_message = Some(format!(
+        "Failed to {action} \"{}\" to \"{}\": {error}",
+        source.display(),
+        target.display(),
+    ));
 }
 
 #[cfg(feature = "test-utils")]
@@ -1198,11 +1232,10 @@ fn measure_totals_up_front(
         return;
     }
 
-    // Copy reads through a symlink and transfers its target's bytes, so
-    // their pre-measurement must follow links too or a symlink-heavy tree
-    // would undercount the total the same way an un-measured folder did.
-    // Delete removes the link itself, so it does not.
-    let follow_symlinks = matches!(kind, OpKind::Copy);
+    // Copy preserves symlinks as links, so their own on-disk size belongs in
+    // the total instead of the size of whatever they happen to point at.
+    // Delete also removes the link itself, so neither operation follows them.
+    let follow_symlinks = false;
     let mut discovered_bytes = 0_u64;
     for item in items.iter().filter(|item| item.size_bytes == 0) {
         if cancel.load(Ordering::Relaxed) {
@@ -2035,13 +2068,10 @@ fn zip_dir_options() -> SimpleFileOptions {
 
 /// Sum the byte size of a directory tree to drive byte-accurate progress.
 ///
-/// `follow_symlinks` should match what the operation actually does with a link:
-/// copy/move read through a symlink and transfer its target's bytes (see
-/// `copy_dir_recursive`), so they pass `true` and a symlinked file/directory is
-/// measured via its resolved target (cycle-guarded via `visited`); delete
-/// removes the link itself, not the target (see `delete_file_with_progress`'s
-/// use of `symlink_metadata`), so it passes `false` and symlinks are skipped
-/// entirely. IO errors are skipped so measurement never aborts the op.
+/// `follow_symlinks` should match what the caller does with a link. Copy/move
+/// preserve a symlink itself, while callers that deliberately traverse targets
+/// can opt in to the cycle-guarded path below. IO errors are skipped so
+/// measurement never aborts the operation.
 pub fn measure_tree_size(path: &Path, cancel: &Arc<AtomicBool>, follow_symlinks: bool) -> u64 {
     if !follow_symlinks {
         return crate::traversal::walk(
@@ -2056,9 +2086,15 @@ pub fn measure_tree_size(path: &Path, cancel: &Arc<AtomicBool>, follow_symlinks:
                 })
                 .filter_map(Result::ok)
                 .filter_map(|entry| {
-                    (!entry.file_type.is_dir() && !entry.file_type.is_symlink())
-                        .then(|| fs::metadata(entry.path).ok().map(|metadata| metadata.len()))
-                        .flatten()
+                    if entry.file_type.is_dir() {
+                        None
+                    } else if entry.file_type.is_symlink() {
+                        fs::symlink_metadata(entry.path)
+                            .ok()
+                            .map(|metadata| metadata.len())
+                    } else {
+                        fs::metadata(entry.path).ok().map(|metadata| metadata.len())
+                    }
                 })
                 .fold(0_u64, u64::saturating_add)
         })
@@ -2171,7 +2207,17 @@ fn copy_path_with_total_discovery(
     ctx: &WorkerCtx<'_>,
     mut manifest: Option<&mut ProgressiveManifest>,
 ) -> Result<(), String> {
-    if source.is_dir() {
+    let source_metadata = fs::symlink_metadata(source).map_err(|error| error.to_string())?;
+    if source_metadata.file_type().is_symlink() {
+        let mut throttle = TransferThrottle::new((ctx.instant_now)(), PROGRESS_EMIT_INTERVAL);
+        copy_symlink_with_total_discovery(
+            source,
+            target,
+            add_discovered_totals,
+            ctx,
+            Some(&mut throttle),
+        )
+    } else if source_metadata.is_dir() {
         let root = source.canonicalize().map_err(|error| error.to_string())?;
         let mut visited = HashSet::from([root.clone()]);
         // The directory walk shares one throttle across the whole recursive
@@ -2226,8 +2272,23 @@ pub fn copy_dir_recursive(
         }
 
         let entry = entry.map_err(|error| error.to_string())?;
+        let child_source = entry.path();
         let child_target = target.join(entry.file_name());
-        if entry.path().is_dir() {
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        if file_type.is_symlink() {
+            if let Some(manifest) = manifest.as_deref_mut() {
+                let link_metadata =
+                    fs::symlink_metadata(&child_source).map_err(|error| error.to_string())?;
+                manifest.record(root, child_source.clone(), link_metadata.len(), true);
+            }
+            copy_symlink_with_total_discovery(
+                &child_source,
+                &child_target,
+                add_discovered_totals,
+                ctx,
+                throttle.as_deref_mut(),
+            )?;
+        } else if file_type.is_dir() {
             let canonical_child = entry
                 .path()
                 .canonicalize()
@@ -2245,7 +2306,7 @@ pub fn copy_dir_recursive(
                 ));
             }
             copy_dir_recursive(
-                &entry.path(),
+                &child_source,
                 &child_target,
                 root,
                 visited,
@@ -2258,13 +2319,12 @@ pub fn copy_dir_recursive(
         } else {
             if let Some(manifest) = manifest.as_deref_mut() {
                 let link_metadata =
-                    fs::symlink_metadata(entry.path()).map_err(|error| error.to_string())?;
+                    fs::symlink_metadata(&child_source).map_err(|error| error.to_string())?;
                 let bytes = link_metadata.len();
-                let is_link = link_metadata.file_type().is_symlink();
-                manifest.record(root, entry.path(), bytes, is_link);
+                manifest.record(root, child_source.clone(), bytes, false);
             }
             copy_file_with_total_discovery(
-                &entry.path(),
+                &child_source,
                 &child_target,
                 add_discovered_totals,
                 ctx,
@@ -2273,6 +2333,60 @@ pub fn copy_dir_recursive(
         }
     }
     Ok(())
+}
+
+/// Recreate a symlink without dereferencing it. This preserves relative,
+/// dangling, and directory links, so a copied tree has the same topology as
+/// its source and does not accidentally walk outside the selected folder.
+fn copy_symlink_with_total_discovery(
+    source: &Path,
+    target: &Path,
+    add_discovered_total_bytes: bool,
+    ctx: &WorkerCtx<'_>,
+    mut throttle: Option<&mut TransferThrottle>,
+) -> Result<(), String> {
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+
+    let link_metadata = fs::symlink_metadata(source).map_err(|error| error.to_string())?;
+    let link_size = link_metadata.len();
+    if add_discovered_total_bytes {
+        add_discovered_total(ctx, link_size, throttle.as_deref_mut());
+    }
+    begin_file_progress(ctx, source, link_size, throttle.as_deref_mut());
+
+    let link_target = fs::read_link(source).map_err(|error| error.to_string())?;
+    create_symlink(source, &link_target, target).map_err(|error| error.to_string())?;
+
+    report_chunk_progress(ctx, link_size, throttle.as_deref_mut());
+    finish_file_progress(ctx, throttle);
+    Ok(())
+}
+
+#[cfg(unix)]
+fn create_symlink(_source: &Path, link_target: &Path, target: &Path) -> io::Result<()> {
+    std::os::unix::fs::symlink(link_target, target)
+}
+
+#[cfg(windows)]
+fn create_symlink(source: &Path, link_target: &Path, target: &Path) -> io::Result<()> {
+    use std::os::windows::fs::FileTypeExt;
+
+    let metadata = fs::symlink_metadata(source)?;
+    if metadata.file_type().is_symlink_dir() {
+        std::os::windows::fs::symlink_dir(link_target, target)
+    } else {
+        std::os::windows::fs::symlink_file(link_target, target)
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn create_symlink(_source: &Path, _link_target: &Path, _target: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "symlink copying is unsupported on this platform",
+    ))
 }
 
 /// Remove `source` (file or directory tree) reporting byte progress through the

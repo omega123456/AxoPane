@@ -172,9 +172,8 @@ fn filesystem_helpers_surface_remove_dir_all_errors_for_directories() {
     );
 }
 
-/// Copy/move read through a symlink and transfer its target's bytes, so their
-/// pre-measurement must follow the link too — otherwise a symlink-heavy tree's
-/// initial total undercounts the same way an un-measured folder used to.
+/// Copy/move preserve a symlink itself, while callers that intentionally walk
+/// targets can opt in to target measurement.
 #[cfg(unix)]
 #[test]
 fn measure_tree_size_follows_symlinks_only_when_asked() {
@@ -192,12 +191,18 @@ fn measure_tree_size_follows_symlinks_only_when_asked() {
 
     let cancel = Arc::new(AtomicBool::new(false));
 
-    // Not following: symlinks contribute nothing, matching delete (which
-    // removes the link itself, not its target).
-    assert_eq!(measure_tree_size(root, &cancel, false), 12 + 5);
+    // Not following: symlinks contribute their own on-disk lengths, matching
+    // copy/move/delete, which each operate on the link itself.
+    let link_bytes = fs::symlink_metadata(root.join("linked-dir"))
+        .expect("directory link metadata")
+        .len()
+        + fs::symlink_metadata(root.join("link-to-file.bin"))
+            .expect("file link metadata")
+            .len();
+    assert_eq!(measure_tree_size(root, &cancel, false), 12 + 5 + link_bytes);
 
     // Following: the symlinked directory's contents and the symlinked file's
-    // target are both counted, matching what copy/move actually transfers.
+    // target are both counted for callers that deliberately traverse targets.
     assert_eq!(measure_tree_size(root, &cancel, true), 12 + 5 + 12 + 5);
 }
 
