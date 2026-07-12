@@ -93,9 +93,43 @@ describe('panes-store navigation', () => {
   })
 
   it('goes up to the parent path', async () => {
+    ipc.override('list_dir', (payload) => ({
+      path: payload.path,
+      entries:
+        payload.path === 'C:\\root'
+          ? [dirAt('C:\\root\\child'), dirAt('C:\\root\\sibling')]
+          : [dirAt('C:\\root\\child\\nested')],
+    }))
+
     await usePanesStore.getState().navigatePane('left', 'C:\\root\\child')
     await usePanesStore.getState().goUp('left')
+
     expect(usePanesStore.getState().panes.left.path).toBe('C:\\root')
+    expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('C:\\root\\child')
+    expect(useSelectionStore.getState().selections.left).toEqual({
+      selectedIds: ['C:\\root\\child'],
+      anchorId: 'C:\\root\\child',
+      focusedId: 'C:\\root\\child',
+    })
+  })
+
+  it('selects the folder being left when going up a POSIX path', async () => {
+    ipc.override('list_dir', (payload) => ({
+      path: payload.path,
+      entries:
+        payload.path === '/Users/example'
+          ? [dirAt('/Users/example/Documents'), dirAt('/Users/example/Downloads')]
+          : [dirAt('/Users/example/Documents/report.txt', false)],
+    }))
+
+    await usePanesStore.getState().navigatePane('left', '/Users/example/Documents')
+    await usePanesStore.getState().goUp('left')
+
+    expect(usePanesStore.getState().panes.left.path).toBe('/Users/example')
+    expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('/Users/example/Documents')
+    expect(useSelectionStore.getState().selections.left.selectedIds).toEqual([
+      '/Users/example/Documents',
+    ])
   })
 
   it('restores the previously selected folder as the keyboard focus when returning to its parent', async () => {
@@ -744,6 +778,25 @@ describe('panes-store navigation', () => {
     await usePanesStore.getState().goForward('left')
     expect(usePanesStore.getState().panes.left.path).toBe('C:\\root\\child')
     expect(usePanesStore.getState().panes.left.historyIndex).toBe(1)
+  })
+
+  it('selects the folder being left when history navigation returns to its parent', async () => {
+    ipc.override('list_dir', (payload) => ({
+      path: payload.path,
+      entries:
+        payload.path === 'C:\\root'
+          ? [dirAt('C:\\root\\child'), dirAt('C:\\root\\sibling')]
+          : [dirAt('C:\\root\\child\\nested')],
+    }))
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    await usePanesStore.getState().navigatePane('left', 'C:\\root\\child')
+    useSelectionStore.getState().clearSelectionForPane('left')
+
+    await usePanesStore.getState().goBack('left')
+
+    expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('C:\\root\\child')
+    expect(useSelectionStore.getState().selections.left.selectedIds).toEqual(['C:\\root\\child'])
   })
 
   it('keeps scroll offsets for history navigation but clears fresh targets', async () => {

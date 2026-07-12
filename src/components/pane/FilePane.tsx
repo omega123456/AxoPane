@@ -336,6 +336,15 @@ export function FilePane({ paneId }: FilePaneProps) {
     return entryIndex < 0 ? -1 : entryIndex + parentOffset
   }, [hasParent, parentOffset, pane.entries, pane.focusedEntryId])
 
+  // Store-driven return navigation selects after the parent listing resolves.
+  // Bring that row into view just as keyboard selection does, including when
+  // the returned folder sorts below the initial virtualized viewport.
+  useEffect(() => {
+    if (selection.focusedId === pane.focusedEntryId && focusedRowIndex >= 0) {
+      rowVirtualizer.scrollToIndex(focusedRowIndex)
+    }
+  }, [focusedRowIndex, pane.focusedEntryId, rowVirtualizer, selection.focusedId])
+
   // Rows fully visible in the scroll viewport, used as the Page Up/Down step —
   // matches Explorer's "jump by a screenful" behavior instead of a fixed count.
   function visibleRowCount() {

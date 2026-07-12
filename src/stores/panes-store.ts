@@ -53,7 +53,9 @@ type SizeStateKind = SizeStateEvent['state']
 
 // When `viaHistory` is set the navigation is a back/forward step and must not
 // rewrite the pane's history stack (the index has already been moved).
-type NavigateOptions = { viaHistory?: boolean }
+// `selectPathAfterNavigation` is used when ascending to a parent so the folder
+// being left becomes the parent's focused, selected row once listing succeeds.
+type NavigateOptions = { viaHistory?: boolean; selectPathAfterNavigation?: string }
 
 export type TreeNodeState = Omit<LazyTreeNode, 'expandability' | 'lastAccess'> & {
   expandability?: LazyTreeNode['expandability']
@@ -1677,14 +1679,38 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           : { ...state.filterTimers, [paneId]: undefined },
       }
     })
-    await get().reloadPane(paneId)
+    const reload = get().reloadPane(paneId)
+    const navigationGeneration = get().panes[paneId].listingGeneration
+    await reload
+
+    const returnPath = options.selectPathAfterNavigation
+    const returnedPane = get().panes[paneId]
+    if (
+      !returnPath ||
+      returnedPane.listingGeneration !== navigationGeneration ||
+      returnedPane.loading ||
+      returnedPane.error ||
+      !pathsMatch(returnedPane.path, path)
+    ) {
+      return
+    }
+
+    const returnedEntry = returnedPane.entries.find((entry) => pathsMatch(entry.path, returnPath))
+    if (!returnedEntry) {
+      return
+    }
+
+    useSelectionStore
+      .getState()
+      .setSelection(paneId, [returnedEntry.id], returnedEntry.id, returnedEntry.id)
+    get().setFocusedEntry(paneId, returnedEntry.id)
   },
   goUp: async (paneId) => {
     const currentPath = get().panes[paneId].path
     const parentPath = getParentPath(currentPath)
     log.debug('goUp', { paneId, currentPath, parentPath })
     if (parentPath) {
-      await get().navigatePane(paneId, parentPath)
+      await get().navigatePane(paneId, parentPath, { selectPathAfterNavigation: currentPath })
     }
   },
   goBack: async (paneId) => {
@@ -1702,7 +1728,11 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         [paneId]: { ...state.panes[paneId], historyIndex: nextIndex },
       },
     }))
-    await get().navigatePane(paneId, path, { viaHistory: true })
+    const parentPath = getParentPath(pane.path)
+    await get().navigatePane(paneId, path, {
+      viaHistory: true,
+      selectPathAfterNavigation: parentPath && pathsMatch(parentPath, path) ? pane.path : undefined,
+    })
   },
   goForward: async (paneId) => {
     const pane = get().panes[paneId]
