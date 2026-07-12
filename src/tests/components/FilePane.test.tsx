@@ -918,6 +918,39 @@ describe('FilePane state rendering', () => {
     expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('Nested B')
   })
 
+  it('highlights and reveals the folder navigated back from when going up', async () => {
+    const user = userEvent.setup()
+    ipc.override('list_dir', (payload) => {
+      if (payload.path === 'C:\\root\\Alpha') {
+        return { path: payload.path, entries: [entry('Nested A')] }
+      }
+
+      return { path: payload.path, entries: [entry('Alpha'), entry('Beta')] }
+    })
+    ipc.override('set_tab_watch', () => undefined)
+    ipc.override('save_session', (payload) => payload.session)
+    seedPane({ path: 'C:\\root', entries: [entry('Alpha'), entry('Beta')], focusedEntryId: 'Alpha' })
+
+    render(<FilePane paneId="left" />)
+    const pane = screen.getByLabelText('Left pane')
+    await user.dblClick(within(pane).getByRole('row', { name: /Alpha/ }))
+    await screen.findByRole('row', { name: /Nested A/ })
+
+    // Selecting inside the child must not defeat the highlight on the way up.
+    await user.click(within(pane).getByRole('row', { name: /Nested A/ }))
+    // Navigate up one level directly (goUp delegates here; other tests in this
+    // file stub the goUp action on the store, and zustand reset() does not
+    // restore actions, so the wrapper itself is covered by the store tests).
+    await act(async () => {
+      await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    })
+
+    expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('Alpha')
+    expect(useSelectionStore.getState().selections.left.selectedIds).toEqual(['Alpha'])
+    const alphaRow = await within(pane).findByRole('row', { name: /Alpha/ })
+    expect(alphaRow.className).toContain('bg-accent-blue-soft')
+  })
+
   it('moves DOM focus into a pane when a tab is opened into it via openTabFromPath', async () => {
     ipc.override('list_dir', (payload) => ({ path: payload.path, entries: [entry('Alpha')] }))
     ipc.override('set_tab_watch', () => undefined)

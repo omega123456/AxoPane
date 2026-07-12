@@ -33,18 +33,20 @@ export function pruneIconCache(
     )
       delete next[path]
   }
-  const candidates = () =>
-    Object.entries(next)
-      .filter(([path]) => !protectedPaths.has(path))
-      .sort(
-        ([leftPath, left], [rightPath, right]) =>
-          left.touched - right.touched || leftPath.localeCompare(rightPath),
-      )
-  const weight = () => Object.values(next).reduce((total, record) => total + record.weight, 0)
-  while (Object.keys(next).length > MAX_ICON_CACHE_ENTRIES || weight() > MAX_ICON_CACHE_BYTES) {
-    const oldest = candidates()[0]
-    if (!oldest) break
-    delete next[oldest[0]]
+  const remaining = Object.entries(next)
+  let count = remaining.length
+  let weight = remaining.reduce((total, [, record]) => total + record.weight, 0)
+  const candidates = remaining
+    .filter(([path]) => !protectedPaths.has(path))
+    .sort(
+      ([leftPath, left], [rightPath, right]) =>
+        left.touched - right.touched || leftPath.localeCompare(rightPath),
+    )
+  for (const [path, record] of candidates) {
+    if (count <= MAX_ICON_CACHE_ENTRIES && weight <= MAX_ICON_CACHE_BYTES) break
+    delete next[path]
+    count -= 1
+    weight -= record.weight
   }
   return next
 }

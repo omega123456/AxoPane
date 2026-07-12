@@ -135,6 +135,92 @@ describe('panes-store navigation', () => {
     expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('C:\\root\\Gamma')
   })
 
+  it('selects, focuses, and requests a reveal for the folder left behind when going up', async () => {
+    ipc.override('list_dir', (payload) => {
+      if (payload.path === 'C:\\root') {
+        return {
+          path: payload.path,
+          entries: [dirAt('C:\\root\\Alpha'), dirAt('C:\\root\\Gamma')],
+        }
+      }
+      if (payload.path === 'C:\\root\\Gamma') {
+        return { path: payload.path, entries: [dirAt('C:\\root\\Gamma\\Nested')] }
+      }
+      return responder(payload)
+    })
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root\\Gamma')
+    // Selecting something inside the child must not defeat the reveal: the
+    // parent listing still highlights the folder we came back from.
+    useSelectionStore
+      .getState()
+      .setSelection(
+        'left',
+        ['C:\\root\\Gamma\\Nested'],
+        'C:\\root\\Gamma\\Nested',
+        'C:\\root\\Gamma\\Nested',
+      )
+
+    await usePanesStore.getState().goUp('left')
+
+    expect(usePanesStore.getState().panes.left.path).toBe('C:\\root')
+    expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('C:\\root\\Gamma')
+    expect(useSelectionStore.getState().selections.left).toEqual({
+      selectedIds: ['C:\\root\\Gamma'],
+      anchorId: 'C:\\root\\Gamma',
+      focusedId: 'C:\\root\\Gamma',
+    })
+    expect(usePanesStore.getState().revealScrollRequests.left).toBeGreaterThan(0)
+  })
+
+  it('highlights the folder returned from when going back lands on its parent', async () => {
+    ipc.override('list_dir', (payload) => {
+      if (payload.path === 'C:\\root') {
+        return {
+          path: payload.path,
+          entries: [dirAt('C:\\root\\Alpha'), dirAt('C:\\root\\Gamma')],
+        }
+      }
+      if (payload.path === 'C:\\root\\Gamma') {
+        return { path: payload.path, entries: [dirAt('C:\\root\\Gamma\\Nested')] }
+      }
+      return responder(payload)
+    })
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    await usePanesStore.getState().navigatePane('left', 'C:\\root\\Gamma')
+    useSelectionStore
+      .getState()
+      .setSelection(
+        'left',
+        ['C:\\root\\Gamma\\Nested'],
+        'C:\\root\\Gamma\\Nested',
+        'C:\\root\\Gamma\\Nested',
+      )
+
+    await usePanesStore.getState().goBack('left')
+
+    expect(usePanesStore.getState().panes.left.path).toBe('C:\\root')
+    expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('C:\\root\\Gamma')
+    expect(useSelectionStore.getState().selections.left.selectedIds).toEqual(['C:\\root\\Gamma'])
+  })
+
+  it('does not reveal anything when a history step lands on a non-parent path', async () => {
+    ipc.override('list_dir', (payload) => ({
+      path: payload.path,
+      entries: [dirAt(`${payload.path}\\Alpha`), dirAt(`${payload.path}\\Beta`)],
+    }))
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root\\one')
+    await usePanesStore.getState().navigatePane('left', 'C:\\root\\two')
+
+    await usePanesStore.getState().goBack('left')
+
+    expect(usePanesStore.getState().panes.left.path).toBe('C:\\root\\one')
+    expect(useSelectionStore.getState().selections.left.selectedIds).toEqual([])
+    expect(usePanesStore.getState().revealScrollRequests.left).toBeUndefined()
+  })
+
   it('debounces filter draft then applies it', async () => {
     vi.useFakeTimers()
     try {

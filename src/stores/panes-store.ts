@@ -140,6 +140,10 @@ type PanesStore = {
   treeNodes: Record<string, TreeNodeState>
   treeRoots: string[]
   filterTimers: Partial<Record<PaneId, number>>
+  // Bumped when a listing finished with a parent-reveal focus (navigating up
+  // highlighted the folder we came from); `FilePane` scrolls the focused row
+  // into view when its pane's counter changes.
+  revealScrollRequests: Partial<Record<PaneId, number>>
   initialize: (payload: InitializePayload) => void
   setActivePane: (paneId: PaneId) => void
   reloadPane: (paneId: PaneId) => Promise<void>
@@ -194,6 +198,15 @@ const AUTO_VISIBLE_ITEM_COUNT_LIMIT = 200
 // that promise, preventing double expands/reveals from issuing duplicate IPC.
 const treeLoadFlights = new Map<string, Promise<void>>()
 let treeLoadGeneration = 0
+
+// When a navigation moves a pane to the direct parent of the folder it is
+// leaving (Up/Backspace, the synthetic ".." row, or a history step that lands
+// one level above), the leaving path is parked here so the parent's listing
+// can select and reveal that folder once it resolves. Keyed per pane and
+// consumed (cleared) by the next `reloadPane` for that pane, so a superseding
+// navigation or an unrelated reload never applies a stale reveal.
+const pendingParentRevealPaths: Partial<Record<PaneId, string>> = {}
+let revealScrollRequestCounter = 0
 
 // ---------------------------------------------------------------------------
 // v2 directory-session integration (Phase 4 live-app wiring).
@@ -378,6 +391,7 @@ function defaultState() {
     treeNodes: {} as Record<string, TreeNodeState>,
     treeRoots: [] as string[],
     filterTimers: {} as Partial<Record<PaneId, number>>,
+    revealScrollRequests: {} as Partial<Record<PaneId, number>>,
   }
 }
 
@@ -1349,6 +1363,11 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
   },
   reloadPane: async (paneId) => {
     const pane = get().panes[paneId]
+    // Consume the parked reveal target up front so it binds to exactly this
+    // reload; a superseded/stale attempt drops it instead of leaking into a
+    // later unrelated reload.
+    const revealChildPath = pendingParentRevealPaths[paneId]
+    delete pendingParentRevealPaths[paneId]
     const tabId = activeTab(paneId).id
     const requestContext = {
       path: pane.path,
@@ -1502,6 +1521,17 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       listRequestIdCounter += 1
       const requestId = listRequestIdCounter
 
+      // Navigating up to this folder's listing highlights the folder we came
+      // from: it wins over the generic focus restore below, and also becomes
+      // the selection so the row is visibly highlighted, not just focused.
+      const revealEntry = revealChildPath
+        ? sortedEntries.find((entry) => entry.isDir && pathsMatch(entry.path, revealChildPath))
+        : undefined
+      if (revealEntry) {
+        revealScrollRequestCounter += 1
+      }
+      const revealScrollRequestId = revealScrollRequestCounter
+
       set((state) => {
         const previous = state.panes[paneId]
         const entries = withResolvedIcons(sortedEntries, state.resolvedIconPaths)
@@ -1522,13 +1552,16 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
             state.passiveItemCountRequests,
             paneId,
           ),
+          revealScrollRequests: revealEntry
+            ? { ...state.revealScrollRequests, [paneId]: revealScrollRequestId }
+            : state.revealScrollRequests,
           panes: {
             ...state.panes,
             [paneId]: {
               ...previous,
               path: resolvedPath,
               entries,
-              focusedEntryId: restoredFocusId ?? sortedEntries[0]?.id ?? null,
+              focusedEntryId: revealEntry?.id ?? restoredFocusId ?? sortedEntries[0]?.id ?? null,
               loading: false,
               itemsSortStatus: 'idle',
               listRequestId: requestId,
@@ -1538,6 +1571,12 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           },
         }
       })
+
+      if (revealEntry) {
+        useSelectionStore
+          .getState()
+          .setSelection(paneId, [revealEntry.id], revealEntry.id, revealEntry.id)
+      }
 
       const nextPane = get().panes[paneId]
       useTabsStore.getState().patchActiveTab(paneId, {
@@ -1593,6 +1632,17 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     // stop churning once the pane moves on. Jobs for folders still shown by the
     // other pane (same directory open in both) are left untouched.
     const leaving = get().panes[paneId]
+
+    // Navigating up one level should land with the folder we came from
+    // selected and focused, matching Explorer/xplorer2. Park the leaving path
+    // for `reloadPane` to resolve against the parent's fresh listing.
+    const leavingParentPath = getParentPath(leaving.path)
+    if (leavingParentPath && pathsMatch(leavingParentPath, path)) {
+      pendingParentRevealPaths[paneId] = leaving.path
+    } else {
+      delete pendingParentRevealPaths[paneId]
+    }
+
     const otherPaneId: PaneId = paneId === 'left' ? 'right' : 'left'
     const otherDirPaths = new Set(directoryPaths(get().panes[otherPaneId].entries))
     const leavingDirPaths = directoryPaths(leaving.entries)
@@ -2874,6 +2924,8 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
   reset: () => {
     treeLoadGeneration += 1
     treeLoadFlights.clear()
+    delete pendingParentRevealPaths.left
+    delete pendingParentRevealPaths.right
     useTabsStore.getState().reset()
     // `release()` resets each session's baseline/collection synchronously
     // before its own (best-effort) async IPC call, so this clears in-memory

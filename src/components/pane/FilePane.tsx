@@ -94,6 +94,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   const activePaneId = usePanesStore((state) => state.activePaneId)
   const focusRequestId = usePanesStore((state) => state.focusRequestId)
   const focusRequestPaneId = usePanesStore((state) => state.focusRequestPaneId)
+  const revealScrollRequestId = usePanesStore((state) => state.revealScrollRequests[paneId])
   const setActivePane = usePanesStore((state) => state.setActivePane)
   const setFocusedEntry = usePanesStore((state) => state.setFocusedEntry)
   const goUp = usePanesStore((state) => state.goUp)
@@ -335,6 +336,23 @@ export function FilePane({ paneId }: FilePaneProps) {
     const entryIndex = pane.entries.findIndex((entry) => entry.id === pane.focusedEntryId)
     return entryIndex < 0 ? -1 : entryIndex + parentOffset
   }, [hasParent, parentOffset, pane.entries, pane.focusedEntryId])
+
+  // Navigating up highlights the folder we came from (see the store's
+  // parent-reveal handling); make sure that row is actually scrolled into
+  // view — a fresh up-navigation starts the parent listing at the top, where
+  // the highlighted folder may live below the fold.
+  const handledRevealScrollIdRef = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (
+      revealScrollRequestId === undefined ||
+      revealScrollRequestId === handledRevealScrollIdRef.current ||
+      focusedRowIndex < 0
+    ) {
+      return
+    }
+    handledRevealScrollIdRef.current = revealScrollRequestId
+    rowVirtualizer.scrollToIndex(focusedRowIndex)
+  }, [focusedRowIndex, revealScrollRequestId, rowVirtualizer])
 
   // Rows fully visible in the scroll viewport, used as the Page Up/Down step —
   // matches Explorer's "jump by a screenful" behavior instead of a fixed count.
