@@ -2,7 +2,9 @@ use std::fs;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use file_explorer_lib::traversal::{safe_destination, walk, TraversalError, TraversalOptions};
+use file_explorer_lib::traversal::{
+    safe_destination, walk, walk_without_links, TraversalError, TraversalOptions,
+};
 use tempfile::tempdir;
 
 #[test]
@@ -86,6 +88,39 @@ fn safe_destination_rejects_parent_and_existing_link_escapes() {
             Err(TraversalError::DestinationEscape(_))
         ));
     }
+}
+
+#[test]
+fn walk_without_links_serially_visits_the_tree_without_following_directory_links() {
+    let fixture = tempdir().expect("fixture");
+    let root = fixture.path();
+    fs::create_dir(root.join("nested")).expect("nested");
+    fs::write(root.join("nested/file.txt"), b"file").expect("file");
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let names = walk_without_links(root, &cancel)
+        .expect("walk")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("entries")
+        .into_iter()
+        .map(|entry| entry.path.strip_prefix(root).expect("relative").to_path_buf())
+        .collect::<Vec<_>>();
+
+    assert!(names
+        .iter()
+        .any(|path| path == std::path::Path::new("nested/file.txt")));
+}
+
+#[test]
+fn walk_without_links_honors_cancellation() {
+    let fixture = tempdir().expect("fixture");
+    fs::write(fixture.path().join("file"), b"file").expect("file");
+    let cancel = Arc::new(AtomicBool::new(true));
+    let mut entries = walk_without_links(fixture.path(), &cancel).expect("walk");
+    assert!(matches!(
+        entries.next(),
+        Some(Err(TraversalError::Cancelled))
+    ));
 }
 
 #[test]

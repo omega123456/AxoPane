@@ -53,5 +53,12 @@ pub fn select_adapter(
 }
 
 pub fn is_cross_device(error: &std::io::Error) -> bool {
-    error.raw_os_error() == Some(libc::EXDEV)
+    let raw_os_error = error.raw_os_error();
+
+    #[cfg(windows)]
+    if raw_os_error == Some(windows_sys::Win32::Foundation::ERROR_NOT_SAME_DEVICE as i32) {
+        return true;
+    }
+
+    raw_os_error == Some(libc::EXDEV)
 }

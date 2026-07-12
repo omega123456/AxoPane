@@ -207,6 +207,14 @@ fn saturated_ipc_queue_shutdown_drains_without_losing_worker_termination() {
             .send(())
             .expect("shutdown completion receiver");
     });
+    let deadline = Instant::now() + Duration::from_millis(500);
+    while !executor.is_shutting_down() {
+        assert!(
+            Instant::now() < deadline,
+            "shutdown did not cross the admission boundary"
+        );
+        thread::yield_now();
+    }
     for _ in 0..4 {
         release_tx.send(()).expect("release active worker");
     }

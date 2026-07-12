@@ -117,6 +117,36 @@ fn focus_requests_return_immediately_and_only_latest_generation_publishes() {
 }
 
 #[test]
+fn bump_generation_advances_per_target_and_is_current_tracks_the_latest() {
+    let reconcile = ReconcileCoordinator::default();
+
+    assert_eq!(reconcile.bump_generation("focus-tree"), 1);
+    assert_eq!(reconcile.bump_generation("focus-tree"), 2);
+    assert!(reconcile.is_current("focus-tree", 2));
+    assert!(!reconcile.is_current("focus-tree", 1));
+
+    // A distinct target coalesces independently and starts from its own zero.
+    assert_eq!(reconcile.bump_generation("focus-volume"), 1);
+    assert!(reconcile.is_current("focus-volume", 1));
+    assert!(reconcile.is_current("focus-tree", 2));
+}
+
+#[test]
+fn generation_for_tests_reports_the_reserved_test_targets_generation() {
+    let reconcile = ReconcileCoordinator::default();
+    assert_eq!(
+        file_explorer_lib::reconcile::generation_for_tests(&reconcile),
+        0
+    );
+    reconcile.bump_generation("test");
+    reconcile.bump_generation("test");
+    assert_eq!(
+        file_explorer_lib::reconcile::generation_for_tests(&reconcile),
+        2
+    );
+}
+
+#[test]
 fn distinct_focus_targets_each_run_when_requested_by_the_same_focus_event() {
     let resources = Arc::new(ResourceCoordinator::new());
     let reconcile = Arc::new(ReconcileCoordinator::default());

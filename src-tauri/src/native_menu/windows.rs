@@ -1,5 +1,8 @@
+#[cfg(not(feature = "test-utils"))]
 use super::helper_protocol::{HelperOperation, HelperResult};
-use super::helper_supervisor::{HelperRole, DISCOVERY_DEADLINE, INVOCATION_DEADLINE};
+use super::helper_supervisor::HelperRole;
+#[cfg(not(feature = "test-utils"))]
+use super::helper_supervisor::{DISCOVERY_DEADLINE, INVOCATION_DEADLINE};
 use super::provider::{NativeMenuProvider, ProviderInvocation, ProviderNativeMenuItem};
 use super::shell_executor::ShellExecutor;
 use super::types::LoadNativeMenuRequest;
@@ -79,6 +82,7 @@ impl NativeMenuProvider for WindowsNativeMenuProvider {
         }
         #[cfg(feature = "test-utils")]
         {
+            let _ = role;
             self.load_menu(request, executor)
         }
     }

@@ -387,6 +387,72 @@ fn automatic_context_keeps_pane_and_tab_ids_exact() {
 }
 
 #[test]
+fn cancel_tab_drops_queued_and_active_work_for_that_tab_only() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    fs::create_dir(root.join("child")).expect("child");
+    fs::write(root.join("child").join("a"), b"a").expect("seed");
+    let service = ItemCountService::default();
+
+    // Populate the automatic map (active context for tab left-1) and the queue.
+    let plan = service.plan_automatic_request(&VisibleItemCountsRequest {
+        context: context(&root.to_string_lossy()),
+        paths: vec![root.join("child").to_string_lossy().into_owned()],
+    });
+    assert!(service.enqueue_automatic_request(plan));
+    // Populate the explicit map with an active context for the same tab.
+    let _ = service
+        .sort_active_items(&ActiveItemsSortRequest {
+            context: context(&root.to_string_lossy()),
+            sort_direction: SortDirection::Asc,
+            filter: String::new(),
+            show_hidden: true,
+        })
+        .expect("sort items");
+    assert_eq!(service.automatic_queue_len(), 1);
+
+    // Cancelling an unrelated tab must retain the owning tab's queued work.
+    service.cancel_tab("right-9");
+    assert_eq!(service.automatic_queue_len(), 1);
+
+    // Cancelling the owning tab drops its queued plan and active contexts.
+    service.cancel_tab("left-1");
+    assert_eq!(service.automatic_queue_len(), 0);
+}
+
+#[test]
+fn invalidate_directory_generation_makes_a_counted_directory_recountable() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    fs::create_dir(root.join("child")).expect("child");
+    fs::write(root.join("child").join("a"), b"a").expect("seed");
+    let service = ItemCountService::default();
+    let child = root.join("child").to_string_lossy().into_owned();
+
+    // request_id 7 (from `context`) is the cache generation for the count.
+    let plan = service.plan_automatic_request(&VisibleItemCountsRequest {
+        context: context(&root.to_string_lossy()),
+        paths: vec![child.clone()],
+    });
+    service.process_automatic_request(plan, |_| {});
+    assert_eq!(service.cache_len(), 1);
+
+    service.invalidate_directory_generation(&child, 7);
+
+    let replan = service.plan_automatic_request(&VisibleItemCountsRequest {
+        context: ItemCountRequestContext {
+            request_id: 7,
+            ..context(&root.to_string_lossy())
+        },
+        paths: vec![child],
+    });
+    assert!(
+        !replan.is_empty(),
+        "an invalidated directory generation must require a fresh count"
+    );
+}
+
+#[test]
 fn generation_cache_coalesces_pending_work_and_invalidates_only_the_changed_directory() {
     let mut cache = ItemCountCache::new(4);
     assert!(cache.begin("/one", 3));

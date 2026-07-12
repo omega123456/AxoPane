@@ -232,6 +232,13 @@ impl IpcExecutor {
     pub fn queued_len(&self) -> usize {
         self.sender.len()
     }
+
+    /// Reports whether shutdown has crossed the admission boundary. This is
+    /// an instantaneous diagnostic snapshot; lifecycle synchronization still
+    /// belongs to [`Self::shutdown`] and request admission.
+    pub fn is_shutting_down(&self) -> bool {
+        self.shutting_down.load(Ordering::Acquire)
+    }
 }
 
 impl Drop for IpcExecutor {

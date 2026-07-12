@@ -230,6 +230,11 @@ fn rename_only_falls_back_for_confirmed_cross_device_errors() {
         io::Error::from_raw_os_error(libc::EXDEV)
     ))
     .expect("cross device fallback"));
+    #[cfg(windows)]
+    assert!(!rename_or_cross_device(source, target, true, |_, _| Err(
+        io::Error::from_raw_os_error(windows_sys::Win32::Foundation::ERROR_NOT_SAME_DEVICE as i32,)
+    ))
+    .expect("Windows cross-volume fallback"));
     assert!(
         rename_or_cross_device(source, target, true, |_, _| Err(io::Error::new(
             io::ErrorKind::PermissionDenied,

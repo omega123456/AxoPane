@@ -390,7 +390,18 @@ fn deny_read(path: &Path) -> bool {
         .arg(format!("{user}:(RX)"))
         .output()
         .expect("run icacls /deny");
-    output.status.success()
+    if !output.status.success() {
+        return false;
+    }
+    // Elevated / Administrator sessions bypass an ACL deny, so the directory
+    // stays readable and the test's precondition never holds. Verify the deny
+    // is actually effective; if the read still succeeds, restore access and
+    // skip so the test is deterministic regardless of the host's privilege.
+    if fs::read_dir(path).is_ok() {
+        restore_read(path);
+        return false;
+    }
+    true
 }
 
 #[cfg(windows)]

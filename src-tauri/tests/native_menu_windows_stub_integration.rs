@@ -9,6 +9,7 @@
 #![cfg(target_os = "windows")]
 
 use file_explorer_lib::ipc::types::{MenuActionStatus, OpenWithRequest, ShowPropertiesRequest};
+use file_explorer_lib::native_menu::helper_supervisor::HelperRole;
 use file_explorer_lib::native_menu::provider::{NativeMenuProvider, ProviderInvocation};
 use file_explorer_lib::native_menu::shell_executor::ShellExecutor;
 use file_explorer_lib::native_menu::types::{LoadNativeMenuRequest, NativeMenuTargetKind};
@@ -41,6 +42,24 @@ fn windows_provider_load_menu_is_a_safe_empty_stub_under_test_utils() {
         executor.execution_count(),
         1,
         "load_menu routes its work through the shell executor exactly once"
+    );
+}
+
+#[test]
+fn windows_provider_load_menu_for_role_delegates_to_the_safe_stub() {
+    let provider = WindowsNativeMenuProvider;
+    let executor = ShellExecutor::new();
+
+    let items = provider.load_menu_for_role(&sample_request(), &executor, HelperRole::Interactive);
+
+    assert!(
+        items.is_empty(),
+        "the test-utils Windows provider must not enumerate real shell menus per role"
+    );
+    assert_eq!(
+        executor.execution_count(),
+        1,
+        "load_menu_for_role routes through the shell executor exactly once under test-utils"
     );
 }
 
