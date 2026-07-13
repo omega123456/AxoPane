@@ -15,3 +15,4 @@ test-results-run
 .tmp
 .playwright-mcp
 .pnpm-store
+.codex
