@@ -40,6 +40,12 @@ function rowShapes(rows: TreeFlatRow[]) {
     if (row.kind === 'trash') {
       return { kind: row.kind }
     }
+    if (row.kind === 'empty-favourites') {
+      return { kind: row.kind }
+    }
+    if (row.kind === 'favourite') {
+      return { kind: row.kind, path: row.path }
+    }
     return {
       kind: row.kind,
       path: row.path,
@@ -66,6 +72,8 @@ describe('buildTreeFlatModel', () => {
     const { rows } = buildTreeFlatModel(treeNodes, volumes)
 
     expect(rowShapes(rows)).toEqual([
+      { kind: 'header', label: 'Favourites' },
+      { kind: 'empty-favourites' },
       { kind: 'header', label: 'Drives' },
       { kind: 'node', path: 'C:\\', depth: 0, volume: volumes[0] },
       { kind: 'node', path: 'C:\\aa', depth: 1, volume: undefined },
@@ -102,7 +110,12 @@ describe('buildTreeFlatModel', () => {
 
     const { rows } = buildTreeFlatModel({}, volumes)
 
-    expect(rowShapes(rows)).toEqual([{ kind: 'header', label: 'Drives' }, { kind: 'trash' }])
+    expect(rowShapes(rows)).toEqual([
+      { kind: 'header', label: 'Favourites' },
+      { kind: 'empty-favourites' },
+      { kind: 'header', label: 'Drives' },
+      { kind: 'trash' },
+    ])
   })
 
   it('renders a macOS mount only as its own volume root, not under /Volumes', () => {
@@ -168,6 +181,8 @@ describe('buildTreeFlatModel', () => {
     const { rows } = buildTreeFlatModel(treeNodes, volumes)
 
     expect(rowShapes(rows)).toEqual([
+      { kind: 'header', label: 'Favourites' },
+      { kind: 'empty-favourites' },
       { kind: 'header', label: 'Drives' },
       { kind: 'node', path: '/', depth: 0, volume: volumes[0] },
       { kind: 'node', path: '/Volumes', depth: 1, volume: undefined },
@@ -187,14 +202,13 @@ describe('buildTreeFlatModel', () => {
 
     const { rows, offsets } = buildTreeFlatModel(treeNodes, volumes)
 
-    // header, C:\, C:\aa, trash
+    // favourites header + empty row, drives header, C:\, C:\aa, trash
     expect(offsets).toHaveLength(rows.length + 1)
     expect(offsets[0]).toBe(0)
     for (let i = 0; i < rows.length; i += 1) {
       expect(offsets[i + 1] - offsets[i]).toBeCloseTo(treeRowHeight(rows[i]), 5)
     }
-    // Total height ends at header + three fixed-height rows (C:\, C:\aa, trash).
-    expect(offsets[rows.length]).toBeCloseTo(TREE_HEADER_HEIGHT_PX + TREE_ROW_HEIGHT_PX * 3, 5)
+    expect(offsets[rows.length]).toBeCloseTo(TREE_HEADER_HEIGHT_PX * 2 + TREE_ROW_HEIGHT_PX * 4, 5)
   })
 
   it('maps every node path and the trash sentinel to its flat index', () => {
@@ -206,9 +220,9 @@ describe('buildTreeFlatModel', () => {
 
     const { indexByPath } = buildTreeFlatModel(treeNodes, volumes)
 
-    expect(indexByPath.get('C:\\')).toBe(1)
-    expect(indexByPath.get('C:\\aa')).toBe(2)
-    expect(indexByPath.get(TRASH_PATH)).toBe(3)
+    expect(indexByPath.get('C:\\')).toBe(3)
+    expect(indexByPath.get('C:\\aa')).toBe(4)
+    expect(indexByPath.get(TRASH_PATH)).toBe(5)
   })
 
   it('sizes header rows and node/trash rows from their tokens', () => {
@@ -219,6 +233,23 @@ describe('buildTreeFlatModel', () => {
       treeRowHeight({ kind: 'node', path: 'C:\\', depth: 0, renderKey: 'node-fixed-C:\\-C:\\-0' }),
     ).toBe(TREE_ROW_HEIGHT_PX)
     expect(treeRowHeight({ kind: 'trash', renderKey: 'trash-fixed' })).toBe(TREE_ROW_HEIGHT_PX)
+    expect(
+      treeRowHeight({ kind: 'favourite', path: 'C:\\Fav', renderKey: 'favourite-C:\\Fav' }),
+    ).toBe(TREE_ROW_HEIGHT_PX)
+    expect(treeRowHeight({ kind: 'empty-favourites', renderKey: 'empty-favourites' })).toBe(
+      TREE_ROW_HEIGHT_PX,
+    )
+  })
+
+  it('places favourites first and keeps them out of the hierarchy path index', () => {
+    const { rows, indexByPath } = buildTreeFlatModel({}, [], ['C:\\Users\\Omega', '/Users/omega'])
+    expect(rowShapes(rows)).toEqual([
+      { kind: 'header', label: 'Favourites' },
+      { kind: 'favourite', path: 'C:\\Users\\Omega' },
+      { kind: 'favourite', path: '/Users/omega' },
+    ])
+    expect(indexByPath.has('C:\\Users\\Omega')).toBe(false)
+    expect(indexByPath.has('/Users/omega')).toBe(false)
   })
 
   it('keeps virtual row heights on whole CSS pixels', () => {

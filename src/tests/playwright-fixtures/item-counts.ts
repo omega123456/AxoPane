@@ -12,7 +12,15 @@ export const itemsSortPendingSession: SessionState = {
   rightPath: 'D:\\projects',
   left: {
     activeTabIndex: 0,
-    tabs: [{ path: 'C:\\Users\\Omega', sortKey: 'items', sortDirection: 'desc', filter: '' }],
+    tabs: [
+      {
+        path: 'C:\\Users\\Omega',
+        sortKey: 'items',
+        sortDirection: 'desc',
+        filter: '',
+        locked: false,
+      },
+    ],
   },
 }
 

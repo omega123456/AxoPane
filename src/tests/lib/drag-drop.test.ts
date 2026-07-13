@@ -7,11 +7,12 @@ import {
   performDrop,
   resolveDropKind,
   sameVolume,
-  type DragPayload,
+  type FileTransferDragPayload,
 } from '@/lib/drag-drop'
 
-function payload(overrides: Partial<DragPayload> = {}): DragPayload {
+function payload(overrides: Partial<FileTransferDragPayload> = {}): FileTransferDragPayload {
   return {
+    kind: 'file-transfer',
     sourcePaneId: 'left',
     sourceDir: 'C:\\root',
     items: [

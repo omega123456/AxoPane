@@ -35,6 +35,7 @@ fn persistence_defaults_match_the_frontend_contract() {
     assert!(!config.relative_dates);
     assert!(config.auto_folder_size);
     assert!(!config.auto_expand_active_queue_toasts);
+    assert!(config.favourites.is_empty());
     assert_eq!(config.columns, columns);
     assert_eq!(config.layout, LayoutConfig::default());
     assert_eq!(common::bootstrap_message(), "phase-1-common");

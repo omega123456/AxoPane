@@ -7,6 +7,7 @@ import { defaultLayout, useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useTabsStore } from '@/stores/tabs-store'
+import { useConfigStore } from '@/stores/config-store'
 
 const folderEntry = {
   id: 'docs',
@@ -46,6 +47,7 @@ describe('buildAppContextMenuContent', () => {
     useSelectionStore.getState().reset()
     useKeymapStore.getState().reset()
     useTabsStore.getState().reset()
+    useConfigStore.getState().reset()
     usePanesStore.getState().reset()
     useLayoutStore.setState({ defaultPaneMode: defaultLayout.defaultPaneMode })
     usePanesStore.setState({
@@ -108,6 +110,7 @@ describe('buildAppContextMenuContent', () => {
       'Open with',
     ])
     expect(content.sections[1]?.rows.map((row) => row.label)).toContain('Copy as path')
+    expect(content.sections[1]?.rows.map((row) => row.label)).toContain('Add to Favourites')
     const appRows = content.sections
       .flatMap((section) => section.rows)
       .filter((row) => row.owner === 'app')
@@ -120,6 +123,46 @@ describe('buildAppContextMenuContent', () => {
       content.sections[1]?.rows.find((row) => row.label === 'Delete permanently'),
     ).toMatchObject({ danger: true })
     expect(content.sections[2]?.rows.map((row) => row.label)).toEqual(['Properties'])
+  })
+
+  it('disables duplicate favourite actions and offers removal for favourite shortcuts', () => {
+    useConfigStore.setState({ favourites: [folderEntry.path] })
+    const folderContent = buildAppContextMenuContent(
+      'left',
+      { kind: 'folder', entry: folderEntry },
+      'windows',
+    )
+    expect(
+      folderContent.sections
+        .flatMap((item) => item.rows)
+        .find((row) => row.label === 'Add to Favourites'),
+    ).toMatchObject({ disabled: true })
+
+    const favouriteContent = buildAppContextMenuContent(
+      'left',
+      { kind: 'favourite', path: folderEntry.path },
+      'windows',
+    )
+    expect(
+      favouriteContent.sections
+        .flatMap((item) => item.rows)
+        .find((row) => row.label === 'Remove from Favourites'),
+    ).toMatchObject({ action: { kind: 'remove-favourite', path: folderEntry.path } })
+  })
+
+  it('uses the targeted tab path and exposes lock state in tab menus', () => {
+    const first = useTabsStore.getState().panes.left.tabs[0]
+    useTabsStore.getState().setTabLocked('left', first.id, true)
+    useTabsStore
+      .getState()
+      .addTab('left', { path: 'C:\\active', sortKey: 'name', sortDirection: 'asc', filter: '' })
+    const content = buildAppContextMenuContent('left', { kind: 'tab', tabId: first.id }, 'windows')
+    const rows = content.sections.flatMap((item) => item.rows)
+    expect(rows.find((row) => row.label === 'Open in other pane')).toMatchObject({
+      action: { kind: 'navigate', path: '.', destination: 'other-pane' },
+    })
+    expect(rows.find((row) => row.label === 'Unlock tab')).toBeDefined()
+    expect(rows.find((row) => row.label === 'Close tab')).toMatchObject({ disabled: true })
   })
 
   it('keeps unsupported file actions disabled and hides folder-size rows when Everything is available', () => {
@@ -375,7 +418,11 @@ describe('buildAppContextMenuContent', () => {
     })
 
     it('offers a single Empty trash action for the trash tree row and the pane background', () => {
-      const treeContent = buildAppContextMenuContent('left', { kind: 'tree', path: TRASH_PATH }, 'windows')
+      const treeContent = buildAppContextMenuContent(
+        'left',
+        { kind: 'tree', path: TRASH_PATH },
+        'windows',
+      )
       expect(treeContent.sections[0]?.rows.map((row) => row.label)).toEqual(['Empty Trash'])
 
       const emptyContent = buildAppContextMenuContent('left', { kind: 'empty' }, 'windows')

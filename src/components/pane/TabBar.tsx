@@ -1,6 +1,6 @@
 import type { MouseEvent } from 'react'
 import { buildContextMenuContent } from '@/components/menus/menu-definitions'
-import { PlusIcon, XIcon } from '@/components/icons'
+import { LockIcon, PlusIcon, XIcon } from '@/components/icons'
 import { LocationIcon } from '@/components/icons/LocationIcon'
 import { detectPlatformOs } from '@/lib/keymap'
 import { useContextMenuStore } from '@/stores/context-menu-store'
@@ -79,7 +79,14 @@ export function TabBar({ paneId, title, currentPath, isActive }: TabBarProps) {
             >
               {tabLabel(tab)}
             </button>
-            {canClose ? (
+            {tab.locked ? (
+              <span
+                aria-label={`Locked tab ${tabLabel(tab)} in ${title}`}
+                className="inline-flex h-5 w-5 shrink-0 items-center justify-center text-light-text-muted dark:text-dark-text-muted"
+              >
+                <LockIcon className="h-3.5 w-3.5" />
+              </span>
+            ) : canClose ? (
               <button
                 type="button"
                 aria-label={`Close tab ${tabLabel(tab)} in ${title}`}

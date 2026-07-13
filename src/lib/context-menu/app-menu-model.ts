@@ -11,6 +11,9 @@ import {
   openWithContextAction,
   propertiesContextAction,
   requestFolderSizeContextAction,
+  addFavouriteContextAction,
+  removeFavouriteContextAction,
+  setTabLockedContextAction,
 } from '@/lib/context-menu/context-menu-actions'
 import { getFileCategory } from '@/lib/file-type'
 import { findVolumeForPath, isVolumeRoot } from '@/lib/volumes'
@@ -36,8 +39,23 @@ import { useKeymapStore } from '@/stores/keymap-store'
 import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useTabsStore } from '@/stores/tabs-store'
+import { useConfigStore } from '@/stores/config-store'
 import type { CommandId, DirectoryEntry } from '@/lib/types/ipc'
 import type { PaneId } from '@/types/pane'
+import { pathsMatch } from '@/lib/path-compare'
+
+function favouriteRow(path: string, remove = false): ContextMenuActionRow {
+  const isFavourite = useConfigStore.getState().favourites.some((item) => pathsMatch(item, path))
+  return customRow(
+    `${remove ? 'remove' : 'add'}-favourite-${path}`,
+    remove ? 'Remove from Favourites' : 'Add to Favourites',
+    remove ? removeFavouriteContextAction(path) : addFavouriteContextAction(path),
+    {
+      disabled: !remove && isFavourite,
+      icon: { kind: 'app', name: remove ? 'close-tab' : 'new-folder' },
+    },
+  )
+}
 
 function shortcutFor(commandId: CommandId, os: PlatformOs) {
   const binding = useKeymapStore.getState().bindings[commandId][0]
@@ -188,10 +206,7 @@ function fileSystemStrip(
   ]
 }
 
-function calculateSizeRow(
-  entry: DirectoryEntry,
-  os: PlatformOs,
-): ContextMenuActionRow {
+function calculateSizeRow(entry: DirectoryEntry, os: PlatformOs): ContextMenuActionRow {
   const everythingStatus = usePanesStore.getState().everythingStatus
   const volumes = usePanesStore.getState().volumes
   const volume = volumes.find((item) =>
@@ -302,6 +317,7 @@ function buildFileOrFolderContent(
         ),
       ]),
       section('secondary', [
+        ...(target.kind === 'folder' ? [favouriteRow(target.entry.path)] : []),
         commandRow('paste', os, { disabled: !canPaste }),
         customRow(
           `copy-path-${target.entry.id}`,
@@ -347,15 +363,12 @@ function buildMultiContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
   const canExtract = selectedEntries.length > 0 && selectedEntries.every(isZipArchiveEntry)
 
   return {
-    topStrip: fileSystemStrip(
-      undefined,
-      {
-        includeRename: false,
-        copyDisabled: selectedEntries.length === 0,
-        cutDisabled: selectedEntries.length === 0,
-        deleteDisabled: selectedEntries.length === 0,
-      },
-    ),
+    topStrip: fileSystemStrip(undefined, {
+      includeRename: false,
+      copyDisabled: selectedEntries.length === 0,
+      cutDisabled: selectedEntries.length === 0,
+      deleteDisabled: selectedEntries.length === 0,
+    }),
     sections: [
       section('selection', [
         customRow(
@@ -420,6 +433,7 @@ function buildEmptyContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
         commandRow('newFile', os),
       ]),
       section('footer', [
+        favouriteRow(pane.path),
         commandRow('refresh', os),
         commandRow('selectAll', os, {
           disabled: pane.entries.length === 0,
@@ -457,9 +471,14 @@ function buildTrashTreeContent(os: PlatformOs): ContextMenuContent {
 function buildTreeOpenTargetRows(path: string): ContextMenuActionRow[] {
   if (useLayoutStore.getState().defaultPaneMode === 'single') {
     return [
-      customRow(`open-tree-tab-${path}`, commandLabels.openInNewTab, openPathInNewTabContextAction(path), {
-        icon: { kind: 'app', name: 'open-in-new-tab' },
-      }),
+      customRow(
+        `open-tree-tab-${path}`,
+        commandLabels.openInNewTab,
+        openPathInNewTabContextAction(path),
+        {
+          icon: { kind: 'app', name: 'open-in-new-tab' },
+        },
+      ),
     ]
   }
 
@@ -480,7 +499,7 @@ function buildTreeOpenTargetRows(path: string): ContextMenuActionRow[] {
 }
 
 function buildTreeContent(
-  target: Extract<ContextMenuTarget, { kind: 'tree' }>,
+  target: Extract<ContextMenuTarget, { kind: 'tree' | 'favourite' }>,
   os: PlatformOs,
 ): ContextMenuContent {
   if (isTrashPath(target.path)) {
@@ -497,8 +516,7 @@ function buildTreeContent(
   // in-use volume can only be force-dismounted), so Windows users use the native
   // "Eject" entry in the shell context menu instead.
   const isEjectableRoot =
-    os === 'macos' &&
-    Boolean(volume && isVolumeRoot(target.path, volume) && volume.isRemovable)
+    os === 'macos' && Boolean(volume && isVolumeRoot(target.path, volume) && volume.isRemovable)
 
   return {
     topStrip: [],
@@ -517,6 +535,7 @@ function buildTreeContent(
         ...buildTreeOpenTargetRows(target.path),
       ]),
       section('footer', [
+        favouriteRow(target.path, target.kind === 'favourite'),
         customRow(
           `copy-tree-path-${target.path}`,
           'Copy as path',
@@ -564,7 +583,8 @@ function buildTabContent(
   target: Extract<ContextMenuTarget, { kind: 'tab' }>,
 ): ContextMenuContent {
   const tabs = useTabsStore.getState().panes[paneId]
-  const path = usePanesStore.getState().panes[paneId].path
+  const tab = tabs.tabs.find((item) => item.id === target.tabId)
+  const path = tab?.path ?? usePanesStore.getState().panes[paneId].path
 
   return {
     topStrip: [],
@@ -579,15 +599,15 @@ function buildTabContent(
       ]),
       section('footer', [
         customRow(
-          `close-tab-${target.tabId}`,
-          'Close tab',
-          closeTabContextAction(target.tabId),
-          {
-            disabled: tabs.tabs.length <= 1,
-            danger: true,
-            icon: { kind: 'app', name: 'close-tab' },
-          },
+          `lock-tab-${target.tabId}`,
+          tab?.locked ? 'Unlock tab' : 'Lock tab',
+          setTabLockedContextAction(target.tabId, !tab?.locked),
         ),
+        customRow(`close-tab-${target.tabId}`, 'Close tab', closeTabContextAction(target.tabId), {
+          disabled: tabs.tabs.length <= 1 || tab?.locked,
+          danger: true,
+          icon: { kind: 'app', name: 'close-tab' },
+        }),
       ]),
     ],
   }
@@ -607,6 +627,8 @@ export function buildAppContextMenuContent(
     case 'empty':
       return buildEmptyContent(paneId, os)
     case 'tree':
+      return buildTreeContent(target, os)
+    case 'favourite':
       return buildTreeContent(target, os)
     case 'tab':
       return buildTabContent(paneId, target)

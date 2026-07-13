@@ -39,6 +39,8 @@ pub struct Config {
     pub auto_folder_size: bool,
     #[serde(default)]
     pub auto_expand_active_queue_toasts: bool,
+    #[serde(default)]
+    pub favourites: Vec<String>,
 }
 
 pub fn default_true() -> bool {
@@ -163,6 +165,7 @@ impl Default for Config {
             relative_dates: false,
             auto_folder_size: true,
             auto_expand_active_queue_toasts: false,
+            favourites: Vec::new(),
         }
     }
 }
@@ -177,6 +180,8 @@ pub struct SessionTab {
     pub sort_direction: String,
     #[serde(default)]
     pub filter: String,
+    #[serde(default)]
+    pub locked: bool,
 }
 
 pub fn default_sort_key() -> String {

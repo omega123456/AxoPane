@@ -1,11 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
-import {
-  buildAppConfig,
-  defaultAppConfig,
-  hydrateAppConfig,
-  isLogLevel,
-} from '@/lib/app-config'
+import { buildAppConfig, defaultAppConfig, hydrateAppConfig, isLogLevel } from '@/lib/app-config'
 import { useConfigStore } from '@/stores/config-store'
 import type { AppConfig } from '@/lib/types/ipc'
 
@@ -16,6 +11,19 @@ function baseConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 beforeEach(() => {
   ipc.install()
   useConfigStore.getState().reset()
+})
+
+describe('app-config favourites', () => {
+  it('defaults and migrates favourites to an empty list', () => {
+    expect(defaultAppConfig().favourites).toEqual([])
+    hydrateAppConfig(baseConfig({ favourites: undefined as unknown as string[] }))
+    expect(useConfigStore.getState().favourites).toEqual([])
+  })
+
+  it('round-trips favourites through the config store', () => {
+    hydrateAppConfig(baseConfig({ favourites: ['C:\\Users\\Omega', '/Users/omega'] }))
+    expect(buildAppConfig().favourites).toEqual(['C:\\Users\\Omega', '/Users/omega'])
+  })
 })
 
 describe('app-config log level', () => {

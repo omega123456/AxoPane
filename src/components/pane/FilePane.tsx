@@ -648,7 +648,7 @@ export function FilePane({ paneId }: FilePaneProps) {
       event.preventDefault()
       return
     }
-    beginDrag({ sourcePaneId: paneId, sourceDir: pane.path, items })
+    beginDrag({ kind: 'file-transfer', sourcePaneId: paneId, sourceDir: pane.path, items })
     event.dataTransfer.effectAllowed = 'copyMove'
     event.dataTransfer.setData('text/plain', items.map((item) => item.path).join('\n'))
   }
@@ -667,7 +667,7 @@ export function FilePane({ paneId }: FilePaneProps) {
       return
     }
     const drag = useDragStore.getState().drag
-    if (!canDropInto(drag, entry.path, os)) {
+    if (drag?.kind !== 'file-transfer' || !canDropInto(drag, entry.path, os)) {
       return
     }
     // preventDefault marks this a valid drop target; stopPropagation keeps the
@@ -676,7 +676,7 @@ export function FilePane({ paneId }: FilePaneProps) {
     event.stopPropagation()
     event.dataTransfer.dropEffect = resolveDropKind(
       dropModifiers(event),
-      drag!.sourceDir,
+      drag.sourceDir,
       entry.path,
       os,
     )
@@ -702,13 +702,13 @@ export function FilePane({ paneId }: FilePaneProps) {
 
   function handlePaneDragOver(event: React.DragEvent<HTMLDivElement>) {
     const drag = useDragStore.getState().drag
-    if (!canDropInto(drag, pane.path, os)) {
+    if (drag?.kind !== 'file-transfer' || !canDropInto(drag, pane.path, os)) {
       return
     }
     event.preventDefault()
     event.dataTransfer.dropEffect = resolveDropKind(
       dropModifiers(event),
-      drag!.sourceDir,
+      drag.sourceDir,
       pane.path,
       os,
     )

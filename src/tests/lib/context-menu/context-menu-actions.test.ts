@@ -7,6 +7,8 @@ import { useErrorToastStore } from '@/stores/error-toast-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 import type { DirectoryEntry } from '@/lib/types/ipc'
+import { useConfigStore } from '@/stores/config-store'
+import { useTabsStore } from '@/stores/tabs-store'
 
 function entry(overrides: Partial<DirectoryEntry> = {}): DirectoryEntry {
   return {
@@ -32,6 +34,8 @@ beforeEach(() => {
   useErrorToastStore.getState().dismiss()
   usePanesStore.getState().reset()
   usePropertiesDialogStore.getState().close()
+  useConfigStore.getState().reset()
+  useTabsStore.getState().reset()
   usePanesStore.setState((state) => ({
     panes: {
       ...state.panes,
@@ -45,6 +49,18 @@ beforeEach(() => {
 })
 
 describe('dispatchContextMenuAction', () => {
+  it('dispatches tab locking and favourite mutations through their typed stores', async () => {
+    ipc.override('save_config', (payload) => payload.config)
+    const tabId = useTabsStore.getState().panes.left.tabs[0].id
+    dispatchContextMenuAction('left', { kind: 'set-tab-locked', tabId, locked: true })
+    expect(useTabsStore.getState().panes.left.tabs[0].locked).toBe(true)
+
+    dispatchContextMenuAction('left', { kind: 'add-favourite', path: 'C:\\root' })
+    await waitFor(() => expect(useConfigStore.getState().favourites).toEqual(['C:\\root']))
+    dispatchContextMenuAction('left', { kind: 'remove-favourite', path: 'C:\\root' })
+    await waitFor(() => expect(useConfigStore.getState().favourites).toEqual([]))
+  })
+
   it('navigates the current pane in place for the current-pane destination', () => {
     const navigatePane = vi.fn()
     usePanesStore.setState({ navigatePane })

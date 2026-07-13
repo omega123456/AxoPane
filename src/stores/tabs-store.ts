@@ -9,6 +9,7 @@ export type TabState = {
   sortKey: SortKey
   sortDirection: SortDirection
   filter: string
+  locked: boolean
 }
 
 type PaneTabs = {
@@ -17,12 +18,14 @@ type PaneTabs = {
 }
 
 type TabPatch = Partial<Pick<TabState, 'path' | 'sortKey' | 'sortDirection' | 'filter'>>
+type NewTabState = Omit<TabState, 'id' | 'locked'> & { locked?: boolean }
 
 type TabsStore = {
   panes: Record<PaneId, PaneTabs>
   hydrate: (paneId: PaneId, pane: PaneTabs) => void
-  addTab: (paneId: PaneId, tab: Omit<TabState, 'id'>, options?: { activate?: boolean }) => string
+  addTab: (paneId: PaneId, tab: NewTabState, options?: { activate?: boolean }) => string
   closeTab: (paneId: PaneId, tabId: string) => void
+  setTabLocked: (paneId: PaneId, tabId: string, locked: boolean) => void
   setActiveTab: (paneId: PaneId, tabId: string) => void
   patchActiveTab: (paneId: PaneId, patch: TabPatch) => void
   reset: () => void
@@ -41,7 +44,7 @@ function lastLabel(path: string) {
   return segment ?? trimmed ?? path
 }
 
-export function tabLabel(tab: TabState) {
+export function tabLabel(tab: Pick<TabState, 'path'>) {
   return lastLabel(tab.path)
 }
 
@@ -55,6 +58,7 @@ function singleTabPane(path: string): PaneTabs {
         sortKey: 'name',
         sortDirection: 'asc',
         filter: '',
+        locked: false,
       },
     ],
   }
@@ -93,7 +97,7 @@ export const useTabsStore = create<TabsStore>((set) => ({
     const id = createTabId(paneId)
     set((state) => {
       const pane = state.panes[paneId]
-      const tabs = [...pane.tabs, { ...tab, id }]
+      const tabs = [...pane.tabs, { ...tab, locked: tab.locked ?? false, id }]
       return {
         panes: {
           ...state.panes,
@@ -114,7 +118,7 @@ export const useTabsStore = create<TabsStore>((set) => ({
       }
 
       const closingIndex = pane.tabs.findIndex((tab) => tab.id === tabId)
-      if (closingIndex === -1) {
+      if (closingIndex === -1 || pane.tabs[closingIndex].locked) {
         return state
       }
 
@@ -135,6 +139,12 @@ export const useTabsStore = create<TabsStore>((set) => ({
           },
         },
       }
+    }),
+  setTabLocked: (paneId, tabId, locked) =>
+    set((state) => {
+      const pane = state.panes[paneId]
+      const tabs = pane.tabs.map((tab) => (tab.id === tabId ? { ...tab, locked } : tab))
+      return { panes: { ...state.panes, [paneId]: { ...pane, tabs } } }
     }),
   setActiveTab: (paneId, tabId) =>
     set((state) => {
@@ -182,6 +192,7 @@ export function toSessionPane(paneId: PaneId): SessionPane {
       sortKey: tab.sortKey,
       sortDirection: tab.sortDirection,
       filter: tab.filter,
+      locked: tab.locked,
     })),
   }
 }
@@ -195,6 +206,7 @@ export function fromSessionPane(paneId: PaneId, pane: SessionPane): PaneTabs {
       sortKey: tab.sortKey,
       sortDirection: tab.sortDirection,
       filter: tab.filter,
+      locked: tab.locked ?? false,
     })),
   }
 }

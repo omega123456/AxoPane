@@ -1,15 +1,32 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type MouseEvent,
+} from 'react'
 import { TreeNode, type TreeRowActions } from './TreeNode'
 import { TrashTreeRow } from './TrashTreeRow'
+import { FavouriteTreeRow, favouriteLabel, type FavouriteRowActions } from './FavouriteTreeRow'
 import { buildContextMenuContent } from '@/components/menus/menu-definitions'
 import { detectPlatformOs } from '@/lib/keymap'
 import { TRASH_PATH } from '@/lib/trash'
-import { buildTreeFlatModel, treeRowHeight, TREE_ROW_HEIGHT_PX, type TreeFlatRow } from '@/lib/tree-flat'
+import {
+  buildTreeFlatModel,
+  treeRowHeight,
+  TREE_ROW_HEIGHT_PX,
+  type TreeFlatRow,
+} from '@/lib/tree-flat'
 import { buildStickyChain } from '@/lib/tree-sticky'
 import { useElementVirtualizer } from '@/lib/use-element-virtualizer'
 import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
+import { useConfigStore } from '@/stores/config-store'
+import { useDragStore } from '@/stores/drag-store'
+import { pathsMatch } from '@/lib/path-compare'
 
 function rowKey(row: TreeFlatRow): string {
   return row.renderKey
@@ -26,6 +43,7 @@ export function FolderTree() {
   const openTabFromPath = usePanesStore((state) => state.openTabFromPath)
   const openMenu = useContextMenuStore((state) => state.openMenu)
   const treeWidthPx = useLayoutStore((state) => state.treeWidthPx)
+  const favourites = useConfigStore((state) => state.favourites)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   // Live scroll offset, held in component state (not just a ref) because the
@@ -38,8 +56,8 @@ export function FolderTree() {
   // One flat, virtualization-ready model spanning every category, volume subtree
   // and the trash row. Rebuilt only when the underlying tree/volumes change.
   const { rows, offsets, indexByPath } = useMemo(
-    () => buildTreeFlatModel(treeNodes, volumes),
-    [treeNodes, volumes],
+    () => buildTreeFlatModel(treeNodes, volumes, favourites),
+    [treeNodes, volumes, favourites],
   )
   const isMacOs = detectPlatformOs() === 'macos'
   const rowLayerClassName = 'absolute inset-x-0 overflow-hidden bg-light-tree dark:bg-dark-tree'
@@ -48,7 +66,10 @@ export function FolderTree() {
   // scroll area as the user scrolls past each ancestor - an editor-style "sticky
   // scroll" breadcrumb for the active folder's lineage, reimplemented as a
   // manual overlay (below) instead of per-row `position: sticky`.
-  const stickyChain = useMemo(() => buildStickyChain(treeNodes, activePath), [treeNodes, activePath])
+  const stickyChain = useMemo(
+    () => buildStickyChain(treeNodes, activePath),
+    [treeNodes, activePath],
+  )
 
   const rowVirtualizer = useElementVirtualizer({
     count: rows.length,
@@ -98,8 +119,10 @@ export function FolderTree() {
   const actions = useMemo<TreeRowActions>(
     () => ({
       onToggle: (path) => void latestRef.current.toggleTreeNode(path),
-      onNavigate: (path) => void latestRef.current.navigatePane(latestRef.current.activePaneId, path),
-      onOpenTab: (path) => void latestRef.current.openTabFromPath(latestRef.current.activePaneId, path),
+      onNavigate: (path) =>
+        void latestRef.current.navigatePane(latestRef.current.activePaneId, path),
+      onOpenTab: (path) =>
+        void latestRef.current.openTabFromPath(latestRef.current.activePaneId, path),
       onContextMenu: (node, event) => {
         event.preventDefault()
         const paneId = latestRef.current.activePaneId
@@ -118,8 +141,10 @@ export function FolderTree() {
 
   const trashActions = useMemo(
     () => ({
-      onNavigate: () => void latestRef.current.navigatePane(latestRef.current.activePaneId, TRASH_PATH),
-      onOpenTab: () => void latestRef.current.openTabFromPath(latestRef.current.activePaneId, TRASH_PATH),
+      onNavigate: () =>
+        void latestRef.current.navigatePane(latestRef.current.activePaneId, TRASH_PATH),
+      onOpenTab: () =>
+        void latestRef.current.openTabFromPath(latestRef.current.activePaneId, TRASH_PATH),
       onContextMenu: (event: MouseEvent) => {
         event.preventDefault()
         const paneId = latestRef.current.activePaneId
@@ -130,12 +155,65 @@ export function FolderTree() {
           chip: 'DIR',
           x: event.clientX,
           y: event.clientY,
-          ...buildContextMenuContent(paneId, { kind: 'tree', path: TRASH_PATH }, detectPlatformOs()),
+          ...buildContextMenuContent(
+            paneId,
+            { kind: 'tree', path: TRASH_PATH },
+            detectPlatformOs(),
+          ),
         })
       },
     }),
     [],
   )
+
+  const favouriteActions = useMemo<FavouriteRowActions>(
+    () => ({
+      onNavigate: (path) =>
+        void latestRef.current.navigatePane(latestRef.current.activePaneId, path),
+      onOpenTab: (path) =>
+        void latestRef.current.openTabFromPath(latestRef.current.activePaneId, path),
+      onContextMenu: (path, event) => {
+        event.preventDefault()
+        const paneId = latestRef.current.activePaneId
+        latestRef.current.openMenu({
+          paneId,
+          title: favouriteLabel(path),
+          chip: 'DIR',
+          x: event.clientX,
+          y: event.clientY,
+          ...buildContextMenuContent(paneId, { kind: 'favourite', path }, detectPlatformOs()),
+        })
+      },
+    }),
+    [],
+  )
+
+  function canDropOnFavourites() {
+    const drag = useDragStore.getState().drag
+    return drag?.kind === 'favourite' || drag?.items.some((item) => item.isDir) === true
+  }
+
+  function handleFavouritesDragOver(event: DragEvent<HTMLDivElement>) {
+    if (!canDropOnFavourites()) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+  }
+
+  async function handleFavouritesDrop(event: DragEvent<HTMLDivElement>) {
+    if (!canDropOnFavourites()) return
+    event.preventDefault()
+    const drag = useDragStore.getState().drag
+    useDragStore.getState().end()
+    if (drag?.kind === 'favourite') {
+      await useConfigStore.getState().reorderFavourite(drag.path, favourites.length)
+      return
+    }
+    if (drag?.kind === 'file-transfer') {
+      for (const item of drag.items) {
+        if (item.isDir) await useConfigStore.getState().addFavourite(item.path)
+      }
+    }
+  }
 
   // Ancestors scrolled up past their stacked slot are drawn in an opaque overlay
   // pinned to the top; ancestors still in their natural position render normally
@@ -188,13 +266,52 @@ export function FolderTree() {
             }
 
             if (row.kind === 'header') {
+              const favouritesHeader = row.renderKey === 'header-favourites'
               return (
-                <div key={rowKey(row)} className={rowLayerClassName} style={style}>
+                <div
+                  key={rowKey(row)}
+                  className={rowLayerClassName}
+                  style={style}
+                  onDragOver={favouritesHeader ? handleFavouritesDragOver : undefined}
+                  onDrop={
+                    favouritesHeader ? (event) => void handleFavouritesDrop(event) : undefined
+                  }
+                >
                   <div className="flex h-tree-header items-end px-3 pb-1">
                     <span className="font-mono text-uxs uppercase tracking-wide text-light-text-faint dark:text-dark-text-faint">
                       {row.label}
                     </span>
                   </div>
+                </div>
+              )
+            }
+
+            if (row.kind === 'empty-favourites') {
+              return (
+                <div
+                  key={rowKey(row)}
+                  className={rowLayerClassName}
+                  style={style}
+                  onDragOver={handleFavouritesDragOver}
+                  onDrop={(event) => void handleFavouritesDrop(event)}
+                >
+                  <div className="flex h-tree-row items-center rounded-tab px-3 text-uxs text-light-text-faint ring-1 ring-inset ring-light-border dark:text-dark-text-faint dark:ring-dark-border">
+                    Drop folders here
+                  </div>
+                </div>
+              )
+            }
+
+            if (row.kind === 'favourite') {
+              const favouriteIndex = favourites.findIndex((path) => path === row.path)
+              return (
+                <div key={rowKey(row)} className={rowLayerClassName} style={style}>
+                  <FavouriteTreeRow
+                    path={row.path}
+                    index={favouriteIndex}
+                    isCurrent={pathsMatch(activePath, row.path)}
+                    actions={favouriteActions}
+                  />
                 </div>
               )
             }

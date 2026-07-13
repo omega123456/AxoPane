@@ -40,6 +40,7 @@ describe('EverythingBanner', () => {
       relativeDates: false,
       autoFolderSize: true,
       autoExpandActiveQueueToasts: false,
+      favourites: [],
       keybindings: {},
       columns: [],
       layout: {

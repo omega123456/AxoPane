@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
@@ -8,6 +8,7 @@ import { useContextMenuStore } from '@/stores/context-menu-store'
 import { useDragStore } from '@/stores/drag-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useTabsStore } from '@/stores/tabs-store'
+import { useConfigStore } from '@/stores/config-store'
 
 const originalPlatform = navigator.platform
 
@@ -38,6 +39,7 @@ beforeEach(() => {
   useTabsStore.getState().reset()
   useDragStore.getState().end()
   useContextMenuStore.setState({ menu: null })
+  useConfigStore.getState().reset()
 })
 
 afterEach(() => {
@@ -105,6 +107,69 @@ function seedMacVolumes() {
 }
 
 describe('FolderTree', () => {
+  it('keeps Favourites first and renders an empty folder-only drop target', () => {
+    seedVolumes()
+    render(<FolderTree />)
+    const favourites = screen.getByText('Favourites')
+    const drives = screen.getByText('Drives')
+    expect(
+      favourites.compareDocumentPosition(drives) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(screen.getByText('Drop folders here')).toBeInTheDocument()
+  })
+
+  it('navigates, opens tabs, and opens removal actions from favourite shortcuts', async () => {
+    const user = userEvent.setup()
+    const navigate = vi.fn(() => Promise.resolve())
+    const openTab = vi.fn(() => Promise.resolve())
+    seedVolumes()
+    useConfigStore.setState({ favourites: ['C:\\Users\\Omega\\Documents'] })
+    usePanesStore.setState({ navigatePane: navigate, openTabFromPath: openTab })
+    render(<FolderTree />)
+
+    const favourite = screen.getByRole('button', { name: 'Documents' })
+    await user.click(favourite)
+    expect(navigate).toHaveBeenCalledWith('left', 'C:\\Users\\Omega\\Documents')
+    await user.pointer({ keys: '[MouseMiddle]', target: favourite })
+    expect(openTab).toHaveBeenCalledWith('left', 'C:\\Users\\Omega\\Documents')
+    fireEvent.contextMenu(favourite.closest('[data-favourite-row]')!)
+    expect(
+      useContextMenuStore
+        .getState()
+        .menu?.sections.flatMap((section) => section.rows)
+        .some((row) => row.label === 'Remove from Favourites'),
+    ).toBe(true)
+  })
+
+  it('adds only dragged directories and reorders favourite drags without filesystem operations', async () => {
+    const startOp = vi.fn(() => 'op-1')
+    ipc.override('start_op', startOp)
+    seedVolumes()
+    render(<FolderTree />)
+    useDragStore.getState().begin({
+      kind: 'file-transfer',
+      sourcePaneId: 'left',
+      sourceDir: 'C:\\root',
+      items: [
+        { id: 'dir', name: 'Alpha', path: 'C:\\root\\Alpha', isDir: true, sizeBytes: null },
+        { id: 'file', name: 'a.txt', path: 'C:\\root\\a.txt', isDir: false, sizeBytes: 1 },
+      ],
+    })
+    fireEvent.drop(screen.getByText('Drop folders here'), { dataTransfer: { dropEffect: '' } })
+    await waitFor(() => expect(useConfigStore.getState().favourites).toEqual(['C:\\root\\Alpha']))
+    expect(startOp).not.toHaveBeenCalled()
+
+    await act(async () => useConfigStore.getState().addFavourite('C:\\root\\Beta'))
+    useDragStore.getState().begin({ kind: 'favourite', path: 'C:\\root\\Beta' })
+    fireEvent.drop(screen.getByRole('button', { name: 'Alpha' }).closest('[data-favourite-row]')!, {
+      dataTransfer: { dropEffect: '' },
+    })
+    await waitFor(() =>
+      expect(useConfigStore.getState().favourites).toEqual(['C:\\root\\Beta', 'C:\\root\\Alpha']),
+    )
+    expect(startOp).not.toHaveBeenCalled()
+  })
+
   it('groups volumes under Drives, Removable Drives, and Network Drives headings', () => {
     seedVolumes()
     render(<FolderTree />)
@@ -597,6 +662,7 @@ describe('FolderTree', () => {
     }))
     // A drag originating from a different folder on the same volume.
     useDragStore.getState().begin({
+      kind: 'file-transfer',
       sourcePaneId: 'left',
       sourceDir: 'C:\\root',
       items: [{ id: 'a', name: 'Alpha', path: 'C:\\root\\Alpha', isDir: false, sizeBytes: 10 }],

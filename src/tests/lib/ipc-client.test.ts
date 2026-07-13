@@ -151,6 +151,7 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
         relativeDates: false,
         autoFolderSize: true,
         autoExpandActiveQueueToasts: false,
+        favourites: [],
         keybindings: {},
         columns: [],
         layout: {

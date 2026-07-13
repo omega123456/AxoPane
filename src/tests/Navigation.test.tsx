@@ -111,6 +111,22 @@ describe('Navigation: tabs, breadcrumb, session, live patching', () => {
     })
   })
 
+  it('shows a lock icon and ignores close gestures for locked tabs', async () => {
+    const user = userEvent.setup()
+    installDefaults()
+    renderApp()
+    await waitFor(() => expect(getRow('Left pane', 'Documents')).toBeTruthy())
+    const leftPane = screen.getByLabelText('Left pane')
+    await user.click(within(leftPane).getByRole('button', { name: 'New tab in Left pane' }))
+    const lockedId = useTabsStore.getState().panes.left.tabs[0].id
+    act(() => usePanesStore.getState().setTabLocked('left', lockedId, true))
+
+    expect(within(leftPane).getByLabelText(/Locked tab/)).toBeInTheDocument()
+    expect(within(leftPane).getAllByRole('button', { name: /Close tab/ })).toHaveLength(1)
+    await user.pointer({ keys: '[MouseMiddle]', target: within(leftPane).getAllByRole('tab')[0] })
+    expect(useTabsStore.getState().panes.left.tabs).toHaveLength(2)
+  })
+
   it('opens a folder in a new tab on middle-click', async () => {
     const user = userEvent.setup()
     installDefaults()
@@ -139,13 +155,27 @@ describe('Navigation: tabs, breadcrumb, session, live patching', () => {
       left: {
         activeTabIndex: 1,
         tabs: [
-          { path: 'C:\\Users\\Omega', sortKey: 'name', sortDirection: 'asc', filter: '' },
-          { path: 'C:\\', sortKey: 'size', sortDirection: 'desc', filter: '' },
+          {
+            path: 'C:\\Users\\Omega',
+            sortKey: 'name',
+            sortDirection: 'asc',
+            filter: '',
+            locked: false,
+          },
+          { path: 'C:\\', sortKey: 'size', sortDirection: 'desc', filter: '', locked: true },
         ],
       },
       right: {
         activeTabIndex: 0,
-        tabs: [{ path: 'D:\\projects', sortKey: 'name', sortDirection: 'asc', filter: '' }],
+        tabs: [
+          {
+            path: 'D:\\projects',
+            sortKey: 'name',
+            sortDirection: 'asc',
+            filter: '',
+            locked: false,
+          },
+        ],
       },
     }
     installDefaults()

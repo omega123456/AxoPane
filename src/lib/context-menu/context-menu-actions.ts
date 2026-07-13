@@ -2,10 +2,7 @@ import { log } from '@/lib/app-log-commands'
 import { executeCommand } from '@/lib/commands'
 import { runEjectVolume } from '@/lib/eject-commands'
 import { copyPathsToClipboard } from '@/lib/path-clipboard'
-import {
-  invokeNativeMenu,
-  showNativeOpenWith,
-} from '@/lib/context-menu/native-menu-commands'
+import { invokeNativeMenu, showNativeOpenWith } from '@/lib/context-menu/native-menu-commands'
 import { requestFolderSize } from '@/lib/ipc/commands'
 import { showPropertiesDialog } from '@/lib/properties-commands'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
@@ -13,6 +10,7 @@ import { useErrorToastStore } from '@/stores/error-toast-store'
 import type { PropertiesDialogItem } from '@/stores/properties-dialog-store'
 import type { CommandId } from '@/lib/types/ipc'
 import { usePanesStore } from '@/stores/panes-store'
+import { useConfigStore } from '@/stores/config-store'
 import type { PaneId } from '@/types/pane'
 
 export type ContextMenuAction =
@@ -39,6 +37,13 @@ export type ContextMenuAction =
       kind: 'close-tab'
       tabId: string
     }
+  | {
+      kind: 'set-tab-locked'
+      tabId: string
+      locked: boolean
+    }
+  | { kind: 'add-favourite'; path: string }
+  | { kind: 'remove-favourite'; path: string }
   | {
       kind: 'copy-paths'
       paths: string[]
@@ -111,6 +116,18 @@ export function closeTabContextAction(tabId: string): ContextMenuAction {
   return { kind: 'close-tab', tabId }
 }
 
+export function setTabLockedContextAction(tabId: string, locked: boolean): ContextMenuAction {
+  return { kind: 'set-tab-locked', tabId, locked }
+}
+
+export function addFavouriteContextAction(path: string): ContextMenuAction {
+  return { kind: 'add-favourite', path }
+}
+
+export function removeFavouriteContextAction(path: string): ContextMenuAction {
+  return { kind: 'remove-favourite', path }
+}
+
 export function copyPathsContextAction(paths: string[]): ContextMenuAction {
   return { kind: 'copy-paths', paths }
 }
@@ -127,10 +144,7 @@ export function propertiesContextAction(items: PropertiesDialogItem[]): ContextM
   return { kind: 'properties', items }
 }
 
-export function compressContextAction(
-  paths: string[],
-  destinationDir: string,
-): ContextMenuAction {
+export function compressContextAction(paths: string[], destinationDir: string): ContextMenuAction {
   return { kind: 'compress', paths, destinationDir }
 }
 
@@ -181,6 +195,15 @@ export function dispatchContextMenuAction(paneId: PaneId, action: ContextMenuAct
       return
     case 'close-tab':
       void usePanesStore.getState().closeTab(paneId, action.tabId)
+      return
+    case 'set-tab-locked':
+      usePanesStore.getState().setTabLocked(paneId, action.tabId, action.locked)
+      return
+    case 'add-favourite':
+      void useConfigStore.getState().addFavourite(action.path)
+      return
+    case 'remove-favourite':
+      void useConfigStore.getState().removeFavourite(action.path)
       return
     case 'copy-paths':
       void copyPathsToClipboard(action.paths)
@@ -241,9 +264,7 @@ export function dispatchContextMenuAction(paneId: PaneId, action: ContextMenuAct
     case 'eject-volume':
       void runEjectVolume({ mountRoot: action.mountRoot }).then((response) => {
         if (!response.handled) {
-          useErrorToastStore
-            .getState()
-            .show(response.message ?? 'Could not eject the drive.')
+          useErrorToastStore.getState().show(response.message ?? 'Could not eject the drive.')
         }
       })
       return

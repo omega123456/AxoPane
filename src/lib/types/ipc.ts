@@ -299,6 +299,7 @@ export type AppConfig = {
   relativeDates: boolean
   autoFolderSize: boolean
   autoExpandActiveQueueToasts: boolean
+  favourites: string[]
 }
 
 export type SessionTab = {
@@ -306,6 +307,7 @@ export type SessionTab = {
   sortKey: SortKey
   sortDirection: SortDirection
   filter: string
+  locked: boolean
 }
 
 export type SessionPane = {

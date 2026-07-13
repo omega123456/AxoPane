@@ -501,6 +501,36 @@ describe('panes-store navigation', () => {
     expect(useTabsStore.getState().panes.left.tabs).toHaveLength(1)
   })
 
+  it('keeps locked paths fixed and forks different-path navigation into an unlocked tab', async () => {
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    const lockedId = useTabsStore.getState().panes.left.tabs[0].id
+    usePanesStore.getState().setTabLocked('left', lockedId, true)
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    expect(useTabsStore.getState().panes.left.tabs).toHaveLength(1)
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root\\Alpha')
+    const tabs = useTabsStore.getState().panes.left.tabs
+    expect(tabs).toHaveLength(2)
+    expect(tabs[0]).toMatchObject({ id: lockedId, path: 'C:\\root', locked: true })
+    expect(tabs[1]).toMatchObject({ path: 'C:\\root\\Alpha', locked: false })
+
+    await usePanesStore.getState().closeTab('left', lockedId)
+    expect(useTabsStore.getState().panes.left.tabs).toHaveLength(2)
+  })
+
+  it('forks locked back navigation before mutating the locked tab history', async () => {
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    await usePanesStore.getState().navigatePane('left', 'C:\\root\\Alpha')
+    const lockedId = useTabsStore.getState().panes.left.tabs[0].id
+    usePanesStore.getState().setTabLocked('left', lockedId, true)
+
+    await usePanesStore.getState().goBack('left')
+    const tabs = useTabsStore.getState().panes.left.tabs
+    expect(tabs[0]).toMatchObject({ id: lockedId, path: 'C:\\root\\Alpha', locked: true })
+    expect(tabs[1]).toMatchObject({ path: 'C:\\root', locked: false })
+  })
+
   it('bumps the focus request for the pane a new tab is opened into', async () => {
     expect(usePanesStore.getState().focusRequestId).toBe(0)
     expect(usePanesStore.getState().focusRequestPaneId).toBeNull()
@@ -922,7 +952,9 @@ describe('panes-store navigation', () => {
       'list_tree_children',
       (): ListTreeChildrenResponse => ({
         path: 'C:\\Users\\Omega',
-        children: [{ name: 'Downloads', path: 'C:\\Users\\Omega\\Downloads', expandability: 'nonEmpty' }],
+        children: [
+          { name: 'Downloads', path: 'C:\\Users\\Omega\\Downloads', expandability: 'nonEmpty' },
+        ],
       }),
     )
     await usePanesStore.getState().ensureTreeChildren('C:\\Users\\Omega')
@@ -2148,14 +2180,10 @@ describe('panes-store passive item counts', () => {
     await usePanesStore.getState().requestVisibleItemCounts('left', 0, 0, 0)
 
     expect(requestVisibleItemCounts).toHaveBeenCalledTimes(3)
-    const requestedPaths = (requestVisibleItemCounts.mock.calls as unknown as Array<[{ paths: string[] }]>).map(
-      ([payload]) => payload.paths,
-    )
-    expect(requestedPaths).toEqual([
-      ['C:\\root\\Alpha'],
-      ['C:\\root\\Bravo'],
-      ['C:\\root\\Alpha'],
-    ])
+    const requestedPaths = (
+      requestVisibleItemCounts.mock.calls as unknown as Array<[{ paths: string[] }]>
+    ).map(([payload]) => payload.paths)
+    expect(requestedPaths).toEqual([['C:\\root\\Alpha'], ['C:\\root\\Bravo'], ['C:\\root\\Alpha']])
   })
 
   it('does not request passive counts while an explicit Items sort is counting', async () => {
@@ -2347,19 +2375,47 @@ describe('panes-store active items sort', () => {
   })
 
   it('keeps the newest same-context Items-sort terminal state when an older request fails', async () => {
-    let resolveNewest: ((value: { kind: 'ready'; context: { paneId: string; tabId: string; requestId: number; path: string }; path: string; entries: DirectoryEntry[] }) => void) | undefined
+    let resolveNewest:
+      | ((value: {
+          kind: 'ready'
+          context: { paneId: string; tabId: string; requestId: number; path: string }
+          path: string
+          entries: DirectoryEntry[]
+        }) => void)
+      | undefined
     let rejectOldest: ((reason?: unknown) => void) | undefined
-    ipc.override('sort_active_items', vi.fn()
-      .mockImplementationOnce(() => new Promise((_, reject) => { rejectOldest = reject }))
-      .mockImplementationOnce(() => new Promise((resolve) => { resolveNewest = resolve as typeof resolveNewest })))
+    ipc.override(
+      'sort_active_items',
+      vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise((_, reject) => {
+              rejectOldest = reject
+            }),
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveNewest = resolve as typeof resolveNewest
+            }),
+        ),
+    )
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
     const pane = usePanesStore.getState().panes.left
     const tabId = useTabsStore.getState().panes.left.tabs[0].id
     const first = usePanesStore.getState().setSort('left', 'items')
     await Promise.resolve()
-    usePanesStore.getState().applyDirPatch({ tabId, path: pane.path, reason: 'watch', changed: [], removed: [] })
+    usePanesStore
+      .getState()
+      .applyDirPatch({ tabId, path: pane.path, reason: 'watch', changed: [], removed: [] })
     await Promise.resolve()
-    resolveNewest?.({ kind: 'ready', context: { paneId: 'left', tabId, requestId: pane.listRequestId, path: pane.path }, path: pane.path, entries: [{ ...dirAt('C:\\root\\Newest'), itemCount: 2 }] })
+    resolveNewest?.({
+      kind: 'ready',
+      context: { paneId: 'left', tabId, requestId: pane.listRequestId, path: pane.path },
+      path: pane.path,
+      entries: [{ ...dirAt('C:\\root\\Newest'), itemCount: 2 }],
+    })
     await Promise.resolve()
     rejectOldest?.(new Error('old request failed'))
     await first

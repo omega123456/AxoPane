@@ -400,6 +400,7 @@ export const fixtures: {
     relativeDates: false,
     autoFolderSize: true,
     autoExpandActiveQueueToasts: false,
+    favourites: [],
     keybindings: {},
     columns: [
       { key: 'name', visible: true },
@@ -438,6 +439,7 @@ export const fixtures: {
     relativeDates: false,
     autoFolderSize: true,
     autoExpandActiveQueueToasts: false,
+    favourites: [],
     keybindings: {},
     columns: [
       { key: 'name', visible: true },

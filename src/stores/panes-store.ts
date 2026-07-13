@@ -153,6 +153,7 @@ type PanesStore = {
   goForward: (paneId: PaneId) => Promise<void>
   openTabFromPath: (paneId: PaneId, path: string) => Promise<void>
   closeTab: (paneId: PaneId, tabId: string) => Promise<void>
+  setTabLocked: (paneId: PaneId, tabId: string, locked: boolean) => void
   switchTab: (paneId: PaneId, tabId: string) => Promise<void>
   refreshEverything: (paneId: PaneId) => Promise<void>
   /** Runs the post-listing tail (arm fs-watch, eager folder sizes, tree children) once a listing is complete. */
@@ -1310,11 +1311,27 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     const tabsStore = useTabsStore.getState()
     const leftPane = session.left ?? {
       activeTabIndex: 0,
-      tabs: [{ path: session.leftPath || '.', sortKey: 'name', sortDirection: 'asc', filter: '' }],
+      tabs: [
+        {
+          path: session.leftPath || '.',
+          sortKey: 'name',
+          sortDirection: 'asc',
+          filter: '',
+          locked: false,
+        },
+      ],
     }
     const rightPane = session.right ?? {
       activeTabIndex: 0,
-      tabs: [{ path: session.rightPath || '.', sortKey: 'name', sortDirection: 'asc', filter: '' }],
+      tabs: [
+        {
+          path: session.rightPath || '.',
+          sortKey: 'name',
+          sortDirection: 'asc',
+          filter: '',
+          locked: false,
+        },
+      ],
     }
     tabsStore.hydrate('left', fromSessionPane('left', leftPane))
     tabsStore.hydrate('right', fromSessionPane('right', rightPane))
@@ -1623,6 +1640,11 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
   },
   navigatePane: async (paneId, path, options = {}) => {
     log.debug('navigatePane', { paneId, path, viaHistory: options.viaHistory ?? false })
+    const currentTab = activeTab(paneId)
+    if (currentTab.locked && !pathsMatch(currentTab.path, path)) {
+      await get().openTabFromPath(paneId, path)
+      return
+    }
     const timer = get().filterTimers[paneId]
     if (timer && !options.viaHistory) {
       window.clearTimeout(timer)
@@ -1746,6 +1768,10 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     const nextIndex = pane.historyIndex - 1
     const path = pane.history[nextIndex]
     log.debug('goBack', { paneId, path })
+    if (activeTab(paneId).locked && !pathsMatch(activeTab(paneId).path, path)) {
+      await get().openTabFromPath(paneId, path)
+      return
+    }
     set((state) => ({
       panes: {
         ...state.panes,
@@ -1763,6 +1789,10 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     const nextIndex = pane.historyIndex + 1
     const path = pane.history[nextIndex]
     log.debug('goForward', { paneId, path })
+    if (activeTab(paneId).locked && !pathsMatch(activeTab(paneId).path, path)) {
+      await get().openTabFromPath(paneId, path)
+      return
+    }
     set((state) => ({
       panes: {
         ...state.panes,
@@ -1778,6 +1808,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       sortKey: 'name',
       sortDirection: 'asc',
       filter: '',
+      locked: false,
     })
 
     set((state) => ({
@@ -1815,7 +1846,8 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
   },
   closeTab: async (paneId, tabId) => {
     const before = useTabsStore.getState().panes[paneId]
-    if (before.tabs.length <= 1) {
+    const closingTab = before.tabs.find((tab) => tab.id === tabId)
+    if (before.tabs.length <= 1 || !closingTab || closingTab.locked) {
       return
     }
 
@@ -1857,6 +1889,10 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     // promptly rather than waiting for the pane's next `begin` to replace it.
     void listingSessions[paneId].release()
     await get().reloadPane(paneId)
+  },
+  setTabLocked: (paneId, tabId, locked) => {
+    useTabsStore.getState().setTabLocked(paneId, tabId, locked)
+    schedulePersistSession(get().activePaneId)
   },
   switchTab: async (paneId, tabId) => {
     const before = useTabsStore.getState().panes[paneId]

@@ -3,6 +3,7 @@ import { useDragStore } from '@/stores/drag-store'
 import type { DragPayload } from '@/lib/drag-drop'
 
 const payload: DragPayload = {
+  kind: 'file-transfer',
   sourcePaneId: 'left',
   sourceDir: 'C:\\root',
   items: [{ id: 'a', name: 'Alpha', path: 'C:\\root\\Alpha', isDir: false, sizeBytes: 1 }],

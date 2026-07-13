@@ -10,6 +10,7 @@ export type ContextMenuTarget =
   | { kind: 'empty' }
   | { kind: 'tab'; tabId: string }
   | { kind: 'tree'; path: string }
+  | { kind: 'favourite'; path: string }
 
 export type ContextMenuNativeRequest = Omit<LoadNativeMenuRequest, 'requestId'> & {
   targetKind: NativeMenuTargetKind
@@ -112,6 +113,8 @@ export type ContextMenuContent = Pick<
   'topStrip' | 'sections' | 'nativeRequest' | 'nativeSectionId'
 >
 
-export function isContextMenuSubmenuRow(item: ContextMenuRowItem): item is ContextMenuSubmenuRowItem {
+export function isContextMenuSubmenuRow(
+  item: ContextMenuRowItem,
+): item is ContextMenuSubmenuRowItem {
   return item.kind === 'submenu'
 }
