@@ -53,8 +53,19 @@ describe('getFileCategory', () => {
   it('covers every non-folder category at least once in the table', () => {
     const covered = new Set(representative.map(([, category]) => category))
     const all: FileCategory[] = [
-      'code', 'web', 'config', 'text', 'office', 'image', 'audio', 'video',
-      'archive', 'disc', 'executable', 'font', 'database',
+      'code',
+      'web',
+      'config',
+      'text',
+      'office',
+      'image',
+      'audio',
+      'video',
+      'archive',
+      'disc',
+      'executable',
+      'font',
+      'database',
     ]
     for (const category of all) {
       expect(covered.has(category)).toBe(true)

@@ -16,10 +16,9 @@ use tempfile::tempdir;
 
 fn candidate(path: &Path) -> ThumbnailCandidate {
     let metadata = fs::metadata(path).expect("metadata");
-    let modified_rfc3339 = file_explorer_lib::fs::system_time_to_rfc3339(Some(
-        metadata.modified().expect("modified"),
-    ))
-    .expect("listing timestamp");
+    let modified_rfc3339 =
+        file_explorer_lib::fs::system_time_to_rfc3339(Some(metadata.modified().expect("modified")))
+            .expect("listing timestamp");
     let modified_unix_seconds = u64::try_from(
         OffsetDateTime::parse(&modified_rfc3339, &Rfc3339)
             .expect("parse listing timestamp")
@@ -56,11 +55,22 @@ fn fake_provider_emits_contextual_ready_and_negative_results_in_a_timed_batch() 
     );
     let events = Arc::new(Mutex::new(Vec::new()));
     let received = Arc::clone(&events);
-    service.set_emitter(Arc::new(move |batch| received.lock().expect("events").extend(batch)));
+    service.set_emitter(Arc::new(move |batch| {
+        received.lock().expect("events").extend(batch)
+    }));
     service.request(vec![
-        (subscriber("ready"), candidate(&directory.path().join("image.png"))),
-        (subscriber("none"), candidate(&directory.path().join("unavailable.png"))),
-        (subscriber("bad"), candidate(&directory.path().join("failed.png"))),
+        (
+            subscriber("ready"),
+            candidate(&directory.path().join("image.png")),
+        ),
+        (
+            subscriber("none"),
+            candidate(&directory.path().join("unavailable.png")),
+        ),
+        (
+            subscriber("bad"),
+            candidate(&directory.path().join("failed.png")),
+        ),
     ]);
 
     *now.lock().expect("clock") = 49;
@@ -75,7 +85,9 @@ fn fake_provider_emits_contextual_ready_and_negative_results_in_a_timed_batch() 
         std::thread::yield_now();
     }
     let events = events.lock().expect("events");
-    assert!(events.iter().any(|event| event.tab_id == "ready" && event.data_url.is_some()));
+    assert!(events
+        .iter()
+        .any(|event| event.tab_id == "ready" && event.data_url.is_some()));
     assert!(events.iter().any(|event| event.tab_id == "none"));
     assert!(events.iter().any(|event| event.tab_id == "bad"));
 }
@@ -92,7 +104,9 @@ fn eight_results_flush_immediately_without_advancing_the_clock() {
     );
     let batches = Arc::new(Mutex::new(Vec::new()));
     let received = Arc::clone(&batches);
-    service.set_emitter(Arc::new(move |batch| received.lock().expect("batches").push(batch)));
+    service.set_emitter(Arc::new(move |batch| {
+        received.lock().expect("batches").push(batch)
+    }));
     let requests = (0..MAX_RESULTS_PER_BATCH)
         .map(|index| {
             let path = directory.path().join(format!("image-{index}.png"));
@@ -106,13 +120,18 @@ fn eight_results_flush_immediately_without_advancing_the_clock() {
         assert!(Instant::now() < deadline, "batch timed out");
         std::thread::yield_now();
     }
-    assert_eq!(batches.lock().expect("batches")[0].len(), MAX_RESULTS_PER_BATCH);
+    assert_eq!(
+        batches.lock().expect("batches")[0].len(),
+        MAX_RESULTS_PER_BATCH
+    );
 }
 
 struct MutatingProvider;
 
 impl ThumbnailProvider for MutatingProvider {
-    fn capability(&self) -> ProviderCapability { ProviderCapability::Fake }
+    fn capability(&self) -> ProviderCapability {
+        ProviderCapability::Fake
+    }
 
     fn generate(&self, candidate: &ThumbnailCandidate) -> ThumbnailState {
         fs::write(&candidate.fingerprint.path, b"changed-size").expect("mutate fixture");
@@ -132,7 +151,9 @@ fn post_generation_metadata_mismatch_is_superseded_without_cache_or_event() {
     );
     let events = Arc::new(Mutex::new(Vec::new()));
     let received = Arc::clone(&events);
-    service.set_emitter(Arc::new(move |batch| received.lock().expect("events").extend(batch)));
+    service.set_emitter(Arc::new(move |batch| {
+        received.lock().expect("events").extend(batch)
+    }));
     service.request(vec![(subscriber("tab"), candidate(&path))]);
     let deadline = Instant::now() + Duration::from_secs(1);
     while fs::metadata(&path).expect("metadata").len() == 4 {

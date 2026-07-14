@@ -12,7 +12,6 @@ type SettingsStore = {
 export const useSettingsStore = create<SettingsStore>((set) => ({
   isOpen: false,
   section: 'layout',
-  open: (section) =>
-    set((state) => ({ isOpen: true, section: section ?? state.section })),
+  open: (section) => set((state) => ({ isOpen: true, section: section ?? state.section })),
   close: () => set({ isOpen: false }),
 }))

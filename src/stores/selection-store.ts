@@ -10,7 +10,12 @@ type PaneSelection = {
 
 type SelectionStore = {
   selections: Record<PaneId, PaneSelection>
-  setSelection: (paneId: PaneId, selectedIds: string[], anchorId: string | null, focusedId: string | null) => void
+  setSelection: (
+    paneId: PaneId,
+    selectedIds: string[],
+    anchorId: string | null,
+    focusedId: string | null,
+  ) => void
   clearSelectionForPane: (paneId: PaneId) => void
   reset: () => void
 }

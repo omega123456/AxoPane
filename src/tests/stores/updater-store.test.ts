@@ -197,6 +197,10 @@ describe('updater-store', () => {
     expect(useUpdaterStore.getState()).toMatchObject({ status: 'error', error: 'boom' })
 
     useUpdaterStore.getState().dismiss()
-    expect(useUpdaterStore.getState()).toMatchObject({ status: 'idle', update: null, summary: null })
+    expect(useUpdaterStore.getState()).toMatchObject({
+      status: 'idle',
+      update: null,
+      summary: null,
+    })
   })
 })

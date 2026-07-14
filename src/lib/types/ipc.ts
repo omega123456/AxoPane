@@ -301,6 +301,7 @@ export type AppConfig = {
   relativeDates: boolean
   autoFolderSize: boolean
   autoExpandActiveQueueToasts: boolean
+  favourites: string[]
 }
 
 export type SessionTab = {
@@ -310,6 +311,7 @@ export type SessionTab = {
   filter: string
   /** Optional so older saved sessions remain distinguishable during migration. */
   viewMode?: string | null
+  locked?: boolean
 }
 
 export type SessionPane = {

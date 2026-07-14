@@ -31,9 +31,7 @@ function reorder(operations: OpProgress[], id: string, delta: number) {
   ;[next[index], next[target]] = [next[target], next[index]]
   void reorderOps(next)
   useQueueStore.setState((state) => {
-    const nonPending = state.order.filter(
-      (operationId) => !pending.includes(operationId),
-    )
+    const nonPending = state.order.filter((operationId) => !pending.includes(operationId))
     return { order: [...nonPending, ...next] }
   })
 }
@@ -64,8 +62,7 @@ function primaryOperation(operations: OpProgress[], conflicts: Record<string, un
       index,
       priority: jobPriority(operation, Boolean(conflicts[operation.operationId])),
     }))
-    .sort((left, right) => left.priority - right.priority || left.index - right.index)[0]
-    ?.operation
+    .sort((left, right) => left.priority - right.priority || left.index - right.index)[0]?.operation
 }
 
 function itemSummary(operation: OpProgress) {
@@ -154,7 +151,9 @@ function CompactJobRow({
       )}
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
-          {completed ? <CheckCircleIcon className="h-3.5 w-3.5 shrink-0 text-accent-green" /> : null}
+          {completed ? (
+            <CheckCircleIcon className="h-3.5 w-3.5 shrink-0 text-accent-green" />
+          ) : null}
           {failed ? <XCircleIcon className="h-3.5 w-3.5 shrink-0 text-accent-red" /> : null}
           {cancelled ? (
             <XCircleIcon className="h-3.5 w-3.5 shrink-0 text-light-text-muted dark:text-dark-text-muted" />

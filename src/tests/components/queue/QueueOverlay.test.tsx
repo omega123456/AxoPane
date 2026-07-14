@@ -30,11 +30,11 @@ function progress(overrides: Partial<OpProgress>): OpProgress {
   }
 }
 
-  beforeEach(() => {
-    ipc.install()
-    useConfigStore.getState().reset()
-    useQueueStore.getState().reset()
-  })
+beforeEach(() => {
+  ipc.install()
+  useConfigStore.getState().reset()
+  useQueueStore.getState().reset()
+})
 
 describe('QueueOverlay', () => {
   it('renders nothing when there is no queue work', async () => {

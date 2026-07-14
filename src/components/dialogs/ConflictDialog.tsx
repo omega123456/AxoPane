@@ -159,7 +159,8 @@ export function ConflictDialog({ conflict, onResolve }: ConflictDialogProps) {
             onClick={() => (renaming ? resolve('rename') : setRenaming(true))}
             className="rounded-md border border-light-border px-4 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
           >
-            {renaming ? 'Confirm rename' : 'Rename'} <span className="font-mono opacity-70">(N)</span>
+            {renaming ? 'Confirm rename' : 'Rename'}{' '}
+            <span className="font-mono opacity-70">(N)</span>
           </button>
           <button
             ref={skipRef}

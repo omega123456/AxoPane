@@ -14,12 +14,12 @@ mod unsupported;
 #[cfg(all(not(feature = "test-utils"), windows))]
 mod windows;
 
-use std::sync::{Arc, Mutex};
 #[cfg(not(feature = "test-utils"))]
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex};
 #[cfg(not(feature = "test-utils"))]
 use std::time::Duration;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use cache::ThumbnailCache;
 use provider::ThumbnailProvider;
@@ -157,7 +157,12 @@ impl ThumbnailService {
                 continue;
             }
             let key = ThumbnailCacheKey(candidate.fingerprint.clone());
-            if let Some(state) = self.cache.lock().expect("thumbnail cache lock").get(&key, now) {
+            if let Some(state) = self
+                .cache
+                .lock()
+                .expect("thumbnail cache lock")
+                .get(&key, now)
+            {
                 enqueue_batch(
                     &self.batches,
                     &self.emitter,
@@ -181,7 +186,8 @@ impl ThumbnailService {
     }
 
     pub fn cancel(&self, pane_id: &str, tab_id: &str, path: &str, generation: u64) {
-        self.scheduler.cancel_scope(pane_id, tab_id, path, generation);
+        self.scheduler
+            .cancel_scope(pane_id, tab_id, path, generation);
     }
 
     pub fn shutdown(&self) {
@@ -189,7 +195,12 @@ impl ThumbnailService {
         #[cfg(not(feature = "test-utils"))]
         {
             self.batch_timer_stop.store(true, Ordering::Release);
-            if let Some(timer) = self.batch_timer.lock().expect("thumbnail batch timer lock").take() {
+            if let Some(timer) = self
+                .batch_timer
+                .lock()
+                .expect("thumbnail batch timer lock")
+                .take()
+            {
                 let _ = timer.join();
             }
         }
@@ -240,7 +251,10 @@ fn flush_due_batch(
     emit_batches(emitter, batch.into_iter().collect());
 }
 
-fn emit_batches(emitter: &Arc<Mutex<Option<ResultEmitter>>>, batches: Vec<Vec<ThumbnailResultEvent>>) {
+fn emit_batches(
+    emitter: &Arc<Mutex<Option<ResultEmitter>>>,
+    batches: Vec<Vec<ThumbnailResultEvent>>,
+) {
     if let Some(emit) = emitter.lock().expect("thumbnail emitter lock").clone() {
         for batch in batches {
             emit(batch);
@@ -249,7 +263,9 @@ fn emit_batches(emitter: &Arc<Mutex<Option<ResultEmitter>>>, batches: Vec<Vec<Th
 }
 
 fn now_seconds() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 fn result_event(
@@ -277,11 +293,19 @@ fn result_event(
 
 pub fn platform_provider() -> Box<dyn ThumbnailProvider> {
     #[cfg(feature = "test-utils")]
-    { Box::new(fake_provider::FakeThumbnailProvider) }
+    {
+        Box::new(fake_provider::FakeThumbnailProvider)
+    }
     #[cfg(all(not(feature = "test-utils"), windows))]
-    { Box::new(windows::WindowsThumbnailProvider::default()) }
+    {
+        Box::new(windows::WindowsThumbnailProvider::default())
+    }
     #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
-    { Box::new(macos::MacosThumbnailProvider::default()) }
+    {
+        Box::new(macos::MacosThumbnailProvider::default())
+    }
     #[cfg(all(not(feature = "test-utils"), not(any(windows, target_os = "macos"))))]
-    { Box::new(unsupported::UnsupportedThumbnailProvider) }
+    {
+        Box::new(unsupported::UnsupportedThumbnailProvider)
+    }
 }

@@ -125,16 +125,20 @@ describe('layout-store', () => {
 
   it('defaults, hydrates, and validates the default tab view', () => {
     expect(useLayoutStore.getState().defaultViewMode).toBe('details')
-    useLayoutStore.getState().hydrate(
-      { ...useLayoutStore.getState(), defaultViewMode: 'icons' },
-      useLayoutStore.getState().columns,
-    )
+    useLayoutStore
+      .getState()
+      .hydrate(
+        { ...useLayoutStore.getState(), defaultViewMode: 'icons' },
+        useLayoutStore.getState().columns,
+      )
     expect(useLayoutStore.getState().defaultViewMode).toBe('icons')
 
-    useLayoutStore.getState().hydrate(
-      { ...useLayoutStore.getState(), defaultViewMode: 'unknown' as never },
-      useLayoutStore.getState().columns,
-    )
+    useLayoutStore
+      .getState()
+      .hydrate(
+        { ...useLayoutStore.getState(), defaultViewMode: 'unknown' as never },
+        useLayoutStore.getState().columns,
+      )
     expect(useLayoutStore.getState().defaultViewMode).toBe('details')
   })
 })

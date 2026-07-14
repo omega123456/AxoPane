@@ -260,12 +260,8 @@ describe('JobCard', () => {
       />,
     )
 
-    expect(
-      screen.getByText('C:\\Downloads\\Season 01, poster.jpg, +1 more'),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText('D:\\Sorted\\Season 01, poster.jpg, +1 more'),
-    ).toBeInTheDocument()
+    expect(screen.getByText('C:\\Downloads\\Season 01, poster.jpg, +1 more')).toBeInTheDocument()
+    expect(screen.getByText('D:\\Sorted\\Season 01, poster.jpg, +1 more')).toBeInTheDocument()
   })
 
   it('appends the top-level item name to both paths while the job is actively running', () => {

@@ -8,6 +8,34 @@ beforeEach(() => {
 })
 
 describe('config-store', () => {
+  it('adds, deduplicates, reorders, removes, and persists favourites across path forms', async () => {
+    const saveConfig = vi.fn((payload) => payload.config)
+    ipc.override('save_config', saveConfig)
+    const store = useConfigStore.getState()
+
+    await store.addFavourite('C:\\Users\\Omega')
+    await store.addFavourite('c:\\users\\omega')
+    await store.addFavourite('/Users/Omega')
+    await store.addFavourite('/Users/Other', 0)
+    expect(useConfigStore.getState().favourites).toEqual([
+      '/Users/Other',
+      'C:\\Users\\Omega',
+      '/Users/Omega',
+    ])
+
+    await store.reorderFavourite('/Users/Omega', 0)
+    await store.removeFavourite('c:\\USERS\\OMEGA')
+    expect(useConfigStore.getState().favourites).toEqual(['/Users/Omega', '/Users/Other'])
+    expect(saveConfig).toHaveBeenCalled()
+  })
+
+  it('inserts a forward-dragged favourite before the targeted row', async () => {
+    ipc.override('save_config', (payload) => payload.config)
+    useConfigStore.setState({ favourites: ['C:\\A', 'C:\\B', 'C:\\C'] })
+    await useConfigStore.getState().reorderFavourite('C:\\A', 2)
+    expect(useConfigStore.getState().favourites).toEqual(['C:\\B', 'C:\\A', 'C:\\C'])
+  })
+
   it('hydrates from an AppConfig', () => {
     useConfigStore.getState().hydrate({
       theme: 'light',
@@ -21,6 +49,7 @@ describe('config-store', () => {
       relativeDates: true,
       autoFolderSize: false,
       autoExpandActiveQueueToasts: true,
+      favourites: ['C:\\Users\\Omega'],
     })
 
     const state = useConfigStore.getState()
@@ -31,6 +60,7 @@ describe('config-store', () => {
     expect(state.relativeDates).toBe(true)
     expect(state.autoFolderSize).toBe(false)
     expect(state.autoExpandActiveQueueToasts).toBe(true)
+    expect(state.favourites).toEqual(['C:\\Users\\Omega'])
   })
 
   it('persists the update check interval through save_config', async () => {
@@ -144,6 +174,7 @@ describe('config-store', () => {
       relativeDates: false,
       autoFolderSize: true,
       autoExpandActiveQueueToasts: false,
+      favourites: [],
     })
     expect(useConfigStore.getState().logLevel).toBe('warn')
 
@@ -169,6 +200,7 @@ describe('config-store', () => {
       relativeDates: false,
       autoFolderSize: true,
       autoExpandActiveQueueToasts: false,
+      favourites: [],
       keybindings: {},
       columns: [],
       layout: {
@@ -184,6 +216,7 @@ describe('config-store', () => {
           created: 128,
         },
         defaultPaneMode: 'dual' as const,
+        defaultViewMode: 'details' as const,
         restoreSession: true,
         zoom: '100' as const,
       },
@@ -212,6 +245,7 @@ describe('config-store', () => {
               created: 128,
             },
             defaultPaneMode: 'dual',
+            defaultViewMode: 'details',
             restoreSession: true,
             zoom: '100',
           }),

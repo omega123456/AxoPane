@@ -38,7 +38,9 @@ describe('menu definitions', () => {
   })
 
   it('resolves multi-select targets when the right-clicked entry is inside the current selection', () => {
-    useSelectionStore.getState().setSelection('left', [folderEntry.id, fileEntry.id], folderEntry.id, fileEntry.id)
+    useSelectionStore
+      .getState()
+      .setSelection('left', [folderEntry.id, fileEntry.id], folderEntry.id, fileEntry.id)
     expect(resolveMenuTarget('left', folderEntry)).toEqual({ kind: 'multi' })
     expect(resolveMenuTarget('left')).toEqual({ kind: 'multi' })
   })
@@ -82,7 +84,9 @@ describe('menu definitions', () => {
       .getState()
       .setSelection('left', [folderEntry.id, fileEntry.id], folderEntry.id, fileEntry.id)
 
-    expect(buildContextMenuContent('left', { kind: 'file', entry: fileEntry }, 'windows').nativeRequest).toEqual({
+    expect(
+      buildContextMenuContent('left', { kind: 'file', entry: fileEntry }, 'windows').nativeRequest,
+    ).toEqual({
       targetKind: 'file',
       targetPath: fileEntry.path,
       folderPath: 'C:\\Users\\Omega',
@@ -105,6 +109,8 @@ describe('menu definitions', () => {
       selectedPaths: ['C:\\'],
     })
 
-    expect(buildContextMenuContent('left', { kind: 'tab', tabId: 'tab-1' }, 'windows').nativeRequest).toBeNull()
+    expect(
+      buildContextMenuContent('left', { kind: 'tab', tabId: 'tab-1' }, 'windows').nativeRequest,
+    ).toBeNull()
   })
 })

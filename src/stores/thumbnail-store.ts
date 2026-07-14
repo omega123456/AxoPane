@@ -34,9 +34,9 @@ type ThumbnailStore = {
   ) => Promise<void>
   cancelScope: (paneId: string, tabId: string) => Promise<void>
   applyThumbnailResults: (events: ThumbnailResultEvent[]) => void
-  getRecord: (candidate: Pick<ThumbnailCandidateRequest, 'path' | 'modifiedUnixSeconds' | 'sizeBytes'>) =>
-    | ThumbnailCacheRecord
-    | undefined
+  getRecord: (
+    candidate: Pick<ThumbnailCandidateRequest, 'path' | 'modifiedUnixSeconds' | 'sizeBytes'>,
+  ) => ThumbnailCacheRecord | undefined
   reset: () => void
 }
 
@@ -157,7 +157,10 @@ export const useThumbnailStore = create<ThumbnailStore>((set, get) => ({
     set((state) => {
       const scopes = { ...state.scopes }
       delete scopes[key]
-      return { scopes, cache: pruneThumbnailCache(state.cache, visibleProtection(scopes), thumbnailCacheNow()) }
+      return {
+        scopes,
+        cache: pruneThumbnailCache(state.cache, visibleProtection(scopes), thumbnailCacheNow()),
+      }
     })
   },
   applyThumbnailResults: (events) =>

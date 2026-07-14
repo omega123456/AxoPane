@@ -16,7 +16,17 @@ describe('MenuPopover', () => {
           { id: 'icons', label: 'Icons', checked: false, onSelect: selectIcons },
         ]}
         trigger={({ ref, expanded, controls, toggle, onTriggerKeyDown }) => (
-          <button ref={ref} type="button" aria-label="View" aria-expanded={expanded} aria-controls={controls} onClick={toggle} onKeyDown={onTriggerKeyDown}>View</button>
+          <button
+            ref={ref}
+            type="button"
+            aria-label="View"
+            aria-expanded={expanded}
+            aria-controls={controls}
+            onClick={toggle}
+            onKeyDown={onTriggerKeyDown}
+          >
+            View
+          </button>
         )}
       />,
     )
@@ -24,15 +34,22 @@ describe('MenuPopover', () => {
     const trigger = screen.getByRole('button', { name: 'View' })
     await user.click(trigger)
     expect(screen.getByRole('menu', { name: 'View options' })).toBeInTheDocument()
-    expect(screen.getByRole('menuitemradio', { name: 'Details' })).toHaveAttribute('aria-checked', 'true')
-    await waitFor(() => expect(screen.getByRole('menuitemradio', { name: 'Details' })).toHaveFocus())
+    expect(screen.getByRole('menuitemradio', { name: 'Details' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    )
+    await waitFor(() =>
+      expect(screen.getByRole('menuitemradio', { name: 'Details' })).toHaveFocus(),
+    )
     await user.keyboard('{ArrowDown}{Enter}')
     expect(selectIcons).toHaveBeenCalledOnce()
     await waitFor(() => expect(trigger).toHaveFocus())
 
     trigger.focus()
     await user.keyboard('{ArrowDown}')
-    await waitFor(() => expect(screen.getByRole('menuitemradio', { name: 'Details' })).toHaveFocus())
+    await waitFor(() =>
+      expect(screen.getByRole('menuitemradio', { name: 'Details' })).toHaveFocus(),
+    )
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     await waitFor(() => expect(trigger).toHaveFocus())

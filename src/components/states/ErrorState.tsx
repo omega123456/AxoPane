@@ -14,7 +14,9 @@ export function ErrorState({ message, onRetry, onGoUp, canGoUp }: ErrorStateProp
       className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-10 text-center"
     >
       <AlertTriangleIcon className="h-8 w-8 text-accent-amber" />
-      <p className="max-w-popover text-row text-light-text-soft dark:text-dark-text-soft">{message}</p>
+      <p className="max-w-popover text-row text-light-text-soft dark:text-dark-text-soft">
+        {message}
+      </p>
       <div className="flex items-center gap-2">
         <button
           type="button"

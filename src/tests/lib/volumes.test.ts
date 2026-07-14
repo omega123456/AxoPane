@@ -79,9 +79,9 @@ describe('findVolumeForPath', () => {
 
 describe('isNetworkPath', () => {
   it('uses the matching mounted volume on both supported platforms', () => {
-    expect(isNetworkPath('Z:\\shared\\report.txt', [volume({ mountRoot: 'Z:\\', isNetwork: true })])).toBe(
-      true,
-    )
+    expect(
+      isNetworkPath('Z:\\shared\\report.txt', [volume({ mountRoot: 'Z:\\', isNetwork: true })]),
+    ).toBe(true)
     expect(
       isNetworkPath('/Volumes/team/project/report.txt', [
         volume({ mountRoot: '/Volumes/team', isNetwork: true }),

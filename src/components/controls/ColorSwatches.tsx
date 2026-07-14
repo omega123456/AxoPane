@@ -23,7 +23,9 @@ export function ColorSwatches({
             // design-system token, so it can only be expressed at runtime.
             style={{ backgroundColor: color }}
           >
-            {selected ? <span className="size-3 rounded-full bg-white ring-2 ring-accent-blue" /> : null}
+            {selected ? (
+              <span className="size-3 rounded-full bg-white ring-2 ring-accent-blue" />
+            ) : null}
           </button>
         )
       })}
@@ -36,7 +38,9 @@ export function ColorSwatches({
           onChange={(event) => onChange(event.target.value)}
           className="size-color-input cursor-pointer rounded-tab border border-light-border-strong bg-light-surface p-0.5 dark:border-dark-border-strong dark:bg-dark-surface"
         />
-        <span className="font-mono text-row uppercase text-light-text-soft dark:text-dark-text-soft">{value}</span>
+        <span className="font-mono text-row uppercase text-light-text-soft dark:text-dark-text-soft">
+          {value}
+        </span>
       </label>
     </div>
   )

@@ -45,7 +45,12 @@ export function samePathOrWindowsCaseFold(left: string, right: string) {
   return pathsMatch(left, right)
 }
 
-export function pathKey(path: string, platform: PathComparisonPlatform = runtimePathComparisonPlatform()) {
+export function pathKey(
+  path: string,
+  platform: PathComparisonPlatform = runtimePathComparisonPlatform(),
+) {
   const normalized = normalizeWindowsCompatibilityPath(path)
-  return isWindowsStylePath(normalized) || platform === 'macos' ? normalized.toLowerCase() : normalized
+  return isWindowsStylePath(normalized) || platform === 'macos'
+    ? normalized.toLowerCase()
+    : normalized
 }

@@ -3,9 +3,7 @@ import { hasUnfinishedOps } from '@/lib/queue-commands'
 type CloseEvent = { preventDefault: () => void }
 
 export type GuardableWindow = {
-  onCloseRequested: (
-    handler: (event: CloseEvent) => void | Promise<void>,
-  ) => Promise<() => void>
+  onCloseRequested: (handler: (event: CloseEvent) => void | Promise<void>) => Promise<() => void>
   destroy: () => Promise<void>
 }
 
@@ -18,8 +16,7 @@ async function defaultAcquireWindow(): Promise<GuardableWindow | null> {
     const { getCurrentWindow } = await import('@tauri-apps/api/window')
     const appWindow = getCurrentWindow()
     return {
-      onCloseRequested: (handler) =>
-        appWindow.onCloseRequested((event) => handler(event)),
+      onCloseRequested: (handler) => appWindow.onCloseRequested((event) => handler(event)),
       destroy: () => appWindow.destroy(),
     }
   } catch {

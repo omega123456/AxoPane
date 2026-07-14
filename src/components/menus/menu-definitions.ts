@@ -130,6 +130,13 @@ function buildNativeMenuRequest(
         selectedPaths: [target.path],
       }
     }
+    case 'favourite':
+      return {
+        targetKind: 'tree',
+        targetPath: target.path,
+        folderPath: target.path,
+        selectedPaths: [target.path],
+      }
     case 'tab':
       return null
   }

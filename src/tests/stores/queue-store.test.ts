@@ -54,7 +54,10 @@ describe('queue store', () => {
   it('hydrates operations, order and conflicts from a snapshot', () => {
     const snapshots: OpSnapshot[] = [
       { progress: progress({ operationId: 'op-1' }), conflict: null },
-      { progress: progress({ operationId: 'op-2', status: 'conflict' }), conflict: conflict('op-2') },
+      {
+        progress: progress({ operationId: 'op-2', status: 'conflict' }),
+        conflict: conflict('op-2'),
+      },
     ]
     useQueueStore.getState().hydrate(snapshots)
 
@@ -70,16 +73,14 @@ describe('queue store', () => {
 
   it('opens a new smoothed bucket when progress advances into a new bucket', () => {
     useQueueStore.getState().applyProgress(progress({ operationId: 'op-1', copiedBytes: 100 }))
-    useQueueStore
-      .getState()
-      .applyProgress(
-        progress({
-          operationId: 'op-1',
-          copiedBytes: 900,
-          progressPercent: 90,
-          bytesPerSecond: 300,
-        }),
-      )
+    useQueueStore.getState().applyProgress(
+      progress({
+        operationId: 'op-1',
+        copiedBytes: 900,
+        progressPercent: 90,
+        bytesPerSecond: 300,
+      }),
+    )
 
     const operations = orderedOperations(useQueueStore.getState())
     expect(operations).toHaveLength(1)
@@ -95,9 +96,9 @@ describe('queue store', () => {
   })
 
   it('ratchets the throughput peak up only — a stall never drops it', () => {
-    useQueueStore.getState().applyProgress(
-      progress({ operationId: 'op-1', progressPercent: 40, bytesPerSecond: 100 }),
-    )
+    useQueueStore
+      .getState()
+      .applyProgress(progress({ operationId: 'op-1', progressPercent: 40, bytesPerSecond: 100 }))
     useQueueStore.getState().applyProgress(
       progress({
         operationId: 'op-1',
@@ -150,12 +151,16 @@ describe('queue store', () => {
   })
 
   it('resets throughput history when percent or counters regress', () => {
-    useQueueStore.getState().applyProgress(
-      progress({ operationId: 'op-1', progressPercent: 40, copiedBytes: 400, completedItems: 4 }),
-    )
-    useQueueStore.getState().applyProgress(
-      progress({ operationId: 'op-1', progressPercent: 70, copiedBytes: 700, completedItems: 7 }),
-    )
+    useQueueStore
+      .getState()
+      .applyProgress(
+        progress({ operationId: 'op-1', progressPercent: 40, copiedBytes: 400, completedItems: 4 }),
+      )
+    useQueueStore
+      .getState()
+      .applyProgress(
+        progress({ operationId: 'op-1', progressPercent: 70, copiedBytes: 700, completedItems: 7 }),
+      )
 
     useQueueStore.getState().applyProgress(
       progress({
@@ -230,21 +235,24 @@ describe('queue store', () => {
 
   it('preserves existing throughput history when hydrate runs again', () => {
     useQueueStore.getState().applyProgress(progress({ operationId: 'op-1', progressPercent: 40 }))
-    useQueueStore
-      .getState()
-      .applyProgress(
-        progress({
-          operationId: 'op-1',
-          progressPercent: 70,
-          bytesPerSecond: 200,
-        }),
-      )
+    useQueueStore.getState().applyProgress(
+      progress({
+        operationId: 'op-1',
+        progressPercent: 70,
+        bytesPerSecond: 200,
+      }),
+    )
 
     const existingHistory = useQueueStore.getState().throughputHistory['op-1']
     const existingPeak = useQueueStore.getState().throughputPeak['op-1']
     useQueueStore
       .getState()
-      .hydrate([{ progress: progress({ operationId: 'op-1', progressPercent: 75, bytesPerSecond: 150 }), conflict: null }])
+      .hydrate([
+        {
+          progress: progress({ operationId: 'op-1', progressPercent: 75, bytesPerSecond: 150 }),
+          conflict: null,
+        },
+      ])
 
     expect(useQueueStore.getState().throughputHistory['op-1']).toEqual(existingHistory)
     // Hydrate never lowers the peak (here the snapshot rate is below it).
@@ -354,9 +362,9 @@ describe('queue store', () => {
 
   it('retry resets a failed op to pending', () => {
     ipc.override('retry_op', () => undefined)
-    useQueueStore.getState().applyProgress(
-      progress({ operationId: 'op-1', status: 'failed', errorMessage: 'boom' }),
-    )
+    useQueueStore
+      .getState()
+      .applyProgress(progress({ operationId: 'op-1', status: 'failed', errorMessage: 'boom' }))
     useQueueStore.getState().applyProgress(
       progress({
         operationId: 'op-1',

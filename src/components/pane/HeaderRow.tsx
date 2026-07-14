@@ -84,7 +84,9 @@ export function HeaderRow({ pane }: HeaderRowProps) {
               type="button"
               onClick={() => void setSort(pane.id, column.key)}
               aria-describedby={
-                column.key === 'items' && itemsSortPending ? `${pane.id}-items-sort-status` : undefined
+                column.key === 'items' && itemsSortPending
+                  ? `${pane.id}-items-sort-status`
+                  : undefined
               }
               className="flex h-full w-full min-w-0 cursor-pointer items-center gap-1 rounded-tab text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
             >

@@ -48,11 +48,20 @@ export const paneViewListDir: ListDirResponse = {
   entries: [
     folder('assets', 'Assets'),
     folder('designs', 'Design references'),
-    file('wide-photo', 'A very long photograph filename that truncates in a narrow icon tile.png', 'PNG file', 49_152),
+    file(
+      'wide-photo',
+      'A very long photograph filename that truncates in a narrow icon tile.png',
+      'PNG file',
+      49_152,
+    ),
     file('preview', 'Mountain preview.png', 'PNG file', 65_536),
     file('fallback', 'Unsupported artwork.psd', 'PSD file', 131_072),
     file('failure', 'Unreadable scan.tiff', 'TIFF file', 98_304),
-    { ...file('hidden', 'Hidden reference.txt', 'TXT file'), isHidden: true, attributes: ['hidden'] },
+    {
+      ...file('hidden', 'Hidden reference.txt', 'TXT file'),
+      isHidden: true,
+      attributes: ['hidden'],
+    },
   ],
 }
 
@@ -64,7 +73,13 @@ export const iconsSession: SessionState = {
     activeTabIndex: 0,
     tabs: [
       { path: root, sortKey: 'name', sortDirection: 'asc', filter: '', viewMode: 'icons' },
-      { path: 'C:\\Users\\Omega', sortKey: 'name', sortDirection: 'asc', filter: '', viewMode: 'details' },
+      {
+        path: 'C:\\Users\\Omega',
+        sortKey: 'name',
+        sortDirection: 'asc',
+        filter: '',
+        viewMode: 'details',
+      },
     ],
   },
 }
@@ -73,7 +88,9 @@ export const thumbnailsSession: SessionState = {
   ...iconsSession,
   left: {
     activeTabIndex: 0,
-    tabs: [{ path: root, sortKey: 'name', sortDirection: 'asc', filter: '', viewMode: 'thumbnails' }],
+    tabs: [
+      { path: root, sortKey: 'name', sortDirection: 'asc', filter: '', viewMode: 'thumbnails' },
+    ],
   },
 }
 
@@ -89,7 +106,10 @@ const transparentPreview =
 export const thumbnailFixture: ThumbnailFixture = {
   outcomes: {
     'Mountain preview.png': { state: 'ready', dataUrl: transparentPreview },
-    'A very long photograph filename that truncates in a narrow icon tile.png': { state: 'ready', dataUrl: transparentPreview },
+    'A very long photograph filename that truncates in a narrow icon tile.png': {
+      state: 'ready',
+      dataUrl: transparentPreview,
+    },
     'Unsupported artwork.psd': { state: 'unavailable', dataUrl: null },
     'Unreadable scan.tiff': { state: 'failed', dataUrl: null },
   },

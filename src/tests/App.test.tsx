@@ -109,10 +109,12 @@ describe('App', () => {
   it('subscribes to thumbnail batches and applies a burst on one animation frame', async () => {
     installListDirOverride()
     const callbacks: FrameRequestCallback[] = []
-    const requestAnimationFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
-      callbacks.push(callback)
-      return callbacks.length
-    })
+    const requestAnimationFrame = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback) => {
+        callbacks.push(callback)
+        return callbacks.length
+      })
     const { unmount } = renderApp()
     await screen.findByLabelText('Left pane')
     await waitFor(() => expect(ipc.listenerCount('thumbnail://state')).toBeGreaterThan(0))
@@ -124,10 +126,12 @@ describe('App', () => {
     }
     const callbackCount = callbacks.length
     await act(async () => {
-      await useThumbnailStore.getState().setVisibleCandidates(
-        { paneId: 'left', tabId: 'thumb-tab', path: 'C:\\Users\\Omega', mode: 'thumbnails' },
-        [candidate],
-      )
+      await useThumbnailStore
+        .getState()
+        .setVisibleCandidates(
+          { paneId: 'left', tabId: 'thumb-tab', path: 'C:\\Users\\Omega', mode: 'thumbnails' },
+          [candidate],
+        )
     })
     await act(async () => {
       ipc.emit('thumbnail://state', [
@@ -268,6 +272,7 @@ describe('App', () => {
       relativeDates: false,
       autoFolderSize: true,
       autoExpandActiveQueueToasts: false,
+      favourites: [],
       keybindings: {
         refresh: ['F5'],
       },
@@ -292,6 +297,7 @@ describe('App', () => {
           created: 128,
         },
         defaultPaneMode: 'dual',
+        defaultViewMode: 'details',
         restoreSession: true,
         zoom: '100',
       },
@@ -486,10 +492,12 @@ describe('App', () => {
   it('renders batched size state updates from the shared IPC event channel', async () => {
     installListDirOverride()
     const callbacks: FrameRequestCallback[] = []
-    const requestAnimationFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
-      callbacks.push(callback)
-      return callbacks.length
-    })
+    const requestAnimationFrame = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback) => {
+        callbacks.push(callback)
+        return callbacks.length
+      })
     renderApp()
 
     await waitFor(() => {
@@ -526,10 +534,12 @@ describe('App', () => {
   it('applies a batched icon://state event, patching every matched entry from one array payload', async () => {
     installListDirOverride()
     const callbacks: FrameRequestCallback[] = []
-    const requestAnimationFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
-      callbacks.push(callback)
-      return callbacks.length
-    })
+    const requestAnimationFrame = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback) => {
+        callbacks.push(callback)
+        return callbacks.length
+      })
     renderApp()
 
     await waitFor(() => {

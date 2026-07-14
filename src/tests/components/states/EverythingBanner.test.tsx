@@ -40,6 +40,7 @@ describe('EverythingBanner', () => {
       relativeDates: false,
       autoFolderSize: true,
       autoExpandActiveQueueToasts: false,
+      favourites: [],
       keybindings: {},
       columns: [],
       layout: {
@@ -55,6 +56,7 @@ describe('EverythingBanner', () => {
           created: 128,
         },
         defaultPaneMode: 'dual' as const,
+        defaultViewMode: 'details' as const,
         restoreSession: true,
         zoom: '100' as const,
       },

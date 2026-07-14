@@ -92,7 +92,11 @@ const EMPTY: FormattedDate = { text: '—', tone: 'default' }
 const ABSOLUTE_FORMAT_CACHE_LIMIT = 2000
 const absoluteFormatCache = new Map<string, FormattedDate>()
 
-function cachedAbsoluteFormat(value: string, pattern: string, compute: () => FormattedDate): FormattedDate {
+function cachedAbsoluteFormat(
+  value: string,
+  pattern: string,
+  compute: () => FormattedDate,
+): FormattedDate {
   const cacheKey = `${value}|${pattern}`
   const cached = absoluteFormatCache.get(cacheKey)
   if (cached) {
@@ -134,7 +138,12 @@ function relativeWeekdayPattern(showTime: boolean, showSeconds: boolean): string
   return `'on' EEEE ${showSeconds ? 'HH:mm:ss' : 'HH:mm'}`
 }
 
-function formatRelative(value: Date, ageMs: number, showTime: boolean, showSeconds: boolean): FormattedDate | null {
+function formatRelative(
+  value: Date,
+  ageMs: number,
+  showTime: boolean,
+  showSeconds: boolean,
+): FormattedDate | null {
   // Clamp clock-skewed "future" timestamps to the present.
   const age = ageMs < 0 ? 0 : ageMs
   if (age >= RELATIVE_CUTOFF) {

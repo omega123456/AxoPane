@@ -246,7 +246,9 @@ function FileRowImpl({
               <span className="flex min-w-0 items-center gap-2">
                 <EntryIcon entry={entry} />
                 <span
-                  title={entry.originalPath ? `Original location: ${entry.originalPath}` : undefined}
+                  title={
+                    entry.originalPath ? `Original location: ${entry.originalPath}` : undefined
+                  }
                   className={`truncate ${
                     isCut
                       ? 'text-light-text-soft dark:text-dark-text-soft'

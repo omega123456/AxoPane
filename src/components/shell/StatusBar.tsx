@@ -9,20 +9,21 @@ export function StatusBar() {
   // Select only cheap references here; the O(n) lookup for the focused entry is
   // deferred to a `useMemo` below so it runs when entries/focus change rather
   // than on every unrelated panes-store emission (size/icon/patch bursts).
-  const { path, typing, itemCount, focusedEntryId, entries, sortKey, itemsSortStatus } = usePanesStore(
-    useShallow((state) => {
-      const pane = state.panes[state.activePaneId]
-      return {
-        path: pane.path,
-        typing: pane.typing,
-        itemCount: pane.entries.length,
-        focusedEntryId: pane.focusedEntryId,
-        entries: pane.entries,
-        sortKey: pane.sortKey,
-        itemsSortStatus: pane.itemsSortStatus,
-      }
-    }),
-  )
+  const { path, typing, itemCount, focusedEntryId, entries, sortKey, itemsSortStatus } =
+    usePanesStore(
+      useShallow((state) => {
+        const pane = state.panes[state.activePaneId]
+        return {
+          path: pane.path,
+          typing: pane.typing,
+          itemCount: pane.entries.length,
+          focusedEntryId: pane.focusedEntryId,
+          entries: pane.entries,
+          sortKey: pane.sortKey,
+          itemsSortStatus: pane.itemsSortStatus,
+        }
+      }),
+    )
   const focusedEntry = useMemo(
     () => (focusedEntryId ? entries.find((entry) => entry.id === focusedEntryId) : undefined),
     [entries, focusedEntryId],
@@ -44,7 +45,9 @@ export function StatusBar() {
       {countingItems ? (
         <>
           <span className="text-light-text-faint dark:text-dark-text-faint">|</span>
-          <span role="status" aria-live="polite" aria-label="Counting items…">Counting items…</span>
+          <span role="status" aria-live="polite" aria-label="Counting items…">
+            Counting items…
+          </span>
         </>
       ) : null}
       <span className="text-light-text-faint dark:text-dark-text-faint">|</span>
@@ -59,7 +62,9 @@ export function StatusBar() {
       {volume ? (
         <>
           <span className="text-light-text-faint dark:text-dark-text-faint">|</span>
-          <span>{freeLabel} free of {totalLabel}</span>
+          <span>
+            {freeLabel} free of {totalLabel}
+          </span>
         </>
       ) : null}
     </footer>

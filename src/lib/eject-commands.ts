@@ -2,9 +2,7 @@ import { log } from '@/lib/app-log-commands'
 import { ejectVolume } from '@/lib/ipc/commands'
 import type { EjectVolumeRequest, MenuActionStatus } from '@/lib/types/ipc'
 
-export async function runEjectVolume({
-  mountRoot,
-}: EjectVolumeRequest): Promise<MenuActionStatus> {
+export async function runEjectVolume({ mountRoot }: EjectVolumeRequest): Promise<MenuActionStatus> {
   try {
     const response = await ejectVolume({ mountRoot })
     if (!response.handled) {

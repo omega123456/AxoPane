@@ -201,7 +201,9 @@ export const ipc = {
     command: CommandName,
     response:
       | IpcCommandMap[CommandName]['response']
-      | ((payload: IpcCommandMap[CommandName]['request']) => IpcCommandMap[CommandName]['response']),
+      | ((
+          payload: IpcCommandMap[CommandName]['request'],
+        ) => IpcCommandMap[CommandName]['response']),
   ) {
     overrides[command] = response as OverrideMap[CommandName]
   },

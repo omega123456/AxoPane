@@ -141,7 +141,7 @@ function useAppendedTail(target: ThroughputSample[]): {
     setState({
       identity,
       length: target.length,
-      start: isAppend ? target[target.length - 2] ?? null : null,
+      start: isAppend ? (target[target.length - 2] ?? null) : null,
       end,
       endKey: end ? sampleKey(end) : '',
       progress: isAppend ? 0 : 1,
@@ -221,11 +221,7 @@ function useAppendedTail(target: ThroughputSample[]): {
  * sweeps the fill + leading line across smoothly rather than teleporting). The
  * sample geometry is never routed through this — committed points stay frozen.
  */
-function useEasedScalar(
-  target: number,
-  durationMs: number,
-  easing: (progress: number) => number,
-) {
+function useEasedScalar(target: number, durationMs: number, easing: (progress: number) => number) {
   const [displayed, setDisplayed] = useState(target)
   const displayedRef = useRef(target)
   const animationRef = useRef<number | null>(null)
@@ -247,9 +243,7 @@ function useEasedScalar(
     const startedAt = performance.now()
 
     const tick = (time: number) => {
-      const progress = reducedMotion
-        ? 1
-        : Math.min(1, Math.max(0, (time - startedAt) / durationMs))
+      const progress = reducedMotion ? 1 : Math.min(1, Math.max(0, (time - startedAt) / durationMs))
       const nextValue = interpolate(startValue, target, easing(progress))
       displayedRef.current = nextValue
       setDisplayed(nextValue)
@@ -315,7 +309,10 @@ function anchorChartSamples(samples: ThroughputSample[]): ThroughputSample[] {
   return anchored
 }
 
-function buildChartSamples(samples: ThroughputSample[], currentPercent: number): ThroughputSample[] {
+function buildChartSamples(
+  samples: ThroughputSample[],
+  currentPercent: number,
+): ThroughputSample[] {
   const normalized = anchorChartSamples(normalizeSamples(samples, currentPercent))
   const lastSample = normalized.at(-1)
 

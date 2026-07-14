@@ -25,7 +25,13 @@ import { itemsSortPendingListDir, itemsSortPendingSession } from './item-counts'
 import { relativeDatesListDir } from './relative-dates'
 import { stickyTreeChildrenByPath, stickyTreeListDir, stickyTreeSession } from './tree'
 import type { TreeChildrenByPath } from './tree-states'
-import { iconsSession, paneViewListDir, thumbnailFixture, thumbnailsSession, type ThumbnailFixture } from './pane-views'
+import {
+  iconsSession,
+  paneViewListDir,
+  thumbnailFixture,
+  thumbnailsSession,
+  type ThumbnailFixture,
+} from './pane-views'
 
 type CommandMap = Partial<{
   [CommandName in keyof IpcCommandMap]: IpcCommandMap[CommandName]['response']
@@ -69,6 +75,7 @@ const lightConfig: AppConfig = {
   relativeDates: false,
   autoFolderSize: true,
   autoExpandActiveQueueToasts: false,
+  favourites: [],
   keybindings: {},
   columns: [
     { key: 'name', visible: true },
@@ -142,10 +149,10 @@ const multiTabSession: SessionState = {
   left: {
     activeTabIndex: 0,
     tabs: [
-      { path: 'C:\\Users\\Omega', sortKey: 'name', sortDirection: 'asc', filter: '' },
-      { path: 'C:\\', sortKey: 'name', sortDirection: 'asc', filter: '' },
-      { path: 'E:\\', sortKey: 'name', sortDirection: 'asc', filter: '' },
-      { path: 'Z:\\', sortKey: 'name', sortDirection: 'asc', filter: '' },
+      { path: 'C:\\Users\\Omega', sortKey: 'name', sortDirection: 'asc', filter: '', locked: true },
+      { path: 'C:\\', sortKey: 'name', sortDirection: 'asc', filter: '', locked: false },
+      { path: 'E:\\', sortKey: 'name', sortDirection: 'asc', filter: '', locked: false },
+      { path: 'Z:\\', sortKey: 'name', sortDirection: 'asc', filter: '', locked: false },
     ],
   },
 }
@@ -349,13 +356,35 @@ export const screenshotScenarios = {
       },
     },
   },
+  favourites: {
+    light: {
+      commands: {
+        load_config: {
+          ...lightConfig,
+          favourites: ['C:\\Users\\Omega\\Documents', 'D:\\projects', 'E:\\'],
+        },
+        load_session: multiTabSession,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+    },
+    dark: {
+      commands: {
+        load_config: {
+          ...darkConfig,
+          favourites: ['C:\\Users\\Omega\\Documents', 'D:\\projects', 'E:\\'],
+        },
+        load_session: multiTabSession,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+    },
+  },
   breadcrumbs: {
     light: {
       commands: {
         load_config: {
           ...lightConfig,
           layout: {
-          ...lightConfig.layout,
+            ...lightConfig.layout,
             paneSplit: 0.18,
           },
         },
@@ -370,7 +399,7 @@ export const screenshotScenarios = {
         load_config: {
           ...darkConfig,
           layout: {
-          ...darkConfig.layout,
+            ...darkConfig.layout,
             paneSplit: 0.18,
           },
         },

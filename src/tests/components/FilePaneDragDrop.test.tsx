@@ -25,7 +25,10 @@ function entry(name: string, isDir = false, dir = 'C:\\root'): DirectoryEntry {
   }
 }
 
-function seedPane(paneId: PaneId, partial: Partial<ReturnType<typeof usePanesStore.getState>['panes']['left']>) {
+function seedPane(
+  paneId: PaneId,
+  partial: Partial<ReturnType<typeof usePanesStore.getState>['panes']['left']>,
+) {
   usePanesStore.setState((state) => ({
     panes: {
       ...state.panes,

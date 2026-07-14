@@ -58,7 +58,9 @@ const appIconMap = {
   share: Share2Icon,
 } satisfies Record<NonNullable<Extract<ContextMenuIcon, { kind: 'app' }>['name']>, IconComponent>
 
-function itemTextClass(item: Pick<ContextMenuRowItem | ContextMenuSubmenuRow, 'disabled' | 'danger'>) {
+function itemTextClass(
+  item: Pick<ContextMenuRowItem | ContextMenuSubmenuRow, 'disabled' | 'danger'>,
+) {
   if (item.disabled) {
     return 'text-light-text-faint dark:text-dark-text-faint'
   }

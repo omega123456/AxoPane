@@ -189,18 +189,16 @@ describe('BreadcrumbBar navigation', () => {
       font: '',
       measureText: (label: string) => ({ width: label.length * 10 }) as TextMetrics,
     } as CanvasRenderingContext2D)
-    vi.spyOn(window, 'getComputedStyle').mockImplementation(
-      (element: Element) => {
-        const style = originalGetComputedStyle(element)
-        if (element.getAttribute('aria-label') === 'Left pane path') {
-          Object.defineProperty(style, 'font', {
-            configurable: true,
-            value: '12px ui-monospace',
-          })
-        }
-        return style
-      },
-    )
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element: Element) => {
+      const style = originalGetComputedStyle(element)
+      if (element.getAttribute('aria-label') === 'Left pane path') {
+        Object.defineProperty(style, 'font', {
+          configurable: true,
+          value: '12px ui-monospace',
+        })
+      }
+      return style
+    })
 
     render(<BreadcrumbBar pane={pane('C:\\Alpha\\Bravo\\Charlie')} isActive />)
 

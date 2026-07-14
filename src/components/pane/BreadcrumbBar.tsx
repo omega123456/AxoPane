@@ -161,7 +161,9 @@ export function BreadcrumbBar({ pane, isActive, actions }: BreadcrumbBarProps) {
               }`}
             >
               <span className="truncate">{segment.label}</span>
-              {index < layout.items.length - 1 ? <ChevronRightIcon className="h-3.5 w-3.5" /> : null}
+              {index < layout.items.length - 1 ? (
+                <ChevronRightIcon className="h-3.5 w-3.5" />
+              ) : null}
             </button>
           ))}
         </nav>

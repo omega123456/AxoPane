@@ -29,7 +29,9 @@ describe('UpdateBanner', () => {
   it('shows the available version and installs on click', async () => {
     const user = userEvent.setup()
     const downloadAndInstall = vi.fn(() => Promise.resolve())
-    vi.spyOn(useUpdaterStore.getState(), 'downloadAndInstall').mockImplementation(downloadAndInstall)
+    vi.spyOn(useUpdaterStore.getState(), 'downloadAndInstall').mockImplementation(
+      downloadAndInstall,
+    )
     const update = fakeUpdate()
     useUpdaterStore.getState().setAvailable(update, {
       currentVersion: '0.1.0',
@@ -56,7 +58,9 @@ describe('UpdateBanner', () => {
 
   it('dismisses the banner', async () => {
     const user = userEvent.setup()
-    useUpdaterStore.getState().setAvailable(fakeUpdate(), { currentVersion: '0.1.0', version: '0.2.0' })
+    useUpdaterStore
+      .getState()
+      .setAvailable(fakeUpdate(), { currentVersion: '0.1.0', version: '0.2.0' })
 
     render(<UpdateBanner />)
     await user.click(screen.getByRole('button', { name: /dismiss update banner/i }))

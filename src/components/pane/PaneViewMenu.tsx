@@ -16,7 +16,10 @@ export function PaneViewMenu({ paneId }: { paneId: PaneId }) {
   const items: MenuPopoverRadioItem[] = paneViewModes.map((mode) => ({
     id: mode,
     label: paneViewMetadata[mode].label,
-    icon: (() => { const ModeIcon = modeIcons[mode]; return <ModeIcon className="size-4" /> })(),
+    icon: (() => {
+      const ModeIcon = modeIcons[mode]
+      return <ModeIcon className="size-4" />
+    })(),
     checked: mode === viewMode,
     onSelect: () => patchActiveTab(paneId, { viewMode: mode }),
   }))

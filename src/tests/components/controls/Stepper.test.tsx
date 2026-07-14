@@ -9,14 +9,7 @@ describe('Stepper', () => {
     const onChange = vi.fn()
 
     render(
-      <Stepper
-        ariaLabel="Worker threads"
-        value={4}
-        min={2}
-        max={8}
-        step={2}
-        onChange={onChange}
-      />,
+      <Stepper ariaLabel="Worker threads" value={4} min={2} max={8} step={2} onChange={onChange} />,
     )
 
     await user.click(screen.getByRole('button', { name: 'Increase' }))

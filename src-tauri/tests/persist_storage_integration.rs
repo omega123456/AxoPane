@@ -60,6 +60,7 @@ fn config_and_session_round_trip_through_atomic_storage() {
         relative_dates: true,
         auto_folder_size: true,
         auto_expand_active_queue_toasts: true,
+        favourites: vec!["C:\\left".to_string()],
     });
     session_store.replace(Session {
         active_pane: "right".to_string(),
@@ -111,6 +112,7 @@ fn config_and_session_round_trip_through_atomic_storage() {
             relative_dates: true,
             auto_folder_size: true,
             auto_expand_active_queue_toasts: true,
+            favourites: vec!["C:\\left".to_string()],
         }
     );
     assert_eq!(
@@ -146,6 +148,7 @@ fn session_with_per_pane_tabs_round_trips_through_storage() {
                     sort_direction: "asc".to_string(),
                     filter: String::new(),
                     view_mode: Some("details".to_string()),
+                    locked: true,
                 },
                 SessionTab {
                     path: "C:\\left\\nested".to_string(),
@@ -153,6 +156,7 @@ fn session_with_per_pane_tabs_round_trips_through_storage() {
                     sort_direction: "desc".to_string(),
                     filter: "report".to_string(),
                     view_mode: Some("thumbnails".to_string()),
+                    locked: false,
                 },
             ],
         }),
@@ -164,6 +168,7 @@ fn session_with_per_pane_tabs_round_trips_through_storage() {
                 sort_direction: "desc".to_string(),
                 filter: String::new(),
                 view_mode: Some("icons".to_string()),
+                locked: false,
             }],
         }),
     };
@@ -209,6 +214,21 @@ fn old_tab_modes_remain_optional_raw_text() {
     let tabs = &loaded.left.expect("left tabs").tabs;
     assert_eq!(tabs[0].view_mode, None);
     assert_eq!(tabs[1].view_mode.as_deref(), Some("future-view"));
+    assert!(!tabs[0].locked);
+    assert!(!tabs[1].locked);
+}
+
+#[test]
+fn legacy_tab_defaults_to_unlocked() {
+    let fixture = tempdir().expect("temp dir");
+    let path = fixture.path().join("session.json");
+    fs::write(
+        &path,
+        br#"{"activePane":"left","leftPath":"/old","rightPath":"/old","left":{"activeTabIndex":0,"tabs":[{"path":"/old","sortKey":"name","sortDirection":"asc","filter":""}]}}"#,
+    )
+    .expect("seed legacy tab");
+    let loaded: Session = load_json_or_default(&path).expect("load legacy tab");
+    assert!(!loaded.left.expect("left pane").tabs[0].locked);
 }
 
 #[test]

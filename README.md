@@ -31,10 +31,10 @@ A cross-platform **dual-pane desktop file explorer** for **Windows and macOS**, 
 
 AxoPane splits responsibilities between a Rust backend and a React frontend:
 
-| Layer | Responsibility |
-| ----- | -------------- |
+| Layer            | Responsibility                                                                                                                                 |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Rust (Tauri)** | Directory listing, sorting, in-folder filtering, folder-size capability, copy/move queue, filesystem watching, volume enumeration, persistence |
-| **React** | Dual-pane shell, folder tree, tabs, details grid, breadcrumbs, transfer queue UI, settings modal, keyboard handling |
+| **React**        | Dual-pane shell, folder tree, tabs, details grid, breadcrumbs, transfer queue UI, settings modal, keyboard handling                            |
 
 When you open a folder, the active pane asks Rust for entries. Sorting and filtering happen on the backend so large directories stay responsive; the details list is virtualized in the UI. Filesystem changes on watched paths arrive as incremental patches instead of full reloads.
 
@@ -71,22 +71,22 @@ File previews/thumbnails, global search, drag-and-drop between panes, batch rena
 
 Default shortcuts are editable in **Settings → Keybindings**. Clipboard commands (**Ctrl+C / X / V**) follow the platform defaults and cannot be remapped.
 
-| Action | Default |
-| ------ | ------- |
-| Open | **Enter** |
-| Go up | **Backspace** |
-| Refresh | **Ctrl+R** |
-| Rename | **F2** |
-| Delete | **Delete** |
-| Copy to other pane | **F5** |
-| Move to other pane | **F6** |
-| New folder | **Ctrl+Shift+N** |
-| Calculate folder size | **Space** |
-| Open in new tab | **Ctrl+Enter** |
-| Open in other pane | **Ctrl+Shift+Enter** |
-| Select all | **Ctrl+A** |
-| Clear filter | **Esc** |
-| Settings | **Ctrl+,** |
+| Action                | Default              |
+| --------------------- | -------------------- |
+| Open                  | **Enter**            |
+| Go up                 | **Backspace**        |
+| Refresh               | **Ctrl+R**           |
+| Rename                | **F2**               |
+| Delete                | **Delete**           |
+| Copy to other pane    | **F5**               |
+| Move to other pane    | **F6**               |
+| New folder            | **Ctrl+Shift+N**     |
+| Calculate folder size | **Space**            |
+| Open in new tab       | **Ctrl+Enter**       |
+| Open in other pane    | **Ctrl+Shift+Enter** |
+| Select all            | **Ctrl+A**           |
+| Clear filter          | **Esc**              |
+| Settings              | **Ctrl+,**           |
 
 On macOS, **Ctrl** in the table above is shown as **⌘** in the UI.
 
@@ -107,12 +107,12 @@ Open the queue from the bottom-right toast or expand it to manage all jobs.
 
 ## Folder sizes
 
-| Platform | Behavior |
-| -------- | -------- |
-| **Windows + Everything running** | Sizes populate progressively for the full directory; size sorting works as values arrive |
-| **Windows without Everything** | Press **Space** on a folder (or use **Calculate size** in the context menu) for an on-demand recursive scan |
-| **macOS** | Same manual on-demand behavior as Windows without Everything |
-| **Network drives / folders** | Always **N/A** — never calculated |
+| Platform                         | Behavior                                                                                                    |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **Windows + Everything running** | Sizes populate progressively for the full directory; size sorting works as values arrive                    |
+| **Windows without Everything**   | Press **Space** on a folder (or use **Calculate size** in the context menu) for an on-demand recursive scan |
+| **macOS**                        | Same manual on-demand behavior as Windows without Everything                                                |
+| **Network drives / folders**     | Always **N/A** — never calculated                                                                           |
 
 If Everything is not available on Windows, a banner offers a download link and can be dismissed.
 
@@ -127,24 +127,24 @@ Settings opens as an in-app modal with sidebar navigation:
 
 ## Stack
 
-| Layer | Technologies |
-| ----- | ------------ |
-| Desktop shell | Tauri 2, Rust (filesystem, queue, watching, persistence) |
-| UI | React 19, TypeScript, Vite 8, Zustand, Tailwind CSS v4 |
-| Virtualization | `@tanstack/react-virtual` |
-| Updates | `@tauri-apps/plugin-updater` |
-| Tests | Vitest (coverage gates), Rust integration tests (nextest / llvm-cov), Playwright E2E + screenshot baselines |
+| Layer          | Technologies                                                                                                |
+| -------------- | ----------------------------------------------------------------------------------------------------------- |
+| Desktop shell  | Tauri 2, Rust (filesystem, queue, watching, persistence)                                                    |
+| UI             | React 19, TypeScript, Vite 8, Zustand, Tailwind CSS v4                                                      |
+| Virtualization | `@tanstack/react-virtual`                                                                                   |
+| Updates        | `@tauri-apps/plugin-updater`                                                                                |
+| Tests          | Vitest (coverage gates), Rust integration tests (nextest / llvm-cov), Playwright E2E + screenshot baselines |
 
 ## Requirements
 
-| Tool | Notes |
-| ---- | ----- |
-| [Node.js](https://nodejs.org/) | LTS recommended |
-| [pnpm](https://pnpm.io/) | Package manager (`corepack enable` or install globally) |
-| [Rust](https://www.rust-lang.org/tools/install) | Required to build the Tauri backend |
-| [cargo-nextest](https://nexte.st/book/installing.html) | For `pnpm test:rust` and `pnpm test:all` |
-| Rust coverage (optional) | For `pnpm test:rust:coverage` / `pnpm test:all`: `cargo install cargo-llvm-cov` and `rustup component add llvm-tools-preview` |
-| OS deps | See [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform |
+| Tool                                                   | Notes                                                                                                                         |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| [Node.js](https://nodejs.org/)                         | LTS recommended                                                                                                               |
+| [pnpm](https://pnpm.io/)                               | Package manager (`corepack enable` or install globally)                                                                       |
+| [Rust](https://www.rust-lang.org/tools/install)        | Required to build the Tauri backend                                                                                           |
+| [cargo-nextest](https://nexte.st/book/installing.html) | For `pnpm test:rust` and `pnpm test:all`                                                                                      |
+| Rust coverage (optional)                               | For `pnpm test:rust:coverage` / `pnpm test:all`: `cargo install cargo-llvm-cov` and `rustup component add llvm-tools-preview` |
+| OS deps                                                | See [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform                                        |
 
 **Windows only (optional, for eager folder sizes):** [Everything](https://www.voidtools.com/) installed and running.
 
@@ -191,33 +191,33 @@ The dev server uses port **1420** (`http://127.0.0.1:1420`).
 
 ## Scripts
 
-| Command | Purpose |
-| ------- | ------- |
-| `pnpm dev` | Run the full Tauri app in development |
-| `pnpm build` | Build frontend + native app (no bundle) |
-| `pnpm preview` | Preview the built frontend |
-| `pnpm tauri build` | Build installable bundles for your OS |
-| `pnpm release:tauri-version` | Interactive release helper: bumps version, prompts for release notes, runs `pnpm build`, then commits, tags `v*`, and pushes |
-| `pnpm test` | Run Vitest once |
-| `pnpm test:watch` | Vitest in watch mode |
-| `pnpm test:coverage` | Vitest with coverage thresholds |
-| `pnpm test:rust` | Rust integration tests via cargo-nextest |
-| `pnpm test:rust:coverage` | Same tests under cargo-llvm-cov |
-| `pnpm test:all` | Vitest coverage + Rust llvm-cov + Playwright E2E |
-| `pnpm test:e2e` | Playwright E2E tests (including visual regression) |
-| `pnpm lint` / `pnpm lint:fix` | ESLint |
-| `pnpm format` | Prettier check |
-| `pnpm typecheck` | TypeScript + `cargo check` |
-| `pnpm clippy` | Rust clippy with warnings denied |
+| Command                       | Purpose                                                                                                                      |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm dev`                    | Run the full Tauri app in development                                                                                        |
+| `pnpm build`                  | Build frontend + native app (no bundle)                                                                                      |
+| `pnpm preview`                | Preview the built frontend                                                                                                   |
+| `pnpm tauri build`            | Build installable bundles for your OS                                                                                        |
+| `pnpm release:tauri-version`  | Interactive release helper: bumps version, prompts for release notes, runs `pnpm build`, then commits, tags `v*`, and pushes |
+| `pnpm test`                   | Run Vitest once                                                                                                              |
+| `pnpm test:watch`             | Vitest in watch mode                                                                                                         |
+| `pnpm test:coverage`          | Vitest with coverage thresholds                                                                                              |
+| `pnpm test:rust`              | Rust integration tests via cargo-nextest                                                                                     |
+| `pnpm test:rust:coverage`     | Same tests under cargo-llvm-cov                                                                                              |
+| `pnpm test:all`               | Vitest coverage + Rust llvm-cov + Playwright E2E                                                                             |
+| `pnpm test:e2e`               | Playwright E2E tests (including visual regression)                                                                           |
+| `pnpm lint` / `pnpm lint:fix` | ESLint                                                                                                                       |
+| `pnpm format`                 | Prettier check                                                                                                               |
+| `pnpm typecheck`              | TypeScript + `cargo check`                                                                                                   |
+| `pnpm clippy`                 | Rust clippy with warnings denied                                                                                             |
 
 ## GitHub releases (CI)
 
 The workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) publishes GitHub Release assets for these platforms:
 
-| Platform | Artifacts | Notes |
-| -------- | --------- | ----- |
-| **Windows (x64)** | Updater bundle + `.msi` / `.exe` (NSIS) installers | Signed when `TAURI_SIGNING_PRIVATE_KEY` secrets are configured; in-app updates download first, then restart to finish |
-| **macOS (Apple Silicon)** | Updater bundle + `.dmg` | Code-signed with the self-signed `AxoPane Local Code Signing` identity when the Apple certificate secrets are configured; not Apple-notarized, so users may still see Gatekeeper warnings |
+| Platform                  | Artifacts                                          | Notes                                                                                                                                                                                     |
+| ------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Windows (x64)**         | Updater bundle + `.msi` / `.exe` (NSIS) installers | Signed when `TAURI_SIGNING_PRIVATE_KEY` secrets are configured; in-app updates download first, then restart to finish                                                                     |
+| **macOS (Apple Silicon)** | Updater bundle + `.dmg`                            | Code-signed with the self-signed `AxoPane Local Code Signing` identity when the Apple certificate secrets are configured; not Apple-notarized, so users may still see Gatekeeper warnings |
 
 The release workflow runs on **`workflow_dispatch`** (Actions → Release → Run workflow) or when you push a version tag matching `v*` (for example `v0.1.0`).
 
@@ -234,10 +234,10 @@ Releases are published directly (non-draft) by default.
 
 Download installers from **GitHub Releases** for your repository. Use the table below, then see the linked sections for platform-specific notes.
 
-| OS | Artifacts (CI) | Install | In-app updates | More detail |
-| -- | -------------- | ------- | -------------- | ----------- |
-| **Windows (x64)** | `.msi`, `.exe`, updater bundle | Run the installer from the release asset | Yes — download then restart to finish | [GitHub releases](#github-releases-ci) |
-| **macOS (Apple Silicon)** | `.dmg`, updater bundle | Open the `.dmg` and drag **AxoPane** to **Applications** | Yes, when CI uses the stable `AxoPane Local Code Signing` identity | [macOS quarantine](#macos-quarantine-exclusion-step-by-step) · [Tauri macOS signing](https://v2.tauri.app/distribute/sign-macos/) |
+| OS                        | Artifacts (CI)                 | Install                                                  | In-app updates                                                     | More detail                                                                                                                       |
+| ------------------------- | ------------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| **Windows (x64)**         | `.msi`, `.exe`, updater bundle | Run the installer from the release asset                 | Yes — download then restart to finish                              | [GitHub releases](#github-releases-ci)                                                                                            |
+| **macOS (Apple Silicon)** | `.dmg`, updater bundle         | Open the `.dmg` and drag **AxoPane** to **Applications** | Yes, when CI uses the stable `AxoPane Local Code Signing` identity | [macOS quarantine](#macos-quarantine-exclusion-step-by-step) · [Tauri macOS signing](https://v2.tauri.app/distribute/sign-macos/) |
 
 For **building from source** on any supported OS, use [Requirements](#requirements), [Setup](#setup), and [Quick start](#quick-start) instead of prebuilt installers.
 

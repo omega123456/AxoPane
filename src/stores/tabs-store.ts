@@ -12,6 +12,7 @@ export type TabState = {
   sortDirection: SortDirection
   filter: string
   viewMode: PaneViewMode
+  locked: boolean
 }
 
 type PaneTabs = {
@@ -19,14 +20,20 @@ type PaneTabs = {
   tabs: TabState[]
 }
 
-type TabPatch = Partial<Pick<TabState, 'path' | 'sortKey' | 'sortDirection' | 'filter' | 'viewMode'>>
-type NewTabState = Omit<TabState, 'id' | 'viewMode'> & { viewMode?: PaneViewMode }
+type TabPatch = Partial<
+  Pick<TabState, 'path' | 'sortKey' | 'sortDirection' | 'filter' | 'viewMode'>
+>
+type NewTabState = Omit<TabState, 'id' | 'viewMode' | 'locked'> & {
+  viewMode?: PaneViewMode
+  locked?: boolean
+}
 
 type TabsStore = {
   panes: Record<PaneId, PaneTabs>
   hydrate: (paneId: PaneId, pane: PaneTabs) => void
   addTab: (paneId: PaneId, tab: NewTabState, options?: { activate?: boolean }) => string
   closeTab: (paneId: PaneId, tabId: string) => void
+  setTabLocked: (paneId: PaneId, tabId: string, locked: boolean) => void
   setActiveTab: (paneId: PaneId, tabId: string) => void
   patchActiveTab: (paneId: PaneId, patch: TabPatch) => void
   reset: () => void
@@ -45,7 +52,7 @@ function lastLabel(path: string) {
   return segment ?? trimmed ?? path
 }
 
-export function tabLabel(tab: TabState) {
+export function tabLabel(tab: Pick<TabState, 'path'>) {
   return lastLabel(tab.path)
 }
 
@@ -60,6 +67,7 @@ function singleTabPane(path: string): PaneTabs {
         sortDirection: 'asc',
         filter: '',
         viewMode: useLayoutStore.getState().defaultViewMode,
+        locked: false,
       },
     ],
   }
@@ -100,7 +108,12 @@ export const useTabsStore = create<TabsStore>((set) => ({
       const pane = state.panes[paneId]
       const tabs = [
         ...pane.tabs,
-        { ...tab, id, viewMode: tab.viewMode ?? useLayoutStore.getState().defaultViewMode },
+        {
+          ...tab,
+          id,
+          viewMode: tab.viewMode ?? useLayoutStore.getState().defaultViewMode,
+          locked: tab.locked ?? false,
+        },
       ]
       return {
         panes: {
@@ -122,7 +135,7 @@ export const useTabsStore = create<TabsStore>((set) => ({
       }
 
       const closingIndex = pane.tabs.findIndex((tab) => tab.id === tabId)
-      if (closingIndex === -1) {
+      if (closingIndex === -1 || pane.tabs[closingIndex].locked) {
         return state
       }
 
@@ -143,6 +156,12 @@ export const useTabsStore = create<TabsStore>((set) => ({
           },
         },
       }
+    }),
+  setTabLocked: (paneId, tabId, locked) =>
+    set((state) => {
+      const pane = state.panes[paneId]
+      const tabs = pane.tabs.map((tab) => (tab.id === tabId ? { ...tab, locked } : tab))
+      return { panes: { ...state.panes, [paneId]: { ...pane, tabs } } }
     }),
   setActiveTab: (paneId, tabId) =>
     set((state) => {
@@ -191,6 +210,7 @@ export function toSessionPane(paneId: PaneId): SessionPane {
       sortDirection: tab.sortDirection,
       filter: tab.filter,
       viewMode: tab.viewMode,
+      locked: tab.locked,
     })),
   }
 }
@@ -205,6 +225,7 @@ export function fromSessionPane(paneId: PaneId, pane: SessionPane): PaneTabs {
       sortDirection: tab.sortDirection,
       filter: tab.filter,
       viewMode: resolvePaneViewMode(tab.viewMode, useLayoutStore.getState().defaultViewMode),
+      locked: tab.locked ?? false,
     })),
   }
 }

@@ -67,8 +67,7 @@ export function JobCard({
   const isConflict = operation.status === 'conflict' || hasConflict
   const isPending = operation.status === 'pending'
   const topLevelItems = formatItemPreview(operation.itemNames, operation.totalItems)
-  const showTopLevelItems =
-    !isCompleted && !isFailed && !isCancelled && topLevelItems !== null
+  const showTopLevelItems = !isCompleted && !isFailed && !isCancelled && topLevelItems !== null
   const sourceSeparator = operation.sourceDir.includes('\\') ? '\\' : '/'
   const destinationSeparator = operation.destinationDir.includes('\\') ? '\\' : '/'
   const sourceDisplay = showTopLevelItems
@@ -193,11 +192,7 @@ export function JobCard({
   }, [])
 
   return (
-    <article
-      aria-labelledby={headingId}
-      data-status={operation.status}
-      className="p-4"
-    >
+    <article aria-labelledby={headingId} data-status={operation.status} className="p-4">
       <div className="flex items-start justify-between gap-4">
         <div className="flex min-w-0 flex-1 items-start gap-2">
           {reorderable ? (

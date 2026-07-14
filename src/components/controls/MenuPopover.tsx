@@ -19,7 +19,7 @@ export type MenuPopoverItem = {
 
 export type MenuPopoverRadioItem = MenuPopoverItem & { checked: boolean }
 
-type MenuPopoverProps = {
+type MenuPopoverSharedProps = {
   ariaLabel: string
   trigger: (props: {
     ref: Ref<HTMLButtonElement>
@@ -28,9 +28,10 @@ type MenuPopoverProps = {
     toggle: () => void
     onTriggerKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => void
   }) => ReactNode
-  items: MenuPopoverItem[]
-  radio?: boolean
 }
+
+type MenuPopoverProps = MenuPopoverSharedProps &
+  ({ items: MenuPopoverRadioItem[]; radio: true } | { items: MenuPopoverItem[]; radio?: false })
 
 /**
  * A compact, trigger-anchored menu for toolbar controls. It intentionally owns
@@ -54,8 +55,10 @@ export function MenuPopover({ ariaLabel, trigger, items, radio = false }: MenuPo
   function openMenu() {
     setOpen(true)
     requestAnimationFrame(() => {
-      const checkedIndex = radio ? (items as MenuPopoverRadioItem[]).findIndex((item) => item.checked) : -1
-      focusItem(checkedIndex >= 0 ? checkedIndex : enabledIndexes()[0] ?? 0)
+      const checkedIndex = radio
+        ? (items as MenuPopoverRadioItem[]).findIndex((item) => item.checked)
+        : -1
+      focusItem(checkedIndex >= 0 ? checkedIndex : (enabledIndexes()[0] ?? 0))
     })
   }
 
@@ -68,7 +71,8 @@ export function MenuPopover({ ariaLabel, trigger, items, radio = false }: MenuPo
     if (!open) return
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node
-      if (!menuRef.current?.contains(target) && !triggerRef.current?.contains(target)) closeAndRestoreFocus()
+      if (!menuRef.current?.contains(target) && !triggerRef.current?.contains(target))
+        closeAndRestoreFocus()
     }
     document.addEventListener('pointerdown', onPointerDown)
     return () => document.removeEventListener('pointerdown', onPointerDown)
@@ -126,7 +130,9 @@ export function MenuPopover({ ariaLabel, trigger, items, radio = false }: MenuPo
             return (
               <button
                 key={item.id}
-                ref={(element) => { itemRefs.current[index] = element }}
+                ref={(element) => {
+                  itemRefs.current[index] = element
+                }}
                 type="button"
                 role={radio ? 'menuitemradio' : 'menuitem'}
                 aria-checked={radio ? radioItem.checked : undefined}
@@ -137,8 +143,15 @@ export function MenuPopover({ ariaLabel, trigger, items, radio = false }: MenuPo
                 }}
                 className="flex w-full cursor-pointer items-center gap-2 rounded-tab px-2 py-1.5 text-left text-row text-light-text hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-blue-border disabled:cursor-not-allowed disabled:opacity-50 dark:text-dark-text dark:hover:bg-dark-hover"
               >
-                <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
-                  {radio && radioItem.checked ? <CheckIcon className="size-3.5 text-accent-blue-light dark:text-accent-blue" /> : item.icon}
+                <span
+                  className="flex size-4 shrink-0 items-center justify-center"
+                  aria-hidden="true"
+                >
+                  {radio && radioItem.checked ? (
+                    <CheckIcon className="size-3.5 text-accent-blue-light dark:text-accent-blue" />
+                  ) : (
+                    item.icon
+                  )}
                 </span>
                 {item.label}
               </button>

@@ -97,7 +97,9 @@ describe('warmVisibleNativeMenus', () => {
     ipc.override('warm_native_menus', () => undefined)
     setPaneEntries('C:\\root', [entryAt('C:\\root\\a.pdf')])
 
-    const promise = useNativeMenuWarmStore.getState().warmVisibleNativeMenus('left', ['C:\\root\\a.pdf'])
+    const promise = useNativeMenuWarmStore
+      .getState()
+      .warmVisibleNativeMenus('left', ['C:\\root\\a.pdf'])
     expect(useNativeMenuWarmStore.getState().warmedTypeKeys['file::pdf']).toBe(true)
 
     return promise

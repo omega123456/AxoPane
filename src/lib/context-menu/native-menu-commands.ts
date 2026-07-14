@@ -52,7 +52,11 @@ async function requestArchiveOperation(
   kind: StartOpRequest['kind'],
   payload: CompressArchiveRequest | ExtractArchiveRequest,
 ): Promise<string> {
-  return startOp({ kind, destinationDir: payload.destinationDir, items: archiveItems(payload.paths) })
+  return startOp({
+    kind,
+    destinationDir: payload.destinationDir,
+    items: archiveItems(payload.paths),
+  })
 }
 
 export function requestCompressArchive(payload: CompressArchiveRequest): Promise<string> {

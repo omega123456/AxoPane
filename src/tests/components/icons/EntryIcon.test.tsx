@@ -60,9 +60,7 @@ describe('EntryIcon', () => {
   })
 
   it('renders an open folder with a stronger fill', () => {
-    const { container } = render(
-      <EntryIcon entry={{ name: 'Documents', isDir: true }} isOpen />,
-    )
+    const { container } = render(<EntryIcon entry={{ name: 'Documents', isDir: true }} isOpen />)
     const svg = container.querySelector('svg')
     expect(svg).toHaveAttribute('fill-opacity', '0.26')
   })

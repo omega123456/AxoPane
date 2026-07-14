@@ -15,9 +15,15 @@ export function TextAreaField({
 }) {
   return (
     <div>
-      {label ? <div className="mb-1.5 text-row font-medium text-light-text dark:text-dark-text">{label}</div> : null}
+      {label ? (
+        <div className="mb-1.5 text-row font-medium text-light-text dark:text-dark-text">
+          {label}
+        </div>
+      ) : null}
       {description ? (
-        <div className="mb-2 text-uxs text-light-text-muted dark:text-dark-text-muted">{description}</div>
+        <div className="mb-2 text-uxs text-light-text-muted dark:text-dark-text-muted">
+          {description}
+        </div>
       ) : null}
       <textarea
         aria-label={ariaLabel ?? label}

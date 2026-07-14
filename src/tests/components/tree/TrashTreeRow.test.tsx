@@ -25,7 +25,14 @@ beforeEach(() => {
     showHiddenFiles: false,
     everythingStatus: { status: 'unavailable', isAvailable: false },
     volumes: [
-      { mountRoot: 'C:\\', label: 'Windows', totalBytes: 1, freeBytes: 1, isNetwork: false, isRemovable: false },
+      {
+        mountRoot: 'C:\\',
+        label: 'Windows',
+        totalBytes: 1,
+        freeBytes: 1,
+        isNetwork: false,
+        isRemovable: false,
+      },
     ],
   })
 })

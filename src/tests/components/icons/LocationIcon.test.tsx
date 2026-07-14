@@ -33,9 +33,7 @@ describe('LocationIcon', () => {
 
   it('shows a network glyph at a network share root', () => {
     expect(
-      iconClass('\\\\server\\share', [
-        volume({ mountRoot: '\\\\server\\share', isNetwork: true }),
-      ]),
+      iconClass('\\\\server\\share', [volume({ mountRoot: '\\\\server\\share', isNetwork: true })]),
     ).toContain('lucide-network')
   })
 

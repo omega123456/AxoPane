@@ -480,10 +480,12 @@ describe('trash pane commands', () => {
   })
 
   it('shows an error toast when restore fails', async () => {
-    ipc.override('restore_from_trash', () =>
-      Promise.reject(
-        new Error("'report.txt' has no known original location and cannot be restored"),
-      ) as never,
+    ipc.override(
+      'restore_from_trash',
+      () =>
+        Promise.reject(
+          new Error("'report.txt' has no known original location and cannot be restored"),
+        ) as never,
     )
 
     executeCommand('restore', 'left', 'report.txt')

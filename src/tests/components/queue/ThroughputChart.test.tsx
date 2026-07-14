@@ -205,10 +205,7 @@ describe('ThroughputChart', () => {
       })
       expect(screen.getByTestId('throughput-chart-line').getAttribute('d')).toBe(firstLine)
       expect(screen.getByTestId('throughput-chart-scale-label')).toHaveTextContent('3.1 KB/s')
-      expect(screen.getByTestId('throughput-chart')).toHaveAttribute(
-        'data-scale-settled',
-        'false',
-      )
+      expect(screen.getByTestId('throughput-chart')).toHaveAttribute('data-scale-settled', 'false')
 
       act(() => {
         now = 450
@@ -224,10 +221,7 @@ describe('ThroughputChart', () => {
       const finalLine = screen.getByTestId('throughput-chart-line').getAttribute('d')
       expect(finalLine).not.toBe(firstLine)
       expect(finalLine).not.toBe(midLine)
-      expect(screen.getByTestId('throughput-chart')).toHaveAttribute(
-        'data-scale-settled',
-        'true',
-      )
+      expect(screen.getByTestId('throughput-chart')).toHaveAttribute('data-scale-settled', 'true')
     } finally {
       nowSpy.mockRestore()
       animationFrame.restore()

@@ -276,7 +276,9 @@ describe('ContextMenu', () => {
       })
     })
     rerender(<ContextMenu />)
-    fireEvent.mouseDown(screen.getByRole('menu', { name: 'Report.txt' }).parentElement as HTMLElement)
+    fireEvent.mouseDown(
+      screen.getByRole('menu', { name: 'Report.txt' }).parentElement as HTMLElement,
+    )
     expect(useContextMenuStore.getState().menu).toBeNull()
   })
 
@@ -495,7 +497,9 @@ describe('ContextMenu', () => {
 
     render(<ContextMenu />)
 
-    expect(await screen.findByRole('menuitem', { name: 'Open in Fixture Terminal' })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('menuitem', { name: 'Open in Fixture Terminal' }),
+    ).toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: 'Open with Fixture' })).not.toBeInTheDocument()
 
     await user.hover(screen.getByRole('menuitem', { name: 'Fixture archive tools' }))
@@ -552,7 +556,9 @@ describe('ContextMenu', () => {
 
       const view = render(<ContextMenu />)
 
-      expect(screen.queryByRole('status', { name: 'Loading native menu items' })).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole('status', { name: 'Loading native menu items' }),
+      ).not.toBeInTheDocument()
 
       await act(async () => {
         vi.advanceTimersByTime(1000)
@@ -567,7 +573,9 @@ describe('ContextMenu', () => {
         await Promise.resolve()
       })
 
-      expect(screen.queryByRole('status', { name: 'Loading native menu items' })).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole('status', { name: 'Loading native menu items' }),
+      ).not.toBeInTheDocument()
       expect(screen.queryByRole('menuitem', { name: 'Open' })).toBeInTheDocument()
       expect(view.container.querySelector('div[aria-hidden="true"].min-h-24')).not.toBeNull()
     } finally {
@@ -769,7 +777,9 @@ describe('ContextMenu', () => {
       await Promise.resolve()
     })
 
-    expect(await screen.findByRole('menuitem', { name: 'Open in Second Terminal' })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('menuitem', { name: 'Open in Second Terminal' }),
+    ).toBeInTheDocument()
 
     await act(async () => {
       first.resolve({
@@ -791,7 +801,9 @@ describe('ContextMenu', () => {
       await Promise.resolve()
     })
 
-    expect(screen.queryByRole('menuitem', { name: 'Open in First Terminal' })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('menuitem', { name: 'Open in First Terminal' }),
+    ).not.toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: 'Open in Second Terminal' })).toBeInTheDocument()
   })
 
@@ -806,7 +818,10 @@ describe('ContextMenu', () => {
     })
 
     rectSpy.mockImplementation(function mockRect(this: HTMLElement) {
-      if (this.getAttribute('role') === 'menu' && this.getAttribute('aria-label') === 'Report.txt') {
+      if (
+        this.getAttribute('role') === 'menu' &&
+        this.getAttribute('aria-label') === 'Report.txt'
+      ) {
         return DOMRect.fromRect({ x: 0, y: 0, width: 288, height: 260 })
       }
 

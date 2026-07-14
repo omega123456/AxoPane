@@ -1,8 +1,4 @@
-import type {
-  ConflictResolution,
-  OpSnapshot,
-  StartOpRequest,
-} from '@/lib/types/ipc'
+import type { ConflictResolution, OpSnapshot, StartOpRequest } from '@/lib/types/ipc'
 import { invokeCommand } from './ipc/client'
 
 export function startOp(payload: StartOpRequest) {

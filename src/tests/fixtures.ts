@@ -402,6 +402,7 @@ export const fixtures: {
     relativeDates: false,
     autoFolderSize: true,
     autoExpandActiveQueueToasts: false,
+    favourites: [],
     keybindings: {},
     columns: [
       { key: 'name', visible: true },
@@ -424,6 +425,7 @@ export const fixtures: {
         created: 128,
       },
       defaultPaneMode: 'dual',
+      defaultViewMode: 'details',
       restoreSession: true,
       zoom: '100',
     },
@@ -440,6 +442,7 @@ export const fixtures: {
     relativeDates: false,
     autoFolderSize: true,
     autoExpandActiveQueueToasts: false,
+    favourites: [],
     keybindings: {},
     columns: [
       { key: 'name', visible: true },
@@ -462,6 +465,7 @@ export const fixtures: {
         created: 128,
       },
       defaultPaneMode: 'dual',
+      defaultViewMode: 'details',
       restoreSession: true,
       zoom: '100',
     },

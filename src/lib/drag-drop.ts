@@ -13,12 +13,20 @@ export type DragItem = {
 }
 
 /** The active internal drag: which pane/folder it started from and what it carries. */
-export type DragPayload = {
+export type FileTransferDragPayload = {
+  kind: 'file-transfer'
   sourcePaneId: PaneId
   /** The directory the dragged items live in (used to reject no-op same-folder drops). */
   sourceDir: string
   items: DragItem[]
 }
+
+export type FavouriteDragPayload = {
+  kind: 'favourite'
+  path: string
+}
+
+export type DragPayload = FileTransferDragPayload | FavouriteDragPayload
 
 /** Keyboard modifiers that influence copy-vs-move, sampled at drop time. */
 export type DropModifiers = {
@@ -47,7 +55,11 @@ function normalizePath(path: string, os: PlatformOs) {
 }
 
 /** True when `candidate` is `folder` itself or nested anywhere beneath it. */
-export function isSameOrDescendant(candidate: string, folder: string, os: PlatformOs = detectPlatformOs()) {
+export function isSameOrDescendant(
+  candidate: string,
+  folder: string,
+  os: PlatformOs = detectPlatformOs(),
+) {
   const sep = separator(os)
   const a = normalizePath(candidate, os)
   const b = normalizePath(folder, os)
@@ -111,7 +123,7 @@ export function canDropInto(
   destinationDir: string,
   os: PlatformOs = detectPlatformOs(),
 ): boolean {
-  if (!payload || payload.items.length === 0) {
+  if (!payload || payload.kind !== 'file-transfer' || payload.items.length === 0) {
     return false
   }
   // Same directory: a move would be a no-op and a copy would collide with the
@@ -146,6 +158,7 @@ export async function performDrop(
   if (!payload || !canDropInto(payload, destinationDir, os)) {
     return null
   }
+  if (payload.kind !== 'file-transfer') return null
   const kind = resolveDropKind(modifiers, payload.sourceDir, destinationDir, os)
   return startOp({
     kind,

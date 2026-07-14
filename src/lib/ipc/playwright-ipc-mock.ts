@@ -19,7 +19,12 @@ type ListenerMap = {
 const listeners: ListenerMap = {}
 const cancelledThumbnailScopes = new Set<string>()
 
-function thumbnailScopeKey(payload: IpcCommandMap['request_thumbnails']['request']) {
+function thumbnailScopeKey(
+  payload: Pick<
+    IpcCommandMap['request_thumbnails']['request'],
+    'paneId' | 'tabId' | 'path' | 'generation'
+  >,
+) {
   return `${payload.paneId}:${payload.tabId}:${payload.path}:${payload.generation}`
 }
 
@@ -33,7 +38,8 @@ function emitPlaywrightEvent<EventName extends keyof IpcEventMap>(
 }
 
 function readScenario() {
-  return (globalThis as { __PLAYWRIGHT_IPC_SCENARIO__?: PlaywrightScenario }).__PLAYWRIGHT_IPC_SCENARIO__
+  return (globalThis as { __PLAYWRIGHT_IPC_SCENARIO__?: PlaywrightScenario })
+    .__PLAYWRIGHT_IPC_SCENARIO__
 }
 
 /**
@@ -69,7 +75,9 @@ function listVolumesFixture() {
 }
 
 function isVolumeRoot(path: string) {
-  return listVolumesFixture().some((volume) => volume.mountRoot.toLowerCase() === path.toLowerCase())
+  return listVolumesFixture().some(
+    (volume) => volume.mountRoot.toLowerCase() === path.toLowerCase(),
+  )
 }
 
 function loadSessionFixture() {

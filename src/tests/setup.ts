@@ -29,7 +29,8 @@ beforeAll(() => {
   Object.defineProperty(window, 'requestAnimationFrame', {
     configurable: true,
     writable: true,
-    value: (callback: FrameRequestCallback) => window.setTimeout(() => callback(performance.now()), 0),
+    value: (callback: FrameRequestCallback) =>
+      window.setTimeout(() => callback(performance.now()), 0),
   })
   Object.defineProperty(window, 'cancelAnimationFrame', {
     configurable: true,

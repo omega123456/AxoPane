@@ -179,7 +179,9 @@ function restoreFiles(snapshot) {
 async function readReleaseNotes(rl) {
   console.log('')
   console.log('Release notes for the GitHub release.')
-  console.log('Press Enter once to use the default message, or enter multiple lines and finish with an empty line.')
+  console.log(
+    'Press Enter once to use the default message, or enter multiple lines and finish with an empty line.',
+  )
   console.log('')
   console.log(`Default:\n  ${DEFAULT_RELEASE_BODY}\n`)
 
@@ -202,7 +204,9 @@ async function readReleaseNotes(rl) {
 
 async function main() {
   if (!gitRemoteExists('origin')) {
-    throw new Error('Missing git remote "origin". Configure the canonical release remote before bumping and pushing a tag.')
+    throw new Error(
+      'Missing git remote "origin". Configure the canonical release remote before bumping and pushing a tag.',
+    )
   }
 
   const snapshot = {

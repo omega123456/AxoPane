@@ -25,7 +25,12 @@ import {
 } from '@/lib/ipc/events'
 import { resolveCommandForEvent } from '@/lib/keymap'
 import { createRafBatcher } from '@/lib/raf-batcher'
-import type { IconStateEvent, ItemCountEvent, SizeStateEvent, ThumbnailResultEvent } from '@/lib/types/ipc'
+import type {
+  IconStateEvent,
+  ItemCountEvent,
+  SizeStateEvent,
+  ThumbnailResultEvent,
+} from '@/lib/types/ipc'
 import { UpdateBanner } from '@/components/states/UpdateBanner'
 import { useUpdaterStore } from '@/stores/updater-store'
 import { useActionDialogStore } from '@/stores/action-dialog-store'

@@ -5,7 +5,10 @@ import { log } from '@/lib/app-log-commands'
 import { createFileInPane, createFolderInPane } from '@/lib/file-actions'
 import { deleteFromTrash, emptyTrash } from '@/lib/ipc/commands'
 import { startOp } from '@/lib/queue-commands'
-import { useActionDialogStore, type ActionDialog as ActionDialogState } from '@/stores/action-dialog-store'
+import {
+  useActionDialogStore,
+  type ActionDialog as ActionDialogState,
+} from '@/stores/action-dialog-store'
 import { usePanesStore } from '@/stores/panes-store'
 
 export function ActionDialog() {
@@ -136,7 +139,9 @@ function PromptDialog({
   return (
     <DialogShell label={copy.title} onDismiss={close}>
       <div className="border-b border-light-border p-4 dark:border-dark-border">
-        <div className="text-sm font-semibold text-light-text dark:text-dark-text">{copy.title}</div>
+        <div className="text-sm font-semibold text-light-text dark:text-dark-text">
+          {copy.title}
+        </div>
       </div>
       <div className="p-4">
         <label className="block text-uxs uppercase tracking-wide text-light-text-muted dark:text-dark-text-muted">
@@ -235,13 +240,16 @@ function DeleteDialog({ dialog }: { dialog: Extract<ActionDialogState, { kind: '
             Delete {count === 1 ? '1 item' : `${count} items`}?
           </div>
           <div className="mt-1 break-all font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-            {count === 1 ? dialog.targets[0].name : `${dialog.targets[0].name} and ${count - 1} more`}
+            {count === 1
+              ? dialog.targets[0].name
+              : `${dialog.targets[0].name} and ${count - 1} more`}
           </div>
         </div>
       </div>
       <div className="p-4">
         <p className="text-row text-light-text-soft dark:text-dark-text-soft">
-          This permanently deletes the selected {count === 1 ? 'item' : 'items'}. This cannot be undone.
+          This permanently deletes the selected {count === 1 ? 'item' : 'items'}. This cannot be
+          undone.
         </p>
         {error ? (
           <p className="mt-2 flex items-center gap-2 text-uxs text-accent-amber">
@@ -495,14 +503,16 @@ function DeleteFromTrashDialog({
             Delete {count === 1 ? '1 item' : `${count} items`} from trash?
           </div>
           <div className="mt-1 break-all font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-            {count === 1 ? dialog.targets[0].name : `${dialog.targets[0].name} and ${count - 1} more`}
+            {count === 1
+              ? dialog.targets[0].name
+              : `${dialog.targets[0].name} and ${count - 1} more`}
           </div>
         </div>
       </div>
       <div className="p-4">
         <p className="text-row text-light-text-soft dark:text-dark-text-soft">
-          This permanently deletes the selected {count === 1 ? 'item' : 'items'} from the trash. This
-          cannot be undone.
+          This permanently deletes the selected {count === 1 ? 'item' : 'items'} from the trash.
+          This cannot be undone.
         </p>
         {error ? (
           <p className="mt-2 flex items-center gap-2 text-uxs text-accent-amber">
@@ -708,7 +718,7 @@ function ArchiveConfirmDialog({
         items: dialog.targets.map((target) => ({
           sourcePath: target.path,
           name: target.name,
-          sizeBytes: dialog.operation === 'extract' ? 0 : target.sizeBytes ?? 0,
+          sizeBytes: dialog.operation === 'extract' ? 0 : (target.sizeBytes ?? 0),
         })),
       })
       close()

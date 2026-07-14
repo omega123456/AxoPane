@@ -41,7 +41,10 @@ export function pruneThumbnailCache(
   let weight = entries.reduce((total, [, record]) => total + record.weight, 0)
   const candidates = entries
     .filter(([key]) => !protectedKeys.has(key))
-    .sort(([leftKey, left], [rightKey, right]) => left.touched - right.touched || leftKey.localeCompare(rightKey))
+    .sort(
+      ([leftKey, left], [rightKey, right]) =>
+        left.touched - right.touched || leftKey.localeCompare(rightKey),
+    )
 
   for (const [key, record] of candidates) {
     if (entries.length <= MAX_THUMBNAIL_CACHE_ENTRIES && weight <= MAX_THUMBNAIL_CACHE_BYTES) break

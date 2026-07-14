@@ -1,7 +1,10 @@
 import { create } from 'zustand'
 import { log } from '@/lib/app-log-commands'
 import { warmNativeMenus } from '@/lib/ipc/commands'
-import { buildWarmRequestForEntry, nativeMenuTypeKeyForEntry } from '@/lib/context-menu/native-menu-type-key'
+import {
+  buildWarmRequestForEntry,
+  nativeMenuTypeKeyForEntry,
+} from '@/lib/context-menu/native-menu-type-key'
 import { detectPlatformOs } from '@/lib/keymap'
 import { isTrashPath } from '@/lib/trash'
 import type { DirectoryEntry, LoadNativeMenuRequest } from '@/lib/types/ipc'
@@ -62,8 +65,12 @@ export const useNativeMenuWarmStore = create<NativeMenuWarmStore>((set, get) => 
     }
 
     const collected = collectWarmRequests(pane.entries, pane.path, paths, get().warmedTypeKeys)
-    const { requests, skippedAlreadyWarmedOrInFlight, skippedDuplicateInBatch, skippedMissingEntry } =
-      collected
+    const {
+      requests,
+      skippedAlreadyWarmedOrInFlight,
+      skippedDuplicateInBatch,
+      skippedMissingEntry,
+    } = collected
     if (requests.length === 0) {
       log.debug('skipping native menu warm batch because every visible type was already handled', {
         paneId,

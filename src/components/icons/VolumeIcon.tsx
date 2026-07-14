@@ -17,7 +17,10 @@ type VolumeStyle = {
  * differentiated from removable/network media by shape and color.
  */
 const VOLUME_STYLES: Record<VolumeCategory, VolumeStyle> = {
-  fixed: { Glyph: HardDriveIcon, colorClassName: 'text-light-text-muted dark:text-dark-text-muted' },
+  fixed: {
+    Glyph: HardDriveIcon,
+    colorClassName: 'text-light-text-muted dark:text-dark-text-muted',
+  },
   removable: { Glyph: UsbIcon, colorClassName: 'text-accent-amber' },
   network: { Glyph: NetworkIcon, colorClassName: 'text-accent-green' },
 }

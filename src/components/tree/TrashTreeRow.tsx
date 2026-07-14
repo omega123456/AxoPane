@@ -24,7 +24,10 @@ function TrashTreeRowImpl({ isCurrent, onNavigate, onOpenTab, onContextMenu }: T
       }`}
       style={{ paddingLeft: '8px' }}
     >
-      <span className="inline-flex h-6 w-6 flex-none items-center justify-center" aria-hidden="true" />
+      <span
+        className="inline-flex h-6 w-6 flex-none items-center justify-center"
+        aria-hidden="true"
+      />
       <button
         type="button"
         onClick={onNavigate}

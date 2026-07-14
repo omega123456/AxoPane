@@ -338,9 +338,7 @@ describe('FileRow memoization', () => {
   it('is wrapped in React.memo', () => {
     // `FileRow` is exported as the memoized component itself. React.memo
     // components carry a `$$typeof` of Symbol.for('react.memo').
-    expect(String((FileRow as unknown as { $$typeof: symbol }).$$typeof)).toBe(
-      'Symbol(react.memo)',
-    )
+    expect(String((FileRow as unknown as { $$typeof: symbol }).$$typeof)).toBe('Symbol(react.memo)')
   })
 
   it('skips re-rendering when a parent re-renders but every FileRow prop stays referentially equal, and re-renders once a prop genuinely changes', () => {

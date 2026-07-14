@@ -222,7 +222,10 @@ export function requestVisibleItemCounts(payload: VisibleItemCountsRequest) {
 }
 
 export function sortActiveItems(payload: ActiveItemsSortRequest) {
-  return invokeCommand({ command: 'sort_active_items', payload }) as Promise<ActiveItemsSortResponse>
+  return invokeCommand({
+    command: 'sort_active_items',
+    payload,
+  }) as Promise<ActiveItemsSortResponse>
 }
 
 export function cancelSize(path: string) {

@@ -52,8 +52,7 @@ impl ThumbnailCandidate {
         let Ok(metadata) = std::fs::metadata(&self.fingerprint.path) else {
             return false;
         };
-        let Some(modified_at) = crate::fs::system_time_to_rfc3339(metadata.modified().ok())
-        else {
+        let Some(modified_at) = crate::fs::system_time_to_rfc3339(metadata.modified().ok()) else {
             return false;
         };
         let Ok(modified_at) = OffsetDateTime::parse(&modified_at, &Rfc3339) else {

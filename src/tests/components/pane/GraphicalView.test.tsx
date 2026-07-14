@@ -7,15 +7,60 @@ import type { DirectoryEntry } from '@/lib/types/ipc'
 import type { PaneState } from '@/types/pane'
 
 function entries(count: number): DirectoryEntry[] {
-  return Array.from({ length: count }, (_, index) => ({ id: `entry-${index}`, name: `Entry ${index}`, path: `C:\\root\\Entry ${index}`, isDir: false, sizeBytes: index, itemCount: null, typeLabel: 'File', modifiedAt: null, createdAt: null, attributes: [], isHidden: false, isSystem: false }))
+  return Array.from({ length: count }, (_, index) => ({
+    id: `entry-${index}`,
+    name: `Entry ${index}`,
+    path: `C:\\root\\Entry ${index}`,
+    isDir: false,
+    sizeBytes: index,
+    itemCount: null,
+    typeLabel: 'File',
+    modifiedAt: null,
+    createdAt: null,
+    attributes: [],
+    isHidden: false,
+    isSystem: false,
+  }))
 }
 
 function actions(): FileRowActions {
-  return { onPointerDown: vi.fn(), onActivate: vi.fn(), onClick: vi.fn(), onContextMenu: vi.fn(), onMiddleClick: vi.fn(), onDragStart: vi.fn(), onDragEnd: vi.fn(), onDragEnter: vi.fn(), onDragOver: vi.fn(), onDragLeave: vi.fn(), onDrop: vi.fn(), onRenameChange: vi.fn(), onRenameSubmit: vi.fn(), onRenameCancel: vi.fn(), onRenameBlur: vi.fn() }
+  return {
+    onPointerDown: vi.fn(),
+    onActivate: vi.fn(),
+    onClick: vi.fn(),
+    onContextMenu: vi.fn(),
+    onMiddleClick: vi.fn(),
+    onDragStart: vi.fn(),
+    onDragEnd: vi.fn(),
+    onDragEnter: vi.fn(),
+    onDragOver: vi.fn(),
+    onDragLeave: vi.fn(),
+    onDrop: vi.fn(),
+    onRenameChange: vi.fn(),
+    onRenameSubmit: vi.fn(),
+    onRenameCancel: vi.fn(),
+    onRenameBlur: vi.fn(),
+  }
 }
 
 function pane(items = entries(10), focusedEntryId: string | null = null): PaneState {
-  return { id: 'left', title: 'Left', path: 'C:\\root', entries: items, focusedEntryId, sortKey: 'name', sortDirection: 'asc', filterDraft: '', filterApplied: '', typing: false, loading: false, itemsSortStatus: 'idle', error: null, listRequestId: 0, scrollPositions: {} }
+  return {
+    id: 'left',
+    title: 'Left',
+    path: 'C:\\root',
+    entries: items,
+    focusedEntryId,
+    sortKey: 'name',
+    sortDirection: 'asc',
+    filterDraft: '',
+    filterApplied: '',
+    typing: false,
+    loading: false,
+    itemsSortStatus: 'idle',
+    error: null,
+    listRequestId: 0,
+    scrollPositions: {},
+  }
 }
 
 function renderView(overrides: Partial<React.ComponentProps<typeof GraphicalView>> = {}) {
@@ -24,13 +69,37 @@ function renderView(overrides: Partial<React.ComponentProps<typeof GraphicalView
   return {
     onVisibleRangeChange,
     onFocusEntry,
-    ...render(<GraphicalView pane={pane()} mode="icons" isActivePane selectedIds={new Set(['entry-1'])} cutEntryPaths={new Set()} dropTargetEntryId={null} rename={null} actions={actions()} onVisibleRangeChange={onVisibleRangeChange} onFocusEntry={onFocusEntry} {...overrides} />),
+    ...render(
+      <GraphicalView
+        pane={pane()}
+        mode="icons"
+        isActivePane
+        selectedIds={new Set(['entry-1'])}
+        cutEntryPaths={new Set()}
+        dropTargetEntryId={null}
+        rename={null}
+        actions={actions()}
+        onVisibleRangeChange={onVisibleRangeChange}
+        onFocusEntry={onFocusEntry}
+        {...overrides}
+      />,
+    ),
   }
 }
 
 describe('GraphicalView', () => {
   beforeEach(() => {
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, width: 640, height: 480, top: 0, left: 0, right: 640, bottom: 480, toJSON: () => ({}) })
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 640,
+      height: 480,
+      top: 0,
+      left: 0,
+      right: 640,
+      bottom: 480,
+      toJSON: () => ({}),
+    })
   })
 
   afterEach(() => vi.restoreAllMocks())
@@ -45,7 +114,17 @@ describe('GraphicalView', () => {
   })
 
   it('falls back to one column when the pane is narrower than one complete cell', async () => {
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, width: 80, height: 480, top: 0, left: 0, right: 80, bottom: 480, toJSON: () => ({}) })
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 80,
+      height: 480,
+      top: 0,
+      left: 0,
+      right: 80,
+      bottom: 480,
+      toJSON: () => ({}),
+    })
     renderView()
     await waitFor(() => expect(screen.getByRole('grid')).toHaveAttribute('aria-colcount', '1'))
   })
@@ -60,7 +139,11 @@ describe('GraphicalView', () => {
   it('moves focus through graphical keyboard geometry and exposes an imperative focused reveal API', async () => {
     const handle = createRef<GraphicalViewHandle>()
     const onKeyboardMove = vi.fn()
-    const { onFocusEntry } = renderView({ ref: handle, pane: pane(entries(10), 'entry-4'), onKeyboardMove })
+    const { onFocusEntry } = renderView({
+      ref: handle,
+      pane: pane(entries(10), 'entry-4'),
+      onKeyboardMove,
+    })
     const grid = screen.getByRole('grid')
     await waitFor(() => expect(grid).toHaveAttribute('aria-colcount', '3'))
     fireEvent.keyDown(grid, { key: 'ArrowDown' })

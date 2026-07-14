@@ -143,10 +143,7 @@ function injectNativeSection(menu: ContextMenuDocument): ContextMenuDocument {
 }
 
 function getTopLevelItems(menu: ContextMenuDocument): FocusableItem[] {
-  return [
-    ...menu.topStrip,
-    ...menu.sections.flatMap((section) => section.rows),
-  ]
+  return [...menu.topStrip, ...menu.sections.flatMap((section) => section.rows)]
 }
 
 function getEnabledItems(items: FocusableItem[]) {
@@ -260,9 +257,8 @@ function mapNativeChildItem(item: NativeMenuItem): ContextMenuSubmenuRow | null 
 
 function mapNativeItem(item: NativeMenuItem): ContextMenuRowItem | null {
   const childRows = item.children.map(mapNativeChildItem).filter((child) => child !== null)
-  const invokeToken = typeof item.invokeToken === 'string' && item.invokeToken.length > 0
-    ? item.invokeToken
-    : null
+  const invokeToken =
+    typeof item.invokeToken === 'string' && item.invokeToken.length > 0 ? item.invokeToken : null
   const canInvoke = invokeToken !== null
   const base = {
     id: item.id,
@@ -378,12 +374,7 @@ export const useContextMenuStore = create<Store>((set, get) => ({
       const rows = items.map(mapNativeItem).filter((item) => item !== null)
 
       return {
-        menu: sanitizeMenu(
-          replaceNativeSectionRows(
-            state.menu,
-            rows,
-          ),
-        ),
+        menu: sanitizeMenu(replaceNativeSectionRows(state.menu, rows)),
         nativeRequest: null,
         nativeRequestId: null,
         nativeLoading: false,

@@ -9,12 +9,17 @@ describe('PaneViewMenu', () => {
 
   it('labels the active mode and patches only the active tab', async () => {
     const user = userEvent.setup()
-    useTabsStore.getState().addTab('left', { path: 'C:\\two', sortKey: 'name', sortDirection: 'asc', filter: '' })
+    useTabsStore
+      .getState()
+      .addTab('left', { path: 'C:\\two', sortKey: 'name', sortDirection: 'asc', filter: '' })
     render(<PaneViewMenu paneId="left" />)
 
     expect(screen.getByRole('button', { name: 'View: Details' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'View: Details' }))
-    expect(screen.getByRole('menuitemradio', { name: 'Details' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('menuitemradio', { name: 'Details' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    )
     await user.click(screen.getByRole('menuitemradio', { name: 'Large thumbnails' }))
 
     const tabs = useTabsStore.getState().panes.left.tabs

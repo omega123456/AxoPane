@@ -24,6 +24,8 @@ export const TREE_HEADER_HEIGHT_PX = 28
  */
 export type TreeFlatRow =
   | { kind: 'header'; label: string; renderKey: string }
+  | { kind: 'favourite'; path: string; renderKey: string }
+  | { kind: 'empty-favourites'; renderKey: string }
   | { kind: 'node'; path: string; depth: number; volume?: VolumeInfo; renderKey: string }
   | { kind: 'trash'; renderKey: string }
 
@@ -58,11 +60,21 @@ export function treeRowHeight(row: TreeFlatRow): number {
 export function buildTreeFlatModel(
   treeNodes: Record<string, TreeNodeState>,
   volumes: VolumeInfo[],
+  favourites: string[] = [],
 ): TreeFlatModel {
   const groups = groupVolumesByCategory(volumes)
   const volumeRootKeys = new Set(volumes.map((volume) => volume.mountRoot.toLowerCase()))
   const rows: TreeFlatRow[] = []
   const indexByPath = new Map<string, number>()
+
+  rows.push({ kind: 'header', label: 'Favourites', renderKey: 'header-favourites' })
+  if (favourites.length === 0) {
+    rows.push({ kind: 'empty-favourites', renderKey: 'empty-favourites' })
+  } else {
+    for (const path of favourites) {
+      rows.push({ kind: 'favourite', path, renderKey: `favourite-${path}` })
+    }
+  }
 
   for (const group of groups) {
     rows.push({ kind: 'header', label: group.label, renderKey: `header-${group.category}` })

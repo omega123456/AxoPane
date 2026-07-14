@@ -8,7 +8,9 @@ describe('SettingRow', () => {
       <SettingRow
         title="Restore last session"
         description="Reopen the previous tabs and folders on launch."
-        control={<ToggleSwitch checked={true} onChange={() => undefined} label="Restore last session" />}
+        control={
+          <ToggleSwitch checked={true} onChange={() => undefined} label="Restore last session" />
+        }
       />,
     )
 

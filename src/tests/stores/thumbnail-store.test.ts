@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { thumbnailFingerprintKey, useThumbnailStore } from '@/stores/thumbnail-store'
-import type { ThumbnailCandidateRequest, ThumbnailResultEvent } from '@/lib/types/ipc'
+import type {
+  IpcCommandMap,
+  ThumbnailCandidateRequest,
+  ThumbnailResultEvent,
+} from '@/lib/types/ipc'
 
 const scope = { paneId: 'left', tabId: 'tab-1', path: 'C:\\files', mode: 'thumbnails' as const }
 const candidate: ThumbnailCandidateRequest = {
@@ -32,7 +36,7 @@ beforeEach(() => {
 
 describe('thumbnail store', () => {
   it('deduplicates visible candidates, cache hits, and active range reports', async () => {
-    const request = vi.fn(() => undefined)
+    const request = vi.fn<(payload: IpcCommandMap['request_thumbnails']['request']) => void>()
     ipc.override('request_thumbnails', request)
     await useThumbnailStore.getState().setVisibleCandidates(scope, [candidate, candidate])
     expect(request).toHaveBeenCalledOnce()
@@ -48,23 +52,23 @@ describe('thumbnail store', () => {
     const cancel = vi.fn(() => undefined)
     ipc.override('cancel_thumbnails', cancel)
     await useThumbnailStore.getState().setVisibleCandidates(scope, [candidate])
-    await useThumbnailStore.getState().setVisibleCandidates(scope, [{ ...candidate, sizeBytes: 31 }])
-    expect(cancel).toHaveBeenCalledWith(
-      expect.objectContaining({ ...scope, generation: 1 }),
-    )
+    await useThumbnailStore
+      .getState()
+      .setVisibleCandidates(scope, [{ ...candidate, sizeBytes: 31 }])
+    expect(cancel).toHaveBeenCalledWith(expect.objectContaining({ ...scope, generation: 1 }))
     await useThumbnailStore.getState().cancelScope(scope.paneId, scope.tabId)
-    expect(cancel).toHaveBeenCalledWith(
-      expect.objectContaining({ ...scope, generation: 2 }),
-    )
+    expect(cancel).toHaveBeenCalledWith(expect.objectContaining({ ...scope, generation: 2 }))
   })
 
   it('rejects stale context and fingerprint results without cache mutation', async () => {
     await useThumbnailStore.getState().setVisibleCandidates(scope, [candidate])
-    useThumbnailStore.getState().applyThumbnailResults([
-      result({ generation: 2 }),
-      result({ fingerprintPath: 'C:\\files\\other.png' }),
-      result({ path: 'C:\\other' }),
-    ])
+    useThumbnailStore
+      .getState()
+      .applyThumbnailResults([
+        result({ generation: 2 }),
+        result({ fingerprintPath: 'C:\\files\\other.png' }),
+        result({ path: 'C:\\other' }),
+      ])
     expect(useThumbnailStore.getState().cache).toEqual({})
   })
 
@@ -72,10 +76,17 @@ describe('thumbnail store', () => {
     const request = vi.fn(() => undefined)
     ipc.override('request_thumbnails', request)
     await useThumbnailStore.getState().setVisibleCandidates(scope, [candidate])
-    useThumbnailStore.getState().applyThumbnailResults([result({ state: 'unavailable', dataUrl: null })])
+    useThumbnailStore
+      .getState()
+      .applyThumbnailResults([result({ state: 'unavailable', dataUrl: null })])
     const key = thumbnailFingerprintKey(candidate)
-    expect(useThumbnailStore.getState().cache[key]).toMatchObject({ state: 'unavailable', dataUrl: null })
-    await useThumbnailStore.getState().setVisibleCandidates({ ...scope, path: 'C:\\files-2' }, [candidate])
+    expect(useThumbnailStore.getState().cache[key]).toMatchObject({
+      state: 'unavailable',
+      dataUrl: null,
+    })
+    await useThumbnailStore
+      .getState()
+      .setVisibleCandidates({ ...scope, path: 'C:\\files-2' }, [candidate])
     expect(request).toHaveBeenCalledOnce()
   })
 })

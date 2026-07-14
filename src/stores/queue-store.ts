@@ -1,11 +1,5 @@
 import { create } from 'zustand'
-import {
-  cancelOp,
-  pauseOp,
-  resolveConflict,
-  resumeOp,
-  retryOp,
-} from '@/lib/queue-commands'
+import { cancelOp, pauseOp, resolveConflict, resumeOp, retryOp } from '@/lib/queue-commands'
 import type {
   ConflictInfo,
   ConflictResolution,
@@ -95,11 +89,7 @@ const THROUGHPUT_BUCKETS = 90
  * each bucket crossing, so consecutive committed points read as a denoised line.
  */
 const THROUGHPUT_EMA_FACTOR = 0.25
-const TERMINAL: ReadonlySet<OpProgress['status']> = new Set([
-  'completed',
-  'failed',
-  'cancelled',
-])
+const TERMINAL: ReadonlySet<OpProgress['status']> = new Set(['completed', 'failed', 'cancelled'])
 
 function shouldResetThroughputHistory(
   previousProgress: OpProgress | undefined,
@@ -217,10 +207,10 @@ export const useQueueStore = create<QueueStore>((set) => ({
         throughputHistory[id] = seededHistory
         // Preserve an in-flight EMA gate/value; seed fresh ones from the snapshot.
         throughputLastRaw[id] = existingHistory
-          ? state.throughputLastRaw[id] ?? 0
+          ? (state.throughputLastRaw[id] ?? 0)
           : snapshot.progress.bytesPerSecond
         throughputSmoothed[id] = existingHistory
-          ? state.throughputSmoothed[id] ?? 0
+          ? (state.throughputSmoothed[id] ?? 0)
           : snapshot.progress.bytesPerSecond
         throughputPeak[id] = Math.max(
           state.throughputPeak[id] ?? 0,
@@ -279,7 +269,7 @@ export const useQueueStore = create<QueueStore>((set) => ({
       const throughputPeak = {
         ...state.throughputPeak,
         [progress.operationId]: Math.max(
-          resetHistory ? 0 : state.throughputPeak[progress.operationId] ?? 0,
+          resetHistory ? 0 : (state.throughputPeak[progress.operationId] ?? 0),
           latestRate,
         ),
       }

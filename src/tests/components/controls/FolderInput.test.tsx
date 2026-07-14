@@ -6,13 +6,7 @@ describe('FolderInput', () => {
   it('shows the current path and forwards edits', () => {
     const onChange = vi.fn()
 
-    render(
-      <FolderInput
-        ariaLabel="Cache folder"
-        value="C:\\Cache"
-        onChange={onChange}
-      />,
-    )
+    render(<FolderInput ariaLabel="Cache folder" value="C:\\Cache" onChange={onChange} />)
 
     const input = screen.getByLabelText('Cache folder')
     fireEvent.change(input, { target: { value: 'D:\\Temp' } })

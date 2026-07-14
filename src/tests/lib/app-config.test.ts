@@ -1,11 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
-import {
-  buildAppConfig,
-  defaultAppConfig,
-  hydrateAppConfig,
-  isLogLevel,
-} from '@/lib/app-config'
+import { buildAppConfig, defaultAppConfig, hydrateAppConfig, isLogLevel } from '@/lib/app-config'
 import { useConfigStore } from '@/stores/config-store'
 import { useLayoutStore } from '@/stores/layout-store'
 import type { AppConfig } from '@/lib/types/ipc'
@@ -18,6 +13,19 @@ beforeEach(() => {
   ipc.install()
   useConfigStore.getState().reset()
   useLayoutStore.getState().reset()
+})
+
+describe('app-config favourites', () => {
+  it('defaults and migrates favourites to an empty list', () => {
+    expect(defaultAppConfig().favourites).toEqual([])
+    hydrateAppConfig(baseConfig({ favourites: undefined as unknown as string[] }))
+    expect(useConfigStore.getState().favourites).toEqual([])
+  })
+
+  it('round-trips favourites through the config store', () => {
+    hydrateAppConfig(baseConfig({ favourites: ['C:\\Users\\Omega', '/Users/omega'] }))
+    expect(buildAppConfig().favourites).toEqual(['C:\\Users\\Omega', '/Users/omega'])
+  })
 })
 
 describe('app-config log level', () => {
@@ -55,7 +63,9 @@ describe('app-config default tab view', () => {
   })
 
   it('hydrates valid values and falls back for invalid or missing values', () => {
-    hydrateAppConfig(baseConfig({ layout: { ...defaultAppConfig().layout, defaultViewMode: 'icons' } }))
+    hydrateAppConfig(
+      baseConfig({ layout: { ...defaultAppConfig().layout, defaultViewMode: 'icons' } }),
+    )
     expect(useLayoutStore.getState().defaultViewMode).toBe('icons')
 
     hydrateAppConfig(
@@ -72,7 +82,9 @@ describe('app-config default tab view', () => {
   })
 
   it('round-trips the hydrated default tab view', () => {
-    hydrateAppConfig(baseConfig({ layout: { ...defaultAppConfig().layout, defaultViewMode: 'thumbnails' } }))
+    hydrateAppConfig(
+      baseConfig({ layout: { ...defaultAppConfig().layout, defaultViewMode: 'thumbnails' } }),
+    )
     expect(buildAppConfig().layout.defaultViewMode).toBe('thumbnails')
   })
 })

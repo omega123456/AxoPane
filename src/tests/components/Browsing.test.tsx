@@ -186,7 +186,9 @@ describe('HeaderRow', () => {
 
   it('relabels the Modified column to Deleted when browsing the trash pane', () => {
     const pane = usePanesStore.getState().panes.left
-    render(<HeaderRow pane={{ ...pane, path: TRASH_PATH, sortKey: 'modified', sortDirection: 'asc' }} />)
+    render(
+      <HeaderRow pane={{ ...pane, path: TRASH_PATH, sortKey: 'modified', sortDirection: 'asc' }} />,
+    )
 
     expect(screen.getByRole('button', { name: /Deleted/ })).toBeInTheDocument()
     expect(screen.getByRole('separator', { name: 'Resize Deleted column' })).toBeInTheDocument()
@@ -236,7 +238,9 @@ describe('TreeNode', () => {
 
     // Current + pinned swaps to the opaque stand-in so rows scrolling under it
     // don't bleed through.
-    rerender(<TreeNode node={treeNodeState()} depth={0} isCurrent isPinned actions={treeRowActions()} />)
+    rerender(
+      <TreeNode node={treeNodeState()} depth={0} isCurrent isPinned actions={treeRowActions()} />,
+    )
     expect(screen.getByText('root').closest('[data-tree-row]')?.className).toContain(
       'bg-light-tree-current',
     )
@@ -274,7 +278,9 @@ describe('TreeNode', () => {
   })
 
   it('suppresses middle-click autoscroll so the auxclick gesture can fire', () => {
-    render(<TreeNode node={treeNodeState()} depth={0} isCurrent={false} actions={treeRowActions()} />)
+    render(
+      <TreeNode node={treeNodeState()} depth={0} isCurrent={false} actions={treeRowActions()} />,
+    )
 
     const label = screen.getByText('root').closest('button')!
     const prevented = !fireEvent.mouseDown(label, { button: 1 })
@@ -287,11 +293,14 @@ describe('TreeNode', () => {
 
   it('highlights on a valid drag-over and clears only when the pointer truly leaves', () => {
     useDragStore.getState().begin({
+      kind: 'file-transfer',
       sourcePaneId: 'left',
       sourceDir: 'C:\\other',
       items: [{ id: 'a', name: 'A', path: 'C:\\other\\A', isDir: false, sizeBytes: 1 }],
     })
-    render(<TreeNode node={treeNodeState()} depth={0} isCurrent={false} actions={treeRowActions()} />)
+    render(
+      <TreeNode node={treeNodeState()} depth={0} isCurrent={false} actions={treeRowActions()} />,
+    )
     const row = screen.getByRole('treeitem')
 
     fireEvent.dragOver(row, { dataTransfer: { dropEffect: '' } })
@@ -309,7 +318,9 @@ describe('TreeNode', () => {
 
   it('ignores a drag-over when nothing is being dragged', () => {
     useDragStore.getState().end()
-    render(<TreeNode node={treeNodeState()} depth={0} isCurrent={false} actions={treeRowActions()} />)
+    render(
+      <TreeNode node={treeNodeState()} depth={0} isCurrent={false} actions={treeRowActions()} />,
+    )
     const row = screen.getByRole('treeitem')
 
     fireEvent.dragOver(row)
@@ -320,11 +331,14 @@ describe('TreeNode', () => {
     const originalPlatform = navigator.platform
     Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true })
     useDragStore.getState().begin({
+      kind: 'file-transfer',
       sourcePaneId: 'left',
       sourceDir: 'C:\\other',
       items: [{ id: 'a', name: 'A', path: 'C:\\other\\A', isDir: false, sizeBytes: 1 }],
     })
-    render(<TreeNode node={treeNodeState()} depth={0} isCurrent={false} actions={treeRowActions()} />)
+    render(
+      <TreeNode node={treeNodeState()} depth={0} isCurrent={false} actions={treeRowActions()} />,
+    )
     const row = screen.getByRole('treeitem')
 
     fireEvent.dragOver(row, { altKey: true, dataTransfer: { dropEffect: '' } })

@@ -5,7 +5,23 @@ import { GraphicalSortBar } from '@/components/pane/GraphicalSortBar'
 import { usePanesStore } from '@/stores/panes-store'
 import type { PaneState } from '@/types/pane'
 
-const pane: PaneState = { id: 'left', title: 'Left pane', path: '.', entries: [], focusedEntryId: null, sortKey: 'name', sortDirection: 'asc', filterDraft: '', filterApplied: '', typing: false, loading: false, itemsSortStatus: 'idle', error: null, listRequestId: 0, scrollPositions: {} }
+const pane: PaneState = {
+  id: 'left',
+  title: 'Left pane',
+  path: '.',
+  entries: [],
+  focusedEntryId: null,
+  sortKey: 'name',
+  sortDirection: 'asc',
+  filterDraft: '',
+  filterApplied: '',
+  typing: false,
+  loading: false,
+  itemsSortStatus: 'idle',
+  error: null,
+  listRequestId: 0,
+  scrollPositions: {},
+}
 
 describe('GraphicalSortBar', () => {
   beforeEach(() => usePanesStore.getState().reset())

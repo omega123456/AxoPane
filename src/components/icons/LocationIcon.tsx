@@ -6,7 +6,13 @@ import { Trash2Icon } from '@/components/icons'
 import { isTrashPath } from '@/lib/trash'
 
 function lastSegment(path: string) {
-  return path.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).at(-1) ?? path
+  return (
+    path
+      .replace(/[\\/]+$/, '')
+      .split(/[\\/]/)
+      .filter(Boolean)
+      .at(-1) ?? path
+  )
 }
 
 type LocationIconProps = {
@@ -23,7 +29,11 @@ type LocationIconProps = {
  * removable / network) when the path is a volume root, otherwise a folder glyph
  * with special-folder polish (downloads / git / modules).
  */
-export function LocationIcon({ path, volumes, className = 'h-3.5 w-3.5 shrink-0' }: LocationIconProps) {
+export function LocationIcon({
+  path,
+  volumes,
+  className = 'h-3.5 w-3.5 shrink-0',
+}: LocationIconProps) {
   if (isTrashPath(path)) {
     return <Trash2Icon className={className} />
   }

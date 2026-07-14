@@ -21,9 +21,7 @@ describe('state components', () => {
     const user = userEvent.setup()
     const onRetry = vi.fn()
     const onGoUp = vi.fn()
-    render(
-      <ErrorState message="Boom" onRetry={onRetry} onGoUp={onGoUp} canGoUp />,
-    )
+    render(<ErrorState message="Boom" onRetry={onRetry} onGoUp={onGoUp} canGoUp />)
 
     expect(screen.getByText('Boom')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Try again' }))
@@ -34,9 +32,7 @@ describe('state components', () => {
   })
 
   it('disables go-up in the error state when at a root', () => {
-    render(
-      <ErrorState message="Boom" onRetry={vi.fn()} onGoUp={vi.fn()} canGoUp={false} />,
-    )
+    render(<ErrorState message="Boom" onRetry={vi.fn()} onGoUp={vi.fn()} canGoUp={false} />)
 
     expect(screen.getByRole('button', { name: 'Go up' })).toBeDisabled()
   })

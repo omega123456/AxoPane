@@ -61,7 +61,8 @@ const FOLDER_GLYPHS: Record<FolderGlyphKind, IconComponent> = {
 const FOLDER_COLOR = 'text-accent-blue-light dark:text-accent-blue'
 
 type EntryIconProps = {
-  entry: Pick<DirectoryEntry, 'name' | 'isDir' | 'iconDataUrl'> & Partial<Pick<DirectoryEntry, 'attributes'>>
+  entry: Pick<DirectoryEntry, 'name' | 'isDir' | 'iconDataUrl'> &
+    Partial<Pick<DirectoryEntry, 'attributes'>>
   /** Tree expansion / open state — drives `FolderOpen` and the fill opacity. */
   isOpen?: boolean
   /** Size / layout utilities. Defaults to a compact 16px square. */
@@ -89,7 +90,12 @@ function SymlinkBadge() {
  * folder polish (faint fill, open-state, name-based special-folder glyphs).
  * Classification is pure name parsing — see {@link getFileCategory}.
  */
-export function EntryIcon({ entry, isOpen = false, className = 'h-4 w-4 shrink-0', colorClassName }: EntryIconProps) {
+export function EntryIcon({
+  entry,
+  isOpen = false,
+  className = 'h-4 w-4 shrink-0',
+  colorClassName,
+}: EntryIconProps) {
   const [nativeIconFailed, setNativeIconFailed] = useState(false)
   const category = getFileCategory(entry)
   const isSymlink = entry.attributes?.includes('symlink') ?? false

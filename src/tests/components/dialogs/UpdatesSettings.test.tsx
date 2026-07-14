@@ -18,15 +18,15 @@ beforeEach(() => {
   useUpdaterStore.getState().dismiss()
 })
 
-async function renderUpdatesSettings(status?: ReturnType<typeof useUpdaterStore.getState>['status']) {
+async function renderUpdatesSettings(
+  status?: ReturnType<typeof useUpdaterStore.getState>['status'],
+) {
   if (status) {
     useUpdaterStore.setState({ status })
   }
 
   render(<UpdatesSettings value="1d" onChange={vi.fn()} />)
-  await waitFor(() =>
-    expect(screen.getByTestId('updates-app-version')).toHaveTextContent('0.1.0'),
-  )
+  await waitFor(() => expect(screen.getByTestId('updates-app-version')).toHaveTextContent('0.1.0'))
 }
 
 describe('UpdatesSettings', () => {
@@ -47,7 +47,9 @@ describe('UpdatesSettings', () => {
   it('installs an available update', async () => {
     const user = userEvent.setup()
     const downloadAndInstall = vi.fn(() => Promise.resolve())
-    vi.spyOn(useUpdaterStore.getState(), 'downloadAndInstall').mockImplementation(downloadAndInstall)
+    vi.spyOn(useUpdaterStore.getState(), 'downloadAndInstall').mockImplementation(
+      downloadAndInstall,
+    )
     useUpdaterStore.getState().setAvailable(fakeUpdate(), {
       currentVersion: '0.1.0',
       version: '0.2.0',

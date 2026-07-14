@@ -41,9 +41,7 @@ const BREADCRUMB_SEGMENT_CHROME_PX =
   BREADCRUMB_ITEM_GAP_PX
 const BREADCRUMB_CURRENT_SEGMENT_CHROME_PX = BREADCRUMB_BUTTON_PADDING_PX
 const BREADCRUMB_COLLAPSE_MARKER_CHROME_PX =
-  BREADCRUMB_CHEVRON_GAP_PX +
-  BREADCRUMB_CHEVRON_WIDTH_PX +
-  BREADCRUMB_ITEM_GAP_PX
+  BREADCRUMB_CHEVRON_GAP_PX + BREADCRUMB_CHEVRON_WIDTH_PX + BREADCRUMB_ITEM_GAP_PX
 
 export function computeBreadcrumbLayout({
   segments,
@@ -60,7 +58,8 @@ export function computeBreadcrumbLayout({
   }
 
   const currentSegmentMeasure = measure.currentSegment ?? measure.segment
-  const collapseMarkerMeasure = measure.collapseMarker ?? (() => measure.segment(COLLAPSE_MARKER_LABEL))
+  const collapseMarkerMeasure =
+    measure.collapseMarker ?? (() => measure.segment(COLLAPSE_MARKER_LABEL))
   const fullLabels = segments.map((segment) => segment.label)
   const fullWidth = sumLayoutWidths(fullLabels, measure.segment, currentSegmentMeasure)
   if (!Number.isFinite(fullWidth)) {

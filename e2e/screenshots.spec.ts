@@ -71,7 +71,9 @@ for (const mode of ['light', 'dark'] as const) {
     await preview.click()
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+x' : 'Control+x')
     await expect(preview).toHaveAttribute('aria-selected', 'true')
-    await expect(page.locator('main')).toHaveScreenshot(`pane-thumbnails-interaction-states-${mode}.png`)
+    await expect(page.locator('main')).toHaveScreenshot(
+      `pane-thumbnails-interaction-states-${mode}.png`,
+    )
   })
 
   test(`thumbnails rename ${mode}`, async ({ page }) => {
@@ -159,6 +161,34 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(leftPane).toBeVisible()
     await expect(leftPane.getByRole('tab')).toHaveCount(4)
     await expect(page.locator('main')).toHaveScreenshot(`pane-tabs-${mode}.png`)
+  })
+
+  test(`locked tab and populated favourites ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.favourites[mode])
+    await expect(page.getByLabel(/Locked tab/)).toBeVisible()
+    const tree = page.getByTestId('folder-tree-scroll')
+    await expect(tree.getByRole('button', { name: 'Documents', exact: true }).first()).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`locked-tab-favourites-${mode}.png`)
+  })
+
+  test(`empty favourites ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.browsing[mode])
+    const tree = page.getByTestId('folder-tree-scroll')
+    await expect(tree.getByText('Drop folders here')).toBeVisible()
+    await expect(page.locator('aside').first()).toHaveScreenshot(`empty-favourites-${mode}.png`)
+  })
+
+  test(`reordered favourites ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.favourites[mode])
+    const tree = page.getByTestId('folder-tree-scroll')
+    const source = tree.getByRole('button', { name: 'E:', exact: true }).locator('..')
+    const target = tree
+      .getByRole('button', { name: 'Documents', exact: true })
+      .first()
+      .locator('..')
+    await source.dragTo(target)
+    await expect(tree.locator('[data-favourite-row]').first()).toContainText('E:')
+    await expect(page.locator('aside').first()).toHaveScreenshot(`reordered-favourites-${mode}.png`)
   })
 
   test(`breadcrumbs ${mode}`, async ({ page }) => {
@@ -287,9 +317,7 @@ for (const mode of ['light', 'dark'] as const) {
     for (let index = 0; index < 3; index += 1) {
       await expect(pendingRows.nth(index)).toBeInViewport()
     }
-    await expect(page.locator('main')).toHaveScreenshot(
-      `transfer-queue-many-pending-${mode}.png`,
-    )
+    await expect(page.locator('main')).toHaveScreenshot(`transfer-queue-many-pending-${mode}.png`)
   })
 
   test(`queue deleting collapsed ${mode}`, async ({ page }) => {

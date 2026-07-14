@@ -168,6 +168,7 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
         relativeDates: false,
         autoFolderSize: true,
         autoExpandActiveQueueToasts: false,
+        favourites: [],
         keybindings: {},
         columns: [],
         layout: {
@@ -183,6 +184,7 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
             created: 128,
           },
           defaultPaneMode: 'dual',
+          defaultViewMode: 'details',
           restoreSession: true,
           zoom: '100',
         },

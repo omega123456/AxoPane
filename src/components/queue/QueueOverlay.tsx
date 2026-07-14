@@ -40,9 +40,7 @@ export function QueueOverlay() {
   const resume = useQueueStore((state) => state.resume)
   const cancel = useQueueStore((state) => state.cancel)
   const retry = useQueueStore((state) => state.retry)
-  const autoExpandActiveQueueToasts = useConfigStore(
-    (state) => state.autoExpandActiveQueueToasts,
-  )
+  const autoExpandActiveQueueToasts = useConfigStore((state) => state.autoExpandActiveQueueToasts)
   const hadActiveWorkRef = useRef(false)
 
   useEffect(() => {
@@ -115,12 +113,7 @@ export function QueueOverlay() {
   const hasActiveWork = operations.some((operation) => !isTerminal(operation.status))
 
   useEffect(() => {
-    if (
-      autoExpandActiveQueueToasts &&
-      !expanded &&
-      hasActiveWork &&
-      !hadActiveWorkRef.current
-    ) {
+    if (autoExpandActiveQueueToasts && !expanded && hasActiveWork && !hadActiveWorkRef.current) {
       setExpanded(true)
     }
     hadActiveWorkRef.current = hasActiveWork
@@ -133,9 +126,7 @@ export function QueueOverlay() {
   return (
     <>
       <div className="pointer-events-none absolute inset-x-0 bottom-status z-20 flex justify-end p-3">
-        <div className="pointer-events-auto">
-          {expanded ? <QueuePanel /> : <QueueToast />}
-        </div>
+        <div className="pointer-events-auto">{expanded ? <QueuePanel /> : <QueueToast />}</div>
       </div>
     </>
   )

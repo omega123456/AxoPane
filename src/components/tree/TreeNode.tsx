@@ -41,7 +41,14 @@ type TreeNodeProps = {
   actions: TreeRowActions
 }
 
-function TreeNodeImpl({ node, depth, volume, isCurrent, isPinned = false, actions }: TreeNodeProps) {
+function TreeNodeImpl({
+  node,
+  depth,
+  volume,
+  isCurrent,
+  isPinned = false,
+  actions,
+}: TreeNodeProps) {
   const [isDropTarget, setIsDropTarget] = useState(false)
 
   const rowStyle = {
@@ -77,11 +84,16 @@ function TreeNodeImpl({ node, depth, volume, isCurrent, isPinned = false, action
 
   function handleDragOver(event: DragEvent<HTMLDivElement>) {
     const drag = useDragStore.getState().drag
-    if (!canDropInto(drag, node.path, os)) {
+    if (drag?.kind !== 'file-transfer' || !canDropInto(drag, node.path, os)) {
       return
     }
     event.preventDefault()
-    event.dataTransfer.dropEffect = resolveDropKind(dropModifiers(event), drag!.sourceDir, node.path, os)
+    event.dataTransfer.dropEffect = resolveDropKind(
+      dropModifiers(event),
+      drag.sourceDir,
+      node.path,
+      os,
+    )
     setIsDropTarget(true)
   }
 

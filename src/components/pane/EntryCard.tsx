@@ -128,7 +128,7 @@ function EntryCardImpl({
     )
   }
 
-  const previewDataUrl = thumbnail.state === 'ready' ? thumbnail.dataUrl ?? undefined : undefined
+  const previewDataUrl = thumbnail.state === 'ready' ? (thumbnail.dataUrl ?? undefined) : undefined
   return (
     <div
       {...sharedProps}

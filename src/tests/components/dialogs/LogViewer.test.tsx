@@ -25,10 +25,7 @@ describe('LogViewer', () => {
   })
 
   it('renders entries newest-first from the current day file', async () => {
-    ipc.override('read_logs', [
-      entry(0, 'info', 'oldest line'),
-      entry(1, 'error', 'newest line'),
-    ])
+    ipc.override('read_logs', [entry(0, 'info', 'oldest line'), entry(1, 'error', 'newest line')])
 
     render(<LogViewer />)
 
@@ -64,9 +61,7 @@ describe('LogViewer', () => {
   })
 
   it('paginates 20 entries per page', async () => {
-    const many = Array.from({ length: 25 }, (_, index) =>
-      entry(index, 'info', `line ${index}`),
-    )
+    const many = Array.from({ length: 25 }, (_, index) => entry(index, 'info', `line ${index}`))
     ipc.override('read_logs', many)
     const user = userEvent.setup()
     render(<LogViewer />)

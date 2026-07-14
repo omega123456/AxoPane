@@ -1,6 +1,8 @@
 import type { IpcCommandMap, NativeMenuItem } from '@/lib/types/ipc'
 
-function item(overrides: Partial<NativeMenuItem> & Pick<NativeMenuItem, 'id' | 'label'>): NativeMenuItem {
+function item(
+  overrides: Partial<NativeMenuItem> & Pick<NativeMenuItem, 'id' | 'label'>,
+): NativeMenuItem {
   return {
     id: overrides.id,
     label: overrides.label,

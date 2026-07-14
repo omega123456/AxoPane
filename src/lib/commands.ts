@@ -261,9 +261,7 @@ export function executeCommand(
     case 'cut': {
       if (effectiveEntries.length > 0) {
         const mode = commandId === 'copy' ? 'copy' : 'move'
-        useClipboardStore
-          .getState()
-          .setClipboard(mode, paneId, effectiveEntries)
+        useClipboardStore.getState().setClipboard(mode, paneId, effectiveEntries)
         void writeFileClipboard({
           mode,
           paths: effectiveEntries.map((item) => item.path),

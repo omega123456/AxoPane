@@ -127,7 +127,8 @@ export function ContextMenu() {
   const beforeNativeSections =
     nativeSectionIndex >= 0 ? menu.sections.slice(0, nativeSectionIndex) : menu.sections
   const nativeSection = nativeSectionIndex >= 0 ? menu.sections[nativeSectionIndex] : null
-  const afterNativeSections = nativeSectionIndex >= 0 ? menu.sections.slice(nativeSectionIndex + 1) : []
+  const afterNativeSections =
+    nativeSectionIndex >= 0 ? menu.sections.slice(nativeSectionIndex + 1) : []
   return (
     <div className="fixed inset-0 z-50" onMouseDown={() => closeMenu()}>
       <div
@@ -176,7 +177,7 @@ export function ContextMenu() {
             }
           }
         }}
-        >
+      >
         <ContextMenuTopStrip
           items={menu.topStrip}
           activeItemId={activeItemId}
@@ -219,9 +220,7 @@ export function ContextMenu() {
             <ContextMenuSection
               key={section.id}
               section={section}
-              showDivider={
-                index > 0 || beforeNativeSections.length > 0 || nativeSection !== null
-              }
+              showDivider={index > 0 || beforeNativeSections.length > 0 || nativeSection !== null}
               activeItemId={activeItemId}
               openSubmenuId={openSubmenuId}
               onHoverItem={hoverItem}

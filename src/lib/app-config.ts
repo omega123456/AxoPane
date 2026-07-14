@@ -28,6 +28,7 @@ export function defaultAppConfig(): AppConfig {
     relativeDates: false,
     autoFolderSize: true,
     autoExpandActiveQueueToasts: false,
+    favourites: [],
   }
 }
 
@@ -66,6 +67,7 @@ export function buildAppConfig(): AppConfig {
     relativeDates: config.relativeDates,
     autoFolderSize: config.autoFolderSize,
     autoExpandActiveQueueToasts: config.autoExpandActiveQueueToasts,
+    favourites: config.favourites,
   }
 }
 
@@ -102,7 +104,10 @@ export function hydrateAppConfig(config: AppConfig) {
       ...defaultLayout,
       ...config.layout,
       detailsVisible: false,
-      defaultViewMode: resolvePaneViewMode(config.layout?.defaultViewMode, defaultLayout.defaultViewMode),
+      defaultViewMode: resolvePaneViewMode(
+        config.layout?.defaultViewMode,
+        defaultLayout.defaultViewMode,
+      ),
     },
     columns: config.columns?.length ? config.columns : defaultColumns,
     updateCheckInterval,
@@ -126,6 +131,7 @@ export function hydrateAppConfig(config: AppConfig) {
     relativeDates: next.relativeDates,
     autoFolderSize: next.autoFolderSize ?? true,
     autoExpandActiveQueueToasts: next.autoExpandActiveQueueToasts,
+    favourites: next.favourites ?? [],
   })
   useLayoutStore.getState().hydrate(next.layout, next.columns)
   useKeymapStore.getState().hydrate(next.keybindings)
