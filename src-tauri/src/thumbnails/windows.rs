@@ -13,7 +13,7 @@ use super::types::{
 use base64::Engine;
 use png::{BitDepth, ColorType, Encoder};
 use std::mem::size_of;
-use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::sync::Mutex;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
