@@ -20,7 +20,11 @@ use crate::fs::DirectoryEntry;
 /// removed, or renamed within an already-sorted view) — anything broader or
 /// order-ambiguous is a [`SessionPatch::ReplaceView`] instead.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "kind")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
 pub enum RowDelta {
     /// A new row appears at `row_index` (the total row count grows by one).
     Inserted {
@@ -60,7 +64,11 @@ pub struct MetadataDelta {
 /// reject a patch computed against a baseline it no longer holds (stale
 /// session/navigation/watch/view) or a path it is not currently displaying.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "mode")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "mode"
+)]
 pub enum SessionPatch {
     /// Small, order-unambiguous change(s): apply `deltas` in order to a
     /// currently-loaded, covered page without reinstalling it.

@@ -103,7 +103,13 @@ fn walk_without_links_serially_visits_the_tree_without_following_directory_links
         .collect::<Result<Vec<_>, _>>()
         .expect("entries")
         .into_iter()
-        .map(|entry| entry.path.strip_prefix(root).expect("relative").to_path_buf())
+        .map(|entry| {
+            entry
+                .path
+                .strip_prefix(root)
+                .expect("relative")
+                .to_path_buf()
+        })
         .collect::<Vec<_>>();
 
     assert!(names

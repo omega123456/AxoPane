@@ -104,6 +104,7 @@ function cloneDraft(): DraftState {
       paneSplit: layout.paneSplit,
       columnWidths: layout.columnWidths,
       defaultPaneMode: layout.defaultPaneMode,
+      defaultViewMode: layout.defaultViewMode,
       restoreSession: layout.restoreSession,
       zoom: layout.zoom,
     },
@@ -388,6 +389,23 @@ function SettingsModalContent() {
                         options={[
                           { value: 'dual', label: 'Dual' },
                           { value: 'single', label: 'Single' },
+                        ]}
+                      />
+                    }
+                  />
+                  <SettingRow
+                    fixedCopy
+                    title="Default view for new tabs"
+                    description="Used for new tabs and older sessions without a view"
+                    control={
+                      <SegmentedControl
+                        ariaLabel="Default view for new tabs"
+                        value={draft.layout.defaultViewMode}
+                        onChange={(value) => updateLayout('defaultViewMode', value)}
+                        options={[
+                          { value: 'details', label: 'Details' },
+                          { value: 'icons', label: 'Icons' },
+                          { value: 'thumbnails', label: 'Large thumbnails' },
                         ]}
                       />
                     }

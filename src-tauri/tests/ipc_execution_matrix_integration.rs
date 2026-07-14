@@ -22,6 +22,10 @@ const HEAVY_MATRIX: &[(&str, &str)] = &[
         "count/size/icon metadata",
         "ItemCountService/SizeService/IpcExecutor",
     ),
+    (
+        "native thumbnails",
+        "ThumbnailService/ResourceCoordinator CPU",
+    ),
     ("copy/move/delete/archive/extract", "OpsService"),
     ("trash", "IpcExecutor latency"),
     ("native menus", "NativeMenuService helper/IpcExecutor"),
@@ -44,7 +48,7 @@ fn every_heavy_matrix_family_has_exactly_one_named_owner() {
     }
     assert_eq!(
         families.len(),
-        12,
+        13,
         "all plan matrix families are enumerated"
     );
 }

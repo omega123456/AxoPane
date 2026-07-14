@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { PaneState } from '@/types/pane'
 import { ChevronRightIcon, PieChartIcon, RefreshIcon, SearchIcon } from '@/components/icons'
 import type { BreadcrumbLayoutMeasure } from '@/lib/breadcrumb-layout'
@@ -11,9 +11,11 @@ import { autoFolderSizeDisabledForPane, usePanesStore } from '@/stores/panes-sto
 type BreadcrumbBarProps = {
   pane: PaneState
   isActive: boolean
+  /** Reserved action slot for pane-scoped toolbar controls. Live FilePane deliberately leaves it empty until Phase 8. */
+  actions?: ReactNode
 }
 
-export function BreadcrumbBar({ pane, isActive }: BreadcrumbBarProps) {
+export function BreadcrumbBar({ pane, isActive, actions }: BreadcrumbBarProps) {
   const navigatePane = usePanesStore((state) => state.navigatePane)
   const setFilterDraft = usePanesStore((state) => state.setFilterDraft)
   const clearFilter = usePanesStore((state) => state.clearFilter)
@@ -187,6 +189,7 @@ export function BreadcrumbBar({ pane, isActive }: BreadcrumbBarProps) {
           <PieChartIcon className="h-3.5 w-3.5" />
         </button>
       ) : null}
+      {actions}
       <label
         className={`flex h-8 w-search items-center gap-2 rounded-tab border px-2 ${
           isActive ? 'border-accent-blue-border' : 'border-light-border dark:border-dark-border'

@@ -97,6 +97,7 @@ describe('layout-store', () => {
     useLayoutStore.getState().setTreeWidthPx(320)
     useLayoutStore.getState().setPaneSplit(0.35)
     useLayoutStore.getState().setDefaultPaneMode('single')
+    useLayoutStore.getState().setDefaultViewMode('thumbnails')
     useLayoutStore.getState().setRestoreSession(false)
     useLayoutStore.getState().setZoom('125')
     useLayoutStore.getState().setColumnWidth('type', 188)
@@ -107,6 +108,7 @@ describe('layout-store', () => {
       paneSplit: 0.35,
       columnWidths: expect.objectContaining({ type: 188 }),
       defaultPaneMode: 'single',
+      defaultViewMode: 'thumbnails',
       restoreSession: false,
       zoom: '125',
     })
@@ -119,6 +121,21 @@ describe('layout-store', () => {
       key: 'created',
       visible: true,
     })
+  })
+
+  it('defaults, hydrates, and validates the default tab view', () => {
+    expect(useLayoutStore.getState().defaultViewMode).toBe('details')
+    useLayoutStore.getState().hydrate(
+      { ...useLayoutStore.getState(), defaultViewMode: 'icons' },
+      useLayoutStore.getState().columns,
+    )
+    expect(useLayoutStore.getState().defaultViewMode).toBe('icons')
+
+    useLayoutStore.getState().hydrate(
+      { ...useLayoutStore.getState(), defaultViewMode: 'unknown' as never },
+      useLayoutStore.getState().columns,
+    )
+    expect(useLayoutStore.getState().defaultViewMode).toBe('details')
   })
 })
 

@@ -6,8 +6,10 @@ import {
   toSessionPane,
   useTabsStore,
 } from '@/stores/tabs-store'
+import { useLayoutStore } from '@/stores/layout-store'
 
 beforeEach(() => {
+  useLayoutStore.getState().reset()
   useTabsStore.getState().reset()
 })
 
@@ -20,6 +22,7 @@ describe('tabs-store', () => {
     expect(pane.tabs).toHaveLength(2)
     expect(pane.tabs[pane.activeTabIndex].id).toBe(id)
     expect(activeTab('left').path).toBe('C:\\a')
+    expect(activeTab('left').viewMode).toBe('details')
   })
 
   it('does not change the active tab when activate is false', () => {
@@ -67,9 +70,14 @@ describe('tabs-store', () => {
   it('patches only the active tab', () => {
     const store = useTabsStore.getState()
     store.addTab('left', { path: 'C:\\a', sortKey: 'name', sortDirection: 'asc', filter: '' })
-    useTabsStore.getState().patchActiveTab('left', { path: 'C:\\a\\deep', filter: 'x' })
+    useTabsStore.getState().patchActiveTab('left', {
+      path: 'C:\\a\\deep',
+      filter: 'x',
+      viewMode: 'icons',
+    })
     expect(activeTab('left').path).toBe('C:\\a\\deep')
     expect(activeTab('left').filter).toBe('x')
+    expect(activeTab('left').viewMode).toBe('icons')
     expect(useTabsStore.getState().panes.left.tabs[0].path).toBe('.')
   })
 
@@ -84,10 +92,56 @@ describe('tabs-store', () => {
     const right = useTabsStore.getState().panes.right
     expect(right.tabs.map((tab) => tab.path)).toEqual(['.', 'C:\\a'])
     expect(right.tabs[1].sortKey).toBe('size')
+    expect(right.tabs[1].viewMode).toBe('details')
+  })
+
+  it('keeps independent modes when switching active tabs', () => {
+    const first = activeTab('left').id
+    const second = useTabsStore
+      .getState()
+      .addTab('left', { path: 'C:\\a', sortKey: 'name', sortDirection: 'asc', filter: '' })
+    useTabsStore.getState().patchActiveTab('left', { viewMode: 'thumbnails' })
+    useTabsStore.getState().setActiveTab('left', first)
+    useTabsStore.getState().patchActiveTab('left', { viewMode: 'icons' })
+
+    expect(activeTab('left').viewMode).toBe('icons')
+    useTabsStore.getState().setActiveTab('left', second)
+    expect(activeTab('left').viewMode).toBe('thumbnails')
+  })
+
+  it('applies the configured default at every tab creation boundary', () => {
+    useLayoutStore.getState().setDefaultViewMode('icons')
+    useTabsStore.getState().reset()
+    expect(activeTab('left').viewMode).toBe('icons')
+
+    useTabsStore
+      .getState()
+      .addTab('left', { path: 'C:\\a', sortKey: 'name', sortDirection: 'asc', filter: '' })
+    expect(activeTab('left').viewMode).toBe('icons')
+
+    useTabsStore.getState().hydrate('right', { activeTabIndex: 0, tabs: [] })
+    expect(activeTab('right').viewMode).toBe('icons')
+  })
+
+  it('round-trips explicit session modes and migrates missing or invalid modes', () => {
+    useTabsStore.getState().patchActiveTab('left', { viewMode: 'thumbnails' })
+    expect(toSessionPane('left').tabs[0]?.viewMode).toBe('thumbnails')
+
+    useLayoutStore.getState().setDefaultViewMode('icons')
+    const restored = fromSessionPane('right', {
+      activeTabIndex: 0,
+      tabs: [
+        { path: 'C:\\old', sortKey: 'name', sortDirection: 'asc', filter: '' },
+        { path: 'C:\\bad', sortKey: 'size', sortDirection: 'desc', filter: '', viewMode: 'legacy' },
+        { path: 'C:\\saved', sortKey: 'modified', sortDirection: 'asc', filter: '', viewMode: 'details' },
+      ],
+    })
+
+    expect(restored.tabs.map((tab) => tab.viewMode)).toEqual(['icons', 'icons', 'details'])
   })
 
   it('derives a tab label from the trailing path segment', () => {
-    expect(tabLabel({ id: 't', path: 'C:\\a\\b\\Media', sortKey: 'name', sortDirection: 'asc', filter: '' })).toBe('Media')
+    expect(tabLabel({ id: 't', path: 'C:\\a\\b\\Media', sortKey: 'name', sortDirection: 'asc', filter: '', viewMode: 'details' })).toBe('Media')
   })
 
   it('falls back to a single tab when hydrating an empty pane', () => {

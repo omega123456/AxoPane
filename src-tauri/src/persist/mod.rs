@@ -75,6 +75,8 @@ pub struct LayoutConfig {
     #[serde(default = "default_column_widths")]
     pub column_widths: HashMap<String, f64>,
     pub default_pane_mode: String,
+    #[serde(default = "default_view_mode")]
+    pub default_view_mode: String,
     pub restore_session: bool,
     #[serde(default = "default_zoom")]
     pub zoom: String,
@@ -82,6 +84,10 @@ pub struct LayoutConfig {
 
 pub fn default_zoom() -> String {
     "100".to_string()
+}
+
+pub fn default_view_mode() -> String {
+    "details".to_string()
 }
 
 pub fn default_tree_width_px() -> f64 {
@@ -111,6 +117,7 @@ impl Default for LayoutConfig {
             pane_split: default_pane_split(),
             column_widths: default_column_widths(),
             default_pane_mode: "dual".to_string(),
+            default_view_mode: default_view_mode(),
             restore_session: true,
             zoom: default_zoom(),
         }
@@ -177,6 +184,10 @@ pub struct SessionTab {
     pub sort_direction: String,
     #[serde(default)]
     pub filter: String,
+    /// Raw optional text keeps older sessions distinguishable from an explicit
+    /// Details mode and lets the frontend resolve unknown future values.
+    #[serde(default)]
+    pub view_mode: Option<String>,
 }
 
 pub fn default_sort_key() -> String {

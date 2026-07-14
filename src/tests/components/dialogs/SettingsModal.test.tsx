@@ -9,6 +9,7 @@ import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useThemeStore } from '@/stores/theme-store'
+import { useTabsStore } from '@/stores/tabs-store'
 
 const originalPlatform = navigator.platform
 
@@ -25,6 +26,7 @@ describe('SettingsModal', () => {
     useKeymapStore.getState().reset()
     useLayoutStore.getState().reset()
     usePanesStore.getState().reset()
+    useTabsStore.getState().reset()
     useThemeStore.getState().setThemePreference('system')
     setPlatform('MacIntel')
   })
@@ -129,6 +131,23 @@ describe('SettingsModal', () => {
         }),
       )
     })
+  })
+
+  it('updates the default view for future tabs without mutating open tabs', async () => {
+    const user = userEvent.setup()
+    const saveConfig = vi.fn((payload) => payload.config)
+    ipc.override('save_config', saveConfig)
+    useSettingsStore.getState().open('layout')
+    const originalTabMode = useTabsStore.getState().panes.left.tabs[0]?.viewMode
+
+    render(<SettingsModal />)
+    await user.click(screen.getByRole('radio', { name: 'Large thumbnails' }))
+
+    await waitFor(() => {
+      expect(useLayoutStore.getState().defaultViewMode).toBe('thumbnails')
+      expect(saveConfig).toHaveBeenCalled()
+    })
+    expect(useTabsStore.getState().panes.left.tabs[0]?.viewMode).toBe(originalTabMode)
   })
 
   it('hides the auto folder size toggle on macOS even when Everything is available', async () => {

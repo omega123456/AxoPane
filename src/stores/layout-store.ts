@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { columnOrder } from '@/lib/columns'
+import { resolvePaneViewMode, type PaneViewMode } from '@/lib/pane-view'
 import type {
   ColumnConfig,
   ColumnKey,
@@ -76,6 +77,7 @@ export const defaultLayout: LayoutConfig = {
   paneSplit: 0.5,
   columnWidths: defaultColumnWidths,
   defaultPaneMode: 'dual',
+  defaultViewMode: 'details',
   restoreSession: true,
   zoom: '100',
 }
@@ -87,6 +89,7 @@ type LayoutStore = LayoutConfig & {
   setTreeWidthPx: (width: number) => void
   setPaneSplit: (split: number) => void
   setDefaultPaneMode: (mode: LayoutConfig['defaultPaneMode']) => void
+  setDefaultViewMode: (mode: PaneViewMode) => void
   setRestoreSession: (restoreSession: boolean) => void
   setZoom: (zoom: ZoomLevel) => void
   setColumnWidth: (key: ColumnKey, width: number) => void
@@ -145,6 +148,7 @@ export const useLayoutStore = create<LayoutStore>((set) => ({
       treeWidthPx: clampTreeWidth(layout.treeWidthPx),
       paneSplit: clampPaneSplit(layout.paneSplit),
       columnWidths: normalizeColumnWidths(layout.columnWidths),
+      defaultViewMode: resolvePaneViewMode(layout.defaultViewMode, defaultLayout.defaultViewMode),
       columns: normalizeColumns(columns),
     })
   },
@@ -152,6 +156,7 @@ export const useLayoutStore = create<LayoutStore>((set) => ({
   setTreeWidthPx: (width) => set({ treeWidthPx: clampTreeWidth(width) }),
   setPaneSplit: (split) => set({ paneSplit: clampPaneSplit(split) }),
   setDefaultPaneMode: (defaultPaneMode) => set({ defaultPaneMode }),
+  setDefaultViewMode: (defaultViewMode) => set({ defaultViewMode }),
   setRestoreSession: (restoreSession) => set({ restoreSession }),
   setZoom: (zoom) => {
     applyZoom(zoom)

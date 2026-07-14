@@ -14,6 +14,7 @@ pub mod persist;
 pub mod reconcile;
 pub mod resource_coordinator;
 pub mod size;
+pub mod thumbnails;
 pub mod trash;
 pub mod traversal;
 pub mod volumes;
@@ -274,6 +275,16 @@ pub fn run() {
             // dropped (app teardown).
             let resource_coordinator = Arc::new(ResourceCoordinator::new());
             app.manage(Arc::clone(&resource_coordinator));
+            let thumbnails = Arc::new(thumbnails::ThumbnailService::new(Arc::clone(
+                &resource_coordinator,
+            )));
+            let thumbnail_handle = app.handle().clone();
+            thumbnails.set_emitter(Arc::new(move |events| {
+                for batch in events.chunks(thumbnails::MAX_RESULTS_PER_BATCH) {
+                    let _ = thumbnail_handle.emit(ipc::events::THUMBNAIL_STATE, batch.to_vec());
+                }
+            }));
+            app.manage(thumbnails);
             app.manage(Arc::new(ipc::executor::IpcExecutor::new(Arc::clone(
                 &resource_coordinator,
             ))));
@@ -342,6 +353,8 @@ pub fn run() {
             commands::request_folder_size,
             commands::request_folder_sizes,
             commands::request_icons,
+            commands::request_thumbnails,
+            commands::cancel_thumbnails,
             commands::request_visible_item_counts,
             commands::sort_active_items,
             commands::cancel_size,

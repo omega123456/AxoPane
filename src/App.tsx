@@ -20,11 +20,12 @@ import {
   onIconState,
   onItemCountState,
   onSizeState,
+  onThumbnailState,
   onVolumesChanged,
 } from '@/lib/ipc/events'
 import { resolveCommandForEvent } from '@/lib/keymap'
 import { createRafBatcher } from '@/lib/raf-batcher'
-import type { IconStateEvent, ItemCountEvent, SizeStateEvent } from '@/lib/types/ipc'
+import type { IconStateEvent, ItemCountEvent, SizeStateEvent, ThumbnailResultEvent } from '@/lib/types/ipc'
 import { UpdateBanner } from '@/components/states/UpdateBanner'
 import { useUpdaterStore } from '@/stores/updater-store'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
@@ -38,6 +39,7 @@ import { useSettingsStore } from '@/stores/settings-store'
 import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 import { useDefaultAppDialogStore } from '@/stores/default-app-dialog-store'
 import { initializeTheme, useThemeStore } from '@/stores/theme-store'
+import { useThumbnailStore } from '@/stores/thumbnail-store'
 
 function isEditableTarget(target: EventTarget | null) {
   return (
@@ -56,6 +58,7 @@ function App() {
   const applyIconStates = usePanesStore((state) => state.applyIconStates)
   const applyItemCountEvents = usePanesStore((state) => state.applyItemCountEvents)
   const applySessionPatch = usePanesStore((state) => state.applySessionPatch)
+  const applyThumbnailResults = useThumbnailStore((state) => state.applyThumbnailResults)
   const reloadPane = usePanesStore((state) => state.reloadPane)
   const theme = useThemeStore((state) => state.theme)
   const applyTheme = useThemeStore((state) => state.setTheme)
@@ -228,6 +231,9 @@ function App() {
     const itemCountBatcher = createRafBatcher<ItemCountEvent>((batch) => {
       applyItemCountEvents(batch)
     })
+    const thumbnailBatcher = createRafBatcher<ThumbnailResultEvent>((batch) => {
+      applyThumbnailResults(batch)
+    })
     const unlistenVolumesPromise = onVolumesChanged((event) => {
       setVolumes(event.volumes)
     })
@@ -252,12 +258,19 @@ function App() {
       applySessionPatch(event)
     })
 
+    const unlistenThumbnailsPromise = onThumbnailState((events) => {
+      for (const event of events) {
+        thumbnailBatcher.push(event)
+      }
+    })
+
     return () => {
       void unlistenVolumesPromise.then((unlisten) => unlisten())
       void unlistenSizesPromise.then((unlisten) => unlisten())
       void unlistenIconsPromise.then((unlisten) => unlisten())
       void unlistenItemCountsPromise.then((unlisten) => unlisten())
       void unlistenPatchesPromise.then((unlisten) => unlisten())
+      void unlistenThumbnailsPromise.then((unlisten) => unlisten())
       // Flush any buffered events before tearing down so a burst that lands
       // right before unmount is not silently dropped, then cancel the
       // batchers so no further frame callback fires.
@@ -267,8 +280,17 @@ function App() {
       sizeBatcher.cancel()
       itemCountBatcher.flush()
       itemCountBatcher.cancel()
+      thumbnailBatcher.flush()
+      thumbnailBatcher.cancel()
     }
-  }, [applySessionPatch, applyIconStates, applyItemCountEvents, applySizeStates, setVolumes])
+  }, [
+    applySessionPatch,
+    applyIconStates,
+    applyItemCountEvents,
+    applySizeStates,
+    applyThumbnailResults,
+    setVolumes,
+  ])
 
   return (
     <main className="flex h-full select-none flex-col overflow-hidden overscroll-x-none bg-light-window font-ui text-light-text dark:bg-dark-window dark:text-dark-text">

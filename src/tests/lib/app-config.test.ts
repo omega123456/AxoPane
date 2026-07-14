@@ -7,6 +7,7 @@ import {
   isLogLevel,
 } from '@/lib/app-config'
 import { useConfigStore } from '@/stores/config-store'
+import { useLayoutStore } from '@/stores/layout-store'
 import type { AppConfig } from '@/lib/types/ipc'
 
 function baseConfig(overrides: Partial<AppConfig> = {}): AppConfig {
@@ -16,6 +17,7 @@ function baseConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 beforeEach(() => {
   ipc.install()
   useConfigStore.getState().reset()
+  useLayoutStore.getState().reset()
 })
 
 describe('app-config log level', () => {
@@ -44,6 +46,34 @@ describe('app-config log level', () => {
   it('round-trips the log level through buildAppConfig', () => {
     hydrateAppConfig(baseConfig({ logLevel: 'trace' }))
     expect(buildAppConfig().logLevel).toBe('trace')
+  })
+})
+
+describe('app-config default tab view', () => {
+  it('defaults the configured tab view to details', () => {
+    expect(defaultAppConfig().layout.defaultViewMode).toBe('details')
+  })
+
+  it('hydrates valid values and falls back for invalid or missing values', () => {
+    hydrateAppConfig(baseConfig({ layout: { ...defaultAppConfig().layout, defaultViewMode: 'icons' } }))
+    expect(useLayoutStore.getState().defaultViewMode).toBe('icons')
+
+    hydrateAppConfig(
+      baseConfig({
+        layout: { ...defaultAppConfig().layout, defaultViewMode: 'legacy' as never },
+      }),
+    )
+    expect(useLayoutStore.getState().defaultViewMode).toBe('details')
+
+    hydrateAppConfig(
+      baseConfig({ layout: { ...defaultAppConfig().layout, defaultViewMode: undefined as never } }),
+    )
+    expect(useLayoutStore.getState().defaultViewMode).toBe('details')
+  })
+
+  it('round-trips the hydrated default tab view', () => {
+    hydrateAppConfig(baseConfig({ layout: { ...defaultAppConfig().layout, defaultViewMode: 'thumbnails' } }))
+    expect(buildAppConfig().layout.defaultViewMode).toBe('thumbnails')
   })
 })
 

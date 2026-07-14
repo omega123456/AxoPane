@@ -199,7 +199,7 @@ describe('config-store', () => {
           theme: 'system',
           showHiddenFiles: false,
           dismissedEverythingBanner: true,
-          layout: {
+          layout: expect.objectContaining({
             detailsVisible: false,
             treeWidthPx: 204,
             paneSplit: 0.5,
@@ -214,7 +214,7 @@ describe('config-store', () => {
             defaultPaneMode: 'dual',
             restoreSession: true,
             zoom: '100',
-          },
+          }),
         }),
       }),
     )

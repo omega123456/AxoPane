@@ -39,6 +39,9 @@ import {
   HardDrive,
   HardDriveUpload,
   Info,
+  Images,
+  Grid2X2,
+  List,
   LoaderCircle,
   Lock,
   MoonStar,
@@ -113,6 +116,9 @@ export const GripVerticalIcon = withDefaults(GripVertical)
 export const HardDriveIcon = withDefaults(HardDrive)
 export const EjectIcon = withDefaults(HardDriveUpload)
 export const InfoIcon = withDefaults(Info)
+export const ImagesIcon = withDefaults(Images)
+export const Grid2X2Icon = withDefaults(Grid2X2)
+export const ListIcon = withDefaults(List)
 export const LoaderCircleIcon = withDefaults(LoaderCircle)
 export const LockIcon = withDefaults(Lock)
 export const MoonStarIcon = withDefaults(MoonStar)

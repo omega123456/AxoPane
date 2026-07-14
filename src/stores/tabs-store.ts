@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import type { SessionPane, SortDirection, SortKey } from '@/lib/types/ipc'
+import { resolvePaneViewMode, type PaneViewMode } from '@/lib/pane-view'
+import { useLayoutStore } from '@/stores/layout-store'
 
 export type PaneId = 'left' | 'right'
 
@@ -9,6 +11,7 @@ export type TabState = {
   sortKey: SortKey
   sortDirection: SortDirection
   filter: string
+  viewMode: PaneViewMode
 }
 
 type PaneTabs = {
@@ -16,12 +19,13 @@ type PaneTabs = {
   tabs: TabState[]
 }
 
-type TabPatch = Partial<Pick<TabState, 'path' | 'sortKey' | 'sortDirection' | 'filter'>>
+type TabPatch = Partial<Pick<TabState, 'path' | 'sortKey' | 'sortDirection' | 'filter' | 'viewMode'>>
+type NewTabState = Omit<TabState, 'id' | 'viewMode'> & { viewMode?: PaneViewMode }
 
 type TabsStore = {
   panes: Record<PaneId, PaneTabs>
   hydrate: (paneId: PaneId, pane: PaneTabs) => void
-  addTab: (paneId: PaneId, tab: Omit<TabState, 'id'>, options?: { activate?: boolean }) => string
+  addTab: (paneId: PaneId, tab: NewTabState, options?: { activate?: boolean }) => string
   closeTab: (paneId: PaneId, tabId: string) => void
   setActiveTab: (paneId: PaneId, tabId: string) => void
   patchActiveTab: (paneId: PaneId, patch: TabPatch) => void
@@ -55,6 +59,7 @@ function singleTabPane(path: string): PaneTabs {
         sortKey: 'name',
         sortDirection: 'asc',
         filter: '',
+        viewMode: useLayoutStore.getState().defaultViewMode,
       },
     ],
   }
@@ -93,7 +98,10 @@ export const useTabsStore = create<TabsStore>((set) => ({
     const id = createTabId(paneId)
     set((state) => {
       const pane = state.panes[paneId]
-      const tabs = [...pane.tabs, { ...tab, id }]
+      const tabs = [
+        ...pane.tabs,
+        { ...tab, id, viewMode: tab.viewMode ?? useLayoutStore.getState().defaultViewMode },
+      ]
       return {
         panes: {
           ...state.panes,
@@ -182,6 +190,7 @@ export function toSessionPane(paneId: PaneId): SessionPane {
       sortKey: tab.sortKey,
       sortDirection: tab.sortDirection,
       filter: tab.filter,
+      viewMode: tab.viewMode,
     })),
   }
 }
@@ -195,6 +204,7 @@ export function fromSessionPane(paneId: PaneId, pane: SessionPane): PaneTabs {
       sortKey: tab.sortKey,
       sortDirection: tab.sortDirection,
       filter: tab.filter,
+      viewMode: resolvePaneViewMode(tab.viewMode, useLayoutStore.getState().defaultViewMode),
     })),
   }
 }

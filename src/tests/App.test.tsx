@@ -6,6 +6,7 @@ import type { DirectoryEntry, ListDirRequest, ListDirResponse } from '@/lib/type
 import { renderApp } from './utils/render-app'
 import { usePanesStore } from '@/stores/panes-store'
 import { useQueueStore } from '@/stores/queue-store'
+import { useThumbnailStore } from '@/stores/thumbnail-store'
 
 const rootEntries: DirectoryEntry[] = [
   {
@@ -105,6 +106,72 @@ function getRowInPane(paneLabel: string, name: string) {
 }
 
 describe('App', () => {
+  it('subscribes to thumbnail batches and applies a burst on one animation frame', async () => {
+    installListDirOverride()
+    const callbacks: FrameRequestCallback[] = []
+    const requestAnimationFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      callbacks.push(callback)
+      return callbacks.length
+    })
+    const { unmount } = renderApp()
+    await screen.findByLabelText('Left pane')
+    await waitFor(() => expect(ipc.listenerCount('thumbnail://state')).toBeGreaterThan(0))
+    const candidate = {
+      path: 'C:\\Users\\Omega\\Report.txt',
+      modifiedUnixSeconds: 10,
+      sizeBytes: 20,
+      isDirectory: false,
+    }
+    const callbackCount = callbacks.length
+    await act(async () => {
+      await useThumbnailStore.getState().setVisibleCandidates(
+        { paneId: 'left', tabId: 'thumb-tab', path: 'C:\\Users\\Omega', mode: 'thumbnails' },
+        [candidate],
+      )
+    })
+    await act(async () => {
+      ipc.emit('thumbnail://state', [
+        {
+          paneId: 'left',
+          tabId: 'thumb-tab',
+          path: 'C:\\Users\\Omega',
+          generation: 1,
+          fingerprintPath: candidate.path,
+          modifiedUnixSeconds: candidate.modifiedUnixSeconds,
+          sizeBytes: candidate.sizeBytes,
+          state: 'ready',
+          dataUrl: 'data:image/png;base64,AA==',
+        },
+      ])
+    })
+    expect(useThumbnailStore.getState().getRecord(candidate)).toBeUndefined()
+    expect(callbacks).toHaveLength(callbackCount + 1)
+    await act(async () => {
+      callbacks.at(-1)?.(0)
+    })
+    expect(useThumbnailStore.getState().getRecord(candidate)?.state).toBe('ready')
+    unmount()
+    await waitFor(() => expect(ipc.listenerCount('thumbnail://state')).toBe(0))
+    const callbackCountAfterUnmount = callbacks.length
+    await act(async () => {
+      ipc.emit('thumbnail://state', [
+        {
+          paneId: 'left',
+          tabId: 'thumb-tab',
+          path: 'C:\\Users\\Omega',
+          generation: 1,
+          fingerprintPath: candidate.path,
+          modifiedUnixSeconds: candidate.modifiedUnixSeconds,
+          sizeBytes: candidate.sizeBytes,
+          state: 'ready',
+          dataUrl: 'data:image/png;base64,AA==',
+        },
+      ])
+    })
+    expect(callbacks).toHaveLength(callbackCountAfterUnmount)
+    requestAnimationFrame.mockRestore()
+  })
+
   it('renders both panes and the shared tree from IPC-backed data', async () => {
     installListDirOverride()
     renderApp()
@@ -114,6 +181,8 @@ describe('App', () => {
     await waitFor(() => {
       expect(getRowInPane('Left pane', 'Documents')).toBeTruthy()
     })
+    await waitFor(() => expect(ipc.listenerCount('size://state')).toBeGreaterThan(0))
+    await waitFor(() => expect(ipc.listenerCount('size://state')).toBeGreaterThan(0))
   })
 
   it('drives the initial listing and pane navigation entirely through the v2 directory-session commands, never the v1 start_list_dir/dir://list-chunk path', async () => {
@@ -236,6 +305,7 @@ describe('App', () => {
     await waitFor(() => {
       expect(getRowInPane('Left pane', 'Report.txt')).toBeTruthy()
     })
+    await waitFor(() => expect(ipc.listenerCount('icon://state')).toBeGreaterThan(0))
 
     leftPane.focus()
     await user.keyboard('{ArrowDown}{ArrowDown}{F5}')
@@ -415,12 +485,18 @@ describe('App', () => {
 
   it('renders batched size state updates from the shared IPC event channel', async () => {
     installListDirOverride()
+    const callbacks: FrameRequestCallback[] = []
+    const requestAnimationFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      callbacks.push(callback)
+      return callbacks.length
+    })
     renderApp()
 
     await waitFor(() => {
       expect(getRowInPane('Left pane', 'Documents')).toBeTruthy()
     })
 
+    const callbackCount = callbacks.length
     act(() => {
       ipc.emit('size://state', [
         {
@@ -437,25 +513,39 @@ describe('App', () => {
         },
       ])
     })
+    await act(async () => {
+      callbacks.slice(callbackCount).forEach((callback) => callback(0))
+    })
 
     await waitFor(() => {
       expect(getRowInPane('Left pane', '4.0 KB')).toBeTruthy()
     })
+    requestAnimationFrame.mockRestore()
   })
 
   it('applies a batched icon://state event, patching every matched entry from one array payload', async () => {
     installListDirOverride()
+    const callbacks: FrameRequestCallback[] = []
+    const requestAnimationFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      callbacks.push(callback)
+      return callbacks.length
+    })
     renderApp()
 
     await waitFor(() => {
       expect(getRowInPane('Left pane', 'Documents')).toBeTruthy()
       expect(getRowInPane('Left pane', 'Report.txt')).toBeTruthy()
     })
+    await waitFor(() => expect(ipc.listenerCount('icon://state')).toBeGreaterThan(0))
 
+    const callbackCount = callbacks.length
     act(() => {
       ipc.emit('icon://state', [
         { path: 'C:\\Users\\Omega\\Report.txt', iconDataUrl: 'data:image/png;base64,report-icon' },
       ])
+    })
+    await act(async () => {
+      callbacks.slice(callbackCount).forEach((callback) => callback(0))
     })
 
     await waitFor(() => {
@@ -463,6 +553,7 @@ describe('App', () => {
       const img = row?.querySelector('img[src="data:image/png;base64,report-icon"]')
       expect(img).toBeTruthy()
     })
+    requestAnimationFrame.mockRestore()
   })
 
   it('updates the tree when mounted volumes are added or removed', async () => {

@@ -17,6 +17,10 @@ export function onIconState(handler: (payload: IpcEventMap['icon://state']) => v
   return subscribeToEvent('icon://state', handler)
 }
 
+export function onThumbnailState(handler: (payload: IpcEventMap['thumbnail://state']) => void) {
+  return subscribeToEvent('thumbnail://state', handler)
+}
+
 export function onItemCountState(handler: (payload: IpcEventMap['item-count://state']) => void) {
   return subscribeToEvent('item-count://state', handler)
 }

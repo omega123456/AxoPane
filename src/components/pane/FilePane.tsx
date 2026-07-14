@@ -5,9 +5,11 @@ import {
   resolveMenuTarget,
 } from '@/components/menus/menu-definitions'
 import { BreadcrumbBar } from './BreadcrumbBar'
-import { FileRow, type FileRowActions } from './FileRow'
-import { HeaderRow, paneContentWidth } from './HeaderRow'
-import { ParentRow } from './ParentRow'
+import { type FileRowActions } from './FileRow'
+import { DetailsView } from './DetailsView'
+import { GraphicalView, type GraphicalViewHandle } from './GraphicalView'
+import { GraphicalSortBar } from './GraphicalSortBar'
+import { PaneViewMenu } from './PaneViewMenu'
 import { TabBar } from './TabBar'
 import { executeCommand } from '@/lib/commands'
 import { detectPlatformOs, resolveCommandForEvent } from '@/lib/keymap'
@@ -20,11 +22,9 @@ import { EverythingBanner } from '@/components/states/EverythingBanner'
 import { LoadingSkeleton } from '@/components/states/LoadingSkeleton'
 import { PermissionDenied } from '@/components/states/PermissionDenied'
 import { useDelayedFlag } from '@/lib/use-delayed-flag'
-import { useElementVirtualizer } from '@/lib/use-element-virtualizer'
 import { renameEntryInPane } from '@/lib/file-actions'
 import { log } from '@/lib/app-log-commands'
 import { useInlineRenameStore } from '@/stores/inline-rename-store'
-import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { activeConflict, useQueueStore } from '@/stores/queue-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
@@ -36,7 +36,11 @@ import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useDragStore } from '@/stores/drag-store'
 import { useNativeMenuWarmStore } from '@/stores/native-menu-warm-store'
+import { thumbnailFingerprintKey, useThumbnailStore } from '@/stores/thumbnail-store'
+import { useTabsStore } from '@/stores/tabs-store'
 import { canDropInto, performDrop, resolveDropKind, type DragItem } from '@/lib/drag-drop'
+import { getUnixTime, parseISO } from 'date-fns'
+import type { ThumbnailCandidateRequest } from '@/lib/types/ipc'
 import type { PaneId } from '@/types/pane'
 
 function isPermissionError(message: string | null) {
@@ -91,6 +95,10 @@ function useModalOpen() {
 
 export function FilePane({ paneId }: FilePaneProps) {
   const pane = usePanesStore((state) => state.panes[paneId])
+  const activeTab = useTabsStore((state) => {
+    const tabs = state.panes[paneId]
+    return tabs.tabs[tabs.activeTabIndex]
+  })
   const activePaneId = usePanesStore((state) => state.activePaneId)
   const focusRequestId = usePanesStore((state) => state.focusRequestId)
   const focusRequestPaneId = usePanesStore((state) => state.focusRequestPaneId)
@@ -103,9 +111,10 @@ export function FilePane({ paneId }: FilePaneProps) {
   const requestVisibleItemCounts = usePanesStore((state) => state.requestVisibleItemCounts)
   const requestVisibleIcons = usePanesStore((state) => state.requestVisibleIcons)
   const warmVisibleNativeMenus = useNativeMenuWarmStore((state) => state.warmVisibleNativeMenus)
+  const setThumbnailCandidates = useThumbnailStore((state) => state.setVisibleCandidates)
+  const cancelThumbnailScope = useThumbnailStore((state) => state.cancelScope)
+  const thumbnailCache = useThumbnailStore((state) => state.cache)
   const setScrollPosition = usePanesStore((state) => state.setScrollPosition)
-  const configuredColumns = useLayoutStore((state) => state.columns)
-  const columnWidths = useLayoutStore((state) => state.columnWidths)
   const selection = useSelectionStore((state) => state.selections[paneId])
   const keymap = useKeymapStore((state) => state.bindings)
   const setSelection = useSelectionStore((state) => state.setSelection)
@@ -125,11 +134,9 @@ export function FilePane({ paneId }: FilePaneProps) {
   const setRenameError = useInlineRenameStore((state) => state.setError)
   const setRenameValue = useInlineRenameStore((state) => state.setValue)
   const paneRef = useRef<HTMLElement | null>(null)
-  const headerScrollRef = useRef<HTMLDivElement | null>(null)
   const parentRef = useRef<HTMLDivElement | null>(null)
-  const horizontalScrollRef = useRef<HTMLDivElement | null>(null)
-  const contentLayerRef = useRef<HTMLDivElement | null>(null)
-  const horizontalScrollLeftRef = useRef(0)
+  const detailsViewRef = useRef<React.ElementRef<typeof DetailsView>>(null)
+  const graphicalViewRef = useRef<GraphicalViewHandle>(null)
   const scrollPathRef = useRef(pane.path)
   // Tracks the live scrollTop for the currently-mounted path without writing
   // to the store on every scroll event (that would re-render the whole app on
@@ -138,7 +145,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   const liveScrollTopRef = useRef(0)
   // Target scrollTop the layout effect below is still trying to apply after a
   // path switch (kept while retrying across a couple of re-runs while
-  // `totalHeight` grows enough for the target to actually stick — see the
+  // DetailsView's virtual content grows enough for the target to actually stick — see the
   // effect for details). `null` once the restore has taken effect (or there is
   // no path switch in flight), so a same-path re-run triggered by something
   // else entirely (e.g. a fs-watch patch changing the entry count) never
@@ -147,7 +154,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   // True for exactly the first evaluation of a given `pendingRestoreRef` arm
   // (right after mount or a path switch). While true, the layout effect below
   // gives the restore the benefit of the doubt even if it looks unreachable
-  // this render — `totalHeight` may still be about to grow once async content
+  // this render — virtual content may still be about to grow once async content
   // (e.g. entries arriving after the initial render) lands. From the second
   // evaluation onward, a restore that still can't reach its target is treated
   // as permanently unreachable (see the effect for the exact conditions).
@@ -157,6 +164,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   const ignoreNextRenameBlurRef = useRef(false)
   const detachMarqueeListenersRef = useRef<(() => void) | null>(null)
   const visibleIconRequestTimerRef = useRef<number | undefined>(undefined)
+  const activeTabIdRef = useRef(activeTab.id)
   const [marqueeRect, setMarqueeRect] = useState<MarqueeRect | null>(null)
   const beginDrag = useDragStore((state) => state.begin)
   const endDrag = useDragStore((state) => state.end)
@@ -167,7 +175,6 @@ export function FilePane({ paneId }: FilePaneProps) {
   const isActivePane = activePaneId === paneId
   const os = detectPlatformOs()
   const usesDetachedMacScrollbars = os === 'macos'
-  const rowLayerClassName = 'absolute inset-x-0'
   // Suppress the loading skeleton on fast loads: it only appears once loading
   // has lasted longer than a second, avoiding a jarring flash-and-replace when
   // a folder resolves in a few milliseconds.
@@ -176,14 +183,6 @@ export function FilePane({ paneId }: FilePaneProps) {
   const hasParent = getParentPath(pane.path) !== null
   const parentOffset = hasParent ? 1 : 0
   const rowCount = pane.entries.length + parentOffset
-  const visibleColumns = useMemo(
-    () => configuredColumns.filter((column) => column.visible),
-    [configuredColumns],
-  )
-  const contentWidth = useMemo(
-    () => paneContentWidth(visibleColumns, columnWidths),
-    [columnWidths, visibleColumns],
-  )
   const cutEntryPaths = useMemo(
     () =>
       clipboardMode === 'move'
@@ -195,34 +194,8 @@ export function FilePane({ paneId }: FilePaneProps) {
   // (O(selection size)) on every row on every render.
   const selectedIdSet = useMemo(() => new Set(selection.selectedIds), [selection.selectedIds])
 
-  const rowVirtualizer = useElementVirtualizer({
-    count: rowCount,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => rowHeightPx,
-    overscan: 10,
-  })
-  const virtualItems = rowVirtualizer.getVirtualItems()
-  // `getVirtualItems()` legitimately returns `[]` in two different cases that
-  // must NOT be conflated:
-  //   1. `rowCount === 0` (an empty directory / empty view) — the correct
-  //      render is zero rows, not a fallback.
-  //   2. The scroll element has not been measured yet (`outerSize === 0`,
-  //      e.g. the very first render before layout) — a small bounded
-  //      "first paint" fallback avoids a blank flash, but must stay capped at
-  //      a fixed number of rows, never grow to `rowCount` (a directory with
-  //      thousands of rows must never render "everything" as an unbounded
-  //      fallback; Functional Requirement 11 / Phase 4 acceptance).
-  const unmeasuredFallbackRowCount = Math.min(rowCount, 30)
-  const itemsToRender =
-    virtualItems.length > 0 || rowCount === 0
-      ? virtualItems
-      : Array.from({ length: unmeasuredFallbackRowCount }, (_, index) => ({
-          key: `row-${index}`,
-          index,
-          start: index * rowHeightPx,
-        }))
-  const totalHeight = rowCount === 0 ? 0 : rowVirtualizer.getTotalSize() || rowCount * rowHeightPx
   const savedScrollTop = pane.scrollPositions[pane.path] ?? 0
+  const viewMode = activeTab.viewMode
 
   useEffect(() => {
     if (focusRequestId > 0 && focusRequestPaneId === paneId) {
@@ -270,7 +243,7 @@ export function FilePane({ paneId }: FilePaneProps) {
       // folder shrank while the user was away, so `scrollHeight` no longer
       // exceeds `clientHeight` (or the assignment above was silently clamped
       // to something below `target`). The first evaluation is exempted so a
-      // fresh path switch still gets one full retry cycle while `totalHeight`
+      // fresh path switch still gets one full retry cycle while virtual content
       // catches up with async content (e.g. entries arriving after mount).
       const reachedOrClose =
         scrollElement.scrollTop >= target || Math.abs(scrollElement.scrollTop - target) < 1
@@ -283,49 +256,73 @@ export function FilePane({ paneId }: FilePaneProps) {
       }
       restoreJustArmedRef.current = false
     }
-  }, [pane.path, paneId, savedScrollTop, setScrollPosition, totalHeight])
+  }, [pane.entries.length, pane.path, paneId, savedScrollTop, setScrollPosition])
 
-  useEffect(() => {
-    const items = itemsToRender
-    if (items.length === 0) {
-      return
-    }
-
-    // Visible range in entry coordinates (excluding the synthetic parent row),
-    // used only to target lazy icon/native-menu requests at the real directory
-    // entries currently on screen.
-    const start = Math.max(0, items[0].index - parentOffset)
-    const end = Math.max(0, items[items.length - 1].index - parentOffset)
-
-    const viewportCount = Math.max(1, end - start + 1)
-
-    // Visible-row enrichment is debounced so fast scrolls and unrelated renders
-    // collapse into one backend request for the final viewport.
-    window.clearTimeout(visibleIconRequestTimerRef.current)
-    visibleIconRequestTimerRef.current = window.setTimeout(() => {
-      if (!isTrashPath(pane.path)) {
-        void requestVisibleItemCounts(paneId, start, end, viewportCount)
-      }
-      const visiblePaths = pane.entries.slice(start, end + 1).map((entry) => entry.path)
-      void requestVisibleIcons(paneId, visiblePaths)
-      // Background native-context-menu cache pre-warming reuses this same
-      // debounced visible-range trigger and the same visible paths. Unlike the
-      // icon request above, warming is not pre-filtered to non-directories:
-      // the store derives a File or Folder warm key per entry internally.
-      void warmVisibleNativeMenus(paneId, visiblePaths)
-    }, visibleIconRequestDebounceMs)
-  }, [
-    itemsToRender,
-    paneId,
-    pane.entries,
-    pane.path,
-    parentOffset,
-    requestVisibleItemCounts,
-    requestVisibleIcons,
-    warmVisibleNativeMenus,
-  ])
+  const handleVisibleRangeChange = useCallback(
+    (start: number, end: number, viewportCount: number) => {
+      window.clearTimeout(visibleIconRequestTimerRef.current)
+      visibleIconRequestTimerRef.current = window.setTimeout(() => {
+        if (!isTrashPath(pane.path))
+          void requestVisibleItemCounts(paneId, start, end, viewportCount)
+        const visiblePaths = pane.entries.slice(start, end + 1).map((entry) => entry.path)
+        void requestVisibleIcons(paneId, visiblePaths)
+        void warmVisibleNativeMenus(paneId, visiblePaths)
+        if (viewMode === 'thumbnails') {
+          const candidates: ThumbnailCandidateRequest[] = pane.entries
+            .slice(start, end + 1)
+            .flatMap((entry) => {
+              if (entry.isDir || entry.sizeBytes === null || entry.modifiedAt === null) return []
+              const modifiedUnixSeconds = getUnixTime(parseISO(entry.modifiedAt))
+              return Number.isFinite(modifiedUnixSeconds)
+                ? [
+                    {
+                      path: entry.path,
+                      modifiedUnixSeconds,
+                      sizeBytes: entry.sizeBytes,
+                      isDirectory: false,
+                    },
+                  ]
+                : []
+            })
+          void setThumbnailCandidates(
+            { paneId, tabId: activeTab.id, path: pane.path, mode: viewMode },
+            candidates,
+          ).catch(() => undefined)
+        }
+      }, visibleIconRequestDebounceMs)
+    },
+    [
+      pane.entries,
+      pane.path,
+      paneId,
+      requestVisibleIcons,
+      requestVisibleItemCounts,
+      activeTab.id,
+      warmVisibleNativeMenus,
+      setThumbnailCandidates,
+      viewMode,
+    ],
+  )
 
   useEffect(() => () => window.clearTimeout(visibleIconRequestTimerRef.current), [])
+
+  useEffect(() => {
+    const previousTabId = activeTabIdRef.current
+    activeTabIdRef.current = activeTab.id
+    if (viewMode !== 'thumbnails') {
+      void cancelThumbnailScope(paneId, activeTab.id)
+    }
+    if (previousTabId !== activeTab.id) {
+      void cancelThumbnailScope(paneId, previousTabId)
+    }
+  }, [activeTab.id, cancelThumbnailScope, pane.path, paneId, viewMode])
+
+  useEffect(
+    () => () => {
+      void cancelThumbnailScope(paneId, activeTabIdRef.current)
+    },
+    [cancelThumbnailScope, paneId],
+  )
 
   // Row indices include the synthetic parent row at position 0 when present.
   // Row 0 (with a parent) is the parent row; entry `i` is at row `i + parentOffset`.
@@ -351,14 +348,16 @@ export function FilePane({ paneId }: FilePaneProps) {
       return
     }
     handledRevealScrollIdRef.current = revealScrollRequestId
-    rowVirtualizer.scrollToIndex(focusedRowIndex)
-  }, [focusedRowIndex, revealScrollRequestId, rowVirtualizer])
+    if (viewMode === 'details') detailsViewRef.current?.scrollToRow(focusedRowIndex)
+    else graphicalViewRef.current?.scrollToEntry(Math.max(0, focusedRowIndex - parentOffset))
+  }, [focusedRowIndex, parentOffset, revealScrollRequestId, viewMode])
 
   // Rows fully visible in the scroll viewport, used as the Page Up/Down step —
   // matches Explorer's "jump by a screenful" behavior instead of a fixed count.
   function visibleRowCount() {
-    const viewportHeight = parentRef.current?.clientHeight ?? 0
-    return Math.max(1, Math.floor(viewportHeight / rowHeightPx))
+    return viewMode === 'details'
+      ? (detailsViewRef.current?.getVisibleRowCount() ?? 1)
+      : (graphicalViewRef.current?.getVisibleRowCount() ?? 1)
   }
 
   function focusByRowIndex(nextRowIndex: number) {
@@ -367,7 +366,7 @@ export function FilePane({ paneId }: FilePaneProps) {
     if (hasParent && bounded === 0) {
       setFocusedEntry(paneId, PARENT_ROW_ID)
       setSelection(paneId, [], null, null)
-      rowVirtualizer.scrollToIndex(0)
+      if (viewMode === 'details') detailsViewRef.current?.scrollToRow(0)
       return
     }
 
@@ -378,7 +377,8 @@ export function FilePane({ paneId }: FilePaneProps) {
 
     setFocusedEntry(paneId, nextEntry.id)
     setSelection(paneId, [nextEntry.id], nextEntry.id, nextEntry.id)
-    rowVirtualizer.scrollToIndex(bounded)
+    if (viewMode === 'details') detailsViewRef.current?.scrollToRow(bounded)
+    else graphicalViewRef.current?.scrollToEntry(bounded - parentOffset)
   }
 
   function focusPaneShell() {
@@ -469,35 +469,36 @@ export function FilePane({ paneId }: FilePaneProps) {
   }
 
   // Windows-Explorer-style rubber-band selection. A mousedown on the empty
-  // background of the row list (not on a row button) starts tracking; rows
-  // whose row-span vertically overlaps the drawn rectangle become selected.
-  // Because every row is a fixed `rowHeightPx` tall and rendered in
-  // `pane.entries` order, the intersecting rows are always a contiguous
-  // index range, so no per-row hit-testing loop is needed.
+  // background starts tracking. Details uses its fixed-height rows; graphical
+  // views delegate to GraphicalView so the rectangle intersects the actual
+  // responsive card geometry, including virtual rows that are not mounted.
   function contentPoint(clientX: number, clientY: number) {
     const container = parentRef.current
-    if (!container) {
-      return null
-    }
+    if (!container) return null
     const bounds = container.getBoundingClientRect()
     const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1
     return {
-      x:
-        (clientX - bounds.left) / zoom +
-        (usesDetachedMacScrollbars ? horizontalScrollLeftRef.current : container.scrollLeft),
+      x: (clientX - bounds.left) / zoom + container.scrollLeft,
       y: (clientY - bounds.top) / zoom + container.scrollTop,
     }
   }
 
-  function applyMarqueeSelection(drag: MarqueeDragState, rectTop: number, rectBottom: number) {
-    const firstRow = Math.max(0, Math.floor(rectTop / rowHeightPx))
-    const lastRow = Math.min(rowCount - 1, Math.ceil(rectBottom / rowHeightPx) - 1)
-    const entryStart = Math.max(0, firstRow - parentOffset)
-    const entryEnd = lastRow - parentOffset
+  function applyMarqueeSelection(drag: MarqueeDragState, rect: MarqueeRect) {
     const rangeIds =
-      lastRow >= firstRow && entryEnd >= entryStart
-        ? pane.entries.slice(entryStart, entryEnd + 1).map((entry) => entry.id)
-        : []
+      viewMode === 'details'
+        ? (() => {
+            const firstRow = Math.max(0, Math.floor(rect.top / rowHeightPx))
+            const lastRow = Math.min(
+              rowCount - 1,
+              Math.ceil((rect.top + rect.height) / rowHeightPx) - 1,
+            )
+            const entryStart = Math.max(0, firstRow - parentOffset)
+            const entryEnd = lastRow - parentOffset
+            return lastRow >= firstRow && entryEnd >= entryStart
+              ? pane.entries.slice(entryStart, entryEnd + 1).map((entry) => entry.id)
+              : []
+          })()
+        : (graphicalViewRef.current?.getEntriesIntersectingRect(rect) ?? [])
 
     const selectedIds = drag.additive
       ? Array.from(new Set([...drag.baseSelectedIds, ...rangeIds]))
@@ -517,7 +518,10 @@ export function FilePane({ paneId }: FilePaneProps) {
     if (event.button !== 0) {
       return
     }
-    if (event.target instanceof Element && event.target.closest('[role="row"]')) {
+    if (
+      event.target instanceof Element &&
+      event.target.closest('[role="row"], [role="gridcell"]')
+    ) {
       return
     }
 
@@ -556,8 +560,9 @@ export function FilePane({ paneId }: FilePaneProps) {
         return
       }
 
-      setMarqueeRect({ left, top, width, height })
-      applyMarqueeSelection(drag, top, top + height)
+      const rect = { left, top, width, height }
+      setMarqueeRect(rect)
+      applyMarqueeSelection(drag, rect)
     }
 
     function onMouseUp() {
@@ -807,54 +812,30 @@ export function FilePane({ paneId }: FilePaneProps) {
     [],
   )
 
-  const syncHorizontalScroll = useCallback((scrollLeft: number) => {
-    horizontalScrollLeftRef.current = scrollLeft
-    if (headerScrollRef.current) {
-      headerScrollRef.current.scrollLeft = scrollLeft
-    }
-    if (contentLayerRef.current) {
-      contentLayerRef.current.style.transform =
-        scrollLeft === 0 ? '' : `translateX(-${scrollLeft}px)`
-    }
-  }, [])
-
-  useLayoutEffect(() => {
-    if (!usesDetachedMacScrollbars) {
-      horizontalScrollLeftRef.current = 0
-      if (contentLayerRef.current) {
-        contentLayerRef.current.style.transform = ''
-      }
-      return
-    }
-
-    const scrollLeft = horizontalScrollRef.current?.scrollLeft ?? 0
-    syncHorizontalScroll(scrollLeft)
-  }, [contentWidth, syncHorizontalScroll, usesDetachedMacScrollbars])
-
-  function handleHorizontalScroll(event: React.UIEvent<HTMLDivElement>) {
-    syncHorizontalScroll(event.currentTarget.scrollLeft)
-  }
-
-  function handleBodyWheel(event: React.WheelEvent<HTMLDivElement>) {
-    if (!usesDetachedMacScrollbars || event.deltaX === 0) {
-      return
-    }
-
-    const horizontalScroll = horizontalScrollRef.current
-    if (!horizontalScroll) {
-      return
-    }
-
-    const maxScrollLeft = Math.max(0, horizontalScroll.scrollWidth - horizontalScroll.clientWidth)
-    const nextScrollLeft = Math.max(
-      0,
-      Math.min(maxScrollLeft, horizontalScroll.scrollLeft + event.deltaX),
-    )
-    if (nextScrollLeft !== horizontalScroll.scrollLeft) {
-      horizontalScroll.scrollLeft = nextScrollLeft
-      syncHorizontalScroll(nextScrollLeft)
-    }
-  }
+  const graphicalThumbnails = useMemo(
+    () =>
+      Object.fromEntries(
+        pane.entries.map((entry) => {
+          if (entry.isDir || entry.sizeBytes === null || entry.modifiedAt === null)
+            return [entry.id, { state: 'unavailable' as const }]
+          const modifiedUnixSeconds = getUnixTime(parseISO(entry.modifiedAt))
+          const record = Number.isFinite(modifiedUnixSeconds)
+            ? thumbnailCache[
+                thumbnailFingerprintKey({
+                  path: entry.path,
+                  modifiedUnixSeconds,
+                  sizeBytes: entry.sizeBytes,
+                })
+              ]
+            : undefined
+          return [
+            entry.id,
+            record ?? { state: viewMode === 'thumbnails' ? 'loading' : 'unavailable' },
+          ]
+        }),
+      ),
+    [pane.entries, thumbnailCache, viewMode],
+  )
 
   return (
     <section
@@ -867,6 +848,17 @@ export function FilePane({ paneId }: FilePaneProps) {
       onMouseDown={() => setActivePane(paneId)}
       onKeyDown={(event) => {
         if (!isActivePane) {
+          return
+        }
+
+        // GraphicalView owns two-dimensional arrow/home/end/page geometry.
+        // Let its grid handler consume these keys before the Details-compatible
+        // pane fallback below can interpret them as one-dimensional rows.
+        if (
+          viewMode !== 'details' &&
+          event.target instanceof Element &&
+          event.target.closest('[role="grid"]')
+        ) {
           return
         }
 
@@ -951,159 +943,117 @@ export function FilePane({ paneId }: FilePaneProps) {
     >
       <TabBar paneId={paneId} title={pane.title} currentPath={pane.path} isActive={isActivePane} />
       <EverythingBanner />
-      <BreadcrumbBar pane={pane} isActive={isActivePane} />
-      <div
-        ref={headerScrollRef}
-        data-testid={`file-pane-header-scroll-${paneId}`}
-        className="relative overflow-hidden"
-      >
-        <HeaderRow pane={pane} />
-        {usesDetachedMacScrollbars ? (
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-y-0 right-0 w-2 bg-light-header dark:bg-dark-header"
-          />
-        ) : null}
-      </div>
-      {showSkeleton ? (
-        <div className="min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint">
-          <LoadingSkeleton />
-        </div>
-      ) : permissionDenied ? (
-        <PermissionDenied onGoUp={() => void goUp(paneId)} canGoUp={canGoUp} />
-      ) : pane.error ? (
-        <ErrorState
-          message={pane.error}
-          onRetry={() => void reloadPane(paneId)}
-          onGoUp={() => void goUp(paneId)}
-          canGoUp={canGoUp}
+      <BreadcrumbBar
+        pane={pane}
+        isActive={isActivePane}
+        actions={<PaneViewMenu paneId={paneId} />}
+      />
+      {viewMode === 'details' ? (
+        <DetailsView
+          ref={detailsViewRef}
+          pane={pane}
+          isActivePane={isActivePane}
+          hasParent={hasParent}
+          selectedIds={selectedIdSet}
+          cutEntryPaths={cutEntryPaths}
+          dropTargetEntryId={dropTargetEntryId}
+          isPaneDropTarget={isPaneDropTarget}
+          rename={rename}
+          actions={actions}
+          usesDetachedMacScrollbars={usesDetachedMacScrollbars}
+          marqueeRect={marqueeRect}
+          onVisibleRangeChange={handleVisibleRangeChange}
+          onScroll={(position) => {
+            liveScrollTopRef.current = position
+          }}
+          onContainerMouseDown={handleContainerMouseDown}
+          onContainerContextMenu={(event) => showMenu(event)}
+          onPaneDragOver={handlePaneDragOver}
+          onPaneDragLeave={handlePaneDragLeave}
+          onPaneDrop={(event) => void handlePaneDrop(event)}
+          onParentFocus={() => focusByRowIndex(0)}
+          onParentActivate={(eventTimeStamp) =>
+            activateEntryFromPointer(PARENT_ROW_ID, eventTimeStamp)
+          }
+          scrollContainerRef={parentRef}
+          body={
+            showSkeleton ? (
+              <div className="min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint">
+                <LoadingSkeleton />
+              </div>
+            ) : permissionDenied ? (
+              <PermissionDenied onGoUp={() => void goUp(paneId)} canGoUp={canGoUp} />
+            ) : pane.error ? (
+              <ErrorState
+                message={pane.error}
+                onRetry={() => void reloadPane(paneId)}
+                onGoUp={() => void goUp(paneId)}
+                canGoUp={canGoUp}
+              />
+            ) : showEmpty ? (
+              <div
+                className={`min-h-0 flex-1 ${isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-accent-blue-border' : ''}`}
+                onDragOver={handlePaneDragOver}
+                onDragLeave={handlePaneDragLeave}
+                onDrop={(event) => void handlePaneDrop(event)}
+              >
+                <EmptyState />
+              </div>
+            ) : undefined
+          }
         />
-      ) : showEmpty ? (
-        <div
-          className={`min-h-0 flex-1 ${
-            isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-accent-blue-border' : ''
-          }`}
-          onDragOver={handlePaneDragOver}
-          onDragLeave={handlePaneDragLeave}
-          onDrop={(event) => void handlePaneDrop(event)}
-        >
-          <EmptyState />
-        </div>
       ) : (
-        <div className="relative min-h-0 flex-1">
-          <div
-            ref={parentRef}
-            data-testid={`file-pane-scroll-${paneId}`}
-            className={`h-full min-h-0 overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint ${
-              usesDetachedMacScrollbars
-                ? 'overflow-x-hidden overflow-y-auto pb-2'
-                : 'overflow-x-auto overflow-y-auto'
-            } ${
-              isPaneDropTarget
-                ? 'outline outline-2 -outline-offset-2 outline-accent-blue-border'
-                : ''
-            }`}
-            onMouseDown={handleContainerMouseDown}
-            onWheel={handleBodyWheel}
-            onScroll={(event) => {
-              liveScrollTopRef.current = event.currentTarget.scrollTop
-              if (!usesDetachedMacScrollbars && headerScrollRef.current) {
-                headerScrollRef.current.scrollLeft = event.currentTarget.scrollLeft
-              }
+        <>
+          <GraphicalSortBar pane={pane} />
+          <GraphicalView
+            ref={graphicalViewRef}
+            pane={pane}
+            mode={viewMode}
+            isActivePane={isActivePane}
+            selectedIds={selectedIdSet}
+            cutEntryPaths={cutEntryPaths}
+            dropTargetEntryId={dropTargetEntryId}
+            isPaneDropTarget={isPaneDropTarget}
+            rename={rename}
+            actions={actions}
+            thumbnails={graphicalThumbnails}
+            marqueeRect={marqueeRect}
+            onVisibleRangeChange={handleVisibleRangeChange}
+            onFocusEntry={(entryId) => {
+              setFocusedEntry(paneId, entryId)
+              setSelection(paneId, [entryId], entryId, entryId)
             }}
-            onContextMenu={(event) => showMenu(event)}
-            onDragOver={handlePaneDragOver}
-            onDragLeave={handlePaneDragLeave}
-            onDrop={(event) => void handlePaneDrop(event)}
-          >
-            {/*
-            Styling-constraint exception: runtime geometry only. The total
-            scroll height and each row's top offset come from
-            @tanstack/react-virtual (D18) and are continuous px values that no
-            static utility/@theme token can express. Every design-system value
-            (color/spacing/typography) elsewhere stays a pure Tailwind utility.
-          */}
-            <div
-              ref={contentLayerRef}
-              style={{
-                height: `${totalHeight}px`,
-                minWidth: `${contentWidth}px`,
-                position: 'relative',
-              }}
-              className={`min-h-full w-full ${
-                usesDetachedMacScrollbars ? 'will-change-transform' : ''
-              }`}
-            >
-              {itemsToRender.map((virtualRow) => {
-                const rowStyle = {
-                  top: `${virtualRow.start}px`,
-                }
-
-                if (hasParent && virtualRow.index === 0) {
-                  return (
-                    <div key={PARENT_ROW_ID} className={rowLayerClassName} style={rowStyle}>
-                      <ParentRow
-                        isActivePane={isActivePane}
-                        isFocused={pane.focusedEntryId === PARENT_ROW_ID}
-                        onPointerDown={focusPaneShell}
-                        onActivate={(eventTimeStamp) =>
-                          activateEntryFromPointer(PARENT_ROW_ID, eventTimeStamp)
-                        }
-                        onFocus={() => focusByRowIndex(0)}
-                      />
-                    </div>
-                  )
-                }
-
-                const entry = pane.entries[virtualRow.index - parentOffset]
-                if (!entry) {
-                  return null
-                }
-
-                return (
-                  <div key={entry.id} className={rowLayerClassName} style={rowStyle}>
-                    <FileRow
-                      entry={entry}
-                      isActivePane={isActivePane}
-                      isFocused={pane.focusedEntryId === entry.id}
-                      isSelected={selectedIdSet.has(entry.id)}
-                      isCut={cutEntryPaths.has(pathKey(entry.path))}
-                      isDropTarget={dropTargetEntryId === entry.id}
-                      draggable={!entry.trashId}
-                      isRenaming={rename?.entryId === entry.id}
-                      renameValue={rename?.entryId === entry.id ? rename.value : ''}
-                      renameBusy={rename?.entryId === entry.id ? rename.busy : false}
-                      renameError={rename?.entryId === entry.id ? rename.error : null}
-                      actions={actions}
-                    />
-                  </div>
-                )
-              })}
-              {marqueeRect ? (
-                <div
-                  data-testid="marquee-selection"
-                  className="pointer-events-none absolute border border-accent-blue-border bg-accent-blue-soft"
-                  style={{
-                    left: `${marqueeRect.left}px`,
-                    top: `${marqueeRect.top}px`,
-                    width: `${marqueeRect.width}px`,
-                    height: `${marqueeRect.height}px`,
-                  }}
+            onContainerMouseDown={handleContainerMouseDown}
+            onScroll={(position) => {
+              liveScrollTopRef.current = position
+            }}
+            onContainerContextMenu={(event) => showMenu(event)}
+            onPaneDragOver={handlePaneDragOver}
+            onPaneDragLeave={handlePaneDragLeave}
+            onPaneDrop={(event) => void handlePaneDrop(event)}
+            scrollContainerRef={parentRef}
+            body={
+              showSkeleton ? (
+                <div className="min-h-0 flex-1 overflow-auto">
+                  <LoadingSkeleton />
+                </div>
+              ) : permissionDenied ? (
+                <PermissionDenied onGoUp={() => void goUp(paneId)} canGoUp={canGoUp} />
+              ) : pane.error ? (
+                <ErrorState
+                  message={pane.error}
+                  onRetry={() => void reloadPane(paneId)}
+                  onGoUp={() => void goUp(paneId)}
+                  canGoUp={canGoUp}
                 />
-              ) : null}
-            </div>
-          </div>
-          {usesDetachedMacScrollbars ? (
-            <div
-              ref={horizontalScrollRef}
-              data-testid={`file-pane-horizontal-scroll-${paneId}`}
-              className="absolute inset-x-0 bottom-0 z-20 h-2 overflow-x-auto overflow-y-hidden overscroll-contain bg-light-surface scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:bg-dark-surface dark:scrollbar-thumb-dark-text-faint"
-              onScroll={handleHorizontalScroll}
-            >
-              <div style={{ width: `${contentWidth}px`, height: '1px' }} />
-            </div>
-          ) : null}
-        </div>
+              ) : showEmpty ? (
+                <div className="min-h-0 flex-1">
+                  <EmptyState />
+                </div>
+              ) : undefined
+            }
+          />
+        </>
       )}
     </section>
   )

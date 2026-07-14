@@ -210,6 +210,9 @@ export const ipc = {
       listener(payload)
     })
   },
+  listenerCount(eventName: keyof IpcEventMap) {
+    return listeners[eventName]?.size ?? 0
+  },
   reset() {
     for (const key of Object.keys(overrides) as (keyof OverrideMap)[]) {
       delete overrides[key]

@@ -1,7 +1,7 @@
 import type { IpcCommandMap, IpcEventMap } from '@/lib/types/ipc'
 import { SESSION_PAGE_SIZE } from '@/lib/types/ipc'
 import { TRASH_PATH } from '@/lib/trash'
-import { getFixtureResponse } from '@/tests/playwright-fixtures'
+import { getFixtureResponse, resolveThumbnailFixtureBatch } from '@/tests/playwright-fixtures'
 import type { PlaywrightScenario } from '@/tests/playwright-fixtures/e2e'
 import type { TreeChildrenByPath } from '@/tests/playwright-fixtures/tree-states'
 
@@ -17,6 +17,20 @@ type ListenerMap = {
 }
 
 const listeners: ListenerMap = {}
+const cancelledThumbnailScopes = new Set<string>()
+
+function thumbnailScopeKey(payload: IpcCommandMap['request_thumbnails']['request']) {
+  return `${payload.paneId}:${payload.tabId}:${payload.path}:${payload.generation}`
+}
+
+function emitPlaywrightEvent<EventName extends keyof IpcEventMap>(
+  eventName: EventName,
+  payload: IpcEventMap[EventName],
+) {
+  for (const handler of listeners[eventName] ?? []) {
+    handler(payload)
+  }
+}
 
 function readScenario() {
   return (globalThis as { __PLAYWRIGHT_IPC_SCENARIO__?: PlaywrightScenario }).__PLAYWRIGHT_IPC_SCENARIO__
@@ -194,6 +208,28 @@ export async function invokePlaywrightCommand<CommandName extends keyof IpcComma
       totalRows: 0,
       page: { pageIndex: request.pageIndex, entries: [] },
     } as IpcCommandMap[CommandName]['response']
+  }
+
+  if (command === 'cancel_thumbnails') {
+    const request = payload as IpcCommandMap['cancel_thumbnails']['request']
+    cancelledThumbnailScopes.add(thumbnailScopeKey(request))
+    return undefined as IpcCommandMap[CommandName]['response']
+  }
+
+  if (command === 'request_thumbnails') {
+    const request = payload as IpcCommandMap['request_thumbnails']['request']
+    const fixture = readScenario()?.thumbnailFixture
+    const scopeKey = thumbnailScopeKey(request)
+    cancelledThumbnailScopes.delete(scopeKey)
+    if (fixture) {
+      const batch = resolveThumbnailFixtureBatch(request, fixture)
+      window.setTimeout(() => {
+        if (!cancelledThumbnailScopes.has(scopeKey)) {
+          emitPlaywrightEvent('thumbnail://state', batch)
+        }
+      }, 0)
+    }
+    return undefined as IpcCommandMap[CommandName]['response']
   }
 
   // Explicit Items sorting reuses the shared fixture registry by default so a

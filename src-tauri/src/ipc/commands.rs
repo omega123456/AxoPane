@@ -22,14 +22,15 @@ use super::types::WarmNativeMenusResponse;
 use super::types::{
     ActiveItemsSortRequest, ActiveItemsSortResponse, AppConfig, BeginNavigationRequest,
     BeginNavigationResponse, CancelSizeRequest, CancelSizeResponse, CancelSizesRequest,
-    CancelSizesResponse, CreateEntryRequest, DeleteFromTrashRequest, EjectVolumeRequest,
-    FileClipboardMode, FolderSizeRequest, FolderSizesRequest, GetDefaultApplicationRequest,
-    GetDefaultApplicationResponse, GetSessionRangeRequest, IconStateEvent, InitialShellResponse,
-    InvokeNativeMenuRequest, ListApplicationsResponse, ListDirRequest, ListDirResponse,
-    ListTrashResponse, ListTreeChildrenRequest, ListTreeChildrenResponse, LoadNativeMenuRequest,
-    LoadNativeMenuResponse, LogFrontendRequest, MenuActionStatus, OpIdRequest, OpenPathRequest,
-    OpenWithRequest, ReleaseSessionRequest, ReleaseSessionResponse, RenameEntryRequest,
-    ReorderOpsRequest, RequestIconsRequest, ResolveConflictRequest, RestoreTrashRequest,
+    CancelSizesResponse, CancelThumbnailsRequest, CreateEntryRequest, DeleteFromTrashRequest,
+    EjectVolumeRequest, FileClipboardMode, FolderSizeRequest, FolderSizesRequest,
+    GetDefaultApplicationRequest, GetDefaultApplicationResponse, GetSessionRangeRequest,
+    IconStateEvent, InitialShellResponse, InvokeNativeMenuRequest, ListApplicationsResponse,
+    ListDirRequest, ListDirResponse, ListTrashResponse, ListTreeChildrenRequest,
+    ListTreeChildrenResponse, LoadNativeMenuRequest, LoadNativeMenuResponse, LogFrontendRequest,
+    MenuActionStatus, OpIdRequest, OpenPathRequest, OpenWithRequest, ReleaseSessionRequest,
+    ReleaseSessionResponse, RenameEntryRequest, ReorderOpsRequest, RequestIconsRequest,
+    RequestThumbnailsRequest, ResolveConflictRequest, RestoreTrashRequest,
     ReviseSessionViewRequest, SaveConfigRequest, SaveSessionRequest, SessionRangeResponse,
     SessionRejection, SessionState, SetDefaultApplicationRequest, SetLogLevelRequest,
     SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent, StartOpRequest, TrashEntriesRequest,
@@ -87,6 +88,85 @@ async fn latency_filesystem_cancellable<T: Send + 'static>(
 #[tauri::command]
 pub fn get_initial_shell() -> InitialShellResponse {
     mock::initial_shell()
+}
+
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub fn request_thumbnails(
+    payload: RequestThumbnailsRequest,
+    state: State<'_, Arc<crate::thumbnails::ThumbnailService>>,
+) {
+    let subscribers = payload
+        .candidates
+        .into_iter()
+        .map(|candidate| {
+            let subscriber = crate::thumbnails::scheduler::ThumbnailSubscriber {
+                pane_id: payload.pane_id.clone(),
+                tab_id: payload.tab_id.clone(),
+                path: payload.path.clone(),
+                generation: payload.generation,
+            };
+            let fingerprint = crate::thumbnails::types::ThumbnailFingerprint::from_metadata(
+                Path::new(&candidate.path),
+                candidate.modified_unix_seconds,
+                candidate.size_bytes,
+            );
+            (
+                subscriber,
+                crate::thumbnails::types::ThumbnailCandidate::new(
+                    fingerprint,
+                    candidate.is_directory,
+                ),
+            )
+        })
+        .collect();
+    state.request(subscribers);
+}
+
+#[cfg(feature = "test-utils")]
+#[tauri::command]
+pub fn request_thumbnails(
+    payload: RequestThumbnailsRequest,
+    state: State<'_, Arc<crate::thumbnails::ThumbnailService>>,
+) {
+    let subscribers = payload
+        .candidates
+        .into_iter()
+        .map(|candidate| {
+            let subscriber = crate::thumbnails::scheduler::ThumbnailSubscriber {
+                pane_id: payload.pane_id.clone(),
+                tab_id: payload.tab_id.clone(),
+                path: payload.path.clone(),
+                generation: payload.generation,
+            };
+            let fingerprint = crate::thumbnails::types::ThumbnailFingerprint::from_metadata(
+                Path::new(&candidate.path),
+                candidate.modified_unix_seconds,
+                candidate.size_bytes,
+            );
+            (
+                subscriber,
+                crate::thumbnails::types::ThumbnailCandidate::new(
+                    fingerprint,
+                    candidate.is_directory,
+                ),
+            )
+        })
+        .collect();
+    state.request(subscribers);
+}
+
+#[tauri::command]
+pub fn cancel_thumbnails(
+    payload: CancelThumbnailsRequest,
+    state: State<'_, Arc<crate::thumbnails::ThumbnailService>>,
+) {
+    state.cancel(
+        &payload.pane_id,
+        &payload.tab_id,
+        &payload.path,
+        payload.generation,
+    );
 }
 
 #[cfg(not(feature = "test-utils"))]

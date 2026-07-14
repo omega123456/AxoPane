@@ -4,6 +4,8 @@ import { contextMenuFixtures } from './context-menu'
 import { itemsSortReadyResponse } from './item-counts'
 import { shellFixtures } from './shell'
 
+export { resolveThumbnailFixtureBatch, thumbnailFixture } from './pane-views'
+
 const registry: Partial<{
   [CommandName in keyof IpcCommandMap]: IpcCommandMap[CommandName]['response']
 }> = {

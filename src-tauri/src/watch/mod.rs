@@ -19,9 +19,7 @@ use notify::event::{EventKind, ModifyKind, RenameMode};
 use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 
-use self::coordinator::{
-    CompactedBatch, MutationKind, RawMutation, WatchCoordinator, WatchId,
-};
+use self::coordinator::{CompactedBatch, MutationKind, RawMutation, WatchCoordinator, WatchId};
 use crate::fs::{self, DirectoryEntry, ListDirOptions, ListDirResponse, SortDirection, SortKey};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

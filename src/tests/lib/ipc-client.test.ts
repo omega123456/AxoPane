@@ -16,6 +16,8 @@ import {
   requestFolderSize,
   requestFolderSizes,
   requestVisibleItemCounts,
+  requestThumbnails,
+  cancelThumbnails,
   saveConfig,
   saveSession,
   sortActiveItems,
@@ -29,6 +31,7 @@ import {
   onSizeState,
   onVolumesChanged,
   onWatchError,
+  onThumbnailState,
 } from '@/lib/ipc/events'
 import { invokePlaywrightCommand, listenPlaywrightEvent } from '@/lib/ipc/playwright-ipc-mock'
 
@@ -72,6 +75,8 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
     ipc.override('request_folder_size', () => undefined)
     ipc.override('request_folder_sizes', () => undefined)
     ipc.override('request_visible_item_counts', () => undefined)
+    ipc.override('request_thumbnails', () => undefined)
+    ipc.override('cancel_thumbnails', () => undefined)
     ipc.override('open_path', () => undefined)
     let lastSetTabWatchPayload: unknown
     ipc.override('set_tab_watch', (payload) => {
@@ -87,6 +92,18 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
       }),
     ).resolves.toBeUndefined()
     await expect(openPath({ path: 'C:\\x' })).resolves.toBeUndefined()
+    await expect(
+      requestThumbnails({
+        paneId: 'left',
+        tabId: 'tab-1',
+        path: 'C:\\x',
+        generation: 1,
+        candidates: [],
+      }),
+    ).resolves.toBeUndefined()
+    await expect(
+      cancelThumbnails({ paneId: 'left', tabId: 'tab-1', path: 'C:\\x', generation: 1 }),
+    ).resolves.toBeUndefined()
     await expect(setTabWatch(null)).resolves.toBeUndefined()
     expect(lastSetTabWatchPayload).toEqual({
       target: null,
@@ -226,6 +243,7 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
       await onQueueProgress(vi.fn()),
       await onQueueConflict(vi.fn()),
       await onWatchError(vi.fn()),
+      await onThumbnailState(vi.fn()),
     ]
     for (const unlisten of handlers) {
       expect(typeof unlisten).toBe('function')

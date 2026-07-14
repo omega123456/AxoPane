@@ -144,6 +144,58 @@ pub struct IconStateEvent {
     pub icon_data_url: Option<String>,
 }
 
+/// A listing-derived identity for a previewable file. Directory entries are
+/// deliberately excluded: folders retain their ordinary large icon.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThumbnailCandidateRequest {
+    pub path: String,
+    pub modified_unix_seconds: u64,
+    pub size_bytes: u64,
+    pub is_directory: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestThumbnailsRequest {
+    pub pane_id: String,
+    pub tab_id: String,
+    pub path: String,
+    pub generation: u64,
+    pub candidates: Vec<ThumbnailCandidateRequest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelThumbnailsRequest {
+    pub pane_id: String,
+    pub tab_id: String,
+    pub path: String,
+    pub generation: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum ThumbnailResultKind {
+    Ready,
+    Unavailable,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThumbnailResultEvent {
+    pub pane_id: String,
+    pub tab_id: String,
+    pub path: String,
+    pub generation: u64,
+    pub fingerprint_path: String,
+    pub modified_unix_seconds: u64,
+    pub size_bytes: u64,
+    pub state: ThumbnailResultKind,
+    pub data_url: Option<String>,
+}
+
 /// Batch of representative single-item (`File`/`Folder`) requests whose
 /// derived cache keys should be background-warmed. Each element reproduces
 /// exactly the request shape a single-row right-click would build, so the

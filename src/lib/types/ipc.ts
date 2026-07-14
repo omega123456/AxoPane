@@ -1,4 +1,5 @@
 import type { DateFormat } from '@/lib/date-format'
+import type { PaneViewMode } from '@/lib/pane-view'
 import type { UpdateInterval } from '@/lib/update-intervals'
 
 export type ThemePreference = 'system' | 'light' | 'dark'
@@ -268,6 +269,7 @@ export type LayoutConfig = {
   /** Per-column widths in CSS pixels. Missing keys fall back to app defaults. */
   columnWidths: ColumnWidths
   defaultPaneMode: PaneMode
+  defaultViewMode: PaneViewMode
   restoreSession: boolean
   zoom: ZoomLevel
 }
@@ -306,6 +308,8 @@ export type SessionTab = {
   sortKey: SortKey
   sortDirection: SortDirection
   filter: string
+  /** Optional so older saved sessions remain distinguishable during migration. */
+  viewMode?: string | null
 }
 
 export type SessionPane = {
@@ -364,6 +368,44 @@ export type RequestIconsRequest = {
 export type IconStateEvent = {
   path: string
   iconDataUrl: string | null
+}
+
+/** A listing-derived identity for a file that may receive a native preview. */
+export type ThumbnailCandidateRequest = {
+  path: string
+  modifiedUnixSeconds: number
+  sizeBytes: number
+  isDirectory: boolean
+}
+
+export type RequestThumbnailsRequest = {
+  paneId: string
+  tabId: string
+  path: string
+  generation: number
+  candidates: ThumbnailCandidateRequest[]
+}
+
+export type CancelThumbnailsRequest = {
+  paneId: string
+  tabId: string
+  path: string
+  generation: number
+}
+
+export type ThumbnailResultKind = 'ready' | 'unavailable' | 'failed'
+
+/** A contextual result emitted in bounded batches on `thumbnail://state`. */
+export type ThumbnailResultEvent = {
+  paneId: string
+  tabId: string
+  path: string
+  generation: number
+  fingerprintPath: string
+  modifiedUnixSeconds: number
+  sizeBytes: number
+  state: ThumbnailResultKind
+  dataUrl: string | null
 }
 
 export type CancelSizeRequest = {
@@ -854,6 +896,14 @@ export type IpcCommandMap = {
     request: RequestIconsRequest
     response: void
   }
+  request_thumbnails: {
+    request: RequestThumbnailsRequest
+    response: void
+  }
+  cancel_thumbnails: {
+    request: CancelThumbnailsRequest
+    response: void
+  }
   request_visible_item_counts: {
     request: VisibleItemCountsRequest
     response: void
@@ -947,6 +997,8 @@ export type IpcEventMap = {
   'size://state': SizeStateEvent[]
   /** Batched: the backend flushes resolved icons in chunks (see Phase 3 backend batching). */
   'icon://state': IconStateEvent[]
+  /** Batched contextual native thumbnail outcomes. */
+  'thumbnail://state': ThumbnailResultEvent[]
   'item-count://state': ItemCountEvent
   'volumes://changed': VolumesChangedEvent
   'queue://progress': QueueProgressEvent

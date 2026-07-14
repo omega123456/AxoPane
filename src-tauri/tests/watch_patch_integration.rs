@@ -66,11 +66,30 @@ fn session_patch_serializes_struct_variant_fields_as_camel_case() {
     let object = json.as_object().expect("patch serializes to a JSON object");
 
     assert_eq!(object.get("mode").and_then(|v| v.as_str()), Some("delta"));
-    for key in ["paneId", "tabId", "previousBaseline", "nextBaseline", "totalRows", "deltas"] {
-        assert!(object.contains_key(key), "expected camelCase key `{key}` in {json}");
+    for key in [
+        "paneId",
+        "tabId",
+        "previousBaseline",
+        "nextBaseline",
+        "totalRows",
+        "deltas",
+    ] {
+        assert!(
+            object.contains_key(key),
+            "expected camelCase key `{key}` in {json}"
+        );
     }
-    for snake in ["pane_id", "tab_id", "previous_baseline", "next_baseline", "total_rows"] {
-        assert!(!object.contains_key(snake), "unexpected snake_case key `{snake}` in {json}");
+    for snake in [
+        "pane_id",
+        "tab_id",
+        "previous_baseline",
+        "next_baseline",
+        "total_rows",
+    ] {
+        assert!(
+            !object.contains_key(snake),
+            "unexpected snake_case key `{snake}` in {json}"
+        );
     }
 
     let first_delta = object
@@ -79,9 +98,18 @@ fn session_patch_serializes_struct_variant_fields_as_camel_case() {
         .and_then(|deltas| deltas.first())
         .and_then(|delta| delta.as_object())
         .expect("delta row present");
-    assert_eq!(first_delta.get("kind").and_then(|v| v.as_str()), Some("inserted"));
-    assert!(first_delta.contains_key("rowIndex"), "row delta field must be camelCase: {json}");
-    assert!(!first_delta.contains_key("row_index"), "row delta must not be snake_case: {json}");
+    assert_eq!(
+        first_delta.get("kind").and_then(|v| v.as_str()),
+        Some("inserted")
+    );
+    assert!(
+        first_delta.contains_key("rowIndex"),
+        "row delta field must be camelCase: {json}"
+    );
+    assert!(
+        !first_delta.contains_key("row_index"),
+        "row delta must not be snake_case: {json}"
+    );
 }
 
 #[test]

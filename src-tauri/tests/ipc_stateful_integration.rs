@@ -3,6 +3,7 @@ mod common;
 
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -17,7 +18,9 @@ use file_explorer_lib::ipc::types::{
 };
 use file_explorer_lib::ops::{OpItem, OpKind, OpStatus, OpsService, StartOpRequest};
 use file_explorer_lib::persist::{Config, PersistenceState, Session};
+use file_explorer_lib::resource_coordinator::ResourceCoordinator;
 use file_explorer_lib::size::{EverythingStatus, SizeService};
+use file_explorer_lib::thumbnails::ThumbnailService;
 use file_explorer_lib::watch::WatchService;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -35,11 +38,15 @@ impl TestApp<tauri::test::MockRuntime> {
     fn new() -> Self {
         let config_dir = tempdir().expect("config dir");
         let persistence = PersistenceState::load(config_dir.path()).expect("persistence");
+        let coordinator = Arc::new(ResourceCoordinator::new());
+        let thumbnails = Arc::new(ThumbnailService::new(Arc::clone(&coordinator)));
 
         let app = mock_builder()
             .manage(persistence)
+            .manage(coordinator)
+            .manage(thumbnails)
             .manage(SizeService::default())
-            .manage(WatchService::default())
+            .manage(Arc::new(WatchService::default()))
             .manage(OpsService::new(Duration::from_secs(30)))
             .invoke_handler(tauri::generate_handler![
                 commands::get_initial_shell,
@@ -55,6 +62,8 @@ impl TestApp<tauri::test::MockRuntime> {
                 commands::request_folder_size,
                 commands::request_folder_sizes,
                 commands::request_icons,
+                commands::request_thumbnails,
+                commands::cancel_thumbnails,
                 commands::cancel_size,
                 commands::cancel_sizes,
                 commands::set_tab_watch,

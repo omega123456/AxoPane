@@ -10,6 +10,7 @@ import { useConfigStore } from '@/stores/config-store'
 import { defaultColumns, defaultLayout, useLayoutStore } from '@/stores/layout-store'
 import { useKeymapStore } from '@/stores/keymap-store'
 import { migrateKeymap } from '@/lib/keymap'
+import { resolvePaneViewMode } from '@/lib/pane-view'
 
 export function defaultAppConfig(): AppConfig {
   return {
@@ -53,6 +54,7 @@ export function buildAppConfig(): AppConfig {
       paneSplit: layout.paneSplit,
       columnWidths: layout.columnWidths,
       defaultPaneMode: layout.defaultPaneMode,
+      defaultViewMode: layout.defaultViewMode,
       restoreSession: layout.restoreSession,
       zoom: layout.zoom,
     },
@@ -96,7 +98,12 @@ export function hydrateAppConfig(config: AppConfig) {
     ...defaultAppConfig(),
     ...config,
     keybindings: bindings,
-    layout: { ...defaultLayout, ...config.layout, detailsVisible: false },
+    layout: {
+      ...defaultLayout,
+      ...config.layout,
+      detailsVisible: false,
+      defaultViewMode: resolvePaneViewMode(config.layout?.defaultViewMode, defaultLayout.defaultViewMode),
+    },
     columns: config.columns?.length ? config.columns : defaultColumns,
     updateCheckInterval,
     logLevel,

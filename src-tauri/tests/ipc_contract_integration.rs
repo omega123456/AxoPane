@@ -38,6 +38,7 @@ fn exposes_event_channel_names() {
     assert_eq!(events::DIR_PATCH, "dir://patch");
     assert_eq!(events::ITEM_COUNT, "item-count://state");
     assert_eq!(events::WATCH_ERROR, "watch://error");
+    assert_eq!(events::THUMBNAIL_STATE, "thumbnail://state");
     assert_eq!(common::bootstrap_message(), "phase-1-common");
 }
 

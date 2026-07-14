@@ -25,6 +25,7 @@ import { itemsSortPendingListDir, itemsSortPendingSession } from './item-counts'
 import { relativeDatesListDir } from './relative-dates'
 import { stickyTreeChildrenByPath, stickyTreeListDir, stickyTreeSession } from './tree'
 import type { TreeChildrenByPath } from './tree-states'
+import { iconsSession, paneViewListDir, thumbnailFixture, thumbnailsSession, type ThumbnailFixture } from './pane-views'
 
 type CommandMap = Partial<{
   [CommandName in keyof IpcCommandMap]: IpcCommandMap[CommandName]['response']
@@ -42,6 +43,7 @@ export type PlaywrightScenario = {
   delaysMs?: DelayMap
   events?: EventMap
   treeChildrenByPath?: TreeChildrenByPath
+  thumbnailFixture?: ThumbnailFixture
   // Forces the app's platform detection for this scenario regardless of the
   // host OS the Playwright run happens on. The native shell-extension menu
   // section only exists on Windows, so the native-menu scenarios pin
@@ -89,6 +91,7 @@ const lightConfig: AppConfig = {
       created: 128,
     },
     defaultPaneMode: 'dual',
+    defaultViewMode: 'details',
     restoreSession: true,
     zoom: '100',
   },
@@ -235,6 +238,79 @@ export const screenshotScenarios = {
         load_config: darkConfig,
         queue_snapshot: emptyQueueSnapshot,
       },
+    },
+  },
+  iconsNarrow: scenarioByTheme({
+    load_session: iconsSession,
+    list_dir: paneViewListDir,
+    queue_snapshot: emptyQueueSnapshot,
+  }),
+  iconsInteractionStates: {
+    light: {
+      commands: {
+        load_config: { ...lightConfig, showHiddenFiles: true },
+        load_session: iconsSession,
+        list_dir: paneViewListDir,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+    },
+    dark: {
+      commands: {
+        load_config: { ...darkConfig, showHiddenFiles: true },
+        load_session: iconsSession,
+        list_dir: paneViewListDir,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+    },
+  },
+  iconsRename: scenarioByTheme({
+    load_session: iconsSession,
+    list_dir: paneViewListDir,
+    queue_snapshot: emptyQueueSnapshot,
+  }),
+  thumbnailsFallback: {
+    light: {
+      commands: {
+        load_config: lightConfig,
+        load_session: thumbnailsSession,
+        list_dir: paneViewListDir,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+      thumbnailFixture,
+    },
+    dark: {
+      commands: {
+        load_config: darkConfig,
+        load_session: thumbnailsSession,
+        list_dir: paneViewListDir,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+      thumbnailFixture,
+    },
+  },
+  thumbnailsInteractionStates: scenarioByTheme({
+    load_session: thumbnailsSession,
+    list_dir: paneViewListDir,
+    queue_snapshot: emptyQueueSnapshot,
+  }),
+  thumbnailsRename: {
+    light: {
+      commands: {
+        load_config: lightConfig,
+        load_session: thumbnailsSession,
+        list_dir: paneViewListDir,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+      thumbnailFixture,
+    },
+    dark: {
+      commands: {
+        load_config: darkConfig,
+        load_session: thumbnailsSession,
+        list_dir: paneViewListDir,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+      thumbnailFixture,
     },
   },
   stickyTree: {

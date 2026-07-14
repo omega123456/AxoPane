@@ -7,6 +7,7 @@ import { usePanesStore } from '@/stores/panes-store'
 import { useQueueStore } from '@/stores/queue-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useTabsStore } from '@/stores/tabs-store'
+import { useThumbnailStore } from '@/stores/thumbnail-store'
 import { initializeTheme } from '@/stores/theme-store'
 
 export function renderApp() {
@@ -14,6 +15,7 @@ export function renderApp() {
   useLayoutStore.getState().reset()
   usePanesStore.getState().reset()
   useTabsStore.getState().reset()
+  useThumbnailStore.getState().reset()
   useSelectionStore.getState().reset()
   useQueueStore.getState().reset()
   initializeTheme()

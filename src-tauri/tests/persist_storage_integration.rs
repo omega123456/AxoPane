@@ -48,6 +48,7 @@ fn config_and_session_round_trip_through_atomic_storage() {
             pane_split: 0.4,
             column_widths: std::collections::HashMap::from([("type".to_string(), 188.0)]),
             default_pane_mode: "single".to_string(),
+            default_view_mode: "icons".to_string(),
             restore_session: false,
             zoom: "150".to_string(),
         },
@@ -98,6 +99,7 @@ fn config_and_session_round_trip_through_atomic_storage() {
                 pane_split: 0.4,
                 column_widths: std::collections::HashMap::from([("type".to_string(), 188.0)]),
                 default_pane_mode: "single".to_string(),
+                default_view_mode: "icons".to_string(),
                 restore_session: false,
                 zoom: "150".to_string(),
             },
@@ -143,12 +145,14 @@ fn session_with_per_pane_tabs_round_trips_through_storage() {
                     sort_key: "name".to_string(),
                     sort_direction: "asc".to_string(),
                     filter: String::new(),
+                    view_mode: Some("details".to_string()),
                 },
                 SessionTab {
                     path: "C:\\left\\nested".to_string(),
                     sort_key: "size".to_string(),
                     sort_direction: "desc".to_string(),
                     filter: "report".to_string(),
+                    view_mode: Some("thumbnails".to_string()),
                 },
             ],
         }),
@@ -159,6 +163,7 @@ fn session_with_per_pane_tabs_round_trips_through_storage() {
                 sort_key: "modified".to_string(),
                 sort_direction: "desc".to_string(),
                 filter: String::new(),
+                view_mode: Some("icons".to_string()),
             }],
         }),
     };
@@ -187,6 +192,23 @@ fn legacy_flat_session_deserializes_with_no_tab_state() {
     assert_eq!(loaded.right_path, "D:\\old");
     assert!(loaded.left.is_none());
     assert!(loaded.right.is_none());
+}
+
+#[test]
+fn old_tab_modes_remain_optional_raw_text() {
+    let fixture = tempdir().expect("temp dir");
+    let path = fixture.path().join("session.json");
+
+    fs::write(
+        &path,
+        br#"{"activePane":"left","leftPath":"C:\\old","rightPath":"D:\\old","left":{"activeTabIndex":0,"tabs":[{"path":"C:\\old","sortKey":"name","sortDirection":"asc","filter":""},{"path":"C:\\future","sortKey":"name","sortDirection":"asc","filter":"","viewMode":"future-view"}]}}"#,
+    )
+    .expect("seed old tab session");
+
+    let loaded: Session = load_json_or_default(&path).expect("load old tab session");
+    let tabs = &loaded.left.expect("left tabs").tabs;
+    assert_eq!(tabs[0].view_mode, None);
+    assert_eq!(tabs[1].view_mode.as_deref(), Some("future-view"));
 }
 
 #[test]

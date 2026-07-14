@@ -9,6 +9,81 @@ import {
 } from '../src/tests/playwright-fixtures/queue'
 
 for (const mode of ['light', 'dark'] as const) {
+  test(`view menu ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.browsing[mode])
+    const trigger = page.getByLabel('View: Details').first()
+    await trigger.click()
+    const menu = page.getByRole('menu', { name: 'View options' })
+    await expect(menu).toBeVisible()
+    const details = menu.getByRole('menuitemradio', { name: 'Details' })
+    await expect(details).toHaveAttribute('aria-checked', 'true')
+    await expect(details).toBeFocused()
+    await expect(page.locator('main')).toHaveScreenshot(`pane-view-menu-${mode}.png`)
+  })
+
+  test(`icons narrow ${mode}`, async ({ page }) => {
+    await page.setViewportSize({ width: 720, height: 700 })
+    await gotoScenario(page, screenshotScenarios.iconsNarrow[mode])
+    const grid = page.getByRole('grid', { name: /Icons for/ })
+    await expect(grid).toBeVisible()
+    const longName = grid.getByRole('gridcell', { name: /A very long photograph filename/ })
+    await expect(longName).toBeVisible()
+    await expect(grid).toHaveAttribute('aria-colcount', '1')
+    await expect(page.locator('main')).toHaveScreenshot(`pane-icons-narrow-${mode}.png`)
+  })
+
+  test(`icons interaction states ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.iconsInteractionStates[mode])
+    const grid = page.getByRole('grid', { name: /Icons for/ })
+    const longName = grid.getByRole('gridcell', { name: /A very long photograph filename/ })
+    await longName.click()
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+x' : 'Control+x')
+    await expect(longName).toHaveAttribute('aria-selected', 'true')
+    await expect(grid.getByRole('gridcell', { name: 'Hidden reference.txt' })).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`pane-icons-interaction-states-${mode}.png`)
+  })
+
+  test(`icons rename ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.iconsRename[mode])
+    const grid = page.getByRole('grid', { name: /Icons for/ })
+    const longName = grid.getByRole('gridcell', { name: /A very long photograph filename/ })
+    await longName.click()
+    await page.keyboard.press('F2')
+    await expect(page.getByLabel(/Rename A very long photograph filename/)).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`pane-icons-rename-${mode}.png`)
+  })
+
+  test(`thumbnails fallback ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.thumbnailsFallback[mode])
+    const grid = page.getByRole('grid', { name: /Large thumbnails for/ })
+    await expect(grid).toBeVisible()
+    await expect(grid.getByRole('img').first()).toBeVisible()
+    await expect(grid.getByRole('gridcell', { name: 'Unsupported artwork.psd' })).toBeVisible()
+    await expect(grid.getByRole('gridcell', { name: 'Unreadable scan.tiff' })).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`pane-thumbnails-fallback-${mode}.png`)
+  })
+
+  test(`thumbnails interaction states ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.thumbnailsInteractionStates[mode])
+    const grid = page.getByRole('grid', { name: /Large thumbnails for/ })
+    await expect(page.getByLabel('Thumbnail loading').first()).toBeVisible()
+    const preview = grid.getByRole('gridcell', { name: 'Mountain preview.png' })
+    await preview.click()
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+x' : 'Control+x')
+    await expect(preview).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('main')).toHaveScreenshot(`pane-thumbnails-interaction-states-${mode}.png`)
+  })
+
+  test(`thumbnails rename ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.thumbnailsRename[mode])
+    const grid = page.getByRole('grid', { name: /Large thumbnails for/ })
+    const preview = grid.getByRole('gridcell', { name: 'Mountain preview.png' })
+    await preview.click()
+    await page.keyboard.press('F2')
+    await expect(page.getByLabel('Rename Mountain preview.png')).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`pane-thumbnails-rename-${mode}.png`)
+  })
+
   test(`browsing ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
     await expect(page.getByRole('region', { name: 'Left pane' })).toBeVisible()
@@ -272,6 +347,7 @@ for (const mode of ['light', 'dark'] as const) {
     await gotoScenario(page, { ...screenshotScenarios.browsing[mode], platform: 'macos' })
     await openSettingsSection(page, 'layout')
     await expect(page.getByText('Default pane mode')).toBeVisible()
+    await expect(page.getByRole('radiogroup', { name: 'Default view for new tabs' })).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`settings-layout-${mode}.png`)
   })
 

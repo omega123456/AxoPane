@@ -1,11 +1,14 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 @plugin "tailwind-scrollbar";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-ui: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "Cascadia Code", "Cascadia Mono", ui-monospace, "SF Mono", Consolas, "Liberation Mono", monospace;
+  --font-ui:
+    'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono:
+    'Cascadia Code', 'Cascadia Mono', ui-monospace, 'SF Mono', Consolas, 'Liberation Mono',
+    monospace;
 
   --color-dark-backdrop: #161616;
   --color-dark-window: #202020;
@@ -17,8 +20,16 @@
   /* Opaque stand-in for accent-blue-soft on a pinned (sticky) tree row, where
      the translucent selection tint would otherwise let scrolled-under rows
      show through. */
-  --color-dark-tree-current: color-mix(in srgb, var(--color-accent-blue) 15%, var(--color-dark-tree));
-  --color-dark-tree-current-hover: color-mix(in srgb, var(--color-accent-blue) 19%, var(--color-dark-tree));
+  --color-dark-tree-current: color-mix(
+    in srgb,
+    var(--color-accent-blue) 15%,
+    var(--color-dark-tree)
+  );
+  --color-dark-tree-current-hover: color-mix(
+    in srgb,
+    var(--color-accent-blue) 19%,
+    var(--color-dark-tree)
+  );
   --color-dark-tree-hover: color-mix(in srgb, white 5.5%, var(--color-dark-tree));
   --color-dark-header: #2c2c2c;
   --color-dark-hover: rgba(255, 255, 255, 0.055);
@@ -40,8 +51,16 @@
   --color-light-tree: #f1f1f1;
   /* Opaque stand-in for accent-blue-soft on a pinned (sticky) tree row; see
      --color-dark-tree-current. */
-  --color-light-tree-current: color-mix(in srgb, var(--color-accent-blue) 15%, var(--color-light-tree));
-  --color-light-tree-current-hover: color-mix(in srgb, var(--color-accent-blue) 19%, var(--color-light-tree));
+  --color-light-tree-current: color-mix(
+    in srgb,
+    var(--color-accent-blue) 15%,
+    var(--color-light-tree)
+  );
+  --color-light-tree-current-hover: color-mix(
+    in srgb,
+    var(--color-accent-blue) 19%,
+    var(--color-light-tree)
+  );
   --color-light-tree-hover: color-mix(in srgb, black 4.5%, var(--color-light-tree));
   --color-light-header: #efefef;
   --color-light-hover: rgba(0, 0, 0, 0.045);
@@ -144,8 +163,8 @@
   --spacing-queue-list: min(37.5rem, calc(100vh - 6rem));
 
   --spacing-settings-modal-w: min(80vw, 1300px);
-    --spacing-settings-modal-h: min(85vh, 52rem);
-    --spacing-settings-content: 52rem;
+  --spacing-settings-modal-h: min(85vh, 52rem);
+  --spacing-settings-content: 52rem;
   --spacing-settings-nav: 11.375rem;
   --spacing-modal-footer: 3.625rem;
   --spacing-switch-w: 2.375rem;
@@ -156,6 +175,15 @@
   --spacing-radio-dot: 0.5625rem;
   --spacing-swatch: 1.75rem;
   --spacing-color-input: 1.875rem;
+  --spacing-entry-icon: 2rem;
+  --spacing-icon-tile: 3.5rem;
+  --spacing-icon-cell: 13rem;
+  --spacing-icon-row: 4rem;
+  --spacing-thumbnail-preview: 9rem;
+  --spacing-thumbnail-cell: 13rem;
+  --spacing-thumbnail-card: 13.75rem;
+  --spacing-thumbnail-row: 14.25rem;
+  --spacing-gap: 0.5rem;
 
   --container-strata: 93.75rem;
 

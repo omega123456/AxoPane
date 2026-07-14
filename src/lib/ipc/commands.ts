@@ -35,6 +35,8 @@ import type {
   ReleaseSessionResponse,
   RenameEntryRequest,
   RequestIconsRequest,
+  RequestThumbnailsRequest,
+  CancelThumbnailsRequest,
   RestoreTrashRequest,
   ReviseSessionViewRequest,
   SessionRangeResponse,
@@ -205,6 +207,14 @@ export function requestFolderSizes(payload: FolderSizesRequest) {
 
 export function requestIcons(payload: RequestIconsRequest) {
   return invokeCommand({ command: 'request_icons', payload }) as Promise<void>
+}
+
+export function requestThumbnails(payload: RequestThumbnailsRequest) {
+  return invokeCommand({ command: 'request_thumbnails', payload }) as Promise<void>
+}
+
+export function cancelThumbnails(payload: CancelThumbnailsRequest) {
+  return invokeCommand({ command: 'cancel_thumbnails', payload }) as Promise<void>
 }
 
 export function requestVisibleItemCounts(payload: VisibleItemCountsRequest) {

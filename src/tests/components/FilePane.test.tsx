@@ -64,6 +64,42 @@ afterEach(() => {
 })
 
 describe('FilePane state rendering', () => {
+  it('renders the active tab graphical mode without a synthetic Parent item', () => {
+    act(() => {
+      useTabsStore.getState().patchActiveTab('left', { viewMode: 'icons' })
+    })
+    seedPane({ path: 'C:\\root\\dir', entries: [entry('Alpha'), entry('notes.txt', false)] })
+
+    render(<FilePane paneId="left" />)
+
+    expect(screen.getByRole('grid', { name: 'Icons for C:\\root\\dir' })).toBeInTheDocument()
+    expect(screen.getAllByRole('gridcell')).toHaveLength(2)
+    expect(screen.queryByRole('row', { name: 'Go to parent folder' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('View: Icons')).toBeInTheDocument()
+  })
+
+  it('keeps view mode tab-owned when another tab is selected', () => {
+    act(() => {
+      useTabsStore.getState().patchActiveTab('left', { viewMode: 'icons' })
+      const tabId = useTabsStore.getState().addTab('left', {
+        path: 'C:\\root\\other',
+        sortKey: 'name',
+        sortDirection: 'asc',
+        filter: '',
+        viewMode: 'thumbnails',
+      })
+      useTabsStore.getState().setActiveTab('left', tabId)
+    })
+    seedPane({ path: 'C:\\root\\other', entries: [entry('Preview.png', false)] })
+
+    render(<FilePane paneId="left" />)
+
+    expect(
+      screen.getByRole('grid', { name: 'Large thumbnails for C:\\root\\other' }),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('View: Large thumbnails')).toBeInTheDocument()
+  })
+
   it('renders the loading skeleton only after loading persists past the delay', () => {
     vi.useFakeTimers()
     try {
@@ -181,7 +217,10 @@ describe('FilePane state rendering', () => {
     try {
       seedPane({
         path: 'C:\\root',
-        entries: [{ ...entry('Alpha'), itemCount: null }, { ...entry('Beta'), itemCount: null }],
+        entries: [
+          { ...entry('Alpha'), itemCount: null },
+          { ...entry('Beta'), itemCount: null },
+        ],
       })
 
       const view = render(<FilePane paneId="left" />)
@@ -929,7 +968,11 @@ describe('FilePane state rendering', () => {
     })
     ipc.override('set_tab_watch', () => undefined)
     ipc.override('save_session', (payload) => payload.session)
-    seedPane({ path: 'C:\\root', entries: [entry('Alpha'), entry('Beta')], focusedEntryId: 'Alpha' })
+    seedPane({
+      path: 'C:\\root',
+      entries: [entry('Alpha'), entry('Beta')],
+      focusedEntryId: 'Alpha',
+    })
 
     render(<FilePane paneId="left" />)
     const pane = screen.getByLabelText('Left pane')
@@ -1138,6 +1181,72 @@ describe('FilePane state rendering', () => {
     } finally {
       fireEvent.mouseUp(document)
       document.documentElement.style.removeProperty('zoom')
+    }
+  })
+
+  it('intersects only the graphical icon tile under a marquee instead of selecting its entire visual row', async () => {
+    const getBoundingClientRect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue(DOMRect.fromRect({ x: 0, y: 0, width: 640, height: 480 }))
+    try {
+      act(() => {
+        useTabsStore.getState().patchActiveTab('left', { viewMode: 'icons' })
+      })
+      seedPane({
+        path: 'C:\\',
+        entries: [entry('Alpha', false), entry('Beta', false), entry('Gamma', false)],
+      })
+
+      render(<FilePane paneId="left" />)
+      const grid = await screen.findByRole('grid', { name: 'Icons for C:\\' })
+      await waitFor(() => expect(grid).toHaveAttribute('aria-colcount', '3'))
+
+      // x=215 is the inter-column gap; the drag then overlaps only Beta's
+      // second-column tile, never the neighbouring cards in the same row.
+      fireEvent.mouseDown(grid, { button: 0, clientX: 215, clientY: 3 })
+      fireEvent.mouseMove(document, { clientX: 300, clientY: 50 })
+
+      expect(useSelectionStore.getState().selections.left.selectedIds).toEqual(['Beta'])
+    } finally {
+      fireEvent.mouseUp(document)
+      getBoundingClientRect.mockRestore()
+    }
+  })
+
+  it('intersects thumbnail cards by their virtual grid row rather than Details row height', async () => {
+    const getBoundingClientRect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue(DOMRect.fromRect({ x: 0, y: 0, width: 640, height: 480 }))
+    try {
+      act(() => {
+        useTabsStore.getState().patchActiveTab('left', { viewMode: 'thumbnails' })
+      })
+      seedPane({
+        path: 'C:\\',
+        entries: [
+          entry('Alpha', false),
+          entry('Beta', false),
+          entry('Gamma', false),
+          entry('Delta', false),
+          entry('Epsilon', false),
+          entry('Zeta', false),
+        ],
+      })
+
+      render(<FilePane paneId="left" />)
+      const grid = await screen.findByRole('grid', { name: 'Large thumbnails for C:\\' })
+      await waitFor(() => expect(grid).toHaveAttribute('aria-colcount', '3'))
+
+      // The second visual row starts at 228px. Starting in its padding and
+      // ending inside column two selects Epsilon alone, even though Details'
+      // 30px rows would map this y-coordinate to a different entry.
+      fireEvent.mouseDown(grid, { button: 0, clientX: 215, clientY: 231 })
+      fireEvent.mouseMove(document, { clientX: 300, clientY: 300 })
+
+      expect(useSelectionStore.getState().selections.left.selectedIds).toEqual(['Epsilon'])
+    } finally {
+      fireEvent.mouseUp(document)
+      getBoundingClientRect.mockRestore()
     }
   })
 

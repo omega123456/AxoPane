@@ -3,6 +3,7 @@ mod common;
 
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -293,6 +294,33 @@ fn commands_cover_size_and_logging_state() {
     assert!(icon_events
         .iter()
         .all(|event| event.icon_data_url.is_none()));
+    let thumbnail_service = Arc::new(file_explorer_lib::thumbnails::ThumbnailService::new(
+        Arc::new(file_explorer_lib::resource_coordinator::ResourceCoordinator::new()),
+    ));
+    commands::request_thumbnails(
+        file_explorer_lib::ipc::types::RequestThumbnailsRequest {
+            pane_id: "left".into(),
+            tab_id: "tab".into(),
+            path: size_root.to_string_lossy().into_owned(),
+            generation: 1,
+            candidates: vec![file_explorer_lib::ipc::types::ThumbnailCandidateRequest {
+                path: size_root.join("file-0.txt").to_string_lossy().into_owned(),
+                modified_unix_seconds: 0,
+                size_bytes: 32,
+                is_directory: false,
+            }],
+        },
+        as_state(&thumbnail_service),
+    );
+    commands::cancel_thumbnails(
+        file_explorer_lib::ipc::types::CancelThumbnailsRequest {
+            pane_id: "left".into(),
+            tab_id: "tab".into(),
+            path: size_root.to_string_lossy().into_owned(),
+            generation: 1,
+        },
+        as_state(&thumbnail_service),
+    );
     assert_eq!(commands::frontend_log_level("error"), log::Level::Error);
     assert_eq!(commands::frontend_log_level("trace"), log::Level::Debug);
     assert_eq!(
