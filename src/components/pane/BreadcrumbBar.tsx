@@ -1,32 +1,17 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { PaneState } from '@/types/pane'
-import { ChevronRightIcon, PieChartIcon, RefreshIcon, SearchIcon } from '@/components/icons'
+import { ChevronRightIcon } from '@/components/icons'
 import type { BreadcrumbLayoutMeasure } from '@/lib/breadcrumb-layout'
 import { computeBreadcrumbLayout, createBreadcrumbMeasurer } from '@/lib/breadcrumb-layout'
 import { useElementWidth } from '@/lib/use-element-width'
-import { useActionDialogStore } from '@/stores/action-dialog-store'
-import { useConfigStore } from '@/stores/config-store'
-import { autoFolderSizeDisabledForPane, usePanesStore } from '@/stores/panes-store'
+import { usePanesStore } from '@/stores/panes-store'
 
 type BreadcrumbBarProps = {
   pane: PaneState
-  isActive: boolean
-  /** Reserved action slot for pane-scoped toolbar controls. Live FilePane deliberately leaves it empty until Phase 8. */
-  actions?: ReactNode
 }
 
-export function BreadcrumbBar({ pane, isActive, actions }: BreadcrumbBarProps) {
+export function BreadcrumbBar({ pane }: BreadcrumbBarProps) {
   const navigatePane = usePanesStore((state) => state.navigatePane)
-  const setFilterDraft = usePanesStore((state) => state.setFilterDraft)
-  const clearFilter = usePanesStore((state) => state.clearFilter)
-  const refreshEverything = usePanesStore((state) => state.refreshEverything)
-  const everythingAvailable = usePanesStore((state) => state.everythingStatus?.isAvailable ?? false)
-  const autoFolderSize = useConfigStore((state) => state.autoFolderSize)
-  const openActionDialog = useActionDialogStore((state) => state.open)
-  // This pane has too many folders for eager auto-sizing, so surface the manual
-  // button here regardless of the global setting (evaluated per pane).
-  const tooManyFoldersForAuto = autoFolderSizeDisabledForPane(pane.entries)
-  const showCalculateAllSizes = !everythingAvailable || !autoFolderSize || tooManyFoldersForAuto
   const [editingPath, setEditingPath] = useState(false)
   const [pathDraft, setPathDraft] = useState(pane.path)
   const pathInputRef = useRef<HTMLInputElement>(null)
@@ -168,54 +153,6 @@ export function BreadcrumbBar({ pane, isActive, actions }: BreadcrumbBarProps) {
           ))}
         </nav>
       )}
-      <span className="shrink-0 font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-        {pane.entries.length} items
-      </span>
-      <button
-        type="button"
-        aria-label={`Refresh ${pane.title}`}
-        title="Refresh"
-        onClick={() => void refreshEverything(pane.id)}
-        className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:text-dark-text-soft dark:hover:bg-dark-hover"
-      >
-        <RefreshIcon className="h-3.5 w-3.5" />
-      </button>
-      {showCalculateAllSizes ? (
-        <button
-          type="button"
-          aria-label={`Calculate all folder sizes in ${pane.title}`}
-          title="Calculate all folder sizes"
-          onClick={() => openActionDialog({ kind: 'calculateAllSizes', paneId: pane.id })}
-          className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:text-dark-text-soft dark:hover:bg-dark-hover"
-        >
-          <PieChartIcon className="h-3.5 w-3.5" />
-        </button>
-      ) : null}
-      {actions}
-      <label
-        className={`flex h-8 w-search items-center gap-2 rounded-tab border px-2 ${
-          isActive ? 'border-accent-blue-border' : 'border-light-border dark:border-dark-border'
-        } bg-light-panel dark:bg-dark-panel`}
-      >
-        <SearchIcon className="h-3.5 w-3.5 text-light-text-muted dark:text-dark-text-muted" />
-        <input
-          aria-label={`${pane.title} filter`}
-          value={pane.filterDraft}
-          onChange={(event) => setFilterDraft(pane.id, event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') {
-              event.preventDefault()
-              clearFilter(pane.id)
-              // Hand keyboard focus back to the pane shell so arrow keys resume
-              // driving the list directly instead of staying trapped in the
-              // (now empty) filter input.
-              document.querySelector<HTMLElement>(`[data-pane-id="${pane.id}"]`)?.focus()
-            }
-          }}
-          placeholder="Filter current folder"
-          className="min-w-0 flex-1 select-text bg-transparent text-row text-light-text outline-none placeholder:text-light-text-faint dark:text-dark-text dark:placeholder:text-dark-text-faint"
-        />
-      </label>
     </div>
   )
 }

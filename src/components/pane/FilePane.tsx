@@ -5,6 +5,7 @@ import {
   resolveMenuTarget,
 } from '@/components/menus/menu-definitions'
 import { BreadcrumbBar } from './BreadcrumbBar'
+import { PaneToolbar } from './PaneToolbar'
 import { type FileRowActions } from './FileRow'
 import { DetailsView } from './DetailsView'
 import {
@@ -13,7 +14,6 @@ import {
   type GraphicalViewHandle,
 } from './GraphicalView'
 import { GraphicalSortBar } from './GraphicalSortBar'
-import { PaneViewMenu } from './PaneViewMenu'
 import { TabBar } from './TabBar'
 import { executeCommand } from '@/lib/commands'
 import { detectPlatformOs, resolveCommandForEvent } from '@/lib/keymap'
@@ -974,11 +974,8 @@ export function FilePane({ paneId }: FilePaneProps) {
     >
       <TabBar paneId={paneId} title={pane.title} currentPath={pane.path} isActive={isActivePane} />
       <EverythingBanner />
-      <BreadcrumbBar
-        pane={pane}
-        isActive={isActivePane}
-        actions={<PaneViewMenu paneId={paneId} />}
-      />
+      <PaneToolbar pane={pane} isActive={isActivePane} />
+      <BreadcrumbBar pane={pane} />
       {viewMode === 'details' ? (
         <DetailsView
           ref={detailsViewRef}

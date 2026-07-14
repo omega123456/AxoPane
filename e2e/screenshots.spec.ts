@@ -9,6 +9,15 @@ import {
 } from '../src/tests/playwright-fixtures/queue'
 
 for (const mode of ['light', 'dark'] as const) {
+  test(`pane toolbar ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.browsing[mode])
+    const toolbar = page.getByRole('toolbar', { name: 'Left pane toolbar' })
+    await expect(toolbar).toBeVisible()
+    await expect(toolbar.getByRole('button', { name: 'Refresh Left pane' })).toBeVisible()
+    await expect(toolbar.getByRole('textbox', { name: 'Left pane filter' })).toBeVisible()
+    await expect(toolbar).toHaveScreenshot(`pane-toolbar-${mode}.png`)
+  })
+
   test(`view menu ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
     const trigger = page.getByLabel('View: Details').first()
@@ -192,7 +201,7 @@ for (const mode of ['light', 'dark'] as const) {
   })
 
   test(`breadcrumbs ${mode}`, async ({ page }) => {
-    await page.setViewportSize({ width: 1100, height: 520 })
+    await page.setViewportSize({ width: 720, height: 520 })
     await gotoScenario(page, screenshotScenarios.breadcrumbs[mode])
     const rightPane = page.getByRole('region', { name: 'Right pane' })
     await expect(rightPane).toBeVisible()
