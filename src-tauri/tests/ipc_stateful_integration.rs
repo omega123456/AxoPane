@@ -213,6 +213,7 @@ fn ipc_commands_cover_shell_filesystem_and_persistence_flows() {
         relative_dates: initial_config.relative_dates,
         auto_folder_size: initial_config.auto_folder_size,
         auto_expand_active_queue_toasts: initial_config.auto_expand_active_queue_toasts,
+        favourites: initial_config.favourites.clone(),
     };
     let echoed_config: AppConfig = test_app
         .invoke_payload(

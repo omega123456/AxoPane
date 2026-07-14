@@ -2205,7 +2205,7 @@ fn copy_path_with_total_discovery(
     target: &Path,
     add_discovered_totals: bool,
     ctx: &WorkerCtx<'_>,
-    mut manifest: Option<&mut ProgressiveManifest>,
+    manifest: Option<&mut ProgressiveManifest>,
 ) -> Result<(), String> {
     let source_metadata = fs::symlink_metadata(source).map_err(|error| error.to_string())?;
     if source_metadata.file_type().is_symlink() {
@@ -2231,7 +2231,7 @@ fn copy_path_with_total_discovery(
             add_discovered_totals,
             ctx,
             Some(&mut throttle),
-            manifest.as_deref_mut(),
+            manifest,
         )
     } else {
         // A single top-level file transfer gets its own throttle: a large

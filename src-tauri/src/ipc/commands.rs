@@ -30,11 +30,12 @@ use super::types::{
     ListTreeChildrenResponse, LoadNativeMenuRequest, LoadNativeMenuResponse, LogFrontendRequest,
     MenuActionStatus, OpIdRequest, OpenPathRequest, OpenWithRequest, ReleaseSessionRequest,
     ReleaseSessionResponse, RenameEntryRequest, ReorderOpsRequest, RequestIconsRequest,
-    RequestThumbnailsRequest, ResolveConflictRequest, RestoreTrashRequest,
-    ReviseSessionViewRequest, SaveConfigRequest, SaveSessionRequest, SessionRangeResponse,
-    SessionRejection, SessionState, SetDefaultApplicationRequest, SetLogLevelRequest,
-    SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent, StartOpRequest, TrashEntriesRequest,
-    VisibleItemCountsRequest, VolumeInfo, WarmNativeMenusRequest, WriteFileClipboardRequest,
+    RequestThumbnailsRequest, RequestThumbnailsResponse, ResolveConflictRequest,
+    RestoreTrashRequest, ReviseSessionViewRequest, SaveConfigRequest, SaveSessionRequest,
+    SessionRangeResponse, SessionRejection, SessionState, SetDefaultApplicationRequest,
+    SetLogLevelRequest, SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent, StartOpRequest,
+    TrashEntriesRequest, VisibleItemCountsRequest, VolumeInfo, WarmNativeMenusRequest,
+    WriteFileClipboardRequest,
 };
 use crate::fs::DirectoryEntry;
 use std::path::Path;
@@ -90,70 +91,44 @@ pub fn get_initial_shell() -> InitialShellResponse {
     mock::initial_shell()
 }
 
-#[cfg(not(feature = "test-utils"))]
 #[tauri::command]
 pub fn request_thumbnails(
     payload: RequestThumbnailsRequest,
     state: State<'_, Arc<crate::thumbnails::ThumbnailService>>,
-) {
-    let subscribers = payload
+) -> Result<RequestThumbnailsResponse, String> {
+    if payload.candidates.len() > crate::thumbnails::scheduler::MAX_DESIRED_PER_SCOPE {
+        return Err("thumbnail scope exceeds the candidate limit".into());
+    }
+    let subscriber = crate::thumbnails::scheduler::ThumbnailSubscriber {
+        pane_id: payload.pane_id,
+        tab_id: payload.tab_id,
+        path: payload.path,
+        generation: payload.generation,
+    };
+    let candidates = payload
         .candidates
         .into_iter()
         .map(|candidate| {
-            let subscriber = crate::thumbnails::scheduler::ThumbnailSubscriber {
-                pane_id: payload.pane_id.clone(),
-                tab_id: payload.tab_id.clone(),
-                path: payload.path.clone(),
-                generation: payload.generation,
-            };
             let fingerprint = crate::thumbnails::types::ThumbnailFingerprint::from_metadata(
                 Path::new(&candidate.path),
                 candidate.modified_unix_seconds,
                 candidate.size_bytes,
             );
             (
-                subscriber,
                 crate::thumbnails::types::ThumbnailCandidate::new(
                     fingerprint,
                     candidate.is_directory,
                 ),
+                candidate.priority,
+                candidate.order,
             )
         })
         .collect();
-    state.request(subscribers);
-}
-
-#[cfg(feature = "test-utils")]
-#[tauri::command]
-pub fn request_thumbnails(
-    payload: RequestThumbnailsRequest,
-    state: State<'_, Arc<crate::thumbnails::ThumbnailService>>,
-) {
-    let subscribers = payload
-        .candidates
-        .into_iter()
-        .map(|candidate| {
-            let subscriber = crate::thumbnails::scheduler::ThumbnailSubscriber {
-                pane_id: payload.pane_id.clone(),
-                tab_id: payload.tab_id.clone(),
-                path: payload.path.clone(),
-                generation: payload.generation,
-            };
-            let fingerprint = crate::thumbnails::types::ThumbnailFingerprint::from_metadata(
-                Path::new(&candidate.path),
-                candidate.modified_unix_seconds,
-                candidate.size_bytes,
-            );
-            (
-                subscriber,
-                crate::thumbnails::types::ThumbnailCandidate::new(
-                    fingerprint,
-                    candidate.is_directory,
-                ),
-            )
-        })
-        .collect();
-    state.request(subscribers);
+    let accepted_count = state.replace_scope(subscriber, payload.revision, candidates);
+    Ok(RequestThumbnailsResponse {
+        revision: payload.revision,
+        accepted_count,
+    })
 }
 
 #[tauri::command]

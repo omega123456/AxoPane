@@ -37,6 +37,10 @@ impl<K: Eq + Hash + Clone, V> BoundedCache<K, V> {
         self.entries.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
     pub fn get(&mut self, key: &K) -> Option<&V> {
         self.clock = self.clock.wrapping_add(1);
         let record = self.entries.get_mut(key)?;

@@ -51,6 +51,9 @@ impl ItemCountCache {
     pub fn len(&self) -> usize {
         self.entries.len()
     }
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
     pub fn state(&mut self, path: &str, generation: u64) -> ItemCountState {
         self.entries
             .get(&key(path, generation))

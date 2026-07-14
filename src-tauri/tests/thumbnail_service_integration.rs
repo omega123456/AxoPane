@@ -1,17 +1,22 @@
 use std::fs;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
+
+use base64::Engine;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
+use file_explorer_lib::ipc::types::ThumbnailQuality;
 use file_explorer_lib::resource_coordinator::ResourceCoordinator;
 use file_explorer_lib::thumbnails::provider::{ProviderCapability, ThumbnailProvider};
 use file_explorer_lib::thumbnails::scheduler::ThumbnailSubscriber;
 use file_explorer_lib::thumbnails::types::{
     ThumbnailCandidate, ThumbnailFingerprint, ThumbnailState,
 };
-use file_explorer_lib::thumbnails::{ThumbnailService, MAX_RESULTS_PER_BATCH};
+use file_explorer_lib::thumbnails::{
+    ThumbnailService, MAX_RESULTS_PER_BATCH, MAX_RESULT_BYTES_PER_BATCH,
+};
 use tempfile::tempdir;
 
 fn candidate(path: &Path) -> ThumbnailCandidate {
@@ -73,15 +78,15 @@ fn fake_provider_emits_contextual_ready_and_negative_results_in_a_timed_batch() 
         ),
     ]);
 
-    *now.lock().expect("clock") = 49;
+    *now.lock().expect("clock") = 15;
     service.flush_due();
     assert!(events.lock().expect("events").is_empty());
-    *now.lock().expect("clock") = 50;
+    *now.lock().expect("clock") = 16;
     let deadline = Instant::now() + Duration::from_secs(1);
     while events.lock().expect("events").len() < 3 {
         service.flush_due();
         assert!(Instant::now() < deadline, "events timed out");
-        *now.lock().expect("clock") += 50;
+        *now.lock().expect("clock") += 16;
         std::thread::yield_now();
     }
     let events = events.lock().expect("events");
@@ -126,28 +131,45 @@ fn eight_results_flush_immediately_without_advancing_the_clock() {
     );
 }
 
-struct MutatingProvider;
+struct ProgressiveProvider;
 
-impl ThumbnailProvider for MutatingProvider {
+impl ThumbnailProvider for ProgressiveProvider {
     fn capability(&self) -> ProviderCapability {
         ProviderCapability::Fake
     }
 
-    fn generate(&self, candidate: &ThumbnailCandidate) -> ThumbnailState {
-        fs::write(&candidate.fingerprint.path, b"changed-size").expect("mutate fixture");
-        ThumbnailState::Unavailable
+    fn generate(
+        &self,
+        _candidate: &ThumbnailCandidate,
+        preview: file_explorer_lib::thumbnails::provider::ThumbnailPreviewCallback,
+    ) -> ThumbnailState {
+        let state = file_explorer_lib::thumbnails::types::validated_png_data_url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+ZfGHkAAAAABJRU5ErkJggg==".to_string())
+            .expect("valid preview");
+        let ThumbnailState::Ready { data_url, .. } = state else {
+            unreachable!("validated preview is ready")
+        };
+        preview(ThumbnailState::Ready {
+            data_url: data_url.clone(),
+            quality: ThumbnailQuality::Low,
+        });
+        ThumbnailState::Ready {
+            data_url,
+            quality: ThumbnailQuality::High,
+        }
     }
 }
 
 #[test]
-fn post_generation_metadata_mismatch_is_superseded_without_cache_or_event() {
+fn progressive_provider_emits_low_then_high_quality() {
     let directory = tempdir().expect("directory");
     let path = directory.path().join("image.png");
     fs::write(&path, b"data").expect("fixture");
+    let now = Arc::new(Mutex::new(0_u64));
+    let clock_now = Arc::clone(&now);
     let service = ThumbnailService::new_with_provider_and_clock(
-        Arc::new(MutatingProvider),
+        Arc::new(ProgressiveProvider),
         Arc::new(ResourceCoordinator::new()),
-        Arc::new(|| 0),
+        Arc::new(move || *clock_now.lock().expect("clock")),
     );
     let events = Arc::new(Mutex::new(Vec::new()));
     let received = Arc::clone(&events);
@@ -156,11 +178,105 @@ fn post_generation_metadata_mismatch_is_superseded_without_cache_or_event() {
     }));
     service.request(vec![(subscriber("tab"), candidate(&path))]);
     let deadline = Instant::now() + Duration::from_secs(1);
-    while fs::metadata(&path).expect("metadata").len() == 4 {
+    while events.lock().expect("events").len() < 2 {
+        *now.lock().expect("clock") += 16;
+        service.flush_due();
         std::thread::yield_now();
         assert!(Instant::now() < deadline, "provider did not run");
     }
-    service.flush_due();
-    assert_eq!(service.cache_len(), 0);
-    assert!(events.lock().expect("events").is_empty());
+    let qualities = events
+        .lock()
+        .expect("events")
+        .iter()
+        .filter_map(|event| event.quality)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        qualities,
+        vec![ThumbnailQuality::Low, ThumbnailQuality::High]
+    );
+}
+
+struct LargeProgressiveProvider {
+    started: mpsc::Sender<()>,
+    release: Mutex<mpsc::Receiver<()>>,
+}
+
+impl ThumbnailProvider for LargeProgressiveProvider {
+    fn capability(&self) -> ProviderCapability {
+        ProviderCapability::Fake
+    }
+
+    fn generate(
+        &self,
+        _candidate: &ThumbnailCandidate,
+        preview: file_explorer_lib::thumbnails::provider::ThumbnailPreviewCallback,
+    ) -> ThumbnailState {
+        let _ = self.started.send(());
+        let _ = self.release.lock().expect("release").recv();
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        png.extend_from_slice(&1_u32.to_be_bytes());
+        png.extend_from_slice(&1_u32.to_be_bytes());
+        png.resize(200_000, 0);
+        let state = file_explorer_lib::thumbnails::types::validated_png_data_url(format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(png)
+        ))
+        .expect("valid large preview");
+        let ThumbnailState::Ready { data_url, .. } = state else {
+            unreachable!("validated preview is ready")
+        };
+        preview(ThumbnailState::Ready {
+            data_url: data_url.clone(),
+            quality: ThumbnailQuality::Low,
+        });
+        ThumbnailState::Ready {
+            data_url,
+            quality: ThumbnailQuality::High,
+        }
+    }
+}
+
+#[test]
+fn immediate_progressive_results_respect_the_byte_batch_limit() {
+    let directory = tempdir().expect("directory");
+    let path = directory.path().join("large.png");
+    fs::write(&path, b"data").expect("fixture");
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let service = ThumbnailService::new_with_provider_and_clock(
+        Arc::new(LargeProgressiveProvider {
+            started: started_tx,
+            release: Mutex::new(release_rx),
+        }),
+        Arc::new(ResourceCoordinator::new()),
+        Arc::new(|| 0),
+    );
+    let batches = Arc::new(Mutex::new(Vec::new()));
+    let received = Arc::clone(&batches);
+    service.set_emitter(Arc::new(move |batch| {
+        received.lock().expect("batches").push(batch)
+    }));
+    service.request(vec![
+        (subscriber("left"), candidate(&path)),
+        (subscriber("right"), candidate(&path)),
+    ]);
+    started_rx
+        .recv_timeout(Duration::from_millis(200))
+        .expect("provider started");
+    release_tx.send(()).expect("release provider");
+
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while batches.lock().expect("batches").len() < 2 {
+        assert!(Instant::now() < deadline, "preview batches timed out");
+        std::thread::yield_now();
+    }
+    let batches = batches.lock().expect("batches");
+    assert_eq!(batches[0].len(), 1);
+    assert_eq!(batches[1].len(), 1);
+    assert!(batches[0].iter().chain(&batches[1]).all(|event| {
+        event.data_url.as_ref().is_some_and(|data_url| {
+            data_url.len() < MAX_RESULT_BYTES_PER_BATCH
+                && event.quality == Some(ThumbnailQuality::Low)
+        })
+    }));
 }

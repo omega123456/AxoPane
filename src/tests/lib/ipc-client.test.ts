@@ -75,7 +75,10 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
     ipc.override('request_folder_size', () => undefined)
     ipc.override('request_folder_sizes', () => undefined)
     ipc.override('request_visible_item_counts', () => undefined)
-    ipc.override('request_thumbnails', () => undefined)
+    ipc.override('request_thumbnails', (payload) => ({
+      revision: payload.revision,
+      acceptedCount: payload.candidates.length,
+    }))
     ipc.override('cancel_thumbnails', () => undefined)
     ipc.override('open_path', () => undefined)
     let lastSetTabWatchPayload: unknown
@@ -98,9 +101,10 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
         tabId: 'tab-1',
         path: 'C:\\x',
         generation: 1,
+        revision: 1,
         candidates: [],
       }),
-    ).resolves.toBeUndefined()
+    ).resolves.toEqual({ revision: 1, acceptedCount: 0 })
     await expect(
       cancelThumbnails({ paneId: 'left', tabId: 'tab-1', path: 'C:\\x', generation: 1 }),
     ).resolves.toBeUndefined()

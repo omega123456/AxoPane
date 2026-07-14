@@ -455,6 +455,7 @@ fn invalidate_directory_generation_makes_a_counted_directory_recountable() {
 #[test]
 fn generation_cache_coalesces_pending_work_and_invalidates_only_the_changed_directory() {
     let mut cache = ItemCountCache::new(4);
+    assert!(cache.is_empty());
     assert!(cache.begin("/one", 3));
     assert!(!cache.begin("/one", 3));
     cache.resolve("/one", 3, ItemCountState::Exact { value: 2 });

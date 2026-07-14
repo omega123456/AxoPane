@@ -5,7 +5,7 @@
 //! scheduler submits work to this already-bounded executor instead of creating
 //! another pool or putting COM work on a Tauri worker.
 
-use super::provider::{ProviderCapability, ThumbnailProvider};
+use super::provider::{ProviderCapability, ThumbnailPreviewCallback, ThumbnailProvider};
 use super::types::{
     validated_png_data_url, ThumbnailCandidate, ThumbnailState, MAX_PNG_BYTES,
     MAX_PREVIEW_DIMENSION, MAX_PREVIEW_PIXELS,
@@ -16,6 +16,7 @@ use std::mem::size_of;
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::Mutex;
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::SIZE;
 use windows::Win32::Graphics::Gdi::{
@@ -24,11 +25,13 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 use windows::Win32::UI::Shell::{
-    IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_RESIZETOFIT,
+    IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_INCACHEONLY, SIIGBF_RESIZETOFIT,
+    SIIGBF_THUMBNAILONLY,
 };
 
 const WORKER_COUNT: usize = 2;
 const QUEUE_CAPACITY: usize = 64;
+const GENERATION_DEADLINE: Duration = Duration::from_secs(2);
 
 pub struct WindowsThumbnailProvider {
     workers: Mutex<Option<Workers>>,
@@ -42,6 +45,7 @@ struct Workers {
 struct Work {
     candidate: ThumbnailCandidate,
     reply: Sender<ThumbnailState>,
+    deadline: Instant,
 }
 
 impl Default for WindowsThumbnailProvider {
@@ -80,28 +84,37 @@ impl ThumbnailProvider for WindowsThumbnailProvider {
         ProviderCapability::Native
     }
 
-    fn generate(&self, candidate: &ThumbnailCandidate) -> ThumbnailState {
+    fn generate(
+        &self,
+        candidate: &ThumbnailCandidate,
+        _preview: ThumbnailPreviewCallback,
+    ) -> ThumbnailState {
         if candidate.is_directory {
             return ThumbnailState::Unavailable;
         }
         let (reply, result) = mpsc::channel();
-        let Ok(guard) = self.workers.lock() else {
-            return ThumbnailState::Failed;
-        };
-        let Some(workers) = guard.as_ref() else {
-            return ThumbnailState::Unavailable;
-        };
-        if workers
-            .sender
-            .send(Work {
-                candidate: candidate.clone(),
-                reply,
-            })
-            .is_err()
         {
-            return ThumbnailState::Failed;
+            let Ok(guard) = self.workers.lock() else {
+                return ThumbnailState::Failed;
+            };
+            let Some(workers) = guard.as_ref() else {
+                return ThumbnailState::Unavailable;
+            };
+            if workers
+                .sender
+                .try_send(Work {
+                    candidate: candidate.clone(),
+                    reply,
+                    deadline: Instant::now() + GENERATION_DEADLINE,
+                })
+                .is_err()
+            {
+                return ThumbnailState::Failed;
+            }
         }
-        result.recv().unwrap_or(ThumbnailState::Failed)
+        result
+            .recv_timeout(GENERATION_DEADLINE)
+            .unwrap_or(ThumbnailState::Failed)
     }
 
     fn shutdown(&self) {
@@ -112,9 +125,10 @@ impl ThumbnailProvider for WindowsThumbnailProvider {
             return;
         };
         drop(workers.sender);
-        for join in workers.joins {
-            let _ = join.join();
-        }
+        // `IShellItemImageFactory::GetImage` has no cancellation API and a
+        // third-party shell extension can block indefinitely. Dropping the
+        // handles lets healthy workers exit normally without hanging app exit.
+        drop(workers.joins);
     }
 }
 
@@ -126,14 +140,18 @@ fn worker_loop(receiver: std::sync::Arc<Mutex<Receiver<Work>>>) {
             Err(_) => break,
         };
         let Ok(work) = message else { break };
-        let _ = work.reply.send(extract(&work.candidate));
+        if Instant::now() >= work.deadline {
+            let _ = work.reply.send(ThumbnailState::Failed);
+            continue;
+        }
+        let _ = work.reply.send(extract(&work.candidate, work.deadline));
     }
     if initialized {
         unsafe { CoUninitialize() };
     }
 }
 
-fn extract(candidate: &ThumbnailCandidate) -> ThumbnailState {
+fn extract(candidate: &ThumbnailCandidate, deadline: Instant) -> ThumbnailState {
     let wide = candidate
         .fingerprint
         .path
@@ -146,15 +164,24 @@ fn extract(candidate: &ThumbnailCandidate) -> ThumbnailState {
             Ok(item) => item,
             Err(_) => return ThumbnailState::Unavailable,
         };
-    let bitmap = match unsafe {
+    let requested_size = SIZE {
+        cx: MAX_PREVIEW_DIMENSION as i32,
+        cy: MAX_PREVIEW_DIMENSION as i32,
+    };
+    let cached = unsafe {
         item.GetImage(
-            SIZE {
-                cx: MAX_PREVIEW_DIMENSION as i32,
-                cy: MAX_PREVIEW_DIMENSION as i32,
-            },
-            SIIGBF_RESIZETOFIT,
+            requested_size,
+            SIIGBF_RESIZETOFIT | SIIGBF_THUMBNAILONLY | SIIGBF_INCACHEONLY,
         )
-    } {
+    };
+    let bitmap = match cached {
+        Ok(bitmap) => Ok(bitmap),
+        Err(_) if Instant::now() >= deadline => return ThumbnailState::Failed,
+        Err(_) => unsafe {
+            item.GetImage(requested_size, SIIGBF_RESIZETOFIT | SIIGBF_THUMBNAILONLY)
+        },
+    };
+    let bitmap = match bitmap {
         Ok(bitmap) => BitmapGuard(bitmap),
         Err(_) => return ThumbnailState::Unavailable,
     };

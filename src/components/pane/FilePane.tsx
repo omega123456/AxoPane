@@ -5,10 +5,13 @@ import {
   resolveMenuTarget,
 } from '@/components/menus/menu-definitions'
 import { BreadcrumbBar } from './BreadcrumbBar'
-import type { EntryCardThumbnail } from './EntryCard'
 import { type FileRowActions } from './FileRow'
 import { DetailsView } from './DetailsView'
-import { GraphicalView, type GraphicalViewHandle } from './GraphicalView'
+import {
+  GraphicalView,
+  type GraphicalThumbnailRange,
+  type GraphicalViewHandle,
+} from './GraphicalView'
 import { GraphicalSortBar } from './GraphicalSortBar'
 import { PaneViewMenu } from './PaneViewMenu'
 import { TabBar } from './TabBar'
@@ -17,6 +20,7 @@ import { detectPlatformOs, resolveCommandForEvent } from '@/lib/keymap'
 import { getParentPath } from '@/stores/panes-store'
 import { pathKey } from '@/lib/path-compare'
 import { isTrashPath } from '@/lib/trash'
+import type { PaneViewMode } from '@/lib/pane-view'
 import { EmptyState } from '@/components/states/EmptyState'
 import { ErrorState } from '@/components/states/ErrorState'
 import { EverythingBanner } from '@/components/states/EverythingBanner'
@@ -37,7 +41,7 @@ import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useDragStore } from '@/stores/drag-store'
 import { useNativeMenuWarmStore } from '@/stores/native-menu-warm-store'
-import { thumbnailFingerprintKey, useThumbnailStore } from '@/stores/thumbnail-store'
+import { useThumbnailStore } from '@/stores/thumbnail-store'
 import { useTabsStore } from '@/stores/tabs-store'
 import { canDropInto, performDrop, resolveDropKind, type DragItem } from '@/lib/drag-drop'
 import { getUnixTime, parseISO } from 'date-fns'
@@ -114,7 +118,6 @@ export function FilePane({ paneId }: FilePaneProps) {
   const warmVisibleNativeMenus = useNativeMenuWarmStore((state) => state.warmVisibleNativeMenus)
   const setThumbnailCandidates = useThumbnailStore((state) => state.setVisibleCandidates)
   const cancelThumbnailScope = useThumbnailStore((state) => state.cancelScope)
-  const thumbnailCache = useThumbnailStore((state) => state.cache)
   const setScrollPosition = usePanesStore((state) => state.setScrollPosition)
   const selection = useSelectionStore((state) => state.selections[paneId])
   const keymap = useKeymapStore((state) => state.bindings)
@@ -165,7 +168,17 @@ export function FilePane({ paneId }: FilePaneProps) {
   const ignoreNextRenameBlurRef = useRef(false)
   const detachMarqueeListenersRef = useRef<(() => void) | null>(null)
   const visibleIconRequestTimerRef = useRef<number | undefined>(undefined)
+  const thumbnailRequestFrameRef = useRef<number | undefined>(undefined)
+  const pendingThumbnailRangeRef = useRef<{
+    range: GraphicalThumbnailRange
+    entries: typeof pane.entries
+    paneId: string
+    tabId: string
+    path: string
+    mode: PaneViewMode
+  } | null>(null)
   const activeTabIdRef = useRef(activeTab.id)
+  const thumbnailPathRef = useRef(pane.path)
   const [marqueeRect, setMarqueeRect] = useState<MarqueeRect | null>(null)
   const beginDrag = useDragStore((state) => state.begin)
   const endDrag = useDragStore((state) => state.end)
@@ -268,28 +281,6 @@ export function FilePane({ paneId }: FilePaneProps) {
         const visiblePaths = pane.entries.slice(start, end + 1).map((entry) => entry.path)
         void requestVisibleIcons(paneId, visiblePaths)
         void warmVisibleNativeMenus(paneId, visiblePaths)
-        if (viewMode === 'thumbnails') {
-          const candidates: ThumbnailCandidateRequest[] = pane.entries
-            .slice(start, end + 1)
-            .flatMap((entry) => {
-              if (entry.isDir || entry.sizeBytes === null || entry.modifiedAt === null) return []
-              const modifiedUnixSeconds = getUnixTime(parseISO(entry.modifiedAt))
-              return Number.isFinite(modifiedUnixSeconds)
-                ? [
-                    {
-                      path: entry.path,
-                      modifiedUnixSeconds,
-                      sizeBytes: entry.sizeBytes,
-                      isDirectory: false,
-                    },
-                  ]
-                : []
-            })
-          void setThumbnailCandidates(
-            { paneId, tabId: activeTab.id, path: pane.path, mode: viewMode },
-            candidates,
-          ).catch(() => undefined)
-        }
       }, visibleIconRequestDebounceMs)
     },
     [
@@ -298,19 +289,83 @@ export function FilePane({ paneId }: FilePaneProps) {
       paneId,
       requestVisibleIcons,
       requestVisibleItemCounts,
-      activeTab.id,
       warmVisibleNativeMenus,
-      setThumbnailCandidates,
-      viewMode,
     ],
   )
 
-  useEffect(() => () => window.clearTimeout(visibleIconRequestTimerRef.current), [])
+  const handleThumbnailRangeChange = useCallback(
+    (range: GraphicalThumbnailRange) => {
+      pendingThumbnailRangeRef.current = {
+        range,
+        entries: pane.entries,
+        paneId,
+        tabId: activeTab.id,
+        path: pane.path,
+        mode: viewMode,
+      }
+      if (thumbnailRequestFrameRef.current !== undefined) return
+      thumbnailRequestFrameRef.current = window.requestAnimationFrame(() => {
+        thumbnailRequestFrameRef.current = undefined
+        const latest = pendingThumbnailRangeRef.current
+        if (!latest || latest.mode !== 'thumbnails') return
+        const { range: latestRange } = latest
+        const candidates: ThumbnailCandidateRequest[] = latest.entries
+          .slice(latestRange.prefetchStart, latestRange.prefetchEnd + 1)
+          .flatMap((entry, offset) => {
+            if (entry.isDir || entry.sizeBytes === null || entry.modifiedAt === null) return []
+            const modifiedUnixSeconds = getUnixTime(parseISO(entry.modifiedAt))
+            if (!Number.isFinite(modifiedUnixSeconds)) return []
+            const index = latestRange.prefetchStart + offset
+            const visible = index >= latestRange.visibleStart && index <= latestRange.visibleEnd
+            const ahead =
+              latestRange.direction === 'up'
+                ? index < latestRange.visibleStart
+                : index > latestRange.visibleEnd
+            const order = visible
+              ? index - latestRange.visibleStart
+              : index < latestRange.visibleStart
+                ? latestRange.visibleStart - index
+                : index - latestRange.visibleEnd
+            return [
+              {
+                path: entry.path,
+                modifiedUnixSeconds,
+                sizeBytes: entry.sizeBytes,
+                isDirectory: false,
+                priority: visible ? 'visible' : ahead ? 'ahead' : 'behind',
+                order,
+              } satisfies ThumbnailCandidateRequest,
+            ]
+          })
+        void setThumbnailCandidates(
+          {
+            paneId: latest.paneId,
+            tabId: latest.tabId,
+            path: latest.path,
+            mode: latest.mode,
+          },
+          candidates,
+        ).catch(() => undefined)
+      })
+    },
+    [activeTab.id, pane.entries, pane.path, paneId, setThumbnailCandidates, viewMode],
+  )
+
+  useEffect(
+    () => () => {
+      window.clearTimeout(visibleIconRequestTimerRef.current)
+      if (thumbnailRequestFrameRef.current !== undefined)
+        window.cancelAnimationFrame(thumbnailRequestFrameRef.current)
+    },
+    [],
+  )
 
   useEffect(() => {
     const previousTabId = activeTabIdRef.current
+    const previousPath = thumbnailPathRef.current
     activeTabIdRef.current = activeTab.id
-    if (viewMode !== 'thumbnails') {
+    thumbnailPathRef.current = pane.path
+    if (viewMode !== 'thumbnails' || previousPath !== pane.path) {
       void cancelThumbnailScope(paneId, activeTab.id)
     }
     if (previousTabId !== activeTab.id) {
@@ -813,31 +868,6 @@ export function FilePane({ paneId }: FilePaneProps) {
     [],
   )
 
-  const graphicalThumbnails = useMemo<Record<string, EntryCardThumbnail | undefined>>(
-    () =>
-      Object.fromEntries(
-        pane.entries.map((entry) => {
-          if (entry.isDir || entry.sizeBytes === null || entry.modifiedAt === null)
-            return [entry.id, { state: 'unavailable' as const }]
-          const modifiedUnixSeconds = getUnixTime(parseISO(entry.modifiedAt))
-          const record = Number.isFinite(modifiedUnixSeconds)
-            ? thumbnailCache[
-                thumbnailFingerprintKey({
-                  path: entry.path,
-                  modifiedUnixSeconds,
-                  sizeBytes: entry.sizeBytes,
-                })
-              ]
-            : undefined
-          return [
-            entry.id,
-            record ?? { state: viewMode === 'thumbnails' ? 'loading' : 'unavailable' },
-          ]
-        }),
-      ),
-    [pane.entries, thumbnailCache, viewMode],
-  )
-
   return (
     <section
       ref={paneRef}
@@ -1017,9 +1047,9 @@ export function FilePane({ paneId }: FilePaneProps) {
             isPaneDropTarget={isPaneDropTarget}
             rename={rename}
             actions={actions}
-            thumbnails={graphicalThumbnails}
             marqueeRect={marqueeRect}
             onVisibleRangeChange={handleVisibleRangeChange}
+            onThumbnailRangeChange={handleThumbnailRangeChange}
             onFocusEntry={(entryId) => {
               setFocusedEntry(paneId, entryId)
               setSelection(paneId, [entryId], entryId, entryId)

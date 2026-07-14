@@ -1,8 +1,10 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { vi } from 'vitest'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { Profiler } from 'react'
+import { afterEach, vi } from 'vitest'
 import { EntryCard } from '@/components/pane/EntryCard'
 import type { FileRowActions } from '@/components/pane/FileRow'
 import type { DirectoryEntry } from '@/lib/types/ipc'
+import { thumbnailFingerprintKey, useThumbnailStore } from '@/stores/thumbnail-store'
 
 const entry: DirectoryEntry = {
   id: 'photo',
@@ -37,6 +39,9 @@ const actions = (): FileRowActions => ({
 })
 
 describe('EntryCard', () => {
+  afterEach(() => {
+    act(() => useThumbnailStore.getState().reset())
+  })
   it('renders an accessible horizontal Icons tile and forwards entry actions', () => {
     const cardActions = actions()
     render(
@@ -114,6 +119,69 @@ describe('EntryCard', () => {
       />,
     )
     expect(screen.queryByLabelText('Thumbnail loading')).not.toBeInTheDocument()
+  })
+
+  it('rerenders only the preview whose fingerprint changed', async () => {
+    const first = { ...entry, modifiedAt: '1970-01-01T00:00:20Z' }
+    const second = {
+      ...first,
+      id: 'other',
+      name: 'Other.png',
+      path: 'C:\\photos\\other.png',
+    }
+    const firstRender = vi.fn()
+    const secondRender = vi.fn()
+    render(
+      <>
+        <Profiler id="first" onRender={firstRender}>
+          <EntryCard
+            entry={first}
+            mode="thumbnails"
+            isActivePane
+            isFocused={false}
+            isSelected={false}
+            rowIndex={1}
+            columnIndex={1}
+            actions={actions()}
+          />
+        </Profiler>
+        <Profiler id="second" onRender={secondRender}>
+          <EntryCard
+            entry={second}
+            mode="thumbnails"
+            isActivePane
+            isFocused={false}
+            isSelected={false}
+            rowIndex={1}
+            columnIndex={2}
+            actions={actions()}
+          />
+        </Profiler>
+      </>,
+    )
+    firstRender.mockClear()
+    secondRender.mockClear()
+    const key = thumbnailFingerprintKey({
+      path: first.path,
+      modifiedUnixSeconds: 20,
+      sizeBytes: first.sizeBytes ?? 0,
+    })
+    await act(async () => {
+      useThumbnailStore.setState((state) => ({
+        cache: {
+          ...state.cache,
+          [key]: {
+            state: 'ready',
+            quality: 'low',
+            dataUrl: 'data:image/png;base64,AA==',
+            touched: 1,
+            weight: 2,
+          },
+        },
+      }))
+    })
+    expect(firstRender).toHaveBeenCalledOnce()
+    expect(secondRender).not.toHaveBeenCalled()
   })
 
   it('centers a larger thumbnail label beneath its larger preview stage', () => {

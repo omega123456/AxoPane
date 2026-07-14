@@ -1,4 +1,4 @@
-use super::provider::{ProviderCapability, ThumbnailProvider};
+use super::provider::{ProviderCapability, ThumbnailPreviewCallback, ThumbnailProvider};
 use super::types::{ThumbnailCandidate, ThumbnailState};
 
 #[derive(Default)]
@@ -9,7 +9,11 @@ impl ThumbnailProvider for UnsupportedThumbnailProvider {
         ProviderCapability::Unsupported
     }
 
-    fn generate(&self, _candidate: &ThumbnailCandidate) -> ThumbnailState {
+    fn generate(
+        &self,
+        _candidate: &ThumbnailCandidate,
+        _preview: ThumbnailPreviewCallback,
+    ) -> ThumbnailState {
         ThumbnailState::Unavailable
     }
 }

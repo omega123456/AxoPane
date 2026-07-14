@@ -144,6 +144,14 @@ function getResponse<CommandName extends keyof IpcCommandMap>(
     return response as IpcCommandMap[CommandName]['response']
   }
 
+  if (command === 'request_thumbnails') {
+    const request = payload as IpcCommandMap['request_thumbnails']['request']
+    return {
+      revision: request.revision,
+      acceptedCount: request.candidates.length,
+    } as IpcCommandMap[CommandName]['response']
+  }
+
   // Unmocked `list_tree_children` calls default to the fixture only for the
   // exact path it describes; any other path echoes back empty children. A
   // real backend never returns another folder's children for an unrelated

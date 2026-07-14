@@ -14,12 +14,14 @@ describe('thumbnail cache policy', () => {
     const cache = {
       expired: {
         state: 'failed' as const,
+        quality: null,
         dataUrl: null,
         touched: now - THUMBNAIL_NEGATIVE_TTL_MS,
         weight: 1,
       },
       visible: {
         state: 'unavailable' as const,
+        quality: null,
         dataUrl: null,
         touched: now - THUMBNAIL_NEGATIVE_TTL_MS,
         weight: 1,
@@ -36,6 +38,7 @@ describe('thumbnail cache policy', () => {
         `record-${index}`,
         {
           state: 'ready' as const,
+          quality: 'high' as const,
           dataUrl: 'x',
           touched: index,
           weight: MAX_THUMBNAIL_CACHE_BYTES,
@@ -51,11 +54,18 @@ describe('thumbnail cache policy', () => {
     const cache = {
       visible: {
         state: 'ready' as const,
+        quality: 'high' as const,
         dataUrl: 'x',
         touched: 1,
         weight: MAX_THUMBNAIL_CACHE_BYTES,
       },
-      old: { state: 'ready' as const, dataUrl: 'x', touched: 0, weight: MAX_THUMBNAIL_CACHE_BYTES },
+      old: {
+        state: 'ready' as const,
+        quality: 'high' as const,
+        dataUrl: 'x',
+        touched: 0,
+        weight: MAX_THUMBNAIL_CACHE_BYTES,
+      },
     }
     expect(pruneThumbnailCache(cache, new Set(['visible']), 10)).toEqual({ visible: cache.visible })
   })

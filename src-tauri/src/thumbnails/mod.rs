@@ -16,7 +16,7 @@ mod windows;
 
 #[cfg(not(feature = "test-utils"))]
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 #[cfg(not(feature = "test-utils"))]
 use std::time::Duration;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -26,13 +26,16 @@ use provider::ThumbnailProvider;
 use scheduler::{ThumbnailScheduler, ThumbnailSubscriber};
 use types::{ThumbnailCacheKey, ThumbnailCandidate, ThumbnailState};
 
-use crate::ipc::types::{ThumbnailResultEvent, ThumbnailResultKind};
+use crate::ipc::types::{ThumbnailPriority, ThumbnailResultEvent, ThumbnailResultKind};
 use crate::resource_coordinator::ResourceCoordinator;
 
 pub const MAX_RESULTS_PER_BATCH: usize = 8;
-pub const PARTIAL_BATCH_FLUSH_MILLIS: u64 = 50;
+pub const MAX_RESULT_BYTES_PER_BATCH: usize = 512 * 1024;
+pub const PARTIAL_BATCH_FLUSH_MILLIS: u64 = 16;
 
 type ResultEmitter = Arc<dyn Fn(Vec<ThumbnailResultEvent>) + Send + Sync>;
+type ResultPublisher =
+    Arc<dyn Fn(ThumbnailCandidate, ThumbnailState, Vec<ThumbnailSubscriber>) + Send + Sync>;
 pub type ThumbnailClock = Arc<dyn Fn() -> u64 + Send + Sync>;
 
 struct BatchState {
@@ -48,6 +51,7 @@ pub struct ThumbnailService {
     emitter: Arc<Mutex<Option<ResultEmitter>>>,
     batches: Arc<Mutex<BatchState>>,
     clock: ThumbnailClock,
+    batch_wake: Arc<(Mutex<bool>, Condvar)>,
     #[cfg(not(feature = "test-utils"))]
     batch_timer_stop: Arc<AtomicBool>,
     #[cfg(not(feature = "test-utils"))]
@@ -75,33 +79,12 @@ impl ThumbnailService {
             events: Vec::new(),
             last_flush_millis: clock(),
         }));
-        let cache_for_completion = Arc::clone(&cache);
-        let emitter_for_completion = Arc::clone(&emitter);
-        let batches_for_completion = Arc::clone(&batches);
-        let clock_for_completion = Arc::clone(&clock);
-        let scheduler = ThumbnailScheduler::new_with_metadata_verifier(
+        let batch_wake = Arc::new((Mutex::new(false), Condvar::new()));
+        let scheduler = ThumbnailScheduler::new_with_progress_and_metadata_verifier(
             provider,
             coordinator,
-            Arc::new(move |candidate, state, subscribers| {
-                cache_for_completion
-                    .lock()
-                    .expect("thumbnail cache lock")
-                    .insert(
-                        ThumbnailCacheKey(candidate.fingerprint.clone()),
-                        state.clone(),
-                        now_seconds(),
-                    );
-                let events = subscribers
-                    .into_iter()
-                    .map(|subscriber| result_event(subscriber, candidate.clone(), state.clone()))
-                    .collect();
-                enqueue_batch(
-                    &batches_for_completion,
-                    &emitter_for_completion,
-                    events,
-                    clock_for_completion(),
-                );
-            }),
+            result_publisher(&cache, &batches, &emitter, &clock, &batch_wake),
+            result_publisher(&cache, &batches, &emitter, &clock, &batch_wake),
             Arc::new(|candidate| candidate.matches_current_metadata()),
         );
         let service = Self {
@@ -110,6 +93,7 @@ impl ThumbnailService {
             emitter,
             batches,
             clock,
+            batch_wake,
             #[cfg(not(feature = "test-utils"))]
             batch_timer_stop: Arc::new(AtomicBool::new(false)),
             #[cfg(not(feature = "test-utils"))]
@@ -135,11 +119,20 @@ impl ThumbnailService {
         let emitter = Arc::clone(&self.emitter);
         let clock = Arc::clone(&self.clock);
         let stop = Arc::clone(&self.batch_timer_stop);
-        let timer = std::thread::spawn(move || {
-            while !stop.load(Ordering::Acquire) {
-                std::thread::sleep(Duration::from_millis(PARTIAL_BATCH_FLUSH_MILLIS));
-                flush_due_batch(&batches, &emitter, clock());
+        let wake = Arc::clone(&self.batch_wake);
+        let timer = std::thread::spawn(move || loop {
+            let (lock, ready) = &*wake;
+            let mut signalled = lock.lock().expect("thumbnail batch wake lock");
+            while !*signalled && !stop.load(Ordering::Acquire) {
+                signalled = ready.wait(signalled).expect("thumbnail batch wake");
             }
+            if stop.load(Ordering::Acquire) {
+                break;
+            }
+            *signalled = false;
+            drop(signalled);
+            std::thread::sleep(Duration::from_millis(PARTIAL_BATCH_FLUSH_MILLIS));
+            flush_due_batch(&batches, &emitter, clock());
         });
         *self.batch_timer.lock().expect("thumbnail batch timer lock") = Some(timer);
     }
@@ -151,9 +144,7 @@ impl ThumbnailService {
     pub fn request(&self, subscribers: Vec<(ThumbnailSubscriber, ThumbnailCandidate)>) {
         let now = now_seconds();
         for (subscriber, candidate) in subscribers {
-            // Cache admission needs the same re-stat as native admission: a
-            // stale listing identity must neither emit nor populate a cache.
-            if candidate.is_directory || !candidate.matches_current_metadata() {
+            if candidate.is_directory {
                 continue;
             }
             let key = ThumbnailCacheKey(candidate.fingerprint.clone());
@@ -168,11 +159,55 @@ impl ThumbnailService {
                     &self.emitter,
                     vec![result_event(subscriber, candidate, state)],
                     (self.clock)(),
+                    &self.batch_wake,
                 );
             } else {
                 self.scheduler.submit(subscriber, candidate);
             }
         }
+    }
+
+    pub fn replace_scope(
+        &self,
+        subscriber: ThumbnailSubscriber,
+        revision: u64,
+        candidates: Vec<(ThumbnailCandidate, ThumbnailPriority, u32)>,
+    ) -> usize {
+        let requested = candidates.len();
+        let now = now_seconds();
+        let mut pending = Vec::new();
+        for (candidate, priority, order) in candidates {
+            if candidate.is_directory {
+                continue;
+            }
+            let key = ThumbnailCacheKey(candidate.fingerprint.clone());
+            let cached = self
+                .cache
+                .lock()
+                .expect("thumbnail cache lock")
+                .get_with_upgrade(&key, now);
+            if let Some((state, should_upgrade)) = cached {
+                enqueue_batch(
+                    &self.batches,
+                    &self.emitter,
+                    vec![result_event(
+                        subscriber.clone(),
+                        candidate.clone(),
+                        state.clone(),
+                    )],
+                    (self.clock)(),
+                    &self.batch_wake,
+                );
+                if should_upgrade {
+                    pending.push((candidate, priority, order));
+                }
+            } else {
+                pending.push((candidate, priority, order));
+            }
+        }
+        let pending_count = pending.len();
+        let accepted_pending = self.scheduler.replace_scope(subscriber, revision, pending);
+        requested - pending_count + accepted_pending
     }
 
     #[cfg(feature = "test-utils")]
@@ -195,6 +230,7 @@ impl ThumbnailService {
         #[cfg(not(feature = "test-utils"))]
         {
             self.batch_timer_stop.store(true, Ordering::Release);
+            self.batch_wake.1.notify_all();
             if let Some(timer) = self
                 .batch_timer
                 .lock()
@@ -205,6 +241,45 @@ impl ThumbnailService {
             }
         }
     }
+}
+
+fn result_publisher(
+    cache: &Arc<Mutex<ThumbnailCache>>,
+    batches: &Arc<Mutex<BatchState>>,
+    emitter: &Arc<Mutex<Option<ResultEmitter>>>,
+    clock: &ThumbnailClock,
+    batch_wake: &Arc<(Mutex<bool>, Condvar)>,
+) -> ResultPublisher {
+    let cache = Arc::clone(cache);
+    let batches = Arc::clone(batches);
+    let emitter = Arc::clone(emitter);
+    let clock = Arc::clone(clock);
+    let batch_wake = Arc::clone(batch_wake);
+    Arc::new(move |candidate, state, subscribers| {
+        let changed = cache.lock().expect("thumbnail cache lock").insert(
+            ThumbnailCacheKey(candidate.fingerprint.clone()),
+            state.clone(),
+            now_seconds(),
+        );
+        if !changed {
+            return;
+        }
+        let events = subscribers
+            .into_iter()
+            .map(|subscriber| result_event(subscriber, candidate.clone(), state.clone()))
+            .collect();
+        if matches!(
+            state,
+            ThumbnailState::Ready {
+                quality: crate::ipc::types::ThumbnailQuality::Low,
+                ..
+            }
+        ) {
+            emit_batches(&emitter, split_result_events(events));
+        } else {
+            enqueue_batch(&batches, &emitter, events, clock(), &batch_wake);
+        }
+    })
 }
 
 impl Drop for ThumbnailService {
@@ -218,18 +293,73 @@ fn enqueue_batch(
     emitter: &Arc<Mutex<Option<ResultEmitter>>>,
     events: Vec<ThumbnailResultEvent>,
     now_millis: u64,
+    batch_wake: &Arc<(Mutex<bool>, Condvar)>,
 ) {
     let ready_batches = {
         let mut state = batches.lock().expect("thumbnail batches lock");
         state.events.extend(events);
         let mut ready = Vec::new();
-        while state.events.len() >= MAX_RESULTS_PER_BATCH {
+        loop {
+            let total_bytes = state.events.iter().map(result_event_weight).sum::<usize>();
+            if state.events.len() < MAX_RESULTS_PER_BATCH
+                && total_bytes <= MAX_RESULT_BYTES_PER_BATCH
+            {
+                break;
+            }
+            let mut batch_bytes = 0;
+            let mut count = 0;
+            for event in &state.events {
+                let event_bytes = result_event_weight(event);
+                if count > 0
+                    && (count >= MAX_RESULTS_PER_BATCH
+                        || batch_bytes + event_bytes > MAX_RESULT_BYTES_PER_BATCH)
+                {
+                    break;
+                }
+                count += 1;
+                batch_bytes += event_bytes;
+            }
             state.last_flush_millis = now_millis;
-            ready.push(state.events.drain(..MAX_RESULTS_PER_BATCH).collect());
+            ready.push(state.events.drain(..count).collect());
         }
         ready
     };
     emit_batches(emitter, ready_batches);
+    if !batches
+        .lock()
+        .expect("thumbnail batches lock")
+        .events
+        .is_empty()
+    {
+        *batch_wake.0.lock().expect("thumbnail batch wake lock") = true;
+        batch_wake.1.notify_one();
+    }
+}
+
+fn result_event_weight(event: &ThumbnailResultEvent) -> usize {
+    event.data_url.as_ref().map_or(1, String::len)
+}
+
+fn split_result_events(events: Vec<ThumbnailResultEvent>) -> Vec<Vec<ThumbnailResultEvent>> {
+    let mut ready = Vec::new();
+    let mut batch = Vec::new();
+    let mut batch_bytes = 0;
+    for event in events {
+        let event_bytes = result_event_weight(&event);
+        if !batch.is_empty()
+            && (batch.len() >= MAX_RESULTS_PER_BATCH
+                || batch_bytes + event_bytes > MAX_RESULT_BYTES_PER_BATCH)
+        {
+            ready.push(std::mem::take(&mut batch));
+            batch_bytes = 0;
+        }
+        batch_bytes += event_bytes;
+        batch.push(event);
+    }
+    if !batch.is_empty() {
+        ready.push(batch);
+    }
+    ready
 }
 
 fn flush_due_batch(
@@ -273,10 +403,14 @@ fn result_event(
     candidate: ThumbnailCandidate,
     state: ThumbnailState,
 ) -> ThumbnailResultEvent {
-    let (state, data_url) = match state {
-        ThumbnailState::Ready { data_url } => (ThumbnailResultKind::Ready, Some(data_url)),
-        ThumbnailState::Unavailable => (ThumbnailResultKind::Unavailable, None),
-        ThumbnailState::Failed => (ThumbnailResultKind::Failed, None),
+    let (state, quality, data_url) = match state {
+        ThumbnailState::Ready { data_url, quality } => (
+            ThumbnailResultKind::Ready,
+            Some(quality),
+            Some(data_url.as_str().to_owned()),
+        ),
+        ThumbnailState::Unavailable => (ThumbnailResultKind::Unavailable, None, None),
+        ThumbnailState::Failed => (ThumbnailResultKind::Failed, None, None),
     };
     ThumbnailResultEvent {
         pane_id: subscriber.pane_id,
@@ -287,6 +421,7 @@ fn result_event(
         modified_unix_seconds: candidate.fingerprint.modified_unix_seconds,
         size_bytes: candidate.fingerprint.size_bytes,
         state,
+        quality,
         data_url,
     }
 }

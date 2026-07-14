@@ -43,6 +43,7 @@ pub enum HelperFailure {
 /// One lazily-created helper per role. Calls for the same role are serialized
 /// because shell extensions are apartment-bound; warm and interactive roles
 /// have independent processes and therefore cannot starve one another.
+#[derive(Default)]
 pub struct HelperSupervisor {
     #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
     next_request_id: AtomicU64,
@@ -50,19 +51,6 @@ pub struct HelperSupervisor {
     interactive: Mutex<Option<PersistentHelper>>,
     #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
     warm: Mutex<Option<PersistentHelper>>,
-}
-
-impl Default for HelperSupervisor {
-    fn default() -> Self {
-        Self {
-            #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
-            next_request_id: AtomicU64::new(0),
-            #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
-            interactive: Mutex::new(None),
-            #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
-            warm: Mutex::new(None),
-        }
-    }
 }
 
 /// The app-wide Windows shell boundary. Keeping this singleton means every

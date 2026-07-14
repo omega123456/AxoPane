@@ -1,11 +1,13 @@
 export const MAX_THUMBNAIL_CACHE_ENTRIES = 256
 export const MAX_THUMBNAIL_CACHE_BYTES = 32 * 1024 * 1024
 export const THUMBNAIL_NEGATIVE_TTL_MS = 5 * 60 * 1000
+export const THUMBNAIL_FAILED_TTL_MS = 30 * 1000
 
 export type ThumbnailCacheState = 'ready' | 'unavailable' | 'failed'
 
 export type ThumbnailCacheRecord = {
   state: ThumbnailCacheState
+  quality: 'low' | 'high' | null
   dataUrl: string | null
   touched: number
   weight: number
@@ -21,7 +23,9 @@ export function thumbnailCacheNow(): number {
 }
 
 export function isThumbnailCacheRecordUsable(record: ThumbnailCacheRecord, now: number): boolean {
-  return record.state === 'ready' || now - record.touched < THUMBNAIL_NEGATIVE_TTL_MS
+  if (record.state === 'ready') return true
+  const ttl = record.state === 'failed' ? THUMBNAIL_FAILED_TTL_MS : THUMBNAIL_NEGATIVE_TTL_MS
+  return now - record.touched < ttl
 }
 
 /** Expires negatives first, then uses touched time and key as deterministic LRU tie-breakers. */
@@ -51,6 +55,19 @@ export function pruneThumbnailCache(
     delete next[key]
     entries = entries.filter(([entryKey]) => entryKey !== key)
     weight -= record.weight
+  }
+  if (entries.length > MAX_THUMBNAIL_CACHE_ENTRIES || weight > MAX_THUMBNAIL_CACHE_BYTES) {
+    const protectedCandidates = Object.entries(next).sort(
+      ([leftKey, left], [rightKey, right]) =>
+        left.touched - right.touched || leftKey.localeCompare(rightKey),
+    )
+    for (const [key, record] of protectedCandidates) {
+      if (entries.length <= MAX_THUMBNAIL_CACHE_ENTRIES && weight <= MAX_THUMBNAIL_CACHE_BYTES)
+        break
+      delete next[key]
+      entries = entries.filter(([entryKey]) => entryKey !== key)
+      weight -= record.weight
+    }
   }
   return next
 }

@@ -36,6 +36,7 @@ import type {
   RenameEntryRequest,
   RequestIconsRequest,
   RequestThumbnailsRequest,
+  RequestThumbnailsResponse,
   CancelThumbnailsRequest,
   RestoreTrashRequest,
   ReviseSessionViewRequest,
@@ -210,7 +211,10 @@ export function requestIcons(payload: RequestIconsRequest) {
 }
 
 export function requestThumbnails(payload: RequestThumbnailsRequest) {
-  return invokeCommand({ command: 'request_thumbnails', payload }) as Promise<void>
+  return invokeCommand({
+    command: 'request_thumbnails',
+    payload,
+  }) as Promise<RequestThumbnailsResponse>
 }
 
 export function cancelThumbnails(payload: CancelThumbnailsRequest) {

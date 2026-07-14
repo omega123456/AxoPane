@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -1197,13 +1197,13 @@ fn copy_dir_recursive_populates_a_progressive_manifest_during_discovery() {
         let link_entry = manifest
             .entries()
             .iter()
-            .find(|entry| entry.relative_path == PathBuf::from("nested/link.txt"))
+            .find(|entry| entry.relative_path.as_path() == Path::new("nested/link.txt"))
             .expect("link entry present");
         assert!(link_entry.is_link);
     }
 
     for entry in manifest.entries() {
-        if entry.relative_path != PathBuf::from("nested/link.txt") {
+        if entry.relative_path.as_path() != Path::new("nested/link.txt") {
             assert!(!entry.is_link);
         }
     }

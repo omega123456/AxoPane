@@ -153,6 +153,16 @@ pub struct ThumbnailCandidateRequest {
     pub modified_unix_seconds: u64,
     pub size_bytes: u64,
     pub is_directory: bool,
+    pub priority: ThumbnailPriority,
+    pub order: u32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum ThumbnailPriority {
+    Visible,
+    Ahead,
+    Behind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,7 +172,15 @@ pub struct RequestThumbnailsRequest {
     pub tab_id: String,
     pub path: String,
     pub generation: u64,
+    pub revision: u64,
     pub candidates: Vec<ThumbnailCandidateRequest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestThumbnailsResponse {
+    pub revision: u64,
+    pub accepted_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,6 +200,13 @@ pub enum ThumbnailResultKind {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum ThumbnailQuality {
+    Low,
+    High,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThumbnailResultEvent {
@@ -193,6 +218,7 @@ pub struct ThumbnailResultEvent {
     pub modified_unix_seconds: u64,
     pub size_bytes: u64,
     pub state: ThumbnailResultKind,
+    pub quality: Option<ThumbnailQuality>,
     pub data_url: Option<String>,
 }
 

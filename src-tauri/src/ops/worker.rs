@@ -44,7 +44,7 @@ pub fn select_adapter(
     #[cfg(feature = "test-utils")]
     {
         let _ = (adapter, requirements);
-        return AdapterSelection::Portable(PortableReason::UnsupportedPlatform);
+        AdapterSelection::Portable(PortableReason::UnsupportedPlatform)
     }
     #[cfg(not(feature = "test-utils"))]
     {

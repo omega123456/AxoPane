@@ -304,15 +304,19 @@ fn commands_cover_size_and_logging_state() {
             tab_id: "tab".into(),
             path: size_root.to_string_lossy().into_owned(),
             generation: 1,
+            revision: 1,
             candidates: vec![file_explorer_lib::ipc::types::ThumbnailCandidateRequest {
                 path: size_root.join("file-0.txt").to_string_lossy().into_owned(),
                 modified_unix_seconds: 0,
                 size_bytes: 32,
                 is_directory: false,
+                priority: file_explorer_lib::ipc::types::ThumbnailPriority::Visible,
+                order: 0,
             }],
         },
         as_state(&thumbnail_service),
-    );
+    )
+    .expect("request thumbnails");
     commands::cancel_thumbnails(
         file_explorer_lib::ipc::types::CancelThumbnailsRequest {
             pane_id: "left".into(),

@@ -369,7 +369,7 @@ export const fixtures: {
   request_folder_size: undefined,
   request_folder_sizes: undefined,
   request_icons: undefined,
-  request_thumbnails: undefined,
+  request_thumbnails: { revision: 0, acceptedCount: 0 },
   cancel_thumbnails: undefined,
   request_visible_item_counts: undefined,
   sort_active_items: {

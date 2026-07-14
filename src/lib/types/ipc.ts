@@ -378,6 +378,8 @@ export type ThumbnailCandidateRequest = {
   modifiedUnixSeconds: number
   sizeBytes: number
   isDirectory: boolean
+  priority: 'visible' | 'ahead' | 'behind'
+  order: number
 }
 
 export type RequestThumbnailsRequest = {
@@ -385,7 +387,13 @@ export type RequestThumbnailsRequest = {
   tabId: string
   path: string
   generation: number
+  revision: number
   candidates: ThumbnailCandidateRequest[]
+}
+
+export type RequestThumbnailsResponse = {
+  revision: number
+  acceptedCount: number
 }
 
 export type CancelThumbnailsRequest = {
@@ -396,6 +404,7 @@ export type CancelThumbnailsRequest = {
 }
 
 export type ThumbnailResultKind = 'ready' | 'unavailable' | 'failed'
+export type ThumbnailQuality = 'low' | 'high'
 
 /** A contextual result emitted in bounded batches on `thumbnail://state`. */
 export type ThumbnailResultEvent = {
@@ -407,6 +416,7 @@ export type ThumbnailResultEvent = {
   modifiedUnixSeconds: number
   sizeBytes: number
   state: ThumbnailResultKind
+  quality: ThumbnailQuality | null
   dataUrl: string | null
 }
 
@@ -900,7 +910,7 @@ export type IpcCommandMap = {
   }
   request_thumbnails: {
     request: RequestThumbnailsRequest
-    response: void
+    response: RequestThumbnailsResponse
   }
   cancel_thumbnails: {
     request: CancelThumbnailsRequest

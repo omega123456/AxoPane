@@ -1,10 +1,10 @@
 //! Stable, scheduler-independent thumbnail identities.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use crate::ipc::types::ThumbnailQuality;
 use base64::Engine;
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
 
 pub const PREVIEW_CSS_PIXELS: u32 = 112;
 pub const MAX_PREVIEW_DIMENSION: u32 = 224;
@@ -45,20 +45,21 @@ impl ThumbnailCandidate {
         }
     }
 
-    /// Re-reads the listing identity using the directory listing's RFC3339
-    /// timestamp conversion. Failure supersedes a request rather than
-    /// turning it into a negative thumbnail result.
+    /// Re-reads the listing identity once before native generation. Cache hits
+    /// trust the watched directory listing and do not touch the filesystem.
     pub fn matches_current_metadata(&self) -> bool {
         let Ok(metadata) = std::fs::metadata(&self.fingerprint.path) else {
             return false;
         };
-        let Some(modified_at) = crate::fs::system_time_to_rfc3339(metadata.modified().ok()) else {
-            return false;
-        };
-        let Ok(modified_at) = OffsetDateTime::parse(&modified_at, &Rfc3339) else {
-            return false;
-        };
-        let Ok(modified_unix_seconds) = u64::try_from(modified_at.unix_timestamp()) else {
+        let Ok(modified_unix_seconds) = metadata
+            .modified()
+            .and_then(|modified| {
+                modified
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(std::io::Error::other)
+            })
+            .map(|duration| duration.as_secs())
+        else {
             return false;
         };
         self.fingerprint.modified_unix_seconds == modified_unix_seconds
@@ -70,8 +71,24 @@ impl ThumbnailCandidate {
 pub struct ThumbnailCacheKey(pub ThumbnailFingerprint);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThumbnailDataUrl(Arc<str>);
+
+impl ThumbnailDataUrl {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ThumbnailState {
-    Ready { data_url: String },
+    Ready {
+        data_url: ThumbnailDataUrl,
+        quality: ThumbnailQuality,
+    },
     Unavailable,
     Failed,
 }
@@ -79,13 +96,9 @@ pub enum ThumbnailState {
 impl ThumbnailState {
     pub fn weight(&self) -> usize {
         match self {
-            Self::Ready { data_url } => data_url.len(),
+            Self::Ready { data_url, .. } => data_url.len(),
             Self::Unavailable | Self::Failed => 1,
         }
-    }
-
-    pub fn is_negative(&self) -> bool {
-        !matches!(self, Self::Ready { .. })
     }
 }
 
@@ -121,5 +134,8 @@ pub fn validated_png_data_url(data_url: String) -> Result<ThumbnailState, Thumbn
     {
         return Err(ThumbnailState::Failed);
     }
-    Ok(ThumbnailState::Ready { data_url })
+    Ok(ThumbnailState::Ready {
+        data_url: ThumbnailDataUrl(Arc::from(data_url)),
+        quality: ThumbnailQuality::High,
+    })
 }

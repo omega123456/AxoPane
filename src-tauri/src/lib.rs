@@ -280,9 +280,7 @@ pub fn run() {
             )));
             let thumbnail_handle = app.handle().clone();
             thumbnails.set_emitter(Arc::new(move |events| {
-                for batch in events.chunks(thumbnails::MAX_RESULTS_PER_BATCH) {
-                    let _ = thumbnail_handle.emit(ipc::events::THUMBNAIL_STATE, batch.to_vec());
-                }
+                let _ = thumbnail_handle.emit(ipc::events::THUMBNAIL_STATE, events);
             }));
             app.manage(thumbnails);
             app.manage(Arc::new(ipc::executor::IpcExecutor::new(Arc::clone(

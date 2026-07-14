@@ -45,6 +45,7 @@ fn fingerprint_includes_path_metadata_and_fixed_size_class() {
 fn negative_records_expire_against_the_injected_clock() {
     let key = key("unknown.bin", 1);
     let mut cache = ThumbnailCache::new();
+    assert!(cache.is_empty());
     cache.insert(key.clone(), ThumbnailState::Unavailable, 12);
 
     assert_eq!(cache.get(&key, 12), Some(ThumbnailState::Unavailable));
@@ -52,17 +53,76 @@ fn negative_records_expire_against_the_injected_clock() {
 }
 
 #[test]
-fn oversized_ready_payload_is_not_admitted() {
-    let key = key("large.png", 1);
+fn low_quality_preview_survives_failure_and_delays_upgrade_retry() {
+    let key = key("progressive.png", 1);
+    let ThumbnailState::Ready { data_url, .. } =
+        validated_png_data_url(ready_payload(0)).expect("valid preview")
+    else {
+        unreachable!("validated preview is ready")
+    };
     let mut cache = ThumbnailCache::new();
     cache.insert(
         key.clone(),
         ThumbnailState::Ready {
-            data_url: format!("data:image/png;base64,{}", "a".repeat(MAX_DATA_URL_BYTES)),
+            data_url,
+            quality: file_explorer_lib::ipc::types::ThumbnailQuality::Low,
         },
-        0,
+        10,
     );
-    assert_eq!(cache.get(&key, 0), None);
+    cache.insert(key.clone(), ThumbnailState::Failed, 10);
+
+    assert_eq!(
+        cache.get_with_upgrade(&key, 39).map(|(_, upgrade)| upgrade),
+        Some(false)
+    );
+    assert_eq!(
+        cache.get_with_upgrade(&key, 40).map(|(_, upgrade)| upgrade),
+        Some(true)
+    );
+}
+
+#[test]
+fn unavailable_upgrade_preserves_low_quality_for_the_negative_ttl() {
+    let key = key("progressive-unavailable.png", 1);
+    let ThumbnailState::Ready { data_url, .. } =
+        validated_png_data_url(ready_payload(0)).expect("valid preview")
+    else {
+        unreachable!("validated preview is ready")
+    };
+    let mut cache = ThumbnailCache::new();
+    cache.insert(
+        key.clone(),
+        ThumbnailState::Ready {
+            data_url,
+            quality: file_explorer_lib::ipc::types::ThumbnailQuality::Low,
+        },
+        10,
+    );
+    cache.insert(key.clone(), ThumbnailState::Unavailable, 10);
+
+    assert_eq!(
+        cache
+            .get_with_upgrade(&key, 10 + NEGATIVE_TTL_SECONDS - 1)
+            .map(|(_, upgrade)| upgrade),
+        Some(false)
+    );
+    assert_eq!(
+        cache
+            .get_with_upgrade(&key, 10 + NEGATIVE_TTL_SECONDS)
+            .map(|(_, upgrade)| upgrade),
+        Some(true)
+    );
+}
+
+#[test]
+fn oversized_ready_payload_is_not_admitted() {
+    assert_eq!(
+        validated_png_data_url(format!(
+            "data:image/png;base64,{}",
+            "a".repeat(MAX_DATA_URL_BYTES)
+        )),
+        Err(ThumbnailState::Failed)
+    );
 }
 
 #[test]
@@ -101,14 +161,9 @@ fn cache_evicts_least_recently_used_records_at_the_fixed_entry_limit() {
 fn cache_also_evicts_when_encoded_preview_weight_exceeds_sixteen_mebibytes() {
     let mut cache = ThumbnailCache::new();
     let payload = ready_payload(60_000);
+    let state = validated_png_data_url(payload).expect("valid payload");
     for index in 0..256 {
-        cache.insert(
-            key(&format!("weighted-{index}.png"), 1),
-            ThumbnailState::Ready {
-                data_url: payload.clone(),
-            },
-            0,
-        );
+        cache.insert(key(&format!("weighted-{index}.png"), 1), state.clone(), 0);
     }
 
     assert!(cache.len() < 256);

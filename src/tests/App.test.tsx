@@ -123,6 +123,8 @@ describe('App', () => {
       modifiedUnixSeconds: 10,
       sizeBytes: 20,
       isDirectory: false,
+      priority: 'visible' as const,
+      order: 0,
     }
     const callbackCount = callbacks.length
     await act(async () => {
@@ -144,6 +146,7 @@ describe('App', () => {
           modifiedUnixSeconds: candidate.modifiedUnixSeconds,
           sizeBytes: candidate.sizeBytes,
           state: 'ready',
+          quality: 'high',
           dataUrl: 'data:image/png;base64,AA==',
         },
       ])
@@ -168,6 +171,7 @@ describe('App', () => {
           modifiedUnixSeconds: candidate.modifiedUnixSeconds,
           sizeBytes: candidate.sizeBytes,
           state: 'ready',
+          quality: 'high',
           dataUrl: 'data:image/png;base64,AA==',
         },
       ])

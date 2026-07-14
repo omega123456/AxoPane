@@ -13,6 +13,8 @@ const candidate: ThumbnailCandidateRequest = {
   modifiedUnixSeconds: 20,
   sizeBytes: 30,
   isDirectory: false,
+  priority: 'visible',
+  order: 0,
 }
 
 function result(overrides: Partial<ThumbnailResultEvent> = {}): ThumbnailResultEvent {
@@ -25,6 +27,7 @@ function result(overrides: Partial<ThumbnailResultEvent> = {}): ThumbnailResultE
     modifiedUnixSeconds: candidate.modifiedUnixSeconds,
     sizeBytes: candidate.sizeBytes,
     state: 'ready',
+    quality: 'high',
     dataUrl: 'data:image/png;base64,AA==',
     ...overrides,
   }
@@ -36,7 +39,10 @@ beforeEach(() => {
 
 describe('thumbnail store', () => {
   it('deduplicates visible candidates, cache hits, and active range reports', async () => {
-    const request = vi.fn<(payload: IpcCommandMap['request_thumbnails']['request']) => void>()
+    const request = vi.fn((payload: IpcCommandMap['request_thumbnails']['request']) => ({
+      revision: payload.revision,
+      acceptedCount: payload.candidates.length,
+    }))
     ipc.override('request_thumbnails', request)
     await useThumbnailStore.getState().setVisibleCandidates(scope, [candidate, candidate])
     expect(request).toHaveBeenCalledOnce()
@@ -48,16 +54,53 @@ describe('thumbnail store', () => {
     expect(useThumbnailStore.getState().getRecord(candidate)?.dataUrl).toBe(result().dataUrl)
   })
 
-  it('cancels old generations when a range or scope is replaced', async () => {
+  it('retains a generation across range changes and cancels only the scope', async () => {
     const cancel = vi.fn(() => undefined)
     ipc.override('cancel_thumbnails', cancel)
     await useThumbnailStore.getState().setVisibleCandidates(scope, [candidate])
     await useThumbnailStore
       .getState()
       .setVisibleCandidates(scope, [{ ...candidate, sizeBytes: 31 }])
-    expect(cancel).toHaveBeenCalledWith(expect.objectContaining({ ...scope, generation: 1 }))
+    expect(cancel).not.toHaveBeenCalled()
     await useThumbnailStore.getState().cancelScope(scope.paneId, scope.tabId)
-    expect(cancel).toHaveBeenCalledWith(expect.objectContaining({ ...scope, generation: 2 }))
+    expect(cancel).toHaveBeenCalledWith(expect.objectContaining({ ...scope, generation: 1 }))
+  })
+
+  it('publishes the new scope before an old-scope cancellation finishes', async () => {
+    let releaseCancel: () => void = () => undefined
+    ipc.override(
+      'cancel_thumbnails',
+      () =>
+        new Promise<void>((resolve) => {
+          releaseCancel = resolve
+        }),
+    )
+    const request = vi.fn((payload: IpcCommandMap['request_thumbnails']['request']) => ({
+      revision: payload.revision,
+      acceptedCount: payload.candidates.length,
+    }))
+    ipc.override('request_thumbnails', request)
+    await useThumbnailStore.getState().setVisibleCandidates(scope, [candidate])
+
+    const nextScope = { ...scope, path: 'C:\\next' }
+    const firstRange = useThumbnailStore
+      .getState()
+      .setVisibleCandidates(nextScope, [{ ...candidate, sizeBytes: 31 }])
+    await vi.waitFor(() =>
+      expect(useThumbnailStore.getState().scopes).toMatchObject({
+        [`${scope.paneId}\u0000${scope.tabId}`]: { path: nextScope.path, revision: 1 },
+      }),
+    )
+    await useThumbnailStore
+      .getState()
+      .setVisibleCandidates(nextScope, [{ ...candidate, sizeBytes: 32 }])
+    releaseCancel()
+    await firstRange
+
+    expect(useThumbnailStore.getState().scopes).toMatchObject({
+      [`${scope.paneId}\u0000${scope.tabId}`]: { path: nextScope.path, revision: 2 },
+    })
+    expect(request.mock.calls.slice(1).map(([payload]) => payload.revision)).toEqual([2, 1])
   })
 
   it('rejects stale context and fingerprint results without cache mutation', async () => {
@@ -73,7 +116,10 @@ describe('thumbnail store', () => {
   })
 
   it('stores failure records as fallback state and suppresses retry until expiry', async () => {
-    const request = vi.fn(() => undefined)
+    const request = vi.fn((payload: IpcCommandMap['request_thumbnails']['request']) => ({
+      revision: payload.revision,
+      acceptedCount: payload.candidates.length,
+    }))
     ipc.override('request_thumbnails', request)
     await useThumbnailStore.getState().setVisibleCandidates(scope, [candidate])
     useThumbnailStore
@@ -87,6 +133,7 @@ describe('thumbnail store', () => {
     await useThumbnailStore
       .getState()
       .setVisibleCandidates({ ...scope, path: 'C:\\files-2' }, [candidate])
-    expect(request).toHaveBeenCalledOnce()
+    expect(request).toHaveBeenCalledTimes(2)
+    expect(request.mock.calls[1]?.[0].candidates).toEqual([])
   })
 })

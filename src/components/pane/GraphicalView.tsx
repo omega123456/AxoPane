@@ -8,7 +8,7 @@ import {
   useState,
 } from 'react'
 import type { KeyboardEvent, ReactNode, RefObject, UIEvent } from 'react'
-import { EntryCard, type EntryCardThumbnail } from './EntryCard'
+import { EntryCard } from './EntryCard'
 import type { FileRowActions } from './FileRow'
 import {
   moveGridIndex,
@@ -32,6 +32,14 @@ export type GraphicalViewHandle = {
 
 export type GraphicalMarqueeRect = { left: number; top: number; width: number; height: number }
 
+export type GraphicalThumbnailRange = {
+  visibleStart: number
+  visibleEnd: number
+  prefetchStart: number
+  prefetchEnd: number
+  direction: 'up' | 'down' | 'stationary'
+}
+
 type GraphicalViewProps = {
   pane: PaneState
   mode: Exclude<PaneViewMode, 'details'>
@@ -41,8 +49,8 @@ type GraphicalViewProps = {
   dropTargetEntryId: string | null
   rename: InlineRenameState | null
   actions: FileRowActions
-  thumbnails?: Record<string, EntryCardThumbnail | undefined>
   onVisibleRangeChange: (start: number, end: number, viewportCount: number) => void
+  onThumbnailRangeChange?: (range: GraphicalThumbnailRange) => void
   onFocusEntry: (entryId: string) => void
   onKeyboardMove?: (entryId: string, movement: GridMovement) => void
   onContainerMouseDown?: (event: React.MouseEvent<HTMLDivElement>) => void
@@ -68,8 +76,8 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
       dropTargetEntryId,
       rename,
       actions,
-      thumbnails = {},
       onVisibleRangeChange,
+      onThumbnailRangeChange,
       onFocusEntry,
       onKeyboardMove,
       onContainerMouseDown,
@@ -86,6 +94,8 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
     ref,
   ) {
     const internalScrollRef = useRef<HTMLDivElement | null>(null)
+    const lastScrollTopRef = useRef(0)
+    const scrollDirectionRef = useRef<GraphicalThumbnailRange['direction']>('stationary')
     const [measuredElement, setMeasuredElement] = useState<HTMLDivElement | null>(null)
     const width = useElementWidth(measuredElement)
     const grid = paneGridLayout(mode, width)
@@ -95,7 +105,8 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
       count: rowCount,
       getScrollElement: () => scrollRef.current,
       estimateSize: () => grid.rowPitch,
-      overscan: 4,
+      overscan: mode === 'thumbnails' ? 2 : 4,
+      measurementKey: grid.rowPitch,
     })
     const virtualRows = rowVirtualizer.getVirtualItems()
     const rowsToRender =
@@ -181,6 +192,36 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
       )
     }, [grid.columns, onVisibleRangeChange, pane.entries.length, rowsToRender])
 
+    useEffect(() => {
+      if (mode !== 'thumbnails' || !onThumbnailRangeChange || pane.entries.length === 0) return
+      const element = scrollRef.current
+      const viewportHeight = element?.clientHeight || element?.getBoundingClientRect().height || 480
+      const scrollTop = element?.scrollTop ?? 0
+      const firstRow = Math.max(0, Math.floor(scrollTop / grid.rowPitch))
+      const lastRow = Math.min(
+        rowCount - 1,
+        Math.max(firstRow, Math.ceil((scrollTop + viewportHeight) / grid.rowPitch) - 1),
+      )
+      const prefetchFirstRow = Math.max(0, firstRow - 2)
+      const prefetchLastRow = Math.min(rowCount - 1, lastRow + 2)
+      onThumbnailRangeChange({
+        visibleStart: firstRow * grid.columns,
+        visibleEnd: Math.min(pane.entries.length - 1, (lastRow + 1) * grid.columns - 1),
+        prefetchStart: prefetchFirstRow * grid.columns,
+        prefetchEnd: Math.min(pane.entries.length - 1, (prefetchLastRow + 1) * grid.columns - 1),
+        direction: scrollDirectionRef.current,
+      })
+    }, [
+      grid.columns,
+      grid.rowPitch,
+      mode,
+      onThumbnailRangeChange,
+      pane.entries.length,
+      rowCount,
+      rowsToRender,
+      scrollRef,
+    ])
+
     function keyboardMovement(event: KeyboardEvent<HTMLDivElement>): GridMovement | null {
       if (event.ctrlKey || event.metaKey) {
         if (event.key === 'Home') return 'first'
@@ -245,7 +286,17 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
           className={`h-full min-h-0 overflow-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-blue-border dark:scrollbar-thumb-dark-text-faint ${isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-accent-blue-border' : ''}`}
           onKeyDown={onGridKeyDown}
           onMouseDown={onContainerMouseDown}
-          onScroll={(event: UIEvent<HTMLDivElement>) => onScroll?.(event.currentTarget.scrollTop)}
+          onScroll={(event: UIEvent<HTMLDivElement>) => {
+            const next = event.currentTarget.scrollTop
+            scrollDirectionRef.current =
+              next > lastScrollTopRef.current
+                ? 'down'
+                : next < lastScrollTopRef.current
+                  ? 'up'
+                  : 'stationary'
+            lastScrollTopRef.current = next
+            onScroll?.(next)
+          }}
           onContextMenu={onContainerContextMenu}
           onDragOver={onPaneDragOver}
           onDragLeave={onPaneDragLeave}
@@ -278,7 +329,6 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
                       renameBusy={rename?.entryId === entry.id ? rename.busy : false}
                       renameError={rename?.entryId === entry.id ? rename.error : null}
                       draggable={!entry.trashId}
-                      thumbnail={thumbnails[entry.id]}
                       rowIndex={virtualRow.index + 1}
                       columnIndex={column + 1}
                       actions={actions}

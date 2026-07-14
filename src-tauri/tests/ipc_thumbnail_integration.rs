@@ -7,11 +7,14 @@ fn thumbnail_contract_serializes_context_and_event_name() {
         tab_id: "tab".into(),
         path: "/folder".into(),
         generation: 4,
+        revision: 2,
         candidates: vec![ThumbnailCandidateRequest {
             path: "/folder/image.png".into(),
             modified_unix_seconds: 2,
             size_bytes: 3,
             is_directory: false,
+            priority: ThumbnailPriority::Visible,
+            order: 0,
         }],
     };
     let value = serde_json::to_value(request).expect("serialize");

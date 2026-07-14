@@ -1,12 +1,63 @@
-import { memo, useEffect, useRef } from 'react'
+import { memo, useEffect, useMemo, useRef } from 'react'
+import { getUnixTime, parseISO } from 'date-fns'
 import type { DragEvent, KeyboardEvent, MouseEvent } from 'react'
 import { EntryIcon } from '@/components/icons/EntryIcon'
 import type { FileRowActions } from './FileRow'
 import type { DirectoryEntry } from '@/lib/types/ipc'
+import { thumbnailFingerprintKey, useThumbnailStore } from '@/stores/thumbnail-store'
 
 export type EntryCardThumbnail = {
   state: 'ready' | 'loading' | 'unavailable' | 'failed'
+  quality?: 'low' | 'high' | null
   dataUrl?: string | null
+}
+
+function ThumbnailPreview({
+  entry,
+  override,
+}: {
+  entry: DirectoryEntry
+  override?: EntryCardThumbnail
+}) {
+  const fingerprint = useMemo(() => {
+    if (entry.isDir || entry.sizeBytes === null || entry.modifiedAt === null) return null
+    const modifiedUnixSeconds = getUnixTime(parseISO(entry.modifiedAt))
+    return Number.isFinite(modifiedUnixSeconds)
+      ? thumbnailFingerprintKey({
+          path: entry.path,
+          modifiedUnixSeconds,
+          sizeBytes: entry.sizeBytes,
+        })
+      : null
+  }, [entry.isDir, entry.modifiedAt, entry.path, entry.sizeBytes])
+  const record = useThumbnailStore((state) => (fingerprint ? state.cache[fingerprint] : undefined))
+  const thumbnail =
+    override ??
+    record ??
+    ({ state: fingerprint ? 'loading' : 'unavailable', quality: null } as const)
+  const previewDataUrl = thumbnail.state === 'ready' ? (thumbnail.dataUrl ?? undefined) : undefined
+
+  return (
+    <div className="relative flex size-thumbnail-preview shrink-0 items-center justify-center self-center overflow-hidden rounded-tab bg-light-panel dark:bg-dark-panel">
+      {previewDataUrl ? (
+        <img
+          role="img"
+          src={previewDataUrl}
+          alt=""
+          decoding="async"
+          className="size-full object-contain"
+        />
+      ) : (
+        <EntryIcon entry={entry} className="size-8 shrink-0" />
+      )}
+      {thumbnail.state === 'loading' ? (
+        <span
+          aria-label="Thumbnail loading"
+          className="absolute inset-0 animate-pulse bg-light-skeleton dark:bg-dark-skeleton"
+        />
+      ) : null}
+    </div>
+  )
 }
 
 type EntryCardProps = {
@@ -44,7 +95,7 @@ function EntryCardImpl({
   renameError = null,
   isDropTarget = false,
   draggable = false,
-  thumbnail = { state: 'unavailable' },
+  thumbnail,
 }: EntryCardProps) {
   const renameInputRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
@@ -128,25 +179,12 @@ function EntryCardImpl({
     )
   }
 
-  const previewDataUrl = thumbnail.state === 'ready' ? (thumbnail.dataUrl ?? undefined) : undefined
   return (
     <div
       {...sharedProps}
       className={`flex h-thumbnail-card ${minimumCellClassName} cursor-pointer flex-col rounded-tab p-2 hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-blue-border dark:hover:bg-dark-hover ${stateClassName}`}
     >
-      <div className="relative flex size-thumbnail-preview shrink-0 items-center justify-center self-center overflow-hidden rounded-tab bg-light-panel dark:bg-dark-panel">
-        {previewDataUrl ? (
-          <img role="img" src={previewDataUrl} alt="" className="size-full object-contain" />
-        ) : (
-          <EntryIcon entry={entry} className="size-8 shrink-0" />
-        )}
-        {thumbnail.state === 'loading' ? (
-          <span
-            aria-label="Thumbnail loading"
-            className="absolute inset-0 animate-pulse bg-light-skeleton dark:bg-dark-skeleton"
-          />
-        ) : null}
-      </div>
+      <ThumbnailPreview entry={entry} override={thumbnail} />
       <div className="min-h-0 w-full flex-1 pt-2 text-center text-row text-light-text dark:text-dark-text">
         {renameControl ?? <span className="line-clamp-2 break-words">{entry.name}</span>}
       </div>

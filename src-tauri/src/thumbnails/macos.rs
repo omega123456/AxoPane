@@ -5,10 +5,10 @@
 //! the callback queue, so callbacks immediately copy into an owned bounded
 //! RGBA buffer and only send Rust data back to the owner.
 
-use super::provider::{ProviderCapability, ThumbnailProvider};
+use super::provider::{ProviderCapability, ThumbnailPreviewCallback, ThumbnailProvider};
 use super::types::{
-    validated_png_data_url, ThumbnailCandidate, ThumbnailState, MAX_PNG_BYTES,
-    MAX_PREVIEW_DIMENSION, MAX_PREVIEW_PIXELS,
+    validated_png_data_url, ThumbnailCandidate, ThumbnailFingerprint, ThumbnailState,
+    MAX_PNG_BYTES, MAX_PREVIEW_DIMENSION, MAX_PREVIEW_PIXELS,
 };
 use base64::Engine;
 use block2::RcBlock;
@@ -22,19 +22,20 @@ use objc2_core_graphics::{
 use objc2_foundation::{NSError, NSString, NSURL};
 use objc2_quick_look_thumbnailing::{
     QLThumbnailGenerationRequest, QLThumbnailGenerationRequestRepresentationTypes,
-    QLThumbnailGenerator, QLThumbnailRepresentation,
+    QLThumbnailGenerator, QLThumbnailRepresentation, QLThumbnailRepresentationType,
 };
 use png::{BitDepth, ColorType, Encoder};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const MAX_IN_FLIGHT: usize = 2;
 const COMMAND_CAPACITY: usize = 64;
 const COMPLETION_CAPACITY: usize = 8;
 const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(2);
+const GENERATION_DEADLINE: Duration = Duration::from_secs(2);
 
 pub struct MacosThumbnailProvider {
     owner: Mutex<Option<Owner>>,
@@ -49,16 +50,31 @@ enum Command {
     Generate {
         id: u64,
         candidate: ThumbnailCandidate,
-        reply: Sender<ThumbnailState>,
+        reply: Sender<ProviderUpdate>,
     },
     Cancel {
-        path: std::path::PathBuf,
+        fingerprint: ThumbnailFingerprint,
     },
     Shutdown,
 }
 struct Completion {
     id: u64,
-    state: ThumbnailState,
+    payload: ProviderPayload,
+    is_final: bool,
+}
+struct ProviderUpdate {
+    payload: ProviderPayload,
+    is_final: bool,
+}
+enum ProviderPayload {
+    Frame(RawFrame),
+    State(ThumbnailState),
+}
+struct RawFrame {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+    quality: crate::ipc::types::ThumbnailQuality,
 }
 struct CallbackState {
     cancelled: AtomicBool,
@@ -66,8 +82,10 @@ struct CallbackState {
 struct Pending {
     candidate: ThumbnailCandidate,
     request: Retained<QLThumbnailGenerationRequest>,
-    _completion: RcBlock<dyn Fn(*mut QLThumbnailRepresentation, *mut NSError)>,
-    reply: Sender<ThumbnailState>,
+    _completion: RcBlock<
+        dyn Fn(*mut QLThumbnailRepresentation, QLThumbnailRepresentationType, *mut NSError),
+    >,
+    reply: Sender<ProviderUpdate>,
     callback: std::sync::Arc<CallbackState>,
 }
 
@@ -96,37 +114,60 @@ impl ThumbnailProvider for MacosThumbnailProvider {
         ProviderCapability::Native
     }
 
-    fn generate(&self, candidate: &ThumbnailCandidate) -> ThumbnailState {
+    fn generate(
+        &self,
+        candidate: &ThumbnailCandidate,
+        preview: ThumbnailPreviewCallback,
+    ) -> ThumbnailState {
         if candidate.is_directory {
             return ThumbnailState::Unavailable;
         }
-        let (reply, result) = bounded(1);
+        let (reply, result) = bounded(2);
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let Ok(owner) = self.owner.lock() else {
-            return ThumbnailState::Failed;
-        };
-        let Some(owner) = owner.as_ref() else {
-            return ThumbnailState::Unavailable;
-        };
-        if owner
-            .commands
-            .send(Command::Generate {
-                id,
-                candidate: candidate.clone(),
-                reply,
-            })
-            .is_err()
         {
-            return ThumbnailState::Failed;
+            let Ok(owner) = self.owner.lock() else {
+                return ThumbnailState::Failed;
+            };
+            let Some(owner) = owner.as_ref() else {
+                return ThumbnailState::Unavailable;
+            };
+            if owner
+                .commands
+                .send(Command::Generate {
+                    id,
+                    candidate: candidate.clone(),
+                    reply,
+                })
+                .is_err()
+            {
+                return ThumbnailState::Failed;
+            }
         }
-        result.recv().unwrap_or(ThumbnailState::Unavailable)
+        let deadline = Instant::now() + GENERATION_DEADLINE;
+        loop {
+            match result.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(update) if update.is_final => {
+                    return encode_payload(update.payload);
+                }
+                Ok(update) => {
+                    let state = encode_payload(update.payload);
+                    if matches!(state, ThumbnailState::Ready { .. }) {
+                        preview(state);
+                    }
+                }
+                Err(_) => {
+                    self.cancel(candidate);
+                    return ThumbnailState::Failed;
+                }
+            }
+        }
     }
 
     fn cancel(&self, candidate: &ThumbnailCandidate) {
         if let Ok(owner) = self.owner.lock() {
             if let Some(owner) = owner.as_ref() {
                 let _ = owner.commands.try_send(Command::Cancel {
-                    path: candidate.fingerprint.path.clone(),
+                    fingerprint: candidate.fingerprint.clone(),
                 });
             }
         }
@@ -152,14 +193,20 @@ fn owner_loop(commands: Receiver<Command>) {
     while accepting || !pending.is_empty() {
         select! {
             recv(completion_rx) -> completion => if let Ok(completion) = completion {
-                if let Some(pending) = pending.remove(&completion.id) { let _ = pending.reply.send(completion.state); }
+                if completion.is_final {
+                    if let Some(pending) = pending.remove(&completion.id) {
+                        let _ = pending.reply.send(ProviderUpdate { payload: completion.payload, is_final: true });
+                    }
+                } else if let Some(pending) = pending.get(&completion.id) {
+                    let _ = pending.reply.send(ProviderUpdate { payload: completion.payload, is_final: false });
+                }
             },
             recv(commands) -> command => match command {
                 Ok(Command::Generate { id, candidate, reply }) if accepting && pending.len() < MAX_IN_FLIGHT => {
                     begin(&generator, id, candidate, reply, completion_tx.clone(), &mut pending);
                 }
-                Ok(Command::Generate { reply, .. }) => { let _ = reply.send(ThumbnailState::Unavailable); }
-                Ok(Command::Cancel { path }) => cancel_path(&generator, &mut pending, &path),
+                Ok(Command::Generate { reply, .. }) => { let _ = reply.send(ProviderUpdate { payload: ProviderPayload::State(ThumbnailState::Unavailable), is_final: true }); }
+                Ok(Command::Cancel { fingerprint }) => cancel_fingerprint(&generator, &mut pending, &fingerprint),
                 Ok(Command::Shutdown) | Err(_) => {
                     accepting = false;
                     for pending in pending.values() { pending.callback.cancelled.store(true, Ordering::Release); unsafe { generator.cancelRequest(&pending.request); } }
@@ -168,10 +215,10 @@ fn owner_loop(commands: Receiver<Command>) {
                     let deadline = std::time::Instant::now() + SHUTDOWN_DEADLINE;
                     while !pending.is_empty() && std::time::Instant::now() < deadline {
                         if let Ok(completion) = completion_rx.recv_timeout(Duration::from_millis(10)) {
-                            if let Some(pending) = pending.remove(&completion.id) { let _ = pending.reply.send(ThumbnailState::Unavailable); }
+                            if let Some(pending) = pending.remove(&completion.id) { let _ = pending.reply.send(ProviderUpdate { payload: ProviderPayload::State(ThumbnailState::Unavailable), is_final: true }); }
                         }
                     }
-                    for (_, pending) in pending.drain() { let _ = pending.reply.send(ThumbnailState::Unavailable); }
+                    for (_, pending) in pending.drain() { let _ = pending.reply.send(ProviderUpdate { payload: ProviderPayload::State(ThumbnailState::Unavailable), is_final: true }); }
                 }
             }
         }
@@ -182,7 +229,7 @@ fn begin(
     generator: &QLThumbnailGenerator,
     id: u64,
     candidate: ThumbnailCandidate,
-    reply: Sender<ThumbnailState>,
+    reply: Sender<ProviderUpdate>,
     completion_tx: Sender<Completion>,
     pending: &mut HashMap<u64, Pending>,
 ) {
@@ -195,28 +242,40 @@ fn begin(
     // This selector is not generated by objc2 0.3 on every deployment
     // target, although it is available on our macOS 12 baseline.
     let request: Retained<QLThumbnailGenerationRequest> = unsafe {
-        objc2::msg_send![QLThumbnailGenerationRequest::alloc(), initWithFileAtURL: &*url, size: size, scale: 1.0f64, representationTypes: QLThumbnailGenerationRequestRepresentationTypes::Thumbnail]
+        objc2::msg_send![QLThumbnailGenerationRequest::alloc(), initWithFileAtURL: &*url, size: size, scale: 1.0f64, representationTypes: QLThumbnailGenerationRequestRepresentationTypes::LowQualityThumbnail | QLThumbnailGenerationRequestRepresentationTypes::Thumbnail]
     };
     let callback = std::sync::Arc::new(CallbackState {
         cancelled: AtomicBool::new(false),
     });
     let callback_state = std::sync::Arc::clone(&callback);
     let completion = RcBlock::new(
-        move |representation: *mut QLThumbnailRepresentation, error: *mut NSError| {
-            let state = if callback_state.cancelled.load(Ordering::Acquire) {
-                ThumbnailState::Unavailable
+        move |representation: *mut QLThumbnailRepresentation,
+              representation_type: QLThumbnailRepresentationType,
+              error: *mut NSError| {
+            let is_final = representation_type == QLThumbnailRepresentationType::Thumbnail;
+            let payload = if callback_state.cancelled.load(Ordering::Acquire) {
+                ProviderPayload::State(ThumbnailState::Unavailable)
             } else if representation.is_null() || !error.is_null() {
-                ThumbnailState::Unavailable
+                ProviderPayload::State(ThumbnailState::Unavailable)
             } else {
                 unsafe {
-                    rgba_png_from_representation(&*representation).unwrap_or(ThumbnailState::Failed)
+                    rgba_frame_from_representation(&*representation, representation_type).map_or(
+                        ProviderPayload::State(ThumbnailState::Failed),
+                        ProviderPayload::Frame,
+                    )
                 }
             };
-            let _ = completion_tx.try_send(Completion { id, state });
+            if is_final || matches!(payload, ProviderPayload::Frame(_)) {
+                let _ = completion_tx.try_send(Completion {
+                    id,
+                    payload,
+                    is_final,
+                });
+            }
         },
     );
     unsafe {
-        generator.generateBestRepresentationForRequest_completionHandler(&request, &completion);
+        generator.generateRepresentationsForRequest_updateHandler(&request, Some(&completion));
     }
     pending.insert(
         id,
@@ -230,14 +289,14 @@ fn begin(
     );
 }
 
-fn cancel_path(
+fn cancel_fingerprint(
     generator: &QLThumbnailGenerator,
     pending: &mut HashMap<u64, Pending>,
-    path: &std::path::Path,
+    fingerprint: &ThumbnailFingerprint,
 ) {
     let ids: Vec<_> = pending
         .iter()
-        .filter_map(|(id, pending)| (pending.candidate.fingerprint.path == path).then_some(*id))
+        .filter_map(|(id, pending)| (pending.candidate.fingerprint == *fingerprint).then_some(*id))
         .collect();
     for id in ids {
         if let Some(pending) = pending.get(&id) {
@@ -251,9 +310,10 @@ fn cancel_path(
 
 /// Copies arbitrary Quick Look CGImage formats through our fixed RGBA context;
 /// provider-owned bytes are never assumed to be directly usable RGBA.
-unsafe fn rgba_png_from_representation(
+unsafe fn rgba_frame_from_representation(
     representation: &QLThumbnailRepresentation,
-) -> Option<ThumbnailState> {
+    representation_type: QLThumbnailRepresentationType,
+) -> Option<RawFrame> {
     let image = representation.CGImage();
     let width = CGImage::width(Some(&image));
     let height = CGImage::height(Some(&image));
@@ -288,17 +348,47 @@ unsafe fn rgba_png_from_representation(
         },
         Some(&image),
     );
+    Some(RawFrame {
+        width: width as u32,
+        height: height as u32,
+        rgba,
+        quality: if representation_type == QLThumbnailRepresentationType::Thumbnail {
+            crate::ipc::types::ThumbnailQuality::High
+        } else {
+            crate::ipc::types::ThumbnailQuality::Low
+        },
+    })
+}
+
+fn encode_payload(payload: ProviderPayload) -> ThumbnailState {
+    let frame = match payload {
+        ProviderPayload::Frame(frame) => frame,
+        ProviderPayload::State(state) => return state,
+    };
     let mut png = Vec::new();
-    let mut encoder = Encoder::new(&mut png, width as u32, height as u32);
+    let mut encoder = Encoder::new(&mut png, frame.width, frame.height);
     encoder.set_color(ColorType::Rgba);
     encoder.set_depth(BitDepth::Eight);
-    encoder.write_header().ok()?.write_image_data(&rgba).ok()?;
-    if png.len() > MAX_PNG_BYTES {
-        return None;
+    let encoded = encoder
+        .write_header()
+        .and_then(|mut writer| writer.write_image_data(&frame.rgba));
+    if encoded.is_err() {
+        return ThumbnailState::Failed;
     }
-    validated_png_data_url(format!(
+    if png.len() > MAX_PNG_BYTES {
+        return ThumbnailState::Failed;
+    }
+    let Ok(validated) = validated_png_data_url(format!(
         "data:image/png;base64,{}",
         base64::engine::general_purpose::STANDARD.encode(png)
-    ))
-    .ok()
+    )) else {
+        return ThumbnailState::Failed;
+    };
+    match validated {
+        ThumbnailState::Ready { data_url, .. } => ThumbnailState::Ready {
+            data_url,
+            quality: frame.quality,
+        },
+        _ => ThumbnailState::Failed,
+    }
 }

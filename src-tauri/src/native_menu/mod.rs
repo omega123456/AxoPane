@@ -83,12 +83,11 @@ impl NativeMenuService {
         // structure with their paths rebound. Fresh invoke tokens are still
         // issued per request below, so cache hits never replay stale tokens.
         let (items, _) = self.cache.get_or_load(&request, || {
-            let fresh = dedupe_provider_items(self.provider.load_menu_for_role(
+            dedupe_provider_items(self.provider.load_menu_for_role(
                 &request,
                 &self.executor,
                 HelperRole::Interactive,
-            ));
-            fresh
+            ))
         });
 
         LoadNativeMenuResponse {

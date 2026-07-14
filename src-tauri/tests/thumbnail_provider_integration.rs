@@ -16,12 +16,19 @@ fn candidate(name: &str, is_directory: bool) -> ThumbnailCandidate {
     )
 }
 
+fn generate(
+    provider: &dyn file_explorer_lib::thumbnails::provider::ThumbnailProvider,
+    candidate: &ThumbnailCandidate,
+) -> ThumbnailState {
+    provider.generate(candidate, std::sync::Arc::new(|_| {}))
+}
+
 #[test]
 fn test_utils_always_selects_the_safe_fake_provider() {
     let provider = platform_provider();
     assert_eq!(provider.capability(), ProviderCapability::Fake);
     assert_eq!(
-        provider.generate(&candidate("directory.png", true)),
+        generate(provider.as_ref(), &candidate("directory.png", true)),
         ThumbnailState::Unavailable
     );
     assert_eq!(common::bootstrap_message(), "phase-1-common");
@@ -31,19 +38,19 @@ fn test_utils_always_selects_the_safe_fake_provider() {
 fn fake_provider_has_deterministic_terminal_outcomes_without_native_calls() {
     let provider = platform_provider();
     assert!(matches!(
-        provider.generate(&candidate("preview.png", false)),
+        generate(provider.as_ref(), &candidate("preview.png", false)),
         ThumbnailState::Ready { .. }
     ));
     assert_eq!(
-        provider.generate(&candidate("unavailable.png", false)),
+        generate(provider.as_ref(), &candidate("unavailable.png", false)),
         ThumbnailState::Unavailable
     );
     assert_eq!(
-        provider.generate(&candidate("cancelled.png", false)),
+        generate(provider.as_ref(), &candidate("cancelled.png", false)),
         ThumbnailState::Unavailable
     );
     assert_eq!(
-        provider.generate(&candidate("failed.png", false)),
+        generate(provider.as_ref(), &candidate("failed.png", false)),
         ThumbnailState::Failed
     );
     provider.cancel(&candidate("preview.png", false));

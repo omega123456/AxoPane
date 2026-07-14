@@ -136,6 +136,55 @@ describe('GraphicalView', () => {
     expect(onVisibleRangeChange.mock.calls.at(-1)?.[0]).toBe(0)
   })
 
+  it('reports the true thumbnail viewport separately from two-row prefetch', async () => {
+    const onThumbnailRangeChange = vi.fn()
+    renderView({
+      pane: pane(entries(200)),
+      mode: 'thumbnails',
+      onThumbnailRangeChange,
+    })
+    await waitFor(() => expect(onThumbnailRangeChange).toHaveBeenCalled())
+    expect(onThumbnailRangeChange.mock.calls.at(-1)?.[0]).toEqual({
+      visibleStart: 0,
+      visibleEnd: 8,
+      prefetchStart: 0,
+      prefetchEnd: 14,
+      direction: 'stationary',
+    })
+  })
+
+  it('invalidates fixed row measurements when the graphical mode changes', async () => {
+    const view = renderView({ pane: pane(entries(20)) })
+    await waitFor(() =>
+      expect(screen.getByRole('gridcell', { name: 'Entry 3' }).closest('[role="row"]')).toHaveStyle(
+        {
+          top: '64px',
+        },
+      ),
+    )
+    view.rerender(
+      <GraphicalView
+        pane={pane(entries(20))}
+        mode="thumbnails"
+        isActivePane
+        selectedIds={new Set()}
+        cutEntryPaths={new Set()}
+        dropTargetEntryId={null}
+        rename={null}
+        actions={actions()}
+        onVisibleRangeChange={view.onVisibleRangeChange}
+        onFocusEntry={view.onFocusEntry}
+      />,
+    )
+    await waitFor(() =>
+      expect(screen.getByRole('gridcell', { name: 'Entry 3' }).closest('[role="row"]')).toHaveStyle(
+        {
+          top: '228px',
+        },
+      ),
+    )
+  })
+
   it('moves focus through graphical keyboard geometry and exposes an imperative focused reveal API', async () => {
     const handle = createRef<GraphicalViewHandle>()
     const onKeyboardMove = vi.fn()

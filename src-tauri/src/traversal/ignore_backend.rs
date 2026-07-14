@@ -4,19 +4,11 @@ use std::sync::Arc;
 
 use ignore::{Walk, WalkBuilder};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TraversalOptions {
     /// Include the root in output. Recursive consumers generally leave this
     /// false, because they already own root handling.
     pub include_root: bool,
-}
-
-impl Default for TraversalOptions {
-    fn default() -> Self {
-        Self {
-            include_root: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,7 +106,7 @@ impl Iterator for TraversalIter {
                 Err(error) => {
                     return Some(Err(TraversalError::Io(
                         self.root.clone(),
-                        std::io::Error::new(std::io::ErrorKind::Other, error.to_string()),
+                        std::io::Error::other(error.to_string()),
                     )))
                 }
             };

@@ -237,7 +237,10 @@ export async function invokePlaywrightCommand<CommandName extends keyof IpcComma
         }
       }, 0)
     }
-    return undefined as IpcCommandMap[CommandName]['response']
+    return {
+      revision: request.revision,
+      acceptedCount: request.candidates.length,
+    } as IpcCommandMap[CommandName]['response']
   }
 
   // Explicit Items sorting reuses the shared fixture registry by default so a

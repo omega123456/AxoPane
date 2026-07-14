@@ -72,7 +72,7 @@ where
     }
     #[cfg(feature = "test-utils")]
     {
-        return move_to_trash_impl_cancellable(paths, &fake_trash_dir(), &is_cancelled);
+        move_to_trash_impl_cancellable(paths, &fake_trash_dir(), &is_cancelled)
     }
     #[cfg(not(feature = "test-utils"))]
     {

@@ -131,6 +131,7 @@ export function resolveThumbnailFixtureBatch(
       modifiedUnixSeconds: candidate.modifiedUnixSeconds,
       sizeBytes: candidate.sizeBytes,
       state: outcome?.state ?? 'unavailable',
+      quality: outcome?.state === 'ready' ? 'high' : null,
       dataUrl: outcome?.dataUrl ?? null,
     }
   })
