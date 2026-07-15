@@ -16,6 +16,7 @@ describe('PaneViewMenu', () => {
 
     expect(screen.getByRole('button', { name: 'View: Details' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'View: Details' }))
+    expect(screen.getByRole('menu', { name: 'View options' }).parentElement).toBe(document.body)
     expect(screen.getByRole('menuitemradio', { name: 'Details' })).toHaveAttribute(
       'aria-checked',
       'true',

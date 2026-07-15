@@ -1,12 +1,14 @@
 import {
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   type Ref,
 } from 'react'
+import { createPortal } from 'react-dom'
 import { CheckIcon } from '@/components/icons'
 
 export type MenuPopoverItem = {
@@ -78,6 +80,28 @@ export function MenuPopover({ ariaLabel, trigger, items, radio = false }: MenuPo
     return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [open])
 
+  useLayoutEffect(() => {
+    const menu = menuRef.current
+    const trigger = triggerRef.current
+    if (!open || !menu || !trigger) return
+
+    const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1
+    const triggerRect = trigger.getBoundingClientRect()
+    const menuRect = menu.getBoundingClientRect()
+    const margin = 8
+    const left = Math.max(
+      margin,
+      Math.min(triggerRect.left, window.innerWidth - menuRect.width - margin),
+    )
+    const top =
+      triggerRect.bottom + menuRect.height <= window.innerHeight - margin
+        ? triggerRect.bottom
+        : triggerRect.top - menuRect.height
+
+    menu.style.left = `${left / zoom}px`
+    menu.style.top = `${Math.max(margin, top) / zoom}px`
+  }, [open])
+
   function onMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     const currentIndex = itemRefs.current.findIndex((item) => item === document.activeElement)
     const indexes = enabledIndexes()
@@ -116,49 +140,52 @@ export function MenuPopover({ ariaLabel, trigger, items, radio = false }: MenuPo
         toggle: toggleMenu,
         onTriggerKeyDown,
       })}
-      {open ? (
-        <div
-          ref={menuRef}
-          id={menuId}
-          role="menu"
-          aria-label={ariaLabel}
-          onKeyDown={onMenuKeyDown}
-          className="absolute right-0 top-full z-30 mt-1 min-w-menu rounded-tab border border-light-border-strong bg-light-panel p-1 shadow-menu dark:border-dark-border-strong dark:bg-dark-panel"
-        >
-          {items.map((item, index) => {
-            const radioItem = item as MenuPopoverRadioItem
-            return (
-              <button
-                key={item.id}
-                ref={(element) => {
-                  itemRefs.current[index] = element
-                }}
-                type="button"
-                role={radio ? 'menuitemradio' : 'menuitem'}
-                aria-checked={radio ? radioItem.checked : undefined}
-                disabled={item.disabled}
-                onClick={() => {
-                  item.onSelect()
-                  closeAndRestoreFocus()
-                }}
-                className="flex w-full cursor-pointer items-center gap-2 rounded-tab px-2 py-1.5 text-left text-row text-light-text hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-blue-border disabled:cursor-not-allowed disabled:opacity-50 dark:text-dark-text dark:hover:bg-dark-hover"
-              >
-                <span
-                  className="flex size-4 shrink-0 items-center justify-center"
-                  aria-hidden="true"
-                >
-                  {radio && radioItem.checked ? (
-                    <CheckIcon className="size-3.5 text-accent-blue-light dark:text-accent-blue" />
-                  ) : (
-                    item.icon
-                  )}
-                </span>
-                {item.label}
-              </button>
-            )
-          })}
-        </div>
-      ) : null}
+      {open
+        ? createPortal(
+            <div
+              ref={menuRef}
+              id={menuId}
+              role="menu"
+              aria-label={ariaLabel}
+              onKeyDown={onMenuKeyDown}
+              className="fixed z-30 w-72 rounded-menu border border-light-border-strong bg-light-surface p-1.5 shadow-menu dark:border-dark-border-strong dark:bg-dark-surface"
+            >
+              {items.map((item, index) => {
+                const radioItem = item as MenuPopoverRadioItem
+                return (
+                  <button
+                    key={item.id}
+                    ref={(element) => {
+                      itemRefs.current[index] = element
+                    }}
+                    type="button"
+                    role={radio ? 'menuitemradio' : 'menuitem'}
+                    aria-checked={radio ? radioItem.checked : undefined}
+                    disabled={item.disabled}
+                    onClick={() => {
+                      item.onSelect()
+                      closeAndRestoreFocus()
+                    }}
+                    className="flex h-8 w-full cursor-pointer items-center gap-3 whitespace-nowrap rounded-lg px-2.5 text-left text-row text-light-text hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-blue-border disabled:cursor-not-allowed disabled:opacity-50 dark:text-dark-text dark:hover:bg-dark-hover"
+                  >
+                    <span
+                      className="flex size-4 shrink-0 items-center justify-center"
+                      aria-hidden="true"
+                    >
+                      {radio && radioItem.checked ? (
+                        <CheckIcon className="size-3.5 text-accent-blue-light dark:text-accent-blue" />
+                      ) : (
+                        item.icon
+                      )}
+                    </span>
+                    {item.label}
+                  </button>
+                )
+              })}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   )
 }
