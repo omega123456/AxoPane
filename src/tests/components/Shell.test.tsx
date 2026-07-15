@@ -11,26 +11,13 @@ beforeEach(() => {
 })
 
 describe('CommandBar', () => {
-  it('fires up/refresh, and toggles theme', async () => {
+  it('keeps navigation controls out of the global bar and toggles theme', async () => {
     const user = userEvent.setup()
-    const goUp = vi.fn(() => Promise.resolve())
-    const reloadPane = vi.fn(() => Promise.resolve())
     const setTheme = vi.fn()
-    usePanesStore.setState((state) => ({
-      goUp,
-      reloadPane,
-      panes: {
-        ...state.panes,
-        left: { ...state.panes.left, path: 'C:\\Users', filterApplied: '' },
-      },
-    }))
 
     render(<CommandBar theme="dark" setTheme={setTheme} />)
 
-    await user.click(screen.getByRole('button', { name: 'Up' }))
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
-    expect(goUp).toHaveBeenCalledWith('left')
-    expect(reloadPane).toHaveBeenCalledWith('left')
+    expect(screen.queryByRole('button', { name: /^(back|up|refresh)$/i })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Light theme' }))
     expect(setTheme).toHaveBeenCalledWith('light')

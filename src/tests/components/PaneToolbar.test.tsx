@@ -54,19 +54,33 @@ beforeEach(() => {
 })
 
 describe('PaneToolbar', () => {
-  it('labels the toolbar and wires refresh while showing the pane item count and filter', async () => {
+  it('wires pane navigation and refresh while showing the item count and filter', async () => {
     const user = userEvent.setup()
+    const goBack = vi.fn(() => Promise.resolve())
+    const goUp = vi.fn(() => Promise.resolve())
     const refreshEverything = vi.fn(() => Promise.resolve())
-    usePanesStore.setState({ refreshEverything })
+    usePanesStore.setState((state) => ({
+      goBack,
+      goUp,
+      refreshEverything,
+      panes: {
+        ...state.panes,
+        left: { ...state.panes.left, history: ['C:\\Users', 'C:\\Users\\Omega'], historyIndex: 1 },
+      },
+    }))
 
     render(<PaneToolbar pane={pane(folderEntries(2))} isActive />)
 
     expect(screen.getByRole('toolbar', { name: 'Left pane toolbar' })).toBeInTheDocument()
     expect(screen.getByText('2 items')).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Left pane filter' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Back in Left pane' }))
+    await user.click(screen.getByRole('button', { name: 'Up in Left pane' }))
     const refresh = screen.getByRole('button', { name: 'Refresh Left pane' })
     expect(refresh).toHaveAttribute('title', 'Refresh')
     await user.click(refresh)
+    expect(goBack).toHaveBeenCalledWith('left')
+    expect(goUp).toHaveBeenCalledWith('left')
     expect(refreshEverything).toHaveBeenCalledWith('left')
   })
 

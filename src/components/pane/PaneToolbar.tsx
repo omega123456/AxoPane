@@ -1,4 +1,10 @@
-import { PieChartIcon, RefreshIcon, SearchIcon } from '@/components/icons'
+import {
+  ArrowLeftIcon,
+  ArrowUpIcon,
+  PieChartIcon,
+  RefreshIcon,
+  SearchIcon,
+} from '@/components/icons'
 import type { PaneState } from '@/types/pane'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useConfigStore } from '@/stores/config-store'
@@ -13,7 +19,10 @@ type PaneToolbarProps = {
 export function PaneToolbar({ pane, isActive }: PaneToolbarProps) {
   const setFilterDraft = usePanesStore((state) => state.setFilterDraft)
   const clearFilter = usePanesStore((state) => state.clearFilter)
+  const goBack = usePanesStore((state) => state.goBack)
+  const goUp = usePanesStore((state) => state.goUp)
   const refreshEverything = usePanesStore((state) => state.refreshEverything)
+  const canGoBack = usePanesStore((state) => state.panes[pane.id].historyIndex > 0)
   const everythingAvailable = usePanesStore((state) => state.everythingStatus?.isAvailable ?? false)
   const autoFolderSize = useConfigStore((state) => state.autoFolderSize)
   const openActionDialog = useActionDialogStore((state) => state.open)
@@ -26,6 +35,25 @@ export function PaneToolbar({ pane, isActive }: PaneToolbarProps) {
       aria-label={`${pane.title} toolbar`}
       className="flex h-crumb min-w-0 items-center gap-2 border-b border-light-border bg-light-surface px-3 dark:border-dark-border dark:bg-dark-surface"
     >
+      <button
+        type="button"
+        aria-label={`Back in ${pane.title}`}
+        title="Back"
+        disabled={!canGoBack}
+        onClick={() => void goBack(pane.id)}
+        className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab text-light-text-soft hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border disabled:cursor-default disabled:opacity-40 dark:text-dark-text-soft dark:hover:bg-dark-hover"
+      >
+        <ArrowLeftIcon className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        aria-label={`Up in ${pane.title}`}
+        title="Up"
+        onClick={() => void goUp(pane.id)}
+        className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab text-light-text-soft hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
+      >
+        <ArrowUpIcon className="h-3.5 w-3.5" />
+      </button>
       <button
         type="button"
         aria-label={`Refresh ${pane.title}`}
