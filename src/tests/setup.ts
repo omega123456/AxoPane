@@ -47,6 +47,11 @@ beforeAll(() => {
     writable: true,
     value: ResizeObserverMock,
   })
+  Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+    configurable: true,
+    writable: true,
+    value: () => null,
+  })
   Element.prototype.scrollIntoView = () => {}
   HTMLElement.prototype.setPointerCapture = () => {}
   HTMLElement.prototype.releasePointerCapture = () => {}

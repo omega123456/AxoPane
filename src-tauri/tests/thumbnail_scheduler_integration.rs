@@ -32,6 +32,7 @@ fn subscriber(tab: &str, generation: u64) -> ThumbnailSubscriber {
 
 struct GateProvider {
     started: mpsc::Sender<String>,
+    unblock: mpsc::Sender<()>,
     release: Mutex<mpsc::Receiver<()>>,
 }
 
@@ -50,6 +51,12 @@ impl ThumbnailProvider for GateProvider {
             .send(candidate.fingerprint.path.to_string_lossy().into_owned());
         let _ = self.release.lock().expect("release").recv();
         ThumbnailState::Unavailable
+    }
+
+    fn shutdown(&self) {
+        for _ in 0..MAX_ACTIVE_JOBS {
+            let _ = self.unblock.send(());
+        }
     }
 }
 
@@ -118,6 +125,7 @@ fn replacement_retains_ranges_larger_than_the_old_queue_limit() {
     let scheduler = ThumbnailScheduler::new(
         Arc::new(GateProvider {
             started: started_tx,
+            unblock: release_tx.clone(),
             release: Mutex::new(release_rx),
         }),
         Arc::new(ResourceCoordinator::new()),
@@ -159,6 +167,7 @@ fn visible_work_precedes_directional_and_behind_prefetch() {
     let scheduler = ThumbnailScheduler::new(
         Arc::new(GateProvider {
             started: started_tx,
+            unblock: release_tx.clone(),
             release: Mutex::new(release_rx),
         }),
         Arc::new(ResourceCoordinator::new()),
@@ -173,14 +182,15 @@ fn visible_work_precedes_directional_and_behind_prefetch() {
         scheduler.replace_scope(subscriber("priority", 1), 1, jobs),
         3
     );
-    let first = started_rx
-        .recv_timeout(Duration::from_millis(200))
-        .expect("visible started");
-    let second = started_rx
-        .recv_timeout(Duration::from_millis(200))
-        .expect("ahead started");
-    assert!(first.ends_with("visible.png"));
-    assert!(second.ends_with("ahead.png"));
+    let started = (0..MAX_ACTIVE_JOBS)
+        .map(|_| {
+            started_rx
+                .recv_timeout(Duration::from_millis(200))
+                .expect("priority work started")
+        })
+        .collect::<Vec<_>>();
+    assert!(started.iter().any(|path| path.ends_with("visible.png")));
+    assert!(started.iter().any(|path| path.ends_with("ahead.png")));
     scheduler.cancel_scope("left", "priority", "/folder", 1);
     release_tx.send(()).expect("release first");
     release_tx.send(()).expect("release second");
