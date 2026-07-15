@@ -45,6 +45,7 @@ import { useThumbnailStore } from '@/stores/thumbnail-store'
 import { useTabsStore } from '@/stores/tabs-store'
 import { canDropInto, performDrop, resolveDropKind, type DragItem } from '@/lib/drag-drop'
 import { getUnixTime, parseISO } from 'date-fns'
+import type { GridMovement } from '@/lib/pane-grid'
 import type { ThumbnailCandidateRequest } from '@/lib/types/ipc'
 import type { PaneId } from '@/types/pane'
 
@@ -61,6 +62,13 @@ const pointerNavigationCooldownMs = 400
 const rowHeightPx = 30
 const marqueeDragThresholdPx = 4
 const visibleIconRequestDebounceMs = 100
+
+const arrowGridMovements: Partial<Record<string, GridMovement>> = {
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
+  ArrowUp: 'up',
+  ArrowDown: 'down',
+}
 
 type MarqueeRect = { left: number; top: number; width: number; height: number }
 type MarqueeDragState = {
@@ -882,14 +890,9 @@ export function FilePane({ paneId }: FilePaneProps) {
           return
         }
 
-        // GraphicalView owns two-dimensional arrow/home/end/page geometry.
-        // Let its grid handler consume these keys before the Details-compatible
-        // pane fallback below can interpret them as one-dimensional rows.
-        if (
-          viewMode !== 'details' &&
-          event.target instanceof Element &&
-          event.target.closest('[role="grid"]')
-        ) {
+        // Child views handle their own navigation; everything else still belongs
+        // to the pane (including type-to-filter and configured shortcuts).
+        if (event.defaultPrevented) {
           return
         }
 
@@ -898,7 +901,7 @@ export function FilePane({ paneId }: FilePaneProps) {
         }
 
         // The filter input is the one editable target inside the pane that still
-        // wants list navigation: pressing Up/Down/Enter should drive the filtered
+        // wants list navigation: pressing arrows/Enter should drive the filtered
         // list (and open the focused entry) while keeping the cursor in the input
         // so the user can keep refining the filter. Every other editable target
         // (e.g. an inline rename) keeps swallowing keys as before.
@@ -907,6 +910,13 @@ export function FilePane({ paneId }: FilePaneProps) {
           event.target.getAttribute('aria-label') === `${pane.title} filter`
 
         if (isEditableTarget(event.target) && !targetIsFilter) {
+          return
+        }
+
+        const graphicalMovement = viewMode === 'details' ? undefined : arrowGridMovements[event.key]
+        if (graphicalMovement) {
+          event.preventDefault()
+          graphicalViewRef.current?.moveFocus(graphicalMovement)
           return
         }
 

@@ -100,6 +100,73 @@ describe('FilePane state rendering', () => {
     expect(screen.getByLabelText('View: Large thumbnails')).toBeInTheDocument()
   })
 
+  it.each([
+    ['icons', 'Icons'],
+    ['thumbnails', 'Large thumbnails'],
+  ] as const)('types into the filter from %s view', async (viewMode, viewLabel) => {
+    const user = userEvent.setup()
+    act(() => {
+      useTabsStore.getState().patchActiveTab('left', { viewMode })
+    })
+    seedPane({ entries: [entry('Alpha'), entry('Media')] })
+
+    render(<FilePane paneId="left" />)
+    screen.getByRole('grid', { name: `${viewLabel} for C:\\root\\dir` }).focus()
+
+    await user.keyboard('m')
+
+    const filter = screen.getByRole('textbox', { name: 'Left pane filter' })
+    expect(filter).toHaveFocus()
+    expect(filter).toHaveValue('m')
+    await waitFor(() => {
+      expect(usePanesStore.getState().panes.left.filterApplied).toBe('m')
+    })
+  })
+
+  it.each([
+    ['icons', 'Icons'],
+    ['thumbnails', 'Large thumbnails'],
+  ] as const)(
+    'restores two-dimensional arrow navigation after deleting a filter in %s view',
+    async (viewMode, viewLabel) => {
+      const user = userEvent.setup()
+      const getBoundingClientRect = vi
+        .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+        .mockReturnValue(DOMRect.fromRect({ width: 640, height: 480 }))
+      try {
+        act(() => {
+          useTabsStore.getState().patchActiveTab('left', { viewMode })
+        })
+        seedPane({
+          entries: ['Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon', 'Zeta'].map((name) =>
+            entry(name),
+          ),
+          focusedEntryId: 'Alpha',
+        })
+
+        render(<FilePane paneId="left" />)
+        const grid = screen.getByRole('grid', { name: `${viewLabel} for C:\\root\\dir` })
+        await waitFor(() => expect(grid).toHaveAttribute('aria-colcount', '3'))
+        grid.focus()
+
+        await user.keyboard('x{Backspace}')
+
+        expect(screen.getByRole('textbox', { name: 'Left pane filter' })).toHaveFocus()
+        await user.keyboard('{ArrowRight}')
+        expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('Beta')
+        await user.keyboard('{ArrowDown}')
+        expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('Epsilon')
+        await user.keyboard('{ArrowLeft}')
+        expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('Delta')
+        await user.keyboard('{ArrowUp}')
+        expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('Alpha')
+        await waitFor(() => expect(usePanesStore.getState().panes.left.typing).toBe(false))
+      } finally {
+        getBoundingClientRect.mockRestore()
+      }
+    },
+  )
+
   it('renders the loading skeleton only after loading persists past the delay', () => {
     vi.useFakeTimers()
     try {

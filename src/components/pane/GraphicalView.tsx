@@ -26,6 +26,7 @@ import type { PaneState } from '@/types/pane'
 
 export type GraphicalViewHandle = {
   scrollToEntry: (index: number) => void
+  moveFocus: (movement: GridMovement) => void
   getVisibleRowCount: () => number
   getEntriesIntersectingRect: (rect: GraphicalMarqueeRect) => string[]
 }
@@ -134,10 +135,39 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
       [pane.entries, pane.focusedEntryId],
     )
 
+    const moveFocus = useCallback(
+      (movement: GridMovement) => {
+        const next = moveGridIndex({
+          index: focusedIndex < 0 ? 0 : focusedIndex,
+          entryCount: pane.entries.length,
+          columns: grid.columns,
+          visibleRows: Math.max(
+            1,
+            Math.floor((scrollRef.current?.clientHeight ?? 0) / grid.rowPitch),
+          ),
+          movement,
+        })
+        if (next === null) return
+        const entry = pane.entries[next]
+        onFocusEntry(entry.id)
+        onKeyboardMove?.(entry.id, movement)
+      },
+      [
+        focusedIndex,
+        grid.columns,
+        grid.rowPitch,
+        onFocusEntry,
+        onKeyboardMove,
+        pane.entries,
+        scrollRef,
+      ],
+    )
+
     useImperativeHandle(
       ref,
       () => ({
         scrollToEntry: (index) => rowVirtualizer.scrollToIndex(Math.floor(index / grid.columns)),
+        moveFocus,
         getVisibleRowCount: () =>
           Math.max(1, Math.floor((scrollRef.current?.clientHeight ?? 0) / grid.rowPitch)),
         getEntriesIntersectingRect: (rect) => {
@@ -170,7 +200,7 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
           })
         },
       }),
-      [grid.columns, grid.rowPitch, pane.entries, rowVirtualizer, scrollRef, width],
+      [grid.columns, grid.rowPitch, moveFocus, pane.entries, rowVirtualizer, scrollRef, width],
     )
 
     useEffect(() => {
@@ -242,20 +272,7 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
       const movement = keyboardMovement(event)
       if (!movement || pane.entries.length === 0) return
       event.preventDefault()
-      const next = moveGridIndex({
-        index: focusedIndex < 0 ? 0 : focusedIndex,
-        entryCount: pane.entries.length,
-        columns: grid.columns,
-        visibleRows: Math.max(
-          1,
-          Math.floor((scrollRef.current?.clientHeight ?? 0) / grid.rowPitch),
-        ),
-        movement,
-      })
-      if (next === null) return
-      const entry = pane.entries[next]
-      onFocusEntry(entry.id)
-      onKeyboardMove?.(entry.id, movement)
+      moveFocus(movement)
     }
 
     if (body)
