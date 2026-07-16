@@ -271,6 +271,20 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(rightPane.getByTestId('breadcrumb-collapse-marker')).toBeVisible()
     await expect(rightPane.getByRole('button', { name: 'Foxtrot' })).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`breadcrumb-overflow-${mode}.png`)
+
+    await rightPane.getByRole('button', { name: 'Foxtrot' }).click({ button: 'right' })
+    const pathEditor = rightPane.getByRole('textbox', { name: 'Right pane path' })
+    const homeShortcut = rightPane.getByRole('button', { name: 'Navigate to ~' })
+    await expect(pathEditor).toBeVisible()
+    await expect(homeShortcut).toBeVisible()
+    await expect(rightPane.getByRole('button', { name: 'Navigate to /' })).toBeVisible()
+    const [editorBox, homeBox] = await Promise.all([
+      pathEditor.boundingBox(),
+      homeShortcut.boundingBox(),
+    ])
+    expect(editorBox).not.toBeNull()
+    expect(homeBox).not.toBeNull()
+    expect(editorBox!.x + editorBox!.width).toBeLessThanOrEqual(homeBox!.x)
   })
 
   test(`file types ${mode}`, async ({ page }) => {

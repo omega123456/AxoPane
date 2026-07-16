@@ -84,9 +84,24 @@ export function BreadcrumbBar({ pane }: BreadcrumbBarProps) {
     }
   }
 
+  function navigateShortcut(path: string) {
+    setEditingPath(false)
+    void navigatePane(pane.id, path)
+  }
+
   return (
     <div
       className="flex h-crumb items-center gap-2 border-b border-light-border bg-light-surface px-3 dark:border-dark-border dark:bg-dark-surface"
+      onBlur={(event) => {
+        if (
+          editingPath &&
+          !(
+            event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)
+          )
+        ) {
+          submitPathEdit()
+        }
+      }}
       onContextMenu={(event) => {
         event.preventDefault()
         event.stopPropagation()
@@ -99,7 +114,6 @@ export function BreadcrumbBar({ pane }: BreadcrumbBarProps) {
           aria-label={`${pane.title} path`}
           value={pathDraft}
           onChange={(event) => setPathDraft(event.target.value)}
-          onBlur={submitPathEdit}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.preventDefault()
@@ -110,7 +124,7 @@ export function BreadcrumbBar({ pane }: BreadcrumbBarProps) {
               setPathDraft(pane.path)
             }
           }}
-          className="min-w-0 flex-1 select-text rounded-tab border border-accent-blue-border bg-light-panel px-2 py-1 font-mono text-row text-light-text outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:bg-dark-panel dark:text-dark-text"
+          className="w-0 min-w-0 flex-1 select-text rounded-tab border border-accent-blue-border bg-light-panel px-2 py-1 font-mono text-row text-light-text outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:bg-dark-panel dark:text-dark-text"
         />
       ) : (
         <nav
@@ -153,26 +167,22 @@ export function BreadcrumbBar({ pane }: BreadcrumbBarProps) {
           ))}
         </nav>
       )}
-      {!editingPath ? (
-        <>
-          <button
-            type="button"
-            aria-label="Navigate to ~"
-            onClick={() => void navigatePane(pane.id, '~')}
-            className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab font-mono text-row text-light-text-soft hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
-          >
-            ~
-          </button>
-          <button
-            type="button"
-            aria-label="Navigate to /"
-            onClick={() => void navigatePane(pane.id, '/')}
-            className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab font-mono text-row text-light-text-soft hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
-          >
-            /
-          </button>
-        </>
-      ) : null}
+      <button
+        type="button"
+        aria-label="Navigate to ~"
+        onClick={() => navigateShortcut('~')}
+        className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab font-mono text-row text-light-text-soft hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
+      >
+        ~
+      </button>
+      <button
+        type="button"
+        aria-label="Navigate to /"
+        onClick={() => navigateShortcut('/')}
+        className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab font-mono text-row text-light-text-soft hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
+      >
+        /
+      </button>
     </div>
   )
 }

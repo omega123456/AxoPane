@@ -139,6 +139,24 @@ describe('BreadcrumbBar navigation', () => {
     expect(navigatePane).toHaveBeenCalledWith('left', 'D:\\Media')
   })
 
+  it('keeps shortcuts beside the editor without submitting its draft first', async () => {
+    const user = userEvent.setup()
+    const navigatePane = vi.fn(() => Promise.resolve())
+    usePanesStore.setState({ navigatePane })
+
+    render(<BreadcrumbBar pane={pane('C:\\Users\\Omega')} />)
+    await user.dblClick(screen.getByRole('navigation', { name: 'Left pane path' }))
+
+    const input = screen.getByRole('textbox', { name: 'Left pane path' })
+    await user.clear(input)
+    await user.type(input, 'D:\\Draft')
+    await user.click(screen.getByRole('button', { name: 'Navigate to ~' }))
+
+    expect(navigatePane).toHaveBeenCalledOnce()
+    expect(navigatePane).toHaveBeenCalledWith('left', '~')
+    expect(screen.queryByRole('textbox', { name: 'Left pane path' })).not.toBeInTheDocument()
+  })
+
   it('opens the full-path editor from a right-click on any breadcrumb', async () => {
     const user = userEvent.setup()
 
