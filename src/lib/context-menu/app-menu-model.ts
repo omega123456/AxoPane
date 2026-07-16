@@ -629,6 +629,10 @@ function buildTabContent(
         ),
       ]),
       section('footer', [
+        favouriteRow(
+          path,
+          useConfigStore.getState().favourites.some((item) => pathsMatch(item, path)),
+        ),
         customRow(
           `lock-tab-${target.tabId}`,
           tab?.locked ? 'Unlock tab' : 'Lock tab',

@@ -231,6 +231,7 @@ for (const mode of ['light', 'dark'] as const) {
     const tab = page.getByRole('region', { name: 'Left pane' }).getByRole('tab').nth(1)
     await tab.click({ button: 'right' })
     await expect(page.getByRole('menuitem', { name: 'Move tab right' })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: 'Add to Favourites' })).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`tab-move-context-menu-${mode}.png`)
   })
 

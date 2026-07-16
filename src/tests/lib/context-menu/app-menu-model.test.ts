@@ -161,8 +161,21 @@ describe('buildAppContextMenuContent', () => {
     expect(rows.find((row) => row.label === 'Open in other pane')).toMatchObject({
       action: { kind: 'navigate', path: '.', destination: 'other-pane' },
     })
+    expect(rows.find((row) => row.label === 'Add to Favourites')).toMatchObject({
+      action: { kind: 'add-favourite', path: '.' },
+    })
     expect(rows.find((row) => row.label === 'Unlock tab')).toBeDefined()
     expect(rows.find((row) => row.label === 'Close tab')).toMatchObject({ disabled: true })
+
+    useConfigStore.setState({ favourites: ['.'] })
+    const favouriteRows = buildAppContextMenuContent(
+      'left',
+      { kind: 'tab', tabId: first.id },
+      'windows',
+    ).sections.flatMap((item) => item.rows)
+    expect(favouriteRows.find((row) => row.label === 'Remove from Favourites')).toMatchObject({
+      action: { kind: 'remove-favourite', path: '.' },
+    })
   })
 
   it('exposes canonical tab movement actions with boundary and single-pane rules', () => {
