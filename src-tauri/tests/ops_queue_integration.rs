@@ -97,6 +97,7 @@ fn pending_transfer_state(
         completed_at: None,
         cancel: Arc::new(AtomicBool::new(false)),
         pause: Arc::new(AtomicBool::new(false)),
+        skip: Arc::new(AtomicBool::new(false)),
         conflict: None,
         conflict_resolution: None,
         apply_to_all: None,
@@ -768,6 +769,57 @@ fn cancel_keeps_already_copied_files() {
     assert_eq!(fs::read(dest.join("already.txt")).unwrap(), b"existing");
     // The source still exists too.
     assert!(already.exists());
+}
+
+#[test]
+fn skip_advances_one_paused_item_and_keeps_the_job_paused() {
+    let dir = tempdir().expect("temp dir");
+    let dest = dir.path().join("dest");
+    fs::create_dir(&dest).expect("dest");
+    let first = seed_file(&dir.path().join("first.txt"), 4);
+    let second = seed_file(&dir.path().join("second.txt"), 6);
+
+    let service = Arc::new(OpsService::new(Duration::from_secs(30)));
+    let state = pending_transfer_state("skip-op", OpKind::Copy, &dest, vec![first, second]);
+    state.pause.store(true, Ordering::Relaxed);
+    service.insert_op_for_tests(state);
+
+    let worker = service.clone();
+    let handle = std::thread::spawn(move || worker.run_operation_for_tests("skip-op"));
+    wait_for(&service, "skip-op", |progress| {
+        progress.status == OpStatus::Active
+    });
+    service.pause_op("skip-op");
+    wait_for(&service, "skip-op", |progress| {
+        progress.status == OpStatus::Paused
+    });
+
+    service.skip_op("skip-op");
+    wait_for(&service, "skip-op", |progress| {
+        progress.status == OpStatus::Paused && progress.completed_items == 1
+    });
+    assert!(!dest.join("second.txt").exists());
+
+    service.resume_op("skip-op");
+    handle.join().expect("worker");
+    wait_for(&service, "skip-op", |progress| {
+        progress.status == OpStatus::Completed
+    });
+    assert_eq!(fs::read(dest.join("second.txt")).unwrap(), vec![0_u8; 6]);
+}
+
+#[test]
+fn cancelling_an_active_job_is_visible_immediately() {
+    let service = OpsService::new(Duration::from_secs(30));
+    let mut state = pending_transfer_state("cancel-op", OpKind::Copy, Path::new("dest"), vec![]);
+    state.status = OpStatus::Active;
+    service.insert_op_for_tests(state);
+
+    service.cancel_op("cancel-op");
+
+    let progress = &service.snapshot()[0].progress;
+    assert_eq!(progress.status, OpStatus::Cancelled);
+    assert!(service.has_unfinished_work());
 }
 
 #[test]
@@ -1712,6 +1764,7 @@ fn unknown_ids_are_no_ops() {
     service.pause_op("nope");
     service.resume_op("nope");
     service.cancel_op("nope");
+    service.skip_op("nope");
     service.retry_op("nope");
     service.resolve_conflict("nope", ConflictResolution::Skip, false, None);
     assert!(service.snapshot().is_empty());

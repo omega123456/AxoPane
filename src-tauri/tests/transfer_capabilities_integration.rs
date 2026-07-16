@@ -52,6 +52,7 @@ fn state() -> OpState {
         completed_at: None,
         cancel: Arc::new(AtomicBool::new(false)),
         pause: Arc::new(AtomicBool::new(false)),
+        skip: Arc::new(AtomicBool::new(false)),
         conflict: None,
         conflict_resolution: None,
         apply_to_all: None,

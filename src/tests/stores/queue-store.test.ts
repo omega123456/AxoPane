@@ -360,6 +360,16 @@ describe('queue store', () => {
     expect(cancelSpy).toHaveBeenCalled()
   })
 
+  it('skip proxies to IPC', () => {
+    const skipSpy = vi.fn()
+    ipc.override('skip_op', () => {
+      skipSpy()
+      return undefined
+    })
+    useQueueStore.getState().skip('op-1')
+    expect(skipSpy).toHaveBeenCalled()
+  })
+
   it('retry resets a failed op to pending', () => {
     ipc.override('retry_op', () => undefined)
     useQueueStore

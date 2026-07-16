@@ -1410,6 +1410,11 @@ pub fn cancel_op(payload: OpIdRequest, state: State<'_, OpsService>) {
 }
 
 #[tauri::command]
+pub fn skip_op(payload: OpIdRequest, state: State<'_, OpsService>) {
+    state.skip_op(&payload.id);
+}
+
+#[tauri::command]
 pub fn retry_op(payload: OpIdRequest, state: State<'_, OpsService>) {
     state.retry_op(&payload.id);
 }

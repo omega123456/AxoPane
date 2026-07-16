@@ -119,6 +119,34 @@ describe('QueueOverlay', () => {
     expect(region.className).not.toMatch(/(?<!max-)h-queue-list/)
   })
 
+  it('keeps a newer successful job above an older sticky failure', async () => {
+    ipc.override('queue_snapshot', [
+      {
+        progress: progress({ status: 'failed', errorMessage: 'boom' }),
+        conflict: null,
+      },
+      {
+        progress: progress({
+          operationId: 'op-2',
+          status: 'completed',
+          progressPercent: 100,
+          copiedBytes: 1000,
+          completedItems: 4,
+          currentFileName: null,
+        }),
+        conflict: null,
+      },
+    ])
+    render(<QueueOverlay />)
+
+    act(() => {
+      useQueueStore.getState().setExpanded(true)
+    })
+    const region = await screen.findByRole('region', { name: 'Job queue' })
+
+    expect(region.querySelector('article')).toHaveAttribute('data-status', 'completed')
+  })
+
   it('auto-expands when a new active queue job appears and the preference is enabled', async () => {
     act(() => {
       useConfigStore.setState({ autoExpandActiveQueueToasts: true })
@@ -252,6 +280,22 @@ describe('QueueOverlay', () => {
     await waitFor(() => {
       expect(useQueueStore.getState().operations['op-1'].status).toBe('active')
     })
+  })
+
+  it('skips a paused item through its dedicated queue command', async () => {
+    const user = userEvent.setup()
+    const skipSpy = vi.fn(() => undefined)
+    ipc.override('skip_op', skipSpy)
+    ipc.override('queue_snapshot', [{ progress: progress({ status: 'paused' }), conflict: null }])
+    render(<QueueOverlay />)
+    await screen.findByRole('button', { name: 'Expand job queue' })
+
+    act(() => {
+      useQueueStore.getState().setExpanded(true)
+    })
+    await user.click(await screen.findByRole('button', { name: /Skip/ }))
+
+    expect(skipSpy).toHaveBeenCalledWith({ id: 'op-1' })
   })
 
   it('Delete cancels and R retries the head operation while expanded', async () => {

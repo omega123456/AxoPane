@@ -367,6 +367,7 @@ export function JobCard({
           <button
             type="button"
             onClick={onSkip}
+            disabled={!isPaused}
             className="flex items-center gap-1.5 rounded-md border border-light-border px-3.5 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
           >
             <SkipForwardIcon className="h-3.5 w-3.5" /> Skip

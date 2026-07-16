@@ -968,6 +968,10 @@ export type IpcCommandMap = {
     request: OpIdRequest
     response: void
   }
+  skip_op: {
+    request: OpIdRequest
+    response: void
+  }
   retry_op: {
     request: OpIdRequest
     response: void

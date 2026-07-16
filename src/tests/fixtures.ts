@@ -484,6 +484,7 @@ export const fixtures: {
   pause_op: undefined,
   resume_op: undefined,
   cancel_op: undefined,
+  skip_op: undefined,
   retry_op: undefined,
   reorder_ops: undefined,
   resolve_conflict: undefined,

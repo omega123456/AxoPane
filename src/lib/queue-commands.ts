@@ -17,6 +17,10 @@ export function cancelOp(id: string) {
   return invokeCommand({ command: 'cancel_op', payload: { id } }) as Promise<void>
 }
 
+export function skipOp(id: string) {
+  return invokeCommand({ command: 'skip_op', payload: { id } }) as Promise<void>
+}
+
 export function retryOp(id: string) {
   return invokeCommand({ command: 'retry_op', payload: { id } }) as Promise<void>
 }

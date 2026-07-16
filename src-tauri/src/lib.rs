@@ -366,6 +366,7 @@ pub fn run() {
             commands::pause_op,
             commands::resume_op,
             commands::cancel_op,
+            commands::skip_op,
             commands::reorder_ops,
             commands::resolve_conflict,
             commands::retry_op,

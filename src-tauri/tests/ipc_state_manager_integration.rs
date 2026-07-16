@@ -452,6 +452,14 @@ fn commands_cover_queue_state_lifecycle() {
 
     assert!(commands::has_unfinished_ops(as_state(&service)));
 
+    commands::skip_op(
+        OpIdRequest {
+            id: pending_two.clone(),
+        },
+        as_state(&service),
+    );
+    wait_for_op(&service, &pending_two, |status| status == OpStatus::Pending);
+
     commands::cancel_op(
         OpIdRequest {
             id: pending_two.clone(),

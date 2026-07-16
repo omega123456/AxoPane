@@ -36,33 +36,17 @@ function reorder(operations: OpProgress[], id: string, delta: number) {
   })
 }
 
-function jobPriority(operation: OpProgress, hasConflict: boolean) {
-  if (hasConflict || operation.status === 'conflict') {
-    return 0
-  }
-  if (operation.status === 'active' || operation.status === 'paused') {
-    return 1
-  }
-  if (operation.status === 'pending') {
-    return 2
-  }
-  if (operation.status === 'failed') {
-    return 3
-  }
-  if (operation.status === 'cancelled') {
-    return 4
-  }
-  return 5
-}
-
 function primaryOperation(operations: OpProgress[], conflicts: Record<string, unknown>) {
-  return operations
-    .map((operation, index) => ({
-      operation,
-      index,
-      priority: jobPriority(operation, Boolean(conflicts[operation.operationId])),
-    }))
-    .sort((left, right) => left.priority - right.priority || left.index - right.index)[0]?.operation
+  return (
+    operations.find(
+      (operation) => conflicts[operation.operationId] || operation.status === 'conflict',
+    ) ??
+    operations.find(
+      (operation) => operation.status === 'active' || operation.status === 'paused',
+    ) ??
+    operations.find((operation) => operation.status === 'pending') ??
+    operations.at(-1)
+  )
 }
 
 function itemSummary(operation: OpProgress) {
@@ -252,6 +236,7 @@ export function QueuePanel() {
   const pause = useQueueStore((state) => state.pause)
   const resume = useQueueStore((state) => state.resume)
   const cancel = useQueueStore((state) => state.cancel)
+  const skip = useQueueStore((state) => state.skip)
   const retry = useQueueStore((state) => state.retry)
   const dismiss = useQueueStore((state) => state.dismissOperation)
   const setExpanded = useQueueStore((state) => state.setExpanded)
@@ -294,7 +279,7 @@ export function QueuePanel() {
             onResume={() => resume(primary.operationId)}
             onCancel={() => cancel(primary.operationId)}
             onDismiss={() => dismiss(primary.operationId)}
-            onSkip={() => cancel(primary.operationId)}
+            onSkip={() => skip(primary.operationId)}
             onRetry={() => retry(primary.operationId)}
             onResolve={() => setExpanded(true)}
             onMoveUp={

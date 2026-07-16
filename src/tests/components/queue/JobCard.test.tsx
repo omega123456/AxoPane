@@ -67,7 +67,7 @@ describe('JobCard', () => {
     )
     expect(screen.getByTestId('throughput-chart-progress-fill')).toHaveAttribute('width', '63')
     expect(screen.getByRole('button', { name: /Pause/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Skip/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Skip/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /Cancel/ })).toBeInTheDocument()
   })
 
@@ -152,6 +152,10 @@ describe('JobCard', () => {
       '63',
     )
     const resume = screen.getByRole('button', { name: /Resume/ })
+    const skip = screen.getByRole('button', { name: /Skip/ })
+    expect(skip).toBeEnabled()
+    await user.click(skip)
+    expect(handlers.onSkip).toHaveBeenCalled()
     await user.click(resume)
     expect(handlers.onResume).toHaveBeenCalled()
   })

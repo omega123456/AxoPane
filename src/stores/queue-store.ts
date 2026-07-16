@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { cancelOp, pauseOp, resolveConflict, resumeOp, retryOp } from '@/lib/queue-commands'
+import { cancelOp, pauseOp, resolveConflict, resumeOp, retryOp, skipOp } from '@/lib/queue-commands'
 import type {
   ConflictInfo,
   ConflictResolution,
@@ -51,6 +51,7 @@ type QueueStore = {
   pause: (id: string) => void
   resume: (id: string) => void
   cancel: (id: string) => void
+  skip: (id: string) => void
   retry: (id: string) => void
   resolve: (
     id: string,
@@ -329,6 +330,9 @@ export const useQueueStore = create<QueueStore>((set) => ({
   },
   cancel: (id) => {
     void cancelOp(id)
+  },
+  skip: (id) => {
+    void skipOp(id)
   },
   retry: (id) => {
     void retryOp(id)

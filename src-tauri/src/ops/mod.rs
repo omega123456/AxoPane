@@ -245,6 +245,8 @@ pub struct OpState {
     pub completed_at: Option<Instant>,
     pub cancel: Arc<AtomicBool>,
     pub pause: Arc<AtomicBool>,
+    /// One-shot request to abandon the current top-level item while paused.
+    pub skip: Arc<AtomicBool>,
     /// Pending conflict, and the channel the worker waits on for resolution.
     pub conflict: Option<ConflictInfo>,
     pub conflict_resolution: Option<ConflictResolution>,
@@ -331,6 +333,7 @@ impl OpState {
         self.current_file_total = 0;
         self.error_message = None;
         self.completed_at = None;
+        self.skip.store(false, Ordering::Relaxed);
         self.conflict = None;
         self.conflict_resolution = None;
         self.apply_to_all = None;
@@ -515,6 +518,7 @@ impl OpsService {
             completed_at: None,
             cancel: Arc::new(AtomicBool::new(false)),
             pause: Arc::new(AtomicBool::new(false)),
+            skip: Arc::new(AtomicBool::new(false)),
             conflict: None,
             conflict_resolution: None,
             apply_to_all: None,
@@ -655,8 +659,11 @@ impl OpsService {
                 self.emit_progress(&guard);
                 (false, true)
             } else {
+                guard.skip.store(false, Ordering::Relaxed);
                 guard.cancel.store(true, Ordering::Relaxed);
                 guard.pause.store(false, Ordering::Relaxed);
+                guard.status = OpStatus::Cancelled;
+                self.emit_progress(&guard);
                 (true, false)
             }
         } else {
@@ -670,6 +677,31 @@ impl OpsService {
         }
         if schedule_removal {
             self.schedule_auto_remove_for(id);
+        }
+    }
+
+    /// Skip one item only from a paused operation, then leave the operation paused.
+    pub fn skip_op(&self, id: &str) {
+        let notify = if let Some(op) = self.op(id) {
+            let mut guard = op.lock().expect("op lock");
+            if matches!(guard.status, OpStatus::Paused) {
+                guard.skip.store(true, Ordering::Relaxed);
+                guard.cancel.store(true, Ordering::Relaxed);
+                guard.pause.store(false, Ordering::Relaxed);
+                guard.status = OpStatus::Active;
+                self.emit_progress(&guard);
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if notify {
+            if let Some(signal) = self.signal(id) {
+                signal.notify_all();
+            }
         }
     }
 
@@ -757,6 +789,7 @@ impl OpsService {
                 guard.reset_runtime_state();
                 guard.cancel = Arc::new(AtomicBool::new(false));
                 guard.pause = Arc::new(AtomicBool::new(false));
+                guard.skip = Arc::new(AtomicBool::new(false));
                 self.emit_progress(&guard);
                 true
             } else {
@@ -781,13 +814,14 @@ impl OpsService {
             .collect()
     }
 
-    /// True when any operation is still active, pending, paused or in conflict.
+    /// True while work is active or a cancelled worker is still unwinding.
     pub fn has_unfinished_work(&self) -> bool {
         let inner = self.inner.lock().expect("ops lock");
-        inner
-            .ops
-            .values()
-            .any(|op| !op.lock().expect("op lock").is_terminal())
+        inner.ops.values().any(|op| {
+            let op = op.lock().expect("op lock");
+            !op.is_terminal()
+                || (matches!(op.status, OpStatus::Cancelled) && op.completed_at.is_none())
+        })
     }
 
     fn op(&self, id: &str) -> Option<Arc<Mutex<OpState>>> {
@@ -921,13 +955,7 @@ fn run_operation(id: String, inner: &Arc<Mutex<Inner>>, runtime: &WorkerRuntime)
     let start = instant_now();
 
     for item in items {
-        {
-            let op = op_arc.lock().expect("op lock");
-            if op.cancel.load(Ordering::Relaxed) || op.error_message.is_some() {
-                break;
-            }
-        }
-
+        let copied_before = op_arc.lock().expect("op lock").copied_bytes;
         let ctx = WorkerCtx {
             op_arc: &op_arc,
             resolver,
@@ -936,7 +964,23 @@ fn run_operation(id: String, inner: &Arc<Mutex<Inner>>, runtime: &WorkerRuntime)
             rate_window,
             instant_now: &instant_now,
         };
+
+        if finish_skipped_item(&ctx, &item, copied_before) {
+            continue;
+        }
+
+        {
+            let op = op_arc.lock().expect("op lock");
+            if op.cancel.load(Ordering::Relaxed) || op.error_message.is_some() {
+                break;
+            }
+        }
+
         process_item(&ctx, &item, &conflict);
+
+        if finish_skipped_item(&ctx, &item, copied_before) {
+            continue;
+        }
 
         {
             let op = op_arc.lock().expect("op lock");
@@ -962,6 +1006,31 @@ fn run_operation(id: String, inner: &Arc<Mutex<Inner>>, runtime: &WorkerRuntime)
     if let Some(emitter) = &progress {
         emitter(op.progress());
     }
+}
+
+fn finish_skipped_item(ctx: &WorkerCtx<'_>, item: &OpItem, copied_before: u64) -> bool {
+    let mut op = ctx.op_arc.lock().expect("op lock");
+    if !op.skip.swap(false, Ordering::Relaxed) {
+        return false;
+    }
+
+    op.cancel.store(false, Ordering::Relaxed);
+    op.pause.store(true, Ordering::Relaxed);
+    op.status = OpStatus::Paused;
+    op.completed_items += 1;
+    if item.size_bytes > 0 {
+        op.copied_bytes = op
+            .copied_bytes
+            .max(copied_before.saturating_add(item.size_bytes));
+    }
+    op.current_file_name = None;
+    op.current_file_copied = 0;
+    op.current_file_total = 0;
+    refresh_rate_locked_with_now(&mut op, ctx.start, ctx.rate_window, (ctx.instant_now)());
+    if let Some(emitter) = ctx.progress {
+        emitter(op.progress());
+    }
+    true
 }
 
 /// Shared context threaded through the copy/move worker helpers. Bundling these
