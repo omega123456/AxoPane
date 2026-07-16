@@ -96,6 +96,19 @@ describe('BreadcrumbBar navigation', () => {
     expect(navigatePane).toHaveBeenCalledWith('left', 'C:\\Users')
   })
 
+  it('navigates to home and root from the address-row shortcuts', async () => {
+    const user = userEvent.setup()
+    const navigatePane = vi.fn(() => Promise.resolve())
+    usePanesStore.setState({ navigatePane })
+
+    render(<BreadcrumbBar pane={pane('C:\\Users\\Omega')} />)
+    await user.click(screen.getByRole('button', { name: 'Navigate to ~' }))
+    await user.click(screen.getByRole('button', { name: 'Navigate to /' }))
+
+    expect(navigatePane).toHaveBeenNthCalledWith(1, 'left', '~')
+    expect(navigatePane).toHaveBeenNthCalledWith(2, 'left', '/')
+  })
+
   it('navigates UNC breadcrumbs using real network paths', async () => {
     const user = userEvent.setup()
     const navigatePane = vi.fn(() => Promise.resolve())

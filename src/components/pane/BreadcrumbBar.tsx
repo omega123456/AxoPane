@@ -153,6 +153,26 @@ export function BreadcrumbBar({ pane }: BreadcrumbBarProps) {
           ))}
         </nav>
       )}
+      {!editingPath ? (
+        <>
+          <button
+            type="button"
+            aria-label="Navigate to ~"
+            onClick={() => void navigatePane(pane.id, '~')}
+            className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab font-mono text-row text-light-text-soft hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
+          >
+            ~
+          </button>
+          <button
+            type="button"
+            aria-label="Navigate to /"
+            onClick={() => void navigatePane(pane.id, '/')}
+            className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab font-mono text-row text-light-text-soft hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
+          >
+            /
+          </button>
+        </>
+      ) : null}
     </div>
   )
 }
