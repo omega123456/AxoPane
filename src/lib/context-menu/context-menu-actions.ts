@@ -42,6 +42,12 @@ export type ContextMenuAction =
       tabId: string
       locked: boolean
     }
+  | {
+      kind: 'move-tab'
+      tabId: string
+      destinationPaneId: PaneId
+      destinationIndex: number
+    }
   | { kind: 'add-favourite'; path: string }
   | { kind: 'remove-favourite'; path: string }
   | {
@@ -118,6 +124,14 @@ export function closeTabContextAction(tabId: string): ContextMenuAction {
 
 export function setTabLockedContextAction(tabId: string, locked: boolean): ContextMenuAction {
   return { kind: 'set-tab-locked', tabId, locked }
+}
+
+export function moveTabContextAction(
+  tabId: string,
+  destinationPaneId: PaneId,
+  destinationIndex: number,
+): ContextMenuAction {
+  return { kind: 'move-tab', tabId, destinationPaneId, destinationIndex }
 }
 
 export function addFavouriteContextAction(path: string): ContextMenuAction {
@@ -198,6 +212,11 @@ export function dispatchContextMenuAction(paneId: PaneId, action: ContextMenuAct
       return
     case 'set-tab-locked':
       usePanesStore.getState().setTabLocked(paneId, action.tabId, action.locked)
+      return
+    case 'move-tab':
+      void usePanesStore
+        .getState()
+        .moveTab(paneId, action.tabId, action.destinationPaneId, action.destinationIndex)
       return
     case 'add-favourite':
       void useConfigStore.getState().addFavourite(action.path)

@@ -10,6 +10,12 @@ class ResizeObserverMock {
   disconnect() {}
 }
 
+Object.defineProperty(globalThis, 'ResizeObserver', {
+  configurable: true,
+  writable: true,
+  value: ResizeObserverMock,
+})
+
 function matchMediaMock() {
   return {
     matches: false,
@@ -41,11 +47,6 @@ beforeAll(() => {
     configurable: true,
     writable: true,
     value: matchMediaMock,
-  })
-  Object.defineProperty(window, 'ResizeObserver', {
-    configurable: true,
-    writable: true,
-    value: ResizeObserverMock,
   })
   Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
     configurable: true,

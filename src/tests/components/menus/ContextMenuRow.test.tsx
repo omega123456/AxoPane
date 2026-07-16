@@ -55,4 +55,25 @@ describe('ContextMenuRow', () => {
     expect(screen.queryByRole('img', { name: 'Broken fixture icon' })).not.toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: 'Broken native icon' })).toBeInTheDocument()
   })
+
+  it('renders movement icons and preserves disabled treatment', () => {
+    render(
+      <ContextMenuRow
+        item={{
+          id: 'move-left',
+          kind: 'action',
+          label: 'Move tab left',
+          owner: 'app',
+          disabled: true,
+          icon: { kind: 'app', name: 'arrow-left' },
+          action: noopContextAction('move-left'),
+        }}
+        active={false}
+        onPointerEnter={() => {}}
+        onActivate={() => {}}
+      />,
+    )
+
+    expect(screen.getByRole('menuitem', { name: 'Move tab left' })).toBeDisabled()
+  })
 })

@@ -1,5 +1,7 @@
 import { useState, type ComponentType, type Ref, type SVGProps } from 'react'
 import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
   ChevronRightIcon,
   CopyIcon,
   CpuIcon,
@@ -33,6 +35,8 @@ type IconComponent = ComponentType<SVGProps<SVGSVGElement>>
 
 const appIconMap = {
   archive: PackageIcon,
+  'arrow-left': ArrowLeftIcon,
+  'arrow-right': ArrowRightIcon,
   'calculate-size': CpuIcon,
   'close-tab': XIcon,
   copy: CopyIcon,
@@ -50,6 +54,8 @@ const appIconMap = {
   'open-in-right-pane': PanelRightIcon,
   'open-with': FileCogIcon,
   paste: CopyIcon,
+  'panel-left': PanelLeftIcon,
+  'panel-right': PanelRightIcon,
   properties: InfoIcon,
   refresh: RefreshIcon,
   rename: TypeIcon,

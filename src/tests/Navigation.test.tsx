@@ -127,6 +127,27 @@ describe('Navigation: tabs, breadcrumb, session, live patching', () => {
     expect(useTabsStore.getState().panes.left.tabs).toHaveLength(2)
   })
 
+  it('moves a tab from its context menu without changing the active listing', async () => {
+    const user = userEvent.setup()
+    installDefaults()
+    renderApp()
+    await waitFor(() => expect(getRow('Left pane', 'Documents')).toBeTruthy())
+
+    const leftPane = screen.getByLabelText('Left pane')
+    await user.click(within(leftPane).getByRole('button', { name: 'New tab in Left pane' }))
+    await waitFor(() => expect(useTabsStore.getState().panes.left.tabs).toHaveLength(2))
+    const [first, second] = useTabsStore.getState().panes.left.tabs.map((tab) => tab.id)
+
+    await user.pointer({ keys: '[MouseRight]', target: within(leftPane).getAllByRole('tab')[0] })
+    await user.click(await screen.findByRole('menuitem', { name: 'Move tab right' }))
+
+    await waitFor(() => {
+      const pane = useTabsStore.getState().panes.left
+      expect(pane.tabs.map((tab) => tab.id)).toEqual([second, first])
+      expect(usePanesStore.getState().panes.left.path).toBe('C:\\Users\\Omega')
+    })
+  })
+
   it('opens a folder in a new tab on middle-click', async () => {
     const user = userEvent.setup()
     installDefaults()

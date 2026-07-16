@@ -174,6 +174,66 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`pane-tabs-${mode}.png`)
   })
 
+  test(`tab drag same pane ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.tabDrag[mode])
+    const leftPane = page.getByRole('region', { name: 'Left pane' })
+    const tabs = leftPane.getByRole('tab')
+    const source = tabs.nth(0)
+    const target = tabs.nth(2)
+    const sourceBox = await source.boundingBox()
+    const targetBox = await target.boundingBox()
+    if (!sourceBox || !targetBox) throw new Error('missing tab geometry')
+
+    await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 6 })
+    await expect(page.locator('main')).toHaveScreenshot(`tab-drag-same-pane-${mode}.png`)
+    await page.mouse.up()
+    await expect(leftPane.getByRole('tab').last()).toHaveText('Omega')
+  })
+
+  test(`tab drag cross pane ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.tabDrag[mode])
+    const leftPane = page.getByRole('region', { name: 'Left pane' })
+    const rightPane = page.getByRole('region', { name: 'Right pane' })
+    const source = leftPane.getByRole('tab').nth(1)
+    const target = rightPane.getByRole('tab').last()
+    const sourceBox = await source.boundingBox()
+    const targetBox = await target.boundingBox()
+    if (!sourceBox || !targetBox) throw new Error('missing tab geometry')
+
+    await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 6 })
+    await expect(page.locator('main')).toHaveScreenshot(`tab-drag-cross-pane-${mode}.png`)
+    await page.mouse.up()
+    await expect(rightPane.getByRole('tab')).toHaveCount(3)
+  })
+
+  test(`tab drag invalid ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.invalidTabDrag[mode])
+    const source = page.getByRole('region', { name: 'Left pane' }).getByRole('tab')
+    const target = page.getByRole('region', { name: 'Right pane' }).getByRole('tab').first()
+    const sourceBox = await source.boundingBox()
+    const targetBox = await target.boundingBox()
+    if (!sourceBox || !targetBox) throw new Error('missing tab geometry')
+
+    await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 6 })
+    await expect(page.locator('main')).toHaveScreenshot(`tab-drag-invalid-${mode}.png`)
+    await page.mouse.up()
+    await expect(page.getByRole('region', { name: 'Left pane' }).getByRole('tab')).toHaveCount(1)
+  })
+
+  test(`tab move context menu ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.tabDrag[mode])
+    const tab = page.getByRole('region', { name: 'Left pane' }).getByRole('tab').nth(1)
+    await tab.click({ button: 'right' })
+    await expect(page.getByRole('menuitem', { name: 'Move tab right' })).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`tab-move-context-menu-${mode}.png`)
+  })
+
   test(`locked tab and populated favourites ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.favourites[mode])
     await expect(page.getByLabel(/Locked tab/)).toBeVisible()

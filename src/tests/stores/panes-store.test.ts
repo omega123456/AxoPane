@@ -2,7 +2,7 @@ import { beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { getParentPath, schedulePersistSession, usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
-import { useTabsStore } from '@/stores/tabs-store'
+import { activeTab, useTabsStore } from '@/stores/tabs-store'
 import { useConfigStore } from '@/stores/config-store'
 import type {
   DirectoryEntry,
@@ -499,6 +499,33 @@ describe('panes-store navigation', () => {
     const secondTabId = useTabsStore.getState().panes.left.tabs[1].id
     await usePanesStore.getState().closeTab('left', secondTabId)
     expect(useTabsStore.getState().panes.left.tabs).toHaveLength(1)
+  })
+
+  it('moves tabs through one lifecycle, reloading only panes with changed active tabs', async () => {
+    const listDir = vi.fn((payload: { path: string }) => ({ path: payload.path, entries: [] }))
+    ipc.override('list_dir', listDir)
+    const tabs = useTabsStore.getState()
+    const first = tabs.panes.left.tabs[0].id
+    const inactive = tabs.addTab('left', {
+      path: 'C:\\inactive',
+      sortKey: 'name',
+      sortDirection: 'asc',
+      filter: '',
+    })
+    tabs.setActiveTab('left', first)
+
+    await usePanesStore.getState().moveTab('left', inactive, 'right', 1)
+    expect(listDir).toHaveBeenCalledTimes(1)
+    expect(usePanesStore.getState().activePaneId).toBe('right')
+    expect(activeTab('left').id).toBe(first)
+    expect(activeTab('right')).toMatchObject({ path: 'C:\\inactive' })
+    expect(activeTab('right').id).toMatch(/^right-tab-/)
+
+    listDir.mockClear()
+    await usePanesStore.getState().moveTab('right', activeTab('right').id, 'left', 1)
+    expect(listDir).toHaveBeenCalledTimes(2)
+    expect(usePanesStore.getState().activePaneId).toBe('left')
+    expect(activeTab('left')).toMatchObject({ path: 'C:\\inactive' })
   })
 
   it('keeps locked paths fixed and forks different-path navigation into an unlocked tab', async () => {

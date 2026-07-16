@@ -18,6 +18,8 @@ export type ContextMenuNativeRequest = Omit<LoadNativeMenuRequest, 'requestId'> 
 
 export type ContextMenuAppIconName =
   | 'archive'
+  | 'arrow-left'
+  | 'arrow-right'
   | 'calculate-size'
   | 'close-tab'
   | 'copy'
@@ -36,6 +38,8 @@ export type ContextMenuAppIconName =
   | 'open-with'
   | 'paste'
   | 'properties'
+  | 'panel-left'
+  | 'panel-right'
   | 'refresh'
   | 'rename'
   | 'restore'

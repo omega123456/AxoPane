@@ -165,6 +165,42 @@ describe('buildAppContextMenuContent', () => {
     expect(rows.find((row) => row.label === 'Close tab')).toMatchObject({ disabled: true })
   })
 
+  it('exposes canonical tab movement actions with boundary and single-pane rules', () => {
+    const first = useTabsStore.getState().panes.left.tabs[0].id
+    const second = useTabsStore
+      .getState()
+      .addTab('left', { path: 'C:\\next', sortKey: 'name', sortDirection: 'asc', filter: '' })
+    const rows = buildAppContextMenuContent(
+      'left',
+      { kind: 'tab', tabId: first },
+      'windows',
+    ).sections.flatMap((section) => section.rows)
+
+    expect(rows.find((row) => row.label === 'Move tab left')).toMatchObject({
+      disabled: true,
+      icon: { kind: 'app', name: 'arrow-left' },
+    })
+    expect(rows.find((row) => row.label === 'Move tab right')).toMatchObject({
+      action: { kind: 'move-tab', tabId: first, destinationPaneId: 'left', destinationIndex: 1 },
+      icon: { kind: 'app', name: 'arrow-right' },
+    })
+    expect(rows.find((row) => row.label === 'Move tab to right pane')).toMatchObject({
+      action: { kind: 'move-tab', tabId: first, destinationPaneId: 'right', destinationIndex: 1 },
+      icon: { kind: 'app', name: 'panel-right' },
+    })
+    expect(new Set(rows.map((row) => row.id)).size).toBe(rows.length)
+
+    useLayoutStore.getState().setDefaultPaneMode('single')
+    const singleRows = buildAppContextMenuContent(
+      'left',
+      { kind: 'tab', tabId: second },
+      'windows',
+    ).sections.flatMap((section) => section.rows)
+    expect(singleRows.find((row) => row.label === 'Move tab to right pane')).toMatchObject({
+      hidden: true,
+    })
+  })
+
   it('keeps unsupported file actions disabled and hides folder-size rows when Everything is available', () => {
     usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
 

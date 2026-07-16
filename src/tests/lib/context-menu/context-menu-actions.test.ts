@@ -102,6 +102,20 @@ describe('dispatchContextMenuAction', () => {
     expect(openTabFromPath).toHaveBeenCalledWith('right', 'C:\\root\\Sub')
   })
 
+  it('routes tab movement through the shared panes lifecycle', () => {
+    const moveTab = vi.fn(() => Promise.resolve({ kind: 'none' as const }))
+    usePanesStore.setState({ moveTab })
+
+    dispatchContextMenuAction('left', {
+      kind: 'move-tab',
+      tabId: 'left-tab-1',
+      destinationPaneId: 'right',
+      destinationIndex: 2,
+    })
+
+    expect(moveTab).toHaveBeenCalledWith('left', 'left-tab-1', 'right', 2)
+  })
+
   it('copies newline-delimited paths to the text clipboard for Copy as path', async () => {
     const writeText = vi.fn(() => Promise.resolve())
     Object.defineProperty(navigator, 'clipboard', {

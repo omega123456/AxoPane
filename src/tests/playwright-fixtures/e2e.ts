@@ -157,6 +157,35 @@ const multiTabSession: SessionState = {
   },
 }
 
+const tabDragSession: SessionState = {
+  activePane: 'left',
+  leftPath: 'C:\\Users\\Omega',
+  rightPath: 'D:\\projects',
+  left: {
+    activeTabIndex: 0,
+    tabs: [
+      { path: 'C:\\Users\\Omega', sortKey: 'name', sortDirection: 'asc', filter: '', locked: false },
+      { path: 'C:\\Archive', sortKey: 'name', sortDirection: 'asc', filter: '', locked: true },
+      { path: 'C:\\Media', sortKey: 'name', sortDirection: 'asc', filter: '', locked: false },
+    ],
+  },
+  right: {
+    activeTabIndex: 0,
+    tabs: [
+      { path: 'D:\\projects', sortKey: 'name', sortDirection: 'asc', filter: '', locked: false },
+      { path: 'D:\\review', sortKey: 'name', sortDirection: 'asc', filter: '', locked: false },
+    ],
+  },
+}
+
+const invalidTabDragSession: SessionState = {
+  ...tabDragSession,
+  left: {
+    activeTabIndex: 0,
+    tabs: [{ path: 'C:\\Users\\Omega', sortKey: 'name', sortDirection: 'asc', filter: '', locked: true }],
+  },
+}
+
 function scenarioByTheme(
   commands: CommandMap,
   platform?: PlatformOs,
@@ -356,6 +385,14 @@ export const screenshotScenarios = {
       },
     },
   },
+  tabDrag: scenarioByTheme({
+    load_session: tabDragSession,
+    queue_snapshot: emptyQueueSnapshot,
+  }),
+  invalidTabDrag: scenarioByTheme({
+    load_session: invalidTabDragSession,
+    queue_snapshot: emptyQueueSnapshot,
+  }),
   favourites: {
     light: {
       commands: {

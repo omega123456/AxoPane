@@ -113,6 +113,113 @@ describe('tabs-store', () => {
     expect(useTabsStore.getState().panes.left.tabs[0].path).toBe('.')
   })
 
+  it('reorders by final index while preserving the active tab identity', () => {
+    const store = useTabsStore.getState()
+    const first = store.panes.left.tabs[0].id
+    const second = store.addTab('left', {
+      path: 'C:\\a',
+      sortKey: 'size',
+      sortDirection: 'desc',
+      filter: 'needle',
+      viewMode: 'icons',
+      locked: true,
+    })
+    const third = store.addTab('left', {
+      path: 'C:\\b',
+      sortKey: 'name',
+      sortDirection: 'asc',
+      filter: '',
+    })
+    store.setActiveTab('left', second)
+
+    expect(store.moveTab('left', first, 'left', 2)).toMatchObject({ kind: 'reorder' })
+    const pane = useTabsStore.getState().panes.left
+    expect(pane.tabs.map((tab) => tab.id)).toEqual([second, third, first])
+    expect(pane.tabs[pane.activeTabIndex]).toMatchObject({
+      id: second,
+      sortKey: 'size',
+      sortDirection: 'desc',
+      filter: 'needle',
+      viewMode: 'icons',
+      locked: true,
+    })
+  })
+
+  it('normalizes a same-pane append index after removing the source tab', () => {
+    const store = useTabsStore.getState()
+    const first = store.panes.left.tabs[0].id
+    const second = store.addTab('left', {
+      path: 'C:\\a',
+      sortKey: 'name',
+      sortDirection: 'asc',
+      filter: '',
+    })
+    const third = store.addTab('left', {
+      path: 'C:\\b',
+      sortKey: 'name',
+      sortDirection: 'asc',
+      filter: '',
+    })
+
+    expect(store.moveTab('left', first, 'left', 3)).toMatchObject({ kind: 'reorder' })
+    expect(useTabsStore.getState().panes.left.tabs.map((tab) => tab.id)).toEqual([
+      second,
+      third,
+      first,
+    ])
+  })
+
+  it('transfers tabs atomically with a destination identity and approved active fallbacks', () => {
+    const store = useTabsStore.getState()
+    const first = store.panes.left.tabs[0].id
+    const moved = store.addTab('left', {
+      path: 'C:\\moved',
+      sortKey: 'modified',
+      sortDirection: 'desc',
+      filter: 'work',
+      viewMode: 'thumbnails',
+      locked: true,
+    })
+    const fallback = store.addTab('left', {
+      path: 'C:\\fallback',
+      sortKey: 'name',
+      sortDirection: 'asc',
+      filter: '',
+    })
+    store.setActiveTab('left', moved)
+
+    const result = store.moveTab('left', moved, 'right', 1)
+    expect(result).toMatchObject({
+      kind: 'transfer',
+      sourceActiveChanged: true,
+      destinationPaneId: 'right',
+    })
+    const left = useTabsStore.getState().panes.left
+    const right = useTabsStore.getState().panes.right
+    expect(left.tabs[left.activeTabIndex]?.id).toBe(fallback)
+    expect(right.tabs[right.activeTabIndex]).toMatchObject({
+      id: expect.stringMatching(/^right-tab-/),
+      path: 'C:\\moved',
+      sortKey: 'modified',
+      sortDirection: 'desc',
+      filter: 'work',
+      viewMode: 'thumbnails',
+      locked: true,
+    })
+    expect(right.tabs[right.activeTabIndex]?.id).not.toBe(moved)
+    expect(left.tabs.map((tab) => tab.id)).toEqual([first, fallback])
+  })
+
+  it('leaves invalid, unchanged, and last-tab moves untouched', () => {
+    const store = useTabsStore.getState()
+    const only = store.panes.left.tabs[0].id
+    const before = useTabsStore.getState().panes
+    expect(store.moveTab('left', only, 'right', 0)).toEqual({ kind: 'none' })
+    expect(store.moveTab('left', only, 'left', 0)).toEqual({ kind: 'none' })
+    expect(store.moveTab('left', 'missing', 'left', 0)).toEqual({ kind: 'none' })
+    expect(useTabsStore.getState().panes).toBe(before)
+  })
+
   it('round-trips session panes', () => {
     const store = useTabsStore.getState()
     store.addTab('left', { path: 'C:\\a', sortKey: 'size', sortDirection: 'desc', filter: 'q' })

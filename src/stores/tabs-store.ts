@@ -20,6 +20,17 @@ type PaneTabs = {
   tabs: TabState[]
 }
 
+export type TabMoveResult =
+  | { kind: 'none' }
+  | { kind: 'reorder'; paneId: PaneId; tabId: string }
+  | {
+      kind: 'transfer'
+      sourcePaneId: PaneId
+      destinationPaneId: PaneId
+      sourceActiveChanged: boolean
+      destinationTabId: string
+    }
+
 type TabPatch = Partial<
   Pick<TabState, 'path' | 'sortKey' | 'sortDirection' | 'filter' | 'viewMode'>
 >
@@ -36,6 +47,12 @@ type TabsStore = {
   setTabLocked: (paneId: PaneId, tabId: string, locked: boolean) => void
   setActiveTab: (paneId: PaneId, tabId: string) => void
   patchActiveTab: (paneId: PaneId, patch: TabPatch) => void
+  moveTab: (
+    sourcePaneId: PaneId,
+    tabId: string,
+    destinationPaneId: PaneId,
+    destinationIndex: number,
+  ) => TabMoveResult
   reset: () => void
 }
 
@@ -192,6 +209,84 @@ export const useTabsStore = create<TabsStore>((set) => ({
         },
       }
     }),
+  moveTab: (sourcePaneId, tabId, destinationPaneId, destinationIndex) => {
+    let result: TabMoveResult = { kind: 'none' }
+    set((state) => {
+      const source = state.panes[sourcePaneId]
+      const sourceIndex = source.tabs.findIndex((tab) => tab.id === tabId)
+      if (sourceIndex === -1 || !Number.isInteger(destinationIndex)) {
+        return state
+      }
+
+      if (sourcePaneId === destinationPaneId) {
+        if (destinationIndex < 0 || destinationIndex > source.tabs.length) {
+          return state
+        }
+
+        const tabs = [...source.tabs]
+        const [tab] = tabs.splice(sourceIndex, 1)
+        const insertionIndex = Math.min(destinationIndex, tabs.length)
+        tabs.splice(insertionIndex, 0, tab)
+        if (tabs.every((item, index) => item.id === source.tabs[index]?.id)) {
+          return state
+        }
+        const activeTabId = source.tabs[source.activeTabIndex]?.id
+        const activeTabIndex = tabs.findIndex((item) => item.id === activeTabId)
+        result = { kind: 'reorder', paneId: sourcePaneId, tabId }
+        return {
+          panes: {
+            ...state.panes,
+            [sourcePaneId]: { ...source, tabs, activeTabIndex },
+          },
+        }
+      }
+
+      const destination = state.panes[destinationPaneId]
+      if (
+        source.tabs.length <= 1 ||
+        destinationIndex < 0 ||
+        destinationIndex > destination.tabs.length
+      ) {
+        return state
+      }
+
+      const sourceActiveChanged = sourceIndex === source.activeTabIndex
+      const sourceTabs = source.tabs.filter((tab) => tab.id !== tabId)
+      const sourceActiveTabId = source.tabs[source.activeTabIndex]?.id
+      const sourceActiveTabIndex = sourceActiveChanged
+        ? Math.min(sourceIndex, sourceTabs.length - 1)
+        : sourceTabs.findIndex((tab) => tab.id === sourceActiveTabId)
+      const destinationTabId = createTabId(destinationPaneId)
+      const destinationTabs = [...destination.tabs]
+      destinationTabs.splice(destinationIndex, 0, {
+        ...source.tabs[sourceIndex],
+        id: destinationTabId,
+      })
+      result = {
+        kind: 'transfer',
+        sourcePaneId,
+        destinationPaneId,
+        sourceActiveChanged,
+        destinationTabId,
+      }
+      return {
+        panes: {
+          ...state.panes,
+          [sourcePaneId]: {
+            ...source,
+            tabs: sourceTabs,
+            activeTabIndex: sourceActiveTabIndex,
+          },
+          [destinationPaneId]: {
+            ...destination,
+            tabs: destinationTabs,
+            activeTabIndex: destinationIndex,
+          },
+        },
+      }
+    })
+    return result
+  },
   reset: () => set(defaultState()),
 }))
 

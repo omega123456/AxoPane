@@ -28,7 +28,13 @@ import type {
   SortKey,
   VolumeInfo,
 } from '@/lib/types/ipc'
-import { activeTab, fromSessionPane, toSessionPane, useTabsStore } from '@/stores/tabs-store'
+import {
+  activeTab,
+  fromSessionPane,
+  toSessionPane,
+  type TabMoveResult,
+  useTabsStore,
+} from '@/stores/tabs-store'
 import { useConfigStore } from '@/stores/config-store'
 import { log } from '@/lib/app-log-commands'
 import { pathKey, pathsMatch, samePathOrWindowsCaseFold } from '@/lib/path-compare'
@@ -155,6 +161,12 @@ type PanesStore = {
   closeTab: (paneId: PaneId, tabId: string) => Promise<void>
   setTabLocked: (paneId: PaneId, tabId: string, locked: boolean) => void
   switchTab: (paneId: PaneId, tabId: string) => Promise<void>
+  moveTab: (
+    sourcePaneId: PaneId,
+    tabId: string,
+    destinationPaneId: PaneId,
+    destinationIndex: number,
+  ) => Promise<TabMoveResult>
   refreshEverything: (paneId: PaneId) => Promise<void>
   /** Runs the post-listing tail (arm fs-watch, eager folder sizes, tree children) once a listing is complete. */
   finalizeListing: (paneId: PaneId) => Promise<void>
@@ -1893,6 +1905,67 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
   setTabLocked: (paneId, tabId, locked) => {
     useTabsStore.getState().setTabLocked(paneId, tabId, locked)
     schedulePersistSession(get().activePaneId)
+  },
+  moveTab: async (sourcePaneId, tabId, destinationPaneId, destinationIndex) => {
+    const result = useTabsStore
+      .getState()
+      .moveTab(sourcePaneId, tabId, destinationPaneId, destinationIndex)
+    if (result.kind === 'none') {
+      return result
+    }
+
+    schedulePersistSession(
+      result.kind === 'transfer' ? result.destinationPaneId : get().activePaneId,
+    )
+    if (result.kind === 'reorder') {
+      return result
+    }
+
+    const resetPane = (paneId: PaneId) => {
+      const tab = activeTab(paneId)
+      set((state) => ({
+        passiveItemCountRequests: clearPassiveItemCountRequestsForPane(
+          state.passiveItemCountRequests,
+          paneId,
+        ),
+        panes: {
+          ...state.panes,
+          [paneId]: {
+            ...state.panes[paneId],
+            path: tab.path,
+            sortKey: tab.sortKey,
+            sortDirection: tab.sortDirection,
+            filterDraft: tab.filter,
+            filterApplied: tab.filter,
+            typing: false,
+            entries: [],
+            itemsSortStatus: 'idle',
+            focusedEntryId: null,
+            scrollPositions: {},
+            history: [],
+            historyIndex: -1,
+          },
+        },
+      }))
+    }
+
+    resetPane(result.destinationPaneId)
+    if (result.sourceActiveChanged) {
+      resetPane(result.sourcePaneId)
+    }
+    set({ activePaneId: result.destinationPaneId })
+
+    // Replace sessions before the fresh reloads, so late data remains tied to
+    // the superseded tab IDs and is rejected by the existing guards.
+    void listingSessions[result.destinationPaneId].release()
+    if (result.sourceActiveChanged) {
+      void listingSessions[result.sourcePaneId].release()
+    }
+    await Promise.all([
+      get().reloadPane(result.destinationPaneId),
+      ...(result.sourceActiveChanged ? [get().reloadPane(result.sourcePaneId)] : []),
+    ])
+    return result
   },
   switchTab: async (paneId, tabId) => {
     const before = useTabsStore.getState().panes[paneId]

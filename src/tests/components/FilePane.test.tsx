@@ -15,7 +15,13 @@ import { useNativeMenuWarmStore } from '@/stores/native-menu-warm-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useTabsStore } from '@/stores/tabs-store'
-import type { DirectoryEntry, LoadNativeMenuRequest, WarmNativeMenusRequest } from '@/lib/types/ipc'
+import { useThumbnailStore } from '@/stores/thumbnail-store'
+import type {
+  DirectoryEntry,
+  LoadNativeMenuRequest,
+  ThumbnailCandidateRequest,
+  WarmNativeMenusRequest,
+} from '@/lib/types/ipc'
 
 const originalPlatform = navigator.platform
 
@@ -57,6 +63,7 @@ beforeEach(() => {
   useInlineRenameStore.getState().reset()
   useActionDialogStore.getState().close()
   useNativeMenuWarmStore.getState().resetWarmedTypeKeys()
+  useThumbnailStore.getState().reset()
 })
 
 afterEach(() => {
@@ -98,6 +105,88 @@ describe('FilePane state rendering', () => {
       screen.getByRole('grid', { name: 'Large thumbnails for C:\\root\\other' }),
     ).toBeInTheDocument()
     expect(screen.getByLabelText('View: Large thumbnails')).toBeInTheDocument()
+  })
+
+  it('cancels superseded thumbnail scopes after an active cross-pane tab move', async () => {
+    const cancel = vi.fn(() => undefined)
+    ipc.override('cancel_thumbnails', cancel)
+    const tabs = useTabsStore.getState()
+    const movedTabId = tabs.addTab('left', {
+      path: 'C:\\root\\moved',
+      sortKey: 'name',
+      sortDirection: 'asc',
+      filter: '',
+      viewMode: 'thumbnails',
+    })
+    const destinationTabId = tabs.panes.right.tabs[0].id
+    tabs.patchActiveTab('left', { viewMode: 'thumbnails' })
+    tabs.patchActiveTab('right', { path: 'C:\\root\\destination', viewMode: 'thumbnails' })
+    usePanesStore.setState((state) => ({
+      panes: {
+        ...state.panes,
+        left: { ...state.panes.left, path: 'C:\\root\\moved' },
+        right: { ...state.panes.right, path: 'C:\\root\\destination' },
+      },
+    }))
+    const candidate: ThumbnailCandidateRequest = {
+      path: 'C:\\root\\moved\\preview.png',
+      modifiedUnixSeconds: 1,
+      sizeBytes: 1,
+      isDirectory: false,
+      priority: 'visible',
+      order: 0,
+    }
+    await useThumbnailStore
+      .getState()
+      .setVisibleCandidates(
+        { paneId: 'left', tabId: movedTabId, path: 'C:\\root\\moved', mode: 'thumbnails' },
+        [candidate],
+      )
+    await useThumbnailStore.getState().setVisibleCandidates(
+      {
+        paneId: 'right',
+        tabId: destinationTabId,
+        path: 'C:\\root\\destination',
+        mode: 'thumbnails',
+      },
+      [candidate],
+    )
+
+    render(
+      <>
+        <FilePane paneId="left" />
+        <FilePane paneId="right" />
+      </>,
+    )
+    cancel.mockClear()
+
+    await act(async () => {
+      await usePanesStore.getState().moveTab('left', movedTabId, 'right', 1)
+    })
+
+    await waitFor(() => {
+      expect(cancel).toHaveBeenCalledWith(
+        expect.objectContaining({ paneId: 'left', tabId: movedTabId }),
+      )
+      expect(cancel).toHaveBeenCalledWith(
+        expect.objectContaining({ paneId: 'right', tabId: destinationTabId }),
+      )
+    })
+    useThumbnailStore.getState().applyThumbnailResults([
+      {
+        paneId: 'left',
+        tabId: movedTabId,
+        path: 'C:\\root\\moved',
+        generation: 1,
+        fingerprintPath: candidate.path,
+        modifiedUnixSeconds: candidate.modifiedUnixSeconds,
+        sizeBytes: candidate.sizeBytes,
+        state: 'ready',
+        quality: 'high',
+        dataUrl: 'data:image/png;base64,AA==',
+      },
+    ])
+    expect(useThumbnailStore.getState().getRecord(candidate)).toBeUndefined()
   })
 
   it.each([

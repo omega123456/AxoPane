@@ -12,6 +12,7 @@ import {
   propertiesContextAction,
   requestFolderSizeContextAction,
   addFavouriteContextAction,
+  moveTabContextAction,
   removeFavouriteContextAction,
   setTabLockedContextAction,
 } from '@/lib/context-menu/context-menu-actions'
@@ -584,6 +585,9 @@ function buildTabContent(
 ): ContextMenuContent {
   const tabs = useTabsStore.getState().panes[paneId]
   const tab = tabs.tabs.find((item) => item.id === target.tabId)
+  const tabIndex = tabs.tabs.findIndex((item) => item.id === target.tabId)
+  const destinationPaneId = paneId === 'left' ? 'right' : 'left'
+  const destination = useTabsStore.getState().panes[destinationPaneId]
   const path = tab?.path ?? usePanesStore.getState().panes[paneId].path
 
   return {
@@ -595,6 +599,33 @@ function buildTabContent(
           commandLabels.openInOtherPane,
           navigateContextAction(path, 'other-pane'),
           { strong: true, icon: { kind: 'app', name: 'open-in-other-pane' } },
+        ),
+      ]),
+      section('move-tab', [
+        customRow(
+          `move-tab-within-left-${target.tabId}`,
+          'Move tab left',
+          moveTabContextAction(target.tabId, paneId, tabIndex - 1),
+          { disabled: tabIndex <= 0, icon: { kind: 'app', name: 'arrow-left' } },
+        ),
+        customRow(
+          `move-tab-within-right-${target.tabId}`,
+          'Move tab right',
+          moveTabContextAction(target.tabId, paneId, tabIndex + 1),
+          {
+            disabled: tabIndex === -1 || tabIndex >= tabs.tabs.length - 1,
+            icon: { kind: 'app', name: 'arrow-right' },
+          },
+        ),
+        customRow(
+          `move-tab-${destinationPaneId}-${target.tabId}`,
+          `Move tab to ${destinationPaneId} pane`,
+          moveTabContextAction(target.tabId, destinationPaneId, destination.tabs.length),
+          {
+            disabled: tabIndex === -1 || tabs.tabs.length <= 1,
+            hidden: useLayoutStore.getState().defaultPaneMode === 'single',
+            icon: { kind: 'app', name: `panel-${destinationPaneId}` },
+          },
         ),
       ]),
       section('footer', [

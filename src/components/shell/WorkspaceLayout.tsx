@@ -2,6 +2,7 @@ import { useRef } from 'react'
 import { FilePane } from '@/components/pane/FilePane'
 import { FolderTree } from '@/components/tree/FolderTree'
 import { ResizeHandle } from '@/components/shell/ResizeHandle'
+import { TabDragDropProvider } from '@/components/pane/TabDragDropProvider'
 import { persistAppConfig } from '@/lib/app-config'
 import {
   PANE_SPLIT_MAX,
@@ -67,11 +68,12 @@ export function WorkspaceLayout() {
         onStep={(delta) => setTreeWidthPx(treeWidthPx + delta * TREE_STEP_PX)}
         onCommit={commit}
       />
-      {defaultPaneMode === 'single' ? (
-        <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-          <FilePane paneId={activePaneId} />
-        </div>
-      ) : (
+      <TabDragDropProvider>
+        {defaultPaneMode === 'single' ? (
+          <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+            <FilePane paneId={activePaneId} />
+          </div>
+        ) : (
         <div
           ref={panesRef}
           // A grid (not flexbox) so the column split rounds identically to the
@@ -102,7 +104,8 @@ export function WorkspaceLayout() {
             </div>
           </div>
         </div>
-      )}
+        )}
+      </TabDragDropProvider>
     </div>
   )
 }
