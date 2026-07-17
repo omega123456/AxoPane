@@ -23,7 +23,7 @@ import { memo, useEffect, useMemo, useRef } from 'react'
  */
 export type FileRowActions = {
   onPointerDown: () => void
-  onActivate: (entryId: string, clickCount: number) => void
+  onActivate: (entryId: string, clickCount: number, eventTimeStamp: number) => void
   onClick: (entryId: string, event: MouseEvent<HTMLDivElement>) => void
   onContextMenu: (entryId: string, event: MouseEvent<HTMLDivElement>) => void
   onMiddleClick: (entryId: string) => void
@@ -220,7 +220,7 @@ function FileRowImpl({
       // preventDefault a <button> needed, which would otherwise suppress the
       // native `dragstart` and break drag-and-drop entirely.
       onMouseDown={actions.onPointerDown}
-      onDoubleClick={(event) => actions.onActivate(entry.id, event.detail)}
+      onDoubleClick={(event) => actions.onActivate(entry.id, event.detail, event.timeStamp)}
       onClick={(event) => actions.onClick(entry.id, event)}
       onContextMenu={(event) => actions.onContextMenu(entry.id, event)}
       onAuxClick={(event) => {

@@ -55,6 +55,12 @@ function seedPane(partial: Partial<ReturnType<typeof usePanesStore.getState>['pa
   }))
 }
 
+function doubleClick(target: Element, detail: number, timeStamp: number) {
+  const event = new MouseEvent('dblclick', { bubbles: true, detail })
+  Object.defineProperty(event, 'timeStamp', { value: timeStamp })
+  fireEvent(target, event)
+}
+
 beforeEach(() => {
   ipc.install()
   usePanesStore.getState().reset()
@@ -430,7 +436,7 @@ describe('FilePane state rendering', () => {
     expect(goUp).toHaveBeenCalledWith('left')
   })
 
-  it('ignores continued parent-row clicks but accepts a fresh double-click immediately', () => {
+  it('ignores a rapid parent-row continuation but accepts a later macro invocation', () => {
     const originalGoUp = usePanesStore.getState().goUp
     const goUp = vi.fn(() => Promise.resolve())
     try {
@@ -438,7 +444,7 @@ describe('FilePane state rendering', () => {
       seedPane({ path: 'C:\\root\\dir', entries: [] })
 
       const view = render(<FilePane paneId="left" />)
-      fireEvent.doubleClick(screen.getByRole('row', { name: 'Go to parent folder' }), { detail: 2 })
+      doubleClick(screen.getByRole('row', { name: 'Go to parent folder' }), 2, 100)
 
       act(() => {
         usePanesStore.setState((state) => ({
@@ -451,10 +457,10 @@ describe('FilePane state rendering', () => {
       view.rerender(<FilePane paneId="left" />)
 
       const parentRow = screen.getByRole('row', { name: 'Go to parent folder' })
-      fireEvent.doubleClick(parentRow, { detail: 4 })
+      doubleClick(parentRow, 4, 150)
       expect(goUp).toHaveBeenCalledOnce()
 
-      fireEvent.doubleClick(parentRow, { detail: 2 })
+      doubleClick(parentRow, 6, 250)
       expect(goUp).toHaveBeenCalledTimes(2)
     } finally {
       act(() => {
@@ -656,7 +662,7 @@ describe('FilePane state rendering', () => {
     expect(useTabsStore.getState().panes.left.tabs.length).toBeGreaterThan(1)
   })
 
-  it('ignores continued folder clicks but accepts a fresh double-click immediately', () => {
+  it('ignores a rapid folder continuation but accepts a later macro invocation', () => {
     const originalNavigatePane = usePanesStore.getState().navigatePane
     const navigatePane = vi.fn(() => Promise.resolve())
     try {
@@ -667,7 +673,7 @@ describe('FilePane state rendering', () => {
       })
 
       const view = render(<FilePane paneId="left" />)
-      fireEvent.doubleClick(screen.getByRole('row', { name: /Alpha/ }), { detail: 2 })
+      doubleClick(screen.getByRole('row', { name: /Alpha/ }), 2, 100)
 
       act(() => {
         usePanesStore.setState((state) => ({
@@ -685,11 +691,11 @@ describe('FilePane state rendering', () => {
       view.rerender(<FilePane paneId="left" />)
 
       const row = screen.getByRole('row', { name: /Alpha/ })
-      fireEvent.doubleClick(row, { detail: 4 })
+      doubleClick(row, 4, 150)
       expect(navigatePane).toHaveBeenCalledOnce()
       expect(navigatePane).toHaveBeenCalledWith('left', 'C:\\root\\Alpha')
 
-      fireEvent.doubleClick(row, { detail: 2 })
+      doubleClick(row, 6, 250)
       expect(navigatePane).toHaveBeenCalledTimes(2)
     } finally {
       act(() => {

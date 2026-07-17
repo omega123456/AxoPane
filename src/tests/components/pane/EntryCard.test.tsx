@@ -69,7 +69,7 @@ describe('EntryCard', () => {
     fireEvent.doubleClick(card, { detail: 2 })
     fireEvent.contextMenu(card)
     expect(cardActions.onClick).toHaveBeenCalledWith('photo', expect.anything())
-    expect(cardActions.onActivate).toHaveBeenCalledWith('photo', 2)
+    expect(cardActions.onActivate).toHaveBeenCalledWith('photo', 2, expect.any(Number))
     expect(cardActions.onContextMenu).toHaveBeenCalledWith('photo', expect.anything())
   })
 

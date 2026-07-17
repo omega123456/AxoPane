@@ -140,6 +140,7 @@ describe('DetailsView', () => {
     expect(onContextMenu.mock.calls[0][0]).toBe('entry-1')
     expect(onActivate.mock.calls[0][0]).toBe('entry-1')
     expect(onActivate.mock.calls[0][1]).toBe(2)
+    expect(onActivate.mock.calls[0][2]).toEqual(expect.any(Number))
 
     rerender(
       <DetailsView

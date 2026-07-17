@@ -27,9 +27,11 @@ describe('ParentRow', () => {
 
     await user.dblClick(row)
     expect(onActivate).toHaveBeenCalledOnce()
+    expect(onActivate).toHaveBeenLastCalledWith(2, expect.any(Number))
 
     fireEvent.keyDown(row, { key: 'Enter' })
     expect(onActivate).toHaveBeenCalledTimes(2)
+    expect(onActivate).toHaveBeenLastCalledWith()
   })
 
   it('renders without the active focus ring when inactive', () => {
