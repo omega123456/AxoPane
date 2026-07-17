@@ -118,7 +118,7 @@ function EntryCardImpl({
     onDrop: (event: DragEvent<HTMLDivElement>) => actions.onDrop(entry.id, event),
     onMouseDown: actions.onPointerDown,
     onDoubleClick: (event: MouseEvent<HTMLDivElement>) =>
-      actions.onActivate(entry.id, event.timeStamp),
+      actions.onActivate(entry.id, event.detail),
     onClick: (event: MouseEvent<HTMLDivElement>) => actions.onClick(entry.id, event),
     onContextMenu: (event: MouseEvent<HTMLDivElement>) => actions.onContextMenu(entry.id, event),
     onAuxClick: (event: MouseEvent<HTMLDivElement>) => {

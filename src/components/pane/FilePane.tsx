@@ -58,7 +58,6 @@ function isPermissionError(message: string | null) {
 }
 
 const PARENT_ROW_ID = '..'
-const pointerNavigationCooldownMs = 400
 const rowHeightPx = 30
 const marqueeDragThresholdPx = 4
 const visibleIconRequestDebounceMs = 100
@@ -171,7 +170,6 @@ export function FilePane({ paneId }: FilePaneProps) {
   // evaluation onward, a restore that still can't reach its target is treated
   // as permanently unreachable (see the effect for the exact conditions).
   const restoreJustArmedRef = useRef(true)
-  const lastPointerActivationRef = useRef<{ path: string; activatedAt: number } | null>(null)
   const renameSubmittingRef = useRef(false)
   const ignoreNextRenameBlurRef = useRef(false)
   const detachMarqueeListenersRef = useRef<(() => void) | null>(null)
@@ -490,23 +488,13 @@ export function FilePane({ paneId }: FilePaneProps) {
     executeCommand('open', paneId, entryId)
   }
 
-  function activateEntryFromPointer(entryId: string, eventTimeStamp?: number) {
-    const lastActivation = lastPointerActivationRef.current
-    const activationTime = eventTimeStamp ?? Number.POSITIVE_INFINITY
-
-    // Mouse-macro double-clicks can keep firing after the pane has already
-    // navigated and re-rendered a different row under the pointer. Ignore one
-    // immediate follow-up activation across a path change so the gesture opens
-    // exactly one level.
-    if (
-      lastActivation &&
-      lastActivation.path !== pane.path &&
-      activationTime - lastActivation.activatedAt < pointerNavigationCooldownMs
-    ) {
+  function activateEntryFromPointer(entryId: string, clickCount?: number) {
+    // Native click counts reset with the OS/browser double-click sequence.
+    // Ignore later pairs from a macro-generated multi-click burst without
+    // imposing an AxoPane-specific cooldown on the next genuine double-click.
+    if (clickCount !== undefined && clickCount !== 2) {
       return
     }
-
-    lastPointerActivationRef.current = { path: pane.path, activatedAt: activationTime }
     void activateEntry(entryId)
   }
 
@@ -857,8 +845,8 @@ export function FilePane({ paneId }: FilePaneProps) {
   const actions = useMemo<FileRowActions>(
     () => ({
       onPointerDown: () => latestRef.current.focusPaneShell(),
-      onActivate: (entryId, eventTimeStamp) =>
-        latestRef.current.activateEntryFromPointer(entryId, eventTimeStamp),
+      onActivate: (entryId, clickCount) =>
+        latestRef.current.activateEntryFromPointer(entryId, clickCount),
       onClick: (entryId, event) => latestRef.current.selectWithModifiers(entryId, event),
       onContextMenu: (entryId, event) => latestRef.current.showMenu(event, entryId),
       onMiddleClick: (entryId) => void latestRef.current.middleClickOpen(entryId),
@@ -1010,9 +998,7 @@ export function FilePane({ paneId }: FilePaneProps) {
           onPaneDragLeave={handlePaneDragLeave}
           onPaneDrop={(event) => void handlePaneDrop(event)}
           onParentFocus={() => focusByRowIndex(0)}
-          onParentActivate={(eventTimeStamp) =>
-            activateEntryFromPointer(PARENT_ROW_ID, eventTimeStamp)
-          }
+          onParentActivate={(clickCount) => activateEntryFromPointer(PARENT_ROW_ID, clickCount)}
           scrollContainerRef={parentRef}
           body={
             showSkeleton ? (

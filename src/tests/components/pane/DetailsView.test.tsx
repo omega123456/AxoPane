@@ -135,10 +135,11 @@ describe('DetailsView', () => {
 
     fireEvent.click(row)
     fireEvent.contextMenu(row)
-    fireEvent.doubleClick(row)
+    fireEvent.doubleClick(row, { detail: 2 })
     expect(onClick.mock.calls[0][0]).toBe('entry-1')
     expect(onContextMenu.mock.calls[0][0]).toBe('entry-1')
     expect(onActivate.mock.calls[0][0]).toBe('entry-1')
+    expect(onActivate.mock.calls[0][1]).toBe(2)
 
     rerender(
       <DetailsView

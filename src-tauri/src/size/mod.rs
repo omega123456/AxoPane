@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::resource_coordinator::{JobClass, JobSpec, ResourceCoordinator};
+use crate::resource_coordinator::{max_throughput_slots, JobClass, JobSpec, ResourceCoordinator};
 use crate::volumes::{self, VolumeInfo};
 
 use everything::{EverythingAvailability, EverythingHandle};
@@ -21,11 +21,11 @@ use everything::{EverythingAvailability, EverythingHandle};
 /// a thread being spawned per requested path — that is what actually bounds
 /// how many OS threads a huge selection (or an "Items" sort over a folder
 /// with tens of thousands of children) can create. The coordinator's
-/// `Throughput` lane (see [`resource_coordinator::queue::MAX_THROUGHPUT_SLOTS`])
+/// `Throughput` lane (see [`resource_coordinator::max_throughput_slots`])
 /// still gates how many of these workers can be doing filesystem work at
 /// once; this pool only bounds how many *threads exist*, not how many run
 /// concurrently.
-const MANUAL_WORKER_POOL_SIZE: usize = 4;
+pub const DEFAULT_MANUAL_SIZE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The work a queued manual-size job performs once a worker claims it. Boxed
 /// so it can travel through the scheduler's queue (as a job's `payload`)
@@ -130,7 +130,7 @@ struct SizeServiceInner {
 
 impl Default for SizeService {
     fn default() -> Self {
-        Self::new(Duration::from_secs(2))
+        Self::new(DEFAULT_MANUAL_SIZE_TIMEOUT)
     }
 }
 
@@ -212,7 +212,7 @@ impl SizeService {
             everything,
         }));
 
-        let workers = (0..MANUAL_WORKER_POOL_SIZE)
+        let workers = (0..max_throughput_slots())
             .map(|_| {
                 spawn_manual_worker(
                     Arc::clone(&scheduler),
@@ -228,6 +228,14 @@ impl SizeService {
             coordinator,
             workers: Mutex::new(workers),
         }
+    }
+
+    #[cfg(feature = "test-utils")]
+    pub fn manual_worker_count_for_tests(&self) -> usize {
+        self.workers
+            .lock()
+            .expect("size service workers lock")
+            .len()
     }
 
     pub fn everything_status(&self) -> EverythingStatus {
@@ -615,8 +623,8 @@ impl SizeService {
 
     /// Registers `path` and, once it is genuinely scheduled, hands its work
     /// closure to the shared manual-size scheduler queue rather than
-    /// spawning a dedicated OS thread. The bounded [`MANUAL_WORKER_POOL_SIZE`]
-    /// worker pool (see [`spawn_manual_worker`]) claims and executes it.
+    /// spawning a dedicated OS thread. The bounded adaptive worker pool (see
+    /// [`spawn_manual_worker`]) claims and executes it.
     fn enqueue_manual_job(
         &self,
         path: String,
@@ -657,7 +665,7 @@ impl SizeService {
 
 /// One long-lived manual-size worker thread body: pulls jobs from `scheduler`
 /// one at a time (blocking on its condvar when empty) until the scheduler is
-/// shut down. A fixed pool of these (see [`MANUAL_WORKER_POOL_SIZE`]) is
+/// shut down. An adaptively sized pool of these is
 /// what actually bounds how many OS threads folder-size traversal can ever
 /// create, regardless of how many paths are requested at once.
 fn spawn_manual_worker(

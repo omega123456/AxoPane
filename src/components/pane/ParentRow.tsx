@@ -8,7 +8,7 @@ type ParentRowProps = {
   isActivePane: boolean
   isFocused: boolean
   onPointerDown: () => void
-  onActivate: (eventTimeStamp?: number) => void
+  onActivate: (clickCount?: number) => void
   onFocus: () => void
 }
 
@@ -40,7 +40,7 @@ export function ParentRow({
         onPointerDown()
       }}
       onClick={onFocus}
-      onDoubleClick={(event) => onActivate(event.timeStamp)}
+      onDoubleClick={(event) => onActivate(event.detail)}
       onKeyDown={(event) => {
         if (event.key === 'Enter') {
           event.preventDefault()

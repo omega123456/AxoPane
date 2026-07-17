@@ -182,11 +182,12 @@ describe('FileRow action dispatcher', () => {
     const row = screen.getByRole('row')
     fireEvent.click(row)
     fireEvent.contextMenu(row)
-    fireEvent.doubleClick(row)
+    fireEvent.doubleClick(row, { detail: 2 })
 
     expect(onClick.mock.calls[0][0]).toBe('doc')
     expect(onContextMenu.mock.calls[0][0]).toBe('doc')
     expect(onActivate.mock.calls[0][0]).toBe('doc')
+    expect(onActivate.mock.calls[0][1]).toBe(2)
   })
 
   it('forwards pointer-down and drag-end without an entry id (pane-wide handlers)', () => {

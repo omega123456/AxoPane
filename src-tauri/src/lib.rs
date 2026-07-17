@@ -57,8 +57,6 @@ use size::SizeService;
 #[cfg(not(feature = "test-utils"))]
 use std::sync::Arc;
 #[cfg(not(feature = "test-utils"))]
-use std::time::Duration;
-#[cfg(not(feature = "test-utils"))]
 use tauri::{Emitter, Manager};
 #[cfg(not(feature = "test-utils"))]
 use volumes::registry::VolumeRegistry;
@@ -297,7 +295,7 @@ pub fn run() {
             // subsystem instead of having its own independent admission
             // budget.
             app.manage(SizeService::with_resource_coordinator(
-                Duration::from_secs(2),
+                size::DEFAULT_MANUAL_SIZE_TIMEOUT,
                 Arc::clone(&resource_coordinator),
             ));
 

@@ -7,9 +7,9 @@
 //!
 //! The coordinator does not execute jobs itself — subsystems still run
 //! their own work (on whatever thread makes sense for them) once admitted.
-//! What the coordinator owns is *admission*: a fixed global cap of four
-//! latency-sensitive slots, two throughput slots, and two CPU slots
-//! (see [`queue::MAX_LATENCY_SLOTS`], [`queue::MAX_THROUGHPUT_SLOTS`],
+//! What the coordinator owns is *admission*: a global cap of four
+//! latency-sensitive slots, an adaptive throughput cap, and two CPU slots
+//! (see [`queue::MAX_LATENCY_SLOTS`], [`max_throughput_slots`], and
 //! [`queue::MAX_CPU_SLOTS`]), fair scheduling of that capacity across
 //! however many distinct resource keys are in play, and atomic
 //! all-or-none multi-resource reservations so no caller can ever observe a
@@ -53,13 +53,40 @@ pub mod queue;
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::thread::{available_parallelism, JoinHandle};
 use std::time::Duration;
 
 use crossbeam_channel::{bounded, unbounded, Receiver, RecvTimeoutError, Sender};
 
 use queue::{AdmitOutcome, JobRequest, SchedulerState};
+
+const MIN_THROUGHPUT_SLOTS: usize = 2;
+const MAX_THROUGHPUT_SLOTS: usize = 8;
+const THROUGHPUT_CPU_DIVISOR: usize = 4;
+
+fn throughput_slots_for_parallelism(available: Option<usize>) -> usize {
+    available.map_or(MIN_THROUGHPUT_SLOTS, |available| {
+        available
+            .div_ceil(THROUGHPUT_CPU_DIVISOR)
+            .clamp(MIN_THROUGHPUT_SLOTS, MAX_THROUGHPUT_SLOTS)
+    })
+}
+
+/// Process-wide I/O admission capacity: one slot per four available logical
+/// CPUs, bounded so small machines retain current throughput and large ones
+/// cannot create an unbounded metadata/I/O burst.
+pub fn max_throughput_slots() -> usize {
+    static SLOTS: OnceLock<usize> = OnceLock::new();
+    *SLOTS.get_or_init(|| {
+        throughput_slots_for_parallelism(available_parallelism().ok().map(|value| value.get()))
+    })
+}
+
+#[cfg(feature = "test-utils")]
+pub fn throughput_slots_for_parallelism_for_tests(available: Option<usize>) -> usize {
+    throughput_slots_for_parallelism(available)
+}
 
 /// A job's declared resource-admission class. A job may declare more than
 /// one (e.g. archive creation needs both `Throughput` and `Cpu`).

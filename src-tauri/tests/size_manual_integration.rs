@@ -8,7 +8,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use file_explorer_lib::resource_coordinator::{JobClass, JobSpec, ResourceCoordinator};
+use file_explorer_lib::resource_coordinator::{
+    max_throughput_slots, JobClass, JobSpec, ResourceCoordinator,
+};
 use file_explorer_lib::size::everything::EverythingAvailability;
 use file_explorer_lib::size::everything::{
     build_exact_folder_or_queries, escape_exact_folder_query_path, join_everything_result_path,
@@ -16,9 +18,21 @@ use file_explorer_lib::size::everything::{
     EVERYTHING_BATCH_CHUNK_SIZE,
 };
 use file_explorer_lib::size::manual::{calculate, ManualSizeError};
-use file_explorer_lib::size::{SizeBackend, SizeService, SizeSource, SizeStateKind, SizeUpdate};
+use file_explorer_lib::size::{
+    SizeBackend, SizeService, SizeSource, SizeStateKind, SizeUpdate, DEFAULT_MANUAL_SIZE_TIMEOUT,
+};
 use file_explorer_lib::volumes::VolumeInfo;
 use tempfile::tempdir;
+
+#[test]
+fn manual_size_defaults_match_the_adaptive_pool_and_timeout() {
+    let service = SizeService::default();
+    assert_eq!(
+        service.manual_worker_count_for_tests(),
+        max_throughput_slots()
+    );
+    assert_eq!(DEFAULT_MANUAL_SIZE_TIMEOUT, Duration::from_secs(60));
+}
 
 #[test]
 fn manual_sizer_sums_nested_file_sizes() {
@@ -860,7 +874,7 @@ fn size_service_manual_jobs_are_admitted_through_the_injected_coordinator() {
     // Saturate every throughput slot the coordinator has so any job routed
     // through *this* coordinator instance cannot be admitted yet.
     let mut occupying_handles = Vec::new();
-    for index in 0..file_explorer_lib::resource_coordinator::queue::MAX_THROUGHPUT_SLOTS {
+    for index in 0..max_throughput_slots() {
         occupying_handles.push(
             coordinator
                 .submit(JobSpec::new(

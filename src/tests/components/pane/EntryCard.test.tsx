@@ -66,10 +66,10 @@ describe('EntryCard', () => {
     expect(card).toHaveClass('opacity-50')
     expect(card.querySelector('[data-symlink="true"]')).toBeTruthy()
     fireEvent.click(card)
-    fireEvent.doubleClick(card)
+    fireEvent.doubleClick(card, { detail: 2 })
     fireEvent.contextMenu(card)
     expect(cardActions.onClick).toHaveBeenCalledWith('photo', expect.anything())
-    expect(cardActions.onActivate).toHaveBeenCalledWith('photo', expect.any(Number))
+    expect(cardActions.onActivate).toHaveBeenCalledWith('photo', 2)
     expect(cardActions.onContextMenu).toHaveBeenCalledWith('photo', expect.anything())
   })
 

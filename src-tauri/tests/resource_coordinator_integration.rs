@@ -1,4 +1,4 @@
-//! Integration coverage for `ResourceCoordinator`: the fixed global
+//! Integration coverage for `ResourceCoordinator`: the globally bounded
 //! latency/throughput/CPU admission service later phases route real
 //! subsystem work through instead of each owning an independent thread
 //! pool.
@@ -18,16 +18,28 @@ use std::time::Duration;
 use crossbeam_channel::{bounded, unbounded};
 
 use file_explorer_lib::resource_coordinator::queue::{
-    MAX_CPU_SLOTS, MAX_LATENCY_SLOTS, MAX_QUEUED_JOBS, MAX_THROUGHPUT_SLOTS,
+    MAX_CPU_SLOTS, MAX_LATENCY_SLOTS, MAX_QUEUED_JOBS,
 };
 use file_explorer_lib::resource_coordinator::{
-    JobClass, JobSpec, ResourceCoordinator, SubmitError,
+    max_throughput_slots, throughput_slots_for_parallelism_for_tests, JobClass, JobSpec,
+    ResourceCoordinator, SubmitError,
 };
 
 /// Generous bound for "this must resolve quickly" assertions. Never used as
 /// a required wait — only as an upper bound so a genuinely stuck test fails
 /// fast instead of hanging the suite.
 const PROMPT: Duration = Duration::from_millis(500);
+
+#[test]
+fn throughput_capacity_uses_one_quarter_of_available_parallelism_with_bounds() {
+    assert_eq!(throughput_slots_for_parallelism_for_tests(None), 2);
+    assert_eq!(throughput_slots_for_parallelism_for_tests(Some(0)), 2);
+    assert_eq!(throughput_slots_for_parallelism_for_tests(Some(8)), 2);
+    assert_eq!(throughput_slots_for_parallelism_for_tests(Some(9)), 3);
+    assert_eq!(throughput_slots_for_parallelism_for_tests(Some(16)), 4);
+    assert_eq!(throughput_slots_for_parallelism_for_tests(Some(29)), 8);
+    assert_eq!(throughput_slots_for_parallelism_for_tests(Some(64)), 8);
+}
 
 fn latency<S: Into<String>>(resources: impl IntoIterator<Item = S>) -> JobSpec {
     JobSpec::new([JobClass::Latency], resources.into_iter().map(Into::into))
@@ -128,7 +140,7 @@ fn await_exposes_its_submission_id_for_a_coalesced_job_spec() {
 
 // ---------------------------------------------------------------------
 // Global caps: across many distinct resource keys, concurrency never
-// exceeds 4 latency / 2 throughput / 2 CPU.
+// exceeds 4 latency / adaptive throughput / 2 CPU.
 // ---------------------------------------------------------------------
 
 /// Submits `count` jobs of `class` (via `spec_for`), one per distinct
@@ -197,6 +209,7 @@ fn assert_class_never_exceeds_cap_under_load(
 fn global_caps_are_never_exceeded_across_many_resources() {
     let coordinator = Arc::new(ResourceCoordinator::new());
     let resource_pool_size = 12; // far more distinct resources than any cap
+    let throughput_slots = max_throughput_slots();
 
     assert_class_never_exceeds_cap_under_load(
         &coordinator,
@@ -208,8 +221,8 @@ fn global_caps_are_never_exceeded_across_many_resources() {
     assert_class_never_exceeds_cap_under_load(
         &coordinator,
         resource_pool_size,
-        MAX_THROUGHPUT_SLOTS * 3,
-        MAX_THROUGHPUT_SLOTS,
+        throughput_slots * 3,
+        throughput_slots,
         |resource| throughput([resource]),
     );
     assert_class_never_exceeds_cap_under_load(
@@ -682,9 +695,9 @@ fn many_distinct_resources_all_share_the_same_fixed_global_caps() {
     let coordinator = ResourceCoordinator::new();
     let mut handles = Vec::new();
 
-    // MAX_THROUGHPUT_SLOTS distinct resources should all be grantable
+    // The adaptive number of distinct resources should all be grantable
     // immediately (one slot each).
-    for index in 0..MAX_THROUGHPUT_SLOTS {
+    for index in 0..max_throughput_slots() {
         let resource = format!("distinct-{index}");
         let handle = coordinator
             .submit(throughput([resource]))

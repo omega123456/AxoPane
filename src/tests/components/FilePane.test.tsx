@@ -430,7 +430,7 @@ describe('FilePane state rendering', () => {
     expect(goUp).toHaveBeenCalledWith('left')
   })
 
-  it('ignores an immediate follow-up parent-row double-click after the pane path changes', () => {
+  it('ignores continued parent-row clicks but accepts a fresh double-click immediately', () => {
     const originalGoUp = usePanesStore.getState().goUp
     const goUp = vi.fn(() => Promise.resolve())
     try {
@@ -438,7 +438,7 @@ describe('FilePane state rendering', () => {
       seedPane({ path: 'C:\\root\\dir', entries: [] })
 
       const view = render(<FilePane paneId="left" />)
-      fireEvent.doubleClick(screen.getByRole('row', { name: 'Go to parent folder' }))
+      fireEvent.doubleClick(screen.getByRole('row', { name: 'Go to parent folder' }), { detail: 2 })
 
       act(() => {
         usePanesStore.setState((state) => ({
@@ -450,8 +450,12 @@ describe('FilePane state rendering', () => {
       })
       view.rerender(<FilePane paneId="left" />)
 
-      fireEvent.doubleClick(screen.getByRole('row', { name: 'Go to parent folder' }))
+      const parentRow = screen.getByRole('row', { name: 'Go to parent folder' })
+      fireEvent.doubleClick(parentRow, { detail: 4 })
       expect(goUp).toHaveBeenCalledOnce()
+
+      fireEvent.doubleClick(parentRow, { detail: 2 })
+      expect(goUp).toHaveBeenCalledTimes(2)
     } finally {
       act(() => {
         usePanesStore.setState({ goUp: originalGoUp })
@@ -652,7 +656,7 @@ describe('FilePane state rendering', () => {
     expect(useTabsStore.getState().panes.left.tabs.length).toBeGreaterThan(1)
   })
 
-  it('ignores an immediate follow-up folder double-click after a fast path change', () => {
+  it('ignores continued folder clicks but accepts a fresh double-click immediately', () => {
     const originalNavigatePane = usePanesStore.getState().navigatePane
     const navigatePane = vi.fn(() => Promise.resolve())
     try {
@@ -663,7 +667,7 @@ describe('FilePane state rendering', () => {
       })
 
       const view = render(<FilePane paneId="left" />)
-      fireEvent.doubleClick(screen.getByRole('row', { name: /Alpha/ }))
+      fireEvent.doubleClick(screen.getByRole('row', { name: /Alpha/ }), { detail: 2 })
 
       act(() => {
         usePanesStore.setState((state) => ({
@@ -680,9 +684,13 @@ describe('FilePane state rendering', () => {
       })
       view.rerender(<FilePane paneId="left" />)
 
-      fireEvent.doubleClick(screen.getByRole('row', { name: /Alpha/ }))
+      const row = screen.getByRole('row', { name: /Alpha/ })
+      fireEvent.doubleClick(row, { detail: 4 })
       expect(navigatePane).toHaveBeenCalledOnce()
       expect(navigatePane).toHaveBeenCalledWith('left', 'C:\\root\\Alpha')
+
+      fireEvent.doubleClick(row, { detail: 2 })
+      expect(navigatePane).toHaveBeenCalledTimes(2)
     } finally {
       act(() => {
         usePanesStore.setState({ navigatePane: originalNavigatePane })

@@ -19,10 +19,6 @@ use super::{JobClass, JobId};
 /// queued behind bulk work.
 pub const MAX_LATENCY_SLOTS: usize = 4;
 
-/// Fixed global concurrency cap for throughput jobs (folder size traversal,
-/// copy/move/archive I/O).
-pub const MAX_THROUGHPUT_SLOTS: usize = 2;
-
 /// Fixed global concurrency cap for CPU-bound jobs (archive
 /// compression/extraction codec work).
 pub const MAX_CPU_SLOTS: usize = 2;
@@ -78,7 +74,7 @@ impl Occupancy {
     fn global_cap(class: JobClass) -> usize {
         match class {
             JobClass::Latency => MAX_LATENCY_SLOTS,
-            JobClass::Throughput => MAX_THROUGHPUT_SLOTS,
+            JobClass::Throughput => super::max_throughput_slots(),
             JobClass::Cpu => MAX_CPU_SLOTS,
         }
     }
