@@ -16,6 +16,10 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(toolbar.getByRole('button', { name: 'Back in Left pane' })).toBeVisible()
     await expect(toolbar.getByRole('button', { name: 'Up in Left pane' })).toBeVisible()
     await expect(toolbar.getByRole('button', { name: 'Refresh Left pane' })).toBeVisible()
+    await expect(
+      toolbar.getByRole('button', { name: 'Create new folder in Left pane' }),
+    ).toBeVisible()
+    await expect(toolbar.getByRole('button', { name: 'Create new file in Left pane' })).toBeVisible()
     await expect(toolbar.getByRole('textbox', { name: 'Left pane filter' })).toBeVisible()
     await expect(toolbar).toHaveScreenshot(`pane-toolbar-${mode}.png`)
   })

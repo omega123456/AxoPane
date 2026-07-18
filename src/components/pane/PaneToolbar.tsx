@@ -1,6 +1,8 @@
 import {
   ArrowLeftIcon,
   ArrowUpIcon,
+  FilePlusIcon,
+  FolderPlusIcon,
   PieChartIcon,
   RefreshIcon,
   SearchIcon,
@@ -62,6 +64,24 @@ export function PaneToolbar({ pane, isActive }: PaneToolbarProps) {
         className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab text-light-text-soft hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
       >
         <RefreshIcon className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        aria-label={`Create new folder in ${pane.title}`}
+        title="Create new folder"
+        onClick={() => openActionDialog({ kind: 'newFolder', paneId: pane.id })}
+        className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab text-light-text-soft hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
+      >
+        <FolderPlusIcon className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        aria-label={`Create new file in ${pane.title}`}
+        title="Create new file"
+        onClick={() => openActionDialog({ kind: 'newFile', paneId: pane.id })}
+        className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab text-light-text-soft hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
+      >
+        <FilePlusIcon className="h-3.5 w-3.5" />
       </button>
       {showCalculateAllSizes ? (
         <button

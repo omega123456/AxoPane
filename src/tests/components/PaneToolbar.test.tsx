@@ -132,6 +132,17 @@ describe('PaneToolbar', () => {
     })
   })
 
+  it('opens the create folder and file dialogs', async () => {
+    const user = userEvent.setup()
+    render(<PaneToolbar pane={pane()} isActive />)
+
+    await user.click(screen.getByRole('button', { name: 'Create new folder in Left pane' }))
+    expect(useActionDialogStore.getState().dialog).toEqual({ kind: 'newFolder', paneId: 'left' })
+
+    await user.click(screen.getByRole('button', { name: 'Create new file in Left pane' }))
+    expect(useActionDialogStore.getState().dialog).toEqual({ kind: 'newFile', paneId: 'left' })
+  })
+
   it('uses availability, configuration, and the folder threshold for size-action visibility', () => {
     usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
     useConfigStore.setState({ autoFolderSize: true })
