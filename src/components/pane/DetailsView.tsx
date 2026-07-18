@@ -48,7 +48,7 @@ type DetailsViewProps = {
   onPaneDragLeave: (event: React.DragEvent<HTMLDivElement>) => void
   onPaneDrop: (event: React.DragEvent<HTMLDivElement>) => void
   onParentFocus: () => void
-  onParentActivate: (clickCount?: number, eventTimeStamp?: number) => void
+  onParentActivate: (eventTimeStamp?: number) => void
   body?: ReactNode
   scrollContainerRef?: RefObject<HTMLDivElement | null>
 }

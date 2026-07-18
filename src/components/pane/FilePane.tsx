@@ -60,6 +60,11 @@ function isPermissionError(message: string | null) {
 const PARENT_ROW_ID = '..'
 // ponytail: 100 ms separates generated click bursts; tune only for measured slower macros.
 const macroContinuationWindowMs = 100
+// Parent-row activation pairs raw clicks itself instead of trusting dblclick:
+// webviews keep the OS click count running across up-navigations on the same
+// spot, so a second double-click on ".." can arrive as detail 3/4 (or no
+// dblclick at all). 500 ms matches the default OS double-click interval.
+const parentClickPairWindowMs = 500
 const rowHeightPx = 30
 const marqueeDragThresholdPx = 4
 const visibleIconRequestDebounceMs = 100
@@ -508,6 +513,29 @@ export function FilePane({ paneId }: FilePaneProps) {
       }
     }
     void activateEntry(entryId)
+  }
+
+  // Every completed pair of clicks on ".." goes up one level, regardless of
+  // what event.detail the webview reports. Clicks landing right after another
+  // pointer activation are strays from that same burst and are dropped.
+  const parentPendingClickAtRef = useRef<number | null>(null)
+  function activateParentFromPointer(eventTimeStamp?: number) {
+    if (eventTimeStamp === undefined) {
+      void activateEntry(PARENT_ROW_ID)
+      return
+    }
+    const lastActivationAt = lastPointerActivationAtRef.current
+    if (lastActivationAt !== null && eventTimeStamp - lastActivationAt < macroContinuationWindowMs) {
+      return
+    }
+    const pendingAt = parentPendingClickAtRef.current
+    if (pendingAt !== null && eventTimeStamp - pendingAt <= parentClickPairWindowMs) {
+      parentPendingClickAtRef.current = null
+      lastPointerActivationAtRef.current = eventTimeStamp
+      void activateEntry(PARENT_ROW_ID)
+    } else {
+      parentPendingClickAtRef.current = eventTimeStamp
+    }
   }
 
   function selectWithModifiers(entryId: string, event: React.MouseEvent<HTMLDivElement>) {
@@ -1010,9 +1038,7 @@ export function FilePane({ paneId }: FilePaneProps) {
           onPaneDragLeave={handlePaneDragLeave}
           onPaneDrop={(event) => void handlePaneDrop(event)}
           onParentFocus={() => focusByRowIndex(0)}
-          onParentActivate={(clickCount, eventTimeStamp) =>
-            activateEntryFromPointer(PARENT_ROW_ID, clickCount, eventTimeStamp)
-          }
+          onParentActivate={activateParentFromPointer}
           scrollContainerRef={parentRef}
           body={
             showSkeleton ? (

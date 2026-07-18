@@ -4,7 +4,7 @@ import { vi } from 'vitest'
 import { ParentRow } from '@/components/pane/ParentRow'
 
 describe('ParentRow', () => {
-  it('focuses on click and activates on double click or Enter', async () => {
+  it('reports every pointer click with its timestamp and activates on Enter', async () => {
     const user = userEvent.setup()
     const onPointerDown = vi.fn()
     const onActivate = vi.fn()
@@ -24,10 +24,12 @@ describe('ParentRow', () => {
     await user.click(row)
     expect(onPointerDown).toHaveBeenCalledOnce()
     expect(onFocus).toHaveBeenCalledOnce()
-
-    await user.dblClick(row)
     expect(onActivate).toHaveBeenCalledOnce()
-    expect(onActivate).toHaveBeenLastCalledWith(2, expect.any(Number))
+    expect(onActivate).toHaveBeenLastCalledWith(expect.any(Number))
+
+    // Keyboard-synthesized clicks (detail 0) never join click pairing.
+    fireEvent.click(row, { detail: 0 })
+    expect(onActivate).toHaveBeenCalledOnce()
 
     fireEvent.keyDown(row, { key: 'Enter' })
     expect(onActivate).toHaveBeenCalledTimes(2)

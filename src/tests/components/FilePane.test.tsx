@@ -61,6 +61,12 @@ function doubleClick(target: Element, detail: number, timeStamp: number) {
   fireEvent(target, event)
 }
 
+function clickAt(target: Element, timeStamp: number) {
+  const event = new MouseEvent('click', { bubbles: true, detail: 1 })
+  Object.defineProperty(event, 'timeStamp', { value: timeStamp })
+  fireEvent(target, event)
+}
+
 beforeEach(() => {
   ipc.install()
   usePanesStore.getState().reset()
@@ -436,31 +442,44 @@ describe('FilePane state rendering', () => {
     expect(goUp).toHaveBeenCalledWith('left')
   })
 
-  it('ignores a rapid parent-row continuation but accepts a later macro invocation', () => {
+  it('pairs raw parent-row clicks so consecutive double-clicks each go up one level', () => {
     const originalGoUp = usePanesStore.getState().goUp
     const goUp = vi.fn(() => Promise.resolve())
     try {
       usePanesStore.setState({ goUp })
-      seedPane({ path: 'C:\\root\\dir', entries: [] })
+      seedPane({ path: 'C:\\root\\a\\b', entries: [] })
 
       const view = render(<FilePane paneId="left" />)
-      doubleClick(screen.getByRole('row', { name: 'Go to parent folder' }), 2, 100)
+      const parentRow = () => screen.getByRole('row', { name: 'Go to parent folder' })
+
+      // First double-click: the pair completes on the second click.
+      clickAt(parentRow(), 100)
+      expect(goUp).not.toHaveBeenCalled()
+      clickAt(parentRow(), 140)
+      expect(goUp).toHaveBeenCalledOnce()
 
       act(() => {
         usePanesStore.setState((state) => ({
           panes: {
             ...state.panes,
-            left: { ...state.panes.left, path: 'C:\\root', entries: [] },
+            left: { ...state.panes.left, path: 'C:\\root\\a', entries: [] },
           },
         }))
       })
       view.rerender(<FilePane paneId="left" />)
 
-      const parentRow = screen.getByRole('row', { name: 'Go to parent folder' })
-      doubleClick(parentRow, 4, 150)
+      // A stray click from the same generated burst is dropped entirely.
+      clickAt(parentRow(), 180)
       expect(goUp).toHaveBeenCalledOnce()
 
-      doubleClick(parentRow, 6, 250)
+      // Second double-click — the webview may report these as OS clicks 3/4,
+      // but pairing raw clicks still yields exactly one more level.
+      clickAt(parentRow(), 400)
+      clickAt(parentRow(), 440)
+      expect(goUp).toHaveBeenCalledTimes(2)
+
+      // A lone click much later only focuses, never navigates.
+      clickAt(parentRow(), 2000)
       expect(goUp).toHaveBeenCalledTimes(2)
     } finally {
       act(() => {

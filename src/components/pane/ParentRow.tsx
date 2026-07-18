@@ -8,15 +8,17 @@ type ParentRowProps = {
   isActivePane: boolean
   isFocused: boolean
   onPointerDown: () => void
-  onActivate: (clickCount?: number, eventTimeStamp?: number) => void
+  onActivate: (eventTimeStamp?: number) => void
   onFocus: () => void
 }
 
 /**
  * Synthetic ".." row rendered at the top of a pane's listing whenever the
- * current folder has a parent. Activating it (Enter / double-click / click)
- * navigates to the parent directory. It is intentionally never selectable for
- * copy/move or folder-size operations — it carries no entry id.
+ * current folder has a parent. Activating it (Enter / double-click) navigates
+ * to the parent directory. Double-clicks are detected by pairing raw click
+ * timestamps in FilePane rather than via dblclick, whose click counting is
+ * unreliable across consecutive up-navigations. It is intentionally never
+ * selectable for copy/move or folder-size operations — it carries no entry id.
  */
 export function ParentRow({
   isActivePane,
@@ -39,8 +41,14 @@ export function ParentRow({
         event.preventDefault()
         onPointerDown()
       }}
-      onClick={onFocus}
-      onDoubleClick={(event) => onActivate(event.detail, event.timeStamp)}
+      onClick={(event) => {
+        onFocus()
+        // detail 0 = keyboard-synthesized click (Space on the button); only
+        // real pointer clicks participate in double-click pairing.
+        if (event.detail > 0) {
+          onActivate(event.timeStamp)
+        }
+      }}
       onKeyDown={(event) => {
         if (event.key === 'Enter') {
           event.preventDefault()
