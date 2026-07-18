@@ -216,11 +216,14 @@ describe('EntryCard', () => {
         columnIndex={1}
         actions={cardActions}
         isRenaming
-        renameValue="New name"
+        renameValue={entry.name}
         renameError="Name exists"
       />,
     )
     const input = screen.getByRole('textbox', { name: `Rename ${entry.name}` })
+    expect(input).toHaveFocus()
+    expect(input).toHaveProperty('selectionStart', 0)
+    expect(input).toHaveProperty('selectionEnd', entry.name.lastIndexOf('.'))
     expect(screen.getByText('Name exists')).toBeInTheDocument()
     fireEvent.change(input, { target: { value: 'Changed' } })
     fireEvent.keyDown(input, { key: 'Enter' })

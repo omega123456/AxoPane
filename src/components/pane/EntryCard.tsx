@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef } from 'react'
 import { getUnixTime, parseISO } from 'date-fns'
 import type { DragEvent, KeyboardEvent, MouseEvent } from 'react'
 import { EntryIcon } from '@/components/icons/EntryIcon'
-import type { FileRowActions } from './FileRow'
+import { focusRenameInput, type FileRowActions } from './FileRow'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import { thumbnailFingerprintKey, useThumbnailStore } from '@/stores/thumbnail-store'
 
@@ -100,10 +100,9 @@ function EntryCardImpl({
   const renameInputRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
     if (isRenaming) {
-      renameInputRef.current?.focus()
-      renameInputRef.current?.select()
+      focusRenameInput(renameInputRef.current, entry.isDir)
     }
-  }, [isRenaming])
+  }, [entry.isDir, isRenaming])
 
   const stateClassName = `${isSelected ? 'bg-accent-blue-soft' : 'bg-light-surface dark:bg-dark-surface'} ${isFocused && isActivePane ? 'ring-2 ring-inset ring-accent-blue-border' : ''} ${isDropTarget ? 'ring-2 ring-inset ring-accent-blue-border bg-accent-blue-soft' : ''} ${isCut ? 'opacity-50' : ''}`
   const minimumCellClassName = mode === 'icons' ? 'min-w-icon-cell' : 'min-w-thumbnail-cell'

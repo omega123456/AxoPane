@@ -294,7 +294,7 @@ describe('FileRow rename mode', () => {
         isFocused={false}
         isSelected={false}
         isRenaming
-        renameValue="Doc"
+        renameValue="Doc.txt"
         actions={makeActions({
           onRenameChange,
           onRenameSubmit,
@@ -305,6 +305,9 @@ describe('FileRow rename mode', () => {
     )
 
     const input = screen.getByLabelText('Rename Doc.txt')
+    expect(input).toHaveFocus()
+    expect(input).toHaveProperty('selectionStart', 0)
+    expect(input).toHaveProperty('selectionEnd', 3)
     fireEvent.change(input, { target: { value: 'Doc2' } })
     expect(onRenameChange).toHaveBeenCalledWith('Doc2')
 

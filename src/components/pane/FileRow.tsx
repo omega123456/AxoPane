@@ -39,6 +39,19 @@ export type FileRowActions = {
   onRenameBlur: () => void
 }
 
+export function focusRenameInput(input: HTMLInputElement | null, isDirectory: boolean) {
+  if (!input) return
+
+  input.focus()
+  const extensionIndex = isDirectory ? -1 : input.value.lastIndexOf('.')
+  input.setSelectionRange(
+    0,
+    extensionIndex > 0 && extensionIndex < input.value.length - 1
+      ? extensionIndex
+      : input.value.length,
+  )
+}
+
 type FileRowProps = {
   entry: DirectoryEntry
   isActivePane: boolean
@@ -83,9 +96,8 @@ function FileRowImpl({
       return
     }
 
-    renameInputRef.current?.focus()
-    renameInputRef.current?.select()
-  }, [isRenaming])
+    focusRenameInput(renameInputRef.current, entry.isDir)
+  }, [entry.isDir, isRenaming])
 
   const rowClassName = `group flex h-row w-full items-center gap-3 border-b border-light-border px-3 text-row text-left focus-visible:outline-none dark:border-dark-border ${
     isSelected ? 'bg-accent-blue-soft' : 'bg-light-surface dark:bg-dark-surface'
