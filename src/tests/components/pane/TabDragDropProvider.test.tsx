@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useTabsStore } from '@/stores/tabs-store'
 import { TabDragDropProvider } from '@/components/pane/TabDragDropProvider'
 import { renderApp } from '../../utils/render-app'
@@ -63,6 +63,8 @@ describe('TabDragDropProvider', () => {
     dnd.handlers = {}
   })
 
+  afterEach(() => document.documentElement.style.removeProperty('zoom'))
+
   it('keeps a short primary-pointer gesture as a normal tab click', async () => {
     const user = userEvent.setup()
     renderApp()
@@ -72,6 +74,30 @@ describe('TabDragDropProvider', () => {
     const tabs = within(leftPane).getAllByRole('tab')
     await user.click(tabs[0])
     expect(useTabsStore.getState().panes.left.activeTabIndex).toBe(0)
+  })
+
+  it('counter-scales drag feedback while app zoom is active, then restores it', async () => {
+    renderApp()
+    await addLeftTab()
+    document.documentElement.style.zoom = '0.8'
+    const sourceTab = useTabsStore.getState().panes.left.tabs[0]
+    const source = document.querySelector<HTMLElement>(`[data-tab-label-id="${sourceTab.id}"]`)
+    const feedback = source?.parentElement
+    expect(feedback).toBeInstanceOf(HTMLElement)
+    feedback!.setAttribute('data-dnd-dragging', '')
+
+    await act(async () =>
+      dnd.handlers.onDragStart(
+        dragEvent('left', sourceTab.id, 'left', {
+          left: useTabsStore.getState().panes.left.tabs.map((tab) => tab.id),
+          right: [],
+        }),
+      ),
+    )
+    expect(feedback!.style.zoom).toBe('1.25')
+
+    feedback!.removeAttribute('data-dnd-dragging')
+    await waitFor(() => expect(feedback!.style.zoom).toBe(''))
   })
 
   it('previews then commits a valid same-pane move without changing tabs during hover', async () => {

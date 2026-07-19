@@ -389,6 +389,22 @@ export const screenshotScenarios = {
     load_session: tabDragSession,
     queue_snapshot: emptyQueueSnapshot,
   }),
+  tabDragZoomed: {
+    light: {
+      commands: {
+        load_config: { ...lightConfig, layout: { ...lightConfig.layout, zoom: '150' } },
+        load_session: tabDragSession,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+    },
+    dark: {
+      commands: {
+        load_config: { ...darkConfig, layout: { ...darkConfig.layout, zoom: '80' } },
+        load_session: tabDragSession,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+    },
+  },
   invalidTabDrag: scenarioByTheme({
     load_session: invalidTabDragSession,
     queue_snapshot: emptyQueueSnapshot,

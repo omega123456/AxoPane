@@ -87,6 +87,25 @@ function paneIdAtPoint(x: number, y: number) {
   return isPaneId(strip?.dataset.tabStrip) ? strip.dataset.tabStrip : null
 }
 
+function compensateDragZoom(element: HTMLElement) {
+  const zoom = Number.parseFloat(document.documentElement.style.zoom) || 1
+  if (zoom === 1) return
+
+  // DnD renders viewport geometry back inside the zoomed root. Counter-scale
+  // only its fixed-position feedback so that geometry stays in viewport pixels.
+  const previousZoom = element.style.zoom
+  element.style.zoom = String(1 / zoom)
+  const observer = new MutationObserver(() => {
+    if (!element.hasAttribute('data-dnd-dragging')) restore()
+  })
+  const restore = () => {
+    observer.disconnect()
+    element.style.zoom = previousZoom
+  }
+  observer.observe(element, { attributes: true, attributeFilter: ['data-dnd-dragging'] })
+  return restore
+}
+
 function validDestination(sourcePaneId: PaneId, destinationPaneId: PaneId) {
   return (
     sourcePaneId === destinationPaneId ||
@@ -140,6 +159,7 @@ export function TabDragDropProvider({ children }: TabDragDropProviderProps) {
   })
   const sourceTabId = useRef<string | null>(null)
   const sourceDomPosition = useRef<SourceDomPosition | null>(null)
+  const restoreDragZoom = useRef<(() => void) | undefined>(undefined)
 
   const tabIds = useMemo(
     () => ({
@@ -150,6 +170,10 @@ export function TabDragDropProvider({ children }: TabDragDropProviderProps) {
   )
 
   const reset = () => {
+    if (!sourceDomPosition.current?.element.hasAttribute('data-dnd-dragging')) {
+      restoreDragZoom.current?.()
+    }
+    restoreDragZoom.current = undefined
     sourceDomPosition.current = null
     setDragState({ sourcePaneId: null, destinationPaneId: null, isInvalid: false })
   }
@@ -194,6 +218,11 @@ export function TabDragDropProvider({ children }: TabDragDropProviderProps) {
                 nextSibling: sourceElement.nextElementSibling,
               }
             : null
+        restoreDragZoom.current?.()
+        // Let DnD capture the original placeholder and pointer origin first.
+        queueMicrotask(() => {
+          restoreDragZoom.current = sourceElement ? compensateDragZoom(sourceElement) : undefined
+        })
         setDragState({ sourcePaneId, destinationPaneId: sourcePaneId, isInvalid: false })
       }}
       onDragMove={(event) => {
