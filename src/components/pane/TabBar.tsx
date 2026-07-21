@@ -48,7 +48,7 @@ export function TabBar({ paneId, title, currentPath, isActive }: TabBarProps) {
     <div
       ref={stripRef}
       data-tab-strip={paneId}
-      className={`flex h-tabs items-stretch gap-0.5 overflow-x-auto bg-light-panel px-1 pt-1 dark:bg-dark-panel ${dragState.isInvalid ? 'cursor-not-allowed' : ''}`}
+      className={`flex h-tabs items-stretch gap-0.5 overflow-x-auto overflow-y-hidden bg-light-panel px-1 pt-1 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:bg-dark-panel dark:scrollbar-thumb-dark-text-faint ${dragState.isInvalid ? 'cursor-not-allowed' : ''}`}
     >
       {paneTabs.tabs.map((tab, index) => {
         const tabIsActive = index === paneTabs.activeTabIndex
