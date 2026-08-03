@@ -13,3 +13,12 @@ export const columnDefinitions: Record<
 }
 
 export const columnOrder = Object.keys(columnDefinitions) as ColumnKey[]
+
+/**
+ * Class for a data row's fixed-width cell wrapper. `truncate` has to live on the
+ * wrapper (a blockified flex item) — on the inline value spans inside it,
+ * `overflow: hidden` is inert and long values bleed into the next column.
+ */
+export function columnCellClassName(key: ColumnKey) {
+  return `${columnDefinitions[key].className} truncate`
+}

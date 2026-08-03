@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { gotoScenario, openSettingsSection, rightClickPane } from './helpers'
 import { screenshotScenarios } from '../src/tests/playwright-fixtures/e2e'
+import { longTypeLabel } from '../src/tests/playwright-fixtures/file-types'
 import { RELATIVE_DATES_NOW } from '../src/tests/playwright-fixtures/relative-dates'
 import { everythingAvailable, everythingUnavailable } from '../src/tests/playwright-fixtures/states'
 import {
@@ -296,6 +297,27 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.getByRole('region', { name: 'Left pane' })).toBeVisible()
     await expect(page.getByRole('row', { name: /installer\.exe/ }).first()).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`mixed-file-types-${mode}.png`)
+  })
+
+  test(`long column value stays inside its column ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.fileTypes[mode])
+    const row = page.getByRole('row', { name: /mystery\.qwzzz/ }).first()
+    await expect(row).toBeVisible()
+    const cell = await row.evaluate((element, label) => {
+      const match = [...element.children].find((child) => child.textContent === label)
+      return match
+        ? {
+            clientWidth: match.clientWidth,
+            scrollWidth: match.scrollWidth,
+            overflowX: getComputedStyle(match).overflowX,
+          }
+        : null
+    }, longTypeLabel)
+    expect(cell).not.toBeNull()
+    // The value is wider than its fixed-width cell, so the cell — not the inline
+    // span inside it — has to be the clipping box.
+    expect(cell!.scrollWidth).toBeGreaterThan(cell!.clientWidth)
+    expect(cell!.overflowX).toBe('hidden')
   })
 
   test(`relative dates ${mode}`, async ({ page }) => {

@@ -1,5 +1,5 @@
 import type { DirectoryEntry } from '@/lib/types/ipc'
-import { columnDefinitions } from '@/lib/columns'
+import { columnCellClassName } from '@/lib/columns'
 import { dateToneClassName, formatEntryDate } from '@/lib/date-format'
 import { AlertTriangleIcon } from '@/components/icons'
 import { EntryIcon } from '@/components/icons/EntryIcon'
@@ -120,14 +120,12 @@ function FileRowImpl({
     return (
       <div role="row" data-entry-id={entry.id} className={rowClassName}>
         {visibleColumns.map((column) => {
-          const definition = columnDefinitions[column.key]
-
           if (column.key === 'name') {
             return (
               <span
                 key={column.key}
                 style={columnFlexStyle(column.key, columnWidths)}
-                className={definition.className}
+                className={columnCellClassName(column.key)}
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <EntryIcon entry={entry} />
@@ -152,7 +150,7 @@ function FileRowImpl({
               <span
                 key={column.key}
                 style={columnFlexStyle(column.key, columnWidths)}
-                className={definition.className}
+                className={columnCellClassName(column.key)}
               >
                 <span className="font-mono text-uxs text-light-text-soft dark:text-dark-text-soft">
                   <SizeValue entry={entry} />
@@ -166,7 +164,7 @@ function FileRowImpl({
               <span
                 key={column.key}
                 style={columnFlexStyle(column.key, columnWidths)}
-                className={definition.className}
+                className={columnCellClassName(column.key)}
               >
                 <span className="font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
                   {entry.isDir ? (entry.itemCount ?? '—') : '—'}
@@ -180,7 +178,7 @@ function FileRowImpl({
               <span
                 key={column.key}
                 style={columnFlexStyle(column.key, columnWidths)}
-                className={definition.className}
+                className={columnCellClassName(column.key)}
               >
                 {renameError ? (
                   <span className="flex items-center gap-1 text-uxs text-accent-amber">
@@ -204,7 +202,7 @@ function FileRowImpl({
             <span
               key={column.key}
               style={columnFlexStyle(column.key, columnWidths)}
-              className={definition.className}
+              className={columnCellClassName(column.key)}
             >
               <span className={`font-mono text-uxs ${dateToneClassName[formatted.tone]}`}>
                 {formatted.text}
@@ -246,14 +244,12 @@ function FileRowImpl({
       }`}
     >
       {visibleColumns.map((column) => {
-        const definition = columnDefinitions[column.key]
-
         if (column.key === 'name') {
           return (
             <span
               key={column.key}
               style={columnFlexStyle(column.key, columnWidths)}
-              className={definition.className}
+              className={columnCellClassName(column.key)}
             >
               <span className="flex min-w-0 items-center gap-2">
                 <EntryIcon entry={entry} />
@@ -279,7 +275,7 @@ function FileRowImpl({
             <span
               key={column.key}
               style={columnFlexStyle(column.key, columnWidths)}
-              className={definition.className}
+              className={columnCellClassName(column.key)}
             >
               <span className="font-mono text-uxs text-light-text-soft dark:text-dark-text-soft">
                 <SizeValue entry={entry} />
@@ -293,7 +289,7 @@ function FileRowImpl({
             <span
               key={column.key}
               style={columnFlexStyle(column.key, columnWidths)}
-              className={definition.className}
+              className={columnCellClassName(column.key)}
             >
               <span className="font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
                 {entry.isDir ? (entry.itemCount ?? '—') : '—'}
@@ -307,7 +303,7 @@ function FileRowImpl({
             <span
               key={column.key}
               style={columnFlexStyle(column.key, columnWidths)}
-              className={definition.className}
+              className={columnCellClassName(column.key)}
             >
               <span className="truncate text-usm text-light-text-muted dark:text-dark-text-muted">
                 {entry.typeLabel}
@@ -324,7 +320,7 @@ function FileRowImpl({
           <span
             key={column.key}
             style={columnFlexStyle(column.key, columnWidths)}
-            className={definition.className}
+            className={columnCellClassName(column.key)}
           >
             <span className={`font-mono text-uxs ${dateToneClassName[formatted.tone]}`}>
               {formatted.text}

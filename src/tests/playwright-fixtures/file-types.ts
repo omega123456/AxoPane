@@ -10,6 +10,9 @@ const base = {
   isSystem: false,
 } satisfies Partial<DirectoryEntry>
 
+/** Wider than the Type column so a row's cell has to clip rather than bleed. */
+export const longTypeLabel = 'Unrecognised proprietary archive container'
+
 function file(name: string, typeLabel: string): DirectoryEntry {
   return {
     ...base,
@@ -63,7 +66,7 @@ export const fileTypesListDir: ListDirResponse = {
     file('disk.iso', 'Disc image'),
     file('index.html', 'HTML file'),
     file('installer.exe', 'Application'),
-    file('mystery.qwzzz', 'File'),
+    file('mystery.qwzzz', longTypeLabel),
     file('notes.txt', 'TXT file'),
     file('photo.png', 'PNG file'),
     file('regular.ttf', 'Font file'),

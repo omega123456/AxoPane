@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { ArrowUpIcon, FolderIcon } from '@/components/icons'
-import { columnDefinitions } from '@/lib/columns'
+import { columnCellClassName } from '@/lib/columns'
 import { useLayoutStore } from '@/stores/layout-store'
 import { columnFlexStyle } from './HeaderRow'
 
@@ -60,13 +60,12 @@ export function ParentRow({
       } hover:bg-light-hover dark:hover:bg-dark-hover`}
     >
       {visibleColumns.map((column) => {
-        const definition = columnDefinitions[column.key]
         if (column.key === 'name') {
           return (
             <span
               key={column.key}
               style={columnFlexStyle(column.key, columnWidths)}
-              className={definition.className}
+              className={columnCellClassName(column.key)}
             >
               <span className="flex min-w-0 items-center gap-2">
                 <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
@@ -84,7 +83,7 @@ export function ParentRow({
             <span
               key={column.key}
               style={columnFlexStyle(column.key, columnWidths)}
-              className={definition.className}
+              className={columnCellClassName(column.key)}
             >
               <span className="truncate text-usm text-light-text-muted dark:text-dark-text-muted">
                 Parent folder
@@ -97,7 +96,7 @@ export function ParentRow({
           <span
             key={column.key}
             style={columnFlexStyle(column.key, columnWidths)}
-            className={definition.className}
+            className={columnCellClassName(column.key)}
           >
             <span className="font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
               -
