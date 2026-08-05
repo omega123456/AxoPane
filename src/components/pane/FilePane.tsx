@@ -29,6 +29,8 @@ import { PermissionDenied } from '@/components/states/PermissionDenied'
 import { useDelayedFlag } from '@/lib/use-delayed-flag'
 import { renameEntryInPane } from '@/lib/file-actions'
 import { log } from '@/lib/app-log-commands'
+import { startNativeDrag } from '@/lib/ipc/commands'
+import { beginNativeDragBridge, endNativeDragBridge } from '@/lib/native-drag-bridge'
 import { useInlineRenameStore } from '@/stores/inline-rename-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { activeConflict, useQueueStore } from '@/stores/queue-store'
@@ -746,8 +748,26 @@ export function FilePane({ paneId }: FilePaneProps) {
       return
     }
     beginDrag({ kind: 'file-transfer', sourcePaneId: paneId, sourceDir: pane.path, items })
-    event.dataTransfer.effectAllowed = 'copyMove'
-    event.dataTransfer.setData('text/plain', items.map((item) => item.path).join('\n'))
+    // A webview HTML5 drag never becomes an OS drag session, so other apps (Teams,
+    // Finder, Explorer, …) would never see a file. Cancel it and hand the gesture
+    // to the OS instead. In-app drop targets are unaffected: they read the payload
+    // from `useDragStore` (set above), and the OS delivers its own drag session
+    // back into the webview as ordinary DOM drag events.
+    event.preventDefault()
+    // The OS drag is invisible to the webview, so the bridge replays it as DOM
+    // drag events for the drop targets below.
+    beginNativeDragBridge()
+    // Resolves when the drag ends either way, which is what tears the drag state
+    // down now that there is no HTML5 `dragend` to hang it off.
+    void startNativeDrag({ paths: items.map((item) => item.path) })
+      .catch((error: unknown) => {
+        log.error('native drag failed', { error })
+      })
+      .finally(() => {
+        // Drops on the last hovered target before the store is cleared.
+        endNativeDragBridge()
+        clearDragState()
+      })
   }
 
   function clearDragState() {

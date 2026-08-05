@@ -205,13 +205,21 @@ export const ipc = {
       },
     })
   },
+  /**
+   * A responder may return a promise so a test can model a command that is
+   * still in flight (`start_native_drag` stays pending for as long as the OS
+   * drag session lasts) and settle it when the test is ready. It is stored as
+   * its resolved shape — the transport awaits whatever the responder returns.
+   */
   override<CommandName extends keyof IpcCommandMap>(
     command: CommandName,
     response:
       | IpcCommandMap[CommandName]['response']
       | ((
           payload: IpcCommandMap[CommandName]['request'],
-        ) => IpcCommandMap[CommandName]['response']),
+        ) =>
+          | IpcCommandMap[CommandName]['response']
+          | Promise<IpcCommandMap[CommandName]['response']>),
   ) {
     overrides[command] = response as OverrideMap[CommandName]
   },

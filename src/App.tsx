@@ -24,6 +24,7 @@ import {
   onVolumesChanged,
 } from '@/lib/ipc/events'
 import { resolveCommandForEvent } from '@/lib/keymap'
+import { subscribeNativeDragPositions } from '@/lib/native-drag-bridge'
 import { createRafBatcher } from '@/lib/raf-batcher'
 import type {
   IconStateEvent,
@@ -269,7 +270,12 @@ function App() {
       }
     })
 
+    // Replays an OS-owned drag session as DOM drag events; the webview never
+    // sees one otherwise.
+    const unlistenDragPositionsPromise = subscribeNativeDragPositions()
+
     return () => {
+      void unlistenDragPositionsPromise.then((unlisten) => unlisten())
       void unlistenVolumesPromise.then((unlisten) => unlisten())
       void unlistenSizesPromise.then((unlisten) => unlisten())
       void unlistenIconsPromise.then((unlisten) => unlisten())

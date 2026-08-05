@@ -43,6 +43,7 @@ import type {
   SessionRangeResponse,
   SetDefaultApplicationRequest,
   ShowPropertiesRequest,
+  StartNativeDragRequest,
   TrashEntriesRequest,
   VisibleItemCountsRequest,
   WarmNativeMenusRequest,
@@ -138,6 +139,15 @@ export function deleteFromTrash(payload: DeleteFromTrashRequest) {
 
 export function openPath(payload: OpenPathRequest) {
   return invokeCommand({ command: 'open_path', payload }) as Promise<void>
+}
+
+/**
+ * Hands the given absolute paths to the OS as a native drag session. Resolves
+ * when the drag ends (dropped or cancelled) — the webview's HTML5 drag is
+ * cancelled in favour of this, so there is no `dragend` event to wait on.
+ */
+export function startNativeDrag(payload: StartNativeDragRequest) {
+  return invokeCommand({ command: 'start_native_drag', payload }) as Promise<void>
 }
 
 export function writeFileClipboard(payload: WriteFileClipboardRequest) {

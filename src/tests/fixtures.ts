@@ -522,4 +522,5 @@ export const fixtures: {
     },
   ],
   set_log_level: undefined,
+  start_native_drag: undefined,
 }

@@ -8,6 +8,7 @@ pub mod ipc;
 pub mod item_counts;
 pub mod launch;
 pub mod logging;
+pub mod native_drag;
 pub mod native_menu;
 pub mod ops;
 pub mod persist;
@@ -372,7 +373,8 @@ pub fn run() {
             commands::has_unfinished_ops,
             commands::log_frontend,
             commands::read_logs,
-            commands::set_log_level
+            commands::set_log_level,
+            crate::native_drag::start_native_drag
         ])
         .run(tauri::generate_context!())
         .expect("error while running file explorer application")

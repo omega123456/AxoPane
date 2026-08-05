@@ -44,3 +44,7 @@ export function onQueueRemoved(handler: (payload: IpcEventMap['queue://removed']
 export function onWatchError(handler: (payload: IpcEventMap['watch://error']) => void) {
   return subscribeToEvent('watch://error', handler)
 }
+
+export function onDragPosition(handler: (payload: IpcEventMap['drag://position']) => void) {
+  return subscribeToEvent('drag://position', handler)
+}
