@@ -260,9 +260,9 @@ mod native {
         }
     }
 
-    /// ~60 Hz: fast enough that the drop-target highlight tracks the pointer without
-    /// visible lag, slow enough to stay a rounding error next to the drag itself.
-    const CURSOR_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
+    /// ~250 Hz keeps the badge current on 240 Hz displays. This only runs during
+    /// an active drag; lower-rate displays naturally coalesce the extra paints.
+    const CURSOR_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(4);
 
     /// Reads the modifier keys currently held. Polled alongside the cursor rather
     /// than sampled at drag start, so pressing (or releasing) a modifier mid-drag

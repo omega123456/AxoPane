@@ -26,15 +26,15 @@ export function DragCursorBadge() {
     <div
       // Offset down-right so the badge clears the OS drag image, which is drawn
       // at the pointer itself. Positioning is per-frame data, hence inline.
-      className="pointer-events-none fixed z-50 translate-x-4 translate-y-5"
+      className="pointer-events-none fixed left-0 top-0 z-50 translate-x-4 translate-y-5 will-change-transform"
       // The cursor is in viewport pixels, but this element sits inside the root's
       // CSS `zoom`, which scales every length in the subtree — including a fixed
       // element's offsets. Dividing by the factor cancels that, so the badge
       // lands on the pointer at any zoom level.
-      style={{ left: cursor.x / zoom, top: cursor.y / zoom }}
+      style={{ transform: `translate3d(${cursor.x / zoom}px, ${cursor.y / zoom}px, 0)` }}
       aria-hidden="true"
     >
-      <span className="flex items-center gap-1 rounded-md border border-light-border-strong bg-light-surface px-1.5 py-0.5 text-uxs font-medium text-light-text shadow-float dark:border-dark-border-strong dark:bg-dark-surface dark:text-dark-text">
+      <span className="flex items-center gap-1 rounded-md border border-light-border-strong bg-light-surface px-1.5 py-0.5 text-uxs font-medium text-light-text dark:border-dark-border-strong dark:bg-dark-surface dark:text-dark-text">
         <Icon className="h-3 w-3 shrink-0 text-light-text-muted dark:text-dark-text-muted" />
         {copying ? 'Copy' : 'Move'}
       </span>

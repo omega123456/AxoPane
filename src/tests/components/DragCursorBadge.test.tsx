@@ -27,7 +27,7 @@ describe('DragCursorBadge', () => {
 
     const badge = screen.getByText('Move')
     expect(badge).toBeVisible()
-    expect(badge.closest('div')).toHaveStyle({ left: '120px', top: '340px' })
+    expect(badge.closest('div')).toHaveStyle({ transform: 'translate3d(120px, 340px, 0)' })
   })
 
   it('switches label when the modifier flips the drop to a copy', () => {
@@ -59,8 +59,7 @@ describe('DragCursorBadge', () => {
     // is scaled by 1.5 — so the offsets have to be divided by it to land on the
     // pointer rather than 1.5x further out.
     expect(screen.getByText('Copy').closest('div')).toHaveStyle({
-      left: '200px',
-      top: '100px',
+      transform: 'translate3d(200px, 100px, 0)',
     })
   })
 
