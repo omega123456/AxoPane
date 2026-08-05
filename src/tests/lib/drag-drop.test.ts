@@ -7,6 +7,7 @@ import {
   performDrop,
   resolveDropKind,
   sameVolume,
+  setDropEffect,
   type FileTransferDragPayload,
 } from '@/lib/drag-drop'
 
@@ -81,6 +82,19 @@ describe('resolveDropKind', () => {
     expect(resolveDropKind({ ctrlKey: false, shiftKey: true }, 'C:\\a', 'D:\\b', 'windows')).toBe(
       'move',
     )
+  })
+})
+
+describe('setDropEffect', () => {
+  it('keeps a Copy-only native source accepted while preserving ordinary move drags', () => {
+    const native = { effectAllowed: 'copy', dropEffect: 'none' } as DataTransfer
+    const ordinary = { effectAllowed: 'copyMove', dropEffect: 'none' } as DataTransfer
+
+    setDropEffect(native, 'move')
+    setDropEffect(ordinary, 'move')
+
+    expect(native.dropEffect).toBe('copy')
+    expect(ordinary.dropEffect).toBe('move')
   })
 })
 

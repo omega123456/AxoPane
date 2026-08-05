@@ -3,7 +3,7 @@ import { ChevronRightIcon } from '@/components/icons'
 import { EntryIcon } from '@/components/icons/EntryIcon'
 import { VolumeIcon } from '@/components/icons/VolumeIcon'
 import { detectPlatformOs } from '@/lib/keymap'
-import { canDropInto, performDrop, resolveDropKind } from '@/lib/drag-drop'
+import { canDropInto, performDrop, resolveDropKind, setDropEffect } from '@/lib/drag-drop'
 import type { VolumeInfo } from '@/lib/types/ipc'
 import type { TreeNodeState } from '@/stores/panes-store'
 import { useDragStore } from '@/stores/drag-store'
@@ -88,11 +88,9 @@ function TreeNodeImpl({
       return
     }
     event.preventDefault()
-    event.dataTransfer.dropEffect = resolveDropKind(
-      dropModifiers(event),
-      drag.sourceDir,
-      node.path,
-      os,
+    setDropEffect(
+      event.dataTransfer,
+      resolveDropKind(dropModifiers(event), drag.sourceDir, node.path, os),
     )
     setIsDropTarget(true)
   }

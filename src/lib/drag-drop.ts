@@ -97,6 +97,15 @@ function volumeKey(path: string, os: PlatformOs) {
 /** The two transfer kinds an internal drop can produce. */
 export type DropKind = Extract<OpKind, 'copy' | 'move'>
 
+/**
+ * Requests the real in-app outcome unless the OS source only permits Copy.
+ * Native file drags stay Copy-only so an external target can never delete the
+ * source; asking that source for Move makes Windows show a false no-drop cursor.
+ */
+export function setDropEffect(dataTransfer: DataTransfer, kind: DropKind) {
+  dataTransfer.dropEffect = dataTransfer.effectAllowed === 'copy' ? 'copy' : kind
+}
+
 /** Resolve copy vs move: Ctrl forces copy, Shift forces move, else volume-based. */
 export function resolveDropKind(
   modifiers: DropModifiers,

@@ -99,46 +99,89 @@ mod native {
         }
     }
 
+    fn run_session(
+        window: tauri::WebviewWindow,
+        paths: Vec<std::path::PathBuf>,
+        sender: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    ) {
+        log::info!("native drag: starting session for {} path(s)", paths.len());
+        let finished = Arc::clone(&sender);
+        let started = drag::start_drag(
+            &window,
+            drag::DragItem::Files(paths),
+            drag_image(),
+            move |result, cursor| {
+                log::info!(
+                    "native drag: session ended {result:?} at ({}, {})",
+                    cursor.x,
+                    cursor.y
+                );
+                signal(&finished)
+            },
+            drag::Options {
+                // External targets always receive a copy: a `Move` the OS
+                // honours would delete the file out from under the pane.
+                mode: drag::DragMode::Copy,
+                ..Default::default()
+            },
+        );
+        if let Err(error) = started {
+            log::error!("Failed to start the native drag: {error}");
+            signal(&sender);
+        }
+    }
+
+    #[cfg(windows)]
+    type WindowsDragJob = (
+        tauri::WebviewWindow,
+        Vec<std::path::PathBuf>,
+        Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    );
+
+    #[cfg(windows)]
+    fn start_windows_drag(job: WindowsDragJob) -> Result<(), String> {
+        use std::sync::{mpsc, OnceLock};
+
+        // `drag` initializes OLE behind a process-wide `Once`, so every Windows
+        // session must use the same STA. Keeping `DoDragDrop` off Tauri's UI
+        // thread lets its event loop deliver the live cursor stream and repaint
+        // the frontend badge while the modal OLE loop is running.
+        static WORKER: OnceLock<Result<mpsc::Sender<WindowsDragJob>, String>> = OnceLock::new();
+        let worker = WORKER
+            .get_or_init(|| {
+                let (sender, receiver) = mpsc::channel();
+                std::thread::Builder::new()
+                    .name("native-drag".to_string())
+                    .spawn(move || {
+                        while let Ok((window, paths, finished)) = receiver.recv() {
+                            run_session(window, paths, finished);
+                        }
+                    })
+                    .map(|_| sender)
+                    .map_err(|error| format!("Failed to start the native drag worker: {error}"))
+            })
+            .as_ref()
+            .map_err(Clone::clone)?;
+        worker
+            .send(job)
+            .map_err(|_| "native drag worker stopped unexpectedly".to_string())
+    }
+
     pub async fn start(
         window: tauri::WebviewWindow,
         paths: Vec<std::path::PathBuf>,
     ) -> Result<(), String> {
         let (sender, receiver) = oneshot::channel();
         let sender = Arc::new(Mutex::new(Some(sender)));
-        let finished = Arc::clone(&sender);
         let drag_window = window.clone();
 
-        // Both `beginDraggingSession` (macOS) and `DoDragDrop` (Windows) must run on
-        // the UI thread; the latter also blocks it for the duration of the gesture,
-        // pumping its own modal message loop.
+        #[cfg(target_os = "macos")]
         window
-            .run_on_main_thread(move || {
-                log::info!("native drag: starting session for {} path(s)", paths.len());
-                let started = drag::start_drag(
-                    &drag_window,
-                    drag::DragItem::Files(paths),
-                    drag_image(),
-                    move |result, cursor| {
-                        log::info!(
-                            "native drag: session ended {result:?} at ({}, {})",
-                            cursor.x,
-                            cursor.y
-                        );
-                        signal(&finished)
-                    },
-                    drag::Options {
-                        // External targets always receive a copy: a `Move` the OS
-                        // honours would delete the file out from under the pane.
-                        mode: drag::DragMode::Copy,
-                        ..Default::default()
-                    },
-                );
-                if let Err(error) = started {
-                    log::error!("Failed to start the native drag: {error}");
-                    signal(&sender);
-                }
-            })
+            .run_on_main_thread(move || run_session(drag_window, paths, sender))
             .map_err(|error| format!("Failed to start the native drag: {error}"))?;
+
+        #[cfg(windows)]
+        start_windows_drag((drag_window, paths, sender))?;
 
         // WKWebView does not deliver a self-originated drag session back to the page
         // as DOM drag events, so the webview is blind for the whole gesture. Streaming

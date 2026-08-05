@@ -45,7 +45,13 @@ import { useDragStore } from '@/stores/drag-store'
 import { useNativeMenuWarmStore } from '@/stores/native-menu-warm-store'
 import { useThumbnailStore } from '@/stores/thumbnail-store'
 import { useTabsStore } from '@/stores/tabs-store'
-import { canDropInto, performDrop, resolveDropKind, type DragItem } from '@/lib/drag-drop'
+import {
+  canDropInto,
+  performDrop,
+  resolveDropKind,
+  setDropEffect,
+  type DragItem,
+} from '@/lib/drag-drop'
 import { getUnixTime, parseISO } from 'date-fns'
 import type { GridMovement } from '@/lib/pane-grid'
 import type { ThumbnailCandidateRequest } from '@/lib/types/ipc'
@@ -791,11 +797,9 @@ export function FilePane({ paneId }: FilePaneProps) {
     // pane-background highlight from also lighting up while over a folder row.
     event.preventDefault()
     event.stopPropagation()
-    event.dataTransfer.dropEffect = resolveDropKind(
-      dropModifiers(event),
-      drag.sourceDir,
-      entry.path,
-      os,
+    setDropEffect(
+      event.dataTransfer,
+      resolveDropKind(dropModifiers(event), drag.sourceDir, entry.path, os),
     )
     setDropTargetEntryId(entry.id)
   }
@@ -823,11 +827,9 @@ export function FilePane({ paneId }: FilePaneProps) {
       return
     }
     event.preventDefault()
-    event.dataTransfer.dropEffect = resolveDropKind(
-      dropModifiers(event),
-      drag.sourceDir,
-      pane.path,
-      os,
+    setDropEffect(
+      event.dataTransfer,
+      resolveDropKind(dropModifiers(event), drag.sourceDir, pane.path, os),
     )
     setIsPaneDropTarget(true)
   }
