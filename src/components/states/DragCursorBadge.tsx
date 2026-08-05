@@ -1,0 +1,37 @@
+import { CopyIcon, CornerUpRightIcon } from 'lucide-react'
+import { useDragCursorStore } from '@/stores/drag-cursor-store'
+
+/**
+ * Copy-vs-move feedback that follows the pointer during an OS-owned drag.
+ *
+ * The OS cursor badge cannot carry it: the drag session advertises Copy for its
+ * whole lifetime (deliberately, so an external app never moves a file out of the
+ * pane), and wry forces `NSDragOperation::Copy` when the page accepts nothing.
+ * So the badge always reads "copy" no matter which modifier is held. This draws
+ * the real outcome next to the cursor instead.
+ */
+export function DragCursorBadge() {
+  const cursor = useDragCursorStore((state) => state.cursor)
+
+  if (!cursor) {
+    return null
+  }
+
+  const copying = cursor.kind === 'copy'
+  const Icon = copying ? CopyIcon : CornerUpRightIcon
+
+  return (
+    <div
+      // Offset down-right so the badge clears the OS drag image, which is drawn
+      // at the pointer itself. Positioning is per-frame data, hence inline.
+      className="pointer-events-none fixed z-50 translate-x-4 translate-y-5"
+      style={{ left: cursor.x, top: cursor.y }}
+      aria-hidden="true"
+    >
+      <span className="flex items-center gap-1 rounded-md border border-light-border-strong bg-light-surface px-1.5 py-0.5 text-uxs font-medium text-light-text shadow-float dark:border-dark-border-strong dark:bg-dark-surface dark:text-dark-text">
+        <Icon className="h-3 w-3 shrink-0 text-light-text-muted dark:text-dark-text-muted" />
+        {copying ? 'Copy' : 'Move'}
+      </span>
+    </div>
+  )
+}

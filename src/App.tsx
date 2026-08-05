@@ -10,6 +10,7 @@ import { CommandBar } from '@/components/shell/CommandBar'
 import { StatusBar } from '@/components/shell/StatusBar'
 import { WorkspaceLayout } from '@/components/shell/WorkspaceLayout'
 import { QueueOverlay } from '@/components/queue/QueueOverlay'
+import { DragCursorBadge } from '@/components/states/DragCursorBadge'
 import { ErrorToast } from '@/components/states/ErrorToast'
 import { hydrateAppConfig, persistAppConfig } from '@/lib/app-config'
 import { executeCommand } from '@/lib/commands'
@@ -321,6 +322,7 @@ function App() {
           <>
             <QueueOverlay />
             <ErrorToast />
+            <DragCursorBadge />
           </>
         }
       >

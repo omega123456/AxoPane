@@ -781,3 +781,44 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`set-default-application-error-${mode}.png`)
   })
 }
+
+for (const mode of ['light', 'dark'] as const) {
+  test(`native drag badge ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.nativeDrag[mode])
+
+    const pane = page.getByLabel('Left pane')
+    const source = pane.getByRole('row', { name: /Report\.txt/ }).first()
+    const folder = pane.getByRole('row', { name: /Documents/ }).first()
+    await expect(folder).toBeVisible()
+
+    // Start the gesture from the DOM: this arms the bridge and calls
+    // `start_native_drag`, which the scenario holds open for the screenshot.
+    await source.dispatchEvent('dragstart')
+
+    // Then place the OS cursor over the folder, as Rust's stream would. The
+    // payload is physical pixels relative to the window frame, with the frame
+    // sized to the viewport so there is no chrome to subtract.
+    const box = (await folder.boundingBox()) ?? { x: 0, y: 0, width: 0, height: 0 }
+    await page.evaluate(
+      ([x, y]) => {
+        const ratio = window.devicePixelRatio || 1
+        window.__PLAYWRIGHT_IPC_EMIT__?.('drag://position', {
+          cursorX: x * ratio,
+          cursorY: y * ratio,
+          frameWidth: window.innerWidth * ratio,
+          frameHeight: window.innerHeight * ratio,
+          ctrlKey: false,
+          shiftKey: false,
+          altKey: false,
+          metaKey: false,
+        })
+      },
+      [box.x + box.width / 2, box.y + box.height / 2],
+    )
+
+    // Same volume and no modifier, so this is a move — deliberately not asserting
+    // a modifier-driven copy, whose key differs per platform.
+    await expect(page.getByText('Move', { exact: true })).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`native-drag-badge-${mode}.png`)
+  })
+}

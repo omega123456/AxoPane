@@ -1,6 +1,12 @@
 import { onDragPosition } from '@/lib/ipc/events'
 import { log } from '@/lib/app-log-commands'
+import { useDragCursorStore, type DragCursor } from '@/stores/drag-cursor-store'
+import type { DropKind } from '@/lib/drag-drop'
 import type { DragPositionEvent } from '@/lib/types/ipc'
+
+function setCursor(cursor: DragCursor | null) {
+  useDragCursorStore.getState().setCursor(cursor)
+}
 
 /**
  * Replays an OS drag session into the DOM.
@@ -65,8 +71,10 @@ function dispatchDragEvent(
     relatedTarget,
     ...session.modifiers,
   })
-  Object.defineProperty(event, 'dataTransfer', { value: syntheticDataTransfer() })
+  const transfer = syntheticDataTransfer()
+  Object.defineProperty(event, 'dataTransfer', { value: transfer })
   target.dispatchEvent(event)
+  return { accepted: event.defaultPrevented, dropEffect: transfer.dropEffect }
 }
 
 /**
@@ -121,9 +129,21 @@ function handlePosition(event: DragPositionEvent) {
       dispatchDragEvent('dragenter', target, session, previous)
     }
   }
-  if (target) {
-    dispatchDragEvent('dragover', target, session)
+  if (!target) {
+    // Pointer is outside the window: the drop belongs to another application, and
+    // its own cursor feedback takes over.
+    setCursor(null)
+    return
   }
+  // A drop target marks itself valid by calling `preventDefault` and setting
+  // `dropEffect`, exactly as it would for a webview drag — so the badge reports
+  // what the existing handlers decided, with no second copy of that logic.
+  const { accepted, dropEffect } = dispatchDragEvent('dragover', target, session)
+  setCursor(accepted && isDropKind(dropEffect) ? { x, y, kind: dropEffect } : null)
+}
+
+function isDropKind(effect: string): effect is DropKind {
+  return effect === 'copy' || effect === 'move'
 }
 
 /**
@@ -158,7 +178,13 @@ function sameRegion(a: Element | null, b: Element | null) {
  * target left to drop on.
  */
 export function subscribeNativeDragPositions() {
-  return onDragPosition(handlePosition)
+  // Wrapped rather than passed by reference: subscribers are held in a Set keyed
+  // by function identity, so two overlapping subscriptions of the same reference
+  // collapse into one — and the first one's teardown then unsubscribes the
+  // second. React's StrictMode double-invoke does exactly that.
+  return onDragPosition((position) => {
+    handlePosition(position)
+  })
 }
 
 /**
@@ -182,6 +208,7 @@ export function beginNativeDragBridge() {
 export function endNativeDragBridge() {
   const finished = session
   session = null
+  setCursor(null)
   if (!finished) {
     return
   }

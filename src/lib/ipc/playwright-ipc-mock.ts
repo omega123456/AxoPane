@@ -256,6 +256,22 @@ export async function invokePlaywrightCommand<CommandName extends keyof IpcComma
   return withLiveNativeRequestId(command, payload, getFixtureResponse(command))
 }
 
+/**
+ * Lets a spec emit an event mid-test, for UI that only exists once something has
+ * already happened in the page — the native-drag badge needs a drag started from
+ * the DOM first, so scenario-scripted events (delivered at subscribe time) are
+ * too early. Fixture data still belongs in `playwright-fixtures`; this is only
+ * the trigger.
+ */
+declare global {
+  interface Window {
+    __PLAYWRIGHT_IPC_EMIT__?: <EventName extends keyof IpcEventMap>(
+      eventName: EventName,
+      payload: IpcEventMap[EventName],
+    ) => void
+  }
+}
+
 export async function listenPlaywrightEvent<EventName extends keyof IpcEventMap>(
   eventName: EventName,
   handler: (payload: IpcEventMap[EventName]) => void,
@@ -263,6 +279,7 @@ export async function listenPlaywrightEvent<EventName extends keyof IpcEventMap>
   const handlers = listeners[eventName] ?? new Set()
   handlers.add(handler as (payload: unknown) => void)
   listeners[eventName] = handlers
+  window.__PLAYWRIGHT_IPC_EMIT__ = emitPlaywrightEvent
 
   const scriptedEvents = readScenario()?.events?.[eventName]
   if (scriptedEvents) {

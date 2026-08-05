@@ -4,6 +4,7 @@ import { ipc } from '@/tests/ipc-mock'
 import { endNativeDragBridge, subscribeNativeDragPositions } from '@/lib/native-drag-bridge'
 import { FilePane } from '@/components/pane/FilePane'
 import { useDragStore } from '@/stores/drag-store'
+import { useDragCursorStore } from '@/stores/drag-cursor-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import type { DirectoryEntry } from '@/lib/types/ipc'
@@ -396,5 +397,58 @@ describe('FilePane in-app drops during an OS-owned drag', () => {
     await waitFor(() => {
       expect(startOp).toHaveBeenCalledWith(expect.objectContaining({ kind: 'copy' }))
     })
+  })
+})
+
+describe('FilePane drag cursor badge', () => {
+  it('reports the operation the hovered drop target resolved', async () => {
+    seedPane('left', { path: 'C:\\root', entries: [entry('Alpha'), entry('Target', true)] })
+
+    render(<FilePane paneId="left" />)
+    const pane = within(screen.getByLabelText('Left pane'))
+    fireEvent.dragStart(pane.getByRole('row', { name: /Alpha/ }), { dataTransfer: dataTransfer() })
+    await waitFor(() => {
+      expect(nativeDrag.paths).toHaveLength(1)
+    })
+
+    // Same volume, no modifier: a move.
+    await dragPointerOnto(pane.getByRole('row', { name: /Target/ }))
+    expect(useDragCursorStore.getState().cursor).toMatchObject({ kind: 'move' })
+
+    // Ctrl forces a copy, and the badge follows the same decision the drop will.
+    await dragPointerOnto(pane.getByRole('row', { name: /Target/ }), { ctrlKey: true })
+    expect(useDragCursorStore.getState().cursor).toMatchObject({ kind: 'copy' })
+  })
+
+  it('shows nothing over a target that rejects the drop', async () => {
+    seedPane('left', { path: 'C:\\root', entries: [entry('Self', true)] })
+
+    render(<FilePane paneId="left" />)
+    const self = within(screen.getByLabelText('Left pane')).getByRole('row', { name: /Self/ })
+    fireEvent.dragStart(self, { dataTransfer: dataTransfer() })
+    await waitFor(() => {
+      expect(nativeDrag.paths).toHaveLength(1)
+    })
+
+    // Dropping a folder into itself is invalid, so there is no operation to name.
+    await dragPointerOnto(self)
+    expect(useDragCursorStore.getState().cursor).toBeNull()
+  })
+
+  it('clears the badge when the drag ends', async () => {
+    seedPane('left', { path: 'C:\\root', entries: [entry('Alpha'), entry('Target', true)] })
+
+    render(<FilePane paneId="left" />)
+    const pane = within(screen.getByLabelText('Left pane'))
+    fireEvent.dragStart(pane.getByRole('row', { name: /Alpha/ }), { dataTransfer: dataTransfer() })
+    await waitFor(() => {
+      expect(nativeDrag.paths).toHaveLength(1)
+    })
+    await dragPointerOnto(pane.getByRole('row', { name: /Target/ }))
+    expect(useDragCursorStore.getState().cursor).not.toBeNull()
+
+    await nativeDrag.end()
+
+    expect(useDragCursorStore.getState().cursor).toBeNull()
   })
 })

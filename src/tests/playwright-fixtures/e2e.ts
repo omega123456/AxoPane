@@ -637,6 +637,27 @@ export const screenshotScenarios = {
       },
     },
   },
+  // The drag badge only exists while an OS drag session is live, so
+  // `start_native_drag` is held open for the duration of the screenshot — the
+  // real command resolves only when the drag ends.
+  nativeDrag: {
+    light: {
+      commands: {
+        load_config: lightConfig,
+      },
+      delaysMs: {
+        start_native_drag: 30_000,
+      },
+    },
+    dark: {
+      commands: {
+        load_config: darkConfig,
+      },
+      delaysMs: {
+        start_native_drag: 30_000,
+      },
+    },
+  },
   queueCollapsed: {
     light: {
       commands: {
