@@ -658,6 +658,26 @@ export const screenshotScenarios = {
       },
     },
   },
+  // Same, zoomed: the badge is positioned in viewport pixels but rendered inside
+  // the zoomed root, so its offsets have to cancel the zoom factor.
+  nativeDragZoomed: {
+    light: {
+      commands: {
+        load_config: { ...lightConfig, layout: { ...lightConfig.layout, zoom: '150' } },
+      },
+      delaysMs: {
+        start_native_drag: 30_000,
+      },
+    },
+    dark: {
+      commands: {
+        load_config: { ...darkConfig, layout: { ...darkConfig.layout, zoom: '80' } },
+      },
+      delaysMs: {
+        start_native_drag: 30_000,
+      },
+    },
+  },
   queueCollapsed: {
     light: {
       commands: {

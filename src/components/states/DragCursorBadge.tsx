@@ -1,5 +1,6 @@
 import { CopyIcon, CornerUpRightIcon } from 'lucide-react'
 import { useDragCursorStore } from '@/stores/drag-cursor-store'
+import { useLayoutStore } from '@/stores/layout-store'
 
 /**
  * Copy-vs-move feedback that follows the pointer during an OS-owned drag.
@@ -12,6 +13,7 @@ import { useDragCursorStore } from '@/stores/drag-cursor-store'
  */
 export function DragCursorBadge() {
   const cursor = useDragCursorStore((state) => state.cursor)
+  const zoom = useLayoutStore((state) => Number(state.zoom) / 100)
 
   if (!cursor) {
     return null
@@ -25,7 +27,11 @@ export function DragCursorBadge() {
       // Offset down-right so the badge clears the OS drag image, which is drawn
       // at the pointer itself. Positioning is per-frame data, hence inline.
       className="pointer-events-none fixed z-50 translate-x-4 translate-y-5"
-      style={{ left: cursor.x, top: cursor.y }}
+      // The cursor is in viewport pixels, but this element sits inside the root's
+      // CSS `zoom`, which scales every length in the subtree — including a fixed
+      // element's offsets. Dividing by the factor cancels that, so the badge
+      // lands on the pointer at any zoom level.
+      style={{ left: cursor.x / zoom, top: cursor.y / zoom }}
       aria-hidden="true"
     >
       <span className="flex items-center gap-1 rounded-md border border-light-border-strong bg-light-surface px-1.5 py-0.5 text-uxs font-medium text-light-text shadow-float dark:border-dark-border-strong dark:bg-dark-surface dark:text-dark-text">
