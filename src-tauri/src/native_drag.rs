@@ -136,35 +136,86 @@ mod native {
         tauri::WebviewWindow,
         Vec<std::path::PathBuf>,
         Arc<Mutex<Option<oneshot::Sender<()>>>>,
+        u32,
     );
 
     #[cfg(windows)]
-    fn start_windows_drag(job: WindowsDragJob) -> Result<(), String> {
+    struct WindowsDragWorker {
+        sender: std::sync::mpsc::Sender<WindowsDragJob>,
+        thread_id: u32,
+    }
+
+    #[cfg(windows)]
+    fn start_windows_drag(
+        window: tauri::WebviewWindow,
+        paths: Vec<std::path::PathBuf>,
+        finished: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    ) -> Result<(), String> {
         use std::sync::{mpsc, OnceLock};
+        use windows::Win32::{
+            System::Threading::{AttachThreadInput, GetCurrentThreadId},
+            UI::WindowsAndMessaging::{GetWindowThreadProcessId, PeekMessageW, MSG, PM_NOREMOVE},
+        };
 
         // `drag` initializes OLE behind a process-wide `Once`, so every Windows
         // session must use the same STA. Keeping `DoDragDrop` off Tauri's UI
         // thread lets its event loop deliver the live cursor stream and repaint
         // the frontend badge while the modal OLE loop is running.
-        static WORKER: OnceLock<Result<mpsc::Sender<WindowsDragJob>, String>> = OnceLock::new();
+        static WORKER: OnceLock<Result<WindowsDragWorker, String>> = OnceLock::new();
         let worker = WORKER
             .get_or_init(|| {
                 let (sender, receiver) = mpsc::channel();
+                let (ready, thread_id) = mpsc::sync_channel(1);
                 std::thread::Builder::new()
                     .name("native-drag".to_string())
                     .spawn(move || {
-                        while let Ok((window, paths, finished)) = receiver.recv() {
+                        // Both threads need message queues before Win32 can share
+                        // their mouse capture and input state.
+                        let mut message = MSG::default();
+                        unsafe {
+                            let _ = PeekMessageW(&mut message, None, 0, 0, PM_NOREMOVE);
+                        }
+                        let id = unsafe { GetCurrentThreadId() };
+                        if ready.send(id).is_err() {
+                            return;
+                        }
+                        while let Ok((window, paths, finished, ui_thread)) = receiver.recv() {
                             run_session(window, paths, finished);
+                            if !unsafe { AttachThreadInput(id, ui_thread, false) }.as_bool() {
+                                log::warn!("Failed to detach native drag input queues");
+                            }
                         }
                     })
-                    .map(|_| sender)
-                    .map_err(|error| format!("Failed to start the native drag worker: {error}"))
+                    .map_err(|error| format!("Failed to start the native drag worker: {error}"))?;
+                Ok(WindowsDragWorker {
+                    sender,
+                    thread_id: thread_id.recv().map_err(|_| {
+                        "native drag worker stopped during initialization".to_string()
+                    })?,
+                })
             })
             .as_ref()
             .map_err(Clone::clone)?;
-        worker
-            .send(job)
-            .map_err(|_| "native drag worker stopped unexpectedly".to_string())
+
+        let hwnd = window
+            .hwnd()
+            .map_err(|error| format!("Failed to resolve the native drag window: {error}"))?;
+        let ui_thread = unsafe { GetWindowThreadProcessId(hwnd, None) };
+        if ui_thread == 0 {
+            return Err("Failed to resolve the native drag window thread".to_string());
+        }
+        if !unsafe { AttachThreadInput(worker.thread_id, ui_thread, true) }.as_bool() {
+            return Err("Failed to attach the native drag input queue".to_string());
+        }
+        if worker
+            .sender
+            .send((window, paths, finished, ui_thread))
+            .is_err()
+        {
+            let _ = unsafe { AttachThreadInput(worker.thread_id, ui_thread, false) };
+            return Err("native drag worker stopped unexpectedly".to_string());
+        }
+        Ok(())
     }
 
     pub async fn start(
@@ -181,7 +232,7 @@ mod native {
             .map_err(|error| format!("Failed to start the native drag: {error}"))?;
 
         #[cfg(windows)]
-        start_windows_drag((drag_window, paths, sender))?;
+        start_windows_drag(drag_window, paths, sender)?;
 
         // WKWebView does not deliver a self-originated drag session back to the page
         // as DOM drag events, so the webview is blind for the whole gesture. Streaming
