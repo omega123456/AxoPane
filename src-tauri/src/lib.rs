@@ -41,6 +41,10 @@ pub fn resolved_app_config_dir(base: &Path) -> PathBuf {
     }
 }
 
+pub fn allow_webview_navigation(url: &tauri::Url) -> bool {
+    url.scheme() != "file"
+}
+
 #[cfg(not(feature = "test-utils"))]
 use ipc::commands;
 #[cfg(not(feature = "test-utils"))]
@@ -129,6 +133,11 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(prevent_default_plugin())
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("navigation-guard")
+                .on_navigation(|_, url| allow_webview_navigation(url))
+                .build(),
+        )
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())

@@ -24,3 +24,17 @@ fn resolved_app_config_dir_maps_last_component_in_debug() {
         assert_eq!(resolved, base);
     }
 }
+
+#[test]
+fn webview_navigation_rejects_dropped_files() {
+    let app = tauri::Url::parse("tauri://localhost").expect("app URL");
+    let dev = tauri::Url::parse("http://localhost:1420").expect("dev URL");
+
+    for file in ["file:///tmp/readme.txt", "file:///C:/Temp/readme.txt"] {
+        assert!(!file_explorer_lib::allow_webview_navigation(
+            &tauri::Url::parse(file).expect("file URL")
+        ));
+    }
+    assert!(file_explorer_lib::allow_webview_navigation(&app));
+    assert!(file_explorer_lib::allow_webview_navigation(&dev));
+}
