@@ -41,6 +41,30 @@ pub fn open_path(path: &Path) -> Result<(), OpenPathError> {
     platform::open_path(&resolved)
 }
 
+/// `ShellExecuteW` reports failure as a status code of 32 or less.
+const SHELL_EXECUTE_SUCCESS_FLOOR: isize = 32;
+/// `SE_ERR_ASSOCINCOMPLETE`: the association exists but is unusable.
+const SE_ERR_ASSOCINCOMPLETE: isize = 27;
+/// `SE_ERR_NOASSOC`: no application is associated with the extension.
+const SE_ERR_NOASSOC: isize = 31;
+
+/// Verb that raises the shell's "Open with" picker.
+pub const OPEN_WITH_VERB: &str = "openas";
+
+pub fn shell_execute_succeeded(status: isize) -> bool {
+    status > SHELL_EXECUTE_SUCCESS_FLOOR
+}
+
+/// Explorer falls back to the "Open with" picker for types it cannot resolve;
+/// erroring out instead would leave the user no way to open them at all.
+pub fn should_prompt_open_with(status: isize) -> bool {
+    matches!(status, SE_ERR_ASSOCINCOMPLETE | SE_ERR_NOASSOC)
+}
+
+pub fn launch_failure_detail(status: isize) -> String {
+    format!("ShellExecuteW returned status code {status}")
+}
+
 /// Matches Explorer-style launches: scripts and associated apps start in the
 /// clicked item's containing folder, not the file explorer process directory.
 pub fn launch_directory(path: &Path) -> Option<PathBuf> {
@@ -77,33 +101,48 @@ mod platform {
     }
 
     pub fn open_path(path: &Path) -> Result<(), OpenPathError> {
-        let operation = wide(OsStr::new("open"));
         let target = wide(path.as_os_str());
         let directory = super::launch_directory(path).map(|value| wide(value.as_os_str()));
         let directory_ptr = directory
             .as_ref()
             .map_or(PCWSTR::null(), |value| PCWSTR(value.as_ptr()));
 
+        // A null verb makes the shell pick the file type's *default* verb, which
+        // is what a double-click in Explorer does. Hard-coding "open" breaks
+        // every type whose default verb is something else — `.iso` registers
+        // `mount`, so "open" failed with SE_ERR_NOASSOC instead of mounting.
+        let status = shell_execute(PCWSTR::null(), &target, directory_ptr);
+        if super::shell_execute_succeeded(status) {
+            return Ok(());
+        }
+
+        if super::should_prompt_open_with(status) {
+            let open_with = wide(OsStr::new(super::OPEN_WITH_VERB));
+            let fallback = shell_execute(PCWSTR(open_with.as_ptr()), &target, directory_ptr);
+            if super::shell_execute_succeeded(fallback) {
+                return Ok(());
+            }
+        }
+
+        Err(OpenPathError::LaunchFailed {
+            path: path.to_path_buf(),
+            detail: super::launch_failure_detail(status),
+        })
+    }
+
+    fn shell_execute(operation: PCWSTR, target: &[u16], directory: PCWSTR) -> isize {
         let result = unsafe {
             ShellExecuteW(
                 None,
-                PCWSTR(operation.as_ptr()),
+                operation,
                 PCWSTR(target.as_ptr()),
                 PCWSTR::null(),
-                directory_ptr,
+                directory,
                 SW_SHOWNORMAL,
             )
         };
 
-        let status = result.0 as isize;
-        if status <= 32 {
-            return Err(OpenPathError::LaunchFailed {
-                path: path.to_path_buf(),
-                detail: format!("ShellExecuteW returned status code {status}"),
-            });
-        }
-
-        Ok(())
+        result.0 as isize
     }
 }
 
