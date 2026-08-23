@@ -2,7 +2,10 @@ use std::fs;
 
 use std::path::Path;
 
-use file_explorer_lib::launch::{launch_directory, open_path, OpenPathError};
+use file_explorer_lib::launch::{
+    launch_directory, launch_failure_detail, open_path, shell_execute_succeeded,
+    should_prompt_open_with, OpenPathError, OPEN_WITH_VERB,
+};
 use tempfile::tempdir;
 
 #[cfg(feature = "test-utils")]
@@ -47,4 +50,40 @@ fn launch_directory_returns_the_paths_parent_folder() {
 #[test]
 fn launch_directory_ignores_bare_relative_file_names() {
     assert_eq!(launch_directory(Path::new("links.bat")), None);
+}
+
+#[test]
+fn shell_execute_treats_only_codes_above_thirty_two_as_success() {
+    assert!(!shell_execute_succeeded(0));
+    assert!(!shell_execute_succeeded(31));
+    assert!(!shell_execute_succeeded(32));
+    assert!(shell_execute_succeeded(33));
+    assert!(shell_execute_succeeded(42));
+}
+
+#[test]
+fn missing_associations_fall_back_to_the_open_with_picker() {
+    // SE_ERR_NOASSOC (31) is what `.iso` produced before the default verb fix,
+    // and SE_ERR_ASSOCINCOMPLETE (27) is its half-registered sibling.
+    assert!(should_prompt_open_with(31));
+    assert!(should_prompt_open_with(27));
+    assert_eq!(OPEN_WITH_VERB, "openas");
+}
+
+#[test]
+fn other_launch_failures_do_not_prompt_the_open_with_picker() {
+    for status in [0, 2, 8, 26, 28, 30, 32, 33] {
+        assert!(
+            !should_prompt_open_with(status),
+            "status {status} must not open the picker"
+        );
+    }
+}
+
+#[test]
+fn launch_failure_detail_reports_the_shell_status_code() {
+    assert_eq!(
+        launch_failure_detail(31),
+        "ShellExecuteW returned status code 31"
+    );
 }

@@ -234,16 +234,17 @@ describe('FilePane state rendering', () => {
       const getBoundingClientRect = vi
         .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
         .mockReturnValue(DOMRect.fromRect({ width: 640, height: 480 }))
+      const entries = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon', 'Zeta'].map((name) =>
+        entry(name),
+      )
       try {
         act(() => {
           useTabsStore.getState().patchActiveTab('left', { viewMode })
         })
-        seedPane({
-          entries: ['Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon', 'Zeta'].map((name) =>
-            entry(name),
-          ),
-          focusedEntryId: 'Alpha',
-        })
+        // Clearing the typing filter re-lists the folder, so the listing has to
+        // resolve back to the same grid the arrow assertions below expect.
+        ipc.override('list_dir', (payload) => ({ path: payload.path, entries }))
+        seedPane({ entries, focusedEntryId: 'Alpha' })
 
         render(<FilePane paneId="left" />)
         const grid = screen.getByRole('grid', { name: `${viewLabel} for C:\\root\\dir` })
