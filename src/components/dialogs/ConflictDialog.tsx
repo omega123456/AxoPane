@@ -123,6 +123,7 @@ export function ConflictDialog({ conflict, onResolve }: ConflictDialogProps) {
           {renaming ? (
             <input
               ref={renameInputRef}
+              autoComplete="off"
               value={renameValue}
               onChange={(event) => setRenameValue(event.target.value)}
               aria-label="New name"
@@ -133,6 +134,7 @@ export function ConflictDialog({ conflict, onResolve }: ConflictDialogProps) {
           <label className="mt-3 flex items-center gap-2 text-uxs text-light-text-muted dark:text-dark-text-muted">
             <input
               type="checkbox"
+              autoComplete="off"
               checked={applyToAll}
               onChange={(event) => setApplyToAll(event.target.checked)}
               className="h-3.5 w-3.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"

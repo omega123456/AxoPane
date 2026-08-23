@@ -106,6 +106,7 @@ export function PaneToolbar({ pane, isActive }: PaneToolbarProps) {
         <SearchIcon className="h-3.5 w-3.5 shrink-0 text-light-text-muted dark:text-dark-text-muted" />
         <input
           aria-label={`${pane.title} filter`}
+          autoComplete="off"
           value={pane.filterDraft}
           onChange={(event) => setFilterDraft(pane.id, event.target.value)}
           onKeyDown={(event) => {

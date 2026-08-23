@@ -577,6 +577,7 @@ function SettingsModalContent() {
                     <SearchIcon className="size-4 text-light-text-muted dark:text-dark-text-muted" />
                     <input
                       aria-label="Search keybindings"
+                      autoComplete="off"
                       value={search}
                       onChange={(event) => setSearch(event.target.value)}
                       className="w-full select-text bg-transparent text-row text-light-text focus-visible:outline-none dark:text-dark-text"

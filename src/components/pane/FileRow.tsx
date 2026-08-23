@@ -131,6 +131,7 @@ function FileRowImpl({
                   <EntryIcon entry={entry} />
                   <input
                     ref={renameInputRef}
+                    autoComplete="off"
                     aria-label={`Rename ${entry.name}`}
                     value={renameValue}
                     disabled={renameBusy}

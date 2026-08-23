@@ -19,6 +19,7 @@ export function RangeSlider({
     <>
       <input
         type="range"
+        autoComplete="off"
         min={min}
         max={max}
         step={step}

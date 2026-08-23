@@ -33,6 +33,7 @@ export function ColorSwatches({
       <label className="inline-flex cursor-pointer items-center gap-2.5">
         <input
           type="color"
+          autoComplete="off"
           value={value}
           aria-label="Custom accent color"
           onChange={(event) => onChange(event.target.value)}

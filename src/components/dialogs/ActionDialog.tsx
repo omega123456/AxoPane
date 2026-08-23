@@ -149,6 +149,7 @@ function PromptDialog({
         </label>
         <input
           ref={inputRef}
+          autoComplete="off"
           value={value}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={onKeyDown}
@@ -765,6 +766,7 @@ function ArchiveConfirmDialog({
           </label>
           <input
             id="archive-destination"
+            autoComplete="off"
             value={destinationPath}
             onChange={(event) => setDestinationPath(event.target.value)}
             className="mt-1 h-9 w-full select-text rounded-tab border border-light-border bg-light-window px-3 font-mono text-uxs text-light-text outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border dark:bg-dark-window dark:text-dark-text"

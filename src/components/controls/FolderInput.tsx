@@ -17,6 +17,7 @@ export function FolderInput({
       />
       <input
         aria-label={ariaLabel}
+        autoComplete="off"
         value={value}
         readOnly={readOnly}
         onChange={onChange ? (event) => onChange(event.target.value) : undefined}

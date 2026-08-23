@@ -111,6 +111,7 @@ export function BreadcrumbBar({ pane }: BreadcrumbBarProps) {
       {editingPath ? (
         <input
           ref={pathInputRef}
+          autoComplete="off"
           aria-label={`${pane.title} path`}
           value={pathDraft}
           onChange={(event) => setPathDraft(event.target.value)}

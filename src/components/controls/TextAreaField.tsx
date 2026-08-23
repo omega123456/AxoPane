@@ -27,6 +27,7 @@ export function TextAreaField({
       ) : null}
       <textarea
         aria-label={ariaLabel ?? label}
+        autoComplete="off"
         value={value}
         rows={rows}
         spellCheck={false}
