@@ -264,6 +264,7 @@ const listingSessions: Record<PaneId, ListingSession> = {
   left: new ListingSession('left', 'left', { onChange: () => notifySessionChange('left') }),
   right: new ListingSession('right', 'right', { onChange: () => notifySessionChange('right') }),
 }
+const replacementViewTokens: Record<PaneId, number> = { left: 0, right: 0 }
 
 // Monotonic identity for each successful v2-backed listing, replacing the old
 // `head.requestId` assigned by `start_list_dir`. Kept as a frontend-local
@@ -2242,7 +2243,102 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     // baseline gate above has accepted the session patch.  This prevents one
     // stale event from updating either half independently.
     if (event.mode === 'replaceView') {
-      void get().reloadPane(paneId)
+      replacementViewTokens[paneId] += 1
+      const replacementToken = replacementViewTokens[paneId]
+      void (async () => {
+        try {
+          let acceptedBaseline = event.nextBaseline
+          while (replacementViewTokens[paneId] === replacementToken) {
+            await ensureSessionFullyLoaded(paneId, session)
+            if (
+              activeTab(paneId).id !== event.tabId ||
+              !pathsMatch(get().panes[paneId].path, event.path)
+            ) {
+              return
+            }
+            if (session.currentBaseline !== acceptedBaseline) {
+              if (!session.currentBaseline) return
+              acceptedBaseline = session.currentBaseline
+              continue
+            }
+            break
+          }
+          if (replacementViewTokens[paneId] !== replacementToken) return
+
+          const loadedEntries = session.loadedEntries()
+          listRequestIdCounter += 1
+          const requestId = listRequestIdCounter
+          set((state) => {
+            const currentPane = state.panes[paneId]
+            if (
+              session.currentBaseline !== acceptedBaseline ||
+              activeTab(paneId).id !== event.tabId ||
+              !pathsMatch(currentPane.path, event.path)
+            ) {
+              return state
+            }
+
+            const entries = withResolvedIcons(
+              currentPane.sortKey === 'size'
+                ? sortEntries(
+                    loadedEntries,
+                    currentPane.sortKey,
+                    currentPane.sortDirection,
+                    state.sizeStates,
+                  )
+                : loadedEntries,
+              state.resolvedIconPaths,
+            )
+            const entryPaths = new Set(entries.map((entry) => pathKey(entry.path)))
+            const treeEvent: DirPatchEvent = {
+              tabId: event.tabId,
+              path: event.path,
+              reason: 'watch',
+              changed: entries
+                .filter((entry) => entry.isDir)
+                .map((entry) => ({ path: entry.path, entry })),
+              removed: currentPane.entries
+                .filter((entry) => entry.isDir && !entryPaths.has(pathKey(entry.path)))
+                .map((entry) => entry.path),
+            }
+            const focusedStillPresent = entries.some(
+              (entry) => entry.id === currentPane.focusedEntryId,
+            )
+            const treeNodes = applyTreeDirPatch(state, treeEvent)
+
+            return {
+              passiveItemCountRequests: clearPassiveItemCountRequestsForPane(
+                state.passiveItemCountRequests,
+                paneId,
+              ),
+              panes: {
+                ...state.panes,
+                [paneId]: {
+                  ...currentPane,
+                  entries,
+                  listRequestId: requestId,
+                  focusedEntryId: focusedStillPresent
+                    ? currentPane.focusedEntryId
+                    : (entries[0]?.id ?? null),
+                },
+              },
+              ...(treeNodes ? { treeNodes } : {}),
+            }
+          })
+
+          const currentPane = get().panes[paneId]
+          void runActiveItemsSort(paneId, currentItemCountContext(paneId, currentPane), {
+            filterApplied: currentPane.filterApplied,
+            sortDirection: currentPane.sortDirection,
+          })
+        } catch (error) {
+          log.error('applySessionPatch failed to materialize replacement view', {
+            paneId,
+            path: event.path,
+            error,
+          })
+        }
+      })()
       return
     }
     const changed =

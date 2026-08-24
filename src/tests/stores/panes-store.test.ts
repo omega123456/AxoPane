@@ -1875,6 +1875,72 @@ describe('panes-store v2 directory sessions', () => {
     expect(entries.slice(-2).map((entry) => entry.name)).toEqual(['Page1-Alpha', 'Page1-Bravo'])
   })
 
+  it('keeps the current rows visible while a watcher replacement view loads', async () => {
+    const initial = [dir('Alpha')]
+    const next = [dir('Alpha'), dir('Bravo')]
+    const previousBaseline = {
+      sessionId: 51,
+      navigationRevision: 51,
+      watchRevision: 0,
+      viewRevision: 0,
+    }
+    const nextBaseline = { ...previousBaseline, watchRevision: 1, viewRevision: 1 }
+    let resolveRange:
+      | ((value: {
+          baseline: typeof nextBaseline
+          totalRows: number
+          page: { pageIndex: number; entries: DirectoryEntry[] }
+        }) => void)
+      | undefined
+
+    ipc.override('begin_directory_session', (payload) => ({
+      paneId: payload.paneId,
+      tabId: payload.tabId,
+      path: payload.path,
+      baseline: previousBaseline,
+      totalRows: initial.length,
+      pageSize: 500,
+      firstPage: { pageIndex: 0, entries: initial },
+    }))
+    ipc.override(
+      'get_directory_session_range',
+      () =>
+        new Promise((resolve) => {
+          resolveRange = resolve
+        }),
+    )
+
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    const tabId = useTabsStore.getState().panes.left.tabs[0].id
+    usePanesStore.getState().applySessionPatch({
+      mode: 'replaceView',
+      paneId: 'left',
+      tabId,
+      path: 'C:\\root',
+      previousBaseline,
+      nextBaseline,
+      totalRows: next.length,
+    })
+
+    expect(usePanesStore.getState().panes.left.loading).toBe(false)
+    expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+      'Alpha',
+    ])
+
+    resolveRange?.({
+      baseline: nextBaseline,
+      totalRows: next.length,
+      page: { pageIndex: 0, entries: next },
+    })
+    await vi.waitFor(() =>
+      expect(usePanesStore.getState().panes.left.entries.map((entry) => entry.name)).toEqual([
+        'Alpha',
+        'Bravo',
+      ]),
+    )
+    expect(usePanesStore.getState().panes.left.loading).toBe(false)
+  })
+
   it('ignores sort actions while a session begin is still pending', async () => {
     ipc.override('begin_directory_session', () => new Promise(() => {}) as never)
     void usePanesStore.getState().navigatePane('left', 'C:\\root')
