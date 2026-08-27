@@ -4,8 +4,7 @@
 [profile.default]
 fail-fast = false
 test-threads = "num-cpus"
-# Which integration binaries run is set in the repo-root `.cargo/config.toml` aliases
-# (`gm-test-integration`, `gm-llvm-cov`) via repeated `--test <name>`.
+# The repo-root cargo aliases run the single `tests/integration/main.rs` target.
 # Integration tests may block on I/O or filesystem watching; avoid false "hung test" kills.
 slow-timeout = { period = "120s", terminate-after = 2 }
 # End-of-run summary: list slow tests alongside pass/fail totals.

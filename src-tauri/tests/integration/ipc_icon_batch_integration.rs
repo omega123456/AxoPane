@@ -16,17 +16,6 @@
 use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::types::{IconStateEvent, RequestIconsRequest};
 
-// Shim so `crate::ipc::types::IconStateEvent` (referenced by the whitebox-
-// included `src/ipc/icon_batch.rs` below) resolves to the real library type
-// against this test binary's own crate root, instead of failing to resolve —
-// mirrors the `mod volumes` shim in
-// `ops_single_file_progress_throttle_integration.rs`.
-mod ipc {
-    pub mod types {
-        pub use file_explorer_lib::ipc::types::*;
-    }
-}
-
 fn paths(count: usize) -> Vec<String> {
     (0..count)
         .map(|index| format!("/tmp/icon-{index}.bin"))
@@ -99,7 +88,7 @@ fn request_icons_emits_ceil_n_over_chunk_batches_not_n_events() {
 /// stepped clock, independent of any real sleep, plus the count-threshold
 /// branch and both branches of `drain_remainder`.
 mod icon_batch_unit {
-    include!("../src/ipc/icon_batch.rs");
+    include!("../../src/ipc/icon_batch.rs");
 
     fn event(path: &str) -> IconStateEvent {
         IconStateEvent {

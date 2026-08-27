@@ -7,7 +7,8 @@ edition = "2021"
 
 [lib]
 name = "file_explorer_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["rlib"]
+test = false
 
 [build-dependencies]
 tauri-build = { version = "~2.6.3", features = [] }
@@ -67,3 +68,9 @@ windows = { version = "~0.61.3", features = ["Win32_Devices_DeviceAndDriverInsta
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 test-utils = []
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

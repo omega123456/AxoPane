@@ -1,15 +1,5 @@
-mod fs {
-    pub use file_explorer_lib::fs::*;
-}
-
-mod directory_session {
-    pub mod model {
-        pub use file_explorer_lib::directory_session::model::*;
-    }
-}
-
 mod watch_src {
-    include!("../src/watch/mod.rs");
+    include!("../../src/watch/mod.rs");
 
     #[cfg(test)]
     mod tests {

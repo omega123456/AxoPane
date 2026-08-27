@@ -3,29 +3,12 @@
 //
 // These tests need access to private items (`TransferThrottle`, the throttled
 // emit helpers, `compress_item_with_progress`, `extract_item_with_progress`),
-// so — matching the existing whitebox convention in
-// `ops_private_integration.rs` — this file `include!`s the module source
-// directly instead of depending on the crate's public surface.
-
-include!("../src/ops/mod.rs");
-
-mod volumes {
-    pub use file_explorer_lib::volumes::*;
-}
-
-// The source-included ops module uses the production crate-root traversal
-// path. Mirror that export for this whitebox integration crate.
-mod traversal {
-    pub use file_explorer_lib::traversal::*;
-}
-
-mod resource_coordinator {
-    pub use file_explorer_lib::resource_coordinator::*;
-}
+// so `ops_private_integration.rs` loads this file as a child of its single
+// source-included ops module.
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::super::*;
     use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};

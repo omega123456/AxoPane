@@ -1,5 +1,4 @@
-#[path = "common/mod.rs"]
-mod common;
+use crate::common;
 
 use file_explorer_lib::persist::{
     default_column_widths, default_columns, default_date_format, default_pane_split,

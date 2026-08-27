@@ -1,5 +1,4 @@
-#[path = "common/mod.rs"]
-mod common;
+use crate::common;
 
 use file_explorer_lib::ipc::types::{LoadNativeMenuRequest, NativeMenuTargetKind};
 use file_explorer_lib::native_menu::helper_entry::{dispatch_for_tests, run_framed_stdio};

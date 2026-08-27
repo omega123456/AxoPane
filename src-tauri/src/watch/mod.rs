@@ -1,8 +1,8 @@
 // `#[allow(dead_code)]`: these two submodules are fully used from
 // `directory_session`/`lib.rs` in the real crate build. The `allow` only
-// matters for `tests/watch_private_integration.rs`, which `include!`s this
-// entire file verbatim into an isolated single-purpose test binary that
-// never references either module — without it, that binary's own
+// matters for `tests/integration/watch_private_integration.rs`, which `include!`s
+// this entire file verbatim into an isolated single-purpose test module that
+// never references either module — without it, that module's own
 // `-D warnings` dead-code lint would fail on code that is very much alive in
 // the real crate.
 #[allow(dead_code)]

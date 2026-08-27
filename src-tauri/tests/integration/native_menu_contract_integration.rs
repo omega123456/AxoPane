@@ -1,5 +1,4 @@
-#[path = "common/mod.rs"]
-mod common;
+use crate::common;
 
 use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::types::{

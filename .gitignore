@@ -1,6 +1,7 @@
 .claude
 .agent
 .agents
+.pi
 .vscode
 node_modules
 .cargo/*

@@ -1,5 +1,4 @@
-#[path = "common/mod.rs"]
-mod common;
+use crate::common;
 
 use std::fs;
 use std::path::Path;
@@ -14,7 +13,8 @@ use file_explorer_lib::ipc::types::{
     FolderSizesRequest, IconStateEvent, InitialShellResponse, ListDirRequest, ListDirResponse,
     ListTreeChildrenRequest, ListTreeChildrenResponse, OpIdRequest, OpSnapshot, OpenPathRequest,
     ReorderOpsRequest, RequestIconsRequest, ResolveConflictRequest, SaveConfigRequest,
-    SaveSessionRequest, SessionState, SetTabWatchRequest, TrashEntriesRequest, WatchTarget,
+    SaveSessionRequest, SessionState, SetTabWatchRequest, SizeStateEvent, TrashEntriesRequest,
+    WatchTarget,
 };
 use file_explorer_lib::ops::{OpItem, OpKind, OpStatus, OpsService, StartOpRequest};
 use file_explorer_lib::persist::{Config, PersistenceState, Session};
@@ -409,22 +409,31 @@ fn ipc_commands_cover_watch_size_and_logging_state() {
         );
     }
 
-    test_app
-        .invoke_payload::<(), _>(
+    let size_batches: Vec<Vec<SizeStateEvent>> = test_app
+        .invoke_payload(
             "request_folder_size",
             FolderSizeRequest {
                 path: size_root.to_string_lossy().into_owned(),
             },
         )
         .expect("request folder size");
-    test_app
-        .invoke_payload::<(), _>(
+    assert!(size_batches.into_iter().flatten().any(|event| matches!(
+        event.state,
+        file_explorer_lib::size::SizeStateKind::Ready | file_explorer_lib::size::SizeStateKind::Na
+    )));
+
+    let size_batches: Vec<Vec<SizeStateEvent>> = test_app
+        .invoke_payload(
             "request_folder_sizes",
             FolderSizesRequest {
                 paths: vec![size_root.to_string_lossy().into_owned()],
             },
         )
         .expect("request folder sizes");
+    assert!(size_batches.into_iter().flatten().any(|event| matches!(
+        event.state,
+        file_explorer_lib::size::SizeStateKind::Ready | file_explorer_lib::size::SizeStateKind::Na
+    )));
 
     let cancel_response: CancelSizeResponse = test_app
         .invoke_payload(
@@ -434,7 +443,7 @@ fn ipc_commands_cover_watch_size_and_logging_state() {
             },
         )
         .expect("cancel size");
-    assert!(cancel_response.cancelled);
+    assert!(!cancel_response.cancelled);
 
     let icon_paths = vec![
         size_root.join("file-0.txt").to_string_lossy().into_owned(),

@@ -1,5 +1,4 @@
-#[path = "common/mod.rs"]
-mod common;
+use crate::common;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

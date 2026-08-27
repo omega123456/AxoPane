@@ -113,25 +113,36 @@ function reportFailures(thresholds, totals) {
   process.stderr.write(`${failures.join('\n')}\n`)
 }
 
-const env = ensureRustCoverageTools({ ...process.env })
+const env = {
+  ...ensureRustCoverageTools({ ...process.env }),
+  CARGO_TARGET_DIR: process.env.CARGO_TARGET_DIR ?? rustCoverageTargetDir,
+}
 
 // Use `rustup run stable cargo` to ensure the rustup-managed rustc is used,
 // so cargo-llvm-cov resolves llvm-profdata via the correct sysroot regardless
 // of which `cargo` binary PATH resolves to (e.g. Homebrew vs rustup shim).
 const hasRustup = Boolean(tryReadCommand('rustup', ['--version']))
-const [command, commandArgs] = hasRustup
-  ? ['rustup', ['run', 'stable', 'cargo', 'gm-llvm-cov']]
-  : ['cargo', ['gm-llvm-cov']]
+const [command, cargoArgs] = hasRustup ? ['rustup', ['run', 'stable', 'cargo']] : ['cargo', []]
+
+execFileSync(
+  command,
+  [...cargoArgs, 'llvm-cov', 'clean', '--profraw-only', '--manifest-path', 'src-tauri/Cargo.toml'],
+  {
+    cwd: root,
+    env,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  },
+)
+
+const commandArgs = [...cargoArgs, 'gm-llvm-cov']
 
 // Capture stdout (where the coverage table is printed) so we can parse the
 // TOTAL row, while still streaming it to the terminal in real time. nextest
 // progress goes to stderr and is inherited untouched.
 const child = spawn(command, commandArgs, {
   cwd: root,
-  env: {
-    ...env,
-    CARGO_TARGET_DIR: env.CARGO_TARGET_DIR ?? rustCoverageTargetDir,
-  },
+  env,
   stdio: ['inherit', 'pipe', 'inherit'],
   shell: process.platform === 'win32',
 })

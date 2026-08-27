@@ -1,18 +1,9 @@
-include!("../src/ops/mod.rs");
+include!("../../src/ops/mod.rs");
 
-mod volumes {
-    pub use file_explorer_lib::volumes::*;
-}
+use crate::resource_coordinator;
 
-// The source-included ops module uses the production crate-root traversal
-// path. Mirror that export for this whitebox integration crate.
-mod traversal {
-    pub use file_explorer_lib::traversal::*;
-}
-
-mod resource_coordinator {
-    pub use file_explorer_lib::resource_coordinator::*;
-}
+#[path = "ops_single_file_progress_throttle_integration.rs"]
+pub mod ops_single_file_progress_throttle_integration;
 
 #[cfg(test)]
 mod tests {
