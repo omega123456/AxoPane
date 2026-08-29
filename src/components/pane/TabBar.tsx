@@ -84,7 +84,6 @@ export function TabBar({ paneId, title, currentPath, isActive }: TabBarProps) {
           >
             {(handleRef) => (
               <>
-                <LocationIcon path={tab.path} volumes={volumes} />
                 <button
                   ref={handleRef}
                   data-tab-id={tab.id}
@@ -94,9 +93,10 @@ export function TabBar({ paneId, title, currentPath, isActive }: TabBarProps) {
                   aria-selected={tabIsActive}
                   aria-label={`Tab ${tabLabel(tab)} in ${title}`}
                   onClick={() => void switchTab(paneId, tab.id)}
-                  className="min-w-0 flex-1 cursor-pointer truncate rounded-sm py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
+                  className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-sm py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
                 >
-                  {tabLabel(tab)}
+                  <LocationIcon path={tab.path} volumes={volumes} />
+                  <span className="min-w-0 flex-1 truncate">{tabLabel(tab)}</span>
                 </button>
                 {tab.locked ? (
                   <span

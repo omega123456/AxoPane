@@ -114,14 +114,9 @@ impl NativeMenuService {
     pub fn show_properties(&self, request: ShowPropertiesRequest) -> MenuActionStatus {
         #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
         {
-            return match helper_supervisor::shared().call(
-                HelperRole::Interactive,
-                helper_protocol::HelperOperation::Properties(request),
-                helper_supervisor::INVOCATION_DEADLINE,
-            ) {
-                Ok(helper_protocol::HelperResult::Status(status)) => status,
-                _ => MenuActionStatus::unsupported("native-helper-failed"),
-            };
+            // Must run in the UI process: the shell property sheet is owned by
+            // the calling process, and the helper child has no message pump.
+            return windows::show_properties(&request);
         }
 
         #[cfg(any(feature = "test-utils", not(target_os = "windows")))]
@@ -133,14 +128,9 @@ impl NativeMenuService {
     pub fn open_with(&self, request: OpenWithRequest) -> MenuActionStatus {
         #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
         {
-            return match helper_supervisor::shared().call(
-                HelperRole::Interactive,
-                helper_protocol::HelperOperation::OpenWith(request),
-                helper_supervisor::INVOCATION_DEADLINE,
-            ) {
-                Ok(helper_protocol::HelperResult::Status(status)) => status,
-                _ => MenuActionStatus::unsupported("native-helper-failed"),
-            };
+            // Same process requirement as `show_properties`: SHOpenWithDialog is
+            // modal and dies with the helper child.
+            return windows::open_with(&request);
         }
 
         #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
