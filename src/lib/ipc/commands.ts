@@ -31,6 +31,7 @@ import type {
   MenuActionStatus,
   OpenWithRequest,
   OpenPathRequest,
+  ReadFileClipboardResponse,
   ReleaseSessionRequest,
   ReleaseSessionResponse,
   RenameEntryRequest,
@@ -152,6 +153,10 @@ export function startNativeDrag(payload: StartNativeDragRequest) {
 
 export function writeFileClipboard(payload: WriteFileClipboardRequest) {
   return invokeCommand({ command: 'write_file_clipboard', payload }) as Promise<void>
+}
+
+export function readFileClipboard() {
+  return invokeCommand({ command: 'read_file_clipboard' }) as Promise<ReadFileClipboardResponse>
 }
 
 export function clearFileClipboard() {

@@ -23,19 +23,19 @@ use super::types::{
     ActiveItemsSortRequest, ActiveItemsSortResponse, AppConfig, BeginNavigationRequest,
     BeginNavigationResponse, CancelSizeRequest, CancelSizeResponse, CancelSizesRequest,
     CancelSizesResponse, CancelThumbnailsRequest, CreateEntryRequest, DeleteFromTrashRequest,
-    EjectVolumeRequest, FileClipboardMode, FolderSizeRequest, FolderSizesRequest,
-    GetDefaultApplicationRequest, GetDefaultApplicationResponse, GetSessionRangeRequest,
-    IconStateEvent, InitialShellResponse, InvokeNativeMenuRequest, ListApplicationsResponse,
-    ListDirRequest, ListDirResponse, ListTrashResponse, ListTreeChildrenRequest,
-    ListTreeChildrenResponse, LoadNativeMenuRequest, LoadNativeMenuResponse, LogFrontendRequest,
-    MenuActionStatus, OpIdRequest, OpenPathRequest, OpenWithRequest, ReleaseSessionRequest,
-    ReleaseSessionResponse, RenameEntryRequest, ReorderOpsRequest, RequestIconsRequest,
-    RequestThumbnailsRequest, RequestThumbnailsResponse, ResolveConflictRequest,
-    RestoreTrashRequest, ReviseSessionViewRequest, SaveConfigRequest, SaveSessionRequest,
-    SessionRangeResponse, SessionRejection, SessionState, SetDefaultApplicationRequest,
-    SetLogLevelRequest, SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent, StartOpRequest,
-    TrashEntriesRequest, VisibleItemCountsRequest, VolumeInfo, WarmNativeMenusRequest,
-    WriteFileClipboardRequest,
+    EjectVolumeRequest, FileClipboardItem, FileClipboardMode, FolderSizeRequest,
+    FolderSizesRequest, GetDefaultApplicationRequest, GetDefaultApplicationResponse,
+    GetSessionRangeRequest, IconStateEvent, InitialShellResponse, InvokeNativeMenuRequest,
+    ListApplicationsResponse, ListDirRequest, ListDirResponse, ListTrashResponse,
+    ListTreeChildrenRequest, ListTreeChildrenResponse, LoadNativeMenuRequest,
+    LoadNativeMenuResponse, LogFrontendRequest, MenuActionStatus, OpIdRequest, OpenPathRequest,
+    OpenWithRequest, ReadFileClipboardResponse, ReleaseSessionRequest, ReleaseSessionResponse,
+    RenameEntryRequest, ReorderOpsRequest, RequestIconsRequest, RequestThumbnailsRequest,
+    RequestThumbnailsResponse, ResolveConflictRequest, RestoreTrashRequest,
+    ReviseSessionViewRequest, SaveConfigRequest, SaveSessionRequest, SessionRangeResponse,
+    SessionRejection, SessionState, SetDefaultApplicationRequest, SetLogLevelRequest,
+    SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent, StartOpRequest, TrashEntriesRequest,
+    VisibleItemCountsRequest, VolumeInfo, WarmNativeMenusRequest, WriteFileClipboardRequest,
 };
 use crate::fs::DirectoryEntry;
 use std::path::Path;
@@ -587,6 +587,51 @@ fn write_file_clipboard_impl(payload: WriteFileClipboardRequest) -> Result<(), S
         log::warn!("{message}");
         message
     })
+}
+
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub async fn read_file_clipboard(
+    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+) -> Result<ReadFileClipboardResponse, String> {
+    latency_filesystem(&executor, "clipboard".into(), read_file_clipboard_impl).await?
+}
+
+#[cfg(feature = "test-utils")]
+#[tauri::command]
+pub fn read_file_clipboard() -> Result<ReadFileClipboardResponse, String> {
+    read_file_clipboard_impl()
+}
+
+fn read_file_clipboard_impl() -> Result<ReadFileClipboardResponse, String> {
+    let (mode, paths) = crate::clipboard::read_paths().map_err(|error| {
+        let message = format!("Failed to read OS clipboard: {error}");
+        log::warn!("{message}");
+        message
+    })?;
+
+    Ok(ReadFileClipboardResponse {
+        mode: match mode {
+            crate::clipboard::ClipboardMode::Copy => FileClipboardMode::Copy,
+            crate::clipboard::ClipboardMode::Move => FileClipboardMode::Move,
+        },
+        items: file_clipboard_items(paths),
+    })
+}
+
+/// Pair each clipboard path with its display name. A path without a file name
+/// (a drive root, for example) keeps the full path as its name.
+pub fn file_clipboard_items(paths: Vec<String>) -> Vec<FileClipboardItem> {
+    paths
+        .into_iter()
+        .map(|path| {
+            let name = Path::new(&path)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.clone());
+            FileClipboardItem { path, name }
+        })
+        .collect()
 }
 
 #[cfg(not(feature = "test-utils"))]

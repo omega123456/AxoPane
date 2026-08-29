@@ -206,6 +206,7 @@ export const fixtures: {
   delete_from_trash: undefined,
   open_path: undefined,
   write_file_clipboard: undefined,
+  read_file_clipboard: { mode: 'copy', items: [] },
   clear_file_clipboard: undefined,
   load_native_menu: {
     requestId: 'fixture-native-request',

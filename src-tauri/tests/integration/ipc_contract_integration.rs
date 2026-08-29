@@ -189,6 +189,10 @@ fn file_clipboard_commands_are_safe_noops_under_test_utils() {
     })
     .expect("clipboard write");
 
+    let clipboard = commands::read_file_clipboard().expect("clipboard read");
+    assert_eq!(clipboard.mode, FileClipboardMode::Copy);
+    assert!(clipboard.items.is_empty());
+
     commands::clear_file_clipboard().expect("clipboard clear");
     commands::noop_dir_patch(file_explorer_lib::watch::DirPatch {
         tab_id: String::new(),
@@ -198,6 +202,21 @@ fn file_clipboard_commands_are_safe_noops_under_test_utils() {
         removed: Vec::new(),
     });
     commands::noop_watch_error(String::new(), String::new());
+}
+
+#[cfg(feature = "test-utils")]
+#[test]
+fn file_clipboard_items_carry_the_display_name_of_each_path() {
+    // Forward slashes keep the expectation identical on Windows and macOS.
+    let items = commands::file_clipboard_items(vec![
+        "/fixture/reports/Report.txt".to_string(),
+        "/".to_string(),
+    ]);
+
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].path, "/fixture/reports/Report.txt");
+    assert_eq!(items[0].name, "Report.txt");
+    assert_eq!(items[1].name, "/");
 }
 
 #[cfg(feature = "test-utils")]

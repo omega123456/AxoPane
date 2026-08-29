@@ -344,6 +344,7 @@ pub fn run() {
             commands::delete_from_trash,
             commands::open_path,
             commands::write_file_clipboard,
+            commands::read_file_clipboard,
             commands::clear_file_clipboard,
             commands::load_native_menu,
             commands::invoke_native_menu_action,

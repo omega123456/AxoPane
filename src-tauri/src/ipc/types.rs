@@ -314,6 +314,20 @@ pub struct WriteFileClipboardRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct FileClipboardItem {
+    pub path: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadFileClipboardResponse {
+    pub mode: FileClipboardMode,
+    pub items: Vec<FileClipboardItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct MenuActionStatus {
     pub handled: bool,
     pub message: Option<String>,

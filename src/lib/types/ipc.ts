@@ -506,6 +506,16 @@ export type WriteFileClipboardRequest = {
   paths: string[]
 }
 
+export type FileClipboardItem = {
+  path: string
+  name: string
+}
+
+export type ReadFileClipboardResponse = {
+  mode: FileClipboardMode
+  items: FileClipboardItem[]
+}
+
 export type MenuActionStatus = {
   handled: boolean
   message?: string | null
@@ -871,6 +881,10 @@ export type IpcCommandMap = {
   write_file_clipboard: {
     request: WriteFileClipboardRequest
     response: void
+  }
+  read_file_clipboard: {
+    request: undefined
+    response: ReadFileClipboardResponse
   }
   clear_file_clipboard: {
     request: undefined

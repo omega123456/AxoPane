@@ -9,7 +9,7 @@ const isCI = !!process.env.CI
 // Cap local concurrency at 2 workers (1 on CI) so parallel webServer-backed
 // runs don't oversubscribe the machine. Without this, fullyParallel spins up
 // one worker per CPU core.
-const workers = isCI ? 1 : Math.min(2, availableCpus)
+const workers = isCI ? 1 : Math.min(4, availableCpus)
 
 export default defineConfig({
   testDir: './e2e',

@@ -36,6 +36,7 @@ import type {
 import { UpdateBanner } from '@/components/states/UpdateBanner'
 import { useUpdaterStore } from '@/stores/updater-store'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
+import { useClipboardStore } from '@/stores/clipboard-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
 import { useConfigStore } from '@/stores/config-store'
 import { useLayoutStore } from '@/stores/layout-store'
@@ -224,6 +225,19 @@ function App() {
     propertiesDialogOpen,
     settingsOpen,
   ])
+
+  useEffect(() => {
+    // Another application can only copy files while it holds the focus, so
+    // regaining the focus is the one moment where the OS clipboard can differ
+    // from what this app knows. There is no clipboard change event to watch.
+    const syncClipboard = () => {
+      void useClipboardStore.getState().syncFromOs()
+    }
+
+    syncClipboard()
+    window.addEventListener('focus', syncClipboard)
+    return () => window.removeEventListener('focus', syncClipboard)
+  }, [])
 
   useEffect(() => {
     // Icon/size events can arrive in bursts (e.g. loading a folder full of

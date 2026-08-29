@@ -53,6 +53,20 @@ pub fn write_paths(mode: ClipboardMode, paths: &[String]) -> Result<(), Clipboar
     }
 }
 
+/// Read the file paths another application (or this one) put on the OS
+/// clipboard. An empty list means that the clipboard holds no files.
+pub fn read_paths() -> Result<(ClipboardMode, Vec<String>), ClipboardError> {
+    #[cfg(not(feature = "test-utils"))]
+    {
+        return read_impl::read_paths();
+    }
+
+    #[cfg(feature = "test-utils")]
+    {
+        Ok((ClipboardMode::Copy, Vec::new()))
+    }
+}
+
 pub fn clear() -> Result<(), ClipboardError> {
     #[cfg(all(windows, not(feature = "test-utils")))]
     {
@@ -67,6 +81,38 @@ pub fn clear() -> Result<(), ClipboardError> {
     #[cfg(feature = "test-utils")]
     {
         Ok(())
+    }
+}
+
+#[cfg(not(feature = "test-utils"))]
+mod read_impl {
+    use super::{ClipboardError, ClipboardMode};
+    use clipboard_rs::{Clipboard, ClipboardContext};
+
+    pub(super) fn read_paths() -> Result<(ClipboardMode, Vec<String>), ClipboardError> {
+        let context =
+            ClipboardContext::new().map_err(|error| ClipboardError::new(error.to_string()))?;
+
+        // Every platform reports "the clipboard holds no files" as an error.
+        // That is an empty clipboard, not a failure.
+        let paths = context.get_files().unwrap_or_default();
+        if paths.is_empty() {
+            return Ok((ClipboardMode::Copy, Vec::new()));
+        }
+
+        Ok((read_mode(), paths))
+    }
+
+    #[cfg(windows)]
+    fn read_mode() -> ClipboardMode {
+        super::windows_impl::read_preferred_effect()
+    }
+
+    // macOS and Linux file clipboards carry no move hint. A cut inside the app
+    // keeps its own mode in the app clipboard store.
+    #[cfg(not(windows))]
+    fn read_mode() -> ClipboardMode {
+        ClipboardMode::Copy
     }
 }
 
@@ -109,7 +155,8 @@ mod windows_impl {
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND};
     use windows::Win32::System::DataExchange::{
-        CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
+        CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, RegisterClipboardFormatW,
+        SetClipboardData,
     };
     use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
     use windows::Win32::System::Ole::CF_HDROP;
@@ -146,6 +193,30 @@ mod windows_impl {
     pub(super) fn clear() -> Result<(), ClipboardError> {
         let clipboard = ClipboardSession::open()?;
         clipboard.empty()
+    }
+
+    /// Explorer marks a cut with the "Preferred DropEffect" format. If the
+    /// format is absent or unreadable, the safe answer is a copy.
+    pub(super) fn read_preferred_effect() -> ClipboardMode {
+        let Ok(format) = register_preferred_drop_effect() else {
+            return ClipboardMode::Copy;
+        };
+        let Ok(_clipboard) = ClipboardSession::open() else {
+            return ClipboardMode::Copy;
+        };
+        let Ok(handle) = (unsafe { GetClipboardData(format) }) else {
+            return ClipboardMode::Copy;
+        };
+        let Ok(lock) = GlobalLockGuard::new(HGLOBAL(handle.0)) else {
+            return ClipboardMode::Copy;
+        };
+
+        let effect = unsafe { std::ptr::read_unaligned(lock.ptr.cast::<u32>()) };
+        if effect & DROPEFFECT_MOVE != 0 {
+            ClipboardMode::Move
+        } else {
+            ClipboardMode::Copy
+        }
     }
 
     struct ClipboardSession;
