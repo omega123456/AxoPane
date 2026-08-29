@@ -878,6 +878,10 @@ export type IpcCommandMap = {
     request: OpenPathRequest
     response: void
   }
+  restart_as_admin: {
+    request: undefined
+    response: void
+  }
   write_file_clipboard: {
     request: WriteFileClipboardRequest
     response: void

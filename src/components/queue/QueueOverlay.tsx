@@ -3,6 +3,7 @@ import { QueuePanel } from '@/components/queue/QueuePanel'
 import { QueueToast } from '@/components/queue/QueueToast'
 import { onQueueConflict, onQueueProgress, onQueueRemoved } from '@/lib/ipc/events'
 import { queueSnapshot } from '@/lib/queue-commands'
+import { openAdminRestartDialog } from '@/stores/action-dialog-store'
 import { useConfigStore } from '@/stores/config-store'
 import { isTerminal, orderedOperations, useQueueStore } from '@/stores/queue-store'
 
@@ -48,7 +49,14 @@ export function QueueOverlay() {
   }, [hydrate])
 
   useEffect(() => {
-    const unlistenProgress = onQueueProgress((event) => applyProgress(event))
+    const unlistenProgress = onQueueProgress((event) => {
+      applyProgress(event)
+      // A job the OS refused for lack of permissions cannot be retried in
+      // place. Offer the elevated restart instead of a red line in the card.
+      if (event.status === 'failed' && event.errorMessage) {
+        openAdminRestartDialog(event.errorMessage)
+      }
+    })
     const unlistenConflict = onQueueConflict((event) => applyConflict(event))
     const unlistenRemoved = onQueueRemoved((event) => removeOperation(event))
     return () => {

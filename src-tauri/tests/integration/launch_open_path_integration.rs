@@ -3,8 +3,8 @@ use std::fs;
 use std::path::Path;
 
 use file_explorer_lib::launch::{
-    launch_directory, launch_failure_detail, open_path, shell_execute_succeeded,
-    should_prompt_open_with, OpenPathError, OPEN_WITH_VERB,
+    elevation_failure_detail, launch_directory, launch_failure_detail, open_path, restart_as_admin,
+    shell_execute_succeeded, should_prompt_open_with, OpenPathError, OPEN_WITH_VERB, RUNAS_VERB,
 };
 use tempfile::tempdir;
 
@@ -86,4 +86,30 @@ fn launch_failure_detail_reports_the_shell_status_code() {
         launch_failure_detail(31),
         "ShellExecuteW returned status code 31"
     );
+}
+
+#[test]
+fn a_refused_uac_prompt_reads_as_a_refusal_not_a_status_code() {
+    // SE_ERR_ACCESSDENIED (5) is what a "runas" launch returns when the user
+    // dismisses the UAC prompt.
+    assert_eq!(
+        elevation_failure_detail(5),
+        "the administrator permission request was refused"
+    );
+    assert_eq!(RUNAS_VERB, "runas");
+}
+
+#[test]
+fn other_elevation_failures_keep_the_shell_status_code() {
+    assert_eq!(
+        elevation_failure_detail(2),
+        "ShellExecuteW returned status code 2"
+    );
+}
+
+#[cfg(feature = "test-utils")]
+#[test]
+fn restart_as_admin_uses_the_safe_test_fallback() {
+    let error = restart_as_admin().expect_err("test-utils blocks real elevation");
+    assert!(matches!(error, OpenPathError::Unsupported));
 }

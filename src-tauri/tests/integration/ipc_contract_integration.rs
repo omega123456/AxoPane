@@ -182,6 +182,15 @@ fn open_path_command_uses_safe_test_utils_fallback() {
 
 #[cfg(feature = "test-utils")]
 #[test]
+fn restart_as_admin_command_uses_safe_test_utils_fallback() {
+    let error = commands::restart_as_admin().expect_err("test-utils should block real elevation");
+
+    assert!(error.contains("Failed to restart with administrator permissions"));
+    assert!(error.contains("unsupported"));
+}
+
+#[cfg(feature = "test-utils")]
+#[test]
 fn file_clipboard_commands_are_safe_noops_under_test_utils() {
     commands::write_file_clipboard(WriteFileClipboardRequest {
         mode: FileClipboardMode::Copy,

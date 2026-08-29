@@ -545,6 +545,30 @@ pub fn open_path(payload: OpenPathRequest) -> Result<(), String> {
     open_path_impl(payload)
 }
 
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command]
+pub fn restart_as_admin(app: AppHandle) -> Result<(), String> {
+    restart_as_admin_impl()?;
+    // Only quit after the elevated instance started. A refused UAC prompt must
+    // leave the running application alone.
+    app.exit(0);
+    Ok(())
+}
+
+#[cfg(feature = "test-utils")]
+#[tauri::command]
+pub fn restart_as_admin() -> Result<(), String> {
+    restart_as_admin_impl()
+}
+
+fn restart_as_admin_impl() -> Result<(), String> {
+    crate::launch::restart_as_admin().map_err(|error| {
+        let message = format!("Failed to restart with administrator permissions: {error}");
+        log::error!("{message}");
+        message
+    })
+}
+
 fn open_path_impl(payload: OpenPathRequest) -> Result<(), String> {
     crate::launch::open_path(Path::new(&payload.path)).map_err(|error| {
         let message = format!("Failed to open \"{}\": {error}", payload.path);

@@ -343,6 +343,7 @@ pub fn run() {
             commands::empty_trash,
             commands::delete_from_trash,
             commands::open_path,
+            commands::restart_as_admin,
             commands::write_file_clipboard,
             commands::read_file_clipboard,
             commands::clear_file_clipboard,

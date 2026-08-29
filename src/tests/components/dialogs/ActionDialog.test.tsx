@@ -415,6 +415,52 @@ describe('ActionDialog', () => {
     expect(useActionDialogStore.getState().dialog).toBeNull()
   })
 
+  it('replaces a permission failure with the administrator restart prompt', async () => {
+    const user = userEvent.setup()
+    ipc.override('create_folder', () => {
+      throw new Error('Failed to create folder: Access is denied. (os error 5)')
+    })
+    const restart = vi.fn(() => undefined)
+    ipc.override('restart_as_admin', restart)
+
+    useActionDialogStore.getState().open({ kind: 'newFolder', paneId: 'left' })
+    render(<ActionDialog />)
+
+    await user.type(screen.getByLabelText('Folder name'), 'Reports')
+    await user.click(screen.getByRole('button', { name: 'Create' }))
+
+    expect(
+      await screen.findByRole('dialog', { name: 'Administrator permissions needed' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Access is denied\. \(os error 5\)/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Restart as administrator' }))
+    await waitFor(() => expect(restart).toHaveBeenCalled())
+  })
+
+  it('keeps the prompt open when the elevated restart fails', async () => {
+    const user = userEvent.setup()
+    ipc.override('restart_as_admin', () => {
+      throw new Error('the administrator permission request was refused')
+    })
+
+    useActionDialogStore.getState().open({
+      kind: 'adminRequired',
+      message: 'Access is denied. (os error 5)',
+    })
+    render(<ActionDialog />)
+
+    await user.click(screen.getByRole('button', { name: 'Restart as administrator' }))
+
+    expect(
+      await screen.findByText(/the administrator permission request was refused/),
+    ).toBeInTheDocument()
+    expect(useActionDialogStore.getState().dialog).not.toBeNull()
+
+    await user.keyboard('{Escape}')
+    expect(useActionDialogStore.getState().dialog).toBeNull()
+  })
+
   it('dismisses on cancel without calling the backend', async () => {
     const user = userEvent.setup()
     const create = vi.fn(() => dir('x'))

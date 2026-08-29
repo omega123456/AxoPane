@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { QueueOverlay } from '@/components/queue/QueueOverlay'
 import type { OpProgress, OpSnapshot } from '@/lib/types/ipc'
+import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useConfigStore } from '@/stores/config-store'
 import { useQueueStore } from '@/stores/queue-store'
 
@@ -34,6 +35,7 @@ beforeEach(() => {
   ipc.install()
   useConfigStore.getState().reset()
   useQueueStore.getState().reset()
+  useActionDialogStore.getState().close()
 })
 
 describe('QueueOverlay', () => {
@@ -163,6 +165,46 @@ describe('QueueOverlay', () => {
     })
 
     expect(await screen.findByRole('region', { name: 'Job queue' })).toBeInTheDocument()
+  })
+
+  it('offers the administrator restart when a job fails for lack of permissions', async () => {
+    ipc.override('queue_snapshot', [])
+    render(<QueueOverlay />)
+
+    await waitFor(() => {
+      expect(useQueueStore.getState().order).toEqual([])
+    })
+
+    act(() => {
+      ipc.emit(
+        'queue://progress',
+        progress({ status: 'failed', errorMessage: 'Access is denied. (os error 5)' }),
+      )
+    })
+
+    await waitFor(() => {
+      expect(useActionDialogStore.getState().dialog).toEqual({
+        kind: 'adminRequired',
+        message: 'Access is denied. (os error 5)',
+      })
+    })
+  })
+
+  it('leaves an ordinary job failure to the job card', async () => {
+    ipc.override('queue_snapshot', [])
+    render(<QueueOverlay />)
+
+    act(() => {
+      ipc.emit(
+        'queue://progress',
+        progress({ status: 'failed', errorMessage: 'source file is missing' }),
+      )
+    })
+
+    await waitFor(() => {
+      expect(useQueueStore.getState().operations['op-1'].status).toBe('failed')
+    })
+    expect(useActionDialogStore.getState().dialog).toBeNull()
   })
 
   it('does not auto-reopen a queue the user manually collapsed while work remains active', async () => {

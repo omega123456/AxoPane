@@ -143,6 +143,15 @@ export function openPath(payload: OpenPathRequest) {
 }
 
 /**
+ * Relaunches the application with administrator permissions (Windows only).
+ * The current process quits only after the elevated one starts, so a refused
+ * UAC prompt rejects and leaves the window open.
+ */
+export function restartAsAdmin() {
+  return invokeCommand({ command: 'restart_as_admin' }) as Promise<void>
+}
+
+/**
  * Hands the given absolute paths to the OS as a native drag session. Resolves
  * when the drag ends (dropped or cancelled) — the webview's HTML5 drag is
  * cancelled in favour of this, so there is no `dragend` event to wait on.

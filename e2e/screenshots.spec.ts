@@ -635,6 +635,31 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`new-folder-dialog-${mode}.png`)
   })
 
+  test(`administrator permissions dialog ${mode}`, async ({ page }) => {
+    // Windows-only prompt: pin the platform so the run stays deterministic on
+    // a macOS host, where an access-denied error has a different answer.
+    await gotoScenario(page, {
+      ...screenshotScenarios.browsing[mode],
+      platform: 'windows',
+      commandErrors: {
+        create_folder: 'Failed to create folder: Access is denied. (os error 5)',
+      },
+    })
+    await rightClickPane(page, 'Left pane')
+    await page.getByRole('menuitem', { name: 'New folder' }).click()
+    await page.getByLabel('Folder name').fill('Reports')
+    await page
+      .getByRole('dialog', { name: 'New folder' })
+      .getByRole('button', { name: 'Create', exact: true })
+      .click()
+    await expect(
+      page.getByRole('dialog', { name: 'Administrator permissions needed' }),
+    ).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(
+      `administrator-permissions-dialog-${mode}.png`,
+    )
+  })
+
   test(`rename inline ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
     await page

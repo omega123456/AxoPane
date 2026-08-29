@@ -2,11 +2,13 @@ import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, vi } from 'vitest'
 import { ErrorToast } from '@/components/states/ErrorToast'
+import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useErrorToastStore } from '@/stores/error-toast-store'
 
 beforeEach(() => {
   act(() => {
     useErrorToastStore.getState().dismiss()
+    useActionDialogStore.getState().close()
   })
 })
 
@@ -27,6 +29,21 @@ describe('ErrorToast', () => {
 
     await user.click(screen.getByRole('button', { name: 'Dismiss error' }))
     expect(useErrorToastStore.getState().message).toBeNull()
+  })
+
+  it('routes a permission failure to the administrator restart prompt', () => {
+    const { container } = render(<ErrorToast />)
+
+    act(() => {
+      useErrorToastStore.getState().show('Failed to rename: Access is denied. (os error 5)')
+    })
+
+    expect(container).toBeEmptyDOMElement()
+    expect(useErrorToastStore.getState().message).toBeNull()
+    expect(useActionDialogStore.getState().dialog).toEqual({
+      kind: 'adminRequired',
+      message: 'Failed to rename: Access is denied. (os error 5)',
+    })
   })
 
   it('auto-dismisses after the timeout', () => {

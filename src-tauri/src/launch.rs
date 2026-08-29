@@ -48,8 +48,14 @@ const SE_ERR_ASSOCINCOMPLETE: isize = 27;
 /// `SE_ERR_NOASSOC`: no application is associated with the extension.
 const SE_ERR_NOASSOC: isize = 31;
 
+/// `SE_ERR_ACCESSDENIED`: for a "runas" launch this is the refused UAC prompt.
+const SE_ERR_ACCESSDENIED: isize = 5;
+
 /// Verb that raises the shell's "Open with" picker.
 pub const OPEN_WITH_VERB: &str = "openas";
+
+/// Verb that relaunches a program elevated. The shell raises the UAC prompt.
+pub const RUNAS_VERB: &str = "runas";
 
 pub fn shell_execute_succeeded(status: isize) -> bool {
     status > SHELL_EXECUTE_SUCCESS_FLOOR
@@ -63,6 +69,30 @@ pub fn should_prompt_open_with(status: isize) -> bool {
 
 pub fn launch_failure_detail(status: isize) -> String {
     format!("ShellExecuteW returned status code {status}")
+}
+
+/// A refused UAC prompt is a user decision, not a defect. Report it in words
+/// instead of a raw shell status code.
+pub fn elevation_failure_detail(status: isize) -> String {
+    if status == SE_ERR_ACCESSDENIED {
+        return "the administrator permission request was refused".to_string();
+    }
+
+    launch_failure_detail(status)
+}
+
+/// Restarts this application with administrator permissions.
+///
+/// Windows only. The other platforms have no equivalent one-click elevation,
+/// so they report `Unsupported` and the caller tells the user to restart the
+/// application manually.
+pub fn restart_as_admin() -> Result<(), OpenPathError> {
+    let executable = std::env::current_exe().map_err(|source| OpenPathError::Io {
+        path: PathBuf::new(),
+        source,
+    })?;
+
+    platform::restart_as_admin(&executable)
 }
 
 /// Matches Explorer-style launches: scripts and associated apps start in the
@@ -82,6 +112,10 @@ mod platform {
     pub fn open_path(_path: &Path) -> Result<(), OpenPathError> {
         Err(OpenPathError::Unsupported)
     }
+
+    pub fn restart_as_admin(_executable: &Path) -> Result<(), OpenPathError> {
+        Err(OpenPathError::Unsupported)
+    }
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]
@@ -91,7 +125,7 @@ mod platform {
     use std::path::Path;
 
     use windows::core::PCWSTR;
-    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::Shell::{IsUserAnAdmin, ShellExecuteW};
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
     use super::OpenPathError;
@@ -127,6 +161,34 @@ mod platform {
         Err(OpenPathError::LaunchFailed {
             path: path.to_path_buf(),
             detail: super::launch_failure_detail(status),
+        })
+    }
+
+    pub fn restart_as_admin(executable: &Path) -> Result<(), OpenPathError> {
+        // An elevated process cannot elevate again. Report it instead of
+        // closing the window and gaining nothing.
+        if unsafe { IsUserAnAdmin() }.as_bool() {
+            return Err(OpenPathError::LaunchFailed {
+                path: executable.to_path_buf(),
+                detail: "the application already runs with administrator permissions".to_string(),
+            });
+        }
+
+        let verb = wide(OsStr::new(super::RUNAS_VERB));
+        let target = wide(executable.as_os_str());
+        let directory = super::launch_directory(executable).map(|value| wide(value.as_os_str()));
+        let directory_ptr = directory
+            .as_ref()
+            .map_or(PCWSTR::null(), |value| PCWSTR(value.as_ptr()));
+
+        let status = shell_execute(PCWSTR(verb.as_ptr()), &target, directory_ptr);
+        if super::shell_execute_succeeded(status) {
+            return Ok(());
+        }
+
+        Err(OpenPathError::LaunchFailed {
+            path: executable.to_path_buf(),
+            detail: super::elevation_failure_detail(status),
         })
     }
 
@@ -167,5 +229,11 @@ mod platform {
                 path: path.to_path_buf(),
                 source,
             })
+    }
+
+    /// Only Windows has a one-click elevated relaunch. macOS asks the user to
+    /// start the application again with the permissions it needs.
+    pub fn restart_as_admin(_executable: &Path) -> Result<(), OpenPathError> {
+        Err(OpenPathError::Unsupported)
     }
 }

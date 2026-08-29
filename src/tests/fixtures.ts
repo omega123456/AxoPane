@@ -205,6 +205,7 @@ export const fixtures: {
   empty_trash: undefined,
   delete_from_trash: undefined,
   open_path: undefined,
+  restart_as_admin: undefined,
   write_file_clipboard: undefined,
   read_file_clipboard: { mode: 'copy', items: [] },
   clear_file_clipboard: undefined,
