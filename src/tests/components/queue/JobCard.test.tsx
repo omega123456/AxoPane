@@ -14,8 +14,8 @@ function progress(overrides: Partial<OpProgress>): OpProgress {
     destinationDir: 'D:\\dst',
     totalItems: 1248,
     completedItems: 812,
-    totalBytes: 1000,
-    copiedBytes: 630,
+    totalBytes: 85_899_345_920,
+    copiedBytes: 11_166_914_969,
     progressPercent: 63,
     bytesPerSecond: 260_046_848,
     etaSeconds: 180,
@@ -44,7 +44,7 @@ function samples(...entries: Array<[number, number]>): ThroughputSample[] {
 }
 
 describe('JobCard', () => {
-  it('renders the active copy header, percent, current file, chart and controls', () => {
+  it('renders the header, job total, bar, current file, rate, chart and controls', () => {
     render(
       <JobCard
         operation={progress({ itemNames: ['footage', 'b-roll'] })}
@@ -56,10 +56,13 @@ describe('JobCard', () => {
       />,
     )
     expect(screen.getByText('Copying 1,248 items')).toBeInTheDocument()
+    expect(screen.getByText('footage, b-roll')).toBeInTheDocument()
+    expect(screen.getByText('D:\\dst')).toBeInTheDocument()
+    expect(screen.getByText('10.4 GB of 80.0 GB · about 3 min left')).toBeInTheDocument()
     expect(screen.getByText('63%')).toBeInTheDocument()
-    expect(screen.getByText('C:\\src\\footage, b-roll, +1,246 more')).toBeInTheDocument()
     expect(screen.getByText('master-reel-final.mkv')).toBeInTheDocument()
-    expect(screen.getByText('813 / 1,248 items')).toBeInTheDocument()
+    expect(screen.getByText('item 813 of 1,248')).toBeInTheDocument()
+    expect(screen.getByText('248.0 MB/s')).toBeInTheDocument()
     expect(screen.getByTestId('throughput-chart-line')).toBeInTheDocument()
     expect(screen.getByRole('progressbar', { name: 'Copying 1,248 items' })).toHaveAttribute(
       'aria-valuenow',
@@ -69,6 +72,22 @@ describe('JobCard', () => {
     expect(screen.getByRole('button', { name: /Pause/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Skip/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /Cancel/ })).toBeInTheDocument()
+  })
+
+  it('does not print a speed anywhere except the rate line', () => {
+    render(
+      <JobCard
+        operation={progress({})}
+        throughputHistory={samples([63, 260_046_848])}
+        throughputPeak={260_046_848}
+        hasConflict={false}
+        reorderable={false}
+        {...noopHandlers()}
+      />,
+    )
+    // The chart used to label its Y-axis ceiling with a second, larger
+    // `/s` value that read as a competing speed reading.
+    expect(screen.getAllByText(/\/s$/)).toHaveLength(1)
   })
 
   it('shows estimating until the ETA stabilizes', () => {
@@ -82,7 +101,51 @@ describe('JobCard', () => {
         {...noopHandlers()}
       />,
     )
-    expect(screen.getByText('estimating…')).toBeInTheDocument()
+    expect(screen.getByText('10.4 GB of 80.0 GB · estimating…')).toBeInTheDocument()
+  })
+
+  it('says the total is still growing while the backend keeps discovering bytes', () => {
+    vi.useFakeTimers()
+    const { rerender } = render(
+      <JobCard
+        operation={progress({})}
+        throughputHistory={samples([63, 260_046_848])}
+        throughputPeak={260_046_848}
+        hasConflict={false}
+        reorderable={false}
+        {...noopHandlers()}
+      />,
+    )
+    try {
+      expect(screen.getByText('10.4 GB of 80.0 GB · about 3 min left')).toBeInTheDocument()
+
+      // Rust grows `total_bytes` as it walks the selected folders. A total that
+      // is still climbing must not be presented as final.
+      act(() => {
+        rerender(
+          <JobCard
+            operation={progress({ totalBytes: 128_849_018_880 })}
+            throughputHistory={samples([63, 260_046_848])}
+            throughputPeak={260_046_848}
+            hasConflict={false}
+            reorderable={false}
+            {...noopHandlers()}
+          />,
+        )
+      })
+      act(() => {
+        vi.advanceTimersByTime(500)
+      })
+      expect(screen.getByText('10.4 GB of 120.0 GB (still scanning)')).toBeInTheDocument()
+
+      // Once the scan settles the total stops moving and the estimate returns.
+      act(() => {
+        vi.advanceTimersByTime(500)
+      })
+      expect(screen.getByText('10.4 GB of 120.0 GB · about 3 min left')).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('keeps showing the last current file while the backend briefly clears it between files', () => {
@@ -97,9 +160,7 @@ describe('JobCard', () => {
       />,
     )
     expect(screen.getByText('master-reel-final.mkv')).toBeInTheDocument()
-    const chartProgressbar = screen.getByRole('progressbar', {
-      name: 'Copying 1,248 items',
-    })
+    const bar = screen.getByRole('progressbar', { name: 'Copying 1,248 items' })
 
     // The backend clears currentFileName for an instant between finishing one
     // file and starting the next; the block must stay mounted and keep
@@ -119,7 +180,7 @@ describe('JobCard', () => {
       />,
     )
     expect(screen.getByText('master-reel-final.mkv')).toBeInTheDocument()
-    expect(chartProgressbar).toBeInTheDocument()
+    expect(bar).toBeInTheDocument()
 
     rerender(
       <JobCard
@@ -134,7 +195,7 @@ describe('JobCard', () => {
     expect(screen.getByText('next-clip.mkv')).toBeInTheDocument()
   })
 
-  it('renders a Resume control when paused and keeps the chart surface stable', async () => {
+  it('renders a Resume control when paused, and neither an estimate nor a stale rate', async () => {
     const handlers = noopHandlers()
     const user = userEvent.setup()
     render(
@@ -151,6 +212,8 @@ describe('JobCard', () => {
       'aria-valuenow',
       '63',
     )
+    expect(screen.getByText('10.4 GB of 80.0 GB · paused')).toBeInTheDocument()
+    expect(screen.getByText('—')).toBeInTheDocument()
     const resume = screen.getByRole('button', { name: /Resume/ })
     const skip = screen.getByRole('button', { name: /Skip/ })
     expect(skip).toBeEnabled()
@@ -160,7 +223,7 @@ describe('JobCard', () => {
     expect(handlers.onResume).toHaveBeenCalled()
   })
 
-  it('renders completed state with a dismiss control and no chart progressbar', async () => {
+  it('renders completed state with a dismiss control and no progress bar', async () => {
     const handlers = noopHandlers()
     const user = userEvent.setup()
     render(
@@ -180,7 +243,7 @@ describe('JobCard', () => {
     expect(handlers.onDismiss).toHaveBeenCalled()
   })
 
-  it('renders failed state with a retry control, error message and no chart progressbar', async () => {
+  it('renders failed state with a retry control, error message and no progress bar', async () => {
     const handlers = noopHandlers()
     const user = userEvent.setup()
     render(
@@ -202,7 +265,7 @@ describe('JobCard', () => {
     expect(handlers.onDismiss).toHaveBeenCalled()
   })
 
-  it('renders cancelled state with a dismiss control, retained note box and no chart progressbar', async () => {
+  it('renders cancelled state with a dismiss control, retained note box and no progress bar', async () => {
     const handlers = noopHandlers()
     const user = userEvent.setup()
     render(
@@ -246,34 +309,83 @@ describe('JobCard', () => {
     expect(onMoveDown).toHaveBeenCalled()
   })
 
-  it('appends the queued item names to both the source and destination paths', () => {
+  it('shows what is being copied and where, on one line', () => {
     render(
       <JobCard
         operation={progress({
-          status: 'pending',
-          sourceDir: 'C:\\Downloads',
-          itemNames: ['Season 01', 'poster.jpg', 'notes.txt'],
+          itemNames: ['Season 01', 'poster.jpg'],
           destinationDir: 'D:\\Sorted',
-          totalItems: 3,
+          totalItems: 2,
         })}
-        throughputHistory={samples([0, 0])}
-        throughputPeak={0}
+        throughputHistory={samples([22, 240_000_000])}
+        throughputPeak={240_000_000}
         hasConflict={false}
-        reorderable
+        reorderable={false}
         {...noopHandlers()}
       />,
     )
 
-    expect(screen.getByText('C:\\Downloads\\Season 01, poster.jpg, +1 more')).toBeInTheDocument()
-    expect(screen.getByText('D:\\Sorted\\Season 01, poster.jpg, +1 more')).toBeInTheDocument()
+    expect(screen.getByText('Season 01, poster.jpg')).toBeInTheDocument()
+    expect(screen.getByText('D:\\Sorted')).toHaveAttribute('title', 'D:\\Sorted')
+    // Nothing is hidden, so there is no disclosure to offer.
+    expect(screen.queryByRole('button', { name: /more/ })).not.toBeInTheDocument()
   })
 
-  it('appends the top-level item name to both paths while the job is actively running', () => {
+  it('expands the full selection when more items are queued than the line shows', async () => {
+    const user = userEvent.setup()
     render(
       <JobCard
         operation={progress({
-          status: 'active',
-          sourceDir: 'D:\\projects',
+          itemNames: ['Season 01', 'Season 02', 'Season 03', 'Season 04', 'Season 05'],
+          totalItems: 5,
+          completedItems: 1,
+        })}
+        throughputHistory={samples([22, 240_000_000])}
+        throughputPeak={240_000_000}
+        hasConflict={false}
+        reorderable={false}
+        {...noopHandlers()}
+      />,
+    )
+
+    expect(screen.getByText('Season 01, Season 02')).toBeInTheDocument()
+    expect(screen.queryByText('Season 03')).not.toBeInTheDocument()
+
+    const toggle = screen.getByRole('button', { name: /\+3 more/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    await user.click(toggle)
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    const list = screen.getByRole('list')
+    expect(within(list).getAllByRole('listitem')).toHaveLength(5)
+    expect(within(list).getByText('Season 03')).toBeInTheDocument()
+
+    await user.click(toggle)
+    expect(screen.queryByRole('list')).not.toBeInTheDocument()
+  })
+
+  it('says how many names the backend did not send for an oversized selection', async () => {
+    const user = userEvent.setup()
+    render(
+      <JobCard
+        operation={progress({ itemNames: ['footage', 'b-roll'] })}
+        throughputHistory={samples([22, 240_000_000])}
+        throughputPeak={240_000_000}
+        hasConflict={false}
+        reorderable={false}
+        {...noopHandlers()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /\+1,246 more/ }))
+    const list = screen.getByRole('list')
+    expect(within(list).getByText('+1,246 more')).toBeInTheDocument()
+  })
+
+  it('exposes the destination and current file name via title tooltips when truncated', () => {
+    render(
+      <JobCard
+        operation={progress({
           itemNames: ['b'],
           totalItems: 1,
           destinationDir: 'F:\\Download',
@@ -287,36 +399,11 @@ describe('JobCard', () => {
       />,
     )
 
-    expect(screen.getByText('D:\\projects\\b')).toBeInTheDocument()
-    expect(screen.getByText('F:\\Download\\b')).toBeInTheDocument()
-    expect(screen.getByText('server.mjs')).toBeInTheDocument()
-  })
-
-  it('exposes the full path and current file name via title tooltips when truncated', () => {
-    render(
-      <JobCard
-        operation={progress({
-          status: 'active',
-          sourceDir: 'D:\\projects',
-          itemNames: ['b'],
-          totalItems: 1,
-          destinationDir: 'F:\\Download',
-          currentFileName: 'server.mjs',
-        })}
-        throughputHistory={samples([22, 240_000_000])}
-        throughputPeak={240_000_000}
-        hasConflict={false}
-        reorderable={false}
-        {...noopHandlers()}
-      />,
-    )
-
-    expect(screen.getByText('D:\\projects\\b')).toHaveAttribute('title', 'D:\\projects\\b')
-    expect(screen.getByText('F:\\Download\\b')).toHaveAttribute('title', 'F:\\Download\\b')
+    expect(screen.getByText('F:\\Download')).toHaveAttribute('title', 'F:\\Download')
     expect(screen.getByText('server.mjs')).toHaveAttribute('title', 'server.mjs')
   })
 
-  it('shows a resolve action while in conflict and keeps the chart progressbar', async () => {
+  it('shows a resolve action while in conflict and keeps the progress bar', async () => {
     const handlers = noopHandlers()
     const user = userEvent.setup()
     render(
@@ -351,13 +438,16 @@ describe('JobCard', () => {
     expect(screen.getByText('Moving 1,248 items')).toBeInTheDocument()
   })
 
-  it('labels a delete operation', () => {
+  it('counts items rather than bytes for a delete, and shows no destination', () => {
     render(
       <JobCard
         operation={progress({
           kind: 'delete',
           destinationDir: '',
           itemNames: ['footage', 'b-roll'],
+          totalItems: 500,
+          completedItems: 412,
+          etaSeconds: 8,
         })}
         throughputHistory={samples([63, 260_046_848])}
         throughputPeak={260_046_848}
@@ -366,9 +456,15 @@ describe('JobCard', () => {
         {...noopHandlers()}
       />,
     )
-    expect(screen.getByText('Deleting 1,248 items')).toBeInTheDocument()
-    expect(screen.getByText('C:\\src\\footage, b-roll, +1,246 more')).toBeInTheDocument()
+    expect(screen.getByText('Deleting 500 items')).toBeInTheDocument()
+    expect(screen.getByText('footage, b-roll')).toBeInTheDocument()
+    expect(screen.getByText('412 of 500 items deleted · about 8 sec left')).toBeInTheDocument()
+    expect(screen.getByText('item 413 of 500')).toBeInTheDocument()
     expect(screen.queryByText('D:\\dst')).not.toBeInTheDocument()
+    // Items, not bytes: a transfer rate and a throughput curve would report
+    // something the rest of the card does not.
+    expect(screen.queryByText(/\/s$/)).not.toBeInTheDocument()
+    expect(screen.queryByTestId('throughput-chart-line')).not.toBeInTheDocument()
   })
 
   it('labels archive operations', () => {
@@ -397,7 +493,7 @@ describe('JobCard', () => {
     expect(screen.getByText('Extracting 1,248 items')).toBeInTheDocument()
   })
 
-  it('throttles live metrics announcements for five seconds on a dedicated hidden node', () => {
+  it('announces the job total and time left, throttled to five seconds', () => {
     vi.useFakeTimers()
     const { rerender, container } = render(
       <JobCard
@@ -413,17 +509,12 @@ describe('JobCard', () => {
     const liveRegion = container.querySelector('[aria-live="polite"]')
     try {
       expect(liveRegion).toHaveClass('sr-only')
-      expect(liveRegion?.parentElement).not.toHaveAttribute('aria-live')
-      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 813 / 1,248 items')
+      expect(liveRegion).toHaveTextContent('10.4 GB of 80.0 GB, about 3 min left')
 
       act(() => {
         rerender(
           <JobCard
-            operation={progress({
-              bytesPerSecond: 300_000_000,
-              etaSeconds: 120,
-              completedItems: 900,
-            })}
+            operation={progress({ copiedBytes: 22_888_226_816, etaSeconds: 120 })}
             throughputHistory={samples([63, 300_000_000])}
             throughputPeak={300_000_000}
             hasConflict={false}
@@ -433,32 +524,31 @@ describe('JobCard', () => {
         )
       })
 
-      // The visible metrics row is throttled too, so right after the rerender it
-      // still shows the previous values. (Scope to the metrics row — the chart's
-      // ceiling label can carry the same rate string when speed equals the peak.)
-      const metricsRow = liveRegion?.parentElement as HTMLElement
-      expect(within(metricsRow).getByText('248.0 MB/s')).toBeInTheDocument()
-      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 813 / 1,248 items')
+      // The visible numbers are throttled too, so right after the rerender the
+      // card still shows the previous values.
+      expect(screen.getByText('10.4 GB of 80.0 GB · about 3 min left')).toBeInTheDocument()
+      expect(liveRegion).toHaveTextContent('10.4 GB of 80.0 GB, about 3 min left')
 
-      // After the metrics refresh interval the visible row catches up…
+      // After the metrics refresh interval the visible card catches up…
       act(() => {
         vi.advanceTimersByTime(1000)
       })
-      expect(within(metricsRow).getByText('286.1 MB/s')).toBeInTheDocument()
-      expect(screen.getByText('about 2 min left')).toBeInTheDocument()
-      expect(screen.getByText('901 / 1,248 items')).toBeInTheDocument()
+      expect(screen.getByText('21.3 GB of 80.0 GB · about 2 min left')).toBeInTheDocument()
+      expect(screen.getByText('286.1 MB/s')).toBeInTheDocument()
       // …but the slower 5s live region is still on the old announcement.
-      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 813 / 1,248 items')
+      expect(liveRegion).toHaveTextContent('10.4 GB of 80.0 GB, about 3 min left')
 
+      // The live region announces what the card shows, so its 5s throttle only
+      // starts once the visible numbers change.
       act(() => {
-        vi.advanceTimersByTime(3999)
+        vi.advanceTimersByTime(4999)
       })
-      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 813 / 1,248 items')
+      expect(liveRegion).toHaveTextContent('10.4 GB of 80.0 GB, about 3 min left')
 
       act(() => {
         vi.advanceTimersByTime(1)
       })
-      expect(liveRegion).toHaveTextContent('286.1 MB/s, about 2 min left, 901 / 1,248 items')
+      expect(liveRegion).toHaveTextContent('21.3 GB of 80.0 GB, about 2 min left')
     } finally {
       vi.useRealTimers()
     }
@@ -479,16 +569,12 @@ describe('JobCard', () => {
 
     const liveRegion = container.querySelector('[aria-live="polite"]')
     try {
-      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 813 / 1,248 items')
+      expect(liveRegion).toHaveTextContent('10.4 GB of 80.0 GB, about 3 min left')
 
       act(() => {
         rerender(
           <JobCard
-            operation={progress({
-              bytesPerSecond: 300_000_000,
-              etaSeconds: 120,
-              completedItems: 900,
-            })}
+            operation={progress({ copiedBytes: 22_888_226_816, etaSeconds: 120 })}
             throughputHistory={samples([63, 300_000_000])}
             throughputPeak={300_000_000}
             hasConflict={false}
@@ -514,7 +600,7 @@ describe('JobCard', () => {
       act(() => {
         vi.advanceTimersByTime(5000)
       })
-      expect(liveRegion).toHaveTextContent('248.0 MB/s, about 3 min left, 813 / 1,248 items')
+      expect(liveRegion).toHaveTextContent('10.4 GB of 80.0 GB, about 3 min left')
     } finally {
       vi.useRealTimers()
     }

@@ -1,5 +1,12 @@
 import type { OpProgress, OpSnapshot } from '@/lib/types/ipc'
 
+/** 80 GB, so the card's job total reads like a real media transfer. */
+const TRANSFER_TOTAL_BYTES = 85_899_345_920
+
+function bytesFor(percent: number) {
+  return Math.round(TRANSFER_TOTAL_BYTES * (percent / 100))
+}
+
 /**
  * Phase 6 queue screenshot fixtures. Specs select one via
  * `window.__PLAYWRIGHT_IPC_OVERRIDES__` so the screenshot router stays free of
@@ -12,12 +19,21 @@ function activeCopy(overrides: Partial<OpProgress> = {}): OpProgress {
     kind: 'copy',
     status: 'active',
     sourceDir: 'D:\\Media\\Archives',
-    itemNames: ['Q3-conference-highlights', 'master-reel-final.mkv'],
+    // The backend ships a bounded preview of the top-level names: the card's
+    // collapsed line shows the first two, and expanding it lists the rest.
+    itemNames: [
+      'Q3-conference-highlights',
+      'master-reel-final.mkv',
+      'b-roll-package.mov',
+      'interviews-raw',
+      'colour-graded-v4.mov',
+      'audio-stems',
+    ],
     destinationDir: 'E:\\Cold-Storage\\2025',
     totalItems: 1248,
     completedItems: 812,
-    totalBytes: 1000,
-    copiedBytes: 630,
+    totalBytes: TRANSFER_TOTAL_BYTES,
+    copiedBytes: bytesFor(63),
     progressPercent: 63,
     bytesPerSecond: 260_046_848,
     etaSeconds: 180,
@@ -32,7 +48,7 @@ function activeCopy(overrides: Partial<OpProgress> = {}): OpProgress {
 export const expandedQueueProgressEvents: OpProgress[] = [
   activeCopy({
     completedItems: 78,
-    copiedBytes: 60,
+    copiedBytes: bytesFor(6),
     progressPercent: 6,
     bytesPerSecond: 110_100_480,
     etaSeconds: 880,
@@ -40,7 +56,7 @@ export const expandedQueueProgressEvents: OpProgress[] = [
   }),
   activeCopy({
     completedItems: 156,
-    copiedBytes: 122,
+    copiedBytes: bytesFor(12.2),
     progressPercent: 12.2,
     bytesPerSecond: 188_743_680,
     etaSeconds: 812,
@@ -48,7 +64,7 @@ export const expandedQueueProgressEvents: OpProgress[] = [
   }),
   activeCopy({
     completedItems: 226,
-    copiedBytes: 176,
+    copiedBytes: bytesFor(17.6),
     progressPercent: 17.6,
     bytesPerSecond: 255_852_544,
     etaSeconds: 744,
@@ -56,7 +72,7 @@ export const expandedQueueProgressEvents: OpProgress[] = [
   }),
   activeCopy({
     completedItems: 298,
-    copiedBytes: 232,
+    copiedBytes: bytesFor(23.2),
     progressPercent: 23.2,
     bytesPerSecond: 211_812_352,
     etaSeconds: 662,
@@ -64,7 +80,7 @@ export const expandedQueueProgressEvents: OpProgress[] = [
   }),
   activeCopy({
     completedItems: 372,
-    copiedBytes: 290,
+    copiedBytes: bytesFor(29),
     progressPercent: 29,
     bytesPerSecond: 304_087_040,
     etaSeconds: 584,
@@ -72,7 +88,7 @@ export const expandedQueueProgressEvents: OpProgress[] = [
   }),
   activeCopy({
     completedItems: 444,
-    copiedBytes: 346,
+    copiedBytes: bytesFor(34.6),
     progressPercent: 34.6,
     bytesPerSecond: 241_172_480,
     etaSeconds: 516,
@@ -80,7 +96,7 @@ export const expandedQueueProgressEvents: OpProgress[] = [
   }),
   activeCopy({
     completedItems: 514,
-    copiedBytes: 401,
+    copiedBytes: bytesFor(40.1),
     progressPercent: 40.1,
     bytesPerSecond: 335_544_320,
     etaSeconds: 456,
@@ -88,7 +104,7 @@ export const expandedQueueProgressEvents: OpProgress[] = [
   }),
   activeCopy({
     completedItems: 582,
-    copiedBytes: 454,
+    copiedBytes: bytesFor(45.4),
     progressPercent: 45.4,
     bytesPerSecond: 201_326_592,
     etaSeconds: 398,
@@ -96,7 +112,7 @@ export const expandedQueueProgressEvents: OpProgress[] = [
   }),
   activeCopy({
     completedItems: 646,
-    copiedBytes: 504,
+    copiedBytes: bytesFor(50.4),
     progressPercent: 50.4,
     bytesPerSecond: 283_115_520,
     etaSeconds: 342,
@@ -104,7 +120,7 @@ export const expandedQueueProgressEvents: OpProgress[] = [
   }),
   activeCopy({
     completedItems: 690,
-    copiedBytes: 538,
+    copiedBytes: bytesFor(53.8),
     progressPercent: 53.8,
     bytesPerSecond: 197_132_288,
     etaSeconds: 304,
@@ -112,7 +128,7 @@ export const expandedQueueProgressEvents: OpProgress[] = [
   }),
   activeCopy({
     completedItems: 714,
-    copiedBytes: 550,
+    copiedBytes: bytesFor(55),
     progressPercent: 55,
     bytesPerSecond: 163_577_856,
     etaSeconds: 264,
@@ -120,7 +136,7 @@ export const expandedQueueProgressEvents: OpProgress[] = [
   }),
   activeCopy({
     completedItems: 736,
-    copiedBytes: 568,
+    copiedBytes: bytesFor(56.8),
     progressPercent: 56.8,
     bytesPerSecond: 239_075_328,
     etaSeconds: 238,
@@ -128,7 +144,7 @@ export const expandedQueueProgressEvents: OpProgress[] = [
   }),
   activeCopy({
     completedItems: 758,
-    copiedBytes: 586,
+    copiedBytes: bytesFor(58.6),
     progressPercent: 58.6,
     bytesPerSecond: 293_601_280,
     etaSeconds: 218,
@@ -136,7 +152,7 @@ export const expandedQueueProgressEvents: OpProgress[] = [
   }),
   activeCopy({
     completedItems: 776,
-    copiedBytes: 600,
+    copiedBytes: bytesFor(60),
     progressPercent: 60,
     bytesPerSecond: 230_686_720,
     etaSeconds: 205,
@@ -144,7 +160,7 @@ export const expandedQueueProgressEvents: OpProgress[] = [
   }),
   activeCopy({
     completedItems: 792,
-    copiedBytes: 612,
+    copiedBytes: bytesFor(61.2),
     progressPercent: 61.2,
     bytesPerSecond: 180_355_072,
     etaSeconds: 194,
@@ -152,7 +168,7 @@ export const expandedQueueProgressEvents: OpProgress[] = [
   }),
   activeCopy({
     completedItems: 802,
-    copiedBytes: 620,
+    copiedBytes: bytesFor(62),
     progressPercent: 62,
     bytesPerSecond: 209_715_200,
     etaSeconds: 188,
@@ -160,7 +176,7 @@ export const expandedQueueProgressEvents: OpProgress[] = [
   }),
   activeCopy({
     completedItems: 808,
-    copiedBytes: 626,
+    copiedBytes: bytesFor(62.6),
     progressPercent: 62.6,
     bytesPerSecond: 241_172_480,
     etaSeconds: 184,
@@ -188,7 +204,7 @@ export const expandedQueueSnapshot: OpSnapshot[] = [
       destinationDir: 'D:\\Sorted',
       totalItems: 32,
       completedItems: 0,
-      totalBytes: 500,
+      totalBytes: 21_474_836_480,
       copiedBytes: 0,
       progressPercent: 0,
       bytesPerSecond: 0,
@@ -211,8 +227,8 @@ export const deletingQueueProgressEvents: OpProgress[] = [
     destinationDir: '',
     totalItems: 84,
     completedItems: 8,
-    totalBytes: 1000,
-    copiedBytes: 95,
+    totalBytes: TRANSFER_TOTAL_BYTES,
+    copiedBytes: bytesFor(9.5),
     progressPercent: 9.5,
     bytesPerSecond: 42_991_616,
     etaSeconds: 86,
@@ -228,8 +244,8 @@ export const deletingQueueProgressEvents: OpProgress[] = [
     destinationDir: '',
     totalItems: 84,
     completedItems: 17,
-    totalBytes: 1000,
-    copiedBytes: 205,
+    totalBytes: TRANSFER_TOTAL_BYTES,
+    copiedBytes: bytesFor(20.5),
     progressPercent: 20.5,
     bytesPerSecond: 62_914_560,
     etaSeconds: 69,
@@ -245,8 +261,8 @@ export const deletingQueueProgressEvents: OpProgress[] = [
     destinationDir: '',
     totalItems: 84,
     completedItems: 28,
-    totalBytes: 1000,
-    copiedBytes: 330,
+    totalBytes: TRANSFER_TOTAL_BYTES,
+    copiedBytes: bytesFor(33),
     progressPercent: 33,
     bytesPerSecond: 86_507_520,
     etaSeconds: 56,
@@ -262,8 +278,8 @@ export const deletingQueueProgressEvents: OpProgress[] = [
     destinationDir: '',
     totalItems: 84,
     completedItems: 37,
-    totalBytes: 1000,
-    copiedBytes: 440,
+    totalBytes: TRANSFER_TOTAL_BYTES,
+    copiedBytes: bytesFor(44),
     progressPercent: 44,
     bytesPerSecond: 72_351_744,
     etaSeconds: 48,
@@ -288,8 +304,8 @@ export const deletingQueueSnapshot: OpSnapshot[] = [
         destinationDir: '',
         totalItems: 84,
         completedItems: 37,
-        totalBytes: 1000,
-        copiedBytes: 440,
+        totalBytes: TRANSFER_TOTAL_BYTES,
+        copiedBytes: bytesFor(44),
         progressPercent: 44,
         bytesPerSecond: 72_351_744,
         etaSeconds: 48,
@@ -320,8 +336,8 @@ export const conflictQueueSnapshot: OpSnapshot[] = [
       destinationDir: 'E:\\Cold-Storage\\2025',
       totalItems: 1248,
       completedItems: 120,
-      totalBytes: 1000,
-      copiedBytes: 96,
+      totalBytes: TRANSFER_TOTAL_BYTES,
+      copiedBytes: bytesFor(9.6),
       progressPercent: 9.6,
       bytesPerSecond: 120_000_000,
       etaSeconds: null,
@@ -358,8 +374,8 @@ export const longPathQueueSnapshot: OpSnapshot[] = [
         'F:\\Backups\\Archive\\2025\\Video-Production\\Client-Deliverables\\Cold-Storage\\Long-Term-Retention',
       totalItems: 1,
       completedItems: 0,
-      totalBytes: 1000,
-      copiedBytes: 630,
+      totalBytes: TRANSFER_TOTAL_BYTES,
+      copiedBytes: bytesFor(63),
       progressPercent: 63,
       bytesPerSecond: 260_046_848,
       etaSeconds: 180,
@@ -384,7 +400,7 @@ function pendingMove(operationId: string): OpSnapshot {
       destinationDir: 'D:\\Sorted',
       totalItems: 32,
       completedItems: 0,
-      totalBytes: 500,
+      totalBytes: 21_474_836_480,
       copiedBytes: 0,
       progressPercent: 0,
       bytesPerSecond: 0,

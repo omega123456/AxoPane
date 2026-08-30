@@ -60,6 +60,11 @@ pub const DEFAULT_RATE_WINDOW: Duration = Duration::from_millis(250);
 /// or while copying/moving the files nested inside a directory tree.
 const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(90);
 
+/// Top-level item names carried on every `OpProgress`. Enough for the card's
+/// expandable selection list, small enough that a 500-item selection clones a
+/// bounded handful of short strings per tick rather than the whole selection.
+const ITEM_NAME_PREVIEW_LIMIT: usize = 24;
+
 /// Number of progress samples required before an ETA is considered stable enough
 /// to surface to the UI.
 const ETA_STABILIZATION_SAMPLES: u64 = 3;
@@ -276,15 +281,17 @@ impl OpState {
                 .first()
                 .map(|item| parent_dir(&item.source_path))
                 .unwrap_or_default(),
-            // Bounded preview: the UI only ever renders the first two names
-            // plus a "+K more" count (`JobCard`/`QueuePanel`), and that count
-            // is read from `total_items` (verified == `items.len()` at all
-            // times), so cloning every top-level item name on every tick would
-            // be pure waste on large selections.
+            // Bounded preview: the collapsed card shows the first two names
+            // plus a "+K more" toggle, and expanding it lists what arrived
+            // here. `total_items` (verified == `items.len()` at all times)
+            // still carries the true count, so a selection larger than this
+            // cap reports the remainder rather than pretending the list is
+            // complete. Cloning every top-level name on every tick would be
+            // pure waste on large selections.
             item_names: self
                 .items
                 .iter()
-                .take(2)
+                .take(ITEM_NAME_PREVIEW_LIMIT)
                 .map(|item| item.name.clone())
                 .collect(),
             destination_dir: self.destination_dir.to_string_lossy().into_owned(),

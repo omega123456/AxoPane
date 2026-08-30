@@ -410,6 +410,25 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`transfer-queue-expanded-${mode}.png`)
   })
 
+  test(`queue expanded item list ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.queueExpanded[mode])
+    await page.getByRole('button', { name: 'Expand job queue' }).click()
+    await expect(page.getByRole('region', { name: 'Job queue' })).toBeVisible()
+    const toggle = page.getByRole('button', { name: /more/ }).first()
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await expect(
+      page.locator('[data-testid="throughput-chart-fill-extent"]').first(),
+    ).toHaveAttribute('width', String(expandedQueueFinalProgressEvent.progressPercent))
+    await expect(page.locator('[data-testid="throughput-chart"]').first()).toHaveAttribute(
+      'data-scale-settled',
+      'true',
+    )
+    await expect(page.locator('main')).toHaveScreenshot(
+      `transfer-queue-expanded-items-${mode}.png`,
+    )
+  })
+
   test(`queue long path ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.queueLongPath[mode])
     await page.getByRole('button', { name: 'Expand job queue' }).click()
@@ -448,13 +467,14 @@ for (const mode of ['light', 'dark'] as const) {
       'aria-valuenow',
       String(Math.round(deletingQueueFinalProgressEvent.progressPercent)),
     )
+    // A delete counts items, so it draws no throughput curve.
+    await expect(page.locator('[data-testid="throughput-chart"]')).toHaveCount(0)
     await expect(
-      page.locator('[data-testid="throughput-chart-fill-extent"]').first(),
-    ).toHaveAttribute('width', String(deletingQueueFinalProgressEvent.progressPercent))
-    await expect(page.locator('[data-testid="throughput-chart"]').first()).toHaveAttribute(
-      'data-scale-settled',
-      'true',
-    )
+      page.getByText(
+        `${deletingQueueFinalProgressEvent.completedItems} of ${deletingQueueFinalProgressEvent.totalItems} items deleted ·`,
+        { exact: false },
+      ),
+    ).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(
       `transfer-queue-deleting-expanded-${mode}.png`,
     )

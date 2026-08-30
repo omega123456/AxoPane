@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { curveLinear } from '@visx/curve'
 import { scaleLinear } from '@visx/scale'
 import { AreaClosed, LinePath } from '@visx/shape'
-import { formatRate } from '@/lib/format'
 import type { ThroughputSample } from '@/lib/types/ipc'
 
 type ThroughputChartProps = {
@@ -487,12 +486,6 @@ export function ThroughputChart({ samples, currentPercent, peakRate }: Throughpu
           />
         )}
       </svg>
-      <span
-        data-testid="throughput-chart-scale-label"
-        className="pointer-events-none absolute left-3 top-2 font-mono text-uxs leading-none text-light-text-faint dark:text-dark-text-faint"
-      >
-        {formatRate(ceilingRate)}
-      </span>
       <span
         data-testid="throughput-chart-leading-edge"
         style={{ left: `${currentX}%` }}

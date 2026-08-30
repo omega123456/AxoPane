@@ -6,7 +6,7 @@ import {
   XIcon,
   XCircleIcon,
 } from '@/components/icons'
-import { formatCount } from '@/lib/format'
+import { formatBytes, formatCount } from '@/lib/format'
 import type { OpProgress } from '@/lib/types/ipc'
 import { isTerminal, useQueueStore } from '@/stores/queue-store'
 
@@ -21,6 +21,7 @@ function summarize(operations: OpProgress[]) {
       icon: 'failed' as const,
       label: `${formatCount(failed.length)} job${failed.length === 1 ? '' : 's'} failed`,
       percent: 100,
+      detail: null,
       dismissible: active.length === 0,
     }
   }
@@ -29,6 +30,7 @@ function summarize(operations: OpProgress[]) {
       icon: 'cancelled' as const,
       label: `${formatCount(cancelled.length)} job${cancelled.length === 1 ? '' : 's'} cancelled`,
       percent: 100,
+      detail: null,
       dismissible: true,
     }
   }
@@ -37,6 +39,7 @@ function summarize(operations: OpProgress[]) {
       icon: 'done' as const,
       label: 'Jobs complete',
       percent: 100,
+      detail: null,
       dismissible: true,
     }
   }
@@ -57,6 +60,14 @@ function summarize(operations: OpProgress[]) {
   return {
     icon: 'active' as const,
     label: `${verb} ${formatCount(active.length)} job${active.length === 1 ? '' : 's'}`,
+    // The aggregate is already computed for the bar above; print it too, so the
+    // collapsed pill answers "how much is left" without being expanded. Deletes
+    // are measured in items on the expanded card, so a byte total here would
+    // contradict it.
+    detail:
+      verb !== 'Deleting' && totalBytes > 0
+        ? `${formatBytes(copiedBytes)} of ${formatBytes(totalBytes)}`
+        : null,
     percent,
     dismissible: false,
   }
@@ -104,8 +115,15 @@ export function QueueToast() {
           )}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-xs font-semibold text-light-text dark:text-dark-text">
-            {summary.label}
+          <span className="flex min-w-0 items-baseline gap-1.5">
+            <span className="truncate text-xs font-semibold text-light-text dark:text-dark-text">
+              {summary.label}
+            </span>
+            {summary.detail ? (
+              <span className="shrink-0 font-mono text-uxs tabular-nums text-light-text-muted dark:text-dark-text-muted">
+                {summary.detail}
+              </span>
+            ) : null}
           </span>
           <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-light-skeleton dark:bg-dark-skeleton">
             <span

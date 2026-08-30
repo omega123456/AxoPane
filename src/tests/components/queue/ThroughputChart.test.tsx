@@ -179,13 +179,11 @@ describe('ThroughputChart', () => {
       <ThroughputChart samples={steady} currentPercent={60} peakRate={1000} />,
     )
     const firstLine = screen.getByTestId('throughput-chart-line').getAttribute('d')
-    expect(screen.getByTestId('throughput-chart-scale-label')).toHaveTextContent('1.6 KB/s')
 
     // 1100 B/s is a real new high, but it still fits in the 1.6 KB/s band; the
     // chart should not compress just because the peak nudged upward.
     rerender(<ThroughputChart samples={steady} currentPercent={60} peakRate={1100} />)
     expect(screen.getByTestId('throughput-chart-line').getAttribute('d')).toBe(firstLine)
-    expect(screen.getByTestId('throughput-chart-scale-label')).toHaveTextContent('1.6 KB/s')
   })
 
   it('animates into a higher scale band when the peak meaningfully outgrows the old one', () => {
@@ -204,7 +202,6 @@ describe('ThroughputChart', () => {
         rerender(<ThroughputChart samples={steady} currentPercent={60} peakRate={2000} />)
       })
       expect(screen.getByTestId('throughput-chart-line').getAttribute('d')).toBe(firstLine)
-      expect(screen.getByTestId('throughput-chart-scale-label')).toHaveTextContent('3.1 KB/s')
       expect(screen.getByTestId('throughput-chart')).toHaveAttribute('data-scale-settled', 'false')
 
       act(() => {

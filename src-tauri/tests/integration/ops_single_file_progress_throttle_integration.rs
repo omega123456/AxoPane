@@ -106,11 +106,11 @@ mod tests {
         (op_arc, resolver, progress_log, ctx)
     }
 
-    /// `OpProgress.item_names` is capped to the first two names regardless of
-    /// how many top-level items the operation has; `total_items` (which the
+    /// `OpProgress.item_names` carries a bounded preview of the top-level
+    /// names for the card's expandable selection list; `total_items` (which the
     /// UI's "+K more" count reads) still reflects the full count.
     #[test]
-    fn op_progress_caps_item_names_to_a_two_item_preview() {
+    fn op_progress_lists_item_names_within_the_preview_limit() {
         let items = vec![
             OpItem {
                 source_path: "/tmp/a.txt".to_string(),
@@ -138,10 +138,15 @@ mod tests {
 
         assert_eq!(
             progress.item_names,
-            vec!["a.txt".to_string(), "b.txt".to_string()]
+            vec![
+                "a.txt".to_string(),
+                "b.txt".to_string(),
+                "c.txt".to_string(),
+                "d.txt".to_string()
+            ]
         );
         // The "+K more" count comes from `total_items`, which stays the full
-        // top-level item count even though `item_names` is now a preview.
+        // top-level item count even though `item_names` is only a preview.
         assert_eq!(progress.total_items, 4);
     }
 
@@ -333,7 +338,7 @@ mod tests {
             .collect();
         let state = op_state_with_items(OpStatus::Active, items);
         let progress = state.progress();
-        assert_eq!(progress.item_names.len(), 2);
+        assert_eq!(progress.item_names.len(), 24);
         assert_eq!(progress.total_items, 500);
     }
 }

@@ -1,7 +1,10 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
-  ArrowDownIcon,
+  ArrowRightIcon,
+  CheckIcon,
   CheckCircleIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
   GripVerticalIcon,
   PauseIcon,
   PlayIcon,
@@ -11,8 +14,8 @@ import {
   XIcon,
 } from '@/components/icons'
 import { ThroughputChart } from '@/components/queue/ThroughputChart'
-import { formatBytes, formatCount, formatEta, formatRate } from '@/lib/format'
-import { formatItemPreview, verb } from '@/lib/queue-format'
+import { formatCount, formatRate } from '@/lib/format'
+import { ITEM_PREVIEW_LIMIT, formatJobProgress, verb } from '@/lib/queue-format'
 import type { OpProgress, ThroughputSample } from '@/lib/types/ipc'
 
 type JobCardProps = {
@@ -34,10 +37,11 @@ type JobCardProps = {
 
 const LIVE_REGION_THROTTLE_MS = 5000
 /**
- * Cadence the visible metrics row refreshes at. The backend reports a jittery
+ * Cadence the visible metrics refresh at. The backend reports a jittery
  * instantaneous rate many times a second; sampling it on a calm interval keeps
- * the speed number readable (and roughly in step with the averaged chart)
- * instead of flickering on every progress event.
+ * the numbers readable (and roughly in step with the averaged chart) instead of
+ * flickering on every progress event. The same tick decides whether the backend
+ * is still discovering bytes, by comparing successive totals.
  */
 const METRICS_REFRESH_MS = 500
 
@@ -58,6 +62,7 @@ export function JobCard({
   onMoveDown,
 }: JobCardProps) {
   const headingId = useId()
+  const itemListId = useId()
   const percent = Math.min(100, Math.max(0, operation.progressPercent))
   const roundedPercent = Math.round(percent)
   const isCompleted = operation.status === 'completed'
@@ -66,17 +71,23 @@ export function JobCard({
   const isCancelled = operation.status === 'cancelled'
   const isConflict = operation.status === 'conflict' || hasConflict
   const isPending = operation.status === 'pending'
-  const topLevelItems = formatItemPreview(operation.itemNames, operation.totalItems)
-  const showTopLevelItems = !isCompleted && !isFailed && !isCancelled && topLevelItems !== null
-  const sourceSeparator = operation.sourceDir.includes('\\') ? '\\' : '/'
-  const destinationSeparator = operation.destinationDir.includes('\\') ? '\\' : '/'
-  const sourceDisplay = showTopLevelItems
-    ? `${operation.sourceDir}${sourceSeparator}${topLevelItems}`
-    : operation.sourceDir
-  const destinationDisplay = showTopLevelItems
-    ? `${operation.destinationDir}${destinationSeparator}${topLevelItems}`
-    : operation.destinationDir
-  const showChart = !isPending && !isCompleted && !isFailed && !isCancelled
+  const isFinished = isCompleted || isFailed || isCancelled
+  const showProgress = !isFinished
+  const showCurrentFile = !isPending && !isFinished
+  // A delete is measured in items, so a transfer rate and a throughput curve
+  // would describe something the rest of the card does not report.
+  const isDelete = operation.kind === 'delete'
+  const showChart = showCurrentFile && !isDelete
+  const showRate = showCurrentFile && !isDelete
+
+  const previewNames = operation.itemNames.slice(0, ITEM_PREVIEW_LIMIT)
+  const hiddenItemCount = Math.max(0, operation.totalItems - previewNames.length)
+  const listedNames = operation.itemNames
+  // The backend sends a bounded preview, so a very large selection can still
+  // have names beyond the ones it shipped. Say how many are unlisted rather
+  // than implying the list is complete.
+  const unlistedCount = Math.max(0, operation.totalItems - listedNames.length)
+  const [itemsExpanded, setItemsExpanded] = useState(false)
 
   // The backend briefly clears the current-file fields between finishing one
   // file and starting the next, which would otherwise unmount this whole
@@ -87,78 +98,69 @@ export function JobCard({
   // "adjusting state during render" pattern — the guarded `setState` below
   // only fires when the snapshot actually changed, so it settles in the same
   // render pass instead of looping.)
-  const currentFileSnapshot = operation.currentFileName
-    ? {
-        name: operation.currentFileName,
-        copiedBytes: operation.currentFileCopiedBytes,
-        totalBytes: operation.currentFileTotalBytes,
-      }
-    : null
-  const [lastCurrentFile, setLastCurrentFile] = useState(currentFileSnapshot)
-  if (
-    currentFileSnapshot &&
-    (currentFileSnapshot.name !== lastCurrentFile?.name ||
-      currentFileSnapshot.copiedBytes !== lastCurrentFile?.copiedBytes ||
-      currentFileSnapshot.totalBytes !== lastCurrentFile?.totalBytes)
-  ) {
-    setLastCurrentFile(currentFileSnapshot)
+  const [lastCurrentFile, setLastCurrentFile] = useState(operation.currentFileName)
+  if (operation.currentFileName && operation.currentFileName !== lastCurrentFile) {
+    setLastCurrentFile(operation.currentFileName)
   }
-  const showCurrentFile = !isPending && !isCompleted && !isFailed && !isCancelled
-  const displayedFile = showCurrentFile ? lastCurrentFile : null
+  const displayedFileName = showCurrentFile ? lastCurrentFile : null
+
   // Show the chart's smoothed leading-edge rate (not the raw instantaneous one)
   // so the number matches the curve and stays calm; fall back before any history.
   const currentRate =
     throughputHistory.length > 0
       ? throughputHistory[throughputHistory.length - 1].rate
       : operation.bytesPerSecond
-  // While a job is actively working through its queue, "N completed" reads as
-  // "0 of 2" for the entire time the first item is copying — show the item
-  // currently being worked on instead (like Windows' "item 1 of 2"). Once the
-  // job stops (done/failed/cancelled), fall back to the true completed count.
-  const isTerminalForItemCount = isCompleted || isFailed || isCancelled
-  const displayedItemNumber = isTerminalForItemCount
-    ? operation.completedItems
-    : Math.min(operation.completedItems + 1, operation.totalItems)
-  const metrics = useMemo(
-    () => ({
-      rate: formatRate(currentRate),
-      eta: operation.etaSeconds !== null ? formatEta(operation.etaSeconds) : 'estimating…',
-      items: `${formatCount(displayedItemNumber)} / ${formatCount(operation.totalItems)} items`,
-    }),
-    [currentRate, displayedItemNumber, operation.etaSeconds, operation.totalItems],
-  )
-  // Throttle the live view (metrics + chart) to a calm, fixed cadence so the
-  // number and the chart's leading edge update together a few times per second
-  // — like the Windows copy dialog — rather than on every backend event.
   const liveView = useMemo(
-    () => ({ metrics, samples: throughputHistory, percent, peak: throughputPeak }),
-    [metrics, throughputHistory, percent, throughputPeak],
+    () => ({ operation, rate: currentRate, samples: throughputHistory, peak: throughputPeak }),
+    [currentRate, operation, throughputHistory, throughputPeak],
   )
-  const [view, setView] = useState(liveView)
+  // Throttle the live view (numbers + chart) to a calm, fixed cadence so they
+  // update together a few times per second — like the Windows copy dialog —
+  // rather than on every backend event.
+  const [view, setView] = useState({ ...liveView, scanning: false })
   const latestViewRef = useRef(liveView)
+  const lastTotalBytesRef = useRef(operation.totalBytes)
   useEffect(() => {
     latestViewRef.current = liveView
   })
   useEffect(() => {
     const intervalId = window.setInterval(() => {
-      setView(latestViewRef.current)
+      const latest = latestViewRef.current
+      const scanning = latest.operation.totalBytes > lastTotalBytesRef.current
+      lastTotalBytesRef.current = latest.operation.totalBytes
+      setView({ ...latest, scanning })
     }, METRICS_REFRESH_MS)
     return () => window.clearInterval(intervalId)
   }, [])
-  const displayMetrics = view.metrics
 
-  const metricsAnnouncement = `${metrics.rate}, ${metrics.eta}, ${metrics.items}`
-  const [liveMetricsAnnouncement, setLiveMetricsAnnouncement] = useState(metricsAnnouncement)
-  const liveMetricsAnnouncementRef = useRef(liveMetricsAnnouncement)
+  const displayed = view.operation
+  // While a job is actively working through its queue, "N completed" reads as
+  // "item 0 of 2" for the entire time the first item is copying — show the item
+  // currently being worked on instead (like Windows' "item 1 of 2"). Once the
+  // job stops (done/failed/cancelled), fall back to the true completed count.
+  const displayedItemNumber = isFinished
+    ? displayed.completedItems
+    : Math.min(displayed.completedItems + 1, displayed.totalItems)
+  const progressSegments = useMemo(
+    () => formatJobProgress(displayed, { scanning: view.scanning }),
+    [displayed, view.scanning],
+  )
+  const summary = progressSegments.join(' · ')
+  const itemIndex = `item ${formatCount(displayedItemNumber)} of ${formatCount(displayed.totalItems)}`
+  const rate = isPaused ? '—' : formatRate(view.rate)
+
+  const announcement = progressSegments.join(', ')
+  const [liveAnnouncement, setLiveAnnouncement] = useState(announcement)
+  const liveAnnouncementRef = useRef(liveAnnouncement)
   const pendingLiveAnnouncementRef = useRef<string | null>(null)
   const liveRegionTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
-    liveMetricsAnnouncementRef.current = liveMetricsAnnouncement
-  }, [liveMetricsAnnouncement])
+    liveAnnouncementRef.current = liveAnnouncement
+  }, [liveAnnouncement])
 
   useEffect(() => {
-    if (metricsAnnouncement === liveMetricsAnnouncement) {
+    if (announcement === liveAnnouncement) {
       pendingLiveAnnouncementRef.current = null
       if (liveRegionTimerRef.current !== null) {
         window.clearTimeout(liveRegionTimerRef.current)
@@ -167,7 +169,7 @@ export function JobCard({
       return
     }
 
-    pendingLiveAnnouncementRef.current = metricsAnnouncement
+    pendingLiveAnnouncementRef.current = announcement
     if (liveRegionTimerRef.current !== null) {
       return
     }
@@ -176,12 +178,12 @@ export function JobCard({
       liveRegionTimerRef.current = null
       const nextAnnouncement = pendingLiveAnnouncementRef.current
       pendingLiveAnnouncementRef.current = null
-      if (nextAnnouncement !== null && nextAnnouncement !== liveMetricsAnnouncementRef.current) {
-        setLiveMetricsAnnouncement(nextAnnouncement)
-        liveMetricsAnnouncementRef.current = nextAnnouncement
+      if (nextAnnouncement !== null && nextAnnouncement !== liveAnnouncementRef.current) {
+        setLiveAnnouncement(nextAnnouncement)
+        liveAnnouncementRef.current = nextAnnouncement
       }
     }, LIVE_REGION_THROTTLE_MS)
-  }, [liveMetricsAnnouncement, metricsAnnouncement])
+  }, [announcement, liveAnnouncement])
 
   useEffect(() => {
     return () => {
@@ -193,97 +195,167 @@ export function JobCard({
 
   return (
     <article aria-labelledby={headingId} data-status={operation.status} className="p-4">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex min-w-0 flex-1 items-start gap-2">
-          {reorderable ? (
-            <span className="mt-0.5 flex shrink-0 flex-col">
-              <button
-                type="button"
-                aria-label="Move job up"
-                onClick={onMoveUp}
-                disabled={!onMoveUp}
-                className="flex h-4 w-4 items-center justify-center rounded text-light-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover disabled:opacity-40 dark:text-dark-text-muted dark:hover:bg-dark-hover"
-              >
-                <GripVerticalIcon className="h-3.5 w-3.5" />
-              </button>
-            </span>
-          ) : null}
-          <div className="min-w-0 flex-1">
-            <div
-              id={headingId}
-              className="flex items-center gap-1.5 text-sm font-semibold text-light-text dark:text-dark-text"
+      <div className="flex min-w-0 items-start gap-2">
+        {reorderable ? (
+          <span className="mt-0.5 flex shrink-0 flex-col">
+            <button
+              type="button"
+              aria-label="Move job up"
+              onClick={onMoveUp}
+              disabled={!onMoveUp}
+              className="flex h-4 w-4 items-center justify-center rounded text-light-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover disabled:opacity-40 dark:text-dark-text-muted dark:hover:bg-dark-hover"
             >
-              {isCompleted ? (
-                <CheckCircleIcon className="h-4 w-4 shrink-0 text-accent-green" />
-              ) : null}
-              {isFailed ? <XCircleIcon className="h-4 w-4 shrink-0 text-accent-red" /> : null}
-              {isCancelled ? (
-                <XCircleIcon className="h-4 w-4 shrink-0 text-light-text-muted dark:text-dark-text-muted" />
-              ) : null}
-              <span className="truncate">
-                {isCompleted
-                  ? `${verb(operation)} complete`
-                  : isFailed
-                    ? `${verb(operation)} failed`
-                    : isCancelled
-                      ? `${verb(operation)} cancelled`
-                      : `${verb(operation)} ${formatCount(operation.totalItems)} items`}
+              <GripVerticalIcon className="h-3.5 w-3.5" />
+            </button>
+          </span>
+        ) : null}
+        <div className="min-w-0 flex-1">
+          <div
+            id={headingId}
+            className="flex items-center gap-1.5 text-sm font-semibold text-light-text dark:text-dark-text"
+          >
+            {isCompleted ? (
+              <CheckCircleIcon className="h-4 w-4 shrink-0 text-accent-green" />
+            ) : null}
+            {isFailed ? <XCircleIcon className="h-4 w-4 shrink-0 text-accent-red" /> : null}
+            {isCancelled ? (
+              <XCircleIcon className="h-4 w-4 shrink-0 text-light-text-muted dark:text-dark-text-muted" />
+            ) : null}
+            <span className="truncate">
+              {isCompleted
+                ? `${verb(operation)} complete`
+                : isFailed
+                  ? `${verb(operation)} failed`
+                  : isCancelled
+                    ? `${verb(operation)} cancelled`
+                    : `${verb(operation)} ${formatCount(operation.totalItems)} items`}
+            </span>
+          </div>
+
+          {/* What, then where. One muted line replaces the two full paths. */}
+          <div className="mt-1 flex min-w-0 items-baseline gap-1.5 font-mono text-xs text-light-text-muted dark:text-dark-text-muted">
+            <span className="flex min-w-0 flex-1 items-baseline gap-1">
+              <span className="truncate text-light-text-soft dark:text-dark-text-soft">
+                {previewNames.join(', ')}
               </span>
-            </div>
-            <div className="mt-1 font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-              <div className="min-h-5 truncate" title={sourceDisplay}>
-                {sourceDisplay}
-              </div>
-              {operation.destinationDir ? (
-                <>
-                  <div className="flex justify-center py-0.5">
-                    <ArrowDownIcon className="h-3 w-3 shrink-0 text-accent-blue-light dark:text-accent-blue" />
-                  </div>
-                  <div className="min-h-5 truncate" title={destinationDisplay}>
-                    {destinationDisplay}
-                  </div>
-                </>
+              {hiddenItemCount > 0 ? (
+                <button
+                  type="button"
+                  aria-expanded={itemsExpanded}
+                  aria-controls={itemListId}
+                  onClick={() => setItemsExpanded((expanded) => !expanded)}
+                  className="flex shrink-0 items-center gap-0.5 rounded text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:underline dark:text-accent-blue"
+                >
+                  +{formatCount(hiddenItemCount)} more
+                  {itemsExpanded ? (
+                    <ChevronUpIcon className="h-3 w-3" />
+                  ) : (
+                    <ChevronDownIcon className="h-3 w-3" />
+                  )}
+                </button>
               ) : null}
-            </div>
+            </span>
+            {operation.destinationDir ? (
+              <>
+                <ArrowRightIcon className="h-3 w-3 shrink-0 self-center text-accent-blue-light dark:text-accent-blue" />
+                <span className="min-w-0 shrink truncate" title={operation.destinationDir}>
+                  {operation.destinationDir}
+                </span>
+              </>
+            ) : null}
           </div>
         </div>
-        <span
-          className={`shrink-0 font-mono text-2xl font-semibold leading-none ${
-            isFailed ? 'text-accent-red' : 'text-accent-blue-light dark:text-accent-blue'
-          }`}
-        >
-          {roundedPercent}%
-        </span>
       </div>
 
-      <div className="mt-3 border-t border-light-border pt-3 dark:border-dark-border">
-        <span className="sr-only" aria-live="polite" aria-atomic="true">
-          {liveMetricsAnnouncement}
-        </span>
-        <div className="grid grid-cols-3 gap-3 font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-          <span className="truncate text-light-text-soft dark:text-dark-text-soft">
-            {displayMetrics.rate}
-          </span>
-          <span className="truncate text-center">{displayMetrics.eta}</span>
-          <span className="truncate text-right">{displayMetrics.items}</span>
-        </div>
-      </div>
+      {itemsExpanded ? (
+        <ul
+          id={itemListId}
+          className="mt-2 flex max-h-queue-items flex-col gap-0.5 overflow-y-auto rounded-tab bg-light-skeleton px-2.5 py-1.5 font-mono text-uxs text-light-text-muted scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:bg-dark-skeleton dark:text-dark-text-muted dark:scrollbar-thumb-dark-text-faint"
+        >
+          {listedNames.map((name, index) => {
+            const done = index < displayed.completedItems
+            const current = !isFinished && index === displayed.completedItems
+            return (
+              <li
+                key={name}
+                className={`flex items-center gap-1 truncate ${
+                  done
+                    ? 'text-light-text-faint dark:text-dark-text-faint'
+                    : current
+                      ? 'text-light-text dark:text-dark-text'
+                      : ''
+                }`}
+              >
+                {done ? <CheckIcon className="h-3 w-3 shrink-0 text-accent-green" /> : null}
+                <span className="truncate">{name}</span>
+              </li>
+            )
+          })}
+          {unlistedCount > 0 ? (
+            <li className="text-light-text-faint dark:text-dark-text-faint">
+              +{formatCount(unlistedCount)} more
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
+
+      <span className="sr-only" aria-live="polite" aria-atomic="true">
+        {liveAnnouncement}
+      </span>
+
+      {showProgress ? (
+        <>
+          <div className="mt-3 flex items-baseline justify-between gap-3">
+            <span className="min-w-0 truncate text-sm tabular-nums text-light-text dark:text-dark-text">
+              {summary}
+            </span>
+            <span
+              className={`shrink-0 font-mono text-uxs tabular-nums ${
+                isFailed ? 'text-accent-red' : 'text-light-text-muted dark:text-dark-text-muted'
+              }`}
+            >
+              {roundedPercent}%
+            </span>
+          </div>
+          <div
+            role="progressbar"
+            aria-labelledby={headingId}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={roundedPercent}
+            className="mt-2 h-1.5 overflow-hidden rounded-full bg-light-skeleton dark:bg-dark-skeleton"
+          >
+            <span
+              className={`block h-full rounded-full ${
+                isPaused
+                  ? 'bg-light-text-muted dark:bg-dark-text-muted'
+                  : 'bg-accent-blue-light dark:bg-accent-blue'
+              }`}
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+        </>
+      ) : null}
 
       {showCurrentFile ? (
-        <div className="mt-3.5">
-          <div className="flex min-w-0 items-center justify-between gap-3">
+        <>
+          <div className="mt-2.5 flex min-w-0 items-baseline justify-between gap-3">
             <span
-              className="min-w-0 flex-1 truncate text-xs text-light-text dark:text-dark-text"
-              title={displayedFile?.name ?? undefined}
+              className="min-w-0 truncate text-xs text-light-text-muted dark:text-dark-text-muted"
+              title={displayedFileName ?? undefined}
             >
-              {displayedFile?.name ?? ' '}
+              {displayedFileName ?? ' '}
             </span>
-            <span className="shrink-0 font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-              {formatBytes(displayedFile?.copiedBytes ?? 0)} /{' '}
-              {formatBytes(displayedFile?.totalBytes ?? 0)}
+            <span className="shrink-0 font-mono text-uxs tabular-nums text-light-text-muted dark:text-dark-text-muted">
+              {itemIndex}
             </span>
           </div>
-        </div>
+          {showRate ? (
+            <div className="mt-1 font-mono text-uxs tabular-nums text-light-text-muted dark:text-dark-text-muted">
+              {rate}
+            </div>
+          ) : null}
+        </>
       ) : null}
 
       {isFailed && operation.errorMessage ? (
@@ -295,17 +367,10 @@ export function JobCard({
           Job cancelled. Any completed file changes were kept.
         </div>
       ) : showChart ? (
-        <div
-          role="progressbar"
-          aria-labelledby={headingId}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={roundedPercent}
-          className="mt-2.5"
-        >
+        <div className="mt-2.5">
           <ThroughputChart
             samples={view.samples}
-            currentPercent={view.percent}
+            currentPercent={Math.min(100, Math.max(0, displayed.progressPercent))}
             peakRate={view.peak}
           />
         </div>
@@ -363,7 +428,7 @@ export function JobCard({
           </button>
         )}
 
-        {!isCompleted && !isFailed && !isCancelled ? (
+        {!isFinished ? (
           <button
             type="button"
             onClick={onSkip}
@@ -374,7 +439,7 @@ export function JobCard({
           </button>
         ) : null}
 
-        {!isCompleted && !isFailed && !isCancelled ? (
+        {!isFinished ? (
           <button
             type="button"
             onClick={onCancel}
