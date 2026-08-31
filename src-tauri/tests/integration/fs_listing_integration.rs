@@ -4,9 +4,9 @@ use std::fs;
 use std::path::Path;
 
 use file_explorer_lib::fs::{
-    canonicalize_dir, default_start_dir, display_path_from_text, expand_home_path_with, list_dir,
-    list_tree_children, ListDirOptions, ListTreeChildrenOptions, SortDirection, SortKey,
-    TreeExpandability,
+    canonicalize_dir, default_start_dir, display_path_from_text, expand_env_vars_with,
+    expand_home_path_with, list_dir, list_tree_children, ListDirOptions, ListTreeChildrenOptions,
+    SortDirection, SortKey, TreeExpandability,
 };
 use tempfile::tempdir;
 
@@ -187,6 +187,37 @@ fn expands_home_shorthand_only_for_path_prefixes() {
         expand_home_path_with("~/Projects", None),
         Path::new("~/Projects")
     );
+}
+
+#[test]
+fn expands_windows_environment_variables_in_typed_paths() {
+    let lookup = |name: &str| match name {
+        "APPDATA" => Some("C:\\Users\\ada\\AppData\\Roaming".to_string()),
+        "appdata" => Some("C:\\Users\\ada\\AppData\\Roaming".to_string()),
+        "SystemRoot" => Some("C:\\Windows".to_string()),
+        _ => None,
+    };
+
+    assert_eq!(
+        expand_env_vars_with("%APPDATA%", lookup),
+        "C:\\Users\\ada\\AppData\\Roaming"
+    );
+    assert_eq!(
+        expand_env_vars_with("%appdata%\\Code", lookup),
+        "C:\\Users\\ada\\AppData\\Roaming\\Code"
+    );
+    assert_eq!(
+        expand_env_vars_with("%SystemRoot%\\Fonts\\%APPDATA%", lookup),
+        "C:\\Windows\\Fonts\\C:\\Users\\ada\\AppData\\Roaming"
+    );
+    // Unknown and unterminated names stay as typed so the error names them.
+    assert_eq!(expand_env_vars_with("%NOPE%\\x", lookup), "%NOPE%\\x");
+    assert_eq!(
+        expand_env_vars_with("C:\\100%\\raw", lookup),
+        "C:\\100%\\raw"
+    );
+    assert_eq!(expand_env_vars_with("%%", lookup), "%%");
+    assert_eq!(expand_env_vars_with("/plain/path", lookup), "/plain/path");
 }
 
 #[test]

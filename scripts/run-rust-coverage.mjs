@@ -11,7 +11,7 @@
  * failed and by how much.
  */
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
@@ -63,6 +63,37 @@ function ensureRustCoverageTools(env) {
     ...env,
     LLVM_COV: env.LLVM_COV ?? llvmCov,
     LLVM_PROFDATA: env.LLVM_PROFDATA ?? llvmProfdata,
+  }
+}
+
+/**
+ * Delete every executable in the coverage target directory except the
+ * `integration` test binary.
+ *
+ * The gate runs `--test integration`, but cargo-llvm-cov finds object files by
+ * scanning the target directory. A leftover `file_explorer` app binary from an
+ * earlier build merges a second, never-executed copy of the library into the
+ * report. That copy adds thousands of zero-count lines and functions, so the
+ * gate fails even when every test passes. `--no-clean` keeps such binaries
+ * around forever, so remove them before each run. Compiled dependencies are
+ * untouched, so the run stays fast.
+ */
+function pruneForeignCoverageBinaries(targetDir) {
+  for (const base of [targetDir, path.join(targetDir, 'llvm-cov-target')]) {
+    const depsDir = path.join(base, 'debug', 'deps')
+    if (!existsSync(depsDir)) {
+      continue
+    }
+    for (const name of readdirSync(depsDir)) {
+      // Compiled artifacts all carry an extension; test/app binaries do not.
+      if (name.includes('.') || name.startsWith('integration-')) {
+        continue
+      }
+      const candidate = path.join(depsDir, name)
+      if (statSync(candidate).isFile()) {
+        rmSync(candidate, { force: true })
+      }
+    }
   }
 }
 
@@ -134,6 +165,8 @@ execFileSync(
     shell: process.platform === 'win32',
   },
 )
+
+pruneForeignCoverageBinaries(env.CARGO_TARGET_DIR)
 
 const commandArgs = [...cargoArgs, 'gm-llvm-cov']
 

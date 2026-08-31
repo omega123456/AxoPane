@@ -213,7 +213,45 @@ fn home_dir() -> Option<PathBuf> {
 }
 
 pub fn expand_home_path(path: &Path) -> PathBuf {
-    expand_home_path_with(&path.to_string_lossy(), home_dir().as_deref())
+    let text = path.to_string_lossy();
+    #[cfg(windows)]
+    let text =
+        std::borrow::Cow::Owned(expand_env_vars_with(&text, |name| std::env::var(name).ok()));
+    expand_home_path_with(&text, home_dir().as_deref())
+}
+
+/// Expands Windows-style `%NAME%` references with `lookup`.
+///
+/// Windows shells resolve `%APPDATA%` and friends before a path reaches the
+/// filesystem, so the address bar must do the same. An unknown name stays as
+/// typed, which keeps the failure message readable. Environment names on
+/// Windows are case-insensitive, so `%appdata%` resolves too.
+pub fn expand_env_vars_with(path: &str, lookup: impl Fn(&str) -> Option<String>) -> String {
+    let mut out = String::with_capacity(path.len());
+    let mut rest = path;
+
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let tail = &rest[start + 1..];
+        let Some(end) = tail.find('%') else {
+            out.push('%');
+            return out + tail;
+        };
+
+        let name = &tail[..end];
+        match lookup(name) {
+            Some(value) => out.push_str(&value),
+            None => {
+                out.push('%');
+                out.push_str(name);
+                out.push('%');
+            }
+        }
+        rest = &tail[end + 1..];
+    }
+
+    out.push_str(rest);
+    out
 }
 
 pub fn expand_home_path_with(path: &str, home: Option<&Path>) -> PathBuf {
