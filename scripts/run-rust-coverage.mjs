@@ -67,16 +67,17 @@ function ensureRustCoverageTools(env) {
 }
 
 /**
- * Delete every executable in the coverage target directory except the
+ * Delete every executable in the coverage target directory except the newest
  * `integration` test binary.
  *
  * The gate runs `--test integration`, but cargo-llvm-cov finds object files by
- * scanning the target directory. A leftover `file_explorer` app binary from an
- * earlier build merges a second, never-executed copy of the library into the
- * report. That copy adds thousands of zero-count lines and functions, so the
- * gate fails even when every test passes. `--no-clean` keeps such binaries
- * around forever, so remove them before each run. Compiled dependencies are
- * untouched, so the run stays fast.
+ * scanning the target directory. Two kinds of leftover binary poison the
+ * report, because each one merges a second, never-executed copy of the library
+ * into it: an app binary, and an older `integration` binary from a build with a
+ * different feature set. Such a copy adds thousands of zero-count lines and
+ * functions, so the gate fails even when every test passes. `--no-clean` keeps
+ * those binaries around forever, so remove them before each run. Compiled
+ * dependencies are untouched, so the run stays fast.
  */
 function pruneForeignCoverageBinaries(targetDir) {
   for (const base of [targetDir, path.join(targetDir, 'llvm-cov-target')]) {
@@ -84,13 +85,18 @@ function pruneForeignCoverageBinaries(targetDir) {
     if (!existsSync(depsDir)) {
       continue
     }
-    for (const name of readdirSync(depsDir)) {
-      // Compiled artifacts all carry an extension; test/app binaries do not.
-      if (name.includes('.') || name.startsWith('integration-')) {
-        continue
-      }
-      const candidate = path.join(depsDir, name)
-      if (statSync(candidate).isFile()) {
+
+    // Compiled artifacts all carry an extension; test and app binaries do not.
+    const binaries = readdirSync(depsDir)
+      .filter((name) => !name.includes('.'))
+      .map((name) => path.join(depsDir, name))
+      .filter((candidate) => statSync(candidate).isFile())
+    const newestTestBinary = binaries
+      .filter((candidate) => path.basename(candidate).startsWith('integration-'))
+      .sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs)[0]
+
+    for (const candidate of binaries) {
+      if (candidate !== newestTestBinary) {
         rmSync(candidate, { force: true })
       }
     }
