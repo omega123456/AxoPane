@@ -135,8 +135,10 @@ function runGit(args, inheritIo = true) {
   })
 }
 
-function runCargoGenerateLockfile() {
-  execFileSync('cargo', ['generate-lockfile'], {
+// Only refresh our own crate's entry: `cargo generate-lockfile` re-resolves every dependency
+// and can pull upstream crate combos that don't compile together (e.g. tauri 2.11.6 + tauri-macros 2.7).
+function runCargoLockfileVersionSync() {
+  execFileSync('cargo', ['update', '--workspace'], {
     cwd: tauriDir,
     stdio: 'inherit',
   })
@@ -285,7 +287,7 @@ async function main() {
     writeFileSync(releaseBodyPath, `${releaseNotes}\n`, 'utf8')
 
     try {
-      runCargoGenerateLockfile()
+      runCargoLockfileVersionSync()
       runProductionBuild()
     } catch (error) {
       restoreFiles(snapshot)
