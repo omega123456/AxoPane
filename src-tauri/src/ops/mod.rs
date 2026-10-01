@@ -1172,6 +1172,7 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
 
     // Conflict detection + resolution. `Path::exists` follows links and
     // misses dangling symlinks, so inspect the directory entry as well.
+    let mut merge_directories = false;
     if target.exists() || fs::symlink_metadata(&target).is_ok() {
         let resolution = resolve_or_park(ctx, item, &target, conflict);
         match resolution {
@@ -1181,9 +1182,23 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
                 return;
             }
             Some((ConflictResolution::Replace, _)) => {
-                if let Err(error) = remove_target(&target) {
-                    record_transfer_failure(op_arc, kind, &source, &target, &error);
+                // Replacing an item with itself would delete the source.
+                if normalized_components(&source) == normalized_components(&target) {
+                    count_skipped_bytes(ctx, item.size_bytes);
+                    advance_item(ctx, item);
                     return;
+                }
+                // Folder onto folder merges (Explorer semantics); the copy/move
+                // walk overwrites conflicting children and keeps the rest.
+                let target_is_real_directory = fs::symlink_metadata(&target)
+                    .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+                    .unwrap_or(false);
+                merge_directories = source_is_real_directory && target_is_real_directory;
+                if !merge_directories {
+                    if let Err(error) = remove_target(&target) {
+                        record_transfer_failure(op_arc, kind, &source, &target, &error);
+                        return;
+                    }
                 }
             }
             Some((ConflictResolution::Rename, rename_to)) => {
@@ -1212,7 +1227,9 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
     // Totals for zero-sized (folder) items were already measured up front by
     // `measure_totals_up_front`, so the walk below never needs to grow the
     // denominator mid-flight — only `copied_bytes` moves.
-    let result = if matches!(kind, OpKind::Move) {
+    let result = if matches!(kind, OpKind::Move) && merge_directories {
+        move_merge_dir(&source, &target, ctx)
+    } else if matches!(kind, OpKind::Move) {
         move_path_with_total_discovery(&source, &target, false, ctx)
     } else {
         copy_path_with_total_discovery(&source, &target, false, ctx, None)
@@ -2335,6 +2352,7 @@ pub fn copy_dir_recursive(
     mut throttle: Option<&mut TransferThrottle>,
     mut manifest: Option<&mut ProgressiveManifest>,
 ) -> Result<(), String> {
+    clear_merge_target(target, true)?;
     fs::create_dir_all(target).map_err(|error| error.to_string())?;
     for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
         if ctx
@@ -2424,6 +2442,8 @@ fn copy_symlink_with_total_discovery(
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
+
+    clear_merge_target(target, false)?;
 
     let link_metadata = fs::symlink_metadata(source).map_err(|error| error.to_string())?;
     let link_size = link_metadata.len();
@@ -2651,6 +2671,49 @@ fn move_path_with_total_discovery(
     remove_source(source)
 }
 
+/// Move-merge `source` into the existing real directory `target`: children
+/// that collide as directories recurse, anything else replaces whatever is in
+/// the way and moves by rename (with the per-child cross-device fallback).
+fn move_merge_dir(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(), String> {
+    for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
+        if is_op_cancelled(ctx) {
+            return Ok(());
+        }
+        let entry = entry.map_err(|error| error.to_string())?;
+        let child_source = entry.path();
+        let child_target = target.join(entry.file_name());
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        let target_is_real_directory = fs::symlink_metadata(&child_target)
+            .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+            .unwrap_or(false);
+        if file_type.is_dir() && !file_type.is_symlink() && target_is_real_directory {
+            move_merge_dir(&child_source, &child_target, ctx)?;
+        } else {
+            clear_merge_target(&child_target, false)?;
+            move_path_with_total_discovery(&child_source, &child_target, false, ctx)?;
+        }
+    }
+    if is_op_cancelled(ctx) {
+        return Ok(());
+    }
+    fs::remove_dir(source).map_err(|error| error.to_string())
+}
+
+/// Clear whatever sits at `target` so a merge can write there. A real
+/// directory is kept when `keep_real_dir` (merge into it); anything else is
+/// removed so the walk never writes through a link or trips on a type clash.
+fn clear_merge_target(target: &Path, keep_real_dir: bool) -> Result<(), String> {
+    match fs::symlink_metadata(target) {
+        Err(_) => Ok(()),
+        Ok(metadata)
+            if keep_real_dir && metadata.is_dir() && !metadata.file_type().is_symlink() =>
+        {
+            Ok(())
+        }
+        Ok(_) => remove_target(target),
+    }
+}
+
 pub fn copy_file_with_progress(
     source: &Path,
     target: &Path,
@@ -2718,6 +2781,7 @@ fn copy_file_with_total_discovery(
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
 
+    clear_merge_target(target, false)?;
     log_transfer_adapter_selection(source);
 
     let file_size = fs::metadata(source)

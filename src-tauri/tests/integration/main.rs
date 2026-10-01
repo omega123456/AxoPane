@@ -63,6 +63,7 @@ pub mod native_menu_provider_integration;
 pub mod native_menu_warm_integration;
 pub mod native_menu_windows_stub_integration;
 pub mod ops_helpers_integration;
+pub mod ops_merge_replace_integration;
 pub mod ops_private_integration;
 pub mod ops_queue_integration;
 pub use ops_private_integration::ops_single_file_progress_throttle_integration;
