@@ -1745,6 +1745,9 @@ fn extract_item_with_progress(
     // One throttle shared across every archive member extracted below (mirrors
     // how `copy_dir_recursive` shares a single throttle through its recursion).
     let mut throttle = TransferThrottle::new((ctx.instant_now)(), PROGRESS_EMIT_INTERVAL);
+    // Directory modes are applied after every member is written so a
+    // read-only folder cannot block extraction of its own contents.
+    let mut directory_modes = Vec::new();
 
     for index in 0..archive.len() {
         wait_while_paused(ctx.op_arc, ctx.resolver);
@@ -1768,6 +1771,7 @@ fn extract_item_with_progress(
 
         if entry.is_dir() {
             fs::create_dir_all(&output_path).map_err(|error| error.to_string())?;
+            directory_modes.push((output_path, entry.unix_mode()));
             continue;
         }
 
@@ -1777,13 +1781,56 @@ fn extract_item_with_progress(
 
         let entry_size = entry.size();
         begin_file_progress(ctx, &output_path, entry_size, Some(&mut throttle));
+        #[cfg(unix)]
+        if entry.is_symlink() {
+            // ZIP stores a link's target as its payload. `safe_destination`
+            // refuses to write later members through any link created here.
+            let mut target = String::new();
+            entry
+                .read_to_string(&mut target)
+                .map_err(|error| error.to_string())?;
+            std::os::unix::fs::symlink(&target, &output_path).map_err(|error| error.to_string())?;
+            report_chunk_progress(ctx, entry_size, Some(&mut throttle));
+            finish_file_progress(ctx, Some(&mut throttle));
+            continue;
+        }
         let mut output_file = fs::File::create(&output_path).map_err(|error| error.to_string())?;
         copy_reader_with_progress(&mut entry, &mut output_file, ctx, Some(&mut throttle))?;
         output_file.flush().map_err(|error| error.to_string())?;
+        drop(output_file);
+        apply_extracted_mode(&output_path, entry.unix_mode())?;
         finish_file_progress(ctx, Some(&mut throttle));
     }
 
+    // Deepest first: chmod on a child needs search permission on its parent.
+    for (path, mode) in directory_modes.iter().rev() {
+        apply_extracted_mode(path, *mode)?;
+    }
+
     Ok(())
+}
+
+/// Restores an archived Unix mode on an extracted file or folder. Setuid,
+/// setgid and sticky bits are dropped (as `unzip` does by default). Windows
+/// has no mode bits, so only the read-only flag is honoured there.
+fn apply_extracted_mode(path: &Path, mode: Option<u32>) -> Result<(), String> {
+    let Some(mode) = mode else {
+        return Ok(());
+    };
+    #[cfg(unix)]
+    let permissions = {
+        use std::os::unix::fs::PermissionsExt;
+        fs::Permissions::from_mode(mode & 0o777)
+    };
+    #[cfg(not(unix))]
+    let permissions = {
+        let mut permissions = fs::metadata(path)
+            .map_err(|error| error.to_string())?
+            .permissions();
+        permissions.set_readonly(mode & 0o222 == 0);
+        permissions
+    };
+    fs::set_permissions(path, permissions).map_err(|error| error.to_string())
 }
 
 /// Appends `source` (a file, a symlink, or a directory tree) to `writer`.
@@ -1830,7 +1877,7 @@ fn append_archive_path(
             directory_name.push('/');
         }
         writer
-            .add_directory(directory_name, zip_dir_options())
+            .add_directory(directory_name, zip_dir_options(&metadata))
             .map_err(|error| error.to_string())?;
 
         // Archive member order is intentionally not a contract. The flat
@@ -1874,8 +1921,10 @@ fn append_archive_path(
                 if !member_directory_name.ends_with('/') {
                     member_directory_name.push('/');
                 }
+                let member_metadata =
+                    fs::symlink_metadata(&entry.path).map_err(|error| error.to_string())?;
                 writer
-                    .add_directory(member_directory_name, zip_dir_options())
+                    .add_directory(member_directory_name, zip_dir_options(&member_metadata))
                     .map_err(|error| error.to_string())?;
             } else {
                 append_archive_file(
@@ -1935,16 +1984,13 @@ fn append_archive_symlink(
         target_bytes.len() as u64,
         throttle.as_deref_mut(),
     );
+    // `unix_permissions` masks to 0o777, so only `add_symlink` sets S_IFLNK.
     writer
-        .start_file(
+        .add_symlink(
             to_zip_path(archive_path)?,
-            SimpleFileOptions::default()
-                .compression_method(CompressionMethod::Stored)
-                .unix_permissions(0o120777),
+            &*target,
+            SimpleFileOptions::default(),
         )
-        .map_err(|error| error.to_string())?;
-    writer
-        .write_all(target_bytes)
         .map_err(|error| error.to_string())?;
     report_chunk_progress(ctx, target_bytes.len() as u64, throttle.as_deref_mut());
     finish_file_progress(ctx, throttle);
@@ -1961,15 +2007,14 @@ fn append_archive_file(
     ctx: &WorkerCtx<'_>,
     mut throttle: Option<&mut TransferThrottle>,
 ) -> Result<(), String> {
-    let file_size = fs::metadata(source)
-        .map(|metadata| metadata.len())
-        .unwrap_or(0);
+    let metadata = fs::metadata(source).map_err(|error| error.to_string())?;
+    let file_size = metadata.len();
     if add_discovered_totals {
         add_discovered_total(ctx, file_size, throttle.as_deref_mut());
     }
     begin_file_progress(ctx, source, file_size, throttle.as_deref_mut());
     writer
-        .start_file(to_zip_path(archive_path)?, zip_file_options())
+        .start_file(to_zip_path(archive_path)?, zip_file_options(&metadata))
         .map_err(|error| error.to_string())?;
     let mut input_file = fs::File::open(source).map_err(|error| error.to_string())?;
     copy_reader_with_progress(&mut input_file, writer, ctx, throttle.as_deref_mut())?;
@@ -2145,16 +2190,34 @@ fn to_zip_path(path: &Path) -> Result<String, String> {
     Ok(value)
 }
 
-fn zip_file_options() -> SimpleFileOptions {
+fn zip_file_options(metadata: &fs::Metadata) -> SimpleFileOptions {
     SimpleFileOptions::default()
         .compression_method(CompressionMethod::Deflated)
-        .unix_permissions(0o644)
+        .unix_permissions(source_unix_mode(metadata, 0o644))
 }
 
-fn zip_dir_options() -> SimpleFileOptions {
+fn zip_dir_options(metadata: &fs::Metadata) -> SimpleFileOptions {
     SimpleFileOptions::default()
         .compression_method(CompressionMethod::Stored)
-        .unix_permissions(0o755)
+        .unix_permissions(source_unix_mode(metadata, 0o755))
+}
+
+/// The permission bits to archive for a source entry. Windows has no mode
+/// bits, so `default` is used there with write bits cleared for read-only
+/// sources.
+#[cfg(unix)]
+fn source_unix_mode(metadata: &fs::Metadata, _default: u32) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    metadata.permissions().mode() & 0o777
+}
+
+#[cfg(not(unix))]
+fn source_unix_mode(metadata: &fs::Metadata, default: u32) -> u32 {
+    if metadata.permissions().readonly() {
+        default & !0o222
+    } else {
+        default
+    }
 }
 
 // --- Filesystem helpers --------------------------------------------------------

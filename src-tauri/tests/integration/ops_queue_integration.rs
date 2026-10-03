@@ -480,6 +480,80 @@ fn archive_jobs_compress_and_extract_through_the_queue() {
 }
 
 #[test]
+fn archive_round_trip_preserves_permissions_and_links() {
+    let dir = tempdir().expect("temp dir");
+    let archive_dir = dir.path().join("archives");
+    let extract_dir = dir.path().join("extracted");
+    fs::create_dir(&archive_dir).expect("archive dir");
+    let source = dir.path().join("payload");
+    fs::create_dir(&source).expect("source dir");
+    let locked = source.join("locked.txt");
+    fs::write(&locked, b"locked").expect("locked");
+    let writable = fs::metadata(&locked).unwrap().permissions();
+    let mut readonly = writable.clone();
+    readonly.set_readonly(true);
+    fs::set_permissions(&locked, readonly).expect("readonly");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::write(source.join("run.sh"), b"#!/bin/sh\n").expect("script");
+        fs::set_permissions(source.join("run.sh"), fs::Permissions::from_mode(0o750))
+            .expect("chmod");
+        std::os::unix::fs::symlink("run.sh", source.join("link")).expect("symlink");
+    }
+
+    let service = OpsService::new(Duration::from_secs(5));
+    service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
+    let archive_path = archive_dir.join("payload.zip");
+    let compress_id = service.start_op(StartOpRequest {
+        kind: OpKind::Compress,
+        destination_dir: archive_path.to_string_lossy().into_owned(),
+        items: vec![OpItem {
+            source_path: source.to_string_lossy().into_owned(),
+            name: "payload".to_string(),
+            size_bytes: 0,
+        }],
+    });
+    wait_for(&service, &compress_id, |progress| {
+        progress.status == OpStatus::Completed
+    });
+    let extract_id = service.start_op(StartOpRequest {
+        kind: OpKind::Extract,
+        destination_dir: extract_dir.to_string_lossy().into_owned(),
+        items: vec![OpItem {
+            source_path: archive_path.to_string_lossy().into_owned(),
+            name: "payload.zip".to_string(),
+            size_bytes: 0,
+        }],
+    });
+    wait_for(&service, &extract_id, |progress| {
+        progress.status == OpStatus::Completed
+    });
+
+    let out = extract_dir.join("payload");
+    let extracted_locked = out.join("locked.txt");
+    assert!(fs::metadata(&extracted_locked)
+        .unwrap()
+        .permissions()
+        .readonly());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |path: &Path| fs::symlink_metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&out.join("run.sh")), 0o750);
+        assert_eq!(mode(&out), mode(&source));
+        assert_eq!(
+            fs::read_link(out.join("link")).unwrap(),
+            Path::new("run.sh")
+        );
+    }
+
+    // Windows cannot delete read-only files during temp dir cleanup.
+    fs::set_permissions(&extracted_locked, writable.clone()).expect("writable");
+    fs::set_permissions(&locked, writable).expect("writable");
+}
+
+#[test]
 fn archive_jobs_share_the_same_volume_lock_as_transfers() {
     let dir = tempdir().expect("temp dir");
     let archive_dir = dir.path().join("archives");
