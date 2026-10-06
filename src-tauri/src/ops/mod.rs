@@ -1084,6 +1084,10 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
                 advance_item(ctx, item);
             }
             Err(message) => {
+                log::error!(
+                    "delete operation failed: source=\"{}\", error={message}",
+                    source.display()
+                );
                 op_arc.lock().expect("op lock").error_message = Some(message);
             }
         }
@@ -2611,7 +2615,54 @@ fn delete_dir_recursive(
         return Ok(());
     }
 
-    fs::remove_dir(source).map_err(|error| error.to_string())
+    remove_clearing_readonly(source, |path| fs::remove_dir(path))
+        .map_err(|error| format!("{}: {error}", source.display()))
+}
+
+/// Windows refuses to delete a read-only file or directory with "Access is
+/// denied" — even for an administrator — so clear the attribute and retry
+/// once. Unix deletion depends only on the parent directory's permissions.
+#[cfg(windows)]
+fn remove_clearing_readonly(
+    path: &Path,
+    remove: impl Fn(&Path) -> io::Result<()>,
+) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::fs::MetadataExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        SetFileAttributesW, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_READONLY,
+    };
+
+    let error = match remove(path) {
+        Err(error) if error.kind() == io::ErrorKind::PermissionDenied => error,
+        result => return result,
+    };
+    let attributes = fs::symlink_metadata(path)?.file_attributes();
+    if attributes & FILE_ATTRIBUTE_READONLY == 0 {
+        return Err(error);
+    }
+    log::info!("clearing read-only attribute to delete {}", path.display());
+    let cleared = match attributes & !FILE_ATTRIBUTE_READONLY {
+        0 => FILE_ATTRIBUTE_NORMAL,
+        rest => rest,
+    };
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    if unsafe { SetFileAttributesW(wide.as_ptr(), cleared) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    remove(path)
+}
+
+#[cfg(not(windows))]
+fn remove_clearing_readonly(
+    path: &Path,
+    remove: impl Fn(&Path) -> io::Result<()>,
+) -> io::Result<()> {
+    remove(path)
 }
 
 /// Removes a file or symlink at `path`.
@@ -2629,9 +2680,9 @@ fn remove_file_or_symlink(path: &Path, link_metadata: &fs::Metadata) -> io::Resu
     use std::os::windows::fs::FileTypeExt;
 
     if link_metadata.file_type().is_symlink_dir() {
-        fs::remove_dir(path)
+        remove_clearing_readonly(path, |path| fs::remove_dir(path))
     } else {
-        fs::remove_file(path)
+        remove_clearing_readonly(path, |path| fs::remove_file(path))
     }
 }
 
@@ -2659,7 +2710,8 @@ fn delete_file_with_progress(
 
     let link_metadata = fs::symlink_metadata(source).map_err(|error| error.to_string())?;
     let file_size = link_metadata.len();
-    remove_file_or_symlink(source, &link_metadata).map_err(|error| error.to_string())?;
+    remove_file_or_symlink(source, &link_metadata)
+        .map_err(|error| format!("{}: {error}", source.display()))?;
 
     {
         let mut op = ctx.op_arc.lock().expect("op lock");
@@ -2759,7 +2811,7 @@ fn move_merge_dir(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(
     if is_op_cancelled(ctx) {
         return Ok(());
     }
-    fs::remove_dir(source).map_err(|error| error.to_string())
+    remove_clearing_readonly(source, |path| fs::remove_dir(path)).map_err(|error| error.to_string())
 }
 
 /// Clear whatever sits at `target` so a merge can write there. A real

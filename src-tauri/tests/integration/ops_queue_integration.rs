@@ -302,6 +302,38 @@ fn delete_removes_files_and_directories_through_the_queue() {
 }
 
 #[test]
+fn delete_removes_read_only_files_and_directories() {
+    let dir = tempdir().expect("temp dir");
+    let tree = dir.path().join("game");
+    let locked_dir = tree.join("Win64");
+    let locked_file = tree.join("steam_api64.dll");
+    fs::create_dir_all(&locked_dir).expect("locked dir");
+    fs::write(&locked_file, b"dll").expect("locked file");
+    for path in [&locked_dir, &locked_file] {
+        let mut permissions = fs::metadata(path).expect("metadata").permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(path, permissions).expect("set read-only");
+    }
+
+    let service = OpsService::new(Duration::from_millis(50));
+    service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
+    let id = service.start_op(StartOpRequest {
+        kind: OpKind::Delete,
+        destination_dir: String::new(),
+        items: vec![OpItem {
+            source_path: tree.to_string_lossy().into_owned(),
+            name: "game".to_string(),
+            size_bytes: 0,
+        }],
+    });
+
+    wait_for(&service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
+    assert!(!tree.exists());
+}
+
+#[test]
 fn delete_directory_progress_is_monotonic_and_coalesced() {
     let dir = tempdir().expect("temp dir");
     let tree = dir.path().join("many");

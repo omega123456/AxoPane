@@ -549,18 +549,16 @@ fn list_dir_reports_readonly_and_plain_file_type_metadata() {
         .iter()
         .any(|attribute| attribute == "readonly"));
 
-    // Restore write permission so the temp dir cleans up (Windows refuses to
-    // delete read-only files). Use an explicit mode on Unix to avoid making the
-    // file world-writable.
-    let mut permissions = fs::metadata(&plain).expect("metadata").permissions();
+    // Restore write permission with an explicit mode so the file is not left
+    // world-writable. Windows needs no restore: std's `remove_dir_all`, which
+    // cleans up the temp dir, ignores the read-only attribute there.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&plain).expect("metadata").permissions();
         permissions.set_mode(0o644);
+        fs::set_permissions(&plain, permissions).expect("restore writable");
     }
-    #[cfg(windows)]
-    permissions.set_readonly(false);
-    fs::set_permissions(&plain, permissions).expect("restore writable");
 }
 
 /// A symlinked folder must be listed and treated as navigable — `is_dir` must
