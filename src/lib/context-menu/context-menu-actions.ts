@@ -38,6 +38,11 @@ export type ContextMenuAction =
       tabId: string
     }
   | {
+      kind: 'close-tabs-beside'
+      tabId: string
+      side: 'left' | 'right'
+    }
+  | {
       kind: 'set-tab-locked'
       tabId: string
       locked: boolean
@@ -120,6 +125,13 @@ export function openPathInExplicitPaneContextAction(
 
 export function closeTabContextAction(tabId: string): ContextMenuAction {
   return { kind: 'close-tab', tabId }
+}
+
+export function closeTabsBesideContextAction(
+  tabId: string,
+  side: 'left' | 'right',
+): ContextMenuAction {
+  return { kind: 'close-tabs-beside', tabId, side }
 }
 
 export function setTabLockedContextAction(tabId: string, locked: boolean): ContextMenuAction {
@@ -209,6 +221,9 @@ export function dispatchContextMenuAction(paneId: PaneId, action: ContextMenuAct
       return
     case 'close-tab':
       void usePanesStore.getState().closeTab(paneId, action.tabId)
+      return
+    case 'close-tabs-beside':
+      void usePanesStore.getState().closeTabsBeside(paneId, action.tabId, action.side)
       return
     case 'set-tab-locked':
       usePanesStore.getState().setTabLocked(paneId, action.tabId, action.locked)

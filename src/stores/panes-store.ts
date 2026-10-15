@@ -159,6 +159,8 @@ type PanesStore = {
   goForward: (paneId: PaneId) => Promise<void>
   openTabFromPath: (paneId: PaneId, path: string) => Promise<void>
   closeTab: (paneId: PaneId, tabId: string) => Promise<void>
+  /** Closes every unlocked tab on one side of `tabId`, keeping `tabId` itself open. */
+  closeTabsBeside: (paneId: PaneId, tabId: string, side: 'left' | 'right') => Promise<void>
   setTabLocked: (paneId: PaneId, tabId: string, locked: boolean) => void
   switchTab: (paneId: PaneId, tabId: string) => Promise<void>
   moveTab: (
@@ -1902,6 +1904,24 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     // promptly rather than waiting for the pane's next `begin` to replace it.
     void listingSessions[paneId].release()
     await get().reloadPane(paneId)
+  },
+  closeTabsBeside: async (paneId, tabId, side) => {
+    const { tabs, activeTabIndex } = useTabsStore.getState().panes[paneId]
+    const index = tabs.findIndex((tab) => tab.id === tabId)
+    if (index === -1) {
+      return
+    }
+
+    const closing = (side === 'left' ? tabs.slice(0, index) : tabs.slice(index + 1)).filter(
+      (tab) => !tab.locked,
+    )
+    // Activate the kept tab first so the closes below never reload the pane.
+    if (closing.some((tab) => tab.id === tabs[activeTabIndex]?.id)) {
+      await get().switchTab(paneId, tabId)
+    }
+    for (const tab of closing) {
+      await get().closeTab(paneId, tab.id)
+    }
   },
   setTabLocked: (paneId, tabId, locked) => {
     useTabsStore.getState().setTabLocked(paneId, tabId, locked)

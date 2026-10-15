@@ -61,6 +61,15 @@ describe('dispatchContextMenuAction', () => {
     await waitFor(() => expect(useConfigStore.getState().favourites).toEqual([]))
   })
 
+  it('dispatches closing tabs beside a tab to the panes store', () => {
+    const closeTabsBeside = vi.fn()
+    usePanesStore.setState({ closeTabsBeside })
+
+    dispatchContextMenuAction('left', { kind: 'close-tabs-beside', tabId: 'tab', side: 'right' })
+
+    expect(closeTabsBeside).toHaveBeenCalledWith('left', 'tab', 'right')
+  })
+
   it('navigates the current pane in place for the current-pane destination', () => {
     const navigatePane = vi.fn()
     usePanesStore.setState({ navigatePane })

@@ -166,6 +166,25 @@ describe('buildAppContextMenuContent', () => {
     })
     expect(rows.find((row) => row.label === 'Unlock tab')).toBeDefined()
     expect(rows.find((row) => row.label === 'Close tab')).toMatchObject({ disabled: true })
+    expect(rows.find((row) => row.label === 'Close tabs to the left')).toMatchObject({
+      disabled: true,
+    })
+    expect(rows.find((row) => row.label === 'Close tabs to the right')).toMatchObject({
+      disabled: false,
+      action: { kind: 'close-tabs-beside', tabId: first.id, side: 'right' },
+    })
+    const last = useTabsStore.getState().panes.left.tabs[1].id
+    const lastRows = buildAppContextMenuContent(
+      'left',
+      { kind: 'tab', tabId: last },
+      'windows',
+    ).sections.flatMap((item) => item.rows)
+    expect(lastRows.find((row) => row.label === 'Close tabs to the left')).toMatchObject({
+      disabled: true,
+    })
+    expect(lastRows.find((row) => row.label === 'Close tabs to the right')).toMatchObject({
+      disabled: true,
+    })
 
     useConfigStore.setState({ favourites: ['.'] })
     const favouriteRows = buildAppContextMenuContent(

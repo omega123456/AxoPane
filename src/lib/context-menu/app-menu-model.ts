@@ -1,5 +1,6 @@
 import {
   closeTabContextAction,
+  closeTabsBesideContextAction,
   commandContextAction,
   compressContextAction,
   copyPathsContextAction,
@@ -643,6 +644,25 @@ function buildTabContent(
           danger: true,
           icon: { kind: 'app', name: 'close-tab' },
         }),
+        customRow(
+          `close-tabs-left-${target.tabId}`,
+          'Close tabs to the left',
+          closeTabsBesideContextAction(target.tabId, 'left'),
+          {
+            disabled: !tabs.tabs.slice(0, Math.max(tabIndex, 0)).some((item) => !item.locked),
+            danger: true,
+          },
+        ),
+        customRow(
+          `close-tabs-right-${target.tabId}`,
+          'Close tabs to the right',
+          closeTabsBesideContextAction(target.tabId, 'right'),
+          {
+            disabled:
+              tabIndex === -1 || !tabs.tabs.slice(tabIndex + 1).some((item) => !item.locked),
+            danger: true,
+          },
+        ),
       ]),
     ],
   }

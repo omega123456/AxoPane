@@ -528,6 +528,33 @@ describe('panes-store navigation', () => {
     expect(activeTab('left')).toMatchObject({ path: 'C:\\inactive' })
   })
 
+  it('closes unlocked tabs beside a kept tab, reloading once when the active tab closes', async () => {
+    const listDir = vi.fn((payload: { path: string }) => ({ path: payload.path, entries: [] }))
+    ipc.override('list_dir', listDir)
+    const tabs = useTabsStore.getState()
+    const first = tabs.panes.left.tabs[0].id
+    const tab = { sortKey: 'name', sortDirection: 'asc', filter: '' } as const
+    const locked = tabs.addTab('left', { ...tab, path: 'C:\\locked' })
+    const kept = tabs.addTab('left', { ...tab, path: 'C:\\kept' })
+    tabs.addTab('left', { ...tab, path: 'C:\\right' })
+    tabs.setTabLocked('left', locked, true)
+
+    await usePanesStore.getState().closeTabsBeside('left', 'missing', 'left')
+    await usePanesStore.getState().closeTabsBeside('left', kept, 'right')
+    expect(useTabsStore.getState().panes.left.tabs.map((item) => item.id)).toEqual([
+      first,
+      locked,
+      kept,
+    ])
+    expect(activeTab('left').id).toBe(kept)
+    expect(listDir).toHaveBeenCalledTimes(1)
+
+    listDir.mockClear()
+    await usePanesStore.getState().closeTabsBeside('left', kept, 'left')
+    expect(useTabsStore.getState().panes.left.tabs.map((item) => item.id)).toEqual([locked, kept])
+    expect(listDir).not.toHaveBeenCalled()
+  })
+
   it('keeps locked paths fixed and forks different-path navigation into an unlocked tab', async () => {
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
     const lockedId = useTabsStore.getState().panes.left.tabs[0].id
