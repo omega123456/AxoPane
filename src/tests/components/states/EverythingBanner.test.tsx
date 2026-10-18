@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
@@ -26,7 +26,9 @@ afterEach(() => {
 describe('EverythingBanner', () => {
   it('shows on Windows when Everything is unavailable and persists dismissal', async () => {
     const user = userEvent.setup()
-    usePanesStore.setState({ everythingStatus: { status: 'unavailable', isAvailable: false } })
+    usePanesStore.setState({
+      folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+    })
 
     const saveConfig = vi.fn(() => ({
       theme: 'system' as const,
@@ -74,14 +76,29 @@ describe('EverythingBanner', () => {
   })
 
   it('does not show when Everything is available', () => {
-    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
+    usePanesStore.setState({
+      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+    })
     render(<EverythingBanner />)
+    expect(screen.queryByRole('status', { name: 'Everything unavailable' })).not.toBeInTheDocument()
+  })
+
+  it('does not show for other backends or before the status loads', () => {
+    render(<EverythingBanner />)
+    expect(screen.queryByRole('status', { name: 'Everything unavailable' })).not.toBeInTheDocument()
+    act(() =>
+      usePanesStore.setState({
+        folderSizeIndexStatus: { backend: 'macIndex', isAvailable: false, state: 'unavailable' },
+      }),
+    )
     expect(screen.queryByRole('status', { name: 'Everything unavailable' })).not.toBeInTheDocument()
   })
 
   it('does not show on non-Windows platforms', () => {
     setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)')
-    usePanesStore.setState({ everythingStatus: { status: 'unavailable', isAvailable: false } })
+    usePanesStore.setState({
+      folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+    })
     render(<EverythingBanner />)
     expect(screen.queryByRole('status', { name: 'Everything unavailable' })).not.toBeInTheDocument()
   })

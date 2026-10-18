@@ -108,9 +108,9 @@ describe('executeCommand file actions', () => {
 
   it('runs pane-level commands for go-up, refresh, clear-filter, select-all, and settings', () => {
     const goUp = vi.fn()
-    const refreshEverything = vi.fn()
+    const refreshSizes = vi.fn()
     const clearFilter = vi.fn()
-    usePanesStore.setState({ goUp, refreshEverything, clearFilter })
+    usePanesStore.setState({ goUp, refreshSizes, clearFilter })
 
     // showSettings reopens the section the user last viewed this session.
     useSettingsStore.setState({ section: 'columns' })
@@ -122,7 +122,7 @@ describe('executeCommand file actions', () => {
     executeCommand('showSettings', 'left')
 
     expect(goUp).toHaveBeenCalledWith('left')
-    expect(refreshEverything).toHaveBeenCalledWith('left')
+    expect(refreshSizes).toHaveBeenCalledWith('left')
     expect(clearFilter).toHaveBeenCalledWith('left')
     expect(useSelectionStore.getState().selections.left.selectedIds).toEqual(['Alpha', 'Beta'])
     expect(useSettingsStore.getState().isOpen).toBe(true)

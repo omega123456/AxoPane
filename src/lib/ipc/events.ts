@@ -13,6 +13,10 @@ export function onSizeState(handler: (payload: IpcEventMap['size://state']) => v
   return subscribeToEvent('size://state', handler)
 }
 
+export function onSizeIndexStatus(handler: (payload: IpcEventMap['size://index-status']) => void) {
+  return subscribeToEvent('size://index-status', handler)
+}
+
 export function onIconState(handler: (payload: IpcEventMap['icon://state']) => void) {
   return subscribeToEvent('icon://state', handler)
 }

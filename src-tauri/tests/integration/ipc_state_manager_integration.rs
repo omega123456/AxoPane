@@ -203,14 +203,58 @@ fn commands_cover_size_and_logging_state() {
         );
     }
 
-    let everything_status = commands::everything_status(as_state(&size_service));
-    assert!(!everything_status.is_available);
+    let status = commands::folder_size_index_status(as_state(&size_service));
+    assert!(!status.is_available);
+    let backend = if cfg!(windows) {
+        file_explorer_lib::size::IndexBackend::Everything
+    } else {
+        file_explorer_lib::size::IndexBackend::None
+    };
+    assert_eq!(status.backend, backend);
+    assert_eq!(
+        status.state,
+        file_explorer_lib::size::IndexState::Unavailable
+    );
+    commands::set_size_subscriptions(
+        file_explorer_lib::ipc::types::SizeSubscriptionsRequest {
+            pane_id: "left".to_string(),
+            current_path: None,
+            folder_paths: Vec::new(),
+        },
+        as_state(&size_service),
+    );
+
+    // Automatic sizing never walks outside an index on macOS.
+    let auto_batches = commands::request_folder_sizes(
+        file_explorer_lib::ipc::types::FolderSizesRequest {
+            paths: vec![size_root.to_string_lossy().into_owned()],
+            mode: Some(file_explorer_lib::size::RequestMode::Auto),
+        },
+        as_state(&size_service),
+    );
+    let auto_state = auto_batches
+        .iter()
+        .flatten()
+        .map(|event| event.state)
+        .next_back();
+    if cfg!(target_os = "macos") {
+        assert_eq!(
+            auto_state,
+            Some(file_explorer_lib::size::SizeStateKind::Unknown)
+        );
+    } else {
+        assert_eq!(
+            auto_state,
+            Some(file_explorer_lib::size::SizeStateKind::Ready)
+        );
+    }
     let listed_volumes = commands::list_volumes().expect("list volumes");
     assert!(!listed_volumes.is_empty());
 
     let size_batches = commands::request_folder_size(
         file_explorer_lib::ipc::types::FolderSizeRequest {
             path: size_root.to_string_lossy().into_owned(),
+            mode: None,
         },
         as_state(&size_service),
     );
@@ -250,6 +294,7 @@ fn commands_cover_size_and_logging_state() {
                     "/Volumes/fixture-network".to_string()
                 },
             ],
+            mode: None,
         },
         as_state(&size_service),
     );

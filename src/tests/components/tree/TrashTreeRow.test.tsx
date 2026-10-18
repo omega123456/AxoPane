@@ -23,7 +23,7 @@ beforeEach(() => {
   usePanesStore.getState().initialize({
     session: { activePane: 'left', leftPath: '.', rightPath: '.' },
     showHiddenFiles: false,
-    everythingStatus: { status: 'unavailable', isAvailable: false },
+    folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
     volumes: [
       {
         mountRoot: 'C:\\',

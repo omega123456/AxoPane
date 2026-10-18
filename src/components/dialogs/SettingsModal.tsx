@@ -1,7 +1,10 @@
 import { useEffect, useEffectEvent, useMemo, useState } from 'react'
 import {
   AlertTriangleIcon,
+  CheckCircleIcon,
   GripVerticalIcon,
+  LoaderCircleIcon,
+  PauseIcon,
   SearchIcon,
   SettingsIcon,
   XIcon,
@@ -40,6 +43,7 @@ import {
 import type {
   ColumnConfig,
   CommandId,
+  FolderSizeIndexStatus,
   LayoutConfig,
   LogLevel,
   Shortcut,
@@ -140,6 +144,58 @@ function applyDraft(draft: DraftState) {
   usePanesStore.setState({ showHiddenFiles: draft.showHiddenFiles })
 }
 
+const compactCount = new Intl.NumberFormat('en', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+})
+
+function folderSizeStatusLabel(status: FolderSizeIndexStatus) {
+  switch (status.state) {
+    case 'upToDate':
+      return 'Up to date'
+    case 'paused':
+      return status.pauseReason === 'thermal'
+        ? 'Paused to keep your Mac cool'
+        : 'Paused in Low Power Mode'
+    case 'indexing':
+      return 'Indexing…'
+    case 'updating':
+      return 'Updating…'
+    default:
+      return 'Preparing…'
+  }
+}
+
+/** The macOS index's state, shown under the auto folder size description. */
+function FolderSizeStatusLine({ status }: { status: FolderSizeIndexStatus }) {
+  const iconClass = 'h-3.5 w-3.5 shrink-0'
+  const label = folderSizeStatusLabel(status)
+  const count =
+    status.state === 'indexing' && status.itemsScanned !== undefined
+      ? ` ${compactCount.format(status.itemsScanned)} items`
+      : ''
+
+  // The status region announces state transitions only, not count ticks.
+  return (
+    <span className="mt-1 flex items-center gap-1">
+      {status.state === 'upToDate' ? (
+        <CheckCircleIcon className={iconClass} />
+      ) : status.state === 'paused' ? (
+        <PauseIcon className={iconClass} />
+      ) : (
+        <LoaderCircleIcon className={`${iconClass} animate-spin`} />
+      )}
+      <span aria-hidden="true">
+        {label}
+        {count}
+      </span>
+      <span role="status" className="sr-only">
+        {label}
+      </span>
+    </span>
+  )
+}
+
 export function SettingsModal() {
   const isOpen = useSettingsStore((state) => state.isOpen)
   if (!isOpen) {
@@ -154,7 +210,7 @@ function SettingsModalContent() {
   const close = useSettingsStore((state) => state.close)
   const open = useSettingsStore((state) => state.open)
   const os = detectPlatformOs()
-  const everythingStatus = usePanesStore((state) => state.everythingStatus)
+  const folderSizeStatus = usePanesStore((state) => state.folderSizeIndexStatus)
   const logLevel = useConfigStore((state) => state.logLevel)
   const setLogLevel = useConfigStore((state) => state.setLogLevel)
   const [draft, setDraft] = useState<DraftState>(() => cloneDraft())
@@ -437,10 +493,20 @@ function SettingsModalContent() {
                       />
                     }
                   />
-                  {os === 'windows' && everythingStatus?.isAvailable ? (
+                  {folderSizeStatus?.isAvailable && folderSizeStatus.backend !== 'none' ? (
                     <SettingRow
                       title="Automatically calculate folder sizes"
-                      description="Uses the Everything index to size folders while browsing. Only available on Windows with Everything installed and indexed."
+                      description={
+                        folderSizeStatus.backend === 'macIndex' ? (
+                          <>
+                            Sizes folders in the background as you browse. Folders you open are
+                            sized right away.
+                            <FolderSizeStatusLine status={folderSizeStatus} />
+                          </>
+                        ) : (
+                          'Uses the Everything index to size folders while browsing. Only available on Windows with Everything installed and indexed.'
+                        )
+                      }
                       control={
                         <ToggleSwitch
                           label="Automatically calculate folder sizes"

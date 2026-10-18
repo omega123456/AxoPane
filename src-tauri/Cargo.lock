@@ -940,6 +940,7 @@ dependencies = [
  "dispatch2",
  "drag",
  "dunce",
+ "fsevent-sys",
  "ignore",
  "lexical-sort",
  "libc",

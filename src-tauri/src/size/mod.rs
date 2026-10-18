@@ -1,4 +1,7 @@
 pub mod everything;
+#[cfg(target_os = "macos")]
+pub mod fast_walk;
+pub mod index;
 pub mod manual;
 pub mod scheduler;
 
@@ -24,7 +27,9 @@ use everything::{EverythingAvailability, EverythingHandle};
 /// `Throughput` lane (see [`resource_coordinator::max_throughput_slots`])
 /// still gates how many of these workers can be doing filesystem work at
 /// once; this pool only bounds how many *threads exist*, not how many run
-/// concurrently.
+/// concurrently. On macOS each job's traversal is itself parallel
+/// (`fast_walk`), but every job draws its extra threads from one
+/// process-wide helper cap, so total walk threads stay bounded.
 pub const DEFAULT_MANUAL_SIZE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The work a queued manual-size job performs once a worker claims it. Boxed
@@ -67,22 +72,78 @@ pub enum SizeSource {
     Everything,
     Manual,
     Network,
+    Index,
+}
+
+/// Why a size is `na`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum NaReason {
+    Network,
+    Timeout,
+    Denied,
+}
+
+/// `auto` comes from automatic sizing (macOS only sizes indexed paths for
+/// it), `refresh` forces fresh work, `manual` is an explicit request.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RequestMode {
+    Auto,
+    #[default]
+    Manual,
+    Refresh,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum EverythingStatusKind {
-    Unsupported,
-    Unavailable,
-    NotReady,
-    Available,
+pub enum IndexBackend {
+    Everything,
+    MacIndex,
+    None,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum IndexState {
+    Unavailable,
+    NotReady,
+    Indexing,
+    Updating,
+    UpToDate,
+    Paused,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PauseReason {
+    LowPowerMode,
+    Thermal,
+}
+
+/// Backend-neutral folder-size capability and progress.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct EverythingStatus {
-    pub status: EverythingStatusKind,
+pub struct FolderSizeIndexStatus {
+    pub backend: IndexBackend,
     pub is_available: bool,
+    pub state: IndexState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub items_scanned: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pause_reason: Option<PauseReason>,
+}
+
+impl FolderSizeIndexStatus {
+    pub fn new(backend: IndexBackend, is_available: bool, state: IndexState) -> Self {
+        Self {
+            backend,
+            is_available,
+            state,
+            items_scanned: None,
+            pause_reason: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -92,11 +153,47 @@ pub struct SizeUpdate {
     pub state: SizeStateKind,
     pub source: SizeSource,
     pub size_bytes: Option<u64>,
+    pub na_reason: Option<NaReason>,
+    /// The total excludes skipped protected or denied folders below it.
+    pub is_lower_bound: bool,
+    /// Up to three skipped protected folders' names.
+    pub skipped_roots: Option<Vec<String>>,
+    /// Skipped protected folders beyond `skipped_roots`.
+    pub skipped_more: Option<u32>,
+}
+
+impl SizeUpdate {
+    pub fn new(
+        path: String,
+        state: SizeStateKind,
+        source: SizeSource,
+        size_bytes: Option<u64>,
+    ) -> Self {
+        Self {
+            path,
+            state,
+            source,
+            size_bytes,
+            na_reason: None,
+            is_lower_bound: false,
+            skipped_roots: None,
+            skipped_more: None,
+        }
+    }
+
+    pub fn na(path: String, source: SizeSource, reason: Option<NaReason>) -> Self {
+        Self {
+            na_reason: reason,
+            ..Self::new(path, SizeStateKind::Na, source, None)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SizeBackend {
     Everything,
+    #[cfg(target_os = "macos")]
+    Index,
     Manual,
     NetworkNa,
 }
@@ -126,6 +223,9 @@ struct SizeServiceInner {
     jobs: HashMap<String, Arc<AtomicBool>>,
     scheduler: Arc<scheduler::SizeScheduler<QueuedWork>>,
     everything: Option<Arc<EverythingHandle>>,
+    /// Attached only by the explicit index constructors below.
+    #[cfg(target_os = "macos")]
+    index: Option<Arc<index::FolderSizeIndex>>,
 }
 
 impl Default for SizeService {
@@ -210,6 +310,8 @@ impl SizeService {
             jobs: HashMap::new(),
             scheduler: Arc::clone(&scheduler),
             everything,
+            #[cfg(target_os = "macos")]
+            index: None,
         }));
 
         let workers = (0..max_throughput_slots())
@@ -238,32 +340,89 @@ impl SizeService {
             .len()
     }
 
-    pub fn everything_status(&self) -> EverythingStatus {
-        let inner = self.inner.lock().expect("size service lock");
-        let availability = inner
+    /// Production macOS constructor: attaches the folder-size index, whose
+    /// snapshot lives in `cache_dir`.
+    #[cfg(all(target_os = "macos", not(feature = "test-utils")))]
+    pub fn with_folder_size_index(
+        timeout: Duration,
+        coordinator: Arc<ResourceCoordinator>,
+        cache_dir: &Path,
+        emit_sizes: index::SizeEmitter,
+        emit_status: index::StatusEmitter,
+    ) -> Self {
+        let options = index::IndexOptions::for_this_mac(
+            cache_dir,
+            Arc::clone(&coordinator),
+            emit_sizes,
+            emit_status,
+        );
+        let service = Self::with_resource_coordinator(timeout, coordinator);
+        service.attach_index(index::FolderSizeIndex::start(options));
+        service
+    }
+
+    /// Test constructor attaching an index built from injected options
+    /// (temp roots, fake platform, clock); never touches real OS services.
+    #[cfg(all(target_os = "macos", feature = "test-utils"))]
+    pub fn with_folder_size_index_for_tests(
+        timeout: Duration,
+        options: index::IndexOptions,
+    ) -> Self {
+        let service = Self::build(
+            timeout,
+            None,
+            Arc::clone(&options.coordinator),
+            scheduler::MAX_SIZE_METADATA_ENTRIES,
+        );
+        service.attach_index(index::FolderSizeIndex::start(options));
+        service
+    }
+
+    #[cfg(target_os = "macos")]
+    fn attach_index(&self, index: index::FolderSizeIndex) {
+        self.inner.lock().expect("size service lock").index = Some(Arc::new(index));
+    }
+
+    #[cfg(target_os = "macos")]
+    fn index(&self) -> Option<Arc<index::FolderSizeIndex>> {
+        self.inner.lock().expect("size service lock").index.clone()
+    }
+
+    /// The neutral folder-size capability: Everything when a handle is
+    /// loaded, else the macOS index, else none.
+    pub fn folder_size_index_status(&self) -> FolderSizeIndexStatus {
+        let availability = self
+            .inner
+            .lock()
+            .expect("size service lock")
             .everything
             .as_ref()
             .map(|handle| handle.availability());
-
+        let everything = |is_available, state| {
+            FolderSizeIndexStatus::new(IndexBackend::Everything, is_available, state)
+        };
         match availability {
-            Some(EverythingAvailability::Available) => EverythingStatus {
-                status: EverythingStatusKind::Available,
-                is_available: true,
-            },
-            #[cfg(windows)]
-            Some(EverythingAvailability::NotReady) => EverythingStatus {
-                status: EverythingStatusKind::NotReady,
-                is_available: false,
-            },
-            Some(EverythingAvailability::Unavailable) | None if cfg!(windows) => EverythingStatus {
-                status: EverythingStatusKind::Unavailable,
-                is_available: false,
-            },
-            _ => EverythingStatus {
-                status: EverythingStatusKind::Unsupported,
-                is_available: false,
-            },
+            Some(EverythingAvailability::Available) => everything(true, IndexState::UpToDate),
+            Some(EverythingAvailability::NotReady) => everything(false, IndexState::NotReady),
+            Some(EverythingAvailability::Unavailable) => everything(false, IndexState::Unavailable),
+            None => self.status_without_everything(),
         }
+    }
+
+    #[cfg(windows)]
+    fn status_without_everything(&self) -> FolderSizeIndexStatus {
+        FolderSizeIndexStatus::new(IndexBackend::Everything, false, IndexState::Unavailable)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn status_without_everything(&self) -> FolderSizeIndexStatus {
+        self.index()
+            .map_or_else(unsupported_status, |index| index.status())
+    }
+
+    #[cfg(not(any(windows, target_os = "macos")))]
+    fn status_without_everything(&self) -> FolderSizeIndexStatus {
+        unsupported_status()
     }
 
     pub fn choose_backend_for_path(&self, path: &Path, volumes: &[VolumeInfo]) -> SizeBackend {
@@ -277,30 +436,71 @@ impl SizeService {
             .as_ref()
             .is_some_and(|handle| handle.availability() == EverythingAvailability::Available)
         {
-            SizeBackend::Everything
-        } else {
-            SizeBackend::Manual
+            return SizeBackend::Everything;
         }
+        #[cfg(target_os = "macos")]
+        if inner
+            .index
+            .as_ref()
+            .is_some_and(|index| index.contains(path))
+        {
+            return SizeBackend::Index;
+        }
+        SizeBackend::Manual
     }
 
-    pub fn request_paths<F>(&self, paths: Vec<String>, emitter: F)
+    pub fn request_paths<F>(&self, paths: Vec<String>, mode: RequestMode, emitter: F)
     where
         F: Fn(Vec<SizeUpdate>) + Send + Sync + 'static,
     {
         let emitter = Arc::new(emitter);
         let volumes = volumes::list_volumes();
-        self.request_paths_with_volumes(paths, volumes, emitter);
+        self.request_paths_with_mode(paths, mode, volumes, emitter);
+    }
+
+    /// Replaces one pane's live-update set (FR3.3): `folders` receive
+    /// `size://state` whenever their indexed totals change. `current_path`
+    /// marks a protected folder as visited.
+    pub fn set_subscriptions(
+        &self,
+        pane_id: String,
+        current_path: Option<String>,
+        folders: Vec<String>,
+    ) {
+        #[cfg(target_os = "macos")]
+        if let Some(index) = self.index() {
+            index.set_subscriptions(pane_id, current_path, folders);
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = (pane_id, current_path, folders);
+    }
+
+    /// Main-window focus changes: focus re-probes Full Disk Access and checks
+    /// weekly verification; blur writes the index snapshot.
+    pub fn window_focus_changed(&self, focused: bool) {
+        #[cfg(target_os = "macos")]
+        if let Some(index) = self.index() {
+            index.focus_changed(focused);
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = focused;
+    }
+
+    #[cfg(all(target_os = "macos", feature = "test-utils"))]
+    pub fn index_lanes_for_tests(&self) -> Option<index::LaneSnapshot> {
+        self.index().map(|index| index.lanes_for_tests())
+    }
+
+    /// Writes the index snapshot before the app exits.
+    pub fn flush_index(&self) {
+        #[cfg(target_os = "macos")]
+        if let Some(index) = self.index() {
+            index.flush();
+        }
     }
 
     pub fn cancel(&self, path: &str) -> bool {
-        let mut inner = self.inner.lock().expect("size service lock");
-        if let Some(cancel) = inner.jobs.remove(path) {
-            cancel.store(true, Ordering::Relaxed);
-            inner.scheduler.cancel(path);
-            true
-        } else {
-            false
-        }
+        self.cancel_many(&[path.to_string()]) > 0
     }
 
     /// Cancels every in-flight job in `paths`, returning how many were actually
@@ -308,7 +508,7 @@ impl SizeService {
     /// navigates away, without disturbing jobs for any other path.
     pub fn cancel_many(&self, paths: &[String]) -> usize {
         let mut inner = self.inner.lock().expect("size service lock");
-        paths
+        let cancelled = paths
             .iter()
             .filter(|path| {
                 inner.jobs.remove(*path).is_some_and(|cancel| {
@@ -317,7 +517,13 @@ impl SizeService {
                     true
                 })
             })
-            .count()
+            .count();
+        #[cfg(target_os = "macos")]
+        if let Some(index) = inner.index.clone() {
+            drop(inner);
+            return cancelled + index.cancel(paths);
+        }
+        cancelled
     }
 
     pub fn request_path_with_volumes(
@@ -335,20 +541,70 @@ impl SizeService {
         volumes: Vec<VolumeInfo>,
         emitter: Arc<dyn Fn(Vec<SizeUpdate>) + Send + Sync>,
     ) {
+        self.request_paths_with_mode(paths, RequestMode::Manual, volumes, emitter);
+    }
+
+    /// Routes each path: network → Everything → index → manual. On macOS an
+    /// `auto` request outside the index is answered `unknown` without work,
+    /// and a path through a symlink is routed (and sized) by its resolved
+    /// target while its updates keep the requested path.
+    pub fn request_paths_with_mode(
+        &self,
+        paths: Vec<String>,
+        mode: RequestMode,
+        volumes: Vec<VolumeInfo>,
+        emitter: Arc<dyn Fn(Vec<SizeUpdate>) + Send + Sync>,
+    ) {
         let mut everything_paths = Vec::new();
         let mut network_updates = Vec::new();
+        #[cfg(target_os = "macos")]
+        let mut index_paths = Vec::new();
+        #[cfg(target_os = "macos")]
+        let mut linked_index_paths = Vec::new();
 
         for path in paths {
-            let backend = self.choose_backend_for_path(Path::new(&path), &volumes);
+            // Network paths stay `na` without touching the share.
+            #[cfg(target_os = "macos")]
+            let route = if volumes::path_is_network(Path::new(&path), &volumes) {
+                Route::AsIs
+            } else {
+                route_of(Path::new(&path))
+            };
+            #[cfg(target_os = "macos")]
+            let sized = match &route {
+                Route::Target(target) => target.clone(),
+                Route::AsIs | Route::NotDir => PathBuf::from(&path),
+            };
+            #[cfg(not(target_os = "macos"))]
+            let sized = PathBuf::from(&path);
+            let backend = match self.choose_backend_for_path(&sized, &volumes) {
+                // Files and dangling or looping links are never index paths.
+                #[cfg(target_os = "macos")]
+                SizeBackend::Index if matches!(route, Route::NotDir) => SizeBackend::Manual,
+                backend => backend,
+            };
 
             match backend {
-                SizeBackend::NetworkNa => {
-                    network_updates.push(SizeUpdate {
+                #[cfg(target_os = "macos")]
+                SizeBackend::Index => match route {
+                    Route::Target(target) => linked_index_paths.push((path, target)),
+                    Route::AsIs | Route::NotDir => index_paths.push(path),
+                },
+                #[cfg(target_os = "macos")]
+                SizeBackend::Manual if mode == RequestMode::Auto => {
+                    network_updates.push(SizeUpdate::new(
                         path,
-                        state: SizeStateKind::Na,
-                        source: SizeSource::Network,
-                        size_bytes: None,
-                    });
+                        SizeStateKind::Unknown,
+                        SizeSource::Manual,
+                        None,
+                    ));
+                }
+                SizeBackend::NetworkNa => {
+                    network_updates.push(SizeUpdate::na(
+                        path,
+                        SizeSource::Network,
+                        Some(NaReason::Network),
+                    ));
                 }
                 SizeBackend::Everything => everything_paths.push(path),
                 SizeBackend::Manual => {
@@ -358,26 +614,25 @@ impl SizeService {
                         SizeSource::Manual,
                         emitter.clone(),
                         Box::new(move |job_path, cancel| {
-                            match manual::calculate(Path::new(&job_path), &cancel, timeout) {
-                                Ok(size_bytes) => Some(SizeUpdate {
-                                    path: job_path,
-                                    state: SizeStateKind::Ready,
-                                    source: SizeSource::Manual,
-                                    size_bytes: Some(size_bytes),
-                                }),
-                                Err(manual::ManualSizeError::Timeout) => Some(SizeUpdate {
-                                    path: job_path,
-                                    state: SizeStateKind::Na,
-                                    source: SizeSource::Manual,
-                                    size_bytes: None,
-                                }),
+                            match manual::calculate(&sized, &cancel, timeout) {
+                                Ok(size_bytes) => Some(SizeUpdate::new(
+                                    job_path,
+                                    SizeStateKind::Ready,
+                                    SizeSource::Manual,
+                                    Some(size_bytes),
+                                )),
+                                Err(manual::ManualSizeError::Timeout) => Some(SizeUpdate::na(
+                                    job_path,
+                                    SizeSource::Manual,
+                                    Some(NaReason::Timeout),
+                                )),
                                 Err(manual::ManualSizeError::Cancelled) => None,
-                                Err(_) => Some(SizeUpdate {
-                                    path: job_path,
-                                    state: SizeStateKind::Error,
-                                    source: SizeSource::Manual,
-                                    size_bytes: None,
-                                }),
+                                Err(_) => Some(SizeUpdate::new(
+                                    job_path,
+                                    SizeStateKind::Error,
+                                    SizeSource::Manual,
+                                    None,
+                                )),
                             }
                         }),
                     );
@@ -388,6 +643,32 @@ impl SizeService {
         if !network_updates.is_empty() {
             emitter(network_updates);
         }
+        #[cfg(target_os = "macos")]
+        if let Some(index) = self.index() {
+            if !index_paths.is_empty() {
+                index.request(index_paths, mode, Arc::clone(&emitter));
+            }
+            for (path, target) in linked_index_paths {
+                let emitter = Arc::clone(&emitter);
+                index.request(
+                    vec![target.to_string_lossy().into_owned()],
+                    mode,
+                    Arc::new(move |updates: Vec<SizeUpdate>| {
+                        emitter(
+                            updates
+                                .into_iter()
+                                .map(|update| SizeUpdate {
+                                    path: path.clone(),
+                                    ..update
+                                })
+                                .collect(),
+                        );
+                    }),
+                );
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = mode;
 
         if !everything_paths.is_empty() {
             self.spawn_everything_batch(everything_paths, emitter);
@@ -406,11 +687,8 @@ impl SizeService {
         let Some(handle) = handle else {
             let updates = paths
                 .into_iter()
-                .map(|path| SizeUpdate {
-                    path,
-                    state: SizeStateKind::Error,
-                    source: SizeSource::Everything,
-                    size_bytes: None,
+                .map(|path| {
+                    SizeUpdate::new(path, SizeStateKind::Error, SizeSource::Everything, None)
                 })
                 .collect::<Vec<_>>();
             if !updates.is_empty() {
@@ -433,12 +711,12 @@ impl SizeService {
                 match self.register_job(&path, |_cancel| QueuedWork::EverythingRegistryOnly) {
                     Some(cancel) => Some((path, cancel)),
                     None => {
-                        rejected_updates.push(SizeUpdate {
+                        rejected_updates.push(SizeUpdate::new(
                             path,
-                            state: SizeStateKind::Error,
-                            source: SizeSource::Everything,
-                            size_bytes: None,
-                        });
+                            SizeStateKind::Error,
+                            SizeSource::Everything,
+                            None,
+                        ));
                         None
                     }
                 }
@@ -497,12 +775,12 @@ impl SizeService {
                     if batch_cancelled() {
                         break;
                     }
-                    calculating_updates.push(SizeUpdate {
-                        path: path.clone(),
-                        state: SizeStateKind::Calculating,
-                        source: SizeSource::Everything,
-                        size_bytes: None,
-                    });
+                    calculating_updates.push(SizeUpdate::new(
+                        path.clone(),
+                        SizeStateKind::Calculating,
+                        SizeSource::Everything,
+                        None,
+                    ));
                 }
                 if !calculating_updates.is_empty() {
                     emitter(calculating_updates);
@@ -520,17 +798,17 @@ impl SizeService {
                             continue;
                         }
 
-                        terminal_updates.push(SizeUpdate {
-                            path: path.clone(),
-                            state: results
+                        terminal_updates.push(SizeUpdate::new(
+                            path.clone(),
+                            results
                                 .get(&path)
                                 .copied()
                                 .flatten()
                                 .map(|_| SizeStateKind::Ready)
                                 .unwrap_or(SizeStateKind::Na),
-                            source: SizeSource::Everything,
-                            size_bytes: results.get(&path).copied().flatten(),
-                        });
+                            SizeSource::Everything,
+                            results.get(&path).copied().flatten(),
+                        ));
                         SizeService::complete_job(&inner, &path, &cancel);
                     }
                     if !terminal_updates.is_empty() {
@@ -545,12 +823,12 @@ impl SizeService {
                             continue;
                         }
 
-                        terminal_updates.push(SizeUpdate {
-                            path: path.clone(),
-                            state: SizeStateKind::Error,
-                            source: SizeSource::Everything,
-                            size_bytes: None,
-                        });
+                        terminal_updates.push(SizeUpdate::new(
+                            path.clone(),
+                            SizeStateKind::Error,
+                            SizeSource::Everything,
+                            None,
+                        ));
                         SizeService::complete_job(&inner, &path, &cancel);
                     }
                     if !terminal_updates.is_empty() {
@@ -653,12 +931,12 @@ impl SizeService {
             // no in-flight work to coalesce onto and nothing will ever call
             // `complete_job` for this path. Report the terminal state
             // immediately instead of leaving the caller waiting forever.
-            rejection_emitter(vec![SizeUpdate {
+            rejection_emitter(vec![SizeUpdate::new(
                 path,
-                state: SizeStateKind::Error,
+                SizeStateKind::Error,
                 source,
-                size_bytes: None,
-            }]);
+                None,
+            )]);
         }
     }
 }
@@ -715,12 +993,12 @@ fn spawn_manual_worker(
                     SizeService::complete_job(&inner, &path, &cancel);
                     continue;
                 }
-                emitter(vec![SizeUpdate {
-                    path: path.clone(),
-                    state: SizeStateKind::Calculating,
+                emitter(vec![SizeUpdate::new(
+                    path.clone(),
+                    SizeStateKind::Calculating,
                     source,
-                    size_bytes: None,
-                }]);
+                    None,
+                )]);
                 let update = work(path.clone(), Arc::clone(&cancel));
                 // Untrack the job *before* emitting its terminal update, not
                 // after: a request for this exact path that lands in the
@@ -769,6 +1047,35 @@ impl Drop for SizeService {
             let _ = worker.join();
         }
     }
+}
+
+/// How a macOS size request is routed, resolved once at request time.
+#[cfg(target_os = "macos")]
+pub(crate) enum Route {
+    /// By the requested path itself: already canonical, or missing.
+    AsIs,
+    /// By this canonical directory: the requested path runs through a
+    /// symlink (walks themselves never follow one).
+    Target(PathBuf),
+    /// Not a directory: a file, a link to one, or a dangling or looping link.
+    NotDir,
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn route_of(path: &Path) -> Route {
+    match std::fs::canonicalize(path) {
+        Ok(target) if !target.is_dir() => Route::NotDir,
+        Ok(target) if target == path => Route::AsIs,
+        Ok(target) => Route::Target(target),
+        Err(_) if path.is_symlink() => Route::NotDir,
+        Err(_) => Route::AsIs,
+    }
+}
+
+/// No folder-size backend: macOS without an attached index.
+#[cfg(not(windows))]
+fn unsupported_status() -> FolderSizeIndexStatus {
+    FolderSizeIndexStatus::new(IndexBackend::None, false, IndexState::Unavailable)
 }
 
 pub fn size_path_from_string(path: &str) -> PathBuf {

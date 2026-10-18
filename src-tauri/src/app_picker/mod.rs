@@ -27,7 +27,7 @@ use types::{
 pub fn list_applications() -> ListApplicationsResponse {
     #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
     {
-        return macos::list_applications();
+        macos::list_applications()
     }
 
     #[cfg(any(feature = "test-utils", not(target_os = "macos")))]
@@ -68,7 +68,7 @@ pub async fn set_default_application_cancellable(
         if cancellation.is_cancelled() {
             return MenuActionStatus::unsupported("default-application-cancelled");
         }
-        return result;
+        result
     }
 
     #[cfg(any(feature = "test-utils", not(target_os = "macos")))]
@@ -87,9 +87,9 @@ pub fn get_default_application(
 ) -> GetDefaultApplicationResponse {
     #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
     {
-        return GetDefaultApplicationResponse {
+        GetDefaultApplicationResponse {
             app: macos::get_default_application(&request),
-        };
+        }
     }
 
     #[cfg(any(feature = "test-utils", not(target_os = "macos")))]

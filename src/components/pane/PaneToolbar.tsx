@@ -3,6 +3,7 @@ import {
   ArrowUpIcon,
   FilePlusIcon,
   FolderPlusIcon,
+  LoaderCircleIcon,
   PieChartIcon,
   RefreshIcon,
   SearchIcon,
@@ -23,13 +24,29 @@ export function PaneToolbar({ pane, isActive }: PaneToolbarProps) {
   const clearFilter = usePanesStore((state) => state.clearFilter)
   const goBack = usePanesStore((state) => state.goBack)
   const goUp = usePanesStore((state) => state.goUp)
-  const refreshEverything = usePanesStore((state) => state.refreshEverything)
+  const refreshSizes = usePanesStore((state) => state.refreshSizes)
   const canGoBack = usePanesStore((state) => state.panes[pane.id].historyIndex > 0)
-  const everythingAvailable = usePanesStore((state) => state.everythingStatus?.isAvailable ?? false)
+  const autoSizingAvailable = usePanesStore(
+    (state) => state.folderSizeIndexStatus?.isAvailable ?? false,
+  )
+  // Folders automatic sizing could not answer: outside the macOS index or an
+  // unvisited protected folder (FR8.3).
+  const hasUnknownFolder = usePanesStore((state) =>
+    pane.entries.some((entry) => entry.isDir && state.sizeStates[entry.path]?.state === 'unknown'),
+  )
+  const sizesUpdating = usePanesStore((state) =>
+    pane.entries.some((entry) => {
+      const size = entry.isDir ? state.sizeStates[entry.path] : undefined
+      return size?.state === 'calculating' || size?.refreshing === true
+    }),
+  )
   const autoFolderSize = useConfigStore((state) => state.autoFolderSize)
   const openActionDialog = useActionDialogStore((state) => state.open)
   const showCalculateAllSizes =
-    !everythingAvailable || !autoFolderSize || autoFolderSizeDisabledForPane(pane.entries)
+    !autoSizingAvailable ||
+    !autoFolderSize ||
+    autoFolderSizeDisabledForPane(pane.entries) ||
+    hasUnknownFolder
 
   return (
     <div
@@ -60,7 +77,7 @@ export function PaneToolbar({ pane, isActive }: PaneToolbarProps) {
         type="button"
         aria-label={`Refresh ${pane.title}`}
         title="Refresh"
-        onClick={() => void refreshEverything(pane.id)}
+        onClick={() => void refreshSizes(pane.id)}
         className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab text-light-text-soft hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
       >
         <RefreshIcon className="h-3.5 w-3.5" />
@@ -95,8 +112,14 @@ export function PaneToolbar({ pane, isActive }: PaneToolbarProps) {
         </button>
       ) : null}
       <PaneViewMenu paneId={pane.id} />
-      <span className="ml-auto shrink-0 font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-        {pane.entries.length} items
+      <span className="ml-auto flex shrink-0 items-center gap-2 font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
+        {sizesUpdating ? (
+          <span className="inline-flex items-center">
+            <LoaderCircleIcon className="h-3.5 w-3.5 animate-spin" />
+            <span className="sr-only">Updating folder sizes</span>
+          </span>
+        ) : null}
+        <span>{pane.entries.length} items</span>
       </span>
       <label
         className={`flex h-8 min-w-0 w-search items-center gap-2 rounded-tab border px-2 ${

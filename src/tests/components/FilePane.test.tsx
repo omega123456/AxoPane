@@ -965,9 +965,9 @@ describe('FilePane state rendering', () => {
 
   it('handles arrow navigation, Ctrl+R refresh, and Backspace', async () => {
     const user = userEvent.setup()
-    const refreshEverything = vi.fn(() => Promise.resolve())
+    const refreshSizes = vi.fn(() => Promise.resolve())
     const goUp = vi.fn(() => Promise.resolve())
-    usePanesStore.setState({ refreshEverything, goUp })
+    usePanesStore.setState({ refreshSizes, goUp })
     seedPane({ entries: [entry('Alpha'), entry('Beta')], focusedEntryId: 'Alpha' })
 
     render(<FilePane paneId="left" />)
@@ -980,7 +980,7 @@ describe('FilePane state rendering', () => {
     expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('Alpha')
 
     await user.keyboard('{Control>}r{/Control}')
-    expect(refreshEverything).toHaveBeenCalledWith('left')
+    expect(refreshSizes).toHaveBeenCalledWith('left')
 
     await user.keyboard('{Backspace}')
     expect(goUp).toHaveBeenCalledWith('left')
@@ -1493,8 +1493,8 @@ describe('FilePane state rendering', () => {
 
   it('suppresses pane shortcuts while an app-modal dialog is open', async () => {
     const user = userEvent.setup()
-    const refreshEverything = vi.fn(() => Promise.resolve())
-    usePanesStore.setState({ refreshEverything })
+    const refreshSizes = vi.fn(() => Promise.resolve())
+    usePanesStore.setState({ refreshSizes })
     seedPane({ entries: [entry('Alpha')], focusedEntryId: 'Alpha' })
     useActionDialogStore.getState().open({
       kind: 'delete',
@@ -1506,7 +1506,7 @@ describe('FilePane state rendering', () => {
     screen.getByLabelText('Left pane').focus()
     await user.keyboard('{Control>}r{/Control}')
 
-    expect(refreshEverything).not.toHaveBeenCalled()
+    expect(refreshSizes).not.toHaveBeenCalled()
   })
 
   it('dims rows whose paths are currently cut in the app clipboard', () => {

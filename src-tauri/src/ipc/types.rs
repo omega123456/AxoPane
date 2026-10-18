@@ -28,7 +28,7 @@ pub use crate::ops::{
     StartOpRequest,
 };
 pub use crate::persist::{Config as AppConfig, Session as SessionState};
-pub use crate::size::{EverythingStatus, SizeSource, SizeStateKind};
+pub use crate::size::{FolderSizeIndexStatus, NaReason, RequestMode, SizeSource, SizeStateKind};
 pub use crate::trash::TrashEntry;
 pub use crate::volumes::VolumeInfo;
 pub use crate::watch::patch::{MetadataDelta, RowDelta, SessionPatch};
@@ -117,18 +117,41 @@ pub struct SizeStateEvent {
     pub state: SizeStateKind,
     pub source: SizeSource,
     pub size_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub na_reason: Option<NaReason>,
+    #[serde(default)]
+    pub is_lower_bound: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped_roots: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped_more: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderSizeRequest {
     pub path: String,
+    #[serde(default)]
+    pub mode: Option<RequestMode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderSizesRequest {
     pub paths: Vec<String>,
+    #[serde(default)]
+    pub mode: Option<RequestMode>,
+}
+
+/// One pane's live size-update set; an empty `folder_paths` with no
+/// `current_path` clears it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SizeSubscriptionsRequest {
+    pub pane_id: String,
+    #[serde(default)]
+    pub current_path: Option<String>,
+    pub folder_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

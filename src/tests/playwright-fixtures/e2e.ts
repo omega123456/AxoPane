@@ -164,7 +164,13 @@ const tabDragSession: SessionState = {
   left: {
     activeTabIndex: 0,
     tabs: [
-      { path: 'C:\\Users\\Omega', sortKey: 'name', sortDirection: 'asc', filter: '', locked: false },
+      {
+        path: 'C:\\Users\\Omega',
+        sortKey: 'name',
+        sortDirection: 'asc',
+        filter: '',
+        locked: false,
+      },
       { path: 'C:\\Archive', sortKey: 'name', sortDirection: 'asc', filter: '', locked: true },
       { path: 'C:\\Media', sortKey: 'name', sortDirection: 'asc', filter: '', locked: false },
     ],
@@ -182,8 +188,43 @@ const invalidTabDragSession: SessionState = {
   ...tabDragSession,
   left: {
     activeTabIndex: 0,
-    tabs: [{ path: 'C:\\Users\\Omega', sortKey: 'name', sortDirection: 'asc', filter: '', locked: true }],
+    tabs: [
+      { path: 'C:\\Users\\Omega', sortKey: 'name', sortDirection: 'asc', filter: '', locked: true },
+    ],
   },
+}
+
+/**
+ * A lower-bound total, a denied folder, and a refresh that keeps the last
+ * value while the toolbar's catch-up spinner shows.
+ */
+const sizeBoundEvents: EventMap = {
+  'size://state': [
+    [
+      {
+        path: 'C:\\Users\\Omega\\Documents',
+        state: 'ready',
+        source: 'index',
+        sizeBytes: 987_654_321,
+        isLowerBound: true,
+        skippedRoots: ['Desktop', 'Downloads', 'Mail'],
+        skippedMore: 2,
+      },
+      {
+        path: 'C:\\Users\\Omega\\Media',
+        state: 'na',
+        source: 'index',
+        sizeBytes: null,
+        naReason: 'denied',
+      },
+      {
+        path: 'C:\\Users\\Omega\\Documents',
+        state: 'calculating',
+        source: 'index',
+        sizeBytes: null,
+      },
+    ],
+  ],
 }
 
 function scenarioByTheme(
@@ -611,6 +652,16 @@ export const screenshotScenarios = {
           ],
         ],
       },
+    },
+  },
+  sizeBounds: {
+    light: {
+      commands: { load_config: lightConfig, queue_snapshot: emptyQueueSnapshot },
+      events: sizeBoundEvents,
+    },
+    dark: {
+      commands: { load_config: darkConfig, queue_snapshot: emptyQueueSnapshot },
+      events: sizeBoundEvents,
     },
   },
   itemsSortPending: {

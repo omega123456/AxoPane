@@ -14,12 +14,13 @@ import { DragCursorBadge } from '@/components/states/DragCursorBadge'
 import { ErrorToast } from '@/components/states/ErrorToast'
 import { hydrateAppConfig, persistAppConfig } from '@/lib/app-config'
 import { executeCommand } from '@/lib/commands'
-import { everythingStatus, listVolumes, loadConfig, loadSession } from '@/lib/ipc/commands'
+import { folderSizeIndexStatus, listVolumes, loadConfig, loadSession } from '@/lib/ipc/commands'
 import { installCloseGuard } from '@/lib/close-guard'
 import {
   onDirSessionPatch,
   onIconState,
   onItemCountState,
+  onSizeIndexStatus,
   onSizeState,
   onThumbnailState,
   onVolumesChanged,
@@ -59,7 +60,7 @@ function isEditableTarget(target: EventTarget | null) {
 
 function App() {
   const initialize = usePanesStore((state) => state.initialize)
-  const setEverythingStatus = usePanesStore((state) => state.setEverythingStatus)
+  const setFolderSizeIndexStatus = usePanesStore((state) => state.setFolderSizeIndexStatus)
   const setVolumes = usePanesStore((state) => state.setVolumes)
   const treeRoots = usePanesStore((state) => state.treeRoots)
   const applySizeStates = usePanesStore((state) => state.applySizeStates)
@@ -86,11 +87,15 @@ function App() {
   useEffect(() => {
     initializeTheme()
 
+    // Subscribe to folder-size status changes before the single initial
+    // fetch, so no transition between the two is missed.
+    const unlistenStatusPromise = onSizeIndexStatus(setFolderSizeIndexStatus)
+
     void (async () => {
       const [config, session, status, nextVolumes] = await Promise.all([
         loadConfig(),
         loadSession(),
-        everythingStatus(),
+        unlistenStatusPromise.then(() => folderSizeIndexStatus()),
         listVolumes(),
       ])
 
@@ -104,13 +109,17 @@ function App() {
       initialize({
         session,
         showHiddenFiles: hydratedConfig.showHiddenFiles,
-        everythingStatus: status,
+        folderSizeIndexStatus: status,
         volumes: nextVolumes,
       })
 
       await Promise.all([reloadPane('left'), reloadPane('right')])
     })()
-  }, [initialize, reloadPane, syncThemePreference])
+
+    return () => {
+      void unlistenStatusPromise.then((unlisten) => unlisten())
+    }
+  }, [initialize, reloadPane, setFolderSizeIndexStatus, syncThemePreference])
 
   useEffect(() => {
     void initializePanes()
@@ -134,10 +143,6 @@ function App() {
       unlisten?.()
     }
   }, [])
-
-  useEffect(() => {
-    void everythingStatus().then(setEverythingStatus)
-  }, [setEverythingStatus])
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {

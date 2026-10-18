@@ -131,6 +131,66 @@ describe('SizeValue', () => {
     rerender(<SizeValue entry={entry({ isDir: false, path: 'C:\\empty', sizeBytes: null })} />)
     expect(screen.getByText('—')).toBeInTheDocument()
   })
+
+  it('labels the spinner and renders lower bounds, their tooltips and denied folders', () => {
+    const bound = (skippedRoots: string[] | undefined, skippedMore?: number) =>
+      ({
+        state: 'ready',
+        sizeBytes: 2048,
+        source: 'index',
+        isLowerBound: true,
+        skippedRoots,
+        skippedMore,
+      }) as const
+    usePanesStore.setState({
+      sizeStates: {
+        'C:\\calc': { state: 'calculating', sizeBytes: null, source: 'index' },
+        'C:\\many': bound(['Documents', 'Desktop', 'Downloads'], 2),
+        'C:\\one': bound(['Documents']),
+        'C:\\two': bound(['Documents', 'Desktop']),
+        'C:\\denied-below': bound(undefined),
+        'C:\\denied': { state: 'na', sizeBytes: null, source: 'index', naReason: 'denied' },
+        'C:\\error': { state: 'error', sizeBytes: null, source: 'manual' },
+        'C:\\refreshing': { state: 'ready', sizeBytes: 1024, source: 'index', refreshing: true },
+      },
+    })
+
+    const { rerender } = render(<SizeValue entry={entry({ path: 'C:\\calc' })} />)
+    expect(screen.getByText('Calculating size')).toHaveClass('sr-only')
+
+    rerender(<SizeValue entry={entry({ path: 'C:\\many' })} />)
+    expect(screen.getByText('≥ 2.0 KB')).toHaveAttribute(
+      'title',
+      "Doesn't include Documents, Desktop, Downloads and 2 more. Open them to include them.",
+    )
+    rerender(<SizeValue entry={entry({ path: 'C:\\one' })} />)
+    expect(screen.getByText('≥ 2.0 KB')).toHaveAttribute(
+      'title',
+      "Doesn't include Documents. Open it to include it.",
+    )
+    rerender(<SizeValue entry={entry({ path: 'C:\\two' })} />)
+    expect(screen.getByText('≥ 2.0 KB')).toHaveAttribute(
+      'title',
+      "Doesn't include Documents and Desktop. Open them to include them.",
+    )
+    rerender(<SizeValue entry={entry({ path: 'C:\\denied-below' })} />)
+    expect(screen.getByText('≥ 2.0 KB')).toHaveAttribute(
+      'title',
+      "Doesn't include folders macOS blocked access to.",
+    )
+
+    rerender(<SizeValue entry={entry({ path: 'C:\\denied' })} />)
+    expect(screen.getByText('N/A')).toHaveAttribute(
+      'title',
+      'macOS blocked access. Grant Full Disk Access to include this folder.',
+    )
+    rerender(<SizeValue entry={entry({ path: 'C:\\error' })} />)
+    expect(screen.getByText('N/A')).not.toHaveAttribute('title')
+
+    // Refreshing keeps the last value with no visual change.
+    rerender(<SizeValue entry={entry({ path: 'C:\\refreshing' })} />)
+    expect(screen.getByText('1.0 KB')).not.toHaveAttribute('title')
+  })
 })
 
 describe('HeaderRow', () => {

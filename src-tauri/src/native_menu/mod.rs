@@ -116,7 +116,7 @@ impl NativeMenuService {
         {
             // Must run in the UI process: the shell property sheet is owned by
             // the calling process, and the helper child has no message pump.
-            return windows::show_properties(&request);
+            windows::show_properties(&request)
         }
 
         #[cfg(any(feature = "test-utils", not(target_os = "windows")))]
@@ -130,12 +130,12 @@ impl NativeMenuService {
         {
             // Same process requirement as `show_properties`: SHOpenWithDialog is
             // modal and dies with the helper child.
-            return windows::open_with(&request);
+            windows::open_with(&request)
         }
 
         #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
         {
-            return macos::open_with(&request.path);
+            macos::open_with(&request.path)
         }
 
         #[cfg(any(

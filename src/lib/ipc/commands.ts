@@ -10,7 +10,7 @@ import type {
   DeleteFromTrashRequest,
   DirectoryEntry,
   EjectVolumeRequest,
-  EverythingStatus,
+  FolderSizeIndexStatus,
   FolderSizeRequest,
   FolderSizesRequest,
   GetDefaultApplicationRequest,
@@ -43,6 +43,7 @@ import type {
   ReviseSessionViewRequest,
   SessionRangeResponse,
   SetDefaultApplicationRequest,
+  SizeSubscriptionsRequest,
   ShowPropertiesRequest,
   StartNativeDragRequest,
   TrashEntriesRequest,
@@ -218,8 +219,12 @@ export function ejectVolume(payload: EjectVolumeRequest) {
   return invokeCommand({ command: 'eject_volume', payload }) as Promise<MenuActionStatus>
 }
 
-export function everythingStatus() {
-  return invokeCommand({ command: 'everything_status' }) as Promise<EverythingStatus>
+export function folderSizeIndexStatus() {
+  return invokeCommand({ command: 'folder_size_index_status' }) as Promise<FolderSizeIndexStatus>
+}
+
+export function setSizeSubscriptions(payload: SizeSubscriptionsRequest) {
+  return invokeCommand({ command: 'set_size_subscriptions', payload }) as Promise<void>
 }
 
 export function requestFolderSize(payload: FolderSizeRequest) {

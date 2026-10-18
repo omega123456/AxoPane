@@ -208,8 +208,21 @@ function fileSystemStrip(
   ]
 }
 
+/**
+ * "Calculate size" shows when automatic sizing is unavailable or off, or when
+ * the folder's size is `unknown` (FR8.4). A folder with no size state yet
+ * (e.g. a pane over the auto-size cap, or a tree node) counts as `unknown`.
+ */
+function calculateSizeHidden(path: string) {
+  const { folderSizeIndexStatus, sizeStates } = usePanesStore.getState()
+  return (
+    (folderSizeIndexStatus?.isAvailable ?? false) &&
+    useConfigStore.getState().autoFolderSize &&
+    (sizeStates[path]?.state ?? 'unknown') !== 'unknown'
+  )
+}
+
 function calculateSizeRow(entry: DirectoryEntry, os: PlatformOs): ContextMenuActionRow {
-  const everythingStatus = usePanesStore.getState().everythingStatus
   const volumes = usePanesStore.getState().volumes
   const volume = volumes.find((item) =>
     entry.path.toLowerCase().startsWith(item.mountRoot.toLowerCase()),
@@ -217,7 +230,7 @@ function calculateSizeRow(entry: DirectoryEntry, os: PlatformOs): ContextMenuAct
 
   return commandRow('calculateSize', os, {
     targetEntryId: entry.id,
-    hidden: everythingStatus?.isAvailable ?? false,
+    hidden: calculateSizeHidden(entry.path),
     disabled: Boolean(volume?.isNetwork),
   })
 }
@@ -550,7 +563,7 @@ function buildTreeContent(
           requestFolderSizeContextAction(target.path),
           {
             shortcut: shortcutFor('calculateSize', os),
-            hidden: usePanesStore.getState().everythingStatus?.isAvailable ?? false,
+            hidden: calculateSizeHidden(target.path),
             disabled: Boolean(networkNode),
             icon: { kind: 'app', name: 'calculate-size' },
           },

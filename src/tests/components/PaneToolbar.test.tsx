@@ -58,11 +58,11 @@ describe('PaneToolbar', () => {
     const user = userEvent.setup()
     const goBack = vi.fn(() => Promise.resolve())
     const goUp = vi.fn(() => Promise.resolve())
-    const refreshEverything = vi.fn(() => Promise.resolve())
+    const refreshSizes = vi.fn(() => Promise.resolve())
     usePanesStore.setState((state) => ({
       goBack,
       goUp,
-      refreshEverything,
+      refreshSizes,
       panes: {
         ...state.panes,
         left: { ...state.panes.left, history: ['C:\\Users', 'C:\\Users\\Omega'], historyIndex: 1 },
@@ -81,7 +81,7 @@ describe('PaneToolbar', () => {
     await user.click(refresh)
     expect(goBack).toHaveBeenCalledWith('left')
     expect(goUp).toHaveBeenCalledWith('left')
-    expect(refreshEverything).toHaveBeenCalledWith('left')
+    expect(refreshSizes).toHaveBeenCalledWith('left')
   })
 
   it('updates and clears the filter, returning focus to the pane on Escape', async () => {
@@ -117,7 +117,9 @@ describe('PaneToolbar', () => {
 
   it('shows the size action when needed and opens its confirmation dialog', async () => {
     const user = userEvent.setup()
-    usePanesStore.setState({ everythingStatus: { status: 'unavailable', isAvailable: false } })
+    usePanesStore.setState({
+      folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+    })
 
     render(<PaneToolbar pane={pane()} isActive />)
     const button = screen.getByRole('button', {
@@ -144,7 +146,9 @@ describe('PaneToolbar', () => {
   })
 
   it('uses availability, configuration, and the folder threshold for size-action visibility', () => {
-    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
+    usePanesStore.setState({
+      folderSizeIndexStatus: { backend: 'macIndex', isAvailable: true, state: 'upToDate' },
+    })
     useConfigStore.setState({ autoFolderSize: true })
 
     const { rerender } = render(<PaneToolbar pane={pane(folderEntries(500))} isActive />)
@@ -157,5 +161,52 @@ describe('PaneToolbar', () => {
     act(() => useConfigStore.setState({ autoFolderSize: false }))
     rerender(<PaneToolbar pane={pane()} isActive />)
     expect(screen.getByRole('button', { name: buttonName })).toBeInTheDocument()
+  })
+
+  it('shows the size action when automatic sizing left a folder unknown', () => {
+    usePanesStore.setState({
+      folderSizeIndexStatus: { backend: 'macIndex', isAvailable: true, state: 'upToDate' },
+    })
+    const entries = folderEntries(2)
+    const buttonName = 'Calculate all folder sizes in Left pane'
+    render(<PaneToolbar pane={pane(entries)} isActive />)
+    expect(screen.queryByRole('button', { name: buttonName })).not.toBeInTheDocument()
+
+    act(() =>
+      usePanesStore
+        .getState()
+        .applySizeStates([
+          { path: entries[1].path, state: 'unknown', source: 'index', sizeBytes: null },
+        ]),
+    )
+    expect(screen.getByRole('button', { name: buttonName })).toBeInTheDocument()
+  })
+
+  it('shows a catch-up spinner next to the item count while folder sizes update', () => {
+    const entries = folderEntries(2)
+    render(<PaneToolbar pane={pane(entries)} isActive />)
+    expect(screen.queryByText('Updating folder sizes')).not.toBeInTheDocument()
+
+    const ready = { state: 'ready', source: 'index', sizeBytes: 5 } as const
+    act(() =>
+      usePanesStore.getState().applySizeStates([
+        { path: entries[0].path, ...ready },
+        { path: entries[1].path, state: 'calculating', source: 'index', sizeBytes: null },
+      ]),
+    )
+    expect(screen.getByText('Updating folder sizes')).toHaveClass('sr-only')
+
+    act(() => usePanesStore.getState().applySizeStates([{ path: entries[1].path, ...ready }]))
+    expect(screen.queryByText('Updating folder sizes')).not.toBeInTheDocument()
+
+    // A refresh keeps the value but still counts as updating.
+    act(() =>
+      usePanesStore
+        .getState()
+        .applySizeStates([
+          { path: entries[0].path, state: 'calculating', source: 'index', sizeBytes: null },
+        ]),
+    )
+    expect(screen.getByText('Updating folder sizes')).toBeInTheDocument()
   })
 })

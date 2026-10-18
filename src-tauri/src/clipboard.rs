@@ -38,12 +38,12 @@ pub fn write_paths(mode: ClipboardMode, paths: &[String]) -> Result<(), Clipboar
 
     #[cfg(all(windows, not(feature = "test-utils")))]
     {
-        return windows_impl::write_paths(mode, paths);
+        windows_impl::write_paths(mode, paths)
     }
 
     #[cfg(all(not(windows), not(feature = "test-utils")))]
     {
-        return cross_platform_impl::write_paths(mode, paths);
+        cross_platform_impl::write_paths(mode, paths)
     }
 
     #[cfg(feature = "test-utils")]
@@ -58,7 +58,7 @@ pub fn write_paths(mode: ClipboardMode, paths: &[String]) -> Result<(), Clipboar
 pub fn read_paths() -> Result<(ClipboardMode, Vec<String>), ClipboardError> {
     #[cfg(not(feature = "test-utils"))]
     {
-        return read_impl::read_paths();
+        read_impl::read_paths()
     }
 
     #[cfg(feature = "test-utils")]
@@ -70,12 +70,12 @@ pub fn read_paths() -> Result<(ClipboardMode, Vec<String>), ClipboardError> {
 pub fn clear() -> Result<(), ClipboardError> {
     #[cfg(all(windows, not(feature = "test-utils")))]
     {
-        return windows_impl::clear();
+        windows_impl::clear()
     }
 
     #[cfg(all(not(windows), not(feature = "test-utils")))]
     {
-        return cross_platform_impl::clear();
+        cross_platform_impl::clear()
     }
 
     #[cfg(feature = "test-utils")]

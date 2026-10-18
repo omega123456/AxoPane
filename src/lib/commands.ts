@@ -94,7 +94,7 @@ export function executeCommand(
       void panes.goUp(paneId)
       break
     case 'refresh':
-      void panes.refreshEverything(paneId)
+      void panes.refreshSizes(paneId)
       break
     case 'calculateSize': {
       const focusId = targetEntryId ?? pane.focusedEntryId

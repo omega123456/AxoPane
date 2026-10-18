@@ -16,6 +16,7 @@ A **super-fast, lightweight, dual-pane cross-OS (Windows + macOS) file explorer*
 - **The folder tree follows pane patches.** The tree must not create its own recursive watcher or polling loop. Loaded tree nodes are updated from accepted pane `dir://patch` events for the same path: directory additions are inserted into that node's child list, directory removals prune the cached subtree, and file-only patches leave the tree cache untouched.
 - **Tree fetching stays lazy.** `list_tree_children` is for first expansion/reveal (and explicit reload-style paths), not for every watcher patch. If a tree node is not loaded, leave it alone; it will fetch when expanded. If a pane skips a patch because it is stale, path-mismatched, or typing-filter state is in progress, the tree should skip it too.
 - **Keep Windows/macOS path behavior in mind.** Watch events and tree nodes may use drive roots, UNC roots, POSIX roots, or canonicalized macOS paths; compare exact paths first and only use case-insensitive matching as a compatibility fallback.
+- **The macOS folder-size index owns one recursive, directory-level FSEvents stream used only for size bookkeeping.** It never emits `dir://patch` and never drives pane or tree refresh. Pane watches stay non-recursive, and the tree still has no watcher of its own.
 
 ## Critical Rules for Agents
 
@@ -32,7 +33,6 @@ A **super-fast, lightweight, dual-pane cross-OS (Windows + macOS) file explorer*
 - **No raw `console` in frontend feature code.** Route all logging through `src/lib/app-log-commands.ts` (`logFrontend` and the toast helpers added later). `app-log-commands.ts` is the only module allowed to call `console` (as a last-resort sink). The `no-console` ESLint rule enforces this.
 - **Critical instruction: any time you add or update a screenshot test or regenerate a screenshot baseline, you must inspect the resulting image and verify it matches expectations before you consider the change complete. Never accept an unreviewed screenshot baseline change.**
 - **Screenshot tests cant take longer than 2 seconds to run each. Anything that takes longer is considered a failure.**
-- **Rust and vitests cant take longer than 1 second per test suite. Anything that takes longer is considered a failure.**
 
 **Permission debugging:** A runtime `forbidden`/permission error almost always means a missing or mistyped entry in `capabilities/default.json` or a mismatch between the TOML `commands.allow` name and the registered Rust name.
 

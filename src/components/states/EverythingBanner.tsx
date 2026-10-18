@@ -11,11 +11,11 @@ function isWindows() {
 }
 
 export function EverythingBanner() {
-  const everythingStatus = usePanesStore((state) => state.everythingStatus)
+  const status = usePanesStore((state) => state.folderSizeIndexStatus)
   const dismissed = useConfigStore((state) => state.dismissedEverythingBanner)
   const dismiss = useConfigStore((state) => state.dismissEverythingBanner)
 
-  if (!isWindows() || dismissed || everythingStatus?.isAvailable) {
+  if (!isWindows() || dismissed || status?.backend !== 'everything' || status.isAvailable) {
     return null
   }
 

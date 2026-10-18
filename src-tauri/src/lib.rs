@@ -142,6 +142,15 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .on_window_event(|window, event| {
+            // The folder-size index reacts to focus changes: focus re-probes Full
+            // Disk Access and checks weekly verification, blur writes its
+            // snapshot. Both only post a message to the index thread.
+            if let tauri::WindowEvent::Focused(focused) = event {
+                if let Some(sizes) = window.app_handle().try_state::<SizeService>() {
+                    sizes.window_focus_changed(*focused);
+                }
+            }
+
             // Reliability net for any native volume-change/watch event the OS
             // dropped while the window was unfocused: reconciling here costs
             // nothing at rest since it only runs in response to another
@@ -304,10 +313,32 @@ pub fn run() {
             // against the same throughput/CPU/latency lanes as every other
             // subsystem instead of having its own independent admission
             // budget.
-            app.manage(SizeService::with_resource_coordinator(
+            #[cfg(target_os = "macos")]
+            let sizes = {
+                let size_handle = app.handle().clone();
+                let status_handle = app.handle().clone();
+                SizeService::with_folder_size_index(
+                    size::DEFAULT_MANUAL_SIZE_TIMEOUT,
+                    Arc::clone(&resource_coordinator),
+                    &resolved_app_config_dir(&app.path().app_cache_dir()?),
+                    Arc::new(move |updates| {
+                        let batch = updates
+                            .into_iter()
+                            .map(commands::size_state_event_from_update)
+                            .collect::<Vec<_>>();
+                        let _ = size_handle.emit(ipc::events::SIZE_STATE, batch);
+                    }),
+                    Arc::new(move |status| {
+                        let _ = status_handle.emit(ipc::events::SIZE_INDEX_STATUS, status);
+                    }),
+                )
+            };
+            #[cfg(not(target_os = "macos"))]
+            let sizes = SizeService::with_resource_coordinator(
                 size::DEFAULT_MANUAL_SIZE_TIMEOUT,
                 Arc::clone(&resource_coordinator),
-            ));
+            );
+            app.manage(sizes);
 
             let ops = OpsService::with_resource_coordinator(resource_coordinator);
             let progress_handle = app.handle().clone();
@@ -357,7 +388,8 @@ pub fn run() {
             commands::get_default_application,
             commands::list_volumes,
             commands::eject_volume,
-            commands::everything_status,
+            commands::folder_size_index_status,
+            commands::set_size_subscriptions,
             commands::request_folder_size,
             commands::request_folder_sizes,
             commands::request_icons,
@@ -387,8 +419,16 @@ pub fn run() {
             commands::set_log_level,
             crate::native_drag::start_native_drag
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running file explorer application")
+        .build(tauri::generate_context!())
+        .expect("error while building file explorer application")
+        .run(|app, event| {
+            // Last snapshot write; the index thread does the I/O.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(sizes) = app.try_state::<SizeService>() {
+                    sizes.flush_index();
+                }
+            }
+        });
 }
 
 #[cfg(feature = "test-utils")]

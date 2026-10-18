@@ -72,6 +72,12 @@ pub mod persist_defaults_integration;
 pub mod persist_storage_integration;
 pub mod reconcile_coordinator_integration;
 pub mod resource_coordinator_integration;
+#[cfg(target_os = "macos")]
+pub mod size_fast_walk_integration;
+pub mod size_index_persist_integration;
+#[cfg(target_os = "macos")]
+pub mod size_index_service_integration;
+pub mod size_index_tree_integration;
 pub mod size_manual_integration;
 pub mod size_scheduler_integration;
 pub mod thumbnail_cache_integration;

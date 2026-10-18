@@ -34,8 +34,9 @@ use super::types::{
     RequestThumbnailsResponse, ResolveConflictRequest, RestoreTrashRequest,
     ReviseSessionViewRequest, SaveConfigRequest, SaveSessionRequest, SessionRangeResponse,
     SessionRejection, SessionState, SetDefaultApplicationRequest, SetLogLevelRequest,
-    SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent, StartOpRequest, TrashEntriesRequest,
-    VisibleItemCountsRequest, VolumeInfo, WarmNativeMenusRequest, WriteFileClipboardRequest,
+    SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent, SizeSubscriptionsRequest,
+    StartOpRequest, TrashEntriesRequest, VisibleItemCountsRequest, VolumeInfo,
+    WarmNativeMenusRequest, WriteFileClipboardRequest,
 };
 use crate::fs::DirectoryEntry;
 use std::path::Path;
@@ -945,8 +946,15 @@ pub fn eject_volume(payload: EjectVolumeRequest) -> Result<MenuActionStatus, Str
 }
 
 #[tauri::command]
-pub fn everything_status(state: State<'_, SizeService>) -> super::types::EverythingStatus {
-    state.everything_status()
+pub fn folder_size_index_status(
+    state: State<'_, SizeService>,
+) -> super::types::FolderSizeIndexStatus {
+    state.folder_size_index_status()
+}
+
+#[tauri::command]
+pub fn set_size_subscriptions(payload: SizeSubscriptionsRequest, state: State<'_, SizeService>) {
+    state.set_subscriptions(payload.pane_id, payload.current_path, payload.folder_paths);
 }
 
 #[cfg(not(feature = "test-utils"))]
@@ -959,6 +967,7 @@ pub fn request_folder_size(
     request_folder_sizes(
         FolderSizesRequest {
             paths: vec![payload.path],
+            mode: payload.mode,
         },
         app,
         state,
@@ -974,6 +983,7 @@ pub fn request_folder_size(
     request_folder_sizes(
         FolderSizesRequest {
             paths: vec![payload.path],
+            mode: payload.mode,
         },
         state,
     )
@@ -987,7 +997,8 @@ pub fn request_folder_sizes(
     state: State<'_, SizeService>,
 ) {
     let app_handle = app.clone();
-    state.request_paths(payload.paths, move |updates| {
+    let mode = payload.mode.unwrap_or_default();
+    state.request_paths(payload.paths, mode, move |updates| {
         let batch = updates
             .into_iter()
             .map(size_state_event_from_update)
@@ -1012,7 +1023,8 @@ pub fn request_folder_sizes(
     let updates = Arc::new(Mutex::new(Vec::<Vec<SizeStateEvent>>::new()));
     let updates_for_emitter = Arc::clone(&updates);
 
-    state.request_paths(payload.paths, move |batch| {
+    let mode = payload.mode.unwrap_or_default();
+    state.request_paths(payload.paths, mode, move |batch| {
         let events = batch
             .into_iter()
             .map(size_state_event_from_update)
@@ -1037,6 +1049,7 @@ pub fn request_folder_sizes(
                     crate::size::SizeStateKind::Ready
                         | crate::size::SizeStateKind::Error
                         | crate::size::SizeStateKind::Na
+                        | crate::size::SizeStateKind::Unknown
                 )
             })
             .count();
@@ -1051,12 +1064,16 @@ pub fn request_folder_sizes(
     recorded
 }
 
-fn size_state_event_from_update(update: crate::size::SizeUpdate) -> SizeStateEvent {
+pub fn size_state_event_from_update(update: crate::size::SizeUpdate) -> SizeStateEvent {
     SizeStateEvent {
         path: update.path,
         state: update.state,
         source: update.source,
         size_bytes: update.size_bytes,
+        na_reason: update.na_reason,
+        is_lower_bound: update.is_lower_bound,
+        skipped_roots: update.skipped_roots,
+        skipped_more: update.skipped_more,
     }
 }
 

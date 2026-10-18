@@ -364,10 +364,12 @@ export const fixtures: {
     handled: true,
     message: null,
   },
-  everything_status: {
-    status: 'available',
+  folder_size_index_status: {
+    backend: 'everything',
     isAvailable: true,
+    state: 'upToDate',
   },
+  set_size_subscriptions: undefined,
   request_folder_size: undefined,
   request_folder_sizes: undefined,
   request_icons: undefined,

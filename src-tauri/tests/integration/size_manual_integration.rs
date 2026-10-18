@@ -18,7 +18,8 @@ use file_explorer_lib::size::everything::{
 };
 use file_explorer_lib::size::manual::{calculate, ManualSizeError};
 use file_explorer_lib::size::{
-    SizeBackend, SizeService, SizeSource, SizeStateKind, SizeUpdate, DEFAULT_MANUAL_SIZE_TIMEOUT,
+    RequestMode, SizeBackend, SizeService, SizeSource, SizeStateKind, SizeUpdate,
+    DEFAULT_MANUAL_SIZE_TIMEOUT,
 };
 use file_explorer_lib::volumes::VolumeInfo;
 use tempfile::tempdir;
@@ -312,7 +313,7 @@ fn capability_selection_prefers_network_na_and_manual_fallback() {
 
     let local_mount = local.mount_root.clone();
     let backend = service.choose_backend_for_path(std::path::Path::new(&local_mount), &[local]);
-    if cfg!(windows) && service.everything_status().is_available {
+    if cfg!(windows) && service.folder_size_index_status().is_available {
         assert_eq!(backend, SizeBackend::Everything);
     } else {
         assert_eq!(backend, SizeBackend::Manual);
@@ -333,12 +334,16 @@ fn size_service_request_paths_emits_manual_success_lifecycle() {
     let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
     let updates_for_emitter = updates.clone();
 
-    service.request_paths(vec![root.to_string_lossy().into_owned()], move |update| {
-        updates_for_emitter
-            .lock()
-            .expect("updates lock")
-            .extend(update);
-    });
+    service.request_paths(
+        vec![root.to_string_lossy().into_owned()],
+        RequestMode::Manual,
+        move |update| {
+            updates_for_emitter
+                .lock()
+                .expect("updates lock")
+                .extend(update);
+        },
+    );
 
     wait_for_updates(&updates, |updates| {
         updates
@@ -370,7 +375,7 @@ fn size_service_cancel_removes_a_requested_manual_job() {
     let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
     let updates_for_emitter = updates.clone();
 
-    service.request_paths(vec![target.clone()], move |update| {
+    service.request_paths(vec![target.clone()], RequestMode::Manual, move |update| {
         updates_for_emitter
             .lock()
             .expect("updates lock")
@@ -406,7 +411,7 @@ fn size_service_cancel_many_removes_only_requested_in_flight_jobs() {
     let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
     let updates_for_emitter = updates.clone();
 
-    service.request_paths(roots.clone(), move |update| {
+    service.request_paths(roots.clone(), RequestMode::Manual, move |update| {
         updates_for_emitter
             .lock()
             .expect("updates lock")
@@ -454,7 +459,7 @@ fn queued_manual_jobs_are_skipped_once_cancelled() {
     let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
     let updates_for_emitter = updates.clone();
 
-    service.request_paths(paths.clone(), move |update| {
+    service.request_paths(paths.clone(), RequestMode::Manual, move |update| {
         updates_for_emitter
             .lock()
             .expect("updates lock")
@@ -496,7 +501,7 @@ fn completed_size_jobs_are_removed_from_the_registry() {
     let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
     let updates_for_emitter = updates.clone();
 
-    service.request_paths(vec![target.clone()], move |update| {
+    service.request_paths(vec![target.clone()], RequestMode::Manual, move |update| {
         updates_for_emitter
             .lock()
             .expect("updates lock")
@@ -530,11 +535,13 @@ fn everything_backed_requests_emit_batched_ready_and_na_results() {
     let batches = Arc::new(Mutex::new(Vec::<Vec<SizeUpdate>>::new()));
     let batches_for_emitter = batches.clone();
 
+    let status = service.folder_size_index_status();
     assert_eq!(
-        service.everything_status().status,
-        file_explorer_lib::size::EverythingStatusKind::Available
+        status.backend,
+        file_explorer_lib::size::IndexBackend::Everything
     );
-    assert!(service.everything_status().is_available);
+    assert_eq!(status.state, file_explorer_lib::size::IndexState::UpToDate);
+    assert!(status.is_available);
 
     service.request_paths_with_volumes(
         vec![alpha_path.clone(), beta_path.clone()],
@@ -663,6 +670,7 @@ fn size_service_reports_missing_manual_path_as_error() {
 
     service.request_paths(
         vec![missing.to_string_lossy().into_owned()],
+        RequestMode::Manual,
         move |update| {
             updates_for_emitter
                 .lock()
@@ -738,12 +746,16 @@ fn size_service_reports_fixture_network_paths_as_not_applicable() {
     let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
     let updates_for_emitter = updates.clone();
 
-    service.request_paths(vec!["Z:\\".to_string()], move |update| {
-        updates_for_emitter
-            .lock()
-            .expect("updates lock")
-            .extend(update);
-    });
+    service.request_paths(
+        vec!["Z:\\".to_string()],
+        RequestMode::Manual,
+        move |update| {
+            updates_for_emitter
+                .lock()
+                .expect("updates lock")
+                .extend(update);
+        },
+    );
 
     let recorded = updates.lock().expect("updates lock").clone();
     assert_eq!(recorded.len(), 1);
@@ -896,7 +908,7 @@ fn size_service_manual_jobs_are_admitted_through_the_injected_coordinator() {
 
     let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
     let updates_for_emitter = updates.clone();
-    service.request_paths(vec![target.clone()], move |update| {
+    service.request_paths(vec![target.clone()], RequestMode::Manual, move |update| {
         updates_for_emitter
             .lock()
             .expect("updates lock")
@@ -952,7 +964,7 @@ fn overlapping_requests_for_the_same_in_flight_path_coalesce_to_one_completion()
 
     // First request registers and (once a pool worker claims it) starts
     // walking `target`.
-    service.request_paths(vec![target.clone()], {
+    service.request_paths(vec![target.clone()], RequestMode::Manual, {
         let updates_for_emitter = updates_for_emitter.clone();
         move |update| {
             updates_for_emitter
@@ -967,7 +979,7 @@ fn overlapping_requests_for_the_same_in_flight_path_coalesce_to_one_completion()
     // coalescing contract this must find the existing in-flight job and
     // return its same tracked token rather than registering (or silently
     // dropping) a second one.
-    service.request_paths(vec![target.clone()], move |update| {
+    service.request_paths(vec![target.clone()], RequestMode::Manual, move |update| {
         updates_for_emitter
             .lock()
             .expect("updates lock")
@@ -1037,6 +1049,7 @@ fn a_manual_job_rejected_for_capacity_still_reports_a_terminal_event() {
     let updates_for_emitter = updates.clone();
     service.request_paths(
         vec![first_path.clone(), second_path.clone()],
+        RequestMode::Manual,
         move |update| {
             updates_for_emitter
                 .lock()
@@ -1099,7 +1112,7 @@ fn dropping_the_service_joins_the_worker_pool_deterministically() {
     let service = SizeService::new(Duration::from_secs(5));
     let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
     let updates_for_emitter = updates.clone();
-    service.request_paths(paths, move |update| {
+    service.request_paths(paths, RequestMode::Manual, move |update| {
         updates_for_emitter
             .lock()
             .expect("updates lock")

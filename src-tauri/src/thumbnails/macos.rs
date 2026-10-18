@@ -253,9 +253,10 @@ fn begin(
               representation_type: QLThumbnailRepresentationType,
               error: *mut NSError| {
             let is_final = representation_type == QLThumbnailRepresentationType::Thumbnail;
-            let payload = if callback_state.cancelled.load(Ordering::Acquire) {
-                ProviderPayload::State(ThumbnailState::Unavailable)
-            } else if representation.is_null() || !error.is_null() {
+            let payload = if callback_state.cancelled.load(Ordering::Acquire)
+                || representation.is_null()
+                || !error.is_null()
+            {
                 ProviderPayload::State(ThumbnailState::Unavailable)
             } else {
                 unsafe {

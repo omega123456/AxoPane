@@ -1,5 +1,6 @@
 pub const DIR_PATCH: &str = "dir://patch";
 pub const SIZE_STATE: &str = "size://state";
+pub const SIZE_INDEX_STATUS: &str = "size://index-status";
 pub const ICON_STATE: &str = "icon://state";
 pub const THUMBNAIL_STATE: &str = "thumbnail://state";
 pub const ITEM_COUNT: &str = "item-count://state";

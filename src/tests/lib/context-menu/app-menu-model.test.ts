@@ -51,7 +51,7 @@ describe('buildAppContextMenuContent', () => {
     usePanesStore.getState().reset()
     useLayoutStore.setState({ defaultPaneMode: defaultLayout.defaultPaneMode })
     usePanesStore.setState({
-      everythingStatus: { status: 'unavailable', isAvailable: false },
+      folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
       volumes: [
         {
           mountRoot: 'C:\\',
@@ -234,7 +234,23 @@ describe('buildAppContextMenuContent', () => {
   })
 
   it('keeps unsupported file actions disabled and hides folder-size rows when Everything is available', () => {
-    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
+    usePanesStore.setState({
+      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+    })
+    const folderCalculateRow = () =>
+      buildAppContextMenuContent(
+        'left',
+        { kind: 'folder', entry: folderEntry },
+        'windows',
+      ).sections[1]?.rows.find((row) => row.label === 'Calculate size')
+
+    // No size state yet (e.g. a pane over the auto-size cap) counts as unknown.
+    expect(folderCalculateRow()?.hidden).toBe(false)
+    usePanesStore
+      .getState()
+      .applySizeStates([
+        { path: folderEntry.path, state: 'ready', source: 'everything', sizeBytes: 1 },
+      ])
 
     const folderContent = buildAppContextMenuContent(
       'left',
@@ -270,6 +286,47 @@ describe('buildAppContextMenuContent', () => {
     expect(
       fileContent.sections[0]?.rows.find((row) => row.label === 'Open in other pane')?.shortcut,
     ).toBe('⌘⇧Enter')
+  })
+
+  it('shows "Calculate size" when automatic sizing is off or the folder size is unknown', () => {
+    usePanesStore.setState({
+      folderSizeIndexStatus: { backend: 'macIndex', isAvailable: true, state: 'upToDate' },
+    })
+    const calculateRow = () =>
+      buildAppContextMenuContent(
+        'left',
+        { kind: 'folder', entry: folderEntry },
+        'macos',
+      ).sections[1]?.rows.find((row) => row.label === 'Calculate size')
+    const treeRow = () =>
+      buildAppContextMenuContent('left', { kind: 'tree', path: folderEntry.path }, 'macos')
+        .sections.flatMap((section) => section.rows)
+        .find((row) => row.label === 'Calculate size')
+
+    // A folder with no size state counts as unknown.
+    expect(calculateRow()?.hidden).toBe(false)
+    expect(treeRow()?.hidden).toBe(false)
+
+    usePanesStore
+      .getState()
+      .applySizeStates([{ path: folderEntry.path, state: 'ready', source: 'index', sizeBytes: 1 }])
+    expect(calculateRow()?.hidden).toBe(true)
+    expect(treeRow()?.hidden).toBe(true)
+
+    usePanesStore
+      .getState()
+      .applySizeStates([
+        { path: folderEntry.path, state: 'unknown', source: 'index', sizeBytes: null },
+      ])
+    expect(calculateRow()?.hidden).toBe(false)
+    expect(treeRow()?.hidden).toBe(false)
+
+    usePanesStore
+      .getState()
+      .applySizeStates([{ path: folderEntry.path, state: 'ready', source: 'index', sizeBytes: 1 }])
+    expect(calculateRow()?.hidden).toBe(true)
+    useConfigStore.setState({ autoFolderSize: false })
+    expect(calculateRow()?.hidden).toBe(false)
   })
 
   it('uses a reduced strip for multi-select and keeps tree menus app-owned with disabled network size calculation', () => {

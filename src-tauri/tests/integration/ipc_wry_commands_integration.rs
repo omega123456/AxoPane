@@ -99,12 +99,14 @@ fn concrete_apphandle_commands_cover_volume_watch_and_size_wrappers() {
     commands::request_folder_size(
         FolderSizeRequest {
             path: size_root.to_string_lossy().into_owned(),
+            mode: None,
         },
         app.state::<SizeService>(),
     );
     commands::request_folder_sizes(
         FolderSizesRequest {
             paths: vec![size_root.to_string_lossy().into_owned()],
+            mode: None,
         },
         app.state::<SizeService>(),
     );

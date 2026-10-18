@@ -6,7 +6,7 @@ import {
   cancelSize,
   cancelSizes,
   ejectVolume,
-  everythingStatus,
+  folderSizeIndexStatus,
   getInitialShell,
   listDir,
   listVolumes,
@@ -48,7 +48,7 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
     await expect(getInitialShell()).resolves.toHaveProperty('panes')
     await expect(listVolumes()).resolves.toBeInstanceOf(Array)
     await expect(ejectVolume({ mountRoot: 'E:\\' })).resolves.toHaveProperty('handled')
-    await expect(everythingStatus()).resolves.toHaveProperty('isAvailable')
+    await expect(folderSizeIndexStatus()).resolves.toHaveProperty('backend', 'everything')
     await expect(loadConfig()).resolves.toHaveProperty('theme')
     await expect(loadSession()).resolves.toHaveProperty('activePane')
   })

@@ -47,11 +47,12 @@ block2 = { version = "~0.6.2", default-features = false, features = ["std"] }
 drag = "~2.1.1"
 core-foundation-sys = "~0.8.7"
 dispatch2 = { version = "~0.3.1", default-features = false, features = ["std"] }
+fsevent-sys = "~4.1.0"
 objc2 = { version = "~0.6.4", default-features = false, features = ["std"] }
 objc2-core-foundation = { version = "~0.3.2", default-features = false, features = ["std", "CFCGTypes"] }
 objc2-core-graphics = { version = "~0.3.2", default-features = false, features = ["std", "CGBitmapContext", "CGColorSpace", "CGContext", "CGDataProvider", "CGImage"] }
 objc2-app-kit = { version = "~0.3.2", default-features = false, features = ["std", "NSEvent", "NSWorkspace", "block2", "objc2-uniform-type-identifiers"] }
-objc2-foundation = { version = "~0.3.2", default-features = false, features = ["std", "NSString", "NSURL", "NSError"] }
+objc2-foundation = { version = "~0.3.2", default-features = false, features = ["std", "NSString", "NSURL", "NSError", "NSNotification", "NSProcessInfo", "NSOperation", "block2"] }
 objc2-quick-look-thumbnailing = { version = "~0.3.2", default-features = false, features = ["std", "block2", "objc2-core-foundation", "objc2-core-graphics", "QLThumbnailGenerationRequest", "QLThumbnailGenerator", "QLThumbnailRepresentation", "QLThumbnailingBase"] }
 objc2-uniform-type-identifiers = { version = "~0.3.2", default-features = false, features = ["std", "UTType"] }
 

@@ -9,6 +9,7 @@ import {
   requestFolderSizes,
   requestIcons,
   saveSession,
+  setSizeSubscriptions,
   setTabWatch,
 } from '@/lib/ipc/commands'
 import { isTrashPath, trashEntryToDirectoryEntry } from '@/lib/trash'
@@ -16,7 +17,7 @@ import { SESSION_PAGE_SIZE } from '@/lib/types/ipc'
 import type {
   DirectoryEntry,
   DirPatchEvent,
-  EverythingStatus,
+  FolderSizeIndexStatus,
   IconStateEvent,
   ItemCountEvent,
   ItemCountRequestContext,
@@ -70,6 +71,12 @@ type EntrySizeState = {
   state: SizeStateKind
   sizeBytes: number | null
   source: SizeStateEvent['source']
+  naReason?: SizeStateEvent['naReason']
+  isLowerBound?: boolean
+  skippedRoots?: string[]
+  skippedMore?: number
+  /** A `ready` value kept visible while a refresh recalculates it (FR8.5). */
+  refreshing?: boolean
 }
 
 type PaneState = {
@@ -122,7 +129,7 @@ type ResolvedIconPaths = Record<string, string | null>
 type InitializePayload = {
   session: SessionState
   showHiddenFiles: boolean
-  everythingStatus: EverythingStatus
+  folderSizeIndexStatus: FolderSizeIndexStatus
   volumes: VolumeInfo[]
 }
 
@@ -135,7 +142,7 @@ type PanesStore = {
   focusRequestPaneId: PaneId | null
   panes: Record<PaneId, PaneState>
   showHiddenFiles: boolean
-  everythingStatus: EverythingStatus | null
+  folderSizeIndexStatus: FolderSizeIndexStatus | null
   volumes: VolumeInfo[]
   sizeStates: Record<string, EntrySizeState>
   pendingSizeRequests: PendingSizeRequests
@@ -169,7 +176,8 @@ type PanesStore = {
     destinationPaneId: PaneId,
     destinationIndex: number,
   ) => Promise<TabMoveResult>
-  refreshEverything: (paneId: PaneId) => Promise<void>
+  /** Refresh / F5: reloads the pane and re-requests its folder sizes in `refresh` mode, keeping known values visible. */
+  refreshSizes: (paneId: PaneId) => Promise<void>
   /** Runs the post-listing tail (arm fs-watch, eager folder sizes, tree children) once a listing is complete. */
   finalizeListing: (paneId: PaneId) => Promise<void>
   applyDirPatch: (event: DirPatchEvent) => void
@@ -196,7 +204,7 @@ type PanesStore = {
    * either pane, so a no-op icon update never triggers a re-render (FR7).
    */
   applyIconStates: (events: IconStateEvent[]) => void
-  setEverythingStatus: (status: EverythingStatus) => void
+  setFolderSizeIndexStatus: (status: FolderSizeIndexStatus) => void
   setVolumes: (volumes: VolumeInfo[]) => void
   setShowHiddenFiles: (showHiddenFiles: boolean) => Promise<void>
   requestManualSize: (paneId: PaneId, entryId: string) => Promise<void>
@@ -396,7 +404,7 @@ function defaultState() {
       right: createPane('right', 'Right pane'),
     },
     showHiddenFiles: false,
-    everythingStatus: null,
+    folderSizeIndexStatus: null as FolderSizeIndexStatus | null,
     volumes: [] as VolumeInfo[],
     sizeStates: {} as Record<string, EntrySizeState>,
     pendingSizeRequests: {} as PendingSizeRequests,
@@ -981,16 +989,27 @@ function withPendingIconRequests(
   return next
 }
 
-// Eager folder-size requests are only valid where the Everything index can
-// answer them cheaply for the whole dataset (Windows + Everything available).
-// On macOS and on Windows without Everything, sizes are strictly manual
-// (Space / "Calculate size") — see plan FR7 / M4. Network paths are handled by
-// the Rust size layer (always N/A); we never pre-gate on those here.
-function eagerSizesEnabled(
-  everythingStatus: EverythingStatus | null,
-  autoFolderSize: boolean,
-): boolean {
-  return (everythingStatus?.isAvailable ?? false) && autoFolderSize
+// Eager folder-size requests are only valid where a folder-size index can
+// answer them cheaply (Everything on Windows, the macOS index). Without one,
+// sizes are strictly manual (Space / "Calculate size"). The request is sent in
+// `auto` mode, so on macOS Rust answers paths outside the index `unknown`
+// without walking them. Network paths are handled by the Rust size layer
+// (always N/A); we never pre-gate on those here.
+function eagerSizesEnabled(status: FolderSizeIndexStatus | null, autoFolderSize: boolean): boolean {
+  return (status?.isAvailable ?? false) && autoFolderSize
+}
+
+/** Replaces (or clears) a pane's live size-update set; failures only log. */
+async function reportSizeSubscriptions(
+  paneId: PaneId,
+  currentPath: string | null,
+  folderPaths: string[],
+) {
+  try {
+    await setSizeSubscriptions({ paneId, currentPath, folderPaths })
+  } catch (error) {
+    log.warn('size: setSizeSubscriptions failed', { paneId, error })
+  }
 }
 
 function paneIdFromTabId(tabId: string): PaneId {
@@ -1322,7 +1341,7 @@ function applyTreeDirPatch(state: PanesStore, event: DirPatchEvent) {
 
 export const usePanesStore = create<PanesStore>((set, get) => ({
   ...defaultState(),
-  initialize: ({ session, showHiddenFiles, everythingStatus, volumes }) => {
+  initialize: ({ session, showHiddenFiles, folderSizeIndexStatus, volumes }) => {
     const tabsStore = useTabsStore.getState()
     const leftPane = session.left ?? {
       activeTabIndex: 0,
@@ -1359,7 +1378,9 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       ...state,
       activePaneId: session.activePane === 'right' ? 'right' : 'left',
       showHiddenFiles,
-      everythingStatus,
+      // A `size://index-status` event that arrived before this initial
+      // fetch resolved is newer; keep it.
+      folderSizeIndexStatus: state.folderSizeIndexStatus ?? folderSizeIndexStatus,
       volumes,
       panes: {
         left: {
@@ -1476,6 +1497,8 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           filter: nextTrashPane.filterApplied,
         })
         schedulePersistSession(get().activePaneId)
+        // Trash shows no folder sizes, so the pane's live size set is dropped.
+        await reportSizeSubscriptions(paneId, null, [])
         return
       }
 
@@ -1687,7 +1710,8 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       (candidate) =>
         !otherDirPaths.has(candidate) &&
         (get().pendingSizeRequests[candidate] ||
-          get().sizeStates[candidate]?.state === 'calculating'),
+          get().sizeStates[candidate]?.state === 'calculating' ||
+          get().sizeStates[candidate]?.refreshing === true),
     )
     log.debug('size: navigate cancel evaluation', {
       paneId,
@@ -1707,6 +1731,8 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           // re-requests the size instead of assuming it is still resolving.
           if (sizeStates[stalePath]?.state === 'calculating') {
             delete sizeStates[stalePath]
+          } else if (sizeStates[stalePath]?.refreshing) {
+            sizeStates[stalePath] = { ...sizeStates[stalePath], refreshing: false }
           }
         }
         return { pendingSizeRequests, sizeStates }
@@ -1874,6 +1900,10 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       return
     }
 
+    // The closed tab owned the pane's live size set; the next tab's listing
+    // reports its own.
+    void reportSizeSubscriptions(paneId, null, [])
+
     const next = activeTab(paneId)
     set((state) => ({
       passiveItemCountRequests: clearPassiveItemCountRequestsForPane(
@@ -2033,20 +2063,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     // no separate recheck/patch step is needed here.
     await get().reloadPane(paneId)
   },
-  refreshEverything: async (paneId) => {
-    // Ctrl+R: drop cached size states for the active path then reload, which
-    // re-requests folder sizes from scratch.
-    const pane = get().panes[paneId]
-    set((state) => {
-      const nextSizeStates = { ...state.sizeStates }
-      const pendingSizeRequests = { ...state.pendingSizeRequests }
-      for (const entry of pane.entries) {
-        delete nextSizeStates[entry.path]
-        delete pendingSizeRequests[entry.path]
-      }
-      return { sizeStates: nextSizeStates, pendingSizeRequests }
-    })
-
+  refreshSizes: async (paneId) => {
     // `revise_directory_session_view` re-derives sort/filter from Rust's
     // already-cached enumeration snapshot without touching the filesystem
     // again — wrong for an explicit "refresh from disk" action. Releasing the
@@ -2054,6 +2071,40 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     // `begin_directory_session`, which re-enumerates.
     await listingSessions[paneId].release()
     await get().reloadPane(paneId)
+
+    // Known values stay visible until replaced (FR8.5): instead of clearing
+    // them, re-request in `refresh` mode, bypassing the dedup that skips
+    // `ready` folders. Without automatic sizing only folders that already
+    // have a result are recalculated.
+    const pane = get().panes[paneId]
+    if (isTrashPath(pane.path)) {
+      return
+    }
+    const folders = directoryPaths(pane.entries)
+    const eager =
+      eagerSizesEnabled(get().folderSizeIndexStatus, useConfigStore.getState().autoFolderSize) &&
+      folders.length <= AUTO_FOLDER_SIZE_MAX_DIRECTORIES
+    const paths = eager
+      ? folders
+      : folders.filter((path) => {
+          const state = get().sizeStates[path]?.state
+          return state !== undefined && isTerminalSizeState(state)
+        })
+    if (paths.length === 0) {
+      return
+    }
+
+    set((state) => ({
+      pendingSizeRequests: withPendingSizeRequests(state.pendingSizeRequests, paths, true),
+    }))
+    try {
+      await requestFolderSizes({ paths, mode: 'refresh' })
+    } catch (error) {
+      set((state) => ({
+        pendingSizeRequests: withPendingSizeRequests(state.pendingSizeRequests, paths, false),
+      }))
+      throw error
+    }
   },
   finalizeListing: async (paneId) => {
     const pane = get().panes[paneId]
@@ -2062,8 +2113,11 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       return
     }
 
+    const eager = () =>
+      eagerSizesEnabled(get().folderSizeIndexStatus, useConfigStore.getState().autoFolderSize)
+
     const requestDirectorySizes = async (paths: string[]) => {
-      if (!eagerSizesEnabled(get().everythingStatus, useConfigStore.getState().autoFolderSize)) {
+      if (!eager()) {
         return []
       }
 
@@ -2084,7 +2138,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       }))
 
       try {
-        await requestFolderSizes({ paths: pending })
+        await requestFolderSizes({ paths: pending, mode: 'auto' })
         return pending
       } catch (error) {
         set((state) => ({
@@ -2116,7 +2170,17 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         },
       )
 
-      const requested = await requestDirectorySizes(directoryPaths(get().panes[paneId].entries))
+      // Report the live size set before requesting sizes, so a protected
+      // folder this pane just opened counts as visited for those requests.
+      // The set is sent even without automatic sizing, so manually
+      // calculated indexed sizes still update live (FR3.3).
+      const folders = directoryPaths(get().panes[paneId].entries)
+      await reportSizeSubscriptions(
+        paneId,
+        pane.path,
+        folders.slice(0, AUTO_FOLDER_SIZE_MAX_DIRECTORIES),
+      )
+      const requested = await requestDirectorySizes(folders)
 
       log.debug('finalizeListing done', {
         paneId,
@@ -2569,11 +2633,21 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       const terminalPaths: string[] = []
       let calculatingCount = 0
       for (const event of events) {
-        nextSizeStates[event.path] = {
-          state: event.state,
-          sizeBytes: event.sizeBytes,
-          source: event.source,
-        }
+        const previous = nextSizeStates[event.path]
+        // A recalculation never blanks a known value: keep it and mark it
+        // refreshing until the new result lands (FR8.5).
+        nextSizeStates[event.path] =
+          event.state === 'calculating' && previous?.state === 'ready'
+            ? { ...previous, refreshing: true }
+            : {
+                state: event.state,
+                sizeBytes: event.sizeBytes,
+                source: event.source,
+                naReason: event.naReason,
+                isLowerBound: event.isLowerBound,
+                skippedRoots: event.skippedRoots,
+                skippedMore: event.skippedMore,
+              }
         if (event.state === 'calculating') {
           calculatingCount += 1
         }
@@ -2866,7 +2940,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         iconCacheTouched: boundedIconCacheTouched,
       }
     }),
-  setEverythingStatus: (everythingStatus) => set({ everythingStatus }),
+  setFolderSizeIndexStatus: (folderSizeIndexStatus) => set({ folderSizeIndexStatus }),
   setVolumes: (volumes) => {
     treeLoadGeneration += 1
     return set((state) => {

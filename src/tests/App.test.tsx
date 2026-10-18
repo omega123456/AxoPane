@@ -180,6 +180,30 @@ describe('App', () => {
     requestAnimationFrame.mockRestore()
   })
 
+  it('subscribes to folder-size status before its single initial fetch', async () => {
+    installListDirOverride()
+    const listenersAtFetch: number[] = []
+    ipc.override('folder_size_index_status', () => {
+      listenersAtFetch.push(ipc.listenerCount('size://index-status'))
+      return { backend: 'macIndex', isAvailable: true, state: 'indexing', itemsScanned: 3 }
+    })
+    renderApp()
+
+    await waitFor(() => {
+      expect(usePanesStore.getState().folderSizeIndexStatus?.state).toBe('indexing')
+    })
+    expect(listenersAtFetch).toEqual([1])
+
+    act(() => {
+      ipc.emit('size://index-status', { backend: 'macIndex', isAvailable: true, state: 'upToDate' })
+    })
+    expect(usePanesStore.getState().folderSizeIndexStatus?.state).toBe('upToDate')
+    await waitFor(() => {
+      expect(getRowInPane('Left pane', 'Documents')).toBeTruthy()
+    })
+    expect(listenersAtFetch).toHaveLength(1)
+  })
+
   it('renders both panes and the shared tree from IPC-backed data', async () => {
     installListDirOverride()
     renderApp()

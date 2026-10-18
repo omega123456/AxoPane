@@ -19,7 +19,7 @@ use file_explorer_lib::ipc::types::{
 use file_explorer_lib::ops::{OpItem, OpKind, OpStatus, OpsService, StartOpRequest};
 use file_explorer_lib::persist::{Config, PersistenceState, Session};
 use file_explorer_lib::resource_coordinator::ResourceCoordinator;
-use file_explorer_lib::size::{EverythingStatus, SizeService};
+use file_explorer_lib::size::{FolderSizeIndexStatus, IndexBackend, SizeService};
 use file_explorer_lib::thumbnails::ThumbnailService;
 use file_explorer_lib::watch::WatchService;
 use serde::Serialize;
@@ -58,7 +58,8 @@ impl TestApp<tauri::test::MockRuntime> {
                 commands::move_to_trash,
                 commands::open_path,
                 commands::list_volumes,
-                commands::everything_status,
+                commands::folder_size_index_status,
+                commands::set_size_subscriptions,
                 commands::request_folder_size,
                 commands::request_folder_sizes,
                 commands::request_icons,
@@ -360,10 +361,22 @@ fn ipc_commands_cover_watch_size_and_logging_state() {
     let root = fixture.path();
     write_file(&root.join("before.txt"), b"before");
 
-    let everything_status: EverythingStatus = test_app
-        .invoke("everything_status")
-        .expect("everything status");
-    assert!(!everything_status.is_available);
+    let status: FolderSizeIndexStatus = test_app
+        .invoke("folder_size_index_status")
+        .expect("folder size index status");
+    assert!(!status.is_available);
+    let backend = if cfg!(windows) {
+        IndexBackend::Everything
+    } else {
+        IndexBackend::None
+    };
+    assert_eq!(status.backend, backend);
+    let () = test_app
+        .invoke_payload(
+            "set_size_subscriptions",
+            serde_json::json!({ "paneId": "left", "currentPath": root, "folderPaths": [root] }),
+        )
+        .expect("set size subscriptions");
 
     let volumes: Vec<Value> = test_app.invoke("list_volumes").expect("list volumes");
     assert!(!volumes.is_empty());
@@ -414,6 +427,7 @@ fn ipc_commands_cover_watch_size_and_logging_state() {
             "request_folder_size",
             FolderSizeRequest {
                 path: size_root.to_string_lossy().into_owned(),
+                mode: None,
             },
         )
         .expect("request folder size");
@@ -427,6 +441,7 @@ fn ipc_commands_cover_watch_size_and_logging_state() {
             "request_folder_sizes",
             FolderSizesRequest {
                 paths: vec![size_root.to_string_lossy().into_owned()],
+                mode: None,
             },
         )
         .expect("request folder sizes");

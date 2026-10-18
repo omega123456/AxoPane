@@ -3,6 +3,10 @@
 //! This module deliberately uses `ignore`'s serial walker. Parallelism belongs
 //! to `ResourceCoordinator`, so a single admitted job never creates a second
 //! unbounded worker pool while walking a wide directory.
+//!
+//! macOS folder-size totals do not use this walker: they go through
+//! `size::fast_walk`, which is parallel under a process-wide helper cap.
+//! Operations and archive traversal stay on this serial walker.
 
 mod ignore_backend;
 

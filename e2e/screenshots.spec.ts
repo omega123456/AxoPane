@@ -3,7 +3,12 @@ import { gotoScenario, openSettingsSection, rightClickPane } from './helpers'
 import { screenshotScenarios } from '../src/tests/playwright-fixtures/e2e'
 import { longTypeLabel } from '../src/tests/playwright-fixtures/file-types'
 import { RELATIVE_DATES_NOW } from '../src/tests/playwright-fixtures/relative-dates'
-import { everythingAvailable, everythingUnavailable } from '../src/tests/playwright-fixtures/states'
+import {
+  everythingAvailable,
+  everythingUnavailable,
+  macIndexStatuses,
+  noFolderSizeBackend,
+} from '../src/tests/playwright-fixtures/states'
 import {
   deletingQueueFinalProgressEvent,
   expandedQueueFinalProgressEvent,
@@ -20,7 +25,9 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(
       toolbar.getByRole('button', { name: 'Create new folder in Left pane' }),
     ).toBeVisible()
-    await expect(toolbar.getByRole('button', { name: 'Create new file in Left pane' })).toBeVisible()
+    await expect(
+      toolbar.getByRole('button', { name: 'Create new file in Left pane' }),
+    ).toBeVisible()
     await expect(toolbar.getByRole('textbox', { name: 'Left pane filter' })).toBeVisible()
     await expect(toolbar).toHaveScreenshot(`pane-toolbar-${mode}.png`)
   })
@@ -191,7 +198,9 @@ for (const mode of ['light', 'dark'] as const) {
 
     await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2)
     await page.mouse.down()
-    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 6 })
+    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, {
+      steps: 6,
+    })
     await expect(page.locator('main')).toHaveScreenshot(`tab-drag-same-pane-${mode}.png`)
     await page.mouse.up()
     await expect(leftPane.getByRole('tab').last()).toHaveText('Omega')
@@ -209,7 +218,9 @@ for (const mode of ['light', 'dark'] as const) {
 
     await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2)
     await page.mouse.down()
-    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 6 })
+    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, {
+      steps: 6,
+    })
     await expect(page.locator('main')).toHaveScreenshot(`tab-drag-cross-pane-${mode}.png`)
     await page.mouse.up()
     await expect(rightPane.getByRole('tab')).toHaveCount(3)
@@ -225,7 +236,9 @@ for (const mode of ['light', 'dark'] as const) {
 
     await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2)
     await page.mouse.down()
-    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 6 })
+    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, {
+      steps: 6,
+    })
     await expect(page.locator('main')).toHaveScreenshot(`tab-drag-invalid-${mode}.png`)
     await page.mouse.up()
     await expect(page.getByRole('region', { name: 'Left pane' }).getByRole('tab')).toHaveCount(1)
@@ -373,6 +386,28 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`folder-size-states-${mode}.png`)
   })
 
+  test(`size cells lower bound and denied ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.sizeBounds[mode])
+    const lowerBound = page.getByText('≥ 941.9 MB').first()
+    await expect(lowerBound).toBeVisible()
+    await expect(lowerBound).toHaveAttribute(
+      'title',
+      "Doesn't include Desktop, Downloads, Mail and 2 more. Open them to include them.",
+    )
+    await expect(page.getByText('N/A').first()).toHaveAttribute(
+      'title',
+      'macOS blocked access. Grant Full Disk Access to include this folder.',
+    )
+    await expect(page.locator('main')).toHaveScreenshot(`folder-size-bounds-${mode}.png`)
+  })
+
+  test(`toolbar size spinner ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.sizeBounds[mode])
+    const toolbar = page.getByRole('toolbar', { name: 'Left pane toolbar' })
+    await expect(toolbar.getByText('Updating folder sizes')).toBeAttached()
+    await expect(toolbar).toHaveScreenshot(`pane-toolbar-size-spinner-${mode}.png`)
+  })
+
   test(`items sort pending ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.itemsSortPending[mode])
     await expect(page.getByRole('status', { name: 'Counting items…' })).toBeVisible()
@@ -424,9 +459,7 @@ for (const mode of ['light', 'dark'] as const) {
       'data-scale-settled',
       'true',
     )
-    await expect(page.locator('main')).toHaveScreenshot(
-      `transfer-queue-expanded-items-${mode}.png`,
-    )
+    await expect(page.locator('main')).toHaveScreenshot(`transfer-queue-expanded-items-${mode}.png`)
   })
 
   test(`queue long path ${mode}`, async ({ page }) => {
@@ -501,10 +534,16 @@ for (const mode of ['light', 'dark'] as const) {
   })
 
   test(`settings layout ${mode}`, async ({ page }) => {
-    // Pinned to macOS so the Windows+Everything-only "Automatically calculate
-    // folder sizes" row never renders here, keeping this baseline stable
-    // regardless of the host OS the suite runs on.
-    await gotoScenario(page, { ...screenshotScenarios.browsing[mode], platform: 'macos' })
+    // No folder-size backend, so the "Automatically calculate folder sizes"
+    // row never renders here, keeping this baseline stable.
+    await gotoScenario(page, {
+      ...screenshotScenarios.browsing[mode],
+      platform: 'macos',
+      commands: {
+        ...screenshotScenarios.browsing[mode].commands,
+        folder_size_index_status: noFolderSizeBackend,
+      },
+    })
     await openSettingsSection(page, 'layout')
     await expect(page.getByText('Default pane mode')).toBeVisible()
     await expect(page.getByRole('radiogroup', { name: 'Default view for new tabs' })).toBeVisible()
@@ -519,7 +558,7 @@ for (const mode of ['light', 'dark'] as const) {
       platform: 'windows',
       commands: {
         ...screenshotScenarios.browsing[mode].commands,
-        everything_status: everythingAvailable,
+        folder_size_index_status: everythingAvailable,
       },
     })
     await openSettingsSection(page, 'layout')
@@ -530,6 +569,25 @@ for (const mode of ['light', 'dark'] as const) {
       `settings-layout-auto-folder-size-${mode}.png`,
     )
   })
+
+  for (const [name, status] of Object.entries(macIndexStatuses)) {
+    test(`settings auto folder size on macOS ${name} ${mode}`, async ({ page }) => {
+      await gotoScenario(page, {
+        ...screenshotScenarios.browsing[mode],
+        platform: 'macos',
+        commands: {
+          ...screenshotScenarios.browsing[mode].commands,
+          folder_size_index_status: status,
+        },
+      })
+      await openSettingsSection(page, 'layout')
+      const row = page
+        .getByText('Automatically calculate folder sizes', { exact: true })
+        .locator('xpath=../..')
+      await expect(row.getByText(/Folders you open are sized right away/)).toBeVisible()
+      await expect(row).toHaveScreenshot(`settings-auto-folder-size-macos-${name}-${mode}.png`)
+    })
+  }
 
   test(`settings dates ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
@@ -716,7 +774,7 @@ for (const mode of ['light', 'dark'] as const) {
       ...screenshotScenarios.browsing[mode],
       commands: {
         ...screenshotScenarios.browsing[mode].commands,
-        everything_status: everythingUnavailable,
+        folder_size_index_status: everythingUnavailable,
       },
     })
     await expect(
@@ -730,7 +788,7 @@ for (const mode of ['light', 'dark'] as const) {
       ...screenshotScenarios.browsing[mode],
       commands: {
         ...screenshotScenarios.browsing[mode].commands,
-        everything_status: everythingUnavailable,
+        folder_size_index_status: everythingUnavailable,
       },
     })
     await page.getByRole('button', { name: 'Calculate all folder sizes in Left pane' }).click()

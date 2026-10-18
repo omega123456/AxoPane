@@ -346,21 +346,44 @@ export type DirPatchEvent = {
 export type SizeStateEvent = {
   path: string
   state: 'unknown' | 'calculating' | 'ready' | 'error' | 'na'
-  source: 'everything' | 'manual' | 'network'
+  source: 'everything' | 'manual' | 'network' | 'index'
   sizeBytes: number | null
+  naReason?: 'network' | 'timeout' | 'denied'
+  /** The total excludes skipped protected or unreadable folders below it. */
+  isLowerBound?: boolean
+  /** Up to three skipped protected folders' names. */
+  skippedRoots?: string[]
+  /** Skipped protected folders beyond `skippedRoots`. */
+  skippedMore?: number
 }
 
-export type EverythingStatus = {
-  status: 'unsupported' | 'unavailable' | 'notReady' | 'available'
+/** Backend-neutral folder-size capability and progress. */
+export type FolderSizeIndexStatus = {
+  backend: 'everything' | 'macIndex' | 'none'
   isAvailable: boolean
+  state: 'unavailable' | 'notReady' | 'indexing' | 'updating' | 'upToDate' | 'paused'
+  itemsScanned?: number
+  pauseReason?: 'lowPowerMode' | 'thermal'
 }
+
+/** `auto` = automatic sizing, `refresh` forces fresh work, `manual` is the default. */
+export type SizeRequestMode = 'auto' | 'manual' | 'refresh'
 
 export type FolderSizeRequest = {
   path: string
+  mode?: SizeRequestMode
 }
 
 export type FolderSizesRequest = {
   paths: string[]
+  mode?: SizeRequestMode
+}
+
+/** One pane's live size-update set; no `currentPath` and no folders clears it. */
+export type SizeSubscriptionsRequest = {
+  paneId: string
+  currentPath: string | null
+  folderPaths: string[]
 }
 
 export type RequestIconsRequest = {
@@ -934,9 +957,13 @@ export type IpcCommandMap = {
     request: EjectVolumeRequest
     response: MenuActionStatus
   }
-  everything_status: {
+  folder_size_index_status: {
     request: undefined
-    response: EverythingStatus
+    response: FolderSizeIndexStatus
+  }
+  set_size_subscriptions: {
+    request: SizeSubscriptionsRequest
+    response: void
   }
   request_folder_size: {
     request: FolderSizeRequest
@@ -1057,6 +1084,7 @@ export type IpcEventMap = {
   'dir://session-patch': SessionPatchEvent
   /** Batched: the backend flushes folder-size state changes in arrays to avoid IPC floods. */
   'size://state': SizeStateEvent[]
+  'size://index-status': FolderSizeIndexStatus
   /** Batched: the backend flushes resolved icons in chunks (see Phase 3 backend batching). */
   'icon://state': IconStateEvent[]
   /** Batched contextual native thumbnail outcomes. */

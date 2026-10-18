@@ -150,10 +150,12 @@ describe('SettingsModal', () => {
     expect(useTabsStore.getState().panes.left.tabs[0]?.viewMode).toBe(originalTabMode)
   })
 
-  it('hides the auto folder size toggle on macOS even when Everything is available', async () => {
+  it('hides the auto folder size row when there is no folder-size backend', async () => {
     useSettingsStore.getState().open('layout')
     setPlatform('MacIntel')
-    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
+    usePanesStore.setState({
+      folderSizeIndexStatus: { backend: 'none', isAvailable: false, state: 'unavailable' },
+    })
 
     render(<SettingsModal />)
     await screen.findByText('build 0.1.0', { exact: false })
@@ -162,10 +164,12 @@ describe('SettingsModal', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('hides the auto folder size toggle on Windows when Everything is unavailable', async () => {
+  it('hides the auto folder size row when the backend is unavailable', async () => {
     useSettingsStore.getState().open('layout')
     setPlatform('Win32')
-    usePanesStore.setState({ everythingStatus: { status: 'unavailable', isAvailable: false } })
+    usePanesStore.setState({
+      folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+    })
 
     render(<SettingsModal />)
     await screen.findByText('build 0.1.0', { exact: false })
@@ -174,10 +178,56 @@ describe('SettingsModal', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('shows the auto folder size toggle on Windows when Everything is available', async () => {
+  it('keys the Everything copy off the backend, without a status line', async () => {
+    useSettingsStore.getState().open('layout')
+    // The detected OS does not matter; the backend does.
+    setPlatform('MacIntel')
+    usePanesStore.setState({
+      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+    })
+
+    render(<SettingsModal />)
+    await screen.findByText('build 0.1.0', { exact: false })
+    expect(
+      screen.getByRole('switch', { name: 'Automatically calculate folder sizes' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Uses the Everything index/)).toBeInTheDocument()
+    expect(screen.queryByText('Up to date')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    [{ state: 'notReady' }, 'Preparing…', 'Preparing…'],
+    [{ state: 'indexing', itemsScanned: 1_234_567 }, 'Indexing… 1.2M items', 'Indexing…'],
+    [{ state: 'indexing' }, 'Indexing…', 'Indexing…'],
+    [{ state: 'updating' }, 'Updating…', 'Updating…'],
+    [{ state: 'upToDate' }, 'Up to date', 'Up to date'],
+    [{ state: 'paused', pauseReason: 'lowPowerMode' }, 'Paused in Low Power Mode', null],
+    [{ state: 'paused', pauseReason: 'thermal' }, 'Paused to keep your Mac cool', null],
+  ] as const)('shows the macOS copy and the %o status line', async (status, visible, announced) => {
     useSettingsStore.getState().open('layout')
     setPlatform('Win32')
-    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
+    usePanesStore.setState({
+      folderSizeIndexStatus: { backend: 'macIndex', isAvailable: true, ...status },
+    })
+
+    render(<SettingsModal />)
+    await screen.findByText('build 0.1.0', { exact: false })
+    expect(
+      screen.getByRole('switch', { name: 'Automatically calculate folder sizes' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Folders you open are sized right away\./)).toBeInTheDocument()
+    expect(screen.queryByText(/Uses the Everything index/)).not.toBeInTheDocument()
+    // The visible line carries the count; the status region only the state.
+    expect(screen.getByText(visible, { selector: '[aria-hidden="true"]' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(announced ?? visible)
+  })
+
+  it('shows the auto folder size toggle when Everything is available', async () => {
+    useSettingsStore.getState().open('layout')
+    setPlatform('Win32')
+    usePanesStore.setState({
+      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+    })
 
     render(<SettingsModal />)
     await screen.findByText('build 0.1.0', { exact: false })
@@ -191,7 +241,9 @@ describe('SettingsModal', () => {
     const saveConfig = vi.fn((payload) => payload.config)
     ipc.override('save_config', saveConfig)
     setPlatform('Win32')
-    usePanesStore.setState({ everythingStatus: { status: 'available', isAvailable: true } })
+    usePanesStore.setState({
+      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+    })
     useSettingsStore.getState().open('layout')
 
     render(<SettingsModal />)

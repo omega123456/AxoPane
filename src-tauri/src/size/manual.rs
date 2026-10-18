@@ -1,9 +1,9 @@
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::traversal::{walk, TraversalError, TraversalOptions};
+use crate::traversal::TraversalError;
 
 #[derive(Debug)]
 pub enum ManualSizeError {
@@ -46,9 +46,50 @@ pub fn calculate(
     let started_at = Instant::now();
     let metadata = std::fs::symlink_metadata(path)?;
 
+    // macOS sizes a symlink as its target, resolved once here (a dangling or
+    // looping link is an I/O error); the walk itself never follows links.
+    #[cfg(target_os = "macos")]
+    if metadata.file_type().is_symlink() {
+        let target = std::fs::canonicalize(path)?;
+        return if target.is_dir() {
+            subtree_total(&target, cancel, started_at, timeout)
+        } else {
+            Ok(0)
+        };
+    }
+
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
         return Ok(0);
     }
+
+    subtree_total(path, cancel, started_at, timeout)
+}
+
+/// macOS totals come from the parallel `getattrlistbulk` walker.
+#[cfg(target_os = "macos")]
+fn subtree_total(
+    path: &Path,
+    cancel: &Arc<AtomicBool>,
+    started_at: Instant,
+    timeout: Duration,
+) -> Result<u64, ManualSizeError> {
+    use super::fast_walk::{self, WalkOptions};
+
+    fast_walk::subtree_total(
+        path,
+        &WalkOptions::new(Arc::clone(cancel), started_at.checked_add(timeout)),
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+fn subtree_total(
+    path: &Path,
+    cancel: &Arc<AtomicBool>,
+    started_at: Instant,
+    timeout: Duration,
+) -> Result<u64, ManualSizeError> {
+    use crate::traversal::{walk, TraversalOptions};
+    use std::sync::atomic::Ordering;
 
     let mut total = 0_u64;
 
