@@ -1,27 +1,17 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type DragEvent,
-  type MouseEvent,
-} from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { TreeNode, type TreeRowActions } from './TreeNode'
 import { TrashTreeRow } from './TrashTreeRow'
-import { FavouriteTreeRow, favouriteLabel, type FavouriteRowActions } from './FavouriteTreeRow'
+import { TreeFoldRow } from './TreeFoldRow'
+import { FavouritesPanel } from './FavouritesPanel'
 import { buildContextMenuContent } from '@/components/menus/menu-definitions'
 import { detectPlatformOs } from '@/lib/keymap'
 import { TRASH_PATH } from '@/lib/trash'
 import { buildTreeFlatModel, treeRowHeight, type TreeFlatRow } from '@/lib/tree-flat'
-import { buildStickyChain } from '@/lib/tree-sticky'
+import { buildStickyChain, capStickyChain } from '@/lib/tree-sticky'
 import { useElementVirtualizer } from '@/lib/use-element-virtualizer'
 import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
-import { useConfigStore } from '@/stores/config-store'
-import { useDragStore } from '@/stores/drag-store'
-import { pathsMatch } from '@/lib/path-compare'
 
 function rowKey(row: TreeFlatRow): string {
   return row.renderKey
@@ -33,12 +23,12 @@ export function FolderTree() {
   const activePaneId = usePanesStore((state) => state.activePaneId)
   const activePath = usePanesStore((state) => state.panes[activePaneId].path)
   const treeNodes = usePanesStore((state) => state.treeNodes)
+  const treeFold = usePanesStore((state) => state.treeFold)
   const toggleTreeNode = usePanesStore((state) => state.toggleTreeNode)
   const navigatePane = usePanesStore((state) => state.navigatePane)
   const openTabFromPath = usePanesStore((state) => state.openTabFromPath)
   const openMenu = useContextMenuStore((state) => state.openMenu)
   const treeWidthPx = useLayoutStore((state) => state.treeWidthPx)
-  const favourites = useConfigStore((state) => state.favourites)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   // Live scroll offset, held in component state (not just a ref) because the
@@ -48,23 +38,39 @@ export function FolderTree() {
   // in a ref precisely to avoid re-rendering its (unvirtualized-key) rows.
   const [scrollTop, setScrollTop] = useState(0)
 
-  // One flat, virtualization-ready model spanning every category, volume subtree
-  // and the trash row. Rebuilt only when the underlying tree/volumes change.
-  const { rows, offsets, indexByPath } = useMemo(
-    () => buildTreeFlatModel(treeNodes, volumes, favourites),
-    [treeNodes, volumes, favourites],
-  )
-  const isMacOs = detectPlatformOs() === 'macos'
-  const rowLayerClassName =
-    'absolute inset-x-0 overflow-hidden bg-light-base dark:bg-dark-base mica:bg-transparent'
-
-  // The ancestor chain (volume root -> active node) pins to the top of the
-  // scroll area as the user scrolls past each ancestor - an editor-style "sticky
-  // scroll" breadcrumb for the active folder's lineage, reimplemented as a
-  // manual overlay (below) instead of per-row `position: sticky`.
+  // The ancestor chain (volume root -> active node). It drives both the folding
+  // of the tree along the active path and the pinned breadcrumb overlay below.
   const stickyChain = useMemo(
     () => buildStickyChain(treeNodes, activePath),
     [treeNodes, activePath],
+  )
+
+  const os = detectPlatformOs()
+  const fold = useMemo(
+    () => ({
+      chain: stickyChain,
+      revealedSiblings: new Set(treeFold.revealedSiblings),
+      showHiddenLevels: treeFold.showHiddenLevels,
+    }),
+    [stickyChain, treeFold],
+  )
+
+  // One flat, virtualization-ready model spanning every category, volume subtree
+  // and the trash row. Rebuilt only when the underlying tree/volumes change.
+  const { rows, offsets, indexByPath } = useMemo(
+    () => buildTreeFlatModel(treeNodes, volumes, fold, os),
+    [treeNodes, volumes, fold, os],
+  )
+  const isMacOs = os === 'macos'
+  const rowLayerClassName =
+    'absolute inset-x-0 overflow-hidden bg-light-base dark:bg-dark-base mica:bg-transparent'
+
+  // The capped chain pins to the top of the scroll area as the user scrolls past
+  // each ancestor - an editor-style "sticky scroll" breadcrumb, reimplemented as
+  // a manual overlay (below) instead of per-row `position: sticky`.
+  const pinnedChain = useMemo(
+    () => capStickyChain(stickyChain, indexByPath),
+    [stickyChain, indexByPath],
   )
 
   const rowVirtualizer = useElementVirtualizer({
@@ -162,55 +168,6 @@ export function FolderTree() {
     [],
   )
 
-  const favouriteActions = useMemo<FavouriteRowActions>(
-    () => ({
-      onNavigate: (path) =>
-        void latestRef.current.navigatePane(latestRef.current.activePaneId, path),
-      onOpenTab: (path) =>
-        void latestRef.current.openTabFromPath(latestRef.current.activePaneId, path),
-      onContextMenu: (path, event) => {
-        event.preventDefault()
-        const paneId = latestRef.current.activePaneId
-        latestRef.current.openMenu({
-          paneId,
-          title: favouriteLabel(path),
-          chip: 'DIR',
-          x: event.clientX,
-          y: event.clientY,
-          ...buildContextMenuContent(paneId, { kind: 'favourite', path }, detectPlatformOs()),
-        })
-      },
-    }),
-    [],
-  )
-
-  function canDropOnFavourites() {
-    const drag = useDragStore.getState().drag
-    return drag?.kind === 'favourite' || drag?.items.some((item) => item.isDir) === true
-  }
-
-  function handleFavouritesDragOver(event: DragEvent<HTMLDivElement>) {
-    if (!canDropOnFavourites()) return
-    event.preventDefault()
-    event.dataTransfer.dropEffect = 'move'
-  }
-
-  async function handleFavouritesDrop(event: DragEvent<HTMLDivElement>) {
-    if (!canDropOnFavourites()) return
-    event.preventDefault()
-    const drag = useDragStore.getState().drag
-    useDragStore.getState().end()
-    if (drag?.kind === 'favourite') {
-      await useConfigStore.getState().reorderFavourite(drag.path, favourites.length)
-      return
-    }
-    if (drag?.kind === 'file-transfer') {
-      for (const item of drag.items) {
-        if (item.isDir) await useConfigStore.getState().addFavourite(item.path)
-      }
-    }
-  }
-
   // Ancestors scrolled up past their stacked slot are drawn in an opaque overlay
   // pinned to the top; ancestors still in their natural position render normally
   // in the window below. An ancestor's slot is `chainIndex` row-heights down from
@@ -226,7 +183,7 @@ export function FolderTree() {
     // Slots stack by each ancestor's own height: a drive root is taller than
     // the folder rows pinned beneath it.
     let slotTop = 0
-    stickyChain.forEach((path, chainIndex) => {
+    pinnedChain.forEach((path, chainIndex) => {
       const index = indexByPath.get(path)
       if (index === undefined) {
         return
@@ -237,7 +194,7 @@ export function FolderTree() {
       slotTop += treeRowHeight(rows[index])
     })
     return pinned
-  }, [stickyChain, indexByPath, offsets, rows, scrollTop])
+  }, [pinnedChain, indexByPath, offsets, rows, scrollTop])
 
   return (
     <aside
@@ -245,153 +202,149 @@ export function FolderTree() {
       style={{ width: `${treeWidthPx}px` }}
       className="relative flex min-h-0 shrink-0 flex-col bg-light-base dark:bg-dark-base mica:bg-transparent"
     >
-      <div
-        ref={scrollRef}
-        data-testid="folder-tree-scroll"
-        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pb-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary"
-        onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
-      >
+      <FavouritesPanel />
+      <div className="mx-3 h-px flex-none bg-light-divider dark:bg-dark-divider" />
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div
+          ref={scrollRef}
+          data-testid="folder-tree-scroll"
+          className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pb-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary"
+          onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+        >
+          {/*
+            Styling-constraint exception: runtime geometry only. The total scroll
+            height and each row's top offset come from @tanstack/react-virtual and
+            are continuous px values no static token can express. Every
+            design-system value elsewhere stays a pure Tailwind utility.
+          */}
+          <div
+            role="tree"
+            aria-label="Folders"
+            style={{ height: `${totalHeight}px`, position: 'relative' }}
+            className="mx-1 min-h-full"
+          >
+            {itemsToRender.map((item) => {
+              const row = rows[item.index]
+              const style = {
+                top: `${item.start}px`,
+              }
+
+              if (row.kind === 'header') {
+                return (
+                  <div key={rowKey(row)} className={rowLayerClassName} style={style}>
+                    <div className="flex h-tree-header items-end px-3 pb-1">
+                      <span className="text-caption text-light-text-tertiary dark:text-dark-text-tertiary">
+                        {row.label}
+                      </span>
+                    </div>
+                  </div>
+                )
+              }
+
+              if (row.kind === 'fold-siblings') {
+                return (
+                  <div key={rowKey(row)} className={rowLayerClassName} style={style}>
+                    <TreeFoldRow
+                      kind="siblings"
+                      count={row.count}
+                      depth={row.depth}
+                      onReveal={() => usePanesStore.getState().revealTreeSiblings(row.parentPath)}
+                    />
+                  </div>
+                )
+              }
+
+              if (row.kind === 'fold-levels') {
+                return (
+                  <div key={rowKey(row)} className={rowLayerClassName} style={style}>
+                    <TreeFoldRow
+                      kind="levels"
+                      hiddenNames={row.hiddenPaths.map((path) => treeNodes[path]?.name ?? path)}
+                      depth={row.depth}
+                      onReveal={() => usePanesStore.getState().revealTreeHiddenLevels()}
+                    />
+                  </div>
+                )
+              }
+
+              if (row.kind === 'trash') {
+                return (
+                  <div key={rowKey(row)} className={rowLayerClassName} style={style}>
+                    <TrashTreeRow
+                      isCurrent={activePath === TRASH_PATH}
+                      onNavigate={trashActions.onNavigate}
+                      onOpenTab={trashActions.onOpenTab}
+                      onContextMenu={trashActions.onContextMenu}
+                    />
+                  </div>
+                )
+              }
+
+              const node = treeNodes[row.path]
+              if (!node) {
+                return null
+              }
+              return (
+                <div key={rowKey(row)} className={rowLayerClassName} style={style}>
+                  <TreeNode
+                    node={node}
+                    depth={row.depth}
+                    volume={row.volume}
+                    isCurrent={activePath === node.path}
+                    actions={actions}
+                  />
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
         {/*
-          Styling-constraint exception: runtime geometry only. The total scroll
-          height and each row's top offset come from @tanstack/react-virtual and
-          are continuous px values no static token can express. Every
-          design-system value elsewhere stays a pure Tailwind utility.
+          Pinned-ancestor overlay. It lives OUTSIDE the scroll container so it never
+          inherits the container's scroll offset: its rows sit in viewport space at a
+          fixed `top`. When this overlay was a child of the scrolling content, the
+          native scroll moved it every frame while a React `scrollTop` state term
+          tried to hold it in place - the two were a frame out of sync, which read as
+          a rubber-band jitter. The wrapper is zero-height so it never intercepts
+          pointer events; each pinned row re-enables them for itself.
+
+          The rows are visual copies of rows still in the tree, so the overlay is
+          hidden from assistive tech and kept out of the tab order.
         */}
         <div
-          style={{ height: `${totalHeight}px`, position: 'relative' }}
-          className="mx-1 min-h-full"
+          aria-hidden="true"
+          inert
+          className={`pointer-events-none absolute left-1 top-0 ${isMacOs ? 'right-3' : 'right-1'}`}
         >
-          {itemsToRender.map((item) => {
-            const row = rows[item.index]
-            const style = {
-              top: `${item.start}px`,
-            }
-
-            if (row.kind === 'header') {
-              const favouritesHeader = row.renderKey === 'header-favourites'
-              return (
-                <div
-                  key={rowKey(row)}
-                  className={rowLayerClassName}
-                  style={style}
-                  onDragOver={favouritesHeader ? handleFavouritesDragOver : undefined}
-                  onDrop={
-                    favouritesHeader ? (event) => void handleFavouritesDrop(event) : undefined
-                  }
-                >
-                  <div
-                    className={`flex items-end px-3 pb-1 ${favouritesHeader ? 'h-tree-header-first' : 'h-tree-header'}`}
-                  >
-                    <span className="text-caption text-light-text-tertiary dark:text-dark-text-tertiary">
-                      {row.label}
-                    </span>
-                  </div>
-                </div>
-              )
-            }
-
-            if (row.kind === 'empty-favourites') {
-              return (
-                <div
-                  key={rowKey(row)}
-                  className={rowLayerClassName}
-                  style={style}
-                  onDragOver={handleFavouritesDragOver}
-                  onDrop={(event) => void handleFavouritesDrop(event)}
-                >
-                  <div className="flex h-tree-row items-center rounded-control px-3 text-caption text-light-text-tertiary ring-1 ring-inset ring-light-divider dark:text-dark-text-tertiary dark:ring-dark-divider">
-                    Drop folders here
-                  </div>
-                </div>
-              )
-            }
-
-            if (row.kind === 'favourite') {
-              const favouriteIndex = favourites.findIndex((path) => path === row.path)
-              return (
-                <div key={rowKey(row)} className={rowLayerClassName} style={style}>
-                  <FavouriteTreeRow
-                    path={row.path}
-                    index={favouriteIndex}
-                    isCurrent={pathsMatch(activePath, row.path)}
-                    actions={favouriteActions}
-                  />
-                </div>
-              )
-            }
-
-            if (row.kind === 'trash') {
-              return (
-                <div key={rowKey(row)} className={rowLayerClassName} style={style}>
-                  <TrashTreeRow
-                    isCurrent={activePath === TRASH_PATH}
-                    onNavigate={trashActions.onNavigate}
-                    onOpenTab={trashActions.onOpenTab}
-                    onContextMenu={trashActions.onContextMenu}
-                  />
-                </div>
-              )
-            }
-
-            const node = treeNodes[row.path]
-            if (!node) {
+          {pinnedRows.map(({ path, chainIndex, top }) => {
+            const node = treeNodes[path]
+            const index = indexByPath.get(path)
+            if (!node || index === undefined) {
               return null
             }
+            const row = rows[index]
             return (
-              <div key={rowKey(row)} className={rowLayerClassName} style={style}>
+              <div
+                key={`pinned-${path}`}
+                data-testid="tree-pinned-row"
+                className="pointer-events-auto absolute inset-x-0"
+                style={{
+                  top: `${top}px`,
+                  zIndex: 10 + chainIndex,
+                }}
+              >
                 <TreeNode
                   node={node}
-                  depth={row.depth}
-                  volume={row.volume}
+                  depth={row.kind === 'node' ? row.depth : 0}
+                  volume={row.kind === 'node' ? row.volume : undefined}
                   isCurrent={activePath === node.path}
+                  isPinned
                   actions={actions}
                 />
               </div>
             )
           })}
         </div>
-      </div>
-
-      {/*
-        Pinned-ancestor overlay. It lives OUTSIDE the scroll container so it never
-        inherits the container's scroll offset: its rows sit in viewport space at a
-        fixed `top`. When this overlay was a child of the scrolling content, the
-        native scroll moved it every frame while a React `scrollTop` state term
-        tried to hold it in place - the two were a frame out of sync, which read as
-        a rubber-band jitter. The wrapper is zero-height so it never intercepts
-        pointer events; each pinned row re-enables them for itself.
-      */}
-      <div
-        className={`pointer-events-none absolute left-1 top-0 ${isMacOs ? 'right-3' : 'right-1'}`}
-      >
-        {pinnedRows.map(({ path, chainIndex, top }) => {
-          const node = treeNodes[path]
-          const index = indexByPath.get(path)
-          if (!node || index === undefined) {
-            return null
-          }
-          const row = rows[index]
-          return (
-            <div
-              key={`pinned-${path}`}
-              data-testid="tree-pinned-row"
-              className="pointer-events-auto absolute inset-x-0"
-              style={{
-                top: `${top}px`,
-                zIndex: 10 + chainIndex,
-              }}
-            >
-              <TreeNode
-                node={node}
-                depth={row.kind === 'node' ? row.depth : 0}
-                volume={row.kind === 'node' ? row.volume : undefined}
-                isCurrent={activePath === node.path}
-                isPinned
-                actions={actions}
-              />
-            </div>
-          )
-        })}
       </div>
     </aside>
   )

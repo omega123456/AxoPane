@@ -410,6 +410,7 @@ export const fixtures: {
     autoFolderSize: true,
     autoExpandActiveQueueToasts: false,
     favourites: [],
+    favouritesCollapsed: false,
     keybindings: {},
     columns: [
       { key: 'name', visible: true },
@@ -450,6 +451,7 @@ export const fixtures: {
     autoFolderSize: true,
     autoExpandActiveQueueToasts: false,
     favourites: [],
+    favouritesCollapsed: false,
     keybindings: {},
     columns: [
       { key: 'name', visible: true },

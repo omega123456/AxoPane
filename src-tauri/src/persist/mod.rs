@@ -41,6 +41,8 @@ pub struct Config {
     pub auto_expand_active_queue_toasts: bool,
     #[serde(default)]
     pub favourites: Vec<String>,
+    #[serde(default)]
+    pub favourites_collapsed: bool,
 }
 
 pub fn default_true() -> bool {
@@ -173,6 +175,7 @@ impl Default for Config {
             auto_folder_size: true,
             auto_expand_active_queue_toasts: false,
             favourites: Vec::new(),
+            favourites_collapsed: false,
         }
     }
 }

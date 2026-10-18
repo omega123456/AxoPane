@@ -22,6 +22,14 @@ describe('app-config favourites', () => {
     expect(useConfigStore.getState().favourites).toEqual([])
   })
 
+  it('defaults the favourites collapsed state to open and round-trips it', () => {
+    expect(defaultAppConfig().favouritesCollapsed).toBe(false)
+    hydrateAppConfig(baseConfig({ favouritesCollapsed: undefined as unknown as boolean }))
+    expect(useConfigStore.getState().favouritesCollapsed).toBe(false)
+    hydrateAppConfig(baseConfig({ favouritesCollapsed: true }))
+    expect(buildAppConfig().favouritesCollapsed).toBe(true)
+  })
+
   it('round-trips favourites through the config store', () => {
     hydrateAppConfig(baseConfig({ favourites: ['C:\\Users\\Omega', '/Users/omega'] }))
     expect(buildAppConfig().favourites).toEqual(['C:\\Users\\Omega', '/Users/omega'])

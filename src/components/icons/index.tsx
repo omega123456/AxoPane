@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  ChevronsUpDown,
   ChevronUp,
   Copy,
   CornerUpRight,
@@ -17,6 +18,7 @@ import {
   Database,
   Disc,
   Download,
+  Ellipsis,
   Eye,
   EyeOff,
   File,
@@ -99,12 +101,14 @@ export const CheckCircleIcon = withDefaults(CheckCircle2)
 export const ChevronDownIcon = withDefaults(ChevronDown)
 export const ChevronRightIcon = withDefaults(ChevronRight)
 export const ChevronUpIcon = withDefaults(ChevronUp)
+export const ChevronsUpDownIcon = withDefaults(ChevronsUpDown)
 export const CopyIcon = withDefaults(Copy)
 export const CornerUpRightIcon = withDefaults(CornerUpRight)
 export const CpuIcon = withDefaults(Cpu)
 export const DatabaseIcon = withDefaults(Database)
 export const DiscIcon = withDefaults(Disc)
 export const DownloadIcon = withDefaults(Download)
+export const EllipsisIcon = withDefaults(Ellipsis)
 export const EyeIcon = withDefaults(Eye)
 export const EyeOffIcon = withDefaults(EyeOff)
 export const FileIcon = withDefaults(File)

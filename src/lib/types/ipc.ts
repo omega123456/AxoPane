@@ -302,6 +302,7 @@ export type AppConfig = {
   autoFolderSize: boolean
   autoExpandActiveQueueToasts: boolean
   favourites: string[]
+  favouritesCollapsed: boolean
 }
 
 export type SessionTab = {

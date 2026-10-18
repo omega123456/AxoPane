@@ -5,6 +5,7 @@ import { VolumeIcon } from '@/components/icons/VolumeIcon'
 import { SelectionPill } from '@/components/controls/SelectionPill'
 import { CapacityBar } from './CapacityBar'
 import { volumeUsedFraction } from '@/lib/volumes'
+import { treeIndentPx } from '@/lib/tree-flat'
 import { detectPlatformOs } from '@/lib/keymap'
 import { canDropInto, performDrop, resolveDropKind, setDropEffect } from '@/lib/drag-drop'
 import type { VolumeInfo } from '@/lib/types/ipc'
@@ -57,9 +58,9 @@ function TreeNodeImpl({
 
   const rowStyle = {
     // Styling-constraint exception: runtime geometry only. Indentation is a
-    // function of the (unbounded) tree depth, so it cannot be a static
+    // function of the tree depth (see `treeIndentPx`), so it cannot be a static
     // utility/token. Colors/spacing elsewhere remain pure Tailwind utilities.
-    paddingLeft: `${depth * 16 + 8}px`,
+    paddingLeft: `${treeIndentPx(depth)}px`,
   }
 
   // The current folder gets the subtle fill plus an accent pill. That fill is
@@ -119,6 +120,7 @@ function TreeNodeImpl({
   return (
     <div
       role="treeitem"
+      aria-expanded={node.expanded}
       data-tree-row={node.path}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -133,7 +135,7 @@ function TreeNodeImpl({
       {/* A 12px chevron column with a wider, overhanging hit area. */}
       <button
         type="button"
-        aria-label={`${node.expanded ? 'Collapse' : 'Expand'} ${node.name}`}
+        aria-label={`Toggle ${node.name}`}
         onClick={() => actions.onToggle(node.path)}
         className={`-mx-1 inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-control text-light-text-tertiary hover:bg-light-hover dark:text-dark-text-tertiary dark:hover:bg-dark-hover ${FOCUS_RING_INSET}`}
       >

@@ -19,6 +19,7 @@ type ConfigSnapshot = {
   autoFolderSize: boolean
   autoExpandActiveQueueToasts: boolean
   favourites: string[]
+  favouritesCollapsed: boolean
 }
 
 type ConfigStore = ConfigSnapshot & {
@@ -37,6 +38,7 @@ type ConfigStore = ConfigSnapshot & {
   addFavourite: (path: string, index?: number) => Promise<void>
   removeFavourite: (path: string) => Promise<void>
   reorderFavourite: (path: string, index: number) => Promise<void>
+  setFavouritesCollapsed: (favouritesCollapsed: boolean) => Promise<void>
   reset: () => void
 }
 
@@ -54,6 +56,7 @@ function defaultState(): ConfigSnapshot {
     autoFolderSize: true,
     autoExpandActiveQueueToasts: false,
     favourites: [],
+    favouritesCollapsed: false,
   }
 }
 
@@ -94,6 +97,10 @@ export const useConfigStore = create<ConfigStore>((set) => ({
   },
   setAutoExpandActiveQueueToasts: async (autoExpandActiveQueueToasts) => {
     set({ autoExpandActiveQueueToasts })
+    await persistAppConfig()
+  },
+  setFavouritesCollapsed: async (favouritesCollapsed) => {
+    set({ favouritesCollapsed })
     await persistAppConfig()
   },
   setLogLevel: async (logLevel) => {

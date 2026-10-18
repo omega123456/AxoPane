@@ -24,7 +24,14 @@ import { fileTypesListDir } from './file-types'
 import { itemsSortPendingListDir, itemsSortPendingSession } from './item-counts'
 import { relativeDatesListDir } from './relative-dates'
 import { capacityLevelVolumes, ejectRefused, everythingUnavailable } from './states'
-import { stickyTreeChildrenByPath, stickyTreeListDir, stickyTreeSession } from './tree'
+import {
+  deepTreeChildrenByPath,
+  deepTreeListDir,
+  deepTreeSession,
+  stickyTreeChildrenByPath,
+  stickyTreeListDir,
+  stickyTreeSession,
+} from './tree'
 import type { TreeChildrenByPath } from './tree-states'
 import {
   iconsSession,
@@ -77,6 +84,7 @@ const lightConfig: AppConfig = {
   autoFolderSize: true,
   autoExpandActiveQueueToasts: false,
   favourites: [],
+  favouritesCollapsed: false,
   keybindings: {},
   columns: [
     { key: 'name', visible: true },
@@ -303,6 +311,35 @@ function errorScenarioByTheme(
   }
 }
 
+const overflowFavourites = [
+  'C:\\Users\\Omega\\Documents',
+  'C:\\Users\\Omega\\Downloads',
+  'D:\\projects',
+  'E:\\',
+  'C:\\Users\\Omega\\Pictures\\Screenshots',
+  'D:\\projects\\invoices',
+  'C:\\Users\\Omega\\Music',
+  'D:\\builds',
+  'C:\\Users\\Omega\\Desktop',
+]
+
+/** The deep sticky-tree session with the given favourites config, per theme. */
+function favouritesTreeScenario(config: Partial<AppConfig>): {
+  light: PlaywrightScenario
+  dark: PlaywrightScenario
+} {
+  const scenario = (base: AppConfig): PlaywrightScenario => ({
+    commands: {
+      load_config: { ...base, ...config },
+      load_session: stickyTreeSession,
+      list_dir: stickyTreeListDir,
+      queue_snapshot: emptyQueueSnapshot,
+    },
+    treeChildrenByPath: stickyTreeChildrenByPath,
+  })
+  return { light: scenario(lightConfig), dark: scenario(darkConfig) }
+}
+
 export const screenshotScenarios = {
   browsing: {
     light: {
@@ -411,6 +448,26 @@ export const screenshotScenarios = {
       treeChildrenByPath: stickyTreeChildrenByPath,
     },
   },
+  deepTree: {
+    light: {
+      commands: {
+        load_config: lightConfig,
+        load_session: deepTreeSession,
+        list_dir: deepTreeListDir,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+      treeChildrenByPath: deepTreeChildrenByPath,
+    },
+    dark: {
+      commands: {
+        load_config: darkConfig,
+        load_session: deepTreeSession,
+        list_dir: deepTreeListDir,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+      treeChildrenByPath: deepTreeChildrenByPath,
+    },
+  },
   tabs: {
     light: {
       commands: {
@@ -473,6 +530,11 @@ export const screenshotScenarios = {
       },
     },
   },
+  favouritesCollapsed: favouritesTreeScenario({
+    favourites: overflowFavourites.slice(0, 3),
+    favouritesCollapsed: true,
+  }),
+  favouritesOverflow: favouritesTreeScenario({ favourites: overflowFavourites }),
   breadcrumbs: {
     light: {
       commands: {

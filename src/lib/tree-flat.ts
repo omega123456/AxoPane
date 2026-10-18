@@ -1,23 +1,30 @@
 import type { VolumeInfo } from '@/lib/types/ipc'
+import type { PlatformOs } from '@/lib/keymap'
 import type { TreeNodeState } from '@/stores/panes-store'
 import { TRASH_PATH } from '@/lib/trash'
-import { flattenVisibleTree } from '@/lib/tree-sticky'
+import { EMPTY_TREE_FOLD, flattenVisibleTree, type TreeFoldState } from '@/lib/tree-sticky'
 import { groupVolumesByCategory, volumeUsedFraction } from '@/lib/volumes'
 
 /**
  * Pixel geometry of the virtualized tree, derived from the fixed `@theme`
  * tokens `--spacing-tree-row` (28px), `--spacing-tree-drive-row` (38px, a drive
- * with its capacity bar), `--spacing-tree-header` (30px) and
- * `--spacing-tree-header-first` (36px, the top section's extra lead-in) at the
- * app's 16px root. These must stay compile-time constants: the virtualizer
- * sizes each flat row by kind from them and the sticky overlay stacks pinned
- * rows by these heights. Every height is a whole CSS pixel so Chromium and
- * WebKit accumulate the same offsets in long trees.
+ * with its capacity bar) and `--spacing-tree-header` (30px) at the app's 16px
+ * root. These must stay compile-time constants: the virtualizer sizes each flat
+ * row by kind from them and the sticky overlay stacks pinned rows by these
+ * heights. Every height is a whole CSS pixel so Chromium and WebKit accumulate
+ * the same offsets in long trees.
  */
 export const TREE_ROW_HEIGHT_PX = 28
 export const TREE_DRIVE_ROW_HEIGHT_PX = 38
 export const TREE_HEADER_HEIGHT_PX = 30
-export const TREE_FIRST_HEADER_HEIGHT_PX = 36
+
+/** Depth after which rows stop indenting, so deep names stay readable in a narrow sidebar. */
+export const TREE_INDENT_MAX_DEPTH = 4
+
+/** Left padding of a tree row at `depth`; flat beyond `TREE_INDENT_MAX_DEPTH`. */
+export function treeIndentPx(depth: number): number {
+  return Math.min(depth, TREE_INDENT_MAX_DEPTH) * 16 + 8
+}
 
 /**
  * One row of the fully-flattened tree. A single ordered array of these spans
@@ -27,9 +34,9 @@ export const TREE_FIRST_HEADER_HEIGHT_PX = 36
  */
 export type TreeFlatRow =
   | { kind: 'header'; label: string; renderKey: string }
-  | { kind: 'favourite'; path: string; renderKey: string }
-  | { kind: 'empty-favourites'; renderKey: string }
   | { kind: 'node'; path: string; depth: number; volume?: VolumeInfo; renderKey: string }
+  | { kind: 'fold-siblings'; parentPath: string; count: number; depth: number; renderKey: string }
+  | { kind: 'fold-levels'; hiddenPaths: string[]; depth: number; renderKey: string }
   | { kind: 'trash'; renderKey: string }
 
 export type TreeFlatModel = {
@@ -52,7 +59,7 @@ export type TreeFlatModel = {
 /** Height in pixels of a single flat row, keyed on its kind. */
 export function treeRowHeight(row: TreeFlatRow): number {
   if (row.kind === 'header') {
-    return row.renderKey === FIRST_HEADER_KEY ? TREE_FIRST_HEADER_HEIGHT_PX : TREE_HEADER_HEIGHT_PX
+    return TREE_HEADER_HEIGHT_PX
   }
   if (row.kind === 'node' && row.volume && volumeUsedFraction(row.volume) !== null) {
     return TREE_DRIVE_ROW_HEIGHT_PX
@@ -60,40 +67,41 @@ export function treeRowHeight(row: TreeFlatRow): number {
   return TREE_ROW_HEIGHT_PX
 }
 
-const FIRST_HEADER_KEY = 'header-favourites'
-
 /**
  * Flatten the store's volumes + tree nodes into one ordered row array in render
  * order: a heading per non-empty category, then each volume's visible subtree
- * (root + expanded descendants via `flattenVisibleTree`), with the trash row
- * appended after the `fixed` group — matching the pre-virtualization layout.
+ * (root + expanded descendants via `flattenVisibleTree`, folded along the
+ * active path), with the trash row appended after the `fixed` group.
+ * Favourites live in their own panel above the tree, not in this model.
  */
 export function buildTreeFlatModel(
   treeNodes: Record<string, TreeNodeState>,
   volumes: VolumeInfo[],
-  favourites: string[] = [],
+  fold: TreeFoldState = EMPTY_TREE_FOLD,
+  os: PlatformOs = 'windows',
 ): TreeFlatModel {
   const groups = groupVolumesByCategory(volumes)
   const volumeRootKeys = new Set(volumes.map((volume) => volume.mountRoot.toLowerCase()))
   const rows: TreeFlatRow[] = []
   const indexByPath = new Map<string, number>()
 
-  rows.push({ kind: 'header', label: 'Favourites', renderKey: FIRST_HEADER_KEY })
-  if (favourites.length === 0) {
-    rows.push({ kind: 'empty-favourites', renderKey: 'empty-favourites' })
-  } else {
-    for (const path of favourites) {
-      rows.push({ kind: 'favourite', path, renderKey: `favourite-${path}` })
-    }
-  }
-
   for (const group of groups) {
-    rows.push({ kind: 'header', label: group.label, renderKey: `header-${group.category}` })
+    // Finder calls fixed volumes "Locations"; Windows users expect "Drives".
+    const label = group.category === 'fixed' && os === 'macos' ? 'Locations' : group.label
+    rows.push({ kind: 'header', label, renderKey: `header-${group.category}` })
     for (const volume of group.volumes) {
       const nestedVolumeRoots = new Set(volumeRootKeys)
       nestedVolumeRoots.delete(volume.mountRoot.toLowerCase())
 
-      for (const row of flattenVisibleTree(treeNodes, volume.mountRoot, nestedVolumeRoots)) {
+      for (const row of flattenVisibleTree(treeNodes, volume.mountRoot, nestedVolumeRoots, fold)) {
+        if (row.kind === 'fold-siblings') {
+          rows.push({ ...row, renderKey: `fold-siblings-${row.parentPath}` })
+          continue
+        }
+        if (row.kind === 'fold-levels') {
+          rows.push({ ...row, renderKey: `fold-levels-${volume.mountRoot}` })
+          continue
+        }
         indexByPath.set(row.path, rows.length)
         rows.push({
           kind: 'node',

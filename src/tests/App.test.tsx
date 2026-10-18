@@ -301,6 +301,7 @@ describe('App', () => {
       autoFolderSize: true,
       autoExpandActiveQueueToasts: false,
       favourites: [],
+      favouritesCollapsed: false,
       keybindings: {
         refresh: ['F5'],
       },
@@ -599,7 +600,10 @@ describe('App', () => {
     renderApp()
 
     expect(await screen.findByRole('button', { name: 'Windows (C:)' })).toBeInTheDocument()
-    expect(await screen.findByLabelText('Collapse Windows (C:)')).toBeInTheDocument()
+    expect(await screen.findByLabelText('Toggle Windows (C:)')).toBeInTheDocument()
+    expect(
+      screen.getByLabelText('Toggle Windows (C:)').closest('[role="treeitem"]'),
+    ).toHaveAttribute('aria-expanded', 'true')
     expect(screen.queryByRole('button', { name: 'Archive (Y:)' })).not.toBeInTheDocument()
 
     act(() => {

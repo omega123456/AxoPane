@@ -2,9 +2,10 @@ import {
   buildTreeFlatModel,
   type TreeFlatRow,
   treeRowHeight,
+  treeIndentPx,
   TREE_DRIVE_ROW_HEIGHT_PX,
-  TREE_FIRST_HEADER_HEIGHT_PX,
   TREE_HEADER_HEIGHT_PX,
+  TREE_INDENT_MAX_DEPTH,
   TREE_ROW_HEIGHT_PX,
 } from '@/lib/tree-flat'
 import { TRASH_PATH } from '@/lib/trash'
@@ -42,11 +43,11 @@ function rowShapes(rows: TreeFlatRow[]) {
     if (row.kind === 'trash') {
       return { kind: row.kind }
     }
-    if (row.kind === 'empty-favourites') {
-      return { kind: row.kind }
+    if (row.kind === 'fold-siblings') {
+      return { kind: row.kind, parentPath: row.parentPath, count: row.count, depth: row.depth }
     }
-    if (row.kind === 'favourite') {
-      return { kind: row.kind, path: row.path }
+    if (row.kind === 'fold-levels') {
+      return { kind: row.kind, hiddenPaths: row.hiddenPaths, depth: row.depth }
     }
     return {
       kind: row.kind,
@@ -74,8 +75,6 @@ describe('buildTreeFlatModel', () => {
     const { rows } = buildTreeFlatModel(treeNodes, volumes)
 
     expect(rowShapes(rows)).toEqual([
-      { kind: 'header', label: 'Favourites' },
-      { kind: 'empty-favourites' },
       { kind: 'header', label: 'Drives' },
       { kind: 'node', path: 'C:\\', depth: 0, volume: volumes[0] },
       { kind: 'node', path: 'C:\\aa', depth: 1, volume: undefined },
@@ -112,12 +111,7 @@ describe('buildTreeFlatModel', () => {
 
     const { rows } = buildTreeFlatModel({}, volumes)
 
-    expect(rowShapes(rows)).toEqual([
-      { kind: 'header', label: 'Favourites' },
-      { kind: 'empty-favourites' },
-      { kind: 'header', label: 'Drives' },
-      { kind: 'trash' },
-    ])
+    expect(rowShapes(rows)).toEqual([{ kind: 'header', label: 'Drives' }, { kind: 'trash' }])
   })
 
   it('renders a macOS mount only as its own volume root, not under /Volumes', () => {
@@ -183,8 +177,6 @@ describe('buildTreeFlatModel', () => {
     const { rows } = buildTreeFlatModel(treeNodes, volumes)
 
     expect(rowShapes(rows)).toEqual([
-      { kind: 'header', label: 'Favourites' },
-      { kind: 'empty-favourites' },
       { kind: 'header', label: 'Drives' },
       { kind: 'node', path: '/', depth: 0, volume: volumes[0] },
       { kind: 'node', path: '/Volumes', depth: 1, volume: undefined },
@@ -204,18 +196,14 @@ describe('buildTreeFlatModel', () => {
 
     const { rows, offsets } = buildTreeFlatModel(treeNodes, volumes)
 
-    // favourites header (taller lead-in) + empty row, drives header, C:\ (a
-    // drive with a capacity bar), C:\aa, trash
+    // drives header, C:\ (a drive with a capacity bar), C:\aa, trash
     expect(offsets).toHaveLength(rows.length + 1)
     expect(offsets[0]).toBe(0)
     for (let i = 0; i < rows.length; i += 1) {
       expect(offsets[i + 1] - offsets[i]).toBeCloseTo(treeRowHeight(rows[i]), 5)
     }
     expect(offsets[rows.length]).toBeCloseTo(
-      TREE_FIRST_HEADER_HEIGHT_PX +
-        TREE_HEADER_HEIGHT_PX +
-        TREE_DRIVE_ROW_HEIGHT_PX +
-        TREE_ROW_HEIGHT_PX * 3,
+      TREE_HEADER_HEIGHT_PX + TREE_DRIVE_ROW_HEIGHT_PX + TREE_ROW_HEIGHT_PX * 2,
       5,
     )
   })
@@ -229,9 +217,9 @@ describe('buildTreeFlatModel', () => {
 
     const { indexByPath } = buildTreeFlatModel(treeNodes, volumes)
 
-    expect(indexByPath.get('C:\\')).toBe(3)
-    expect(indexByPath.get('C:\\aa')).toBe(4)
-    expect(indexByPath.get(TRASH_PATH)).toBe(5)
+    expect(indexByPath.get('C:\\')).toBe(1)
+    expect(indexByPath.get('C:\\aa')).toBe(2)
+    expect(indexByPath.get(TRASH_PATH)).toBe(3)
   })
 
   it('sizes header rows and node/trash rows from their tokens', () => {
@@ -243,17 +231,20 @@ describe('buildTreeFlatModel', () => {
     ).toBe(TREE_ROW_HEIGHT_PX)
     expect(treeRowHeight({ kind: 'trash', renderKey: 'trash-fixed' })).toBe(TREE_ROW_HEIGHT_PX)
     expect(
-      treeRowHeight({ kind: 'favourite', path: 'C:\\Fav', renderKey: 'favourite-C:\\Fav' }),
+      treeRowHeight({
+        kind: 'fold-siblings',
+        parentPath: 'C:\\',
+        count: 3,
+        depth: 1,
+        renderKey: 'fold-siblings-C:\\',
+      }),
     ).toBe(TREE_ROW_HEIGHT_PX)
-    expect(treeRowHeight({ kind: 'empty-favourites', renderKey: 'empty-favourites' })).toBe(
-      TREE_ROW_HEIGHT_PX,
-    )
+    expect(
+      treeRowHeight({ kind: 'fold-levels', hiddenPaths: [], depth: 3, renderKey: 'fold-levels' }),
+    ).toBe(TREE_ROW_HEIGHT_PX)
   })
 
-  it('gives the first heading its lead-in and capacity-bar drives their taller row', () => {
-    expect(
-      treeRowHeight({ kind: 'header', label: 'Favourites', renderKey: 'header-favourites' }),
-    ).toBe(TREE_FIRST_HEADER_HEIGHT_PX)
+  it('gives capacity-bar drives their taller row', () => {
     const drive = volume({ mountRoot: 'C:\\', totalBytes: 100, freeBytes: 40 })
     expect(
       treeRowHeight({ kind: 'node', path: 'C:\\', depth: 0, volume: drive, renderKey: 'n' }),
@@ -264,21 +255,87 @@ describe('buildTreeFlatModel', () => {
     ).toBe(TREE_ROW_HEIGHT_PX)
   })
 
-  it('places favourites first and keeps them out of the hierarchy path index', () => {
-    const { rows, indexByPath } = buildTreeFlatModel({}, [], ['C:\\Users\\Omega', '/Users/omega'])
+  it('labels fixed volumes Locations on macOS and Drives on Windows', () => {
+    const volumes = [volume({ mountRoot: 'C:\\' })]
+
+    expect(rowShapes(buildTreeFlatModel({}, volumes, undefined, 'macos').rows)[0]).toEqual({
+      kind: 'header',
+      label: 'Locations',
+    })
+    expect(rowShapes(buildTreeFlatModel({}, volumes, undefined, 'windows').rows)[0]).toEqual({
+      kind: 'header',
+      label: 'Drives',
+    })
+  })
+
+  it('folds the active path and keeps fold rows out of the path index', () => {
+    const volumes = [volume({ mountRoot: 'C:\\' })]
+    const treeNodes: Record<string, TreeNodeState> = {
+      'C:\\': node({ path: 'C:\\', children: ['C:\\aa', 'C:\\bb', 'C:\\cc'], expanded: true }),
+      'C:\\aa': node({ path: 'C:\\aa', parentPath: 'C:\\' }),
+      'C:\\bb': node({ path: 'C:\\bb', parentPath: 'C:\\' }),
+      'C:\\cc': node({ path: 'C:\\cc', parentPath: 'C:\\' }),
+    }
+    const fold = {
+      chain: ['C:\\', 'C:\\bb'],
+      revealedSiblings: new Set<string>(),
+      showHiddenLevels: false,
+    }
+
+    const { rows, indexByPath } = buildTreeFlatModel(treeNodes, volumes, fold)
+
     expect(rowShapes(rows)).toEqual([
-      { kind: 'header', label: 'Favourites' },
-      { kind: 'favourite', path: 'C:\\Users\\Omega' },
-      { kind: 'favourite', path: '/Users/omega' },
+      { kind: 'header', label: 'Drives' },
+      { kind: 'node', path: 'C:\\', depth: 0, volume: volumes[0] },
+      { kind: 'node', path: 'C:\\bb', depth: 1, volume: undefined },
+      { kind: 'fold-siblings', parentPath: 'C:\\', count: 2, depth: 1 },
+      { kind: 'trash' },
     ])
-    expect(indexByPath.has('C:\\Users\\Omega')).toBe(false)
-    expect(indexByPath.has('/Users/omega')).toBe(false)
+    expect(rows[3].renderKey).toBe('fold-siblings-C:\\')
+    expect(indexByPath.has('C:\\aa')).toBe(false)
+    expect(indexByPath.get(TRASH_PATH)).toBe(4)
+  })
+
+  it('keys a folded run of levels by its volume', () => {
+    const volumes = [volume({ mountRoot: 'C:\\' })]
+    const chain = [
+      'C:\\',
+      'C:\\1',
+      'C:\\1\\2',
+      'C:\\1\\2\\3',
+      'C:\\1\\2\\3\\4',
+      'C:\\1\\2\\3\\4\\5',
+      'C:\\1\\2\\3\\4\\5\\6',
+      'C:\\1\\2\\3\\4\\5\\6\\7',
+    ]
+    const treeNodes: Record<string, TreeNodeState> = Object.fromEntries(
+      chain.map((path, index) => [
+        path,
+        node({
+          path,
+          parentPath: chain[index - 1] ?? null,
+          children: chain[index + 1] ? [chain[index + 1]] : [],
+          expanded: index < chain.length - 1,
+        }),
+      ]),
+    )
+    const fold = { chain, revealedSiblings: new Set<string>(), showHiddenLevels: false }
+
+    const { rows } = buildTreeFlatModel(treeNodes, volumes, fold)
+
+    expect(rows.find((row) => row.kind === 'fold-levels')?.renderKey).toBe('fold-levels-C:\\')
+  })
+
+  it('stops indenting after the indent cap', () => {
+    expect(treeIndentPx(0)).toBe(8)
+    expect(treeIndentPx(2)).toBe(40)
+    expect(treeIndentPx(TREE_INDENT_MAX_DEPTH)).toBe(72)
+    expect(treeIndentPx(TREE_INDENT_MAX_DEPTH + 5)).toBe(72)
   })
 
   it('keeps virtual row heights on whole CSS pixels', () => {
     expect(Number.isInteger(TREE_ROW_HEIGHT_PX)).toBe(true)
     expect(Number.isInteger(TREE_HEADER_HEIGHT_PX)).toBe(true)
-    expect(Number.isInteger(TREE_FIRST_HEADER_HEIGHT_PX)).toBe(true)
     expect(Number.isInteger(TREE_DRIVE_ROW_HEIGHT_PX)).toBe(true)
   })
 })

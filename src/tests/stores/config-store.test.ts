@@ -50,6 +50,7 @@ describe('config-store', () => {
       autoFolderSize: false,
       autoExpandActiveQueueToasts: true,
       favourites: ['C:\\Users\\Omega'],
+      favouritesCollapsed: true,
     })
 
     const state = useConfigStore.getState()
@@ -61,6 +62,21 @@ describe('config-store', () => {
     expect(state.autoFolderSize).toBe(false)
     expect(state.autoExpandActiveQueueToasts).toBe(true)
     expect(state.favourites).toEqual(['C:\\Users\\Omega'])
+    expect(state.favouritesCollapsed).toBe(true)
+  })
+
+  it('persists the favourites collapsed state through save_config', async () => {
+    const saveConfig = vi.fn((payload) => payload.config)
+    ipc.override('save_config', saveConfig)
+
+    await useConfigStore.getState().setFavouritesCollapsed(true)
+
+    expect(useConfigStore.getState().favouritesCollapsed).toBe(true)
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({ favouritesCollapsed: true }),
+      }),
+    )
   })
 
   it('persists the update check interval through save_config', async () => {
@@ -175,6 +191,7 @@ describe('config-store', () => {
       autoFolderSize: true,
       autoExpandActiveQueueToasts: false,
       favourites: [],
+      favouritesCollapsed: false,
     })
     expect(useConfigStore.getState().logLevel).toBe('warn')
 
@@ -201,6 +218,7 @@ describe('config-store', () => {
       autoFolderSize: true,
       autoExpandActiveQueueToasts: false,
       favourites: [],
+      favouritesCollapsed: false,
       keybindings: {},
       columns: [],
       layout: {

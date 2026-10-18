@@ -96,6 +96,7 @@ fn commands_cover_filesystem_and_persistence_state() {
         auto_folder_size: initial_config.auto_folder_size,
         auto_expand_active_queue_toasts: initial_config.auto_expand_active_queue_toasts,
         favourites: vec![root.join("favourite").to_string_lossy().into_owned()],
+        favourites_collapsed: initial_config.favourites_collapsed,
     };
     assert_eq!(
         commands::save_config(

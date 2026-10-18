@@ -1401,6 +1401,50 @@ describe('panes-store navigation', () => {
     expect(nodes['C:\\Other'].expanded).toBe(false)
   })
 
+  it('keeps tree fold reveals for the revealed path and resets them on navigation', async () => {
+    usePanesStore.getState().initialize({
+      session: { activePane: 'left', leftPath: 'C:\\', rightPath: 'C:\\' },
+      showHiddenFiles: false,
+      folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+      volumes: [
+        {
+          mountRoot: 'C:\\',
+          label: 'Windows',
+          totalBytes: 1,
+          freeBytes: 1,
+          isNetwork: false,
+          isRemovable: false,
+        },
+      ],
+    })
+    ipc.override(
+      'list_tree_children',
+      (payload: ListTreeChildrenRequest): ListTreeChildrenResponse => ({
+        path: payload.path,
+        children: [],
+      }),
+    )
+
+    await usePanesStore.getState().revealPath('C:\\Users')
+    const store = usePanesStore.getState()
+    store.revealTreeSiblings('C:\\')
+    store.revealTreeSiblings('C:\\')
+    store.revealTreeHiddenLevels()
+    expect(usePanesStore.getState().treeFold).toMatchObject({
+      revealedSiblings: ['C:\\'],
+      showHiddenLevels: true,
+    })
+
+    await usePanesStore.getState().revealPath('C:\\Users')
+    expect(usePanesStore.getState().treeFold.revealedSiblings).toEqual(['C:\\'])
+
+    await usePanesStore.getState().revealPath('C:\\Windows')
+    expect(usePanesStore.getState().treeFold).toMatchObject({
+      revealedSiblings: [],
+      showHiddenLevels: false,
+    })
+  })
+
   it('ignores reveal for empty or out-of-volume paths', async () => {
     usePanesStore.getState().initialize({
       session: { activePane: 'left', leftPath: 'C:\\', rightPath: 'C:\\' },

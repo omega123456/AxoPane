@@ -29,6 +29,7 @@ export function defaultAppConfig(): AppConfig {
     autoFolderSize: true,
     autoExpandActiveQueueToasts: false,
     favourites: [],
+    favouritesCollapsed: false,
   }
 }
 
@@ -68,6 +69,7 @@ export function buildAppConfig(): AppConfig {
     autoFolderSize: config.autoFolderSize,
     autoExpandActiveQueueToasts: config.autoExpandActiveQueueToasts,
     favourites: config.favourites,
+    favouritesCollapsed: config.favouritesCollapsed,
   }
 }
 
@@ -132,6 +134,7 @@ export function hydrateAppConfig(config: AppConfig) {
     autoFolderSize: next.autoFolderSize ?? true,
     autoExpandActiveQueueToasts: next.autoExpandActiveQueueToasts,
     favourites: next.favourites ?? [],
+    favouritesCollapsed: next.favouritesCollapsed ?? false,
   })
   useLayoutStore.getState().hydrate(next.layout, next.columns)
   useKeymapStore.getState().hydrate(next.keybindings)

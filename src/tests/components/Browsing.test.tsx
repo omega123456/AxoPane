@@ -315,7 +315,7 @@ describe('TreeNode', () => {
     const actions = treeRowActions()
     render(<TreeNode node={treeNodeState()} depth={0} isCurrent actions={actions} />)
 
-    await user.click(screen.getByRole('button', { name: /Collapse root/ }))
+    await user.click(screen.getByRole('button', { name: 'Toggle root' }))
     expect(actions.onToggle).toHaveBeenCalledWith('C:\\root')
 
     await user.click(screen.getByText('root'))

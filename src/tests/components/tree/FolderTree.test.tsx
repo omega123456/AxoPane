@@ -280,6 +280,7 @@ describe('FolderTree', () => {
   })
 
   it('renders every visible row in depth-first order, then the trash and other volumes', async () => {
+    const user = userEvent.setup()
     seedVolumes()
     usePanesStore.setState((state) => ({
       panes: { ...state.panes, left: { ...state.panes.left, path: 'C:\\aa\\bb' } },
@@ -327,7 +328,15 @@ describe('FolderTree', () => {
     const order = Array.from(container.querySelectorAll('[data-tree-row]')).map((row) =>
       row.getAttribute('data-tree-row'),
     )
-    expect(order).toEqual(['C:\\', 'C:\\aa', 'C:\\aa\\bb', 'C:\\cc', 'trash', 'E:\\', 'Z:\\'])
+    // cc is off the active path, so it folds into one row until revealed.
+    expect(order).toEqual(['C:\\', 'C:\\aa', 'C:\\aa\\bb', 'trash', 'E:\\', 'Z:\\'])
+
+    await user.click(screen.getByRole('button', { name: '1 other folder' }))
+
+    const revealed = Array.from(container.querySelectorAll('[data-tree-row]')).map((row) =>
+      row.getAttribute('data-tree-row'),
+    )
+    expect(revealed).toEqual(['C:\\', 'C:\\aa', 'C:\\aa\\bb', 'C:\\cc', 'trash', 'E:\\', 'Z:\\'])
   })
 
   it('removes collapsed descendants and keeps the pinned overlay out of the macOS scrollbar lane', async () => {
@@ -380,7 +389,7 @@ describe('FolderTree', () => {
     expect(scroll).toHaveClass('overflow-x-hidden', 'overflow-y-auto', 'overscroll-contain')
     expect(treeRow('Windows (C:)').parentElement).toHaveClass('inset-x-0')
 
-    await user.click(within(treeRow('Windows (C:)')).getByRole('button', { name: /Collapse/ }))
+    await user.click(within(treeRow('Windows (C:)')).getByRole('button', { name: /Toggle/ }))
 
     await waitFor(() => {
       expect(screen.queryByText('aa', { selector: 'span' })).not.toBeInTheDocument()
@@ -441,12 +450,12 @@ describe('FolderTree', () => {
     render(<FolderTree />)
     expect(screen.queryByText('AxoPane', { selector: 'span' })).not.toBeInTheDocument()
 
-    await user.click(within(treeRow('Volumes')).getByRole('button', { name: /Expand/ }))
+    await user.click(within(treeRow('Volumes')).getByRole('button', { name: /Toggle/ }))
 
     expect(await screen.findByText('AxoPane', { selector: 'span' })).toBeInTheDocument()
     expect(screen.getAllByText('Untitled', { selector: 'span' })).toHaveLength(1)
 
-    await user.click(within(treeRow('Volumes')).getByRole('button', { name: /Collapse/ }))
+    await user.click(within(treeRow('Volumes')).getByRole('button', { name: /Toggle/ }))
 
     await waitFor(() => {
       expect(screen.queryByText('AxoPane', { selector: 'span' })).not.toBeInTheDocument()
@@ -487,6 +496,47 @@ describe('FolderTree', () => {
 
     const pinnedOverlay = pinnedRows()[0]?.parentElement
     expect(pinnedOverlay).toHaveClass('right-3')
+  })
+
+  it('folds the middle of a very deep path into one row that reveals it', async () => {
+    const user = userEvent.setup()
+    seedVolumes()
+    const names = ['l1', 'l2', 'l3', 'l4', 'l5', 'l6', 'l7', 'l8']
+    const chain = names.reduce<string[]>(
+      (paths, name) => [...paths, `${paths[paths.length - 1].replace(/\\$/, '')}\\${name}`],
+      ['C:\\'],
+    )
+    usePanesStore.setState((state) => ({
+      panes: { ...state.panes, left: { ...state.panes.left, path: chain[chain.length - 1] } },
+      treeNodes: {
+        ...state.treeNodes,
+        ...Object.fromEntries(
+          chain.map((path, index) => [
+            path,
+            {
+              ...state.treeNodes[path],
+              id: path,
+              name: index === 0 ? state.treeNodes[path].name : names[index - 1],
+              path,
+              parentPath: chain[index - 1] ?? null,
+              children: chain[index + 1] ? [chain[index + 1]] : [],
+              expanded: index < chain.length - 1,
+              loaded: true,
+            },
+          ]),
+        ),
+      },
+    }))
+
+    render(<FolderTree />)
+    const levels = await screen.findByRole('button', { name: '2 levels hidden' })
+    expect(levels).toHaveAttribute('title', 'l3 › l4')
+    expect(screen.queryByText('l3', { selector: 'span' })).not.toBeInTheDocument()
+
+    await user.click(levels)
+
+    expect(await screen.findByText('l3', { selector: 'span' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /levels hidden/ })).not.toBeInTheDocument()
   })
 
   it('gives every ancestor a distinct pinned slot when many levels are revealed in one jump', async () => {
@@ -554,9 +604,12 @@ describe('FolderTree', () => {
 
     scrollTreeTo(420)
 
-    // The whole chain (volume root + a..e) is pinned.
+    // The band is capped: the volume root plus the nearest three path folders.
     const pinned = pinnedRows()
-    expect(pinned).toHaveLength(6)
+    expect(pinned).toHaveLength(4)
+    expect(pinned.slice(1).map((row) => row.textContent)).toEqual(['c', 'd', 'e'])
+    // Pinned rows are visual copies, hidden from assistive tech.
+    expect(pinned[0].parentElement).toHaveAttribute('aria-hidden', 'true')
 
     const tops = pinned.map((row) => Number.parseFloat(row.style.top))
     const zIndexes = pinned.map((row) => Number(row.style.zIndex))
@@ -594,7 +647,7 @@ describe('FolderTree', () => {
     render(<FolderTree />)
     const ccRow = treeRow('cc')
 
-    await user.click(within(ccRow).getByRole('button', { name: /Expand cc/ }))
+    await user.click(within(ccRow).getByRole('button', { name: 'Toggle cc' }))
     expect(toggle).toHaveBeenCalledWith('C:\\cc')
 
     await user.click(screen.getByText('cc'))

@@ -185,10 +185,55 @@ for (const mode of ['light', 'dark'] as const) {
     const treeScroll = page.getByTestId('folder-tree-scroll')
     await expect(treeScroll).toBeVisible()
     await expect(treeScroll.getByRole('button', { name: 'Designs', exact: true })).toBeVisible()
+    // Reveal every folded level so the tree is long enough to scroll the
+    // (capped) pinned band into place.
+    const foldRows = treeScroll.getByRole('button', { name: /other folders?$/ })
+    // Dispatch the clicks so the pointer never rests on the tree; a real click
+    // leaves a hover tint on whichever row the reveal shifts under it.
+    while ((await foldRows.count()) > 0) {
+      await foldRows.first().dispatchEvent('click')
+    }
     await treeScroll.evaluate((element) => {
       element.scrollTop = 420
     })
     await expect(page.locator('aside').first()).toHaveScreenshot(`sticky-tree-items-${mode}.png`)
+  })
+
+  test(`folded tree ${mode}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 520 })
+    await gotoScenario(page, screenshotScenarios.stickyTree[mode])
+    const treeScroll = page.getByTestId('folder-tree-scroll')
+    await expect(treeScroll.getByRole('button', { name: 'Designs', exact: true })).toBeVisible()
+    await expect(treeScroll.getByRole('button', { name: '3 other folders' })).toBeVisible()
+    await expect(page.locator('aside').first()).toHaveScreenshot(`folded-tree-${mode}.png`)
+  })
+
+  test(`deep path levels fold ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.deepTree[mode])
+    const treeScroll = page.getByTestId('folder-tree-scroll')
+    await expect(treeScroll.getByRole('button', { name: 'out', exact: true })).toBeVisible()
+    await expect(treeScroll.getByRole('button', { name: '4 levels hidden' })).toBeVisible()
+    await expect(page.locator('aside').first()).toHaveScreenshot(
+      `deep-tree-levels-fold-${mode}.png`,
+    )
+  })
+
+  test(`favourites collapsed ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.favouritesCollapsed[mode])
+    const heading = page.getByTestId('favourites-panel').getByRole('button', { name: /Favourites/ })
+    await expect(heading).toHaveAttribute('aria-expanded', 'false')
+    await expect(
+      page.getByTestId('folder-tree-scroll').getByRole('button', { name: 'Designs', exact: true }),
+    ).toBeVisible()
+    await expect(page.locator('aside').first()).toHaveScreenshot(`favourites-collapsed-${mode}.png`)
+  })
+
+  test(`favourites overflow ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.favouritesOverflow[mode])
+    const panel = page.getByTestId('favourites-panel')
+    await expect(panel.getByRole('button', { name: 'Documents', exact: true })).toBeVisible()
+    await expect(panel.locator('[data-favourite-row]')).toHaveCount(9)
+    await expect(page.locator('aside').first()).toHaveScreenshot(`favourites-overflow-${mode}.png`)
   })
 
   test(`tree capacity levels ${mode}`, async ({ page }) => {
@@ -327,21 +372,23 @@ for (const mode of ['light', 'dark'] as const) {
   test(`locked tab and populated favourites ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.favourites[mode])
     await expect(page.getByLabel(/Locked tab/)).toBeVisible()
-    const tree = page.getByTestId('folder-tree-scroll')
-    await expect(tree.getByRole('button', { name: 'Documents', exact: true }).first()).toBeVisible()
+    const favourites = page.getByTestId('favourites-panel')
+    await expect(
+      favourites.getByRole('button', { name: 'Documents', exact: true }).first(),
+    ).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`locked-tab-favourites-${mode}.png`)
   })
 
   test(`empty favourites ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
-    const tree = page.getByTestId('folder-tree-scroll')
-    await expect(tree.getByText('Drop folders here')).toBeVisible()
+    const favourites = page.getByTestId('favourites-panel')
+    await expect(favourites.getByText('Drop folders here')).toBeVisible()
     await expect(page.locator('aside').first()).toHaveScreenshot(`empty-favourites-${mode}.png`)
   })
 
   test(`reordered favourites ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.favourites[mode])
-    const tree = page.getByTestId('folder-tree-scroll')
+    const tree = page.getByTestId('favourites-panel')
     const source = tree.getByRole('button', { name: 'E:', exact: true }).locator('..')
     const target = tree
       .getByRole('button', { name: 'Documents', exact: true })

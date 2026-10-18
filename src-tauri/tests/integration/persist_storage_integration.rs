@@ -60,6 +60,7 @@ fn config_and_session_round_trip_through_atomic_storage() {
         auto_folder_size: true,
         auto_expand_active_queue_toasts: true,
         favourites: vec!["C:\\left".to_string()],
+        favourites_collapsed: true,
     });
     session_store.replace(Session {
         active_pane: "right".to_string(),
@@ -112,6 +113,7 @@ fn config_and_session_round_trip_through_atomic_storage() {
             auto_folder_size: true,
             auto_expand_active_queue_toasts: true,
             favourites: vec!["C:\\left".to_string()],
+            favourites_collapsed: true,
         }
     );
     assert_eq!(
@@ -297,6 +299,8 @@ fn legacy_config_without_layout_fields_gets_defaults() {
     assert!(!loaded.show_seconds);
     assert!(!loaded.relative_dates);
     assert!(!loaded.auto_expand_active_queue_toasts);
+    assert!(loaded.favourites.is_empty());
+    assert!(!loaded.favourites_collapsed);
 }
 
 #[test]

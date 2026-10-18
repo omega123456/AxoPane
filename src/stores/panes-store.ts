@@ -62,6 +62,13 @@ type SizeStateKind = SizeStateEvent['state']
 // rewrite the pane's history stack (the index has already been moved).
 type NavigateOptions = { viaHistory?: boolean }
 
+export type TreeFoldReveals = {
+  /** `pathKey` of the leaf these reveals belong to. */
+  leaf: string | null
+  revealedSiblings: string[]
+  showHiddenLevels: boolean
+}
+
 export type TreeNodeState = Omit<LazyTreeNode, 'expandability' | 'lastAccess'> & {
   expandability?: LazyTreeNode['expandability']
   lastAccess?: number
@@ -152,6 +159,9 @@ type PanesStore = {
   iconCacheTouched: Record<string, number>
   treeNodes: Record<string, TreeNodeState>
   treeRoots: string[]
+  // Which folds of the active path the user opened in the tree. Keyed to the
+  // revealed leaf so navigating elsewhere folds the tree back up.
+  treeFold: TreeFoldReveals
   filterTimers: Partial<Record<PaneId, number>>
   // Bumped when a listing finished with a parent-reveal focus (navigating up
   // highlighted the folder we came from); `FilePane` scrolls the focused row
@@ -212,6 +222,10 @@ type PanesStore = {
   ensureTreeChildren: (path: string | null) => Promise<void>
   revealPath: (path: string | null) => Promise<void>
   toggleTreeNode: (path: string) => Promise<void>
+  /** Shows every child of `parentPath` instead of its "N other folders" row. */
+  revealTreeSiblings: (parentPath: string) => void
+  /** Shows the middle levels folded into the "N levels hidden" row. */
+  revealTreeHiddenLevels: () => void
   reset: () => void
 }
 
@@ -414,6 +428,7 @@ function defaultState() {
     iconCacheTouched: {} as Record<string, number>,
     treeNodes: {} as Record<string, TreeNodeState>,
     treeRoots: [] as string[],
+    treeFold: { leaf: null, revealedSiblings: [], showHiddenLevels: false } as TreeFoldReveals,
     filterTimers: {} as Partial<Record<PaneId, number>>,
     revealScrollRequests: {} as Partial<Record<PaneId, number>>,
   }
@@ -3181,6 +3196,10 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       // every other expanded branch collapses so only the active path is shown.
       const ancestors = new Set(chain.slice(0, -1).map((entry) => pathKey(entry)))
       const leaf = pathKey(path)
+      const treeFold =
+        state.treeFold.leaf === leaf
+          ? state.treeFold
+          : { leaf, revealedSiblings: [], showHiddenLevels: false }
       const treeNodes = { ...state.treeNodes }
       for (const [nodePath, node] of Object.entries(state.treeNodes)) {
         const nodePathKey = pathKey(nodePath)
@@ -3192,7 +3211,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           treeNodes[nodePath] = { ...node, expanded: false }
         }
       }
-      return { treeNodes }
+      return { treeNodes, treeFold }
     })
   },
   toggleTreeNode: async (path) => {
@@ -3219,6 +3238,21 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         },
       },
     }))
+  },
+  revealTreeSiblings: (parentPath) => {
+    set((state) =>
+      state.treeFold.revealedSiblings.includes(parentPath)
+        ? state
+        : {
+            treeFold: {
+              ...state.treeFold,
+              revealedSiblings: [...state.treeFold.revealedSiblings, parentPath],
+            },
+          },
+    )
+  },
+  revealTreeHiddenLevels: () => {
+    set((state) => ({ treeFold: { ...state.treeFold, showHiddenLevels: true } }))
   },
   reset: () => {
     treeLoadGeneration += 1

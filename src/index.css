@@ -165,12 +165,13 @@
      constants (mirrored in lib/tree-flat.ts) rather than measured values - a
      JS-measured height only converges after each row's first paint, which left
      gaps/overlaps when many pinned ancestor rows mounted at once. A drive row
-     is taller to hold its capacity bar; the first section heading carries the
-     pane's top lead-in. */
+     is taller to hold its capacity bar; the Favourites heading carries the
+     pane's top lead-in. Favourites shows four rows before scrolling. */
   --spacing-tree-row: 1.75rem;
   --spacing-tree-drive-row: 2.375rem;
   --spacing-tree-header: 1.875rem;
   --spacing-tree-header-first: 2.25rem;
+  --spacing-favourites: 7rem;
   --spacing-details: 18.75rem;
   --spacing-search: 13.75rem;
   --spacing-menu: 17.5rem;
