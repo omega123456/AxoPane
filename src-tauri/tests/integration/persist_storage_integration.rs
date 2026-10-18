@@ -44,6 +44,7 @@ fn config_and_session_round_trip_through_atomic_storage() {
         layout: LayoutConfig {
             details_visible: false,
             tree_width_px: 320.0,
+            favourites_height_px: 168.0,
             pane_split: 0.4,
             column_widths: std::collections::HashMap::from([("type".to_string(), 188.0)]),
             default_pane_mode: "single".to_string(),
@@ -97,6 +98,7 @@ fn config_and_session_round_trip_through_atomic_storage() {
             layout: LayoutConfig {
                 details_visible: false,
                 tree_width_px: 320.0,
+                favourites_height_px: 168.0,
                 pane_split: 0.4,
                 column_widths: std::collections::HashMap::from([("type".to_string(), 188.0)]),
                 default_pane_mode: "single".to_string(),

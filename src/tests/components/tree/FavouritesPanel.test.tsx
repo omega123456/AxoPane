@@ -5,6 +5,7 @@ import { ipc } from '@/tests/ipc-mock'
 import { FavouritesPanel } from '@/components/tree/FavouritesPanel'
 import { useConfigStore } from '@/stores/config-store'
 import { useDragStore } from '@/stores/drag-store'
+import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 
 const FAVOURITES = [
@@ -20,6 +21,7 @@ beforeEach(() => {
   usePanesStore.getState().reset()
   useDragStore.getState().end()
   useConfigStore.getState().reset()
+  useLayoutStore.getState().reset()
 })
 
 describe('FavouritesPanel', () => {
@@ -54,8 +56,48 @@ describe('FavouritesPanel', () => {
     const list = screen
       .getByRole('button', { name: 'Documents' })
       .closest('[data-favourite-row]')?.parentElement
-    expect(list?.className).toContain('max-h-favourites')
+    expect(list).toHaveStyle({ maxHeight: '112px' })
     expect(list?.className).toContain('overflow-y-auto')
+  })
+
+  it('resizes the list from its shown height and persists the result', async () => {
+    const saveConfig = vi.fn((payload) => payload.config)
+    ipc.override('save_config', saveConfig)
+    useConfigStore.setState({ favourites: FAVOURITES.slice(0, 2) })
+    act(() => useLayoutStore.getState().setFavouritesHeightPx(300))
+    render(<FavouritesPanel />)
+
+    // Two 28px rows show 56px of a 300px cap; the drag starts from what is shown.
+    const handle = screen.getByRole('separator', { name: 'Resize favourites' })
+    expect(handle).toHaveAttribute('aria-valuenow', '56')
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientY: 100 })
+    fireEvent.pointerMove(handle, { pointerId: 1, clientY: 80 })
+    expect(useLayoutStore.getState().favouritesHeightPx).toBe(36)
+
+    fireEvent.pointerUp(handle, { pointerId: 1 })
+    await waitFor(() =>
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({
+            layout: expect.objectContaining({ favouritesHeightPx: 36 }),
+          }),
+        }),
+      ),
+    )
+
+    fireEvent.keyDown(handle, { key: 'ArrowDown' })
+    expect(useLayoutStore.getState().favouritesHeightPx).toBe(64)
+  })
+
+  it('hides the resize handle while collapsed or empty', () => {
+    useConfigStore.setState({ favourites: FAVOURITES, favouritesCollapsed: true })
+    const { unmount } = render(<FavouritesPanel />)
+    expect(screen.queryByRole('separator')).not.toBeInTheDocument()
+    unmount()
+
+    act(() => useConfigStore.setState({ favourites: [], favouritesCollapsed: false }))
+    render(<FavouritesPanel />)
+    expect(screen.queryByRole('separator')).not.toBeInTheDocument()
   })
 
   it('marks the favourite for the active pane folder', () => {

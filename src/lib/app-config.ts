@@ -53,6 +53,7 @@ export function buildAppConfig(): AppConfig {
     layout: {
       detailsVisible: false,
       treeWidthPx: layout.treeWidthPx,
+      favouritesHeightPx: layout.favouritesHeightPx,
       paneSplit: layout.paneSplit,
       columnWidths: layout.columnWidths,
       defaultPaneMode: layout.defaultPaneMode,

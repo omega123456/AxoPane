@@ -71,6 +71,21 @@ describe('ResizeHandle', () => {
     expect(onResize).not.toHaveBeenCalled()
   })
 
+  it('drags along Y and nudges with up/down when horizontal', () => {
+    const { handle, onResize, onStep } = setup({ orientation: 'horizontal' })
+    expect(handle).toHaveAttribute('aria-orientation', 'horizontal')
+    expect(handle.className).toContain('cursor-row-resize')
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientX: 500, clientY: 100 })
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 900, clientY: 70 })
+    expect(onResize).toHaveBeenCalledWith(-30)
+    fireEvent.keyDown(handle, { key: 'ArrowLeft' })
+    expect(onStep).not.toHaveBeenCalled()
+    fireEvent.keyDown(handle, { key: 'ArrowUp' })
+    fireEvent.keyDown(handle, { key: 'ArrowDown' })
+    expect(onStep).toHaveBeenNthCalledWith(1, -1)
+    expect(onStep).toHaveBeenNthCalledWith(2, 1)
+  })
+
   it('nudges with the arrow keys and ignores other keys', () => {
     const { handle, onStep, onCommit } = setup()
     fireEvent.keyDown(handle, { key: 'ArrowLeft' })

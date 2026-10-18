@@ -53,6 +53,9 @@ export const defaultColumnWidths: Record<ColumnKey, number> = {
 /** Folder-tree sidebar drag bounds, in pixels. */
 export const TREE_WIDTH_MIN = 160
 export const TREE_WIDTH_MAX = 480
+/** Favourites list drag bounds, in pixels: one row up to twenty. */
+export const FAVOURITES_HEIGHT_MIN = 28
+export const FAVOURITES_HEIGHT_MAX = 560
 /** Dual-pane split drag bounds, as the fraction allotted to the left pane. */
 export const PANE_SPLIT_MIN = 0.2
 export const PANE_SPLIT_MAX = 0.8
@@ -61,6 +64,10 @@ export const COLUMN_WIDTH_MAX = 520
 
 export function clampTreeWidth(width: number) {
   return Math.min(TREE_WIDTH_MAX, Math.max(TREE_WIDTH_MIN, width))
+}
+
+export function clampFavouritesHeight(height: number) {
+  return Math.min(FAVOURITES_HEIGHT_MAX, Math.max(FAVOURITES_HEIGHT_MIN, height))
 }
 
 export function clampPaneSplit(split: number) {
@@ -74,6 +81,7 @@ export function clampColumnWidth(width: number) {
 export const defaultLayout: LayoutConfig = {
   detailsVisible: false,
   treeWidthPx: 212,
+  favouritesHeightPx: 112,
   paneSplit: 0.5,
   columnWidths: defaultColumnWidths,
   defaultPaneMode: 'dual',
@@ -87,6 +95,7 @@ type LayoutStore = LayoutConfig & {
   hydrate: (layout: LayoutConfig, columns: ColumnConfig[]) => void
   setDetailsVisible: (visible: boolean) => void
   setTreeWidthPx: (width: number) => void
+  setFavouritesHeightPx: (height: number) => void
   setPaneSplit: (split: number) => void
   setDefaultPaneMode: (mode: LayoutConfig['defaultPaneMode']) => void
   setDefaultViewMode: (mode: PaneViewMode) => void
@@ -146,6 +155,7 @@ export const useLayoutStore = create<LayoutStore>((set) => ({
     set({
       ...layout,
       treeWidthPx: clampTreeWidth(layout.treeWidthPx),
+      favouritesHeightPx: clampFavouritesHeight(layout.favouritesHeightPx),
       paneSplit: clampPaneSplit(layout.paneSplit),
       columnWidths: normalizeColumnWidths(layout.columnWidths),
       defaultViewMode: resolvePaneViewMode(layout.defaultViewMode, defaultLayout.defaultViewMode),
@@ -154,6 +164,7 @@ export const useLayoutStore = create<LayoutStore>((set) => ({
   },
   setDetailsVisible: (detailsVisible) => set({ detailsVisible }),
   setTreeWidthPx: (width) => set({ treeWidthPx: clampTreeWidth(width) }),
+  setFavouritesHeightPx: (height) => set({ favouritesHeightPx: clampFavouritesHeight(height) }),
   setPaneSplit: (split) => set({ paneSplit: clampPaneSplit(split) }),
   setDefaultPaneMode: (defaultPaneMode) => set({ defaultPaneMode }),
   setDefaultViewMode: (defaultViewMode) => set({ defaultViewMode }),

@@ -1,9 +1,9 @@
 use crate::common;
 
 use file_explorer_lib::persist::{
-    default_column_widths, default_columns, default_date_format, default_pane_split,
-    default_sort_direction, default_sort_key, default_tree_width_px, default_update_check_interval,
-    default_view_mode, default_zoom, Config, LayoutConfig,
+    default_column_widths, default_columns, default_date_format, default_favourites_height_px,
+    default_pane_split, default_sort_direction, default_sort_key, default_tree_width_px,
+    default_update_check_interval, default_view_mode, default_zoom, Config, LayoutConfig,
 };
 
 #[test]
@@ -13,6 +13,7 @@ fn persistence_defaults_match_the_frontend_contract() {
     assert_eq!(default_zoom(), "100");
     assert_eq!(default_view_mode(), "details");
     assert_eq!(default_tree_width_px(), 212.0);
+    assert_eq!(default_favourites_height_px(), 112.0);
     assert_eq!(default_pane_split(), 0.5);
     assert_eq!(default_column_widths().get("name"), Some(&320.0));
     assert_eq!(default_column_widths().get("type"), Some(&136.0));

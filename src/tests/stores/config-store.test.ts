@@ -224,6 +224,7 @@ describe('config-store', () => {
       layout: {
         detailsVisible: false,
         treeWidthPx: 212,
+        favouritesHeightPx: 112,
         paneSplit: 0.5,
         columnWidths: {
           name: 320,
@@ -253,6 +254,7 @@ describe('config-store', () => {
           layout: expect.objectContaining({
             detailsVisible: false,
             treeWidthPx: 212,
+            favouritesHeightPx: 112,
             paneSplit: 0.5,
             columnWidths: {
               name: 320,

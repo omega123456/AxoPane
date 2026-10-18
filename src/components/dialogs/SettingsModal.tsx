@@ -129,6 +129,7 @@ function cloneDraft(): DraftState {
     layout: {
       detailsVisible: layout.detailsVisible,
       treeWidthPx: layout.treeWidthPx,
+      favouritesHeightPx: layout.favouritesHeightPx,
       paneSplit: layout.paneSplit,
       columnWidths: layout.columnWidths,
       defaultPaneMode: layout.defaultPaneMode,

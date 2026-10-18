@@ -105,6 +105,7 @@ describe('layout-store', () => {
 
     expect(useLayoutStore.getState()).toMatchObject({
       treeWidthPx: 320,
+      favouritesHeightPx: 112,
       paneSplit: 0.35,
       columnWidths: expect.objectContaining({ type: 188 }),
       defaultPaneMode: 'single',

@@ -179,6 +179,7 @@ describe('ipc client + command wrappers (Tauri IPC bridge)', () => {
         layout: {
           detailsVisible: false,
           treeWidthPx: 204,
+          favouritesHeightPx: 112,
           paneSplit: 0.5,
           columnWidths: {
             name: 320,

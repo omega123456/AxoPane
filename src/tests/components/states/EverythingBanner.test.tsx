@@ -49,6 +49,7 @@ describe('EverythingBanner', () => {
       layout: {
         detailsVisible: false,
         treeWidthPx: 204,
+        favouritesHeightPx: 112,
         paneSplit: 0.5,
         columnWidths: {
           name: 320,

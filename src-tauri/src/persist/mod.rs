@@ -74,6 +74,8 @@ pub struct LayoutConfig {
     pub details_visible: bool,
     #[serde(default = "default_tree_width_px")]
     pub tree_width_px: f64,
+    #[serde(default = "default_favourites_height_px")]
+    pub favourites_height_px: f64,
     #[serde(default = "default_pane_split")]
     pub pane_split: f64,
     #[serde(default = "default_column_widths")]
@@ -98,6 +100,10 @@ pub fn default_tree_width_px() -> f64 {
     212.0
 }
 
+pub fn default_favourites_height_px() -> f64 {
+    112.0
+}
+
 pub fn default_pane_split() -> f64 {
     0.5
 }
@@ -118,6 +124,7 @@ impl Default for LayoutConfig {
         Self {
             details_visible: true,
             tree_width_px: default_tree_width_px(),
+            favourites_height_px: default_favourites_height_px(),
             pane_split: default_pane_split(),
             column_widths: default_column_widths(),
             default_pane_mode: "dual".to_string(),

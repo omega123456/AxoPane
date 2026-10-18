@@ -423,6 +423,7 @@ export const fixtures: {
     layout: {
       detailsVisible: false,
       treeWidthPx: 212,
+      favouritesHeightPx: 112,
       paneSplit: 0.5,
       columnWidths: {
         name: 320,
@@ -464,6 +465,7 @@ export const fixtures: {
     layout: {
       detailsVisible: false,
       treeWidthPx: 212,
+      favouritesHeightPx: 112,
       paneSplit: 0.5,
       columnWidths: {
         name: 320,

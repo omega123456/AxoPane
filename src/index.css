@@ -7,14 +7,14 @@
 
 @theme {
   --font-ui:
-    'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', 'Selawik', system-ui,
-    -apple-system, 'Helvetica Neue', Arial, sans-serif;
+    'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', 'Selawik', system-ui, -apple-system,
+    'Helvetica Neue', Arial, sans-serif;
   --font-display:
     'Segoe UI Variable Display', 'Segoe UI Variable', 'Segoe UI', 'Selawik', system-ui,
     -apple-system, 'Helvetica Neue', Arial, sans-serif;
   --font-mono:
-    'Cascadia Code', 'Cascadia Mono', 'Cascadia Code Variable', ui-monospace, 'SF Mono',
-    Consolas, 'Liberation Mono', monospace;
+    'Cascadia Code', 'Cascadia Mono', 'Cascadia Code Variable', ui-monospace, 'SF Mono', Consolas,
+    'Liberation Mono', monospace;
 
   /* Fluent layer model (WinUI theme resources). Mica fallback base, recessed
      fill, pane layer, and the card colour shared by menus, dialogs and flyouts. */
@@ -166,12 +166,11 @@
      JS-measured height only converges after each row's first paint, which left
      gaps/overlaps when many pinned ancestor rows mounted at once. A drive row
      is taller to hold its capacity bar; the Favourites heading carries the
-     pane's top lead-in. Favourites shows four rows before scrolling. */
+     pane's top lead-in. */
   --spacing-tree-row: 1.75rem;
   --spacing-tree-drive-row: 2.375rem;
   --spacing-tree-header: 1.875rem;
   --spacing-tree-header-first: 2.25rem;
-  --spacing-favourites: 7rem;
   --spacing-details: 18.75rem;
   --spacing-search: 13.75rem;
   --spacing-menu: 17.5rem;

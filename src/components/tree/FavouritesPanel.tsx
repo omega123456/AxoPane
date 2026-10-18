@@ -1,13 +1,17 @@
-import { useMemo, type DragEvent } from 'react'
+import { useMemo, useRef, type DragEvent } from 'react'
 import { ChevronRightIcon } from '@/components/icons'
+import { ResizeHandle } from '@/components/shell/ResizeHandle'
 import { FavouriteTreeRow, favouriteLabel, type FavouriteRowActions } from './FavouriteTreeRow'
 import { buildContextMenuContent } from '@/components/menus/menu-definitions'
 import { detectPlatformOs } from '@/lib/keymap'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
+import { persistAppConfig } from '@/lib/app-config'
 import { pathsMatch } from '@/lib/path-compare'
+import { TREE_ROW_HEIGHT_PX } from '@/lib/tree-flat'
 import { useConfigStore } from '@/stores/config-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
 import { useDragStore } from '@/stores/drag-store'
+import { FAVOURITES_HEIGHT_MAX, FAVOURITES_HEIGHT_MIN, useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 
 function canDropOnFavourites() {
@@ -41,13 +45,21 @@ async function handleFavouritesDrop(event: DragEvent<HTMLElement>) {
 
 /**
  * Favourites, fixed above the folder tree so they stay on screen however deep
- * the tree is expanded. Shows four rows, then scrolls inside its own area; the
- * heading collapses it to a single row with a count.
+ * the tree is expanded. The list grows to a user-draggable (persisted) height,
+ * then scrolls inside its own area; the heading collapses it to a single row
+ * with a count.
  */
 export function FavouritesPanel() {
   const favourites = useConfigStore((state) => state.favourites)
   const collapsed = useConfigStore((state) => state.favouritesCollapsed)
   const activePath = usePanesStore((state) => state.panes[state.activePaneId].path)
+  const heightPx = useLayoutStore((state) => state.favouritesHeightPx)
+  const setHeightPx = useLayoutStore((state) => state.setFavouritesHeightPx)
+  // Rows are fixed-height, so the list's rendered height is the stored cap or
+  // its content, whichever is smaller. Resizing starts from that, so a short
+  // list reacts to the first pixel of an upward drag.
+  const shownHeightPx = Math.min(heightPx, favourites.length * TREE_ROW_HEIGHT_PX)
+  const dragStartHeight = useRef(shownHeightPx)
 
   // Stable for the memoized rows; every handler reads current store state.
   const actions = useMemo<FavouriteRowActions>(
@@ -105,7 +117,11 @@ export function FavouritesPanel() {
           Drop folders here
         </div>
       ) : (
-        <div className="max-h-favourites overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary">
+        <div
+          // Height is user-draggable runtime geometry; no static token can express it.
+          style={{ maxHeight: `${heightPx}px` }}
+          className="overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary"
+        >
           {favourites.map((path, index) => (
             <FavouriteTreeRow
               key={path}
@@ -116,6 +132,22 @@ export function FavouritesPanel() {
             />
           ))}
         </div>
+      )}
+      {collapsed || favourites.length === 0 ? null : (
+        <ResizeHandle
+          orientation="horizontal"
+          ariaLabel="Resize favourites"
+          value={shownHeightPx}
+          min={FAVOURITES_HEIGHT_MIN}
+          max={FAVOURITES_HEIGHT_MAX}
+          showRestLine={false}
+          onDragStart={() => {
+            dragStartHeight.current = shownHeightPx
+          }}
+          onResize={(deltaY) => setHeightPx(dragStartHeight.current + deltaY)}
+          onStep={(delta) => setHeightPx(shownHeightPx + delta * TREE_ROW_HEIGHT_PX)}
+          onCommit={() => void persistAppConfig()}
+        />
       )}
     </section>
   )

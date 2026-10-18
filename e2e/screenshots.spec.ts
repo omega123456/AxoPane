@@ -236,6 +236,19 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('aside').first()).toHaveScreenshot(`favourites-overflow-${mode}.png`)
   })
 
+  test(`favourites resize handle hover ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.favouritesOverflow[mode])
+    const handle = page.getByRole('separator', { name: 'Resize favourites' })
+    // A zero-height divider never counts as visible to hover(); point at it
+    // directly, where its grab zone overhangs the line.
+    const box = await handle.boundingBox()
+    if (!box) throw new Error('favourites resize handle has no box')
+    await page.mouse.move(box.x + box.width / 2, box.y)
+    await expect(page.locator('aside').first()).toHaveScreenshot(
+      `favourites-resize-hover-${mode}.png`,
+    )
+  })
+
   test(`tree capacity levels ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.capacityLevels[mode])
     const tree = page.getByTestId('folder-tree-scroll')

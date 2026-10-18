@@ -264,6 +264,8 @@ export type LayoutConfig = {
   detailsVisible: boolean
   /** Folder-tree sidebar width in pixels (user-draggable). */
   treeWidthPx: number
+  /** Favourites list max height in pixels (user-draggable). */
+  favouritesHeightPx: number
   /** Fraction of the dual-pane area allotted to the left pane (0..1, user-draggable). */
   paneSplit: number
   /** Per-column widths in CSS pixels. Missing keys fall back to app defaults. */
