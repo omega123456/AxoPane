@@ -1,4 +1,4 @@
-import type { DirectoryEntry } from '@/lib/types/ipc'
+import type { ColumnKey, DirectoryEntry } from '@/lib/types/ipc'
 import { columnCellClassName } from '@/lib/columns'
 import { dateToneClassName, formatEntryDate } from '@/lib/date-format'
 import { AlertTriangleIcon } from '@/components/icons'
@@ -10,6 +10,7 @@ import { SizeValue } from './SizeValue'
 
 import type { DragEvent, KeyboardEvent, MouseEvent } from 'react'
 import { memo, useEffect, useMemo, useRef } from 'react'
+import { FOCUS_RING } from '@/lib/focus-ring'
 
 /**
  * Stable, id-keyed handler dispatcher for a pane's rows.
@@ -99,11 +100,16 @@ function FileRowImpl({
     focusRenameInput(renameInputRef.current, entry.isDir)
   }, [entry.isDir, isRenaming])
 
-  const rowClassName = `group flex h-row w-full items-center gap-3 border-b border-light-border px-3 text-row text-left focus-visible:outline-none dark:border-dark-border ${
-    isSelected ? 'bg-accent-blue-soft' : 'bg-light-surface dark:bg-dark-surface'
-  } ${isFocused && isActivePane ? 'ring-2 ring-inset ring-accent-blue-border' : ''} ${
-    isCut ? 'opacity-50' : ''
-  } hover:bg-light-hover dark:hover:bg-dark-hover`
+  const rowClassName = `group flex h-row w-full items-center rounded-control px-2 text-row text-left focus-visible:outline-none ${
+    isSelected
+      ? isActivePane
+        ? 'bg-light-tint dark:bg-dark-tint'
+        : 'bg-light-neutral-selection dark:bg-dark-neutral-selection'
+      : 'hover:bg-light-hover dark:hover:bg-dark-hover'
+  } ${isFocused && isActivePane ? 'ring-1 ring-inset ring-light-accent dark:ring-dark-accent' : ''}`
+  // Cut items fade their contents, not the selection fill behind them.
+  const cellClassName = (key: ColumnKey) =>
+    `${columnCellClassName(key)}${isCut ? ' opacity-50' : ''}`
 
   function onRenameKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     event.stopPropagation()
@@ -125,7 +131,7 @@ function FileRowImpl({
               <span
                 key={column.key}
                 style={columnFlexStyle(column.key, columnWidths)}
-                className={columnCellClassName(column.key)}
+                className={cellClassName(column.key)}
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <EntryIcon entry={entry} />
@@ -139,7 +145,7 @@ function FileRowImpl({
                     onBlur={actions.onRenameBlur}
                     onChange={(event) => actions.onRenameChange(event.target.value)}
                     onKeyDown={onRenameKeyDown}
-                    className="min-w-0 flex-1 select-text rounded-tab border border-accent-blue-border bg-light-window px-2 py-1 font-mono text-uxs text-light-text outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:bg-dark-window dark:text-dark-text"
+                    className={`min-w-0 flex-1 select-text rounded-control border border-light-accent dark:border-dark-accent bg-light-base px-2 py-1 font-mono text-caption text-light-text outline-none dark:bg-dark-base dark:text-dark-text ${FOCUS_RING}`}
                   />
                 </span>
               </span>
@@ -151,9 +157,9 @@ function FileRowImpl({
               <span
                 key={column.key}
                 style={columnFlexStyle(column.key, columnWidths)}
-                className={columnCellClassName(column.key)}
+                className={cellClassName(column.key)}
               >
-                <span className="font-mono text-uxs text-light-text-soft dark:text-dark-text-soft">
+                <span className="font-mono text-caption text-light-text-secondary dark:text-dark-text-secondary">
                   <SizeValue entry={entry} />
                 </span>
               </span>
@@ -165,9 +171,9 @@ function FileRowImpl({
               <span
                 key={column.key}
                 style={columnFlexStyle(column.key, columnWidths)}
-                className={columnCellClassName(column.key)}
+                className={cellClassName(column.key)}
               >
-                <span className="font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
+                <span className="font-mono text-caption text-light-text-secondary dark:text-dark-text-secondary">
                   {entry.isDir ? (entry.itemCount ?? '—') : '—'}
                 </span>
               </span>
@@ -179,15 +185,15 @@ function FileRowImpl({
               <span
                 key={column.key}
                 style={columnFlexStyle(column.key, columnWidths)}
-                className={columnCellClassName(column.key)}
+                className={cellClassName(column.key)}
               >
                 {renameError ? (
-                  <span className="flex items-center gap-1 text-uxs text-accent-amber">
+                  <span className="flex items-center gap-1 text-caption text-light-warning dark:text-dark-warning">
                     <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" />
                     <span className="truncate">{renameError}</span>
                   </span>
                 ) : (
-                  <span className="truncate text-usm text-light-text-muted dark:text-dark-text-muted">
+                  <span className="truncate text-caption text-light-text-secondary dark:text-dark-text-secondary">
                     {renameBusy ? 'Renaming…' : 'Rename'}
                   </span>
                 )}
@@ -203,9 +209,9 @@ function FileRowImpl({
             <span
               key={column.key}
               style={columnFlexStyle(column.key, columnWidths)}
-              className={columnCellClassName(column.key)}
+              className={cellClassName(column.key)}
             >
-              <span className={`font-mono text-uxs ${dateToneClassName[formatted.tone]}`}>
+              <span className={`text-caption ${dateToneClassName[formatted.tone]}`}>
                 {formatted.text}
               </span>
             </span>
@@ -241,7 +247,9 @@ function FileRowImpl({
         }
       }}
       className={`${rowClassName} cursor-pointer select-none ${
-        isDropTarget ? 'ring-2 ring-inset ring-accent-blue-border bg-accent-blue-soft' : ''
+        isDropTarget
+          ? 'ring-2 ring-inset ring-light-accent dark:ring-dark-accent bg-light-tint dark:bg-dark-tint'
+          : ''
       }`}
     >
       {visibleColumns.map((column) => {
@@ -250,7 +258,7 @@ function FileRowImpl({
             <span
               key={column.key}
               style={columnFlexStyle(column.key, columnWidths)}
-              className={columnCellClassName(column.key)}
+              className={cellClassName(column.key)}
             >
               <span className="flex min-w-0 items-center gap-2">
                 <EntryIcon entry={entry} />
@@ -258,11 +266,7 @@ function FileRowImpl({
                   title={
                     entry.originalPath ? `Original location: ${entry.originalPath}` : undefined
                   }
-                  className={`truncate ${
-                    isCut
-                      ? 'text-light-text-soft dark:text-dark-text-soft'
-                      : 'text-light-text dark:text-dark-text'
-                  }`}
+                  className="truncate text-light-text dark:text-dark-text"
                 >
                   {entry.name}
                 </span>
@@ -276,9 +280,9 @@ function FileRowImpl({
             <span
               key={column.key}
               style={columnFlexStyle(column.key, columnWidths)}
-              className={columnCellClassName(column.key)}
+              className={cellClassName(column.key)}
             >
-              <span className="font-mono text-uxs text-light-text-soft dark:text-dark-text-soft">
+              <span className="font-mono text-caption text-light-text-secondary dark:text-dark-text-secondary">
                 <SizeValue entry={entry} />
               </span>
             </span>
@@ -290,9 +294,9 @@ function FileRowImpl({
             <span
               key={column.key}
               style={columnFlexStyle(column.key, columnWidths)}
-              className={columnCellClassName(column.key)}
+              className={cellClassName(column.key)}
             >
-              <span className="font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
+              <span className="font-mono text-caption text-light-text-secondary dark:text-dark-text-secondary">
                 {entry.isDir ? (entry.itemCount ?? '—') : '—'}
               </span>
             </span>
@@ -304,9 +308,9 @@ function FileRowImpl({
             <span
               key={column.key}
               style={columnFlexStyle(column.key, columnWidths)}
-              className={columnCellClassName(column.key)}
+              className={cellClassName(column.key)}
             >
-              <span className="truncate text-usm text-light-text-muted dark:text-dark-text-muted">
+              <span className="truncate text-caption text-light-text-secondary dark:text-dark-text-secondary">
                 {entry.typeLabel}
               </span>
             </span>
@@ -321,9 +325,9 @@ function FileRowImpl({
           <span
             key={column.key}
             style={columnFlexStyle(column.key, columnWidths)}
-            className={columnCellClassName(column.key)}
+            className={cellClassName(column.key)}
           >
-            <span className={`font-mono text-uxs ${dateToneClassName[formatted.tone]}`}>
+            <span className={`text-caption ${dateToneClassName[formatted.tone]}`}>
               {formatted.text}
             </span>
           </span>

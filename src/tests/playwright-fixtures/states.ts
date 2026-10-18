@@ -1,4 +1,9 @@
-import type { FolderSizeIndexStatus, ListDirResponse } from '@/lib/types/ipc'
+import type {
+  FolderSizeIndexStatus,
+  ListDirResponse,
+  MenuActionStatus,
+  VolumeInfo,
+} from '@/lib/types/ipc'
 
 /**
  * Fixture payloads for the Phase 5 directory state screenshots. Specs select
@@ -48,3 +53,48 @@ export const macIndexStatuses = {
     pauseReason: 'thermal',
   },
 } satisfies Record<string, FolderSizeIndexStatus>
+
+/**
+ * Drives at each capacity level: under 85% used (accent), 91% (warning) and
+ * 96% (danger). Network shares get no bar.
+ */
+export const capacityLevelVolumes: VolumeInfo[] = [
+  {
+    mountRoot: 'C:\\',
+    label: 'Windows',
+    totalBytes: 1_000_000_000,
+    freeBytes: 500_000_000,
+    isNetwork: false,
+    isRemovable: false,
+  },
+  {
+    mountRoot: 'D:\\',
+    label: 'Projects',
+    totalBytes: 1_000_000_000,
+    freeBytes: 90_000_000,
+    isNetwork: false,
+    isRemovable: false,
+  },
+  {
+    mountRoot: 'E:\\',
+    label: 'USB Stick',
+    totalBytes: 64_000_000,
+    freeBytes: 2_560_000,
+    isNetwork: false,
+    isRemovable: true,
+  },
+  {
+    mountRoot: 'Z:\\',
+    label: 'Share',
+    totalBytes: 500_000_000,
+    freeBytes: 200_000_000,
+    isNetwork: true,
+    isRemovable: false,
+  },
+]
+
+/** An eject the OS refused, which surfaces the floating error InfoBar. */
+export const ejectRefused: MenuActionStatus = {
+  handled: false,
+  message: 'USB Stick (E:) is in use. Close any open files and try again.',
+}

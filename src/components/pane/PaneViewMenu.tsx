@@ -3,6 +3,7 @@ import { MenuPopover, type MenuPopoverRadioItem } from '@/components/controls'
 import { paneViewMetadata, paneViewModes } from '@/lib/pane-view'
 import type { PaneId } from '@/stores/tabs-store'
 import { useTabsStore } from '@/stores/tabs-store'
+import { FOCUS_RING } from '@/lib/focus-ring'
 
 const modeIcons = { details: ListIcon, icons: Grid2X2Icon, thumbnails: ImagesIcon } as const
 
@@ -39,11 +40,12 @@ export function PaneViewMenu({ paneId }: { paneId: PaneId }) {
           aria-controls={controls}
           onClick={toggle}
           onKeyDown={onTriggerKeyDown}
-          className="inline-flex h-7 items-center gap-1 rounded-tab px-2 text-row text-light-text-soft hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
+          title="View"
+          className={`inline-flex h-8 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-control px-2 text-row text-light-text hover:bg-light-hover active:bg-light-press dark:text-dark-text dark:hover:bg-dark-hover dark:active:bg-dark-press ${FOCUS_RING}`}
         >
-          <Icon className="size-3.5" />
-          <span>View</span>
-          <ChevronDownIcon className="size-3" />
+          <Icon className="size-4" />
+          <span>{paneViewMetadata[viewMode].label}</span>
+          <ChevronDownIcon className="size-3 text-light-text-secondary dark:text-dark-text-secondary" />
         </button>
       )}
     />

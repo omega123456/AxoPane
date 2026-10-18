@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PaneState } from '@/types/pane'
-import { ChevronRightIcon } from '@/components/icons'
+import type { VolumeInfo } from '@/lib/types/ipc'
+import { ChevronRightIcon, FolderGlyph } from '@/components/icons'
 import type { BreadcrumbLayoutMeasure } from '@/lib/breadcrumb-layout'
 import { computeBreadcrumbLayout, createBreadcrumbMeasurer } from '@/lib/breadcrumb-layout'
 import { useElementWidth } from '@/lib/use-element-width'
 import { usePanesStore } from '@/stores/panes-store'
+import { FOCUS_RING } from '@/lib/focus-ring'
 
 type BreadcrumbBarProps = {
   pane: PaneState
@@ -12,13 +14,14 @@ type BreadcrumbBarProps = {
 
 export function BreadcrumbBar({ pane }: BreadcrumbBarProps) {
   const navigatePane = usePanesStore((state) => state.navigatePane)
+  const volumes = usePanesStore((state) => state.volumes)
   const [editingPath, setEditingPath] = useState(false)
   const [pathDraft, setPathDraft] = useState(pane.path)
   const pathInputRef = useRef<HTMLInputElement>(null)
   const [navElement, setNavElement] = useState<HTMLElement | null>(null)
   const [measureVersion, setMeasureVersion] = useState(0)
 
-  const segments = splitPath(pane.path)
+  const segments = withRootVolumeLabel(splitPath(pane.path), volumes)
   const navWidth = useElementWidth(navElement)
   const layout = computeBreadcrumbLayout({
     segments,
@@ -84,14 +87,9 @@ export function BreadcrumbBar({ pane }: BreadcrumbBarProps) {
     }
   }
 
-  function navigateShortcut(path: string) {
-    setEditingPath(false)
-    void navigatePane(pane.id, path)
-  }
-
   return (
     <div
-      className="flex h-crumb items-center gap-2 border-b border-light-border bg-light-surface px-3 dark:border-dark-border dark:bg-dark-surface"
+      className="flex h-address shrink-0 items-center border-b border-light-divider px-0.75 dark:border-dark-divider"
       onBlur={(event) => {
         if (
           editingPath &&
@@ -109,86 +107,112 @@ export function BreadcrumbBar({ pane }: BreadcrumbBarProps) {
       }}
     >
       {editingPath ? (
-        <input
-          ref={pathInputRef}
-          autoComplete="off"
-          aria-label={`${pane.title} path`}
-          value={pathDraft}
-          onChange={(event) => setPathDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              submitPathEdit()
-            } else if (event.key === 'Escape') {
-              event.preventDefault()
-              setEditingPath(false)
-              setPathDraft(pane.path)
-            }
-          }}
-          className="w-0 min-w-0 flex-1 select-text rounded-tab border border-accent-blue-border bg-light-panel px-2 py-1 font-mono text-row text-light-text outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:bg-dark-panel dark:text-dark-text"
-        />
+        <div className="ml-0.75 flex h-8 min-w-0 flex-1 items-center rounded-control border border-b-2 border-light-control-stroke border-b-light-accent bg-light-card px-2 dark:border-dark-control-stroke dark:border-b-dark-accent dark:bg-dark-card">
+          <input
+            ref={pathInputRef}
+            autoComplete="off"
+            spellCheck={false}
+            aria-label={`${pane.title} path`}
+            value={pathDraft}
+            onChange={(event) => setPathDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                submitPathEdit()
+              } else if (event.key === 'Escape') {
+                event.preventDefault()
+                setEditingPath(false)
+                setPathDraft(pane.path)
+              }
+            }}
+            className="w-0 min-w-0 flex-1 select-text bg-transparent font-mono text-row text-light-text outline-none selection:bg-light-accent selection:text-light-on-accent dark:text-dark-text dark:selection:bg-dark-accent dark:selection:text-dark-on-accent"
+          />
+        </div>
       ) : (
-        <nav
-          ref={setNavElement}
-          aria-label={`${pane.title} path`}
-          className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-row"
+        // Flat at rest; the hover fill shows the row is clickable. Double-click
+        // its empty part (or right-click anywhere) to type a path.
+        <div
+          className="ml-0.75 flex h-8 min-w-0 flex-1 cursor-text items-center overflow-hidden rounded-control pl-1.5 pr-1 hover:bg-light-hover dark:hover:bg-dark-hover"
           onDoubleClick={(event) => {
             if (event.target === event.currentTarget) {
               startPathEdit()
             }
           }}
         >
-          {layout.collapsed ? (
-            <span
-              aria-hidden="true"
-              data-testid="breadcrumb-collapse-marker"
-              className="inline-flex shrink-0 items-center gap-1 text-row text-light-text-muted dark:text-dark-text-muted"
-            >
-              <span>{'..'}</span>
-              <ChevronRightIcon className="h-3.5 w-3.5" />
-            </span>
-          ) : null}
-          {layout.items.map((segment, index) => (
-            <button
-              key={segment.path}
-              type="button"
-              onClick={() => void navigatePane(pane.id, segment.path)}
-              title={segment.truncated ? segment.fullLabel : undefined}
-              className={`inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-tab px-2 py-1 text-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border ${
-                index === layout.items.length - 1
-                  ? 'bg-accent-blue-soft text-accent-blue-light dark:text-accent-blue'
-                  : 'text-light-text-soft hover:bg-light-hover dark:text-dark-text-soft dark:hover:bg-dark-hover'
-              }`}
-            >
-              <span className="truncate">{segment.label}</span>
-              {index < layout.items.length - 1 ? (
-                <ChevronRightIcon className="h-3.5 w-3.5" />
-              ) : null}
-            </button>
-          ))}
-        </nav>
+          <FolderGlyph className="mr-1 size-4 shrink-0" />
+          <nav
+            ref={setNavElement}
+            aria-label={`${pane.title} path`}
+            className="flex min-w-0 flex-1 items-center overflow-hidden whitespace-nowrap text-row"
+            onDoubleClick={(event) => {
+              if (event.target === event.currentTarget) {
+                startPathEdit()
+              }
+            }}
+          >
+            {layout.collapsed ? (
+              <span
+                aria-hidden="true"
+                data-testid="breadcrumb-collapse-marker"
+                className="inline-flex shrink-0 items-center text-light-text-secondary dark:text-dark-text-secondary"
+              >
+                <span className="px-1.5">{'…'}</span>
+                <CrumbSeparator />
+              </span>
+            ) : null}
+            {layout.items.map((segment, index) => {
+              const isCurrent = index === layout.items.length - 1
+              return (
+                <span key={segment.path} className="inline-flex shrink-0 items-center">
+                  <button
+                    type="button"
+                    aria-current={isCurrent ? 'location' : undefined}
+                    onClick={() => void navigatePane(pane.id, segment.path)}
+                    title={segment.truncated ? segment.fullLabel : undefined}
+                    className={`inline-flex shrink-0 items-center rounded-control px-1.5 py-1 text-row ${FOCUS_RING} ${
+                      isCurrent
+                        ? 'cursor-default font-semibold text-light-text dark:text-dark-text'
+                        : 'cursor-pointer text-light-text-secondary hover:bg-light-hover active:bg-light-press dark:text-dark-text-secondary dark:hover:bg-dark-hover dark:active:bg-dark-press'
+                    }`}
+                  >
+                    <span className="truncate">{segment.label}</span>
+                  </button>
+                  {isCurrent ? null : <CrumbSeparator />}
+                </span>
+              )
+            })}
+          </nav>
+        </div>
       )}
-      <button
-        type="button"
-        aria-label="Navigate to ~"
-        onClick={() => navigateShortcut('~')}
-        className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab font-mono text-row text-light-text-soft hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
-      >
-        ~
-      </button>
-      <button
-        type="button"
-        aria-label="Navigate to /"
-        onClick={() => navigateShortcut('/')}
-        className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab font-mono text-row text-light-text-soft hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
-      >
-        /
-      </button>
     </div>
   )
 }
 
+function CrumbSeparator() {
+  return (
+    <span
+      aria-hidden="true"
+      className="flex shrink-0 items-center text-light-text-tertiary dark:text-dark-text-tertiary"
+    >
+      <ChevronRightIcon className="size-3" />
+    </span>
+  )
+}
+
 type Segment = { label: string; path: string }
+
+/**
+ * Labels the POSIX root crumb with the boot volume's name ("Macintosh HD"), as
+ * Finder does. Drive letters and UNC roots already name their volume.
+ */
+export function withRootVolumeLabel(segments: Segment[], volumes: VolumeInfo[]): Segment[] {
+  const [root, ...rest] = segments
+  if (root?.path !== '/') {
+    return segments
+  }
+  const label = volumes.find((volume) => volume.mountRoot === '/')?.label.trim()
+  return label ? [{ ...root, label }, ...rest] : segments
+}
 
 /**
  * Splits an absolute path into clickable breadcrumb segments with correct

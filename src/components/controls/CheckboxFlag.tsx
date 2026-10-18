@@ -1,42 +1,50 @@
 import type { ReactNode } from 'react'
 import { CheckIcon } from '@/components/icons'
+import { FOCUS_RING } from '@/lib/focus-ring'
 
+/** Fluent checkbox: an 18px box on the input boundary, solid accent when checked. */
 export function CheckboxFlag({
   checked,
   onChange,
   title,
   description,
+  tooltip,
+  keyShortcut,
 }: {
   checked: boolean
   onChange: (value: boolean) => void
   title: ReactNode
   description?: ReactNode
+  tooltip?: string
+  keyShortcut?: string
 }) {
   return (
     <button
       type="button"
       role="checkbox"
       aria-checked={checked}
+      aria-keyshortcuts={keyShortcut}
+      title={tooltip}
       onClick={() => onChange(!checked)}
-      className="flex w-full items-start gap-2.5 rounded-tab border-b border-light-border py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border"
+      className={`flex items-start gap-2 rounded-control text-left ${FOCUS_RING}`}
     >
       <span
-        className={`mt-0.5 flex size-control-dot flex-none items-center justify-center rounded-md ${
+        className={`flex size-4.5 flex-none items-center justify-center rounded-control border ${
           checked
-            ? 'bg-accent-blue-light text-white dark:bg-accent-blue'
-            : 'border border-light-border-strong dark:border-dark-border-strong'
+            ? 'border-light-accent bg-light-accent text-light-on-accent dark:border-dark-accent dark:bg-dark-accent dark:text-dark-on-accent'
+            : 'border-light-boundary bg-light-control dark:border-dark-boundary dark:bg-dark-control'
         }`}
       >
-        {checked ? <CheckIcon className="size-3" /> : null}
+        {checked ? <CheckIcon className="size-3" strokeWidth={2.25} /> : null}
       </span>
-      <div className="min-w-0 flex-1">
-        <div className="text-row font-medium text-light-text dark:text-dark-text">{title}</div>
+      <span className="min-w-0 flex-1">
+        <span className="block text-row text-light-text dark:text-dark-text">{title}</span>
         {description ? (
-          <div className="mt-0.5 text-uxs text-light-text-muted dark:text-dark-text-muted">
+          <span className="block text-caption text-light-text-secondary dark:text-dark-text-secondary">
             {description}
-          </div>
+          </span>
         ) : null}
-      </div>
+      </span>
     </button>
   )
 }

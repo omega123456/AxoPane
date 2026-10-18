@@ -170,13 +170,13 @@ describe('FolderTree', () => {
     expect(startOp).not.toHaveBeenCalled()
   })
 
-  it('groups volumes under Drives, Removable Drives, and Network Drives headings', () => {
+  it('groups volumes under Drives, Removable, and Network headings', () => {
     seedVolumes()
     render(<FolderTree />)
 
     expect(screen.getByText('Drives')).toBeInTheDocument()
-    expect(screen.getByText('Removable Drives')).toBeInTheDocument()
-    expect(screen.getByText('Network Drives')).toBeInTheDocument()
+    expect(screen.getByText('Removable')).toBeInTheDocument()
+    expect(screen.getByText('Network')).toBeInTheDocument()
 
     expect(screen.getByText('Windows (C:)')).toBeInTheDocument()
     expect(screen.getByText('USB Stick (E:)')).toBeInTheDocument()
@@ -202,8 +202,8 @@ describe('FolderTree', () => {
     render(<FolderTree />)
 
     expect(screen.getByText('Drives')).toBeInTheDocument()
-    expect(screen.queryByText('Removable Drives')).not.toBeInTheDocument()
-    expect(screen.queryByText('Network Drives')).not.toBeInTheDocument()
+    expect(screen.queryByText('Removable')).not.toBeInTheDocument()
+    expect(screen.queryByText('Network')).not.toBeInTheDocument()
   })
 
   it('pins the ancestor chain of the active node once scrolled past, leaving siblings unpinned', async () => {
@@ -452,8 +452,8 @@ describe('FolderTree', () => {
       expect(screen.queryByText('AxoPane', { selector: 'span' })).not.toBeInTheDocument()
       expect(screen.getAllByText('Untitled', { selector: 'span' })).toHaveLength(1)
     })
-    expect(treeRow('Trash').parentElement).toHaveClass('bg-light-tree', 'overflow-hidden')
-    expect(treeRow('Untitled').parentElement).toHaveClass('bg-light-tree', 'overflow-hidden')
+    expect(treeRow('Trash').parentElement).toHaveClass('bg-light-base', 'overflow-hidden')
+    expect(treeRow('Untitled').parentElement).toHaveClass('bg-light-base', 'overflow-hidden')
   })
 
   it('keeps pinned rows out of the macOS overlay-scrollbar lane', async () => {
@@ -486,7 +486,7 @@ describe('FolderTree', () => {
     scrollTreeTo(420)
 
     const pinnedOverlay = pinnedRows()[0]?.parentElement
-    expect(pinnedOverlay).toHaveClass('right-2')
+    expect(pinnedOverlay).toHaveClass('right-3')
   })
 
   it('gives every ancestor a distinct pinned slot when many levels are revealed in one jump', async () => {
@@ -672,7 +672,7 @@ describe('FolderTree', () => {
     const row = treeRow('cc')
 
     fireEvent.dragOver(row, { dataTransfer: { dropEffect: '' } })
-    expect(row).toHaveClass('ring-accent-blue-border')
+    expect(row).toHaveClass('ring-light-accent dark:ring-dark-accent')
 
     fireEvent.drop(row, { dataTransfer: { dropEffect: '' } })
     await waitFor(() => {

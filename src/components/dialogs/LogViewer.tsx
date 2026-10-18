@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeftIcon, ArrowRightIcon, RefreshIcon } from '@/components/icons'
-import { SelectField } from '@/components/controls'
+import { Button, SelectField } from '@/components/controls'
 import { readLogs } from '@/lib/ipc/commands'
 import { log } from '@/lib/app-log-commands'
 import type { LogDisplayFilter, LogEntry } from '@/lib/types/ipc'
@@ -50,13 +50,14 @@ function formatTimestamp(iso: string): string {
 }
 
 const BADGE_TONES: Record<string, string> = {
-  error: 'border-accent-red/30 bg-accent-red/15 text-accent-red',
-  warn: 'border-accent-amber/30 bg-accent-amber/15 text-accent-amber',
-  info: 'border-accent-blue/30 bg-accent-blue/15 text-accent-blue-light dark:text-accent-blue',
+  error:
+    'border-light-danger/30 dark:border-dark-danger/30 bg-light-danger/15 dark:bg-dark-danger/15 text-light-danger dark:text-dark-danger',
+  warn: 'border-light-warning/30 dark:border-dark-warning/30 bg-light-warning/15 dark:bg-dark-warning/15 text-light-warning dark:text-dark-warning',
+  info: 'border-light-accent/30 dark:border-dark-accent/30 bg-light-accent/15 dark:bg-dark-accent/15 text-light-accent dark:text-dark-accent',
   debug:
-    'border-light-border bg-light-hover text-light-text-muted dark:border-dark-border dark:bg-dark-hover dark:text-dark-text-muted',
+    'border-light-divider bg-light-hover text-light-text-secondary dark:border-dark-divider dark:bg-dark-hover dark:text-dark-text-secondary',
   trace:
-    'border-light-border bg-light-surface text-light-text-faint dark:border-dark-border dark:bg-dark-surface dark:text-dark-text-faint',
+    'border-light-divider bg-light-card text-light-text-tertiary dark:border-dark-divider dark:bg-dark-card dark:text-dark-text-tertiary',
 }
 
 function LogLevelBadge({ level }: { level: string }) {
@@ -64,7 +65,7 @@ function LogLevelBadge({ level }: { level: string }) {
   const tone = BADGE_TONES[normalized] ?? BADGE_TONES.info
   return (
     <span
-      className={`inline-flex min-w-14 items-center justify-center rounded-full border px-2 py-0.5 font-mono text-2xs font-bold uppercase tracking-wide ${tone}`}
+      className={`inline-flex min-w-14 items-center justify-center rounded-full border px-2 py-0.5 font-mono text-caption font-bold uppercase tracking-wide ${tone}`}
     >
       {normalized.toUpperCase()}
     </span>
@@ -73,8 +74,8 @@ function LogLevelBadge({ level }: { level: string }) {
 
 function rowTone(level: string): string {
   const normalized = level.toLowerCase()
-  if (normalized === 'error') return 'bg-accent-red/5'
-  if (normalized === 'warn') return 'bg-accent-amber/5'
+  if (normalized === 'error') return 'bg-light-danger/5 dark:bg-dark-danger/5'
+  if (normalized === 'warn') return 'bg-light-warning/5 dark:bg-dark-warning/5'
   return ''
 }
 
@@ -154,9 +155,9 @@ export function LogViewer() {
     <section
       aria-label="Application logs"
       data-testid="log-viewer"
-      className="mt-4 flex flex-col overflow-hidden rounded-modal border border-light-border bg-light-panel dark:border-dark-border dark:bg-dark-panel"
+      className="mt-1 flex flex-col overflow-hidden rounded-card border border-light-stroke bg-light-card dark:border-dark-stroke dark:bg-dark-card"
     >
-      <div className="flex items-center justify-between gap-3 border-b border-light-border bg-light-surface p-3 dark:border-dark-border dark:bg-dark-surface">
+      <div className="flex items-center justify-between gap-3 border-b border-light-divider px-4 py-2.5 dark:border-dark-divider">
         <SelectField
           ariaLabel="Severity filter"
           value={filter}
@@ -167,67 +168,63 @@ export function LogViewer() {
           options={FILTER_OPTIONS}
         />
         <div className="flex items-center gap-2">
-          <button
-            type="button"
+          <Button
+            variant="subtle"
             aria-label="Refresh logs"
             title="Refresh logs"
             onClick={refresh}
-            className="flex size-8 cursor-pointer items-center justify-center rounded-md text-light-text-muted hover:bg-light-hover hover:text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-muted dark:hover:bg-dark-hover dark:hover:text-accent-blue"
+            size="icon"
             data-testid="log-viewer-refresh"
           >
             <RefreshIcon className={`size-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="subtle"
             aria-label="Toggle auto-refresh"
             aria-pressed={autoRefresh}
             onClick={() => setAutoRefresh((value) => !value)}
             data-testid="log-viewer-auto-refresh"
-            className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-uxs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border ${
-              autoRefresh
-                ? 'border-accent-green/40 text-accent-green'
-                : 'border-light-border text-light-text-muted dark:border-dark-border dark:text-dark-text-muted'
-            }`}
+            className={autoRefresh ? 'bg-light-hover dark:bg-dark-hover' : ''}
           >
             <span
               aria-hidden="true"
               className={`size-2 rounded-full ${
                 autoRefresh
-                  ? 'animate-pulse bg-accent-green'
-                  : 'bg-light-text-faint dark:bg-dark-text-faint'
+                  ? 'bg-light-success dark:bg-dark-success'
+                  : 'bg-light-text-tertiary dark:bg-dark-text-tertiary'
               }`}
             />
             {autoRefresh ? 'Auto-refresh on' : 'Auto-refresh off'}
-          </button>
+          </Button>
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-3 border-b border-light-border bg-light-surface px-3 py-2 dark:border-dark-border dark:bg-dark-surface">
+      <div className="flex items-center justify-between gap-3 border-b border-light-divider px-4 py-1 dark:border-dark-divider">
         <div className="flex items-center gap-1">
-          <button
-            type="button"
+          <Button
+            variant="subtle"
             aria-label="Previous page"
             onClick={() => setPage(Math.max(1, safePage - 1))}
             disabled={safePage <= 1}
-            className="flex size-7 cursor-pointer items-center justify-center rounded-md text-light-text-muted hover:bg-light-hover disabled:cursor-default disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-muted dark:hover:bg-dark-hover"
+            size="icon"
           >
             <ArrowLeftIcon className="size-4" />
-          </button>
-          <span className="min-w-20 text-center text-uxs text-light-text-muted dark:text-dark-text-muted">
+          </Button>
+          <span className="min-w-20 text-center text-caption text-light-text-secondary dark:text-dark-text-secondary">
             Page {safePage} / {totalPages}
           </span>
-          <button
-            type="button"
+          <Button
+            variant="subtle"
             aria-label="Next page"
             onClick={() => setPage(Math.min(totalPages, safePage + 1))}
             disabled={safePage >= totalPages}
-            className="flex size-7 cursor-pointer items-center justify-center rounded-md text-light-text-muted hover:bg-light-hover disabled:cursor-default disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-muted dark:hover:bg-dark-hover"
+            size="icon"
           >
             <ArrowRightIcon className="size-4" />
-          </button>
+          </Button>
         </div>
         <span
-          className="text-uxs text-light-text-muted dark:text-dark-text-muted"
+          className="text-caption text-light-text-secondary dark:text-dark-text-secondary"
           data-testid="log-viewer-summary"
         >
           {summary}
@@ -238,46 +235,46 @@ export function LogViewer() {
         <div
           role="alert"
           data-testid="log-viewer-error"
-          className="px-3 py-8 text-center text-row text-accent-red"
+          className="px-3 py-8 text-center text-row text-light-danger dark:text-dark-danger"
         >
           Failed to load logs.
         </div>
       ) : !isLoading && filtered.length === 0 ? (
         <div
           data-testid="log-viewer-empty"
-          className="px-3 py-8 text-center text-row text-light-text-muted dark:text-dark-text-muted"
+          className="px-3 py-8 text-center text-row text-light-text-secondary dark:text-dark-text-secondary"
         >
           No log entries to show.
         </div>
       ) : (
-        <div className="overflow-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint">
+        <div className="overflow-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary">
           <table className="w-full table-fixed border-collapse">
-            <thead className="bg-light-titlebar dark:bg-dark-titlebar">
-              <tr className="text-left text-2xs uppercase tracking-wide text-light-text-muted dark:text-dark-text-muted">
-                <th className="w-20 px-3 py-2 font-bold">Level</th>
-                <th className="px-3 py-2 font-bold">Message</th>
-                <th className="w-32 px-3 py-2 font-bold">Time</th>
+            <thead>
+              <tr className="text-left text-caption text-light-text-secondary dark:text-dark-text-secondary">
+                <th className="w-20 py-2 pl-4 pr-3 font-normal">Level</th>
+                <th className="px-3 py-2 font-normal">Message</th>
+                <th className="w-32 px-3 py-2 font-normal">Time</th>
               </tr>
             </thead>
             <tbody>
               {visible.map((entry) => (
                 <tr
                   key={entry.id}
-                  className={`border-b border-light-border dark:border-dark-border ${rowTone(entry.level)}`}
+                  className={`border-b border-light-divider dark:border-dark-divider ${rowTone(entry.level)}`}
                 >
-                  <td className="px-3 py-2 align-top">
+                  <td className="py-2 pl-4 pr-3 align-top">
                     <LogLevelBadge level={entry.level} />
                   </td>
                   <td className="px-3 py-2 align-top">
                     <span
                       title={entry.message}
-                      className="block truncate font-mono text-uxs text-light-text dark:text-dark-text"
+                      className="block truncate font-mono text-caption text-light-text dark:text-dark-text"
                       data-testid={`log-viewer-message-${entry.id}`}
                     >
                       {entry.message}
                     </span>
                   </td>
-                  <td className="whitespace-nowrap px-3 py-2 align-top font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
+                  <td className="whitespace-nowrap px-3 py-2 align-top font-mono text-caption text-light-text-secondary dark:text-dark-text-secondary">
                     {formatTimestamp(entry.timestamp)}
                   </td>
                 </tr>

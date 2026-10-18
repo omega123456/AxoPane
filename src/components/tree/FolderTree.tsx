@@ -13,12 +13,7 @@ import { FavouriteTreeRow, favouriteLabel, type FavouriteRowActions } from './Fa
 import { buildContextMenuContent } from '@/components/menus/menu-definitions'
 import { detectPlatformOs } from '@/lib/keymap'
 import { TRASH_PATH } from '@/lib/trash'
-import {
-  buildTreeFlatModel,
-  treeRowHeight,
-  TREE_ROW_HEIGHT_PX,
-  type TreeFlatRow,
-} from '@/lib/tree-flat'
+import { buildTreeFlatModel, treeRowHeight, type TreeFlatRow } from '@/lib/tree-flat'
 import { buildStickyChain } from '@/lib/tree-sticky'
 import { useElementVirtualizer } from '@/lib/use-element-virtualizer'
 import { useLayoutStore } from '@/stores/layout-store'
@@ -60,7 +55,8 @@ export function FolderTree() {
     [treeNodes, volumes, favourites],
   )
   const isMacOs = detectPlatformOs() === 'macos'
-  const rowLayerClassName = 'absolute inset-x-0 overflow-hidden bg-light-tree dark:bg-dark-tree'
+  const rowLayerClassName =
+    'absolute inset-x-0 overflow-hidden bg-light-base dark:bg-dark-base mica:bg-transparent'
 
   // The ancestor chain (volume root -> active node) pins to the top of the
   // scroll area as the user scrolls past each ancestor - an editor-style "sticky
@@ -227,29 +223,32 @@ export function FolderTree() {
   // native scroll and rubber-band.
   const pinnedRows = useMemo(() => {
     const pinned: { path: string; chainIndex: number; top: number }[] = []
+    // Slots stack by each ancestor's own height: a drive root is taller than
+    // the folder rows pinned beneath it.
+    let slotTop = 0
     stickyChain.forEach((path, chainIndex) => {
       const index = indexByPath.get(path)
       if (index === undefined) {
         return
       }
-      const slotTop = chainIndex * TREE_ROW_HEIGHT_PX
       if (offsets[index] - scrollTop < slotTop) {
         pinned.push({ path, chainIndex, top: slotTop })
       }
+      slotTop += treeRowHeight(rows[index])
     })
     return pinned
-  }, [stickyChain, indexByPath, offsets, scrollTop])
+  }, [stickyChain, indexByPath, offsets, rows, scrollTop])
 
   return (
     <aside
       // Width is user-draggable runtime geometry; no static token can express it.
       style={{ width: `${treeWidthPx}px` }}
-      className="relative flex min-h-0 shrink-0 flex-col border-r border-light-border bg-light-tree dark:border-dark-border dark:bg-dark-tree"
+      className="relative flex min-h-0 shrink-0 flex-col bg-light-base dark:bg-dark-base mica:bg-transparent"
     >
       <div
         ref={scrollRef}
         data-testid="folder-tree-scroll"
-        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pb-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint"
+        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pb-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary"
         onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
       >
         {/*
@@ -258,7 +257,10 @@ export function FolderTree() {
           are continuous px values no static token can express. Every
           design-system value elsewhere stays a pure Tailwind utility.
         */}
-        <div style={{ height: `${totalHeight}px`, position: 'relative' }} className="min-h-full">
+        <div
+          style={{ height: `${totalHeight}px`, position: 'relative' }}
+          className="mx-1 min-h-full"
+        >
           {itemsToRender.map((item) => {
             const row = rows[item.index]
             const style = {
@@ -277,8 +279,10 @@ export function FolderTree() {
                     favouritesHeader ? (event) => void handleFavouritesDrop(event) : undefined
                   }
                 >
-                  <div className="flex h-tree-header items-end px-3 pb-1">
-                    <span className="font-mono text-uxs uppercase tracking-wide text-light-text-faint dark:text-dark-text-faint">
+                  <div
+                    className={`flex items-end px-3 pb-1 ${favouritesHeader ? 'h-tree-header-first' : 'h-tree-header'}`}
+                  >
+                    <span className="text-caption text-light-text-tertiary dark:text-dark-text-tertiary">
                       {row.label}
                     </span>
                   </div>
@@ -295,7 +299,7 @@ export function FolderTree() {
                   onDragOver={handleFavouritesDragOver}
                   onDrop={(event) => void handleFavouritesDrop(event)}
                 >
-                  <div className="flex h-tree-row items-center rounded-tab px-3 text-uxs text-light-text-faint ring-1 ring-inset ring-light-border dark:text-dark-text-faint dark:ring-dark-border">
+                  <div className="flex h-tree-row items-center rounded-control px-3 text-caption text-light-text-tertiary ring-1 ring-inset ring-light-divider dark:text-dark-text-tertiary dark:ring-dark-divider">
                     Drop folders here
                   </div>
                 </div>
@@ -358,7 +362,7 @@ export function FolderTree() {
         pointer events; each pinned row re-enables them for itself.
       */}
       <div
-        className={`pointer-events-none absolute left-0 top-0 ${isMacOs ? 'right-2' : 'right-0'}`}
+        className={`pointer-events-none absolute left-1 top-0 ${isMacOs ? 'right-3' : 'right-1'}`}
       >
         {pinnedRows.map(({ path, chainIndex, top }) => {
           const node = treeNodes[path]

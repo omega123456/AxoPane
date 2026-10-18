@@ -89,7 +89,7 @@ describe('FileRow date column', () => {
     )
 
     const cell = screen.getByText('2 hours ago')
-    expect(cell).toHaveClass('text-accent-blue-light')
+    expect(cell).toHaveClass('text-light-accent')
   })
 
   it('shows a weekday label for modified dates from earlier in the past week', () => {
@@ -148,7 +148,7 @@ describe('FileRow drag-and-drop', () => {
         actions={makeActions()}
       />,
     )
-    expect(screen.getByRole('row')).not.toHaveClass('ring-accent-blue-border')
+    expect(screen.getByRole('row')).not.toHaveClass('ring-light-accent dark:ring-dark-accent')
 
     rerender(
       <FileRow
@@ -160,7 +160,7 @@ describe('FileRow drag-and-drop', () => {
         actions={makeActions()}
       />,
     )
-    expect(screen.getByRole('row')).toHaveClass('ring-accent-blue-border')
+    expect(screen.getByRole('row')).toHaveClass('ring-light-accent dark:ring-dark-accent')
   })
 })
 

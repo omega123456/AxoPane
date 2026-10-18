@@ -2,13 +2,35 @@ import { useMemo } from 'react'
 import {
   CheckCircleIcon,
   ChevronUpIcon,
-  LoaderCircleIcon,
+  CopyIcon,
+  CornerUpRightIcon,
+  PackageIcon,
+  PackageOpenIcon,
+  Trash2Icon,
   XIcon,
   XCircleIcon,
 } from '@/components/icons'
-import { formatBytes, formatCount } from '@/lib/format'
-import type { OpProgress } from '@/lib/types/ipc'
+import { Button, ProgressBar } from '@/components/controls'
+import { formatCount, formatDuration } from '@/lib/format'
+import type { OpKind, OpProgress } from '@/lib/types/ipc'
 import { isTerminal, useQueueStore } from '@/stores/queue-store'
+import { FOCUS_RING } from '@/lib/focus-ring'
+
+const kindIcons: Record<OpKind, typeof CopyIcon> = {
+  copy: CopyIcon,
+  move: CornerUpRightIcon,
+  delete: Trash2Icon,
+  compress: PackageIcon,
+  extract: PackageOpenIcon,
+}
+
+const kindVerbs: Record<OpKind, string> = {
+  copy: 'Copying',
+  move: 'Moving',
+  delete: 'Deleting',
+  compress: 'Compressing',
+  extract: 'Extracting',
+}
 
 function summarize(operations: OpProgress[]) {
   const active = operations.filter((operation) => !isTerminal(operation.status))
@@ -47,32 +69,35 @@ function summarize(operations: OpProgress[]) {
   const totalBytes = active.reduce((sum, operation) => sum + operation.totalBytes, 0)
   const copiedBytes = active.reduce((sum, operation) => sum + operation.copiedBytes, 0)
   const percent = totalBytes > 0 ? (copiedBytes / totalBytes) * 100 : 0
-  const verb = active.some((operation) => operation.kind === 'delete')
-    ? 'Deleting'
-    : active.some((operation) => operation.kind === 'extract')
-      ? 'Extracting'
-      : active.some((operation) => operation.kind === 'compress')
-        ? 'Compressing'
-        : active.some((operation) => operation.kind === 'move')
-          ? 'Moving'
-          : 'Copying'
+  const etas = active.flatMap((operation) =>
+    operation.etaSeconds === null ? [] : [operation.etaSeconds],
+  )
+  // One kind names the whole queue, by precedence; the icon and verb follow it.
+  const kind: OpKind =
+    (['delete', 'extract', 'compress', 'move'] as const).find((candidate) =>
+      active.some((operation) => operation.kind === candidate),
+    ) ?? 'copy'
+  const verb = kindVerbs[kind]
+  const totalItems = active[0].totalItems
 
   return {
     icon: 'active' as const,
-    label: `${verb} ${formatCount(active.length)} job${active.length === 1 ? '' : 's'}`,
-    // The aggregate is already computed for the bar above; print it too, so the
-    // collapsed pill answers "how much is left" without being expanded. Deletes
-    // are measured in items on the expanded card, so a byte total here would
-    // contradict it.
-    detail:
-      verb !== 'Deleting' && totalBytes > 0
-        ? `${formatBytes(copiedBytes)} of ${formatBytes(totalBytes)}`
-        : null,
+    kind,
+    label:
+      active.length === 1
+        ? `${verb} ${formatCount(totalItems)} item${totalItems === 1 ? '' : 's'}`
+        : `${verb} ${formatCount(active.length)} jobs`,
+    // Percent and time left answer "how much is left" without expanding.
+    detail: [
+      `${Math.round(percent)}%`,
+      ...(etas.length > 0 ? [formatDuration(Math.max(...etas))] : []),
+    ].join(' · '),
     percent,
     dismissible: false,
   }
 }
 
+/** The collapsed queue: one line with a progress bar along its bottom edge. */
 export function QueueToast() {
   const order = useQueueStore((state) => state.order)
   const operationsMap = useQueueStore((state) => state.operations)
@@ -94,65 +119,66 @@ export function QueueToast() {
       }
     }
   }
+  const KindIcon = summary.icon === 'active' ? kindIcons[summary.kind] : null
 
   return (
-    <div className="relative flex w-copycard items-center rounded-window border border-light-border-strong bg-light-surface shadow-float dark:border-dark-border-strong dark:bg-dark-surface">
-      <button
-        type="button"
-        aria-label="Expand job queue"
-        onClick={() => expand(true)}
-        className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-window px-3 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
-      >
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center">
-          {summary.icon === 'done' ? (
-            <CheckCircleIcon className="h-5 w-5 text-accent-green" />
-          ) : summary.icon === 'failed' ? (
-            <XCircleIcon className="h-5 w-5 text-accent-red" />
-          ) : summary.icon === 'cancelled' ? (
-            <XCircleIcon className="h-5 w-5 text-light-text-muted dark:text-dark-text-muted" />
-          ) : (
-            <LoaderCircleIcon className="h-5 w-5 animate-spin text-accent-blue-light dark:text-accent-blue" />
-          )}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="flex min-w-0 items-baseline gap-1.5">
-            <span className="truncate text-xs font-semibold text-light-text dark:text-dark-text">
-              {summary.label}
-            </span>
-            {summary.detail ? (
-              <span className="shrink-0 font-mono text-uxs tabular-nums text-light-text-muted dark:text-dark-text-muted">
-                {summary.detail}
-              </span>
-            ) : null}
-          </span>
-          <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-light-skeleton dark:bg-dark-skeleton">
-            <span
-              className={`block h-full rounded-full ${
-                summary.icon === 'failed'
-                  ? 'bg-accent-red'
-                  : summary.icon === 'done'
-                    ? 'bg-accent-green'
-                    : summary.icon === 'cancelled'
-                      ? 'bg-light-text-muted dark:bg-dark-text-muted'
-                      : 'bg-accent-blue-light dark:bg-accent-blue'
-              }`}
-              style={{ width: `${Math.min(100, Math.max(0, summary.percent))}%` }}
-            />
-          </span>
-        </span>
-        <ChevronUpIcon className="h-4 w-4 shrink-0 text-light-text-muted dark:text-dark-text-muted" />
-        {summary.dismissible ? <span className="w-7 shrink-0" aria-hidden="true" /> : null}
-      </button>
-      {summary.dismissible ? (
+    <div className="grid w-queue-mini gap-2 rounded-overlay border border-light-flyout-stroke bg-light-card pl-3.5 pr-2 pt-2.5 text-light-text shadow-light-flyout dark:border-dark-flyout-stroke dark:bg-dark-card dark:text-dark-text dark:shadow-dark-flyout">
+      <div className="flex items-center gap-2.5 text-row">
+        {KindIcon ? (
+          <KindIcon className="size-4 shrink-0 text-light-accent dark:text-dark-accent" />
+        ) : summary.icon === 'done' ? (
+          <CheckCircleIcon className="size-4 shrink-0 text-light-success dark:text-dark-success" />
+        ) : summary.icon === 'failed' ? (
+          <XCircleIcon className="size-4 shrink-0 text-light-danger dark:text-dark-danger" />
+        ) : (
+          <XCircleIcon className="size-4 shrink-0 text-light-text-secondary dark:text-dark-text-secondary" />
+        )}
         <button
           type="button"
-          aria-label="Dismiss job queue"
-          onClick={dismissTerminal}
-          className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-light-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:text-dark-text-muted dark:hover:bg-dark-hover"
+          onClick={() => expand(true)}
+          className={`min-w-0 flex-1 cursor-pointer truncate rounded-control text-left ${FOCUS_RING}`}
         >
-          <XIcon className="h-4 w-4" />
+          {summary.label}
         </button>
-      ) : null}
+        {summary.detail ? (
+          <span className="shrink-0 text-caption tabular-nums text-light-text-secondary dark:text-dark-text-secondary">
+            {summary.detail}
+          </span>
+        ) : null}
+        {summary.dismissible ? (
+          <Button
+            variant="subtle"
+            aria-label="Dismiss job queue"
+            onClick={dismissTerminal}
+            size="icon"
+          >
+            <XIcon className="size-4" />
+          </Button>
+        ) : null}
+        <Button
+          variant="subtle"
+          aria-label="Expand job queue"
+          title="Expand"
+          onClick={() => expand(true)}
+          size="icon"
+        >
+          <ChevronUpIcon className="size-4" />
+        </Button>
+      </div>
+      <ProgressBar
+        value={summary.percent}
+        label={summary.label}
+        tone={
+          summary.icon === 'failed'
+            ? 'danger'
+            : summary.icon === 'done'
+              ? 'success'
+              : summary.icon === 'cancelled'
+                ? 'neutral'
+                : 'accent'
+        }
+        className="mr-1.5 rounded-b-none"
+      />
     </div>
   )
 }

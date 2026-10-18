@@ -1,3 +1,4 @@
+import { FOCUS_RING } from '@/lib/focus-ring'
 export function TextAreaField({
   label,
   description,
@@ -21,7 +22,7 @@ export function TextAreaField({
         </div>
       ) : null}
       {description ? (
-        <div className="mb-2 text-uxs text-light-text-muted dark:text-dark-text-muted">
+        <div className="mb-2 text-caption text-light-text-secondary dark:text-dark-text-secondary">
           {description}
         </div>
       ) : null}
@@ -32,7 +33,7 @@ export function TextAreaField({
         rows={rows}
         spellCheck={false}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full resize-y select-text rounded-tab border border-light-border-strong bg-light-surface p-3 font-mono text-uxs leading-relaxed text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border-strong dark:bg-dark-surface dark:text-dark-text-soft"
+        className={`w-full resize-y select-text rounded-control border border-light-control-stroke bg-light-layer p-3 font-mono text-caption leading-relaxed text-light-text-secondary dark:border-dark-control-stroke dark:bg-dark-layer dark:text-dark-text-secondary ${FOCUS_RING}`}
       />
     </div>
   )

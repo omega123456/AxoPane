@@ -1,3 +1,6 @@
+import { FOCUS_RING } from '@/lib/focus-ring'
+
+/** Fluent toggle: 40×20 on the input boundary, with an On/Off label to its left. */
 export function ToggleSwitch({
   checked,
   onChange,
@@ -8,25 +11,28 @@ export function ToggleSwitch({
   label?: string
 }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      onClick={() => onChange(!checked)}
-      className={`relative h-switch-h w-switch-w shrink-0 cursor-pointer rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border ${
-        checked
-          ? 'bg-accent-blue-light dark:bg-accent-blue'
-          : 'bg-light-border-strong dark:bg-dark-border-strong'
-      }`}
-    >
-      <span
-        className={`absolute top-switch-pad size-4 rounded-full transition-all ${
+    <span className="inline-flex items-center gap-3 text-body text-light-text-secondary dark:text-dark-text-secondary">
+      <span aria-hidden="true">{checked ? 'On' : 'Off'}</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        onClick={() => onChange(!checked)}
+        className={`relative h-5 w-10 shrink-0 cursor-pointer rounded-full border ${FOCUS_RING} ${
           checked
-            ? 'left-switch-shift bg-white shadow-sm'
-            : 'left-switch-pad bg-light-text-muted dark:bg-dark-text-muted'
+            ? 'border-light-accent bg-light-accent dark:border-dark-accent dark:bg-dark-accent'
+            : 'border-light-boundary bg-light-control hover:bg-light-control-hover dark:border-dark-boundary dark:bg-dark-control dark:hover:bg-dark-control-hover'
         }`}
-      />
-    </button>
+      >
+        <span
+          className={`absolute top-0.75 size-3 rounded-full ${
+            checked
+              ? 'left-5.75 bg-light-on-accent dark:bg-dark-on-accent'
+              : 'left-0.75 bg-light-text-secondary dark:bg-dark-text-secondary'
+          }`}
+        />
+      </button>
+    </span>
   )
 }

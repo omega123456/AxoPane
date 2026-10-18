@@ -34,9 +34,9 @@ use super::types::{
     RequestThumbnailsResponse, ResolveConflictRequest, RestoreTrashRequest,
     ReviseSessionViewRequest, SaveConfigRequest, SaveSessionRequest, SessionRangeResponse,
     SessionRejection, SessionState, SetDefaultApplicationRequest, SetLogLevelRequest,
-    SetTabWatchRequest, ShowPropertiesRequest, SizeStateEvent, SizeSubscriptionsRequest,
-    StartOpRequest, TrashEntriesRequest, VisibleItemCountsRequest, VolumeInfo,
-    WarmNativeMenusRequest, WriteFileClipboardRequest,
+    SetTabWatchRequest, SetWindowThemeRequest, ShowPropertiesRequest, SizeStateEvent,
+    SizeSubscriptionsRequest, StartOpRequest, TrashEntriesRequest, VisibleItemCountsRequest,
+    VolumeInfo, WarmNativeMenusRequest, WriteFileClipboardRequest,
 };
 use crate::fs::DirectoryEntry;
 use std::path::Path;
@@ -560,6 +560,32 @@ pub fn restart_as_admin(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn restart_as_admin() -> Result<(), String> {
     restart_as_admin_impl()
+}
+
+#[tauri::command]
+pub fn open_full_disk_access_settings() -> Result<(), String> {
+    crate::launch::open_full_disk_access_settings().map_err(|error| {
+        let message = format!("Failed to open Full Disk Access settings: {error}");
+        log::error!("{message}");
+        message
+    })
+}
+
+/// Keeps the native title bar in step with the app theme.
+#[tauri::command]
+pub fn set_window_theme<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+    payload: SetWindowThemeRequest,
+) -> Result<(), String> {
+    window
+        .set_theme(crate::window_chrome::native_theme(payload.theme.as_deref()))
+        .map_err(|error| format!("Failed to set the window theme: {error}"))
+}
+
+/// `mica` when the window got the Windows 11 backdrop, `solid` otherwise.
+#[tauri::command]
+pub fn get_window_backdrop() -> crate::window_chrome::WindowBackdrop {
+    crate::window_chrome::current_backdrop()
 }
 
 fn restart_as_admin_impl() -> Result<(), String> {

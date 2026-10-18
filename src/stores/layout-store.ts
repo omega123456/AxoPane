@@ -73,7 +73,7 @@ export function clampColumnWidth(width: number) {
 
 export const defaultLayout: LayoutConfig = {
   detailsVisible: false,
-  treeWidthPx: 204,
+  treeWidthPx: 212,
   paneSplit: 0.5,
   columnWidths: defaultColumnWidths,
   defaultPaneMode: 'dual',

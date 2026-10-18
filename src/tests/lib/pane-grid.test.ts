@@ -21,11 +21,11 @@ describe('pane grid geometry', () => {
   })
 
   it('clamps narrow and ultra-wide layouts while retaining the mode geometry', () => {
-    expect(paneGridLayout('icons', 0)).toMatchObject({ columns: 1, cellMinimum: 208, rowPitch: 64 })
+    expect(paneGridLayout('icons', 0)).toMatchObject({ columns: 1, cellMinimum: 208, rowPitch: 60 })
     expect(paneGridLayout('thumbnails', 100000)).toMatchObject({
       columns: 12,
       cellMinimum: 208,
-      rowPitch: 228,
+      rowPitch: 204,
     })
   })
 

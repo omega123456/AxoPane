@@ -1,6 +1,6 @@
 import type { PaneViewMode } from './pane-view'
 
-export const PANE_GRID_GAP = 8
+export const PANE_GRID_GAP = 4
 export const PANE_GRID_MAX_COLUMNS = 12
 
 export const paneGridClassNames: Record<number, string> = {
@@ -30,7 +30,7 @@ export function paneGridMinimumCell(mode: Exclude<PaneViewMode, 'details'>) {
 }
 
 export function paneGridRowPitch(mode: Exclude<PaneViewMode, 'details'>) {
-  return mode === 'icons' ? 64 : 228
+  return mode === 'icons' ? 60 : 204
 }
 
 export function columnsForPaneWidth(width: number, cellMinimum: number) {

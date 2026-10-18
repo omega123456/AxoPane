@@ -16,7 +16,9 @@ describe('needsAdminRestart', () => {
     setPlatform('Win32')
 
     expect(needsAdminRestart('Access is denied. (os error 5)')).toBe(true)
-    expect(needsAdminRestart('Failed to create folder: Zugriff verweigert. (os error 5)')).toBe(true)
+    expect(needsAdminRestart('Failed to create folder: Zugriff verweigert. (os error 5)')).toBe(
+      true,
+    )
     expect(needsAdminRestart('A required privilege is not held (os error 1314)')).toBe(true)
     expect(needsAdminRestart('Unknown { hresult: 0x80070005 }')).toBe(true)
   })

@@ -53,6 +53,8 @@ import type {
   SessionState,
   VolumeInfo,
   WatchSeedReference,
+  SetWindowThemeRequest,
+  WindowBackdrop,
   WriteFileClipboardRequest,
 } from '@/lib/types/ipc'
 import { invokeCommand } from './client'
@@ -150,6 +152,18 @@ export function openPath(payload: OpenPathRequest) {
  */
 export function restartAsAdmin() {
   return invokeCommand({ command: 'restart_as_admin' }) as Promise<void>
+}
+
+export function setWindowTheme(payload: SetWindowThemeRequest) {
+  return invokeCommand({ command: 'set_window_theme', payload }) as Promise<void>
+}
+
+export function getWindowBackdrop() {
+  return invokeCommand({ command: 'get_window_backdrop' }) as Promise<WindowBackdrop>
+}
+
+export function openFullDiskAccessSettings() {
+  return invokeCommand({ command: 'open_full_disk_access_settings' }) as Promise<void>
 }
 
 /**

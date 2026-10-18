@@ -19,10 +19,10 @@ type VolumeStyle = {
 const VOLUME_STYLES: Record<VolumeCategory, VolumeStyle> = {
   fixed: {
     Glyph: HardDriveIcon,
-    colorClassName: 'text-light-text-muted dark:text-dark-text-muted',
+    colorClassName: 'text-light-text-secondary dark:text-dark-text-secondary',
   },
-  removable: { Glyph: UsbIcon, colorClassName: 'text-accent-amber' },
-  network: { Glyph: NetworkIcon, colorClassName: 'text-accent-green' },
+  removable: { Glyph: UsbIcon, colorClassName: 'text-volume-removable' },
+  network: { Glyph: NetworkIcon, colorClassName: 'text-volume-network' },
 }
 
 type VolumeIconProps = {

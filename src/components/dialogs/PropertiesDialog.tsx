@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { Button } from '@/components/controls'
 import { DialogShell } from '@/components/dialogs/DialogShell'
 import { EntryIcon } from '@/components/icons/EntryIcon'
 import { LoaderCircleIcon } from '@/components/icons'
@@ -148,107 +149,95 @@ export function PropertiesDialog() {
     useDefaultAppDialogStore.getState().open({ filePath, fileName, apps })
   }
 
+  const canSetDefault = canSetDefaultApplication(dialog.items)
   return (
-    <DialogShell label="Properties" onDismiss={close} onKeyDown={onKeyDown}>
-      <div className="border-b border-light-border px-4 py-3 dark:border-dark-border">
-        <div className="text-sm font-semibold text-light-text dark:text-dark-text">Properties</div>
-      </div>
-      <div className="space-y-4 p-4">
-        <div>
-          <div className="text-sm font-semibold text-light-text dark:text-dark-text">
-            {summary.heading}
-          </div>
-          <div className="mt-1 text-row text-light-text-muted dark:text-dark-text-muted">
-            {summary.itemCountLabel}
-          </div>
-        </div>
-
-        {summary.singleItem ? (
-          <dl className="space-y-2 text-row">
-            <PropertyRow label="Type" value={summary.singleItem.typeLabel} />
-            {canSetDefaultApplication(dialog.items) ? (
-              <DefaultAppRow loaded={defaultAppLoaded} app={defaultApp} />
-            ) : null}
-            <PropertyRow label="Path" value={summary.singleItem.path} monospace />
-            <PropertyRow
-              label="Size"
-              value={formatItemSize(
-                summary.singleItem.sizeBytes,
-                summary.singleItem.itemCount,
-                summary.singleItem.isDir,
+    <DialogShell
+      label="Properties"
+      title={summary.heading}
+      onDismiss={close}
+      onKeyDown={onKeyDown}
+      footer={
+        <>
+          {canSetDefault ? (
+            <Button
+              disabled={isLoadingDefaultAppPicker}
+              onClick={() => void openDefaultAppDialog()}
+            >
+              {isLoadingDefaultAppPicker ? (
+                <>
+                  <LoaderCircleIcon className="size-4 animate-spin" />
+                  Loading…
+                </>
+              ) : (
+                'Set Default Application…'
               )}
-            />
-            <PropertyRow
-              label="Contains"
-              value={formatContains(summary.singleItem.itemCount, summary.singleItem.isDir)}
-            />
-            <DatePropertyRow
-              label="Modified"
-              value={summary.singleItem.modifiedAt}
-              dateFormat={dateFormat}
-              showTime={showTime}
-              showSeconds={showSeconds}
-            />
-            <DatePropertyRow
-              label="Created"
-              value={summary.singleItem.createdAt}
-              dateFormat={dateFormat}
-              showTime={showTime}
-              showSeconds={showSeconds}
-            />
-            <PropertyRow
-              label="Attributes"
-              value={
-                summary.singleItem.attributes.length > 0
-                  ? summary.singleItem.attributes.join(', ')
-                  : '—'
-              }
-            />
-            <PropertyRow label="Hidden" value={summary.singleItem.isHidden ? 'Yes' : 'No'} />
-            <PropertyRow label="System" value={summary.singleItem.isSystem ? 'Yes' : 'No'} />
-          </dl>
-        ) : (
-          <div>
-            <div className="text-uxs uppercase tracking-wide text-light-text-muted dark:text-dark-text-muted">
-              Selected paths
-            </div>
-            <ul className="mt-2 max-h-56 space-y-1 overflow-auto rounded-tab border border-light-border bg-light-window p-3 font-mono text-uxs text-light-text scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:border-dark-border dark:bg-dark-window dark:text-dark-text dark:scrollbar-thumb-dark-text-faint">
-              {dialog.items.map((item) => (
-                <li key={item.path} className="break-all">
-                  {item.path}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-      <div className="flex justify-end gap-2 border-t border-light-border p-4 dark:border-dark-border">
-        {canSetDefaultApplication(dialog.items) ? (
-          <button
-            type="button"
-            disabled={isLoadingDefaultAppPicker}
-            onClick={() => void openDefaultAppDialog()}
-            className="rounded-md border border-light-border px-4 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover disabled:opacity-40 dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
-          >
-            {isLoadingDefaultAppPicker ? (
-              <span className="inline-flex items-center gap-2">
-                <LoaderCircleIcon className="size-4 animate-spin" />
-                Loading…
-              </span>
-            ) : (
-              'Set Default Application…'
+            </Button>
+          ) : null}
+          <Button ref={closeRef} onClick={close} className={canSetDefault ? '' : 'col-start-2'}>
+            Close
+          </Button>
+        </>
+      }
+    >
+      <p className="-mt-2 text-caption text-light-text-secondary dark:text-dark-text-secondary">
+        {summary.itemCountLabel}
+      </p>
+      {summary.singleItem ? (
+        <dl className="grid gap-1.5">
+          <PropertyRow label="Type" value={summary.singleItem.typeLabel} />
+          {canSetDefault ? <DefaultAppRow loaded={defaultAppLoaded} app={defaultApp} /> : null}
+          <PropertyRow label="Path" value={summary.singleItem.path} monospace />
+          <PropertyRow
+            label="Size"
+            value={formatItemSize(
+              summary.singleItem.sizeBytes,
+              summary.singleItem.itemCount,
+              summary.singleItem.isDir,
             )}
-          </button>
-        ) : null}
-        <button
-          ref={closeRef}
-          type="button"
-          onClick={close}
-          className="rounded-md border border-light-border px-4 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
-        >
-          Close
-        </button>
-      </div>
+          />
+          <PropertyRow
+            label="Contains"
+            value={formatContains(summary.singleItem.itemCount, summary.singleItem.isDir)}
+          />
+          <DatePropertyRow
+            label="Modified"
+            value={summary.singleItem.modifiedAt}
+            dateFormat={dateFormat}
+            showTime={showTime}
+            showSeconds={showSeconds}
+          />
+          <DatePropertyRow
+            label="Created"
+            value={summary.singleItem.createdAt}
+            dateFormat={dateFormat}
+            showTime={showTime}
+            showSeconds={showSeconds}
+          />
+          <PropertyRow
+            label="Attributes"
+            value={
+              summary.singleItem.attributes.length > 0
+                ? summary.singleItem.attributes.join(', ')
+                : '—'
+            }
+          />
+          <PropertyRow label="Hidden" value={summary.singleItem.isHidden ? 'Yes' : 'No'} />
+          <PropertyRow label="System" value={summary.singleItem.isSystem ? 'Yes' : 'No'} />
+        </dl>
+      ) : (
+        <div className="grid gap-1">
+          <div className="text-caption text-light-text-secondary dark:text-dark-text-secondary">
+            Selected paths
+          </div>
+          <ul className="grid max-h-56 gap-0.5 overflow-auto font-mono text-caption scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary">
+            {dialog.items.map((item) => (
+              <li key={item.path} className="break-all">
+                {item.path}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </DialogShell>
   )
 }
@@ -265,11 +254,13 @@ function PropertyRow({
   valueClassName?: string
 }) {
   return (
-    <div className="flex justify-between gap-4 border-b border-light-border py-2 dark:border-dark-border">
-      <dt className="shrink-0 text-light-text-muted dark:text-dark-text-muted">{label}</dt>
+    <div className="flex items-baseline gap-4">
+      <dt className="w-24 shrink-0 text-caption text-light-text-secondary dark:text-dark-text-secondary">
+        {label}
+      </dt>
       <dd
-        className={`text-right ${valueClassName ?? 'text-light-text-soft dark:text-dark-text-soft'} ${
-          monospace ? 'break-all font-mono text-uxs' : ''
+        className={`min-w-0 flex-1 break-words ${valueClassName ?? ''} ${
+          monospace ? 'break-all font-mono text-caption' : 'text-row'
         }`}
       >
         {value}
@@ -280,9 +271,11 @@ function PropertyRow({
 
 function DefaultAppRow({ loaded, app }: { loaded: boolean; app: MacApp | null }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-light-border py-2 dark:border-dark-border">
-      <dt className="shrink-0 text-light-text-muted dark:text-dark-text-muted">Default App</dt>
-      <dd className="flex min-w-0 items-center justify-end gap-2 text-right text-light-text-soft dark:text-dark-text-soft">
+    <div className="flex items-baseline gap-4">
+      <dt className="w-24 shrink-0 text-caption text-light-text-secondary dark:text-dark-text-secondary">
+        Default App
+      </dt>
+      <dd className="flex min-w-0 flex-1 items-center gap-2 text-row">
         {!loaded ? (
           'Loading…'
         ) : app ? (

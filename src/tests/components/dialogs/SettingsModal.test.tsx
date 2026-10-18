@@ -65,7 +65,7 @@ describe('SettingsModal', () => {
 
     // The footer resolves the app version asynchronously; wait for it to settle
     // so the state update lands inside act().
-    await screen.findByText('build 0.1.0', { exact: false })
+    await screen.findByText('AxoPane 0.1.0')
 
     // Reserved commands have no capture or reset affordance and are labelled as
     // platform defaults rather than ever flagged as conflicts.
@@ -106,7 +106,8 @@ describe('SettingsModal', () => {
       expect(saveConfig).toHaveBeenCalled()
     })
     expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument()
-    expect(screen.getByText('Changes apply immediately.')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Columns' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Columns' })).toHaveAttribute('aria-current', 'page')
   })
 
   it('auto-saves the active queue toast expansion toggle', async () => {
@@ -116,7 +117,7 @@ describe('SettingsModal', () => {
     useSettingsStore.getState().open('layout')
 
     render(<SettingsModal />)
-    await screen.findByText('build 0.1.0', { exact: false })
+    await screen.findByText('AxoPane 0.1.0')
 
     const toggle = screen.getByRole('switch', { name: 'Auto-expand active queue toasts' })
     expect(toggle).toHaveAttribute('aria-checked', 'false')
@@ -158,7 +159,7 @@ describe('SettingsModal', () => {
     })
 
     render(<SettingsModal />)
-    await screen.findByText('build 0.1.0', { exact: false })
+    await screen.findByText('AxoPane 0.1.0')
     expect(
       screen.queryByRole('switch', { name: 'Automatically calculate folder sizes' }),
     ).not.toBeInTheDocument()
@@ -172,7 +173,7 @@ describe('SettingsModal', () => {
     })
 
     render(<SettingsModal />)
-    await screen.findByText('build 0.1.0', { exact: false })
+    await screen.findByText('AxoPane 0.1.0')
     expect(
       screen.queryByRole('switch', { name: 'Automatically calculate folder sizes' }),
     ).not.toBeInTheDocument()
@@ -187,7 +188,7 @@ describe('SettingsModal', () => {
     })
 
     render(<SettingsModal />)
-    await screen.findByText('build 0.1.0', { exact: false })
+    await screen.findByText('AxoPane 0.1.0')
     expect(
       screen.getByRole('switch', { name: 'Automatically calculate folder sizes' }),
     ).toBeInTheDocument()
@@ -211,7 +212,7 @@ describe('SettingsModal', () => {
     })
 
     render(<SettingsModal />)
-    await screen.findByText('build 0.1.0', { exact: false })
+    await screen.findByText('AxoPane 0.1.0')
     expect(
       screen.getByRole('switch', { name: 'Automatically calculate folder sizes' }),
     ).toBeInTheDocument()
@@ -230,7 +231,7 @@ describe('SettingsModal', () => {
     })
 
     render(<SettingsModal />)
-    await screen.findByText('build 0.1.0', { exact: false })
+    await screen.findByText('AxoPane 0.1.0')
     expect(
       screen.getByRole('switch', { name: 'Automatically calculate folder sizes' }),
     ).toBeInTheDocument()
@@ -247,7 +248,7 @@ describe('SettingsModal', () => {
     useSettingsStore.getState().open('layout')
 
     render(<SettingsModal />)
-    await screen.findByText('build 0.1.0', { exact: false })
+    await screen.findByText('AxoPane 0.1.0')
 
     const toggle = screen.getByRole('switch', { name: 'Automatically calculate folder sizes' })
     expect(toggle).toHaveAttribute('aria-checked', 'true')
@@ -337,7 +338,11 @@ describe('SettingsModal', () => {
 
     await user.click(screen.getByRole('switch', { name: 'Show hidden files' }))
     await user.click(screen.getByRole('radio', { name: 'Dark' }))
-    await user.click(screen.getByRole('button', { name: 'Reset to defaults' }))
+    const expander = screen.getByRole('button', { name: /Reset to defaults/ })
+    expect(screen.queryByRole('button', { name: 'Reset' })).toBeNull()
+    await user.click(expander)
+    expect(expander).toHaveAttribute('aria-expanded', 'true')
+    await user.click(screen.getByRole('button', { name: 'Reset' }))
 
     expect(screen.getByRole('switch', { name: 'Show hidden files' })).toHaveAttribute(
       'aria-checked',

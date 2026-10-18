@@ -2,19 +2,22 @@ import type { VolumeInfo } from '@/lib/types/ipc'
 import type { TreeNodeState } from '@/stores/panes-store'
 import { TRASH_PATH } from '@/lib/trash'
 import { flattenVisibleTree } from '@/lib/tree-sticky'
-import { groupVolumesByCategory } from '@/lib/volumes'
+import { groupVolumesByCategory, volumeUsedFraction } from '@/lib/volumes'
 
 /**
  * Pixel geometry of the virtualized tree, derived from the fixed `@theme`
- * tokens `--spacing-tree-row` (1.5625rem = 25px) and
- * `--spacing-tree-header` (1.75rem = 28px) at the app's 16px root. These must
- * stay compile-time constants: the virtualizer sizes each flat row by kind
- * from them and the sticky overlay's stacking offsets are multiples of the row
- * height. The row height also stays on a whole CSS pixel so Chromium and
+ * tokens `--spacing-tree-row` (28px), `--spacing-tree-drive-row` (38px, a drive
+ * with its capacity bar), `--spacing-tree-header` (30px) and
+ * `--spacing-tree-header-first` (36px, the top section's extra lead-in) at the
+ * app's 16px root. These must stay compile-time constants: the virtualizer
+ * sizes each flat row by kind from them and the sticky overlay stacks pinned
+ * rows by these heights. Every height is a whole CSS pixel so Chromium and
  * WebKit accumulate the same offsets in long trees.
  */
-export const TREE_ROW_HEIGHT_PX = 25
-export const TREE_HEADER_HEIGHT_PX = 28
+export const TREE_ROW_HEIGHT_PX = 28
+export const TREE_DRIVE_ROW_HEIGHT_PX = 38
+export const TREE_HEADER_HEIGHT_PX = 30
+export const TREE_FIRST_HEADER_HEIGHT_PX = 36
 
 /**
  * One row of the fully-flattened tree. A single ordered array of these spans
@@ -48,8 +51,16 @@ export type TreeFlatModel = {
 
 /** Height in pixels of a single flat row, keyed on its kind. */
 export function treeRowHeight(row: TreeFlatRow): number {
-  return row.kind === 'header' ? TREE_HEADER_HEIGHT_PX : TREE_ROW_HEIGHT_PX
+  if (row.kind === 'header') {
+    return row.renderKey === FIRST_HEADER_KEY ? TREE_FIRST_HEADER_HEIGHT_PX : TREE_HEADER_HEIGHT_PX
+  }
+  if (row.kind === 'node' && row.volume && volumeUsedFraction(row.volume) !== null) {
+    return TREE_DRIVE_ROW_HEIGHT_PX
+  }
+  return TREE_ROW_HEIGHT_PX
 }
+
+const FIRST_HEADER_KEY = 'header-favourites'
 
 /**
  * Flatten the store's volumes + tree nodes into one ordered row array in render
@@ -67,7 +78,7 @@ export function buildTreeFlatModel(
   const rows: TreeFlatRow[] = []
   const indexByPath = new Map<string, number>()
 
-  rows.push({ kind: 'header', label: 'Favourites', renderKey: 'header-favourites' })
+  rows.push({ kind: 'header', label: 'Favourites', renderKey: FIRST_HEADER_KEY })
   if (favourites.length === 0) {
     rows.push({ kind: 'empty-favourites', renderKey: 'empty-favourites' })
   } else {

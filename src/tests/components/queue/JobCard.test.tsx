@@ -56,8 +56,7 @@ describe('JobCard', () => {
       />,
     )
     expect(screen.getByText('Copying 1,248 items')).toBeInTheDocument()
-    expect(screen.getByText('footage, b-roll')).toBeInTheDocument()
-    expect(screen.getByText('D:\\dst')).toBeInTheDocument()
+    expect(screen.getByText('to D:\\dst')).toBeInTheDocument()
     expect(screen.getByText('10.4 GB of 80.0 GB · about 3 min left')).toBeInTheDocument()
     expect(screen.getByText('63%')).toBeInTheDocument()
     expect(screen.getByText('master-reel-final.mkv')).toBeInTheDocument()
@@ -68,13 +67,13 @@ describe('JobCard', () => {
       'aria-valuenow',
       '63',
     )
-    expect(screen.getByTestId('throughput-chart-progress-fill')).toHaveAttribute('width', '63')
+    expect(screen.getByTestId('throughput-chart-fill-extent')).toHaveAttribute('width', '63')
     expect(screen.getByRole('button', { name: /Pause/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Skip/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /Cancel/ })).toBeInTheDocument()
   })
 
-  it('does not print a speed anywhere except the rate line', () => {
+  it('prints the speed once, above the chart', () => {
     render(
       <JobCard
         operation={progress({})}
@@ -85,8 +84,7 @@ describe('JobCard', () => {
         {...noopHandlers()}
       />,
     )
-    // The chart used to label its Y-axis ceiling with a second, larger
-    // `/s` value that read as a competing speed reading.
+    // Only the rate line; the chart carries no speed label of its own.
     expect(screen.getAllByText(/\/s$/)).toHaveLength(1)
   })
 
@@ -309,7 +307,7 @@ describe('JobCard', () => {
     expect(onMoveDown).toHaveBeenCalled()
   })
 
-  it('shows what is being copied and where, on one line', () => {
+  it('shows where the items go, and offers the item list', () => {
     render(
       <JobCard
         operation={progress({
@@ -325,10 +323,11 @@ describe('JobCard', () => {
       />,
     )
 
-    expect(screen.getByText('Season 01, poster.jpg')).toBeInTheDocument()
-    expect(screen.getByText('D:\\Sorted')).toHaveAttribute('title', 'D:\\Sorted')
-    // Nothing is hidden, so there is no disclosure to offer.
-    expect(screen.queryByRole('button', { name: /more/ })).not.toBeInTheDocument()
+    expect(screen.getByText('to D:\\Sorted')).toHaveAttribute('title', 'to D:\\Sorted')
+    expect(screen.getByRole('button', { name: 'Show items' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
   })
 
   it('expands the full selection when more items are queued than the line shows', async () => {
@@ -348,14 +347,14 @@ describe('JobCard', () => {
       />,
     )
 
-    expect(screen.getByText('Season 01, Season 02')).toBeInTheDocument()
     expect(screen.queryByText('Season 03')).not.toBeInTheDocument()
 
-    const toggle = screen.getByRole('button', { name: /\+3 more/ })
+    const toggle = screen.getByRole('button', { name: 'Show items' })
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     await user.click(toggle)
 
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(toggle).toHaveAccessibleName('Hide items')
     const list = screen.getByRole('list')
     expect(within(list).getAllByRole('listitem')).toHaveLength(5)
     expect(within(list).getByText('Season 03')).toBeInTheDocument()
@@ -377,7 +376,7 @@ describe('JobCard', () => {
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: /\+1,246 more/ }))
+    await user.click(screen.getByRole('button', { name: 'Show items' }))
     const list = screen.getByRole('list')
     expect(within(list).getByText('+1,246 more')).toBeInTheDocument()
   })
@@ -399,7 +398,7 @@ describe('JobCard', () => {
       />,
     )
 
-    expect(screen.getByText('F:\\Download')).toHaveAttribute('title', 'F:\\Download')
+    expect(screen.getByText('to F:\\Download')).toHaveAttribute('title', 'to F:\\Download')
     expect(screen.getByText('server.mjs')).toHaveAttribute('title', 'server.mjs')
   })
 
@@ -457,14 +456,14 @@ describe('JobCard', () => {
       />,
     )
     expect(screen.getByText('Deleting 500 items')).toBeInTheDocument()
-    expect(screen.getByText('footage, b-roll')).toBeInTheDocument()
+    expect(screen.getByText('footage, b-roll, +498 more')).toBeInTheDocument()
     expect(screen.getByText('412 of 500 items deleted · about 8 sec left')).toBeInTheDocument()
     expect(screen.getByText('item 413 of 500')).toBeInTheDocument()
     expect(screen.queryByText('D:\\dst')).not.toBeInTheDocument()
     // Items, not bytes: a transfer rate and a throughput curve would report
     // something the rest of the card does not.
     expect(screen.queryByText(/\/s$/)).not.toBeInTheDocument()
-    expect(screen.queryByTestId('throughput-chart-line')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('throughput-chart')).not.toBeInTheDocument()
   })
 
   it('labels archive operations', () => {

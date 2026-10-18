@@ -128,7 +128,7 @@ describe('DefaultAppDialog', () => {
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('Fixture Preview')
     expect(alert).toHaveTextContent('.pdf')
-    expect(alert).toHaveAttribute('aria-live', 'assertive')
+    expect(alert).toHaveAttribute('data-severity', 'error')
 
     // Dialog stays open and the confirm button is re-enabled for a retry.
     expect(screen.getByRole('dialog', { name: 'Set Default Application' })).toBeInTheDocument()

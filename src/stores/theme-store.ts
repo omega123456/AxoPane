@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { ThemePreference } from '@/lib/types/ipc'
 import { useConfigStore } from '@/stores/config-store'
+import { syncNativeTheme } from '@/lib/window-commands'
 
 export type ThemeMode = 'light' | 'dark'
 
@@ -37,21 +38,42 @@ function syncTheme(preference: ThemePreference) {
   return { preference, theme }
 }
 
+/** Applies the theme to the document and the native title bar. */
+function commitTheme(preference: ThemePreference) {
+  void syncNativeTheme(preference)
+  return syncTheme(preference)
+}
+
 export const useThemeStore = create<ThemeStore>((set) => ({
+  // The initial state only touches the DOM; `initializeTheme` syncs the title
+  // bar once IPC is available.
   ...syncTheme(useConfigStore.getState().theme),
   setTheme: (theme) => {
-    set(syncTheme(theme))
+    set(commitTheme(theme))
   },
   setThemePreference: (preference) => {
-    set(syncTheme(preference))
+    set(commitTheme(preference))
   },
-  toggleTheme: () =>
-    set((state) => {
-      const nextTheme: ThemeMode = state.theme === 'dark' ? 'light' : 'dark'
-      return syncTheme(nextTheme)
-    }),
+  toggleTheme: () => set((state) => commitTheme(state.theme === 'dark' ? 'light' : 'dark')),
 }))
 
+let systemListenerInstalled = false
+
+/** Re-resolves `system` when the OS switches between light and dark. */
+function followSystemTheme() {
+  if (systemListenerInstalled || typeof window.matchMedia !== 'function') {
+    return
+  }
+  systemListenerInstalled = true
+  window.matchMedia(SYSTEM_MEDIA_QUERY).addEventListener('change', () => {
+    const { preference } = useThemeStore.getState()
+    if (preference === 'system') {
+      useThemeStore.setState(syncTheme(preference))
+    }
+  })
+}
+
 export function initializeTheme() {
+  followSystemTheme()
   useThemeStore.getState().setThemePreference(useConfigStore.getState().theme)
 }

@@ -23,8 +23,6 @@ export type FileCategory =
   | 'generic'
 
 /** Special-folder glyph kinds, resolved by name (never by contents). */
-export type FolderGlyphKind = 'downloads' | 'git' | 'modules' | 'open' | 'closed'
-
 const EXTENSIONS: Record<Exclude<FileCategory, 'folder' | 'generic'>, string[]> = {
   image: [
     'jpg',
@@ -540,21 +538,4 @@ export function getFileCategory(entry: Pick<DirectoryEntry, 'name' | 'isDir'>): 
 
   const ext = name.slice(dot + 1)
   return EXTENSION_CATEGORY.get(ext) ?? 'generic'
-}
-
-/**
- * Resolve the folder glyph kind from a folder name (case-insensitive exact
- * match) and its expansion state. Kept deliberately small and OS-agnostic.
- */
-export function getFolderGlyphKind(name: string, isOpen: boolean): FolderGlyphKind {
-  switch (name.toLowerCase()) {
-    case 'downloads':
-      return 'downloads'
-    case '.git':
-      return 'git'
-    case 'node_modules':
-      return 'modules'
-    default:
-      return isOpen ? 'open' : 'closed'
-  }
 }

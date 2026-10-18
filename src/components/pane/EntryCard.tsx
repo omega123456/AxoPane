@@ -3,8 +3,10 @@ import { getUnixTime, parseISO } from 'date-fns'
 import type { DragEvent, KeyboardEvent, MouseEvent } from 'react'
 import { EntryIcon } from '@/components/icons/EntryIcon'
 import { focusRenameInput, type FileRowActions } from './FileRow'
+import { SizeValue } from './SizeValue'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import { thumbnailFingerprintKey, useThumbnailStore } from '@/stores/thumbnail-store'
+import { FOCUS_RING, FOCUS_RING_INSET } from '@/lib/focus-ring'
 
 export type EntryCardThumbnail = {
   state: 'ready' | 'loading' | 'unavailable' | 'failed'
@@ -38,7 +40,7 @@ function ThumbnailPreview({
   const previewDataUrl = thumbnail.state === 'ready' ? (thumbnail.dataUrl ?? undefined) : undefined
 
   return (
-    <div className="relative flex size-thumbnail-preview shrink-0 items-center justify-center self-center overflow-hidden rounded-tab bg-light-panel dark:bg-dark-panel">
+    <div className="relative flex h-thumbnail-preview w-full shrink-0 items-center justify-center overflow-hidden rounded-control bg-light-recessed dark:bg-dark-recessed">
       {previewDataUrl ? (
         <img
           role="img"
@@ -48,12 +50,12 @@ function ThumbnailPreview({
           className="size-full object-contain"
         />
       ) : (
-        <EntryIcon entry={entry} className="size-8 shrink-0" />
+        <EntryIcon entry={entry} className="size-10 shrink-0" />
       )}
       {thumbnail.state === 'loading' ? (
         <span
           aria-label="Thumbnail loading"
-          className="absolute inset-0 animate-pulse bg-light-skeleton dark:bg-dark-skeleton"
+          className="absolute inset-0 bg-light-skeleton dark:bg-dark-skeleton"
         />
       ) : null}
     </div>
@@ -104,7 +106,38 @@ function EntryCardImpl({
     }
   }, [entry.isDir, isRenaming])
 
-  const stateClassName = `${isSelected ? 'bg-accent-blue-soft' : 'bg-light-surface dark:bg-dark-surface'} ${isFocused && isActivePane ? 'ring-2 ring-inset ring-accent-blue-border' : ''} ${isDropTarget ? 'ring-2 ring-inset ring-accent-blue-border bg-accent-blue-soft' : ''} ${isCut ? 'opacity-50' : ''}`
+  const selectedClassName = isActivePane
+    ? 'border-light-accent bg-light-tint dark:border-dark-accent dark:bg-dark-tint'
+    : 'border-transparent bg-light-neutral-selection dark:bg-dark-neutral-selection'
+  const stateClassName = `rounded-overlay border ${
+    isSelected || isDropTarget
+      ? selectedClassName
+      : 'border-transparent hover:bg-light-hover dark:hover:bg-dark-hover'
+  } ${
+    // A selected card's accent border already marks it; the cursor ring would double it.
+    isFocused && isActivePane && !isSelected
+      ? 'ring-1 ring-inset ring-light-accent dark:ring-dark-accent'
+      : ''
+  }`
+  // Cut items fade their contents, not the selection fill behind them.
+  const contentClassName = isCut ? 'opacity-50' : ''
+  const meta = entry.isDir ? (
+    entry.itemCount === null ? (
+      '—'
+    ) : (
+      `${entry.itemCount} ${entry.itemCount === 1 ? 'item' : 'items'}`
+    )
+  ) : (
+    <SizeValue entry={entry} />
+  )
+  const labels = (
+    <>
+      <span className="truncate text-row text-light-text dark:text-dark-text">{entry.name}</span>
+      <span className="-mt-1 truncate text-caption text-light-text-secondary dark:text-dark-text-secondary">
+        {meta}
+      </span>
+    </>
+  )
   const minimumCellClassName = mode === 'icons' ? 'min-w-icon-cell' : 'min-w-thumbnail-cell'
   const sharedProps = {
     'data-entry-id': entry.id,
@@ -157,10 +190,12 @@ function EntryCardImpl({
         onBlur={actions.onRenameBlur}
         onChange={(event) => actions.onRenameChange(event.target.value)}
         onKeyDown={onRenameKeyDown}
-        className="w-full min-w-0 select-text rounded-tab border border-accent-blue-border bg-light-window px-2 py-1 font-mono text-uxs text-light-text outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:bg-dark-window dark:text-dark-text"
+        className={`w-full min-w-0 select-text rounded-control border border-light-accent dark:border-dark-accent bg-light-base px-2 py-1 font-mono text-caption text-light-text outline-none dark:bg-dark-base dark:text-dark-text ${FOCUS_RING}`}
       />
       {renameError ? (
-        <span className="block truncate pt-1 text-uxs text-accent-amber">{renameError}</span>
+        <span className="block truncate pt-1 text-caption text-light-warning dark:text-dark-warning">
+          {renameError}
+        </span>
       ) : null}
     </div>
   ) : null
@@ -169,12 +204,12 @@ function EntryCardImpl({
     return (
       <div
         {...sharedProps}
-        className={`flex h-icon-tile ${minimumCellClassName} cursor-pointer items-center gap-gap rounded-tab px-2 text-row hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-blue-border dark:hover:bg-dark-hover ${stateClassName}`}
+        className={`flex h-icon-tile ${minimumCellClassName} cursor-pointer items-center gap-2 p-1.5 ${FOCUS_RING_INSET} ${stateClassName}`}
       >
-        <EntryIcon entry={entry} className="size-entry-icon shrink-0" />
-        {renameControl ?? (
-          <span className="min-w-0 truncate text-light-text dark:text-dark-text">{entry.name}</span>
-        )}
+        <EntryIcon entry={entry} className={`size-entry-icon shrink-0 ${contentClassName}`} />
+        <div className={`flex min-w-0 flex-1 flex-col gap-1.5 ${contentClassName}`}>
+          {renameControl ?? labels}
+        </div>
       </div>
     )
   }
@@ -182,11 +217,11 @@ function EntryCardImpl({
   return (
     <div
       {...sharedProps}
-      className={`flex h-thumbnail-card ${minimumCellClassName} cursor-pointer flex-col rounded-tab p-2 hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-blue-border dark:hover:bg-dark-hover ${stateClassName}`}
+      className={`flex h-thumbnail-card ${minimumCellClassName} cursor-pointer flex-col gap-1.5 p-1.5 ${FOCUS_RING_INSET} ${stateClassName}`}
     >
-      <ThumbnailPreview entry={entry} override={thumbnail} />
-      <div className="min-h-0 w-full flex-1 pt-2 text-center text-row text-light-text dark:text-dark-text">
-        {renameControl ?? <span className="line-clamp-2 break-words">{entry.name}</span>}
+      <div className={`flex min-h-0 flex-col gap-1.5 ${contentClassName}`}>
+        <ThumbnailPreview entry={entry} override={thumbnail} />
+        {renameControl ?? labels}
       </div>
     </div>
   )

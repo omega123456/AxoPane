@@ -11,6 +11,8 @@ type ElementVirtualizerOptions = {
   estimateSize: (index: number) => number
   getScrollElement: () => HTMLDivElement | null
   overscan?: number
+  /** Blank space above the first and below the last item, in pixels. */
+  padding?: number
   measurementKey?: string | number
 }
 
@@ -30,6 +32,8 @@ export function useElementVirtualizer(options: ElementVirtualizerOptions) {
           height: 480,
         },
         overscan: options.overscan ?? 10,
+        paddingStart: options.padding ?? 0,
+        paddingEnd: options.padding ?? 0,
         onChange: () => {
           rerender()
         },
@@ -48,6 +52,8 @@ export function useElementVirtualizer(options: ElementVirtualizerOptions) {
       height: 480,
     },
     overscan: options.overscan ?? 10,
+    paddingStart: options.padding ?? 0,
+    paddingEnd: options.padding ?? 0,
     onChange: () => {
       rerender()
     },

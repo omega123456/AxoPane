@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import type { KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react'
+import { FOCUS_RING } from '@/lib/focus-ring'
 
 type ResizeHandleProps = {
   /** Accessible label describing what the divider resizes. */
@@ -91,7 +92,7 @@ export function ResizeHandle({
     }
   }
 
-  const restLine = showRestLine ? 'bg-light-border dark:bg-dark-border' : 'bg-transparent'
+  const restLine = showRestLine ? 'bg-light-divider dark:bg-dark-divider' : 'bg-transparent'
 
   return (
     <div
@@ -109,11 +110,11 @@ export function ResizeHandle({
       onKeyDown={onKeyDown}
       // Zero layout width keeps the fixed pane geometry pixel-exact; the line and
       // grab zone are painted as absolute overlays around it.
-      className="group relative z-10 h-full w-0 shrink-0 cursor-col-resize touch-none select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
+      className={`group relative z-10 h-full w-0 shrink-0 cursor-col-resize touch-none select-none ${FOCUS_RING}`}
     >
       <span
-        className={`pointer-events-none absolute inset-y-0 left-0 w-px group-hover:bg-accent-blue-border ${
-          dragging ? 'bg-accent-blue-border' : restLine
+        className={`pointer-events-none absolute inset-y-0 left-0 w-px group-hover:bg-light-accent dark:group-hover:bg-dark-accent ${
+          dragging ? 'bg-light-accent dark:bg-dark-accent' : restLine
         }`}
       />
       {/* Invisible grab zone that overhangs the line on both sides. */}

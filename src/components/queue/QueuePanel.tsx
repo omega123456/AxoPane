@@ -1,9 +1,9 @@
 import { useMemo } from 'react'
+import { Button } from '@/components/controls'
 import {
   CheckCircleIcon,
   ChevronDownIcon,
   ChevronUpIcon,
-  GripVerticalIcon,
   PauseIcon,
   PlayIcon,
   RotateCcwIcon,
@@ -15,7 +15,7 @@ import { reorderOps } from '@/lib/queue-commands'
 import { formatCount } from '@/lib/format'
 import { formatItemPreview, verb } from '@/lib/queue-format'
 import type { OpProgress, ThroughputSample } from '@/lib/types/ipc'
-import { isTerminal, useQueueStore } from '@/stores/queue-store'
+import { useQueueStore } from '@/stores/queue-store'
 
 /** Move a pending operation within the pending sub-list and persist the order. */
 function reorder(operations: OpProgress[], id: string, delta: number) {
@@ -107,112 +107,84 @@ function CompactJobRow({
   const pending = operation.status === 'pending'
   const conflict = hasConflict || operation.status === 'conflict'
 
+  const summaryText = pending ? `Waiting · ${itemSummary(operation)}` : itemSummary(operation)
+
   return (
-    <div className="flex items-center gap-2 border-t border-light-border px-4 py-2.5 dark:border-dark-border">
-      {reorderable ? (
-        <div className="flex shrink-0 items-center">
-          <button
-            type="button"
-            aria-label="Move job up"
-            onClick={onMoveUp}
-            disabled={!onMoveUp}
-            className="flex h-6 w-6 items-center justify-center rounded-md text-light-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover disabled:opacity-40 dark:text-dark-text-muted dark:hover:bg-dark-hover"
-          >
-            <ChevronUpIcon className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            aria-label="Move job down"
-            onClick={onMoveDown}
-            disabled={!onMoveDown}
-            className="flex h-6 w-6 items-center justify-center rounded-md text-light-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover disabled:opacity-40 dark:text-dark-text-muted dark:hover:bg-dark-hover"
-          >
-            <ChevronDownIcon className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      ) : (
-        <GripVerticalIcon className="h-4 w-4 shrink-0 text-light-text-faint dark:text-dark-text-faint" />
-      )}
-      <div className="min-w-0 flex-1">
+    <div className="flex items-center gap-3 border-t border-light-divider pb-3 pl-4 pr-2 pt-2.5 dark:border-dark-divider">
+      <div className="grid min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
           {completed ? (
-            <CheckCircleIcon className="h-3.5 w-3.5 shrink-0 text-accent-green" />
+            <CheckCircleIcon className="size-4 shrink-0 text-light-success dark:text-dark-success" />
           ) : null}
-          {failed ? <XCircleIcon className="h-3.5 w-3.5 shrink-0 text-accent-red" /> : null}
+          {failed ? (
+            <XCircleIcon className="size-4 shrink-0 text-light-danger dark:text-dark-danger" />
+          ) : null}
           {cancelled ? (
-            <XCircleIcon className="h-3.5 w-3.5 shrink-0 text-light-text-muted dark:text-dark-text-muted" />
+            <XCircleIcon className="size-4 shrink-0 text-light-text-secondary dark:text-dark-text-secondary" />
           ) : null}
-          <span className="truncate text-xs font-semibold text-light-text dark:text-dark-text">
+          <span className="truncate text-body font-semibold text-light-text dark:text-dark-text">
             {title(operation)}
           </span>
         </div>
-        <div className="mt-1 truncate font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-          {itemSummary(operation)}
-        </div>
+        <span className="truncate text-caption text-light-text-secondary dark:text-dark-text-secondary">
+          {summaryText}
+          {!pending && !completed && !cancelled ? ` · ${percent}%` : ''}
+        </span>
       </div>
-      <span
-        className={`w-10 shrink-0 text-right font-mono text-xs font-semibold ${
-          failed ? 'text-accent-red' : 'text-accent-blue-light dark:text-accent-blue'
-        }`}
-      >
-        {percent}%
-      </span>
-      <div className="flex shrink-0 items-center gap-1">
+      <div className="flex shrink-0 items-center">
+        {reorderable ? (
+          <>
+            <Button
+              variant="subtle"
+              aria-label="Move job up"
+              onClick={onMoveUp}
+              disabled={!onMoveUp}
+              size="icon"
+            >
+              <ChevronUpIcon className="size-4" />
+            </Button>
+            <Button
+              variant="subtle"
+              aria-label="Move job down"
+              onClick={onMoveDown}
+              disabled={!onMoveDown}
+              size="icon"
+            >
+              <ChevronDownIcon className="size-4" />
+            </Button>
+          </>
+        ) : null}
         {conflict ? (
-          <button
-            type="button"
-            aria-label="Resolve conflict"
-            onClick={onResolve}
-            className="flex h-7 w-7 items-center justify-center rounded-md bg-accent-blue-soft text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-accent-blue"
-          >
-            <PlayIcon className="h-3.5 w-3.5" />
-          </button>
+          <Button variant="subtle" aria-label="Resolve conflict" onClick={onResolve} size="icon">
+            <PlayIcon className="size-4" />
+          </Button>
         ) : failed ? (
-          <button
-            type="button"
-            aria-label="Retry job"
-            onClick={onRetry}
-            className="flex h-7 w-7 items-center justify-center rounded-md bg-accent-blue-soft text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-accent-blue"
-          >
-            <RotateCcwIcon className="h-3.5 w-3.5" />
-          </button>
+          <Button variant="subtle" aria-label="Retry job" onClick={onRetry} size="icon">
+            <RotateCcwIcon className="size-4" />
+          </Button>
         ) : completed || cancelled ? (
-          <button
-            type="button"
-            aria-label="Dismiss job"
-            onClick={onDismiss}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-light-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:text-dark-text-muted dark:hover:bg-dark-hover"
-          >
-            <XIcon className="h-3.5 w-3.5" />
-          </button>
+          <Button variant="subtle" aria-label="Dismiss job" onClick={onDismiss} size="icon">
+            <XIcon className="size-4" />
+          </Button>
         ) : pending ? null : paused ? (
-          <button
-            type="button"
-            aria-label="Resume job"
-            onClick={onResume}
-            className="flex h-7 w-7 items-center justify-center rounded-md bg-accent-blue-soft text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-accent-blue"
-          >
-            <PlayIcon className="h-3.5 w-3.5" />
-          </button>
+          <Button variant="subtle" aria-label="Resume job" onClick={onResume} size="icon">
+            <PlayIcon className="size-4" />
+          </Button>
         ) : (
-          <button
-            type="button"
-            aria-label="Pause job"
-            onClick={onPause}
-            className="flex h-7 w-7 items-center justify-center rounded-md bg-accent-blue-soft text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-accent-blue"
-          >
-            <PauseIcon className="h-3.5 w-3.5" />
-          </button>
+          <Button variant="subtle" aria-label="Pause job" onClick={onPause} size="icon">
+            <PauseIcon className="size-4" />
+          </Button>
         )}
         {!completed && !failed && !cancelled ? (
-          <button
-            type="button"
+          <Button
+            variant="subtle"
             aria-label="Cancel job"
+            title={pending ? 'Remove from queue' : 'Cancel'}
             onClick={onCancel}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-light-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:text-dark-text-muted dark:hover:bg-dark-hover"
+            size="icon"
           >
-            <XIcon className="h-3.5 w-3.5" />
-          </button>
+            <XIcon className="size-4" />
+          </Button>
         ) : null}
       </div>
     </div>
@@ -245,27 +217,25 @@ export function QueuePanel() {
     ? operations.filter((operation) => operation.operationId !== primary.operationId)
     : []
 
-  const activeCount = operations.filter((operation) => !isTerminal(operation.status)).length
-  const activeLabel = activeCount === 1 ? '1 active job' : `${activeCount} active jobs`
+  const jobsLabel = operations.length === 1 ? '1 job' : `${formatCount(operations.length)} jobs`
 
   return (
     <section
       role="region"
       aria-label="Job queue"
-      className="flex max-h-queue-list w-copycard flex-col overflow-hidden rounded-window border border-light-border-strong bg-light-surface shadow-float dark:border-dark-border-strong dark:bg-dark-surface"
+      className="flex max-h-queue-list w-queue flex-col overflow-hidden rounded-overlay border border-light-flyout-stroke bg-light-card text-light-text shadow-light-flyout dark:border-dark-flyout-stroke dark:bg-dark-card dark:text-dark-text dark:shadow-dark-flyout"
     >
-      <header className="flex items-center justify-between gap-2 border-b border-light-border px-4 py-2.5 dark:border-dark-border">
-        <span className="text-xs font-semibold text-light-text dark:text-dark-text">
-          {activeCount > 0 ? activeLabel : 'Jobs'}
-        </span>
-        <button
-          type="button"
+      <header className="flex h-11 flex-none items-center justify-between gap-2 border-b border-light-divider pl-4 pr-2 dark:border-dark-divider">
+        <span className="text-body font-semibold">{jobsLabel}</span>
+        <Button
+          variant="subtle"
+          aria-label="Fewer details"
+          title="Collapse"
           onClick={() => collapse(false)}
-          className="flex items-center gap-1 rounded-md px-2 py-1 text-uxs text-light-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:text-dark-text-muted dark:hover:bg-dark-hover"
+          size="icon"
         >
-          Fewer details
-          <ChevronDownIcon className="h-3.5 w-3.5" />
-        </button>
+          <ChevronDownIcon className="size-4" />
+        </Button>
       </header>
       <div className="flex min-h-0 flex-1 flex-col">
         {primary ? (
@@ -297,7 +267,7 @@ export function QueuePanel() {
         {secondary.length > 0 ? (
           <div
             aria-label="Queued jobs"
-            className="min-h-0 flex-1 overflow-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint"
+            className="min-h-0 flex-1 overflow-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary"
           >
             {secondary.map((operation) => {
               const reorderable = operation.status === 'pending'

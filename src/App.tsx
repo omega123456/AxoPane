@@ -35,6 +35,7 @@ import type {
   ThumbnailResultEvent,
 } from '@/lib/types/ipc'
 import { UpdateBanner } from '@/components/states/UpdateBanner'
+import { EverythingBanner } from '@/components/states/EverythingBanner'
 import { useUpdaterStore } from '@/stores/updater-store'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useClipboardStore } from '@/stores/clipboard-store'
@@ -48,6 +49,7 @@ import { useSettingsStore } from '@/stores/settings-store'
 import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 import { useDefaultAppDialogStore } from '@/stores/default-app-dialog-store'
 import { initializeTheme, useThemeStore } from '@/stores/theme-store'
+import { applyWindowBackdrop } from '@/lib/window-commands'
 import { useThumbnailStore } from '@/stores/thumbnail-store'
 
 function isEditableTarget(target: EventTarget | null) {
@@ -86,6 +88,7 @@ function App() {
 
   useEffect(() => {
     initializeTheme()
+    void applyWindowBackdrop()
 
     // Subscribe to folder-size status changes before the single initial
     // fetch, so no transition between the two is missed.
@@ -324,17 +327,13 @@ function App() {
   ])
 
   return (
-    <main className="flex h-full select-none flex-col overflow-hidden overscroll-x-none bg-light-window font-ui text-light-text dark:bg-dark-window dark:text-dark-text">
-      <UpdateBanner />
+    <main className="flex h-full select-none flex-col overflow-hidden overscroll-x-none bg-light-base font-ui text-light-text dark:bg-dark-base dark:text-dark-text mica:bg-transparent">
       <AppFrame
-        commandBar={
-          <CommandBar
-            theme={theme}
-            setTheme={(nextTheme) => {
-              applyTheme(nextTheme)
-              void persistThemePreference(nextTheme)
-            }}
-          />
+        infoBars={
+          <>
+            <UpdateBanner />
+            <EverythingBanner />
+          </>
         }
         statusBar={<StatusBar />}
         overlay={
@@ -345,7 +344,17 @@ function App() {
           </>
         }
       >
-        <WorkspaceLayout />
+        <WorkspaceLayout
+          commandBar={
+            <CommandBar
+              theme={theme}
+              setTheme={(nextTheme) => {
+                applyTheme(nextTheme)
+                void persistThemePreference(nextTheme)
+              }}
+            />
+          }
+        />
       </AppFrame>
       <ContextMenu />
       <SettingsModal />

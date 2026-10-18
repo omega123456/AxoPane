@@ -29,19 +29,15 @@ type ComputeBreadcrumbLayoutArgs = {
 }
 
 const DEFAULT_MIN_CHARS = 2
-const COLLAPSE_MARKER_LABEL = '..'
-const BREADCRUMB_BUTTON_PADDING_PX = 16
-const BREADCRUMB_CHEVRON_GAP_PX = 4
-const BREADCRUMB_CHEVRON_WIDTH_PX = 14
-const BREADCRUMB_ITEM_GAP_PX = 4
-const BREADCRUMB_SEGMENT_CHROME_PX =
-  BREADCRUMB_BUTTON_PADDING_PX +
-  BREADCRUMB_CHEVRON_GAP_PX +
-  BREADCRUMB_CHEVRON_WIDTH_PX +
-  BREADCRUMB_ITEM_GAP_PX
+const COLLAPSE_MARKER_LABEL = '…'
+// Matches the address row: 6px padding either side of each crumb and a 12px
+// chevron between crumbs.
+const BREADCRUMB_BUTTON_PADDING_PX = 12
+const BREADCRUMB_CHEVRON_WIDTH_PX = 12
+const BREADCRUMB_SEGMENT_CHROME_PX = BREADCRUMB_BUTTON_PADDING_PX + BREADCRUMB_CHEVRON_WIDTH_PX
 const BREADCRUMB_CURRENT_SEGMENT_CHROME_PX = BREADCRUMB_BUTTON_PADDING_PX
 const BREADCRUMB_COLLAPSE_MARKER_CHROME_PX =
-  BREADCRUMB_CHEVRON_GAP_PX + BREADCRUMB_CHEVRON_WIDTH_PX + BREADCRUMB_ITEM_GAP_PX
+  BREADCRUMB_BUTTON_PADDING_PX + BREADCRUMB_CHEVRON_WIDTH_PX
 
 export function computeBreadcrumbLayout({
   segments,
@@ -136,17 +132,22 @@ export function createBreadcrumbMeasurer(navElement: HTMLElement | null): Breadc
     return { segment: () => Number.NaN }
   }
 
-  const font = window.getComputedStyle(navElement).font
-  if (font) {
-    context.font = font
+  const style = window.getComputedStyle(navElement)
+  const font = style.font
+  // The current crumb is semibold, so it is measured in the bolder weight.
+  const currentFont = `600 ${style.fontSize} ${style.fontFamily}`
+  const measure = (label: string, weightFont: string) => {
+    if (weightFont) {
+      context.font = weightFont
+    }
+    return context.measureText(label).width
   }
 
   return {
-    segment: (label) => context.measureText(label).width + BREADCRUMB_SEGMENT_CHROME_PX,
-    currentSegment: (label) =>
-      context.measureText(label).width + BREADCRUMB_CURRENT_SEGMENT_CHROME_PX,
+    segment: (label) => measure(label, font) + BREADCRUMB_SEGMENT_CHROME_PX,
+    currentSegment: (label) => measure(label, currentFont) + BREADCRUMB_CURRENT_SEGMENT_CHROME_PX,
     collapseMarker: () =>
-      context.measureText(COLLAPSE_MARKER_LABEL).width + BREADCRUMB_COLLAPSE_MARKER_CHROME_PX,
+      measure(COLLAPSE_MARKER_LABEL, font) + BREADCRUMB_COLLAPSE_MARKER_CHROME_PX,
   }
 }
 

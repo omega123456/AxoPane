@@ -15,9 +15,9 @@ import {
 } from '../src/tests/playwright-fixtures/queue'
 
 for (const mode of ['light', 'dark'] as const) {
-  test(`pane toolbar ${mode}`, async ({ page }) => {
+  test(`command bar ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
-    const toolbar = page.getByRole('toolbar', { name: 'Left pane toolbar' })
+    const toolbar = page.getByRole('toolbar', { name: 'Command bar' })
     await expect(toolbar).toBeVisible()
     await expect(toolbar.getByRole('button', { name: 'Back in Left pane' })).toBeVisible()
     await expect(toolbar.getByRole('button', { name: 'Up in Left pane' })).toBeVisible()
@@ -29,7 +29,48 @@ for (const mode of ['light', 'dark'] as const) {
       toolbar.getByRole('button', { name: 'Create new file in Left pane' }),
     ).toBeVisible()
     await expect(toolbar.getByRole('textbox', { name: 'Left pane filter' })).toBeVisible()
-    await expect(toolbar).toHaveScreenshot(`pane-toolbar-${mode}.png`)
+    await expect(toolbar).toHaveScreenshot(`command-bar-${mode}.png`)
+  })
+
+  test(`filter follows the active pane ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.browsing[mode])
+    const toolbar = page.getByRole('toolbar', { name: 'Command bar' })
+    await toolbar.getByRole('textbox', { name: 'Left pane filter' }).fill('doc')
+    await page.getByRole('region', { name: 'Right pane' }).click()
+    const rightFilter = toolbar.getByRole('textbox', { name: 'Right pane filter' })
+    await expect(rightFilter).toHaveValue('')
+    await expect(rightFilter).toHaveAttribute('placeholder', /^Filter /)
+    await expect(page.locator('main')).toHaveScreenshot(`filter-follows-active-pane-${mode}.png`)
+  })
+
+  test(`inactive pane selection ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.browsing[mode])
+    const leftPane = page.getByRole('region', { name: 'Left pane' })
+    await leftPane
+      .getByRole('row', { name: /Documents/ })
+      .first()
+      .click()
+    await page.getByRole('region', { name: 'Right pane' }).click()
+    await expect(page.getByTestId('active-pane-rule')).toHaveCount(1)
+    await expect(page.locator('main')).toHaveScreenshot(`inactive-pane-selection-${mode}.png`)
+  })
+
+  test(`focus ring button ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.browsing[mode])
+    const toolbar = page.getByRole('toolbar', { name: 'Command bar' })
+    const refresh = toolbar.getByRole('button', { name: 'Refresh Left pane' })
+    await refresh.focus()
+    await expect(refresh).toBeFocused()
+    await expect(toolbar).toHaveScreenshot(`focus-ring-button-${mode}.png`)
+  })
+
+  test(`focus ring row ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.browsing[mode])
+    const tree = page.locator('aside')
+    const row = tree.getByRole('treeitem').first().getByRole('button').last()
+    await row.focus()
+    await expect(row).toBeFocused()
+    await expect(tree).toHaveScreenshot(`focus-ring-row-${mode}.png`)
   })
 
   test(`view menu ${mode}`, async ({ page }) => {
@@ -150,6 +191,34 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('aside').first()).toHaveScreenshot(`sticky-tree-items-${mode}.png`)
   })
 
+  test(`tree capacity levels ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.capacityLevels[mode])
+    const tree = page.getByTestId('folder-tree-scroll')
+    await expect(tree.locator('[data-capacity-level="warning"]')).toBeVisible()
+    await expect(tree.locator('[data-capacity-level="critical"]')).toBeVisible()
+    await expect(page.locator('aside').first()).toHaveScreenshot(`tree-capacity-levels-${mode}.png`)
+  })
+
+  test(`everything banner ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.everythingBanner[mode])
+    await expect(page.getByRole('status', { name: 'Everything unavailable' })).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`everything-infobar-${mode}.png`)
+  })
+
+  test(`error infobar ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.ejectRefused[mode])
+    const treeScroll = page.getByTestId('folder-tree-scroll')
+    await treeScroll
+      .getByRole('button', { name: 'USB Stick (E:)', exact: true })
+      .click({ button: 'right' })
+    await page
+      .getByRole('menu', { name: 'USB Stick (E:)' })
+      .getByRole('menuitem', { name: 'Eject' })
+      .click()
+    await expect(page.getByRole('alert').getByText(/is in use/)).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`error-infobar-${mode}.png`)
+  })
+
   test(`tree context menu dual pane ${mode}`, async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 520 })
     await gotoScenario(page, screenshotScenarios.stickyTree[mode])
@@ -180,15 +249,15 @@ for (const mode of ['light', 'dark'] as const) {
 
   test(`tabs ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.tabs[mode])
-    const leftPane = page.getByRole('region', { name: 'Left pane' })
-    await expect(leftPane).toBeVisible()
-    await expect(leftPane.getByRole('tab')).toHaveCount(4)
+    const leftTabs = page.getByRole('group', { name: 'Left pane tabs' })
+    await expect(leftTabs).toBeVisible()
+    await expect(leftTabs.getByRole('tab')).toHaveCount(4)
     await expect(page.locator('main')).toHaveScreenshot(`pane-tabs-${mode}.png`)
   })
 
   test(`tab drag same pane ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.tabDrag[mode])
-    const leftPane = page.getByRole('region', { name: 'Left pane' })
+    const leftPane = page.getByRole('group', { name: 'Left pane tabs' })
     const tabs = leftPane.getByRole('tab')
     const source = tabs.nth(0)
     const target = tabs.nth(2)
@@ -208,8 +277,8 @@ for (const mode of ['light', 'dark'] as const) {
 
   test(`tab drag cross pane ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.tabDrag[mode])
-    const leftPane = page.getByRole('region', { name: 'Left pane' })
-    const rightPane = page.getByRole('region', { name: 'Right pane' })
+    const leftPane = page.getByRole('group', { name: 'Left pane tabs' })
+    const rightPane = page.getByRole('group', { name: 'Right pane tabs' })
     const source = leftPane.getByRole('tab').nth(1)
     const target = rightPane.getByRole('tab').last()
     const sourceBox = await source.boundingBox()
@@ -228,8 +297,8 @@ for (const mode of ['light', 'dark'] as const) {
 
   test(`tab drag invalid ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.invalidTabDrag[mode])
-    const source = page.getByRole('region', { name: 'Left pane' }).getByRole('tab')
-    const target = page.getByRole('region', { name: 'Right pane' }).getByRole('tab').first()
+    const source = page.getByRole('group', { name: 'Left pane tabs' }).getByRole('tab')
+    const target = page.getByRole('group', { name: 'Right pane tabs' }).getByRole('tab').first()
     const sourceBox = await source.boundingBox()
     const targetBox = await target.boundingBox()
     if (!sourceBox || !targetBox) throw new Error('missing tab geometry')
@@ -241,12 +310,14 @@ for (const mode of ['light', 'dark'] as const) {
     })
     await expect(page.locator('main')).toHaveScreenshot(`tab-drag-invalid-${mode}.png`)
     await page.mouse.up()
-    await expect(page.getByRole('region', { name: 'Left pane' }).getByRole('tab')).toHaveCount(1)
+    await expect(page.getByRole('group', { name: 'Left pane tabs' }).getByRole('tab')).toHaveCount(
+      1,
+    )
   })
 
   test(`tab move context menu ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.tabDrag[mode])
-    const tab = page.getByRole('region', { name: 'Left pane' }).getByRole('tab').nth(1)
+    const tab = page.getByRole('group', { name: 'Left pane tabs' }).getByRole('tab').nth(1)
     await tab.click({ button: 'right' })
     await expect(page.getByRole('menuitem', { name: 'Move tab right' })).toBeVisible()
     await expect(page.getByRole('menuitem', { name: 'Add to Favourites' })).toBeVisible()
@@ -292,17 +363,9 @@ for (const mode of ['light', 'dark'] as const) {
 
     await rightPane.getByRole('button', { name: 'Foxtrot' }).click({ button: 'right' })
     const pathEditor = rightPane.getByRole('textbox', { name: 'Right pane path' })
-    const homeShortcut = rightPane.getByRole('button', { name: 'Navigate to ~' })
     await expect(pathEditor).toBeVisible()
-    await expect(homeShortcut).toBeVisible()
-    await expect(rightPane.getByRole('button', { name: 'Navigate to /' })).toBeVisible()
-    const [editorBox, homeBox] = await Promise.all([
-      pathEditor.boundingBox(),
-      homeShortcut.boundingBox(),
-    ])
-    expect(editorBox).not.toBeNull()
-    expect(homeBox).not.toBeNull()
-    expect(editorBox!.x + editorBox!.width).toBeLessThanOrEqual(homeBox!.x)
+    await expect(pathEditor).toBeFocused()
+    await expect(page.locator('main')).toHaveScreenshot(`address-edit-mode-${mode}.png`)
   })
 
   test(`file types ${mode}`, async ({ page }) => {
@@ -364,12 +427,20 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`directory-error-state-${mode}.png`)
   })
 
-  test(`permission ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.permission[mode])
-    await expect(
-      page.getByText('You do not have permission to view this folder.').first(),
-    ).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`permission-denied-state-${mode}.png`)
+  test(`permission on Windows ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.permissionWindows[mode])
+    await expect(page.getByText("You don't have access").first()).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Open as administrator' }).first()).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(
+      `permission-denied-state-windows-${mode}.png`,
+    )
+  })
+
+  test(`permission on macOS ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.permissionMacos[mode])
+    await expect(page.getByText("You don't have access").first()).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Open System Settings' }).first()).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`permission-denied-state-macos-${mode}.png`)
   })
 
   test(`trash ${mode}`, async ({ page }) => {
@@ -401,11 +472,11 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`folder-size-bounds-${mode}.png`)
   })
 
-  test(`toolbar size spinner ${mode}`, async ({ page }) => {
+  test(`status bar size spinner ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.sizeBounds[mode])
-    const toolbar = page.getByRole('toolbar', { name: 'Left pane toolbar' })
-    await expect(toolbar.getByText('Updating folder sizes')).toBeAttached()
-    await expect(toolbar).toHaveScreenshot(`pane-toolbar-size-spinner-${mode}.png`)
+    const statusBar = page.locator('footer').first()
+    await expect(statusBar.getByText('Updating folder sizes')).toBeAttached()
+    await expect(statusBar).toHaveScreenshot(`status-bar-size-spinner-${mode}.png`)
   })
 
   test(`items sort pending ${mode}`, async ({ page }) => {
@@ -449,9 +520,11 @@ for (const mode of ['light', 'dark'] as const) {
     await gotoScenario(page, screenshotScenarios.queueExpanded[mode])
     await page.getByRole('button', { name: 'Expand job queue' }).click()
     await expect(page.getByRole('region', { name: 'Job queue' })).toBeVisible()
-    const toggle = page.getByRole('button', { name: /more/ }).first()
-    await toggle.click()
-    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await page.getByRole('button', { name: 'Show items' }).first().click()
+    await expect(page.getByRole('button', { name: 'Hide items' }).first()).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
     await expect(
       page.locator('[data-testid="throughput-chart-fill-extent"]').first(),
     ).toHaveAttribute('width', String(expandedQueueFinalProgressEvent.progressPercent))
@@ -486,7 +559,7 @@ for (const mode of ['light', 'dark'] as const) {
 
   test(`queue deleting collapsed ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.queueDeleting[mode])
-    await expect(page.getByText('Deleting 1 job')).toBeVisible()
+    await expect(page.getByText('Deleting 84 items')).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(
       `transfer-queue-deleting-collapsed-${mode}.png`,
     )
@@ -588,6 +661,16 @@ for (const mode of ['light', 'dark'] as const) {
       await expect(row).toHaveScreenshot(`settings-auto-folder-size-macos-${name}-${mode}.png`)
     })
   }
+
+  test(`settings reset expander ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.browsing[mode])
+    await openSettingsSection(page, 'dates')
+    const expander = page.getByRole('button', { name: /Reset to defaults/ })
+    await expander.click()
+    await expect(expander).toHaveAttribute('aria-expanded', 'true')
+    await expect(page.getByRole('button', { name: 'Reset', exact: true })).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`settings-reset-expander-${mode}.png`)
+  })
 
   test(`settings dates ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])

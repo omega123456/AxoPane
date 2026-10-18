@@ -1,20 +1,26 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react'
 import {
   buildContextMenuContent,
   describeMenuTarget,
   resolveMenuTarget,
 } from '@/components/menus/menu-definitions'
 import { BreadcrumbBar } from './BreadcrumbBar'
-import { PaneToolbar } from './PaneToolbar'
 import { type FileRowActions } from './FileRow'
-import { DetailsView } from './DetailsView'
+import { DETAILS_LIST_INSET_PX, DETAILS_ROW_HEIGHT_PX, DetailsView } from './DetailsView'
 import {
   GraphicalView,
   type GraphicalThumbnailRange,
   type GraphicalViewHandle,
 } from './GraphicalView'
 import { GraphicalSortBar } from './GraphicalSortBar'
-import { TabBar } from './TabBar'
 import { executeCommand } from '@/lib/commands'
 import { detectPlatformOs, resolveCommandForEvent } from '@/lib/keymap'
 import { getParentPath } from '@/stores/panes-store'
@@ -23,12 +29,12 @@ import { isTrashPath } from '@/lib/trash'
 import type { PaneViewMode } from '@/lib/pane-view'
 import { EmptyState } from '@/components/states/EmptyState'
 import { ErrorState } from '@/components/states/ErrorState'
-import { EverythingBanner } from '@/components/states/EverythingBanner'
 import { LoadingSkeleton } from '@/components/states/LoadingSkeleton'
 import { PermissionDenied } from '@/components/states/PermissionDenied'
 import { useDelayedFlag } from '@/lib/use-delayed-flag'
 import { renameEntryInPane } from '@/lib/file-actions'
 import { log } from '@/lib/app-log-commands'
+import { focusFilterInput, registerPaneFilterKeys } from '@/lib/pane-filter-keys'
 import { startNativeDrag } from '@/lib/ipc/commands'
 import { beginNativeDragBridge, endNativeDragBridge } from '@/lib/native-drag-bridge'
 import { useInlineRenameStore } from '@/stores/inline-rename-store'
@@ -73,7 +79,6 @@ const macroContinuationWindowMs = 100
 // spot, so a second double-click on ".." can arrive as detail 3/4 (or no
 // dblclick at all). 500 ms matches the default OS double-click interval.
 const parentClickPairWindowMs = 500
-const rowHeightPx = 30
 const marqueeDragThresholdPx = 4
 const visibleIconRequestDebounceMs = 100
 
@@ -132,7 +137,6 @@ export function FilePane({ paneId }: FilePaneProps) {
   const revealScrollRequestId = usePanesStore((state) => state.revealScrollRequests[paneId])
   const setActivePane = usePanesStore((state) => state.setActivePane)
   const setFocusedEntry = usePanesStore((state) => state.setFocusedEntry)
-  const goUp = usePanesStore((state) => state.goUp)
   const openTabFromPath = usePanesStore((state) => state.openTabFromPath)
   const reloadPane = usePanesStore((state) => state.reloadPane)
   const requestVisibleItemCounts = usePanesStore((state) => state.requestVisibleItemCounts)
@@ -533,7 +537,10 @@ export function FilePane({ paneId }: FilePaneProps) {
       return
     }
     const lastActivationAt = lastPointerActivationAtRef.current
-    if (lastActivationAt !== null && eventTimeStamp - lastActivationAt < macroContinuationWindowMs) {
+    if (
+      lastActivationAt !== null &&
+      eventTimeStamp - lastActivationAt < macroContinuationWindowMs
+    ) {
       return
     }
     const pendingAt = parentPendingClickAtRef.current
@@ -587,10 +594,11 @@ export function FilePane({ paneId }: FilePaneProps) {
     const rangeIds =
       viewMode === 'details'
         ? (() => {
-            const firstRow = Math.max(0, Math.floor(rect.top / rowHeightPx))
+            const top = rect.top - DETAILS_LIST_INSET_PX
+            const firstRow = Math.max(0, Math.floor(top / DETAILS_ROW_HEIGHT_PX))
             const lastRow = Math.min(
               rowCount - 1,
-              Math.ceil((rect.top + rect.height) / rowHeightPx) - 1,
+              Math.ceil((top + rect.height) / DETAILS_ROW_HEIGHT_PX) - 1,
             )
             const entryStart = Math.max(0, firstRow - parentOffset)
             const entryEnd = lastRow - parentOffset
@@ -682,12 +690,14 @@ export function FilePane({ paneId }: FilePaneProps) {
 
   useEffect(() => () => detachMarqueeListenersRef.current?.(), [])
 
-  const canGoUp = hasParent
   const permissionDenied = isPermissionError(pane.error)
   // An empty folder still shows the synthetic ".." row when a parent exists, so
   // the dedicated EmptyState only takes over when there is genuinely nothing to
   // render (empty folder at a filesystem root).
   const showEmpty = !pane.loading && !pane.error && rowCount === 0
+  const newFolderAction = isTrashPath(pane.path)
+    ? undefined
+    : () => useActionDialogStore.getState().open({ kind: 'newFolder', paneId })
 
   function showMenu(event: React.MouseEvent, entryId?: string) {
     event.preventDefault()
@@ -926,105 +936,109 @@ export function FilePane({ paneId }: FilePaneProps) {
     [],
   )
 
+  function handlePaneKeyDown(event: ReactKeyboardEvent<HTMLElement>, fromFilter: boolean) {
+    if (!isActivePane) {
+      return
+    }
+
+    // Child views handle their own navigation; everything else still belongs
+    // to the pane (including type-to-filter and configured shortcuts).
+    if (event.defaultPrevented) {
+      return
+    }
+
+    if (modalOpen) {
+      return
+    }
+
+    // Keys typed into the shared filter still drive list navigation: pressing
+    // arrows/Enter moves through the filtered list (and opens the focused
+    // entry) while the cursor stays in the filter so the user can keep refining
+    // it. Every other editable target (e.g. an inline rename) keeps swallowing
+    // keys as before.
+    const targetIsFilter = fromFilter
+
+    if (isEditableTarget(event.target) && !targetIsFilter) {
+      return
+    }
+
+    const graphicalMovement = viewMode === 'details' ? undefined : arrowGridMovements[event.key]
+    if (graphicalMovement) {
+      event.preventDefault()
+      graphicalViewRef.current?.moveFocus(graphicalMovement)
+      return
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      focusByRowIndex(focusedRowIndex + 1)
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      focusByRowIndex(focusedRowIndex - 1)
+    } else if (event.key === 'PageDown') {
+      event.preventDefault()
+      focusByRowIndex(focusedRowIndex + visibleRowCount())
+    } else if (event.key === 'PageUp') {
+      event.preventDefault()
+      focusByRowIndex(focusedRowIndex - visibleRowCount())
+    } else if (event.key === 'Home') {
+      event.preventDefault()
+      focusByRowIndex(0)
+    } else if (event.key === 'End') {
+      event.preventDefault()
+      focusByRowIndex(rowCount - 1)
+    } else if (targetIsFilter) {
+      // Open the focused entry on Enter; let every other key reach the input
+      // so typing into the filter is unaffected.
+      if (event.key === 'Enter' && pane.focusedEntryId) {
+        event.preventDefault()
+        // Hand focus back to the pane shell so navigating into the new folder
+        // resumes arrow-key control instead of leaving the cursor trapped in
+        // the filter input.
+        focusPaneShell()
+        void activateEntry(pane.focusedEntryId)
+      }
+    } else if (
+      event.key.length === 1 &&
+      // Space is a bound command (Calculate size), not a typeahead-to-filter
+      // character — let it fall through to the command resolver below.
+      event.key !== ' ' &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey
+    ) {
+      focusFilterInput()
+    } else {
+      const commandId = resolveCommandForEvent(event.nativeEvent, keymap)
+      if (commandId) {
+        event.preventDefault()
+        // The focused pane owns this command. Stop the event here so the
+        // global fallback handler on `window` (App.tsx) doesn't dispatch it a
+        // second time — a double paste would otherwise enqueue two transfers.
+        event.stopPropagation()
+        executeCommand(commandId, paneId)
+      }
+    }
+  }
+
+  // The shared filter forwards the keys typed into it while this pane is active.
+  const paneKeyDownRef = useRef(handlePaneKeyDown)
+  useLayoutEffect(() => {
+    paneKeyDownRef.current = handlePaneKeyDown
+  })
+  useEffect(
+    () => registerPaneFilterKeys(paneId, (event) => paneKeyDownRef.current(event, true)),
+    [paneId],
+  )
+
   return (
     <section
       ref={paneRef}
       data-pane-id={paneId}
       aria-label={pane.title}
-      className={`relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-light-surface dark:bg-dark-surface ${
-        isActivePane ? 'outline outline-1 outline-accent-blue-border' : ''
-      }`}
+      className="relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden border border-light-stroke bg-light-layer outline-none dark:border-dark-stroke dark:bg-dark-layer"
       onMouseDown={() => setActivePane(paneId)}
-      onKeyDown={(event) => {
-        if (!isActivePane) {
-          return
-        }
-
-        // Child views handle their own navigation; everything else still belongs
-        // to the pane (including type-to-filter and configured shortcuts).
-        if (event.defaultPrevented) {
-          return
-        }
-
-        if (modalOpen) {
-          return
-        }
-
-        // The filter input is the one editable target inside the pane that still
-        // wants list navigation: pressing arrows/Enter should drive the filtered
-        // list (and open the focused entry) while keeping the cursor in the input
-        // so the user can keep refining the filter. Every other editable target
-        // (e.g. an inline rename) keeps swallowing keys as before.
-        const targetIsFilter =
-          event.target instanceof HTMLInputElement &&
-          event.target.getAttribute('aria-label') === `${pane.title} filter`
-
-        if (isEditableTarget(event.target) && !targetIsFilter) {
-          return
-        }
-
-        const graphicalMovement = viewMode === 'details' ? undefined : arrowGridMovements[event.key]
-        if (graphicalMovement) {
-          event.preventDefault()
-          graphicalViewRef.current?.moveFocus(graphicalMovement)
-          return
-        }
-
-        if (event.key === 'ArrowDown') {
-          event.preventDefault()
-          focusByRowIndex(focusedRowIndex + 1)
-        } else if (event.key === 'ArrowUp') {
-          event.preventDefault()
-          focusByRowIndex(focusedRowIndex - 1)
-        } else if (event.key === 'PageDown') {
-          event.preventDefault()
-          focusByRowIndex(focusedRowIndex + visibleRowCount())
-        } else if (event.key === 'PageUp') {
-          event.preventDefault()
-          focusByRowIndex(focusedRowIndex - visibleRowCount())
-        } else if (event.key === 'Home') {
-          event.preventDefault()
-          focusByRowIndex(0)
-        } else if (event.key === 'End') {
-          event.preventDefault()
-          focusByRowIndex(rowCount - 1)
-        } else if (targetIsFilter) {
-          // Open the focused entry on Enter; let every other key reach the input
-          // so typing into the filter is unaffected.
-          if (event.key === 'Enter' && pane.focusedEntryId) {
-            event.preventDefault()
-            // Hand focus back to the pane shell so navigating into the new folder
-            // resumes arrow-key control instead of leaving the cursor trapped in
-            // the filter input.
-            focusPaneShell()
-            void activateEntry(pane.focusedEntryId)
-          }
-        } else if (
-          event.key.length === 1 &&
-          // Space is a bound command (Calculate size), not a typeahead-to-filter
-          // character — let it fall through to the command resolver below.
-          event.key !== ' ' &&
-          !event.ctrlKey &&
-          !event.metaKey &&
-          !event.altKey
-        ) {
-          const target = document.querySelector<HTMLInputElement>(
-            `input[aria-label="${pane.title} filter"]`,
-          )
-          target?.focus()
-          target?.setSelectionRange(target.value.length, target.value.length)
-        } else {
-          const commandId = resolveCommandForEvent(event.nativeEvent, keymap)
-          if (commandId) {
-            event.preventDefault()
-            // The focused pane owns this command. Stop the event here so the
-            // global fallback handler on `window` (App.tsx) doesn't dispatch it a
-            // second time — a double paste would otherwise enqueue two transfers.
-            event.stopPropagation()
-            executeCommand(commandId, paneId)
-          }
-        }
-      }}
+      onKeyDown={(event) => handlePaneKeyDown(event, false)}
       tabIndex={0}
       onContextMenu={(event) => {
         if (event.target === parentRef.current) {
@@ -1032,9 +1046,6 @@ export function FilePane({ paneId }: FilePaneProps) {
         }
       }}
     >
-      <TabBar paneId={paneId} title={pane.title} currentPath={pane.path} isActive={isActivePane} />
-      <EverythingBanner />
-      <PaneToolbar pane={pane} isActive={isActivePane} />
       <BreadcrumbBar pane={pane} />
       {viewMode === 'details' ? (
         <DetailsView
@@ -1064,26 +1075,25 @@ export function FilePane({ paneId }: FilePaneProps) {
           scrollContainerRef={parentRef}
           body={
             showSkeleton ? (
-              <div className="min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint">
+              <div className="min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary">
                 <LoadingSkeleton />
               </div>
             ) : permissionDenied ? (
-              <PermissionDenied onGoUp={() => void goUp(paneId)} canGoUp={canGoUp} />
+              <PermissionDenied />
             ) : pane.error ? (
               <ErrorState
+                path={pane.path}
                 message={pane.error}
                 onRetry={() => void reloadPane(paneId)}
-                onGoUp={() => void goUp(paneId)}
-                canGoUp={canGoUp}
               />
             ) : showEmpty ? (
               <div
-                className={`min-h-0 flex-1 ${isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-accent-blue-border' : ''}`}
+                className={`flex min-h-0 flex-1 flex-col ${isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-light-accent dark:outline-dark-accent' : ''}`}
                 onDragOver={handlePaneDragOver}
                 onDragLeave={handlePaneDragLeave}
                 onDrop={(event) => void handlePaneDrop(event)}
               >
-                <EmptyState />
+                <EmptyState onNewFolder={newFolderAction} />
               </div>
             ) : undefined
           }
@@ -1124,17 +1134,16 @@ export function FilePane({ paneId }: FilePaneProps) {
                   <LoadingSkeleton />
                 </div>
               ) : permissionDenied ? (
-                <PermissionDenied onGoUp={() => void goUp(paneId)} canGoUp={canGoUp} />
+                <PermissionDenied />
               ) : pane.error ? (
                 <ErrorState
+                  path={pane.path}
                   message={pane.error}
                   onRetry={() => void reloadPane(paneId)}
-                  onGoUp={() => void goUp(paneId)}
-                  canGoUp={canGoUp}
                 />
               ) : showEmpty ? (
-                <div className="min-h-0 flex-1">
-                  <EmptyState />
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <EmptyState onNewFolder={newFolderAction} />
                 </div>
               ) : undefined
             }

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 
+/** Settings group header, e.g. "View" or "Layout". */
 export function SectionLabel({
   children,
   className = '',
@@ -8,10 +9,10 @@ export function SectionLabel({
   className?: string
 }) {
   return (
-    <div
-      className={`text-2xs font-bold uppercase tracking-wide text-light-text-muted dark:text-dark-text-muted ${className}`}
+    <h3
+      className={`mb-1.5 mt-4.5 text-body font-semibold text-light-text first:mt-0 dark:text-dark-text ${className}`}
     >
       {children}
-    </div>
+    </h3>
   )
 }

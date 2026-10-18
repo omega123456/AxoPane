@@ -148,7 +148,7 @@ describe('FilePane internal drag-and-drop', () => {
     fireEvent.dragStart(source, { dataTransfer: dataTransfer() })
     fireEvent.dragOver(target, { dataTransfer: dataTransfer() })
     // A valid target lights up while hovered.
-    expect(target).toHaveClass('ring-accent-blue-border')
+    expect(target).toHaveClass('ring-light-accent dark:ring-dark-accent')
 
     fireEvent.drop(target, { dataTransfer: dataTransfer() })
 
@@ -160,7 +160,7 @@ describe('FilePane internal drag-and-drop', () => {
       })
     })
     // The highlight and active drag are cleared afterwards.
-    expect(target).not.toHaveClass('ring-accent-blue-border')
+    expect(target).not.toHaveClass('ring-light-accent dark:ring-dark-accent')
     expect(useDragStore.getState().drag).toBeNull()
   })
 
@@ -229,7 +229,7 @@ describe('FilePane internal drag-and-drop', () => {
     fireEvent.dragStart(self, { dataTransfer: dataTransfer() })
     fireEvent.dragOver(self, { dataTransfer: dataTransfer() })
     // No highlight because the drop is invalid.
-    expect(self).not.toHaveClass('ring-accent-blue-border')
+    expect(self).not.toHaveClass('ring-light-accent dark:ring-dark-accent')
 
     fireEvent.drop(self, { dataTransfer: dataTransfer() })
     await Promise.resolve()
@@ -335,7 +335,7 @@ describe('FilePane in-app drops during an OS-owned drag', () => {
     // The webview sees no DOM drag events for an OS drag; the position stream is
     // what drives the drop target.
     await dragPointerOnto(target)
-    expect(target).toHaveClass('ring-accent-blue-border')
+    expect(target).toHaveClass('ring-light-accent dark:ring-dark-accent')
 
     await nativeDrag.end()
 
@@ -346,7 +346,7 @@ describe('FilePane in-app drops during an OS-owned drag', () => {
         items: [{ sourcePath: 'C:\\root\\Alpha', name: 'Alpha', sizeBytes: 10 }],
       })
     })
-    expect(target).not.toHaveClass('ring-accent-blue-border')
+    expect(target).not.toHaveClass('ring-light-accent dark:ring-dark-accent')
     expect(useDragStore.getState().drag).toBeNull()
   })
 

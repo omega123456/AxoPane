@@ -88,7 +88,7 @@ export function sortVolumesForTree(volumes: VolumeInfo[]) {
 }
 
 // Network mounts win over the removable flag (a mapped network drive can report
-// as removable on some systems but belongs under Network Drives), so the order
+// as removable on some systems but belongs under Network), so the order
 // of these checks matters.
 export function volumeCategory(volume: VolumeInfo): VolumeCategory {
   if (volume.isNetwork) {
@@ -105,8 +105,8 @@ export function volumeCategory(volume: VolumeInfo): VolumeCategory {
 // Tree section order + headings. Only non-empty sections are rendered.
 const categoryOrder: { category: VolumeCategory; label: string }[] = [
   { category: 'fixed', label: 'Drives' },
-  { category: 'removable', label: 'Removable Drives' },
-  { category: 'network', label: 'Network Drives' },
+  { category: 'removable', label: 'Removable' },
+  { category: 'network', label: 'Network' },
 ]
 
 export function groupVolumesByCategory(volumes: VolumeInfo[]): VolumeGroup[] {
@@ -139,4 +139,27 @@ export function formatVolumeTreeName(volume: VolumeInfo) {
   }
 
   return `${trimmedLabel} (${drive})`
+}
+
+export type CapacityLevel = 'normal' | 'warning' | 'critical'
+
+/**
+ * Used-space fraction for a local volume's capacity bar, or `null` when no bar
+ * applies: network shares report unreliable totals, and a zero total means the
+ * OS gave no capacity at all.
+ */
+export function volumeUsedFraction(volume: VolumeInfo): number | null {
+  if (volumeCategory(volume) === 'network' || volume.totalBytes <= 0) {
+    return null
+  }
+  const used = (volume.totalBytes - volume.freeBytes) / volume.totalBytes
+  return Math.min(1, Math.max(0, used))
+}
+
+/** Capacity bars turn amber at 85% full and red at 95%. */
+export function capacityLevel(usedFraction: number): CapacityLevel {
+  if (usedFraction >= 0.95) {
+    return 'critical'
+  }
+  return usedFraction >= 0.85 ? 'warning' : 'normal'
 }

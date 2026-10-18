@@ -56,7 +56,7 @@ describe('WorkspaceLayout', () => {
     // Grabbing away from the edge must not jump: only the movement delta applies.
     fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientX: 260 })
     fireEvent.pointerMove(handle, { pointerId: 1, clientX: 306 })
-    expect(useLayoutStore.getState().treeWidthPx).toBe(250)
+    expect(useLayoutStore.getState().treeWidthPx).toBe(258)
 
     fireEvent.pointerUp(handle, { pointerId: 1 })
     await waitFor(() => expect(saveConfig).toHaveBeenCalled())
@@ -73,7 +73,9 @@ describe('WorkspaceLayout', () => {
 
   it('resizes the pane split by the drag distance over the pane width', () => {
     renderLayout()
-    const grid = document.querySelector('[data-pane-id="left"]')?.parentElement as Element
+    // Each pane card sits in a wrapper that also holds its active rule.
+    const grid = document.querySelector('[data-pane-id="left"]')?.parentElement
+      ?.parentElement as Element
     mockRect(grid, 100, 800)
     const handle = screen.getByRole('separator', { name: 'Resize panes' })
 
@@ -85,7 +87,9 @@ describe('WorkspaceLayout', () => {
 
   it('keeps the split unchanged when the pane row has no measurable width', () => {
     renderLayout()
-    const grid = document.querySelector('[data-pane-id="left"]')?.parentElement as Element
+    // Each pane card sits in a wrapper that also holds its active rule.
+    const grid = document.querySelector('[data-pane-id="left"]')?.parentElement
+      ?.parentElement as Element
     mockRect(grid, 0, 0)
     const handle = screen.getByRole('separator', { name: 'Resize panes' })
 
@@ -99,6 +103,14 @@ describe('WorkspaceLayout', () => {
     const handle = screen.getByRole('separator', { name: 'Resize panes' })
     fireEvent.keyDown(handle, { key: 'ArrowRight' })
     expect(useLayoutStore.getState().paneSplit).toBeCloseTo(0.52)
+  })
+
+  it('marks only the active pane with the accent rule', () => {
+    renderLayout()
+
+    const rules = screen.getAllByTestId('active-pane-rule')
+    expect(rules).toHaveLength(1)
+    expect(rules[0].parentElement?.querySelector('[data-pane-id="left"]')).not.toBeNull()
   })
 
   it('renders a single pane without a pane divider in single mode', () => {

@@ -1,6 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
-  ArrowRightIcon,
   CheckIcon,
   CheckCircleIcon,
   ChevronDownIcon,
@@ -11,11 +10,11 @@ import {
   RotateCcwIcon,
   SkipForwardIcon,
   XCircleIcon,
-  XIcon,
 } from '@/components/icons'
+import { Button, ProgressBar } from '@/components/controls'
 import { ThroughputChart } from '@/components/queue/ThroughputChart'
 import { formatCount, formatRate } from '@/lib/format'
-import { ITEM_PREVIEW_LIMIT, formatJobProgress, verb } from '@/lib/queue-format'
+import { formatItemPreview, formatJobProgress, verb } from '@/lib/queue-format'
 import type { OpProgress, ThroughputSample } from '@/lib/types/ipc'
 
 type JobCardProps = {
@@ -80,8 +79,6 @@ export function JobCard({
   const showChart = showCurrentFile && !isDelete
   const showRate = showCurrentFile && !isDelete
 
-  const previewNames = operation.itemNames.slice(0, ITEM_PREVIEW_LIMIT)
-  const hiddenItemCount = Math.max(0, operation.totalItems - previewNames.length)
   const listedNames = operation.itemNames
   // The backend sends a bounded preview, so a very large selection can still
   // have names beyond the ones it shipped. Say how many are unlisted rather
@@ -193,84 +190,92 @@ export function JobCard({
     }
   }, [])
 
+  const title = isCompleted
+    ? `${verb(operation)} complete`
+    : isFailed
+      ? `${verb(operation)} failed`
+      : isCancelled
+        ? `${verb(operation)} cancelled`
+        : `${verb(operation)} ${formatCount(operation.totalItems)} items`
+  const preview =
+    formatItemPreview(operation.itemNames, operation.totalItems) ?? operation.sourceDir
+  // Where the items go; a delete has no destination, so it names what it removes.
+  const where = isPending
+    ? `Waiting · ${preview}`
+    : operation.destinationDir
+      ? `to ${operation.destinationDir}`
+      : preview
+
   return (
-    <article aria-labelledby={headingId} data-status={operation.status} className="p-4">
-      <div className="flex min-w-0 items-start gap-2">
+    <article
+      aria-labelledby={headingId}
+      data-status={operation.status}
+      className="grid gap-2 px-4 py-3.5"
+    >
+      <div className="flex min-w-0 items-center gap-1.5">
         {reorderable ? (
-          <span className="mt-0.5 flex shrink-0 flex-col">
-            <button
-              type="button"
-              aria-label="Move job up"
-              onClick={onMoveUp}
-              disabled={!onMoveUp}
-              className="flex h-4 w-4 items-center justify-center rounded text-light-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover disabled:opacity-40 dark:text-dark-text-muted dark:hover:bg-dark-hover"
-            >
-              <GripVerticalIcon className="h-3.5 w-3.5" />
-            </button>
+          <Button
+            variant="subtle"
+            aria-label="Move job up"
+            onClick={onMoveUp}
+            disabled={!onMoveUp}
+            size="compact"
+            className="-ml-2"
+          >
+            <GripVerticalIcon className="size-3.5" />
+          </Button>
+        ) : null}
+        {isCompleted ? (
+          <CheckCircleIcon className="size-4 shrink-0 text-light-success dark:text-dark-success" />
+        ) : null}
+        {isFailed ? (
+          <XCircleIcon className="size-4 shrink-0 text-light-danger dark:text-dark-danger" />
+        ) : null}
+        {isCancelled ? (
+          <XCircleIcon className="size-4 shrink-0 text-light-text-secondary dark:text-dark-text-secondary" />
+        ) : null}
+        <span
+          id={headingId}
+          className="min-w-0 truncate text-body font-semibold text-light-text dark:text-dark-text"
+        >
+          {title}
+        </span>
+        {listedNames.length > 0 ? (
+          <Button
+            variant="subtle"
+            aria-expanded={itemsExpanded}
+            aria-controls={itemListId}
+            aria-label={itemsExpanded ? 'Hide items' : 'Show items'}
+            title={itemsExpanded ? 'Hide items' : 'Show items'}
+            onClick={() => setItemsExpanded((expanded) => !expanded)}
+            size="compact"
+          >
+            {itemsExpanded ? (
+              <ChevronUpIcon className="size-3" />
+            ) : (
+              <ChevronDownIcon className="size-3" />
+            )}
+          </Button>
+        ) : null}
+      </div>
+
+      <div className="flex min-w-0 justify-between gap-3 text-caption text-light-text-secondary dark:text-dark-text-secondary">
+        <span className="min-w-0 truncate" title={where}>
+          {where}
+        </span>
+        {showProgress && !isPending ? (
+          <span
+            className={`shrink-0 tabular-nums ${isFailed ? 'text-light-danger dark:text-dark-danger' : ''}`}
+          >
+            {roundedPercent}%
           </span>
         ) : null}
-        <div className="min-w-0 flex-1">
-          <div
-            id={headingId}
-            className="flex items-center gap-1.5 text-sm font-semibold text-light-text dark:text-dark-text"
-          >
-            {isCompleted ? (
-              <CheckCircleIcon className="h-4 w-4 shrink-0 text-accent-green" />
-            ) : null}
-            {isFailed ? <XCircleIcon className="h-4 w-4 shrink-0 text-accent-red" /> : null}
-            {isCancelled ? (
-              <XCircleIcon className="h-4 w-4 shrink-0 text-light-text-muted dark:text-dark-text-muted" />
-            ) : null}
-            <span className="truncate">
-              {isCompleted
-                ? `${verb(operation)} complete`
-                : isFailed
-                  ? `${verb(operation)} failed`
-                  : isCancelled
-                    ? `${verb(operation)} cancelled`
-                    : `${verb(operation)} ${formatCount(operation.totalItems)} items`}
-            </span>
-          </div>
-
-          {/* What, then where. One muted line replaces the two full paths. */}
-          <div className="mt-1 flex min-w-0 items-baseline gap-1.5 font-mono text-xs text-light-text-muted dark:text-dark-text-muted">
-            <span className="flex min-w-0 flex-1 items-baseline gap-1">
-              <span className="truncate text-light-text-soft dark:text-dark-text-soft">
-                {previewNames.join(', ')}
-              </span>
-              {hiddenItemCount > 0 ? (
-                <button
-                  type="button"
-                  aria-expanded={itemsExpanded}
-                  aria-controls={itemListId}
-                  onClick={() => setItemsExpanded((expanded) => !expanded)}
-                  className="flex shrink-0 items-center gap-0.5 rounded text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:underline dark:text-accent-blue"
-                >
-                  +{formatCount(hiddenItemCount)} more
-                  {itemsExpanded ? (
-                    <ChevronUpIcon className="h-3 w-3" />
-                  ) : (
-                    <ChevronDownIcon className="h-3 w-3" />
-                  )}
-                </button>
-              ) : null}
-            </span>
-            {operation.destinationDir ? (
-              <>
-                <ArrowRightIcon className="h-3 w-3 shrink-0 self-center text-accent-blue-light dark:text-accent-blue" />
-                <span className="min-w-0 shrink truncate" title={operation.destinationDir}>
-                  {operation.destinationDir}
-                </span>
-              </>
-            ) : null}
-          </div>
-        </div>
       </div>
 
       {itemsExpanded ? (
         <ul
           id={itemListId}
-          className="mt-2 flex max-h-queue-items flex-col gap-0.5 overflow-y-auto rounded-tab bg-light-skeleton px-2.5 py-1.5 font-mono text-uxs text-light-text-muted scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:bg-dark-skeleton dark:text-dark-text-muted dark:scrollbar-thumb-dark-text-faint"
+          className="flex max-h-queue-items flex-col gap-0.5 overflow-y-auto rounded-control bg-light-recessed px-2.5 py-1.5 text-caption text-light-text-secondary scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:bg-dark-recessed dark:text-dark-text-secondary dark:scrollbar-thumb-dark-text-tertiary"
         >
           {listedNames.map((name, index) => {
             const done = index < displayed.completedItems
@@ -280,19 +285,21 @@ export function JobCard({
                 key={name}
                 className={`flex items-center gap-1 truncate ${
                   done
-                    ? 'text-light-text-faint dark:text-dark-text-faint'
+                    ? 'text-light-text-tertiary dark:text-dark-text-tertiary'
                     : current
                       ? 'text-light-text dark:text-dark-text'
                       : ''
                 }`}
               >
-                {done ? <CheckIcon className="h-3 w-3 shrink-0 text-accent-green" /> : null}
+                {done ? (
+                  <CheckIcon className="size-3 shrink-0 text-light-success dark:text-dark-success" />
+                ) : null}
                 <span className="truncate">{name}</span>
               </li>
             )
           })}
           {unlistedCount > 0 ? (
-            <li className="text-light-text-faint dark:text-dark-text-faint">
+            <li className="text-light-text-tertiary dark:text-dark-text-tertiary">
               +{formatCount(unlistedCount)} more
             </li>
           ) : null}
@@ -303,161 +310,92 @@ export function JobCard({
         {liveAnnouncement}
       </span>
 
-      {showProgress ? (
+      {showProgress && !isPending ? (
         <>
-          <div className="mt-3 flex items-baseline justify-between gap-3">
-            <span className="min-w-0 truncate text-sm tabular-nums text-light-text dark:text-dark-text">
-              {summary}
-            </span>
-            <span
-              className={`shrink-0 font-mono text-uxs tabular-nums ${
-                isFailed ? 'text-accent-red' : 'text-light-text-muted dark:text-dark-text-muted'
-              }`}
-            >
-              {roundedPercent}%
-            </span>
+          <ProgressBar
+            value={percent}
+            labelledBy={headingId}
+            tone={isPaused ? 'neutral' : 'accent'}
+          />
+          <div className="flex min-w-0 justify-between gap-3 text-caption tabular-nums text-light-text-secondary dark:text-dark-text-secondary">
+            <span className="min-w-0 truncate">{summary}</span>
+            {showRate ? <span className="shrink-0">{rate}</span> : null}
           </div>
-          <div
-            role="progressbar"
-            aria-labelledby={headingId}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={roundedPercent}
-            className="mt-2 h-1.5 overflow-hidden rounded-full bg-light-skeleton dark:bg-dark-skeleton"
-          >
-            <span
-              className={`block h-full rounded-full ${
-                isPaused
-                  ? 'bg-light-text-muted dark:bg-dark-text-muted'
-                  : 'bg-accent-blue-light dark:bg-accent-blue'
-              }`}
-              style={{ width: `${percent}%` }}
-            />
-          </div>
-        </>
-      ) : null}
-
-      {showCurrentFile ? (
-        <>
-          <div className="mt-2.5 flex min-w-0 items-baseline justify-between gap-3">
-            <span
-              className="min-w-0 truncate text-xs text-light-text-muted dark:text-dark-text-muted"
-              title={displayedFileName ?? undefined}
-            >
-              {displayedFileName ?? ' '}
-            </span>
-            <span className="shrink-0 font-mono text-uxs tabular-nums text-light-text-muted dark:text-dark-text-muted">
-              {itemIndex}
-            </span>
-          </div>
-          {showRate ? (
-            <div className="mt-1 font-mono text-uxs tabular-nums text-light-text-muted dark:text-dark-text-muted">
-              {rate}
-            </div>
-          ) : null}
         </>
       ) : null}
 
       {isFailed && operation.errorMessage ? (
-        <div className="mt-3 rounded-tab bg-accent-red-soft px-3 py-2 text-uxs text-accent-red">
+        <div className="rounded-control bg-light-danger-bg px-3 py-2 text-caption text-light-danger dark:bg-dark-danger-bg dark:text-dark-danger">
           {operation.errorMessage}
         </div>
       ) : isCancelled ? (
-        <div className="mt-3 rounded-tab border border-light-border px-3 py-2 text-uxs text-light-text-muted dark:border-dark-border dark:text-dark-text-muted">
+        <div className="text-caption text-light-text-secondary dark:text-dark-text-secondary">
           Job cancelled. Any completed file changes were kept.
         </div>
       ) : showChart ? (
-        <div className="mt-2.5">
-          <ThroughputChart
-            samples={view.samples}
-            currentPercent={Math.min(100, Math.max(0, displayed.progressPercent))}
-            peakRate={view.peak}
-          />
+        <ThroughputChart
+          samples={view.samples}
+          currentPercent={Math.min(100, Math.max(0, displayed.progressPercent))}
+          peakRate={view.peak}
+        />
+      ) : null}
+
+      {showCurrentFile ? (
+        <div className="flex min-w-0 justify-between gap-3 text-caption tabular-nums text-light-text-tertiary dark:text-dark-text-tertiary">
+          <span className="min-w-0 truncate" title={displayedFileName ?? undefined}>
+            {displayedFileName ?? ' '}
+          </span>
+          <span className="shrink-0">{itemIndex}</span>
         </div>
       ) : null}
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      <div className="mt-1 flex flex-wrap items-center gap-2">
         {isConflict ? (
-          <button
-            type="button"
-            onClick={onResolve}
-            className="flex items-center gap-1.5 rounded-md bg-accent-blue-soft px-4 py-2 text-xs font-semibold text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-accent-blue"
-          >
+          <Button variant="primary" onClick={onResolve}>
             Resolve conflict
-          </button>
+          </Button>
         ) : isFailed ? (
           <>
-            <button
-              type="button"
-              onClick={onRetry}
-              className="flex items-center gap-1.5 rounded-md bg-accent-blue-soft px-4 py-2 text-xs font-semibold text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-accent-blue"
-            >
-              <RotateCcwIcon className="h-3.5 w-3.5" /> Retry
-            </button>
-            <button
-              type="button"
-              onClick={onDismiss}
-              className="flex items-center gap-1.5 rounded-md border border-light-border px-3.5 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
-            >
-              <XIcon className="h-3.5 w-3.5" /> Dismiss
-            </button>
+            <Button onClick={onRetry}>
+              <RotateCcwIcon className="size-4" /> Retry
+            </Button>
+            <Button variant="subtle" onClick={onDismiss}>
+              Dismiss
+            </Button>
           </>
         ) : isCompleted || isCancelled ? (
-          <button
-            type="button"
-            onClick={onDismiss}
-            className="flex items-center gap-1.5 rounded-md border border-light-border px-3.5 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
-          >
-            <XIcon className="h-3.5 w-3.5" /> Dismiss
-          </button>
+          <Button onClick={onDismiss}>Dismiss</Button>
         ) : isPaused ? (
-          <button
-            type="button"
-            onClick={onResume}
-            className="flex items-center gap-1.5 rounded-md bg-accent-blue-soft px-4 py-2 text-xs font-semibold text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-accent-blue"
-          >
-            <PlayIcon className="h-3.5 w-3.5" /> Resume
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={onPause}
-            className="flex items-center gap-1.5 rounded-md bg-accent-blue-soft px-4 py-2 text-xs font-semibold text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-accent-blue"
-          >
-            <PauseIcon className="h-3.5 w-3.5" /> Pause
-          </button>
+          <Button onClick={onResume}>
+            <PlayIcon className="size-4" /> Resume
+          </Button>
+        ) : isPending ? null : (
+          <Button onClick={onPause}>
+            <PauseIcon className="size-4" /> Pause
+          </Button>
         )}
 
-        {!isFinished ? (
-          <button
-            type="button"
-            onClick={onSkip}
-            disabled={!isPaused}
-            className="flex items-center gap-1.5 rounded-md border border-light-border px-3.5 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
-          >
-            <SkipForwardIcon className="h-3.5 w-3.5" /> Skip
-          </button>
+        {!isFinished && !isPending ? (
+          <Button onClick={onSkip} disabled={!isPaused}>
+            <SkipForwardIcon className="size-4" /> Skip
+          </Button>
         ) : null}
 
         {!isFinished ? (
-          <button
-            type="button"
-            onClick={onCancel}
-            className="flex items-center gap-1.5 rounded-md border border-light-border px-3.5 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
-          >
-            <XIcon className="h-3.5 w-3.5" /> Cancel
-          </button>
+          <Button variant="subtle" onClick={onCancel}>
+            Cancel
+          </Button>
         ) : null}
 
         {reorderable && onMoveDown ? (
-          <button
-            type="button"
+          <Button
+            variant="subtle"
             aria-label="Move job down"
             onClick={onMoveDown}
-            className="ml-auto flex h-7 items-center rounded-md px-2 text-uxs text-light-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:text-dark-text-muted dark:hover:bg-dark-hover"
+            className="ml-auto"
           >
             Move down
-          </button>
+          </Button>
         ) : null}
       </div>
     </article>

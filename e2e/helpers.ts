@@ -38,7 +38,7 @@ export async function openSettingsSection(
   } else if (section === 'columns') {
     await page.getByRole('button', { name: 'Columns' }).click()
   } else if (section === 'layout') {
-    await page.getByRole('button', { name: 'View & Layout' }).click()
+    await page.getByRole('button', { name: 'View and layout' }).click()
   } else if (section === 'dates') {
     await page.getByRole('button', { name: 'Dates', exact: true }).click()
   } else if (section === 'updates') {

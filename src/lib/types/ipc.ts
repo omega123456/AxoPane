@@ -770,6 +770,14 @@ export type ConflictInfo = {
   name: string
 }
 
+/** `null` follows the OS theme. */
+export type SetWindowThemeRequest = {
+  theme: 'light' | 'dark' | null
+}
+
+/** `mica` on Windows 11; everything else renders the solid base. */
+export type WindowBackdrop = 'mica' | 'solid'
+
 export type OpProgress = {
   operationId: string
   kind: OpKind
@@ -904,6 +912,18 @@ export type IpcCommandMap = {
   restart_as_admin: {
     request: undefined
     response: void
+  }
+  open_full_disk_access_settings: {
+    request: undefined
+    response: void
+  }
+  set_window_theme: {
+    request: SetWindowThemeRequest
+    response: void
+  }
+  get_window_backdrop: {
+    request: undefined
+    response: WindowBackdrop
   }
   write_file_clipboard: {
     request: WriteFileClipboardRequest

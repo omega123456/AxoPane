@@ -1,5 +1,6 @@
 import { ContextMenuIconGlyph } from '@/components/menus/ContextMenuRow'
 import type { ContextMenuStripItem } from '@/lib/types/context-menu'
+import { FOCUS_RING_INSET } from '@/lib/focus-ring'
 
 export function ContextMenuTopStrip({
   items,
@@ -21,14 +22,14 @@ export function ContextMenuTopStrip({
       data-context-menu-top-strip="true"
       role="group"
       aria-label="Quick actions"
-      className="-mx-1.5 -mt-1.5 mb-1 flex h-12 items-center justify-between border-b border-light-border bg-light-surface px-2 dark:border-dark-border dark:bg-dark-surface"
+      className="mb-1 flex items-center justify-between border-b border-light-divider px-2 pb-2 pt-0.5 dark:border-dark-divider"
     >
       {items.map((item) => {
         const active = item.id === activeItemId
         const textClass = item.disabled
-          ? 'text-light-text-faint dark:text-dark-text-faint'
+          ? 'text-light-text-disabled dark:text-dark-text-disabled'
           : item.danger
-            ? 'text-accent-red'
+            ? 'text-light-danger dark:text-dark-danger'
             : 'text-light-text dark:text-dark-text'
 
         return (
@@ -39,8 +40,10 @@ export function ContextMenuTopStrip({
             aria-label={item.label}
             title={item.label}
             disabled={item.disabled}
-            className={`inline-flex size-10 flex-none items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-blue-border ${
-              active ? 'bg-accent-blue-soft' : 'hover:bg-light-hover dark:hover:bg-dark-hover'
+            className={`inline-flex h-9 w-10 flex-none items-center justify-center rounded-control ${FOCUS_RING_INSET} ${
+              active
+                ? 'bg-light-hover dark:bg-dark-hover'
+                : 'hover:bg-light-hover dark:hover:bg-dark-hover'
             } ${textClass}`}
             onMouseEnter={() => {
               if (!item.disabled) {
@@ -62,7 +65,7 @@ export function ContextMenuTopStrip({
               }
             }}
           >
-            {item.icon ? <ContextMenuIconGlyph icon={item.icon} className="size-5" /> : null}
+            {item.icon ? <ContextMenuIconGlyph icon={item.icon} className="size-4" /> : null}
           </button>
         )
       })}

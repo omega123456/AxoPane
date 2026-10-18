@@ -39,11 +39,7 @@ describe('groupVolumesByCategory', () => {
       volume({ mountRoot: 'C:\\', label: 'Windows' }),
     ])
 
-    expect(groups.map((group) => group.label)).toEqual([
-      'Drives',
-      'Removable Drives',
-      'Network Drives',
-    ])
+    expect(groups.map((group) => group.label)).toEqual(['Drives', 'Removable', 'Network'])
     expect(groups[0].volumes.map((entry) => entry.mountRoot)).toEqual(['C:\\'])
     expect(groups[1].volumes.map((entry) => entry.mountRoot)).toEqual(['E:\\'])
     expect(groups[2].volumes.map((entry) => entry.mountRoot)).toEqual(['Z:\\'])

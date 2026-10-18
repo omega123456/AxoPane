@@ -69,7 +69,7 @@ describe('Navigation: tabs, breadcrumb, session, live patching', () => {
 
     await waitFor(() => expect(getRow('Left pane', 'Documents')).toBeTruthy())
 
-    const leftPane = screen.getByLabelText('Left pane')
+    const leftPane = screen.getByRole('group', { name: 'Left pane tabs' })
     await user.click(within(leftPane).getByRole('button', { name: 'New tab in Left pane' }))
 
     await waitFor(() => {
@@ -98,7 +98,7 @@ describe('Navigation: tabs, breadcrumb, session, live patching', () => {
 
     await waitFor(() => expect(getRow('Left pane', 'Documents')).toBeTruthy())
 
-    const leftPane = screen.getByLabelText('Left pane')
+    const leftPane = screen.getByRole('group', { name: 'Left pane tabs' })
     await user.click(within(leftPane).getByRole('button', { name: 'New tab in Left pane' }))
     await waitFor(() => {
       expect(useTabsStore.getState().panes.left.tabs).toHaveLength(2)
@@ -116,7 +116,7 @@ describe('Navigation: tabs, breadcrumb, session, live patching', () => {
     installDefaults()
     renderApp()
     await waitFor(() => expect(getRow('Left pane', 'Documents')).toBeTruthy())
-    const leftPane = screen.getByLabelText('Left pane')
+    const leftPane = screen.getByRole('group', { name: 'Left pane tabs' })
     await user.click(within(leftPane).getByRole('button', { name: 'New tab in Left pane' }))
     const lockedId = useTabsStore.getState().panes.left.tabs[0].id
     act(() => usePanesStore.getState().setTabLocked('left', lockedId, true))
@@ -133,7 +133,7 @@ describe('Navigation: tabs, breadcrumb, session, live patching', () => {
     renderApp()
     await waitFor(() => expect(getRow('Left pane', 'Documents')).toBeTruthy())
 
-    const leftPane = screen.getByLabelText('Left pane')
+    const leftPane = screen.getByRole('group', { name: 'Left pane tabs' })
     await user.click(within(leftPane).getByRole('button', { name: 'New tab in Left pane' }))
     await waitFor(() => expect(useTabsStore.getState().panes.left.tabs).toHaveLength(2))
     const [first, second] = useTabsStore.getState().panes.left.tabs.map((tab) => tab.id)

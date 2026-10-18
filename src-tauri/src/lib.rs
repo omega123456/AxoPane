@@ -20,6 +20,7 @@ pub mod trash;
 pub mod traversal;
 pub mod volumes;
 pub mod watch;
+pub mod window_chrome;
 
 use std::path::{Path, PathBuf};
 
@@ -254,6 +255,9 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                window_chrome::apply_backdrop(&window);
+            }
             let config_dir = resolved_app_config_dir(&app.path().app_config_dir()?);
             let persistence = PersistenceState::load(&config_dir)
                 .map_err(|error| -> Box<dyn std::error::Error> { Box::new(error) })?;
@@ -375,6 +379,9 @@ pub fn run() {
             commands::delete_from_trash,
             commands::open_path,
             commands::restart_as_admin,
+            commands::open_full_disk_access_settings,
+            commands::set_window_theme,
+            commands::get_window_backdrop,
             commands::write_file_clipboard,
             commands::read_file_clipboard,
             commands::clear_file_clipboard,

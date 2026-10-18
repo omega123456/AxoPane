@@ -34,8 +34,8 @@ export function DragCursorBadge() {
       style={{ transform: `translate3d(${cursor.x / zoom}px, ${cursor.y / zoom}px, 0)` }}
       aria-hidden="true"
     >
-      <span className="flex items-center gap-1 rounded-md border border-light-border-strong bg-light-surface px-1.5 py-0.5 text-uxs font-medium text-light-text dark:border-dark-border-strong dark:bg-dark-surface dark:text-dark-text">
-        <Icon className="h-3 w-3 shrink-0 text-light-text-muted dark:text-dark-text-muted" />
+      <span className="flex items-center gap-1 rounded-control border border-light-flyout-stroke bg-light-card px-1.5 py-0.5 text-caption font-medium text-light-text dark:border-dark-flyout-stroke dark:bg-dark-card dark:text-dark-text">
+        <Icon className="h-3 w-3 shrink-0 text-light-text-secondary dark:text-dark-text-secondary" />
         {copying ? 'Copy' : 'Move'}
       </span>
     </div>

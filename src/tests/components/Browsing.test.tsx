@@ -205,8 +205,10 @@ describe('HeaderRow', () => {
     const sizeHeader = screen.getByRole('button', { name: /Size/ })
 
     expect(nameHeader).toHaveClass('w-full')
-    expect(sizeHeader).not.toHaveClass('justify-end')
-    expect(sizeHeader.querySelector('svg')).toHaveClass('ml-auto')
+    expect(nameHeader).not.toHaveClass('justify-end')
+    // Right-aligned columns keep their label over the numbers, chevron after it.
+    expect(sizeHeader).toHaveClass('justify-end')
+    expect(sizeHeader.lastElementChild?.tagName.toLowerCase()).toBe('svg')
 
     await user.click(nameHeader)
     expect(setSort).toHaveBeenCalledWith('left', 'name')
@@ -229,7 +231,7 @@ describe('HeaderRow', () => {
         ],
         { name: 384, size: 96 },
       ),
-    ).toBe(516)
+    ).toBe(502)
   })
 
   it('resizes a column by dragging its header divider', () => {
@@ -293,8 +295,10 @@ describe('TreeNode', () => {
     )
     const label = screen.getByText('root')
     expect(label).toBeInTheDocument()
-    // Current + in-flow uses the translucent selection tint.
-    expect(label.closest('[data-tree-row]')?.className).toContain('bg-accent-blue-soft')
+    // Current + in-flow uses the subtle hover fill plus the accent pill.
+    expect(label.closest('[data-tree-row]')?.className).toContain(
+      'bg-light-hover dark:bg-dark-hover',
+    )
 
     // Current + pinned swaps to the opaque stand-in so rows scrolling under it
     // don't bleed through.
@@ -364,14 +368,14 @@ describe('TreeNode', () => {
     const row = screen.getByRole('treeitem')
 
     fireEvent.dragOver(row, { dataTransfer: { dropEffect: '' } })
-    expect(row).toHaveClass('ring-accent-blue-border')
+    expect(row).toHaveClass('ring-light-accent dark:ring-dark-accent')
 
     // Moving onto a child element inside the row is not a leave.
     fireEvent(row, dragLeaveTo(row, within(row).getAllByRole('button')[0]))
-    expect(row).toHaveClass('ring-accent-blue-border')
+    expect(row).toHaveClass('ring-light-accent dark:ring-dark-accent')
 
     fireEvent(row, dragLeaveTo(row, document.body))
-    expect(row).not.toHaveClass('ring-accent-blue-border')
+    expect(row).not.toHaveClass('ring-light-accent dark:ring-dark-accent')
 
     useDragStore.getState().end()
   })
@@ -384,7 +388,7 @@ describe('TreeNode', () => {
     const row = screen.getByRole('treeitem')
 
     fireEvent.dragOver(row)
-    expect(row).not.toHaveClass('ring-accent-blue-border')
+    expect(row).not.toHaveClass('ring-light-accent dark:ring-dark-accent')
   })
 
   it('reads macOS drop modifiers when computing the drop effect', () => {
@@ -402,7 +406,7 @@ describe('TreeNode', () => {
     const row = screen.getByRole('treeitem')
 
     fireEvent.dragOver(row, { altKey: true, dataTransfer: { dropEffect: '' } })
-    expect(row).toHaveClass('ring-accent-blue-border')
+    expect(row).toHaveClass('ring-light-accent dark:ring-dark-accent')
 
     useDragStore.getState().end()
     Object.defineProperty(navigator, 'platform', { value: originalPlatform, configurable: true })

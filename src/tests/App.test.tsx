@@ -347,7 +347,7 @@ describe('App', () => {
     expect(copyDialog).toBeInTheDocument()
     expect(within(copyDialog).getByText('C:\\Users\\Omega')).toBeInTheDocument()
     expect(within(copyDialog).getByText('D:\\projects')).toBeInTheDocument()
-    expect(within(copyDialog).getByText('Report.txt')).toBeInTheDocument()
+    expect(within(copyDialog).getByText(/^Report\.txt · /)).toBeInTheDocument()
     expect(startOp).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: 'Copy' }))
@@ -513,8 +513,8 @@ describe('App', () => {
     await user.click(report)
     await user.keyboard('[/ShiftLeft]')
 
-    expect(media.className).toContain('bg-accent-blue-soft')
-    expect(report.className).toContain('bg-accent-blue-soft')
+    expect(media.className).toContain('bg-light-tint dark:bg-dark-tint')
+    expect(report.className).toContain('bg-light-tint dark:bg-dark-tint')
   })
 
   it('renders batched size state updates from the shared IPC event channel', async () => {

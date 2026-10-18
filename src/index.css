@@ -2,86 +2,111 @@
 @plugin "tailwind-scrollbar";
 
 @custom-variant dark (&:where(.dark, .dark *));
+/* Set on <html> when Rust applied the Windows 11 Mica backdrop. */
+@custom-variant mica (&:where(.mica, .mica *));
 
 @theme {
   --font-ui:
-    'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+    'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system,
+    'Helvetica Neue', Arial, sans-serif;
+  --font-display:
+    'Segoe UI Variable Display', 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system,
+    'Helvetica Neue', Arial, sans-serif;
   --font-mono:
     'Cascadia Code', 'Cascadia Mono', ui-monospace, 'SF Mono', Consolas, 'Liberation Mono',
     monospace;
 
-  --color-dark-backdrop: #161616;
-  --color-dark-window: #202020;
-  --color-dark-titlebar: #262626;
-  --color-dark-menubar: #232323;
-  --color-dark-surface: #272727;
-  --color-dark-panel: #242424;
-  --color-dark-tree: #212121;
-  /* Opaque stand-in for accent-blue-soft on a pinned (sticky) tree row, where
-     the translucent selection tint would otherwise let scrolled-under rows
-     show through. */
-  --color-dark-tree-current: color-mix(
-    in srgb,
-    var(--color-accent-blue) 15%,
-    var(--color-dark-tree)
-  );
-  --color-dark-tree-current-hover: color-mix(
-    in srgb,
-    var(--color-accent-blue) 19%,
-    var(--color-dark-tree)
-  );
-  --color-dark-tree-hover: color-mix(in srgb, white 5.5%, var(--color-dark-tree));
-  --color-dark-header: #2c2c2c;
-  --color-dark-hover: rgba(255, 255, 255, 0.055);
-  --color-dark-border: rgba(255, 255, 255, 0.075);
-  --color-dark-border-strong: rgba(255, 255, 255, 0.13);
-  --color-dark-text: #f3f3f3;
-  --color-dark-text-soft: #cdcdcd;
-  --color-dark-text-muted: #999999;
-  --color-dark-text-faint: #6b6b6b;
+  /* Fluent layer model (WinUI theme resources). Mica fallback base, recessed
+     fill, pane layer, and the card colour shared by menus, dialogs and flyouts. */
+  --color-dark-base: #202020;
+  --color-dark-recessed: #1a1a1a;
+  --color-dark-layer: #272727;
+  --color-dark-card: #2c2c2c;
+  --color-dark-stroke: rgba(255, 255, 255, 0.06);
+  --color-dark-flyout-stroke: rgba(0, 0, 0, 0.35);
+  --color-dark-window-stroke: rgba(255, 255, 255, 0.1);
+  --color-dark-control: rgba(255, 255, 255, 0.06);
+  --color-dark-control-stroke: rgba(255, 255, 255, 0.07);
+  --color-dark-control-stroke-bottom: rgba(255, 255, 255, 0.04);
+  --color-dark-control-hover: rgba(255, 255, 255, 0.0837);
+  --color-dark-control-press: rgba(255, 255, 255, 0.0326);
+  --color-dark-hover: rgba(255, 255, 255, 0.06);
+  --color-dark-press: rgba(255, 255, 255, 0.04);
+  --color-dark-divider: rgba(255, 255, 255, 0.08);
+  --color-dark-text: #ffffff;
+  --color-dark-text-secondary: #cfcfcf;
+  --color-dark-text-tertiary: #9d9d9d;
+  --color-dark-text-disabled: #717171;
+  --color-dark-accent: #4cc2ff;
+  --color-dark-on-accent: #000000;
+  --color-dark-tint: rgba(76, 194, 255, 0.15);
+  --color-dark-neutral-selection: rgba(255, 255, 255, 0.07);
+  --color-dark-boundary: #9a9a9a;
+  --color-dark-focus-outer: #ffffff;
+  --color-dark-focus-inner: #000000;
+  --color-dark-danger: #ff99a4;
+  --color-dark-danger-bg: #442726;
+  --color-dark-warning: #fce100;
+  --color-dark-warning-bg: #433519;
+  --color-dark-success: #6ccb5f;
+  --color-dark-success-bg: #393d1b;
+  --color-dark-info-bg: #2c2c2c;
   --color-dark-skeleton: rgba(255, 255, 255, 0.06);
-  --color-dark-skeleton-strong: rgba(255, 255, 255, 0.14);
+  /* Opaque stand-ins for the hover/tint fills on a pinned (sticky) tree row,
+     where a translucent fill would let scrolled-under rows show through. */
+  --color-dark-tree-hover: color-mix(in srgb, white 6%, var(--color-dark-base));
+  --color-dark-tree-current: color-mix(in srgb, white 6%, var(--color-dark-base));
+  --color-dark-tree-current-hover: color-mix(in srgb, white 9%, var(--color-dark-base));
 
-  --color-light-backdrop: #d8d8d8;
-  --color-light-window: #f7f7f7;
-  --color-light-titlebar: #ededed;
-  --color-light-menubar: #f1f1f1;
-  --color-light-surface: #ffffff;
-  --color-light-panel: #f6f6f6;
-  --color-light-tree: #f1f1f1;
-  /* Opaque stand-in for accent-blue-soft on a pinned (sticky) tree row; see
-     --color-dark-tree-current. */
-  --color-light-tree-current: color-mix(
-    in srgb,
-    var(--color-accent-blue) 15%,
-    var(--color-light-tree)
-  );
-  --color-light-tree-current-hover: color-mix(
-    in srgb,
-    var(--color-accent-blue) 19%,
-    var(--color-light-tree)
-  );
-  --color-light-tree-hover: color-mix(in srgb, black 4.5%, var(--color-light-tree));
-  --color-light-header: #efefef;
-  --color-light-hover: rgba(0, 0, 0, 0.045);
-  --color-light-border: rgba(0, 0, 0, 0.08);
-  --color-light-border-strong: rgba(0, 0, 0, 0.14);
+  --color-light-base: #f3f3f3;
+  --color-light-recessed: #e8e8e8;
+  --color-light-layer: #f9f9f9;
+  --color-light-card: #ffffff;
+  --color-light-stroke: rgba(0, 0, 0, 0.07);
+  --color-light-flyout-stroke: rgba(0, 0, 0, 0.1);
+  --color-light-window-stroke: rgba(0, 0, 0, 0.14);
+  --color-light-control: rgba(255, 255, 255, 0.7);
+  --color-light-control-stroke: rgba(0, 0, 0, 0.08);
+  --color-light-control-stroke-bottom: rgba(0, 0, 0, 0.17);
+  --color-light-control-hover: rgba(249, 249, 249, 0.5);
+  --color-light-control-press: rgba(249, 249, 249, 0.3);
+  --color-light-hover: rgba(0, 0, 0, 0.04);
+  --color-light-press: rgba(0, 0, 0, 0.025);
+  --color-light-divider: rgba(0, 0, 0, 0.08);
   --color-light-text: #1b1b1b;
-  --color-light-text-soft: #3d3d3d;
-  --color-light-text-muted: #6e6e6e;
-  --color-light-text-faint: #9b9b9b;
+  --color-light-text-secondary: #5d5d5d;
+  --color-light-text-tertiary: #6e6e6e;
+  --color-light-text-disabled: #a3a3a3;
+  --color-light-accent: #0067c0;
+  --color-light-on-accent: #ffffff;
+  --color-light-tint: rgba(0, 103, 192, 0.13);
+  --color-light-neutral-selection: rgba(0, 0, 0, 0.06);
+  --color-light-boundary: #767676;
+  --color-light-focus-outer: #1b1b1b;
+  --color-light-focus-inner: #ffffff;
+  --color-light-danger: #c42b1c;
+  --color-light-danger-bg: #fde7e9;
+  --color-light-warning: #9d5d00;
+  --color-light-warning-bg: #fff4ce;
+  --color-light-success: #0f7b0f;
+  --color-light-success-bg: #dff6dd;
+  --color-light-info-bg: #f6f6f6;
   --color-light-skeleton: rgba(0, 0, 0, 0.06);
-  --color-light-skeleton-strong: rgba(0, 0, 0, 0.12);
+  /* Opaque sticky-row stand-ins; see --color-dark-tree-hover. */
+  --color-light-tree-hover: color-mix(in srgb, black 4%, var(--color-light-base));
+  --color-light-tree-current: color-mix(in srgb, black 4%, var(--color-light-base));
+  --color-light-tree-current-hover: color-mix(in srgb, black 7%, var(--color-light-base));
 
-  --color-accent-blue: #4cc2ff;
-  --color-accent-blue-light: #0067c0;
-  --color-accent-blue-soft: rgba(76, 194, 255, 0.15);
-  --color-accent-blue-strong: rgba(76, 194, 255, 0.26);
-  --color-accent-blue-border: rgba(76, 194, 255, 0.42);
-  --color-accent-green: #5fb98a;
-  --color-accent-amber: #e3b04b;
-  --color-accent-red: #e0626b;
-  --color-accent-red-soft: rgba(224, 98, 107, 0.15);
+  --color-scrim: rgba(0, 0, 0, 0.4);
+  /* Filled two-tone folder glyph, as in Explorer; same in both themes. */
+  --color-folder: #f6c445;
+  --color-folder-back: #dda22b;
+  /* Category colours for executables/config files and removable/network
+     volumes. They predate the status palette and stay as they were. */
+  --color-file-exec: #e0626b;
+  --color-file-config: #5fb98a;
+  --color-volume-removable: #e3b04b;
+  --color-volume-network: #5fb98a;
   --color-file-video: #a44bcf;
   --color-file-video-soft: rgba(164, 75, 207, 0.14);
   --color-file-video-border: rgba(164, 75, 207, 0.35);
@@ -113,52 +138,47 @@
   --color-file-font-soft: rgba(90, 143, 123, 0.14);
   --color-file-font-border: rgba(90, 143, 123, 0.35);
 
-  --text-2xs: 0.625rem;
-  --text-2xs--line-height: 0.875rem;
-  --text-uxs: 0.6875rem;
-  --text-uxs--line-height: 0.95rem;
-  --text-usm: 0.71875rem;
-  --text-usm--line-height: 1rem;
-  --text-row: 0.78125rem;
-  --text-row--line-height: 1.05rem;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1rem;
+  --text-row: 0.8125rem;
+  --text-row--line-height: 1.125rem;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.25rem;
+  --text-subtitle: 1.25rem;
+  --text-subtitle--line-height: 1.75rem;
+  --text-title: 1.75rem;
+  --text-title--line-height: 2.25rem;
 
-  --spacing-title: 2.5rem;
-  --spacing-command: 2.75rem;
-  --spacing-tabs: 2.125rem;
-  --spacing-tab: 12.5rem;
-  --spacing-tab-min: 6rem;
-  --spacing-crumb: 2.125rem;
-  --spacing-headrow: 1.875rem;
-  --spacing-row: 1.875rem;
-  --spacing-status: 1.625rem;
-  --spacing-tree: 12.75rem;
-  /* Fixed tree-row height. Keep this on a whole CSS pixel so every engine
-     agrees on the cumulative virtualized offsets; WebKit drifted enough on the
-     former fractional value to make long trees overlap. Sticky ancestor rows
-     still stack via `calc(var(--spacing-tree-row) * n)`, so this must stay a
-     compile-time constant rather than a measured value - a JS-measured height
-     only converges after each row's first paint, which left gaps/overlaps when
-     many ancestor levels mounted at once. */
-  --spacing-tree-row: 1.5625rem;
-  /* Fixed height of a tree section heading row ("Drives" etc.). Like the row
-     height above this must stay a compile-time constant: the virtualizer sizes
-     each flat row by kind (header vs node) from these tokens, and the sticky
-     overlay's stacking math is derived from the row height, so a measured value
-     would let deep pinned rows drift by a sub-pixel. */
-  --spacing-tree-header: 1.75rem;
+  --spacing-command: 2.5rem;
+  --spacing-tabs: 2.5rem;
+  --spacing-address: 2.5rem;
+  --spacing-gutter: 0.25rem;
+  --spacing-tab: 11rem;
+  --spacing-headrow: 1.75rem;
+  --spacing-row: 1.75rem;
+  --spacing-status: 1.5rem;
+  --spacing-capbar: 7rem;
+  /* Fixed tree-row heights. Keep these on whole CSS pixels so every engine
+     agrees on the cumulative virtualized offsets; WebKit drifted enough on a
+     fractional value to make long trees overlap. They must stay compile-time
+     constants (mirrored in lib/tree-flat.ts) rather than measured values - a
+     JS-measured height only converges after each row's first paint, which left
+     gaps/overlaps when many pinned ancestor rows mounted at once. A drive row
+     is taller to hold its capacity bar; the first section heading carries the
+     pane's top lead-in. */
+  --spacing-tree-row: 1.75rem;
+  --spacing-tree-drive-row: 2.375rem;
+  --spacing-tree-header: 1.875rem;
+  --spacing-tree-header-first: 2.25rem;
   --spacing-details: 18.75rem;
-  --spacing-window: 50.375rem;
-  --spacing-window-min: 91.25rem;
-  --spacing-search: 14.375rem;
-  --spacing-sizecol: 5.25rem;
-  --spacing-itemcol: 3.875rem;
-  --spacing-typecol: 7.25rem;
-  --spacing-modcol: 6rem;
-  --spacing-frame: 28.375rem;
-  --spacing-copycard: 31.125rem;
-  --spacing-popover: 13.25rem;
-  --spacing-conflict: 26rem;
-  --spacing-queue-bars: 2rem;
+  --spacing-search: 13.75rem;
+  --spacing-menu: 17.5rem;
+  --spacing-dialog: 26.25rem;
+  --spacing-infobar: 30rem;
+  --spacing-queue: 25rem;
+  --spacing-queue-mini: 21.25rem;
+  --spacing-state: 15rem;
+  --spacing-state-tile: 3rem;
   --spacing-queue-chart: 8rem;
   /* Roughly six rows of the job card's expanded selection list, so a large
      selection scrolls inside the list instead of pushing the job controls
@@ -166,37 +186,32 @@
   --spacing-queue-items: 7.5rem;
   --spacing-queue-list: min(37.5rem, calc(100vh - 6rem));
 
-  --spacing-settings-modal-w: min(80vw, 1300px);
-  --spacing-settings-modal-h: min(85vh, 52rem);
+  --spacing-settings: min(80vw, 1300px);
+  --spacing-settings-h: min(85vh, 52rem);
+  /* Readable width for the settings cards inside the wide modal. */
   --spacing-settings-content: 52rem;
-  --spacing-settings-nav: 11.375rem;
-  --spacing-modal-footer: 3.625rem;
-  --spacing-switch-w: 2.375rem;
-  --spacing-switch-h: 1.375rem;
-  --spacing-switch-pad: 0.1875rem;
-  --spacing-switch-shift: 1.1875rem;
-  --spacing-control-dot: 1.0625rem;
-  --spacing-radio-dot: 0.5625rem;
+  --spacing-settings-nav: 13.75rem;
   --spacing-swatch: 1.75rem;
   --spacing-color-input: 1.875rem;
   --spacing-entry-icon: 2rem;
   --spacing-icon-tile: 3.5rem;
   --spacing-icon-cell: 13rem;
-  --spacing-icon-row: 4rem;
   --spacing-thumbnail-preview: 9rem;
   --spacing-thumbnail-cell: 13rem;
-  --spacing-thumbnail-card: 13.75rem;
-  --spacing-thumbnail-row: 14.25rem;
-  --spacing-gap: 0.5rem;
+  --spacing-thumbnail-card: 12.5rem;
 
   --container-strata: 93.75rem;
 
-  --radius-window: 0.5625rem;
-  --radius-tab: 0.4375rem;
-  --radius-modal: 0.75rem;
-  --radius-menu: 0.625rem;
+  /* Bars and panes stay square. */
+  --radius-control: 0.25rem;
+  --radius-card: 0.375rem;
+  --radius-overlay: 0.5rem;
+  /* Skeleton placeholder bars. */
+  --radius-bar: 0.1875rem;
 
-  --shadow-window: 0 24px 70px rgba(0, 0, 0, 0.62), 0 2px 10px rgba(0, 0, 0, 0.5);
-  --shadow-float: 0 10px 34px rgba(0, 0, 0, 0.5);
-  --shadow-menu: 0 3px 10px rgba(0, 0, 0, 0.16), 0 1px 2px rgba(0, 0, 0, 0.12);
+  --shadow-thumb: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-light-flyout: 0 8px 16px rgba(0, 0, 0, 0.14);
+  --shadow-dark-flyout: 0 8px 16px rgba(0, 0, 0, 0.26);
+  --shadow-light-dialog: 0 32px 64px rgba(0, 0, 0, 0.19), 0 2px 21px rgba(0, 0, 0, 0.15);
+  --shadow-dark-dialog: 0 32px 64px rgba(0, 0, 0, 0.37), 0 2px 21px rgba(0, 0, 0, 0.37);
 }

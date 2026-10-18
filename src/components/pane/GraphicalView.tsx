@@ -23,6 +23,7 @@ import { useElementWidth } from '@/lib/use-element-width'
 import type { PaneViewMode } from '@/lib/pane-view'
 import type { InlineRenameState } from '@/stores/inline-rename-store'
 import type { PaneState } from '@/types/pane'
+import { FOCUS_RING_INSET } from '@/lib/focus-ring'
 
 export type GraphicalViewHandle = {
   scrollToEntry: (index: number) => void
@@ -118,8 +119,11 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
             index,
             start: index * grid.rowPitch,
           }))
+    // The extra gap below the last row mirrors each row's `pt-1`.
     const totalHeight =
-      rowCount === 0 ? 0 : rowVirtualizer.getTotalSize() || rowCount * grid.rowPitch
+      rowCount === 0
+        ? 0
+        : (rowVirtualizer.getTotalSize() || rowCount * grid.rowPitch) + PANE_GRID_GAP
 
     const setScrollElement = useCallback(
       (element: HTMLDivElement | null) => {
@@ -171,14 +175,15 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
         getVisibleRowCount: () =>
           Math.max(1, Math.floor((scrollRef.current?.clientHeight ?? 0) / grid.rowPitch)),
         getEntriesIntersectingRect: (rect) => {
-          // Grid rows have `p-1` (4px on every side) and `gap-gap`. The remaining
-          // width is divided evenly by CSS Grid, so this gives every card's real
-          // rectangle without relying on which virtual rows happen to be mounted.
+          // Grid rows have `px-1 pt-1` and `gap-1`, so cards sit 4px apart on
+          // both axes. The remaining width is divided evenly by CSS Grid, so this
+          // gives every card's real rectangle without relying on which virtual
+          // rows happen to be mounted.
           const gridWidth = scrollRef.current?.clientWidth || width
-          const gridPaddingPx = 4
+          const gridPaddingPx = PANE_GRID_GAP
           const cardWidth =
             (gridWidth - gridPaddingPx * 2 - PANE_GRID_GAP * (grid.columns - 1)) / grid.columns
-          const cardHeight = grid.rowPitch - gridPaddingPx * 2
+          const cardHeight = grid.rowPitch - gridPaddingPx
           const rectRight = rect.left + rect.width
           const rectBottom = rect.top + rect.height
 
@@ -279,7 +284,7 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
       return (
         <div
           ref={setScrollElement}
-          className={`relative min-h-0 flex-1 ${isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-accent-blue-border' : ''}`}
+          className={`relative min-h-0 flex-1 ${isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-light-accent dark:outline-dark-accent' : ''}`}
           onMouseDown={onContainerMouseDown}
           onContextMenu={onContainerContextMenu}
           onDragOver={onPaneDragOver}
@@ -300,7 +305,7 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
           aria-rowcount={rowCount}
           aria-colcount={grid.columns}
           tabIndex={0}
-          className={`h-full min-h-0 overflow-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-blue-border dark:scrollbar-thumb-dark-text-faint ${isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-accent-blue-border' : ''}`}
+          className={`h-full min-h-0 overflow-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary ${FOCUS_RING_INSET} ${isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-light-accent dark:outline-dark-accent' : ''}`}
           onKeyDown={onGridKeyDown}
           onMouseDown={onContainerMouseDown}
           onScroll={(event: UIEvent<HTMLDivElement>) => {
@@ -328,7 +333,7 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
                   key={virtualRow.key}
                   role="row"
                   aria-rowindex={virtualRow.index + 1}
-                  className={`absolute inset-x-0 grid gap-gap p-1 ${grid.className}`}
+                  className={`absolute inset-x-0 grid gap-1 px-1 pt-1 ${grid.className}`}
                   style={{ top: `${virtualRow.start}px`, height: `${grid.rowPitch}px` }}
                 >
                   {entries.map((entry, column) => (
@@ -357,7 +362,7 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
             {marqueeRect ? (
               <div
                 data-testid="marquee-selection"
-                className="pointer-events-none absolute border border-accent-blue-border bg-accent-blue-soft"
+                className="pointer-events-none absolute border border-light-accent dark:border-dark-accent bg-light-tint dark:bg-dark-tint"
                 style={{
                   left: `${marqueeRect.left}px`,
                   top: `${marqueeRect.top}px`,

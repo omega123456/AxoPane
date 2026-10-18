@@ -12,15 +12,15 @@ import { useContextMenuStore } from '@/stores/context-menu-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { tabLabel, useTabsStore } from '@/stores/tabs-store'
 import type { PaneId } from '@/types/pane'
+import { FOCUS_RING } from '@/lib/focus-ring'
 
 type TabBarProps = {
   paneId: PaneId
   title: string
   currentPath: string
-  isActive: boolean
 }
 
-export function TabBar({ paneId, title, currentPath, isActive }: TabBarProps) {
+export function TabBar({ paneId, title, currentPath }: TabBarProps) {
   const paneTabs = useTabsStore((state) => state.panes[paneId])
   const volumes = usePanesStore((state) => state.volumes)
   const switchTab = usePanesStore((state) => state.switchTab)
@@ -47,8 +47,10 @@ export function TabBar({ paneId, title, currentPath, isActive }: TabBarProps) {
   return (
     <div
       ref={stripRef}
+      role="group"
+      aria-label={`${title} tabs`}
       data-tab-strip={paneId}
-      className={`flex h-tabs items-stretch gap-0.5 overflow-x-auto overflow-y-hidden bg-light-panel px-1 pt-1 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:bg-dark-panel dark:scrollbar-thumb-dark-text-faint ${dragState.isInvalid ? 'cursor-not-allowed' : ''}`}
+      className={`flex h-tabs min-w-0 items-end gap-0.5 overflow-x-auto overflow-y-hidden scrollbar-none ${dragState.isInvalid ? 'cursor-not-allowed' : ''}`}
     >
       {paneTabs.tabs.map((tab, index) => {
         const tabIsActive = index === paneTabs.activeTabIndex
@@ -70,16 +72,12 @@ export function TabBar({ paneId, title, currentPath, isActive }: TabBarProps) {
                 ...buildContextMenuContent(paneId, { kind: 'tab', tabId: tab.id }, os),
               })
             }}
-            className={`group inline-flex min-w-tab-min max-w-tab flex-1 items-center gap-2 rounded-t-tab pl-3 pr-2 text-row transition-colors ${
+            // The selected tab shares the command bar's layer colour and covers the
+            // strip's bottom line, so tab and bar read as one shape.
+            className={`group relative inline-flex h-8 w-tab min-w-0 shrink items-center gap-2 rounded-t-control border-x border-t pl-2.75 pr-1.5 text-caption ${
               tabIsActive
-                ? 'bg-light-surface dark:bg-dark-surface'
-                : 'text-light-text-soft hover:bg-light-hover dark:text-dark-text-soft dark:hover:bg-dark-hover'
-            } ${
-              tabIsActive && isActive
-                ? 'text-accent-blue-light dark:text-accent-blue'
-                : tabIsActive
-                  ? 'text-light-text dark:text-dark-text'
-                  : ''
+                ? 'z-10 border-light-stroke bg-light-layer font-semibold text-light-text dark:border-dark-stroke dark:bg-dark-layer dark:text-dark-text'
+                : 'border-transparent text-light-text-secondary hover:bg-light-hover dark:text-dark-text-secondary dark:hover:bg-dark-hover'
             }`}
           >
             {(handleRef) => (
@@ -93,7 +91,9 @@ export function TabBar({ paneId, title, currentPath, isActive }: TabBarProps) {
                   aria-selected={tabIsActive}
                   aria-label={`Tab ${tabLabel(tab)} in ${title}`}
                   onClick={() => void switchTab(paneId, tab.id)}
-                  className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-sm py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
+                  // The ::before layer stretches the hit area over the whole tab
+                  // (padding included), so a click or drag anywhere on it lands here.
+                  className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-control text-left before:absolute before:inset-0 before:rounded-t-control ${FOCUS_RING}`}
                 >
                   <LocationIcon path={tab.path} volumes={volumes} />
                   <span className="min-w-0 flex-1 truncate">{tabLabel(tab)}</span>
@@ -101,18 +101,21 @@ export function TabBar({ paneId, title, currentPath, isActive }: TabBarProps) {
                 {tab.locked ? (
                   <span
                     aria-label={`Locked tab ${tabLabel(tab)} in ${title}`}
-                    className="inline-flex h-5 w-5 shrink-0 items-center justify-center text-light-text-muted dark:text-dark-text-muted"
+                    className="inline-flex size-5.5 shrink-0 items-center justify-center font-normal text-light-text-secondary dark:text-dark-text-secondary"
                   >
-                    <LockIcon className="h-3.5 w-3.5" />
+                    <LockIcon className="size-3.5" />
                   </span>
                 ) : canClose ? (
                   <button
                     type="button"
                     aria-label={`Close tab ${tabLabel(tab)} in ${title}`}
                     onClick={(event) => onCloseClick(event, tab.id)}
-                    className="inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-tab text-light-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover hover:text-light-text dark:text-dark-text-muted dark:hover:bg-dark-hover dark:hover:text-dark-text"
+                    // Close shows on the selected tab and on hover, as Windows tabs do.
+                    className={`relative z-10 inline-flex size-5.5 shrink-0 cursor-pointer items-center justify-center rounded-control font-normal text-light-text-secondary hover:bg-light-hover hover:text-light-text focus-visible:opacity-100 dark:text-dark-text-secondary dark:hover:bg-dark-hover dark:hover:text-dark-text ${
+                      tabIsActive ? '' : 'opacity-0 group-hover:opacity-100'
+                    } ${FOCUS_RING}`}
                   >
-                    <XIcon className="h-3.5 w-3.5" />
+                    <XIcon className="size-3.5" />
                   </button>
                 ) : null}
               </>
@@ -124,7 +127,7 @@ export function TabBar({ paneId, title, currentPath, isActive }: TabBarProps) {
         type="button"
         aria-label={`New tab in ${title}`}
         onClick={() => void openTabFromPath(paneId, currentPath)}
-        className="my-auto inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-tab text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover hover:text-light-text dark:text-dark-text-soft dark:hover:bg-dark-hover dark:hover:text-dark-text"
+        className={`ml-1 inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-control text-light-text-secondary hover:bg-light-hover hover:text-light-text dark:text-dark-text-secondary dark:hover:bg-dark-hover dark:hover:text-dark-text ${FOCUS_RING}`}
       >
         <PlusIcon className="h-4 w-4" />
       </button>
@@ -159,7 +162,7 @@ function SortableTab({
       data-tab-id={tabId}
       onAuxClick={onAuxClick}
       onContextMenu={onContextMenu}
-      className={`${className} ${isDragSource ? 'cursor-grabbing opacity-80 shadow-float' : ''}`}
+      className={`${className} ${isDragSource ? 'cursor-grabbing opacity-80 shadow-light-flyout dark:shadow-dark-flyout' : ''}`}
     >
       {children(handleRef)}
     </div>

@@ -30,9 +30,6 @@ import {
   FileType,
   FileVideo,
   Folder,
-  FolderCog,
-  FolderDown,
-  FolderGit2,
   FolderPlus,
   FolderOpen,
   GripVertical,
@@ -69,8 +66,22 @@ import {
   Usb,
   X,
   XCircle,
+  Calendar,
+  CalendarClock,
+  Clock,
+  Columns2,
+  Contrast,
+  History,
+  Keyboard,
+  Layers,
+  LayoutGrid,
+  LayoutList,
+  ListFilter,
+  PanelsTopLeft,
+  Timer,
+  ZoomIn,
 } from 'lucide-react'
-export { DualPaneIcon, SinglePaneIcon } from './custom-icons'
+export { DualPaneIcon, FolderGlyph, SinglePaneIcon } from './custom-icons'
 
 function withDefaults(Icon: LucideIcon) {
   return forwardRef<SVGSVGElement, LucideProps>(function WrappedIcon(props, ref) {
@@ -107,9 +118,6 @@ export const FileTextIcon = withDefaults(FileText)
 export const FileTypeIcon = withDefaults(FileType)
 export const FileVideoIcon = withDefaults(FileVideo)
 export const FolderIcon = withDefaults(Folder)
-export const FolderCogIcon = withDefaults(FolderCog)
-export const FolderDownIcon = withDefaults(FolderDown)
-export const FolderGit2Icon = withDefaults(FolderGit2)
 export const FolderPlusIcon = withDefaults(FolderPlus)
 export const FolderOpenIcon = withDefaults(FolderOpen)
 export const GripVerticalIcon = withDefaults(GripVertical)
@@ -146,3 +154,17 @@ export const TypeIcon = withDefaults(Type)
 export const UsbIcon = withDefaults(Usb)
 export const XIcon = withDefaults(X)
 export const XCircleIcon = withDefaults(XCircle)
+export const CalendarIcon = withDefaults(Calendar)
+export const CalendarClockIcon = withDefaults(CalendarClock)
+export const ClockIcon = withDefaults(Clock)
+export const Columns2Icon = withDefaults(Columns2)
+export const ContrastIcon = withDefaults(Contrast)
+export const HistoryIcon = withDefaults(History)
+export const KeyboardIcon = withDefaults(Keyboard)
+export const LayersIcon = withDefaults(Layers)
+export const LayoutGridIcon = withDefaults(LayoutGrid)
+export const LayoutListIcon = withDefaults(LayoutList)
+export const ListFilterIcon = withDefaults(ListFilter)
+export const PanelsTopLeftIcon = withDefaults(PanelsTopLeft)
+export const TimerIcon = withDefaults(Timer)
+export const ZoomInIcon = withDefaults(ZoomIn)

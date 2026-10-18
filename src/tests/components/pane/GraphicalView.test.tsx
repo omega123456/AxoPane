@@ -158,7 +158,7 @@ describe('GraphicalView', () => {
     await waitFor(() =>
       expect(screen.getByRole('gridcell', { name: 'Entry 3' }).closest('[role="row"]')).toHaveStyle(
         {
-          top: '64px',
+          top: '60px',
         },
       ),
     )
@@ -179,7 +179,7 @@ describe('GraphicalView', () => {
     await waitFor(() =>
       expect(screen.getByRole('gridcell', { name: 'Entry 3' }).closest('[role="row"]')).toHaveStyle(
         {
-          top: '228px',
+          top: '204px',
         },
       ),
     )

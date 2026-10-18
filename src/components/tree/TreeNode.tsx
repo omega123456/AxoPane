@@ -2,11 +2,15 @@ import { memo, useState, type DragEvent, type MouseEvent } from 'react'
 import { ChevronRightIcon } from '@/components/icons'
 import { EntryIcon } from '@/components/icons/EntryIcon'
 import { VolumeIcon } from '@/components/icons/VolumeIcon'
+import { SelectionPill } from '@/components/controls/SelectionPill'
+import { CapacityBar } from './CapacityBar'
+import { volumeUsedFraction } from '@/lib/volumes'
 import { detectPlatformOs } from '@/lib/keymap'
 import { canDropInto, performDrop, resolveDropKind, setDropEffect } from '@/lib/drag-drop'
 import type { VolumeInfo } from '@/lib/types/ipc'
 import type { TreeNodeState } from '@/stores/panes-store'
 import { useDragStore } from '@/stores/drag-store'
+import { FOCUS_RING_INSET } from '@/lib/focus-ring'
 
 /**
  * Stable, path-keyed handler dispatcher for the tree's rows.
@@ -55,19 +59,20 @@ function TreeNodeImpl({
     // Styling-constraint exception: runtime geometry only. Indentation is a
     // function of the (unbounded) tree depth, so it cannot be a static
     // utility/token. Colors/spacing elsewhere remain pure Tailwind utilities.
-    paddingLeft: `${depth * 12 + 8}px`,
+    paddingLeft: `${depth * 16 + 8}px`,
   }
 
-  // accent-blue-soft is translucent; on a pinned row that translucency would
-  // let scrolled-under rows show through, so pinned+current rows get the
-  // opaque *-tree-current stand-in instead.
+  // The current folder gets the subtle fill plus an accent pill. That fill is
+  // translucent; on a pinned row it would let scrolled-under rows show
+  // through, so pinned rows use the opaque *-tree-* stand-ins instead.
   const rowBackgroundClassName = isCurrent
     ? isPinned
-      ? 'bg-light-tree-current text-accent-blue-light dark:bg-dark-tree-current dark:text-accent-blue'
-      : 'bg-accent-blue-soft text-accent-blue-light dark:text-accent-blue'
+      ? 'bg-light-tree-current dark:bg-dark-tree-current'
+      : 'bg-light-hover dark:bg-dark-hover'
     : isPinned
-      ? 'bg-light-tree text-light-text-soft dark:bg-dark-tree dark:text-dark-text-soft'
-      : 'text-light-text-soft dark:text-dark-text-soft'
+      ? 'bg-light-base dark:bg-dark-base'
+      : ''
+  const usedFraction = volume ? volumeUsedFraction(volume) : null
   const rowHoverClassName = isPinned
     ? isCurrent
       ? 'hover:bg-light-tree-current-hover dark:hover:bg-dark-tree-current-hover'
@@ -119,21 +124,25 @@ function TreeNodeImpl({
       onDragLeave={handleDragLeave}
       onDrop={(event) => void handleDrop(event)}
       onContextMenu={(event) => actions.onContextMenu(node, event)}
-      className={`flex h-tree-row items-center gap-1 rounded-tab pr-2 text-row ${rowHoverClassName} ${rowBackgroundClassName} ${
-        isDropTarget ? 'ring-2 ring-inset ring-accent-blue-border' : ''
+      className={`relative flex ${usedFraction === null ? 'h-tree-row' : 'h-tree-drive-row'} items-center gap-2 rounded-control pr-2 text-row text-light-text dark:text-dark-text ${rowHoverClassName} ${rowBackgroundClassName} ${
+        isDropTarget ? 'ring-2 ring-inset ring-light-accent dark:ring-dark-accent' : ''
       }`}
       style={rowStyle}
     >
+      {isCurrent ? <SelectionPill /> : null}
+      {/* A 12px chevron column with a wider, overhanging hit area. */}
       <button
         type="button"
         aria-label={`${node.expanded ? 'Collapse' : 'Expand'} ${node.name}`}
         onClick={() => actions.onToggle(node.path)}
-        className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-tab focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:hover:bg-dark-hover"
+        className={`-mx-1 inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-control text-light-text-tertiary hover:bg-light-hover dark:text-dark-text-tertiary dark:hover:bg-dark-hover ${FOCUS_RING_INSET}`}
       >
-        <ChevronRightIcon className={`h-3.5 w-3.5 ${node.expanded ? 'rotate-90' : ''}`} />
+        <ChevronRightIcon className={`size-3 ${node.expanded ? 'rotate-90' : ''}`} />
       </button>
       <button
         type="button"
+        // Named by the folder alone; the capacity bar inside is a visual aid.
+        aria-label={node.name}
         onClick={() => actions.onNavigate(node.path)}
         onMouseDown={(event) => {
           // Suppress the browser's middle-click autoscroll, which would
@@ -149,14 +158,21 @@ function TreeNodeImpl({
             actions.onOpenTab(node.path)
           }
         }}
-        className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-tab py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
+        className={`flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-control text-left ${FOCUS_RING_INSET}`}
       >
         {volume ? (
           <VolumeIcon volume={volume} />
         ) : (
-          <EntryIcon entry={{ name: node.name, isDir: true }} isOpen={node.expanded} />
+          <EntryIcon entry={{ name: node.name, isDir: true }} />
         )}
-        <span className="truncate">{node.name}</span>
+        {usedFraction === null ? (
+          <span className="truncate">{node.name}</span>
+        ) : (
+          <span className="flex min-w-0 flex-1 flex-col gap-1.25">
+            <span className="truncate">{node.name}</span>
+            <CapacityBar usedFraction={usedFraction} />
+          </span>
+        )}
       </button>
     </div>
   )

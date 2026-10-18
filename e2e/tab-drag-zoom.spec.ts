@@ -8,10 +8,10 @@ for (const [zoom, scenario] of [
 ] as const) {
   test(`keeps a dragged tab under the pointer at ${zoom}% app zoom`, async ({ page }) => {
     await gotoScenario(page, scenario)
-    const tabs = page.getByRole('region', { name: 'Left pane' }).getByRole('tab')
+    const tabs = page.getByRole('group', { name: 'Left pane tabs' }).getByRole('tab')
     const source = tabs.nth(0)
     const destinationTabs =
-      zoom === '150' ? tabs : page.getByRole('region', { name: 'Right pane' }).getByRole('tab')
+      zoom === '150' ? tabs : page.getByRole('group', { name: 'Right pane tabs' }).getByRole('tab')
     const target = zoom === '150' ? tabs.nth(2) : destinationTabs.last()
     const sourceBox = await source.locator('..').boundingBox()
     const targetBox = await target.boundingBox()

@@ -1,5 +1,7 @@
+import { FOCUS_RING_INSET } from '@/lib/focus-ring'
 export type SegmentedOption<T extends string> = { value: T; label: string }
 
+/** Fluent segmented control: 26px items in a 2px-padded control well; selection is solid accent. */
 export function SegmentedControl<T extends string>({
   value,
   onChange,
@@ -15,7 +17,7 @@ export function SegmentedControl<T extends string>({
     <div
       role="radiogroup"
       aria-label={ariaLabel}
-      className="inline-flex gap-0.5 rounded-lg border border-light-border bg-light-surface p-0.5 dark:border-dark-border dark:bg-dark-surface"
+      className="inline-flex gap-0.5 rounded-card border border-light-control-stroke bg-light-control p-0.5 dark:border-dark-control-stroke dark:bg-dark-control"
     >
       {options.map((option) => {
         const active = option.value === value
@@ -26,10 +28,10 @@ export function SegmentedControl<T extends string>({
             role="radio"
             aria-checked={active}
             onClick={() => onChange(option.value)}
-            className={`cursor-pointer rounded-md px-4 py-1.5 text-usm capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-blue-border ${
+            className={`flex h-6.5 cursor-pointer items-center rounded-control px-3 text-row ${FOCUS_RING_INSET} ${
               active
-                ? 'bg-accent-blue-strong font-semibold text-accent-blue-light dark:text-accent-blue'
-                : 'text-light-text-muted dark:text-dark-text-muted'
+                ? 'bg-light-accent text-light-on-accent dark:bg-dark-accent dark:text-dark-on-accent'
+                : 'text-light-text hover:bg-light-hover dark:text-dark-text dark:hover:bg-dark-hover'
             }`}
           >
             {option.label}

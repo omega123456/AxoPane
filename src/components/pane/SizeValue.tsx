@@ -14,7 +14,7 @@ export function SizeValue({ entry }: SizeValueProps) {
   if (entry.isDir) {
     if (sizeState?.state === 'calculating') {
       return (
-        <span className="inline-flex items-center justify-end gap-1 text-accent-blue-light dark:text-accent-blue">
+        <span className="inline-flex items-center justify-end gap-1 text-light-accent dark:text-dark-accent">
           <LoaderCircleIcon className="h-3.5 w-3.5 animate-spin" />
           <span className="sr-only">Calculating size</span>
         </span>

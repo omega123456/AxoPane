@@ -205,7 +205,7 @@ describe('config-store', () => {
       columns: [],
       layout: {
         detailsVisible: false,
-        treeWidthPx: 204,
+        treeWidthPx: 212,
         paneSplit: 0.5,
         columnWidths: {
           name: 320,
@@ -234,7 +234,7 @@ describe('config-store', () => {
           dismissedEverythingBanner: true,
           layout: expect.objectContaining({
             detailsVisible: false,
-            treeWidthPx: 204,
+            treeWidthPx: 212,
             paneSplit: 0.5,
             columnWidths: {
               name: 320,

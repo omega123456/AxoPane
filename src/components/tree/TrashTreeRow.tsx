@@ -1,6 +1,8 @@
 import { memo, type MouseEvent } from 'react'
 import { Trash2Icon } from '@/components/icons'
 import { detectPlatformOs } from '@/lib/keymap'
+import { SelectionPill } from '@/components/controls/SelectionPill'
+import { FOCUS_RING_INSET } from '@/lib/focus-ring'
 
 type TrashTreeRowProps = {
   isCurrent: boolean
@@ -17,17 +19,12 @@ function TrashTreeRowImpl({ isCurrent, onNavigate, onOpenTab, onContextMenu }: T
       role="treeitem"
       data-tree-row="trash"
       onContextMenu={onContextMenu}
-      className={`flex h-tree-row items-center gap-1 rounded-tab pr-2 text-row hover:bg-light-hover dark:hover:bg-dark-hover ${
-        isCurrent
-          ? 'bg-accent-blue-soft text-accent-blue-light dark:text-accent-blue'
-          : 'text-light-text-soft dark:text-dark-text-soft'
+      className={`relative flex h-tree-row items-center gap-2 rounded-control pl-2 pr-2 text-row text-light-text hover:bg-light-hover dark:text-dark-text dark:hover:bg-dark-hover ${
+        isCurrent ? 'bg-light-hover dark:bg-dark-hover' : ''
       }`}
-      style={{ paddingLeft: '8px' }}
     >
-      <span
-        className="inline-flex h-6 w-6 flex-none items-center justify-center"
-        aria-hidden="true"
-      />
+      {isCurrent ? <SelectionPill /> : null}
+      <span className="w-3 flex-none" aria-hidden="true" />
       <button
         type="button"
         onClick={onNavigate}
@@ -42,9 +39,9 @@ function TrashTreeRowImpl({ isCurrent, onNavigate, onOpenTab, onContextMenu }: T
             onOpenTab()
           }
         }}
-        className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-tab py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
+        className={`flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-control ${FOCUS_RING_INSET}`}
       >
-        <Trash2Icon className="size-4 flex-none text-light-text-muted dark:text-dark-text-muted" />
+        <Trash2Icon className="size-4 flex-none text-light-text-secondary dark:text-dark-text-secondary" />
         <span className="truncate">{trashLabel}</span>
       </button>
     </div>

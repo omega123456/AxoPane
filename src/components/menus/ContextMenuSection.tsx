@@ -98,27 +98,25 @@ export function ContextMenuSection({
 
   return (
     <div>
-      {showDivider ? (
-        <div className="mx-1.5 my-1 h-px bg-light-border dark:bg-dark-border" />
-      ) : null}
+      {showDivider ? <div className="my-1 h-px bg-light-divider dark:bg-dark-divider" /> : null}
+      {/* The menu's 4px side padding lives here so dividers can span edge to edge. */}
       <div className="px-1">
         {isNativeSection && !hasNativeRows && nativeState?.loading ? (
           <div
             aria-hidden={!showNativePlaceholder}
             role={showNativePlaceholder ? 'status' : undefined}
             aria-label={showNativePlaceholder ? 'Loading native menu items' : undefined}
-            className="flex min-h-24 flex-col justify-center gap-2 overflow-hidden px-2"
+            className={`flex flex-col ${showNativePlaceholder ? '' : 'opacity-0'}`}
           >
-            <div
-              className={`h-3 rounded-tab bg-light-skeleton dark:bg-dark-skeleton ${
-                showNativePlaceholder ? 'animate-pulse' : 'opacity-0'
-              }`}
-            />
-            <div
-              className={`h-3 rounded-tab bg-light-skeleton-strong dark:bg-dark-skeleton-strong ${
-                showNativePlaceholder ? 'animate-pulse' : 'opacity-0'
-              }`}
-            />
+            {/* Same 32px height as the rows that replace them, so nothing jumps. */}
+            {['w-3/5', 'w-4/5', 'w-1/2'].map((width) => (
+              <div key={width} className="flex h-8 items-center gap-3 px-3">
+                <div className="size-4 rounded-control bg-light-skeleton dark:bg-dark-skeleton" />
+                <div
+                  className={`h-2.5 ${width} rounded-control bg-light-skeleton dark:bg-dark-skeleton`}
+                />
+              </div>
+            ))}
           </div>
         ) : null}
         {isNativeSection && !hasNativeRows && !nativeState?.loading && nativeState?.locked ? (
@@ -146,7 +144,7 @@ export function ContextMenuSection({
           ref={submenuRef}
           role="menu"
           aria-label={openSubmenuItem.label}
-          className="fixed z-10 flex w-64 flex-col overflow-hidden rounded-menu border border-light-border-strong bg-light-surface p-1.5 shadow-menu dark:border-dark-border-strong dark:bg-dark-surface"
+          className="fixed z-10 flex w-menu flex-col overflow-hidden rounded-overlay border border-light-flyout-stroke bg-light-card p-1 shadow-light-flyout dark:border-dark-flyout-stroke dark:bg-dark-card dark:shadow-dark-flyout"
           // Runtime submenu geometry uses viewport coordinates so nested panels
           // are not clipped by the scrolling body of the parent menu.
           style={
@@ -162,7 +160,7 @@ export function ContextMenuSection({
         >
           <div
             data-testid="context-submenu-scroll-body"
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint"
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary"
           >
             {openSubmenuItem.children.rows.map((child) => (
               <ContextMenuRow

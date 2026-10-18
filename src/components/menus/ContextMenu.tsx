@@ -136,7 +136,7 @@ export function ContextMenu() {
         role="menu"
         aria-label={menu.title}
         tabIndex={-1}
-        className="absolute flex w-72 max-h-full flex-col overflow-hidden rounded-menu border border-light-border-strong bg-light-surface p-1.5 shadow-menu focus-visible:outline-none dark:border-dark-border-strong dark:bg-dark-surface"
+        className="absolute flex w-menu max-h-full flex-col overflow-hidden rounded-overlay border border-light-flyout-stroke bg-light-card py-1 shadow-light-flyout focus-visible:outline-none dark:border-dark-flyout-stroke dark:bg-dark-card dark:shadow-dark-flyout"
         // Styling-constraint exception: runtime geometry only. The menu is
         // positioned at the cursor (continuous px coords) and clamped into the
         // viewport by the layout effect above, which no static utility or
@@ -187,7 +187,7 @@ export function ContextMenu() {
         <div
           ref={bodyRef}
           data-testid="context-menu-scroll-body"
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary"
         >
           {beforeNativeSections.map((section, index) => (
             <ContextMenuSection

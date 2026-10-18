@@ -12,7 +12,7 @@ fn persistence_defaults_match_the_frontend_contract() {
     assert_eq!(default_date_format(), "ymd");
     assert_eq!(default_zoom(), "100");
     assert_eq!(default_view_mode(), "details");
-    assert_eq!(default_tree_width_px(), 204.0);
+    assert_eq!(default_tree_width_px(), 212.0);
     assert_eq!(default_pane_split(), 0.5);
     assert_eq!(default_column_widths().get("name"), Some(&320.0));
     assert_eq!(default_column_widths().get("type"), Some(&136.0));

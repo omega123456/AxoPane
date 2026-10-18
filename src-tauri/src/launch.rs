@@ -95,6 +95,16 @@ pub fn restart_as_admin() -> Result<(), OpenPathError> {
     platform::restart_as_admin(&executable)
 }
 
+/// System Settings > Privacy & Security > Full Disk Access.
+pub const FULL_DISK_ACCESS_SETTINGS_URL: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
+
+/// Opens the macOS Full Disk Access settings pane, the fix for a folder macOS
+/// blocks. The other platforms have no such pane and report `Unsupported`.
+pub fn open_full_disk_access_settings() -> Result<(), OpenPathError> {
+    platform::open_full_disk_access_settings()
+}
+
 /// Matches Explorer-style launches: scripts and associated apps start in the
 /// clicked item's containing folder, not the file explorer process directory.
 pub fn launch_directory(path: &Path) -> Option<PathBuf> {
@@ -114,6 +124,10 @@ mod platform {
     }
 
     pub fn restart_as_admin(_executable: &Path) -> Result<(), OpenPathError> {
+        Err(OpenPathError::Unsupported)
+    }
+
+    pub fn open_full_disk_access_settings() -> Result<(), OpenPathError> {
         Err(OpenPathError::Unsupported)
     }
 }
@@ -192,6 +206,11 @@ mod platform {
         })
     }
 
+    /// Full Disk Access is a macOS setting; Windows blocks folders through ACLs.
+    pub fn open_full_disk_access_settings() -> Result<(), OpenPathError> {
+        Err(OpenPathError::Unsupported)
+    }
+
     fn shell_execute(operation: PCWSTR, target: &[u16], directory: PCWSTR) -> isize {
         let result = unsafe {
             ShellExecuteW(
@@ -234,6 +253,23 @@ mod platform {
     /// Only Windows has a one-click elevated relaunch. macOS asks the user to
     /// start the application again with the permissions it needs.
     pub fn restart_as_admin(_executable: &Path) -> Result<(), OpenPathError> {
+        Err(OpenPathError::Unsupported)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn open_full_disk_access_settings() -> Result<(), OpenPathError> {
+        Command::new(OPEN_COMMAND)
+            .arg(super::FULL_DISK_ACCESS_SETTINGS_URL)
+            .spawn()
+            .map(|_| ())
+            .map_err(|source| OpenPathError::Io {
+                path: super::FULL_DISK_ACCESS_SETTINGS_URL.into(),
+                source,
+            })
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn open_full_disk_access_settings() -> Result<(), OpenPathError> {
         Err(OpenPathError::Unsupported)
     }
 }

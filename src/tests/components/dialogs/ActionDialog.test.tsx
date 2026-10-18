@@ -109,7 +109,7 @@ describe('ActionDialog', () => {
     })
     render(<ActionDialog />)
 
-    expect(screen.getByText('Delete 2 items?')).toBeInTheDocument()
+    expect(screen.getByText('Delete 2 items permanently?')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Delete' }))
 
     await waitFor(() => expect(useActionDialogStore.getState().dialog).toBeNull())
@@ -121,6 +121,30 @@ describe('ActionDialog', () => {
         { sourcePath: 'C:\\root\\b.txt', name: 'b.txt', sizeBytes: 0 },
       ],
     })
+  })
+
+  it('names the Trash and lists sizes in the delete dialog on macOS', () => {
+    const originalPlatform = navigator.platform
+    Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true })
+    try {
+      useActionDialogStore.getState().open({
+        kind: 'delete',
+        paneId: 'left',
+        targets: [
+          { id: 'a', name: 'a.zip', path: '/a.zip', sizeBytes: 2048 },
+          { id: 'b', name: 'b.mp4', path: '/b.mp4', sizeBytes: 1024 },
+        ],
+      })
+      render(<ActionDialog />)
+
+      expect(
+        screen.getByText(/These items skip the Trash\. You can't undo this\./),
+      ).toBeInTheDocument()
+      expect(screen.getByText('a.zip · 2.0 KB')).toBeInTheDocument()
+      expect(screen.getByText('b.mp4 · 1.0 KB')).toBeInTheDocument()
+    } finally {
+      Object.defineProperty(navigator, 'platform', { value: originalPlatform, configurable: true })
+    }
   })
 
   it('renders singular delete copy, handles Escape, and shows delete errors', async () => {
@@ -136,8 +160,9 @@ describe('ActionDialog', () => {
     })
     const { unmount } = render(<ActionDialog />)
 
-    expect(screen.getByText('Delete 1 item?')).toBeInTheDocument()
+    expect(screen.getByText('Delete 1 item permanently?')).toBeInTheDocument()
     expect(screen.getByText('a.txt')).toBeInTheDocument()
+    expect(screen.getByText(/This item skips the Recycle Bin/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Delete' }))
     expect(await screen.findByText('delete was denied')).toBeInTheDocument()
     expect(useActionDialogStore.getState().dialog).not.toBeNull()
@@ -253,8 +278,8 @@ describe('ActionDialog', () => {
     expect(screen.getByText('Move 2 items to the other pane?')).toBeInTheDocument()
     expect(screen.getByText('C:\\root')).toBeInTheDocument()
     expect(screen.getByText('D:\\dest')).toBeInTheDocument()
-    expect(screen.getByText('a.txt')).toBeInTheDocument()
-    expect(screen.getByText('b.txt')).toBeInTheDocument()
+    expect(screen.getByText('a.txt · 10 B')).toBeInTheDocument()
+    expect(screen.getByText('b.txt · 12 B')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Move' }))
 
@@ -293,7 +318,10 @@ describe('ActionDialog', () => {
     const { unmount } = render(<ActionDialog />)
 
     expect(screen.getByText('Copy 5 items to the other pane?')).toBeInTheDocument()
-    expect(screen.getByText('and 1 more')).toBeInTheDocument()
+    // Three lines, then a count: a.txt has no size yet, so it shows its name only.
+    expect(screen.getByText('a.txt')).toBeInTheDocument()
+    expect(screen.getByText('c.txt · 14 B')).toBeInTheDocument()
+    expect(screen.getByText('and 2 more')).toBeInTheDocument()
 
     await user.keyboard('{Enter}')
 

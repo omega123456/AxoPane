@@ -219,10 +219,10 @@ describe('date-format', () => {
   })
 
   it('maps every tone to a colour utility', () => {
-    expect(dateToneClassName.recent).toContain('accent-green')
-    expect(dateToneClassName.today).toContain('accent-blue')
-    expect(dateToneClassName.yesterday).toContain('accent-amber')
-    expect(dateToneClassName.default).toContain('text-light-text-muted')
+    expect(dateToneClassName.recent).toContain('text-light-success')
+    expect(dateToneClassName.today).toContain('text-light-accent')
+    expect(dateToneClassName.yesterday).toContain('text-light-warning')
+    expect(dateToneClassName.default).toContain('text-light-text-secondary')
   })
 
   describe('absolute-format cache', () => {

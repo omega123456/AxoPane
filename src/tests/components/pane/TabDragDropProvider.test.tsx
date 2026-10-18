@@ -53,7 +53,7 @@ function dragEvent(
 
 async function addLeftTab() {
   const user = userEvent.setup()
-  const leftPane = await screen.findByRole('region', { name: 'Left pane' })
+  const leftPane = await screen.findByRole('group', { name: 'Left pane tabs' })
   await user.click(within(leftPane).getByRole('button', { name: 'New tab in Left pane' }))
   await waitFor(() => expect(useTabsStore.getState().panes.left.tabs).toHaveLength(2))
 }
@@ -70,7 +70,7 @@ describe('TabDragDropProvider', () => {
     renderApp()
     await addLeftTab()
 
-    const leftPane = await screen.findByRole('region', { name: 'Left pane' })
+    const leftPane = await screen.findByRole('group', { name: 'Left pane tabs' })
     const tabs = within(leftPane).getAllByRole('tab')
     await user.click(tabs[0])
     expect(useTabsStore.getState().panes.left.activeTabIndex).toBe(0)
@@ -153,7 +153,7 @@ describe('TabDragDropProvider', () => {
   it('restores the source label focus after an invalid release', async () => {
     renderApp()
     const source = await within(
-      await screen.findByRole('region', { name: 'Left pane' }),
+      await screen.findByRole('group', { name: 'Left pane tabs' }),
     ).findByRole('tab')
     const sourceTabId = source.dataset.tabLabelId
     expect(sourceTabId).toBeDefined()

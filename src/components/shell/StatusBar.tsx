@@ -3,6 +3,15 @@ import { useShallow } from 'zustand/react/shallow'
 import { isPathInsideVolume } from '@/lib/volumes'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
+import { LoaderCircleIcon } from '@/components/icons'
+
+function Dot() {
+  return (
+    <span aria-hidden="true" className="text-light-text-tertiary dark:text-dark-text-tertiary">
+      ·
+    </span>
+  )
+}
 
 export function StatusBar() {
   const activePaneId = usePanesStore((state) => state.activePaneId)
@@ -36,21 +45,27 @@ export function StatusBar() {
   const freeLabel = volume ? formatBytes(volume.freeBytes) : 'Unknown'
   const totalLabel = volume ? formatBytes(volume.totalBytes) : 'Unknown'
   const countingItems = sortKey === 'items' && itemsSortStatus === 'counting'
+  const sizesUpdating = usePanesStore((state) =>
+    state.panes[state.activePaneId].entries.some((entry) => {
+      const size = entry.isDir ? state.sizeStates[entry.path] : undefined
+      return size?.state === 'calculating' || size?.refreshing === true
+    }),
+  )
 
   return (
-    <footer className="flex h-status items-center gap-3 border-t border-light-border bg-light-titlebar px-4 text-uxs text-light-text-muted dark:border-dark-border dark:bg-dark-titlebar dark:text-dark-text-muted">
+    <footer className="flex h-status shrink-0 items-center gap-1.5 whitespace-nowrap bg-light-base mica:bg-transparent px-3 text-caption text-light-text-secondary dark:bg-dark-base dark:text-dark-text-secondary">
       <span>{itemCount} items</span>
-      <span className="text-light-text-faint dark:text-dark-text-faint">|</span>
+      <Dot />
       <span>{selectionCount} selected</span>
       {countingItems ? (
         <>
-          <span className="text-light-text-faint dark:text-dark-text-faint">|</span>
+          <Dot />
           <span role="status" aria-live="polite" aria-label="Counting items…">
             Counting items…
           </span>
         </>
       ) : null}
-      <span className="text-light-text-faint dark:text-dark-text-faint">|</span>
+      <Dot />
       <span className="truncate">{typing ? 'Filtering…' : path}</span>
       <div className="flex-1" />
       {focusedEntry ? (
@@ -59,9 +74,15 @@ export function StatusBar() {
           {focusedEntry.isDir ? ' · folder' : ` · ${focusedEntry.typeLabel}`}
         </span>
       ) : null}
+      {sizesUpdating ? (
+        <span className="inline-flex items-center">
+          <LoaderCircleIcon className="size-3.5 animate-spin" />
+          <span className="sr-only">Updating folder sizes</span>
+        </span>
+      ) : null}
       {volume ? (
         <>
-          <span className="text-light-text-faint dark:text-dark-text-faint">|</span>
+          {focusedEntry ? <Dot /> : null}
           <span>
             {freeLabel} free of {totalLabel}
           </span>

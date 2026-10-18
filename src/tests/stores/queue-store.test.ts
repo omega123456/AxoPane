@@ -245,14 +245,12 @@ describe('queue store', () => {
 
     const existingHistory = useQueueStore.getState().throughputHistory['op-1']
     const existingPeak = useQueueStore.getState().throughputPeak['op-1']
-    useQueueStore
-      .getState()
-      .hydrate([
-        {
-          progress: progress({ operationId: 'op-1', progressPercent: 75, bytesPerSecond: 150 }),
-          conflict: null,
-        },
-      ])
+    useQueueStore.getState().hydrate([
+      {
+        progress: progress({ operationId: 'op-1', progressPercent: 75, bytesPerSecond: 150 }),
+        conflict: null,
+      },
+    ])
 
     expect(useQueueStore.getState().throughputHistory['op-1']).toEqual(existingHistory)
     // Hydrate never lowers the peak (here the snapshot rate is below it).

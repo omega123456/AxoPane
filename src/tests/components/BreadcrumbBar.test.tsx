@@ -96,19 +96,6 @@ describe('BreadcrumbBar navigation', () => {
     expect(navigatePane).toHaveBeenCalledWith('left', 'C:\\Users')
   })
 
-  it('navigates to home and root from the address-row shortcuts', async () => {
-    const user = userEvent.setup()
-    const navigatePane = vi.fn(() => Promise.resolve())
-    usePanesStore.setState({ navigatePane })
-
-    render(<BreadcrumbBar pane={pane('C:\\Users\\Omega')} />)
-    await user.click(screen.getByRole('button', { name: 'Navigate to ~' }))
-    await user.click(screen.getByRole('button', { name: 'Navigate to /' }))
-
-    expect(navigatePane).toHaveBeenNthCalledWith(1, 'left', '~')
-    expect(navigatePane).toHaveBeenNthCalledWith(2, 'left', '/')
-  })
-
   it('navigates UNC breadcrumbs using real network paths', async () => {
     const user = userEvent.setup()
     const navigatePane = vi.fn(() => Promise.resolve())
@@ -139,24 +126,6 @@ describe('BreadcrumbBar navigation', () => {
     expect(navigatePane).toHaveBeenCalledWith('left', 'D:\\Media')
   })
 
-  it('keeps shortcuts beside the editor without submitting its draft first', async () => {
-    const user = userEvent.setup()
-    const navigatePane = vi.fn(() => Promise.resolve())
-    usePanesStore.setState({ navigatePane })
-
-    render(<BreadcrumbBar pane={pane('C:\\Users\\Omega')} />)
-    await user.dblClick(screen.getByRole('navigation', { name: 'Left pane path' }))
-
-    const input = screen.getByRole('textbox', { name: 'Left pane path' })
-    await user.clear(input)
-    await user.type(input, 'D:\\Draft')
-    await user.click(screen.getByRole('button', { name: 'Navigate to ~' }))
-
-    expect(navigatePane).toHaveBeenCalledOnce()
-    expect(navigatePane).toHaveBeenCalledWith('left', '~')
-    expect(screen.queryByRole('textbox', { name: 'Left pane path' })).not.toBeInTheDocument()
-  })
-
   it('opens the full-path editor from a right-click on any breadcrumb', async () => {
     const user = userEvent.setup()
 
@@ -176,7 +145,9 @@ describe('BreadcrumbBar navigation', () => {
       this: HTMLElement,
     ) {
       if (this.getAttribute('aria-label') === 'Left pane path') {
-        return DOMRect.fromRect({ width: 195 })
+        // Measured at 10px a character plus each crumb's chrome, this keeps
+        // "…", "Br" and "Charlie" but not "Bra".
+        return DOMRect.fromRect({ width: 164 })
       }
 
       return DOMRect.fromRect()
@@ -198,7 +169,7 @@ describe('BreadcrumbBar navigation', () => {
 
     render(<BreadcrumbBar pane={pane('C:\\Alpha\\Bravo\\Charlie')} />)
 
-    expect(screen.getByTestId('breadcrumb-collapse-marker')).toBeInTheDocument()
+    expect(screen.getByTestId('breadcrumb-collapse-marker')).toHaveTextContent('…')
     expect(screen.getByRole('button', { name: 'Br' })).toHaveAttribute('title', 'Bravo')
     expect(screen.getByRole('button', { name: 'Charlie' })).toBeInTheDocument()
   })

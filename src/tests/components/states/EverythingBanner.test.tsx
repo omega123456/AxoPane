@@ -6,21 +6,21 @@ import { EverythingBanner } from '@/components/states/EverythingBanner'
 import { useConfigStore } from '@/stores/config-store'
 import { usePanesStore } from '@/stores/panes-store'
 
-const originalUserAgent = navigator.userAgent
+const originalPlatform = navigator.platform
 
-function setUserAgent(value: string) {
-  Object.defineProperty(navigator, 'userAgent', { value, configurable: true })
+function setPlatform(value: string) {
+  Object.defineProperty(navigator, 'platform', { value, configurable: true })
 }
 
 beforeEach(() => {
   ipc.install()
   useConfigStore.getState().reset()
   usePanesStore.getState().reset()
-  setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
+  setPlatform('Win32')
 })
 
 afterEach(() => {
-  setUserAgent(originalUserAgent)
+  setPlatform(originalPlatform)
 })
 
 describe('EverythingBanner', () => {
@@ -95,7 +95,7 @@ describe('EverythingBanner', () => {
   })
 
   it('does not show on non-Windows platforms', () => {
-    setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)')
+    setPlatform('MacIntel')
     usePanesStore.setState({
       folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
     })

@@ -1,19 +1,40 @@
 import { useEffect, useEffectEvent, useMemo, useState } from 'react'
 import {
   AlertTriangleIcon,
+  CalendarClockIcon,
+  CalendarIcon,
   CheckCircleIcon,
+  ChevronDownIcon,
+  ClockIcon,
+  Columns2Icon,
+  ContrastIcon,
+  DownloadIcon,
+  EyeOffIcon,
+  FileTextIcon,
   GripVerticalIcon,
+  HistoryIcon,
+  KeyboardIcon,
+  LayersIcon,
+  LayoutGridIcon,
+  LayoutListIcon,
+  ListFilterIcon,
   LoaderCircleIcon,
+  PanelsTopLeftIcon,
   PauseIcon,
+  PieChartIcon,
+  RotateCcwIcon,
   SearchIcon,
   SettingsIcon,
+  TimerIcon,
   XIcon,
+  ZoomInIcon,
 } from '@/components/icons'
 import {
   Button,
   SectionLabel,
   SegmentedControl,
   SelectField,
+  SelectionPill,
   SettingRow,
   ToggleSwitch,
 } from '@/components/controls'
@@ -55,17 +76,20 @@ import { useKeymapStore } from '@/stores/keymap-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useThemeStore } from '@/stores/theme-store'
+import { FOCUS_RING, FOCUS_RING_INSET } from '@/lib/focus-ring'
 
 type Section = 'layout' | 'columns' | 'keybindings' | 'dates' | 'updates' | 'logs'
 
-const sectionNav: { key: Section; label: string }[] = [
-  { key: 'layout', label: 'View & Layout' },
-  { key: 'columns', label: 'Columns' },
-  { key: 'dates', label: 'Dates' },
-  { key: 'keybindings', label: 'Keybindings' },
-  { key: 'updates', label: 'Updates' },
-  { key: 'logs', label: 'Logs' },
+const sectionNav: { key: Section; label: string; Icon: typeof SettingsIcon }[] = [
+  { key: 'layout', label: 'View and layout', Icon: LayoutListIcon },
+  { key: 'columns', label: 'Columns', Icon: PanelsTopLeftIcon },
+  { key: 'dates', label: 'Dates', Icon: CalendarIcon },
+  { key: 'keybindings', label: 'Keybindings', Icon: KeyboardIcon },
+  { key: 'updates', label: 'Updates', Icon: DownloadIcon },
+  { key: 'logs', label: 'Logs', Icon: FileTextIcon },
 ]
+
+const iconClass = 'size-4'
 
 const DATE_FORMAT_OPTIONS: { value: DateFormat; label: string }[] = DATE_FORMATS.map((format) => ({
   value: format,
@@ -327,63 +351,69 @@ function SettingsModalContent() {
   )
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-10">
-      <div className="flex h-settings-modal-h max-h-full w-settings-modal-w max-w-full flex-col overflow-hidden rounded-modal border border-light-border-strong bg-light-window shadow-window dark:border-dark-border-strong dark:bg-dark-window">
-        <header className="flex h-12 flex-none items-center gap-2.5 border-b border-light-border bg-light-titlebar pl-4 pr-2 dark:border-dark-border dark:bg-dark-titlebar">
-          <SettingsIcon className="size-4 text-accent-blue-light dark:text-accent-blue" />
-          <span className="text-usm font-semibold text-light-text dark:text-dark-text">
-            Settings
-          </span>
-          <button
-            type="button"
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-scrim p-10">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Settings"
+        className="flex h-settings-h max-h-full w-settings max-w-full flex-col overflow-hidden rounded-overlay border border-light-window-stroke bg-light-base text-light-text shadow-light-dialog dark:border-dark-window-stroke dark:bg-dark-base dark:text-dark-text dark:shadow-dark-dialog"
+      >
+        <header className="flex h-11 flex-none items-center gap-2.5 pl-4 pr-1.5 text-caption">
+          <SettingsIcon className={iconClass} />
+          Settings
+          <Button
+            variant="subtle"
             aria-label="Close settings"
             onClick={onCancel}
-            className="ml-auto flex size-7 cursor-pointer items-center justify-center rounded-md text-light-text-muted hover:bg-accent-red hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-muted"
+            size="icon"
+            className="ml-auto"
           >
-            <XIcon className="size-4" />
-          </button>
+            <XIcon className={iconClass} />
+          </Button>
         </header>
 
         <div className="flex min-h-0 flex-1">
           <nav
             aria-label="Settings sections"
-            className="flex w-settings-nav flex-none flex-col gap-0.5 border-r border-light-border bg-light-panel p-2 dark:border-dark-border dark:bg-dark-panel"
+            className="flex w-settings-nav flex-none flex-col gap-0.5 px-2 pb-4 pt-1"
           >
-            {sectionNav.map((item) => {
-              const active = item.key === section
+            {sectionNav.map(({ key, label, Icon }) => {
+              const active = key === section
               return (
                 <button
-                  key={item.key}
+                  key={key}
                   type="button"
-                  onClick={() => open(item.key)}
-                  className={`relative flex h-8.5 cursor-pointer items-center rounded-tab px-3 text-usm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-blue-border ${
+                  aria-current={active ? 'page' : undefined}
+                  onClick={() => open(key)}
+                  className={`relative flex h-8.5 flex-none cursor-pointer items-center gap-3 rounded-control px-3 text-body ${FOCUS_RING_INSET} ${
                     active
-                      ? 'bg-accent-blue-soft font-semibold text-accent-blue-light dark:text-accent-blue'
-                      : 'text-light-text-soft hover:bg-light-hover hover:text-light-text dark:text-dark-text-soft dark:hover:bg-dark-hover dark:hover:text-dark-text'
+                      ? 'bg-light-hover dark:bg-dark-hover'
+                      : 'hover:bg-light-hover active:bg-light-press dark:hover:bg-dark-hover dark:active:bg-dark-press'
                   }`}
                 >
-                  {active ? (
-                    <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-accent-blue-light dark:bg-accent-blue" />
-                  ) : null}
-                  {item.label}
+                  {active ? <SelectionPill /> : null}
+                  <Icon className={iconClass} />
+                  {label}
                 </button>
               )
             })}
-            <div className="mt-auto px-3 py-2.5 font-mono text-2xs leading-relaxed text-light-text-faint dark:text-dark-text-faint">
-              AxoPane
-              <br />
-              build {appVersion}
+            <div className="mt-6 px-3 text-caption text-light-text-tertiary dark:text-dark-text-tertiary">
+              AxoPane {appVersion}
             </div>
           </nav>
 
-          <div className="min-h-0 flex-1 overflow-auto px-8 py-6 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint">
-            <div className="mx-auto w-full max-w-settings-content">
+          <div className="min-h-0 flex-1 overflow-auto pb-7 pl-3 pr-7 pt-1 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary">
+            <div className="mx-auto grid w-full max-w-settings-content content-start gap-1">
+              <h2 className="mb-3.5 font-display text-title font-semibold">
+                {sectionNav.find((item) => item.key === section)?.label}
+              </h2>
               {section === 'layout' ? (
-                <div>
-                  <SectionLabel className="mb-3">View</SectionLabel>
+                <>
+                  <SectionLabel>View</SectionLabel>
                   <SettingRow
+                    icon={<EyeOffIcon className={iconClass} />}
                     title="Show hidden files"
-                    description="Include hidden and system items in directory listings"
+                    description="Include hidden and system items in folder listings"
                     control={
                       <ToggleSwitch
                         label="Show hidden files"
@@ -395,9 +425,9 @@ function SettingsModalContent() {
                     }
                   />
                   <SettingRow
-                    fixedCopy
+                    icon={<ContrastIcon className={iconClass} />}
                     title="Theme"
-                    description="Choose how the explorer matches your desktop appearance"
+                    description="Match your desktop or pick one"
                     control={
                       <SegmentedControl
                         ariaLabel="Theme"
@@ -417,9 +447,9 @@ function SettingsModalContent() {
                     }
                   />
                   <SettingRow
-                    fixedCopy
+                    icon={<ZoomInIcon className={iconClass} />}
                     title="Zoom"
-                    description="Scale the entire interface up or down"
+                    description="Scale the whole interface"
                     control={
                       <SelectField
                         ariaLabel="Zoom"
@@ -432,11 +462,11 @@ function SettingsModalContent() {
                       />
                     }
                   />
-                  <SectionLabel className="mb-3 mt-5">Layout</SectionLabel>
+                  <SectionLabel>Layout</SectionLabel>
                   <SettingRow
-                    fixedCopy
+                    icon={<Columns2Icon className={iconClass} />}
                     title="Default pane mode"
-                    description="How panes open on a fresh window"
+                    description="How panes open in a new window"
                     control={
                       <SegmentedControl
                         ariaLabel="Default pane mode"
@@ -450,7 +480,7 @@ function SettingsModalContent() {
                     }
                   />
                   <SettingRow
-                    fixedCopy
+                    icon={<LayoutGridIcon className={iconClass} />}
                     title="Default view for new tabs"
                     description="Used for new tabs and older sessions without a view"
                     control={
@@ -467,6 +497,7 @@ function SettingsModalContent() {
                     }
                   />
                   <SettingRow
+                    icon={<LayersIcon className={iconClass} />}
                     title="Auto-expand active queue toasts"
                     description="Open the full job queue automatically when new active work starts"
                     control={
@@ -483,8 +514,9 @@ function SettingsModalContent() {
                     }
                   />
                   <SettingRow
+                    icon={<HistoryIcon className={iconClass} />}
                     title="Restore last session"
-                    description="Reopen the previous tabs and folders on launch"
+                    description="Reopen your tabs and folders on launch"
                     control={
                       <ToggleSwitch
                         label="Restore last session"
@@ -495,6 +527,7 @@ function SettingsModalContent() {
                   />
                   {folderSizeStatus?.isAvailable && folderSizeStatus.backend !== 'none' ? (
                     <SettingRow
+                      icon={<PieChartIcon className={iconClass} />}
                       title="Automatically calculate folder sizes"
                       description={
                         folderSizeStatus.backend === 'macIndex' ? (
@@ -518,13 +551,13 @@ function SettingsModalContent() {
                       }
                     />
                   ) : null}
-                </div>
+                  <ResetExpander onReset={onReset} />
+                </>
               ) : null}
 
               {section === 'columns' ? (
-                <div>
-                  <SectionLabel className="mb-3">Columns</SectionLabel>
-                  <ul className="space-y-1">
+                <>
+                  <ul className="grid gap-1">
                     {draft.columns.map((column) => (
                       <li
                         key={column.key}
@@ -550,10 +583,10 @@ function SettingsModalContent() {
                             return { ...current, columns }
                           })
                         }}
-                        className="flex cursor-grab items-center justify-between rounded-tab border border-light-border bg-light-surface px-3 py-2.5 dark:border-dark-border dark:bg-dark-surface"
+                        className="flex min-h-12 cursor-grab items-center justify-between gap-4 rounded-card border border-light-stroke bg-light-card px-4 py-2 dark:border-dark-stroke dark:bg-dark-card"
                       >
-                        <span className="inline-flex items-center gap-3 text-row text-light-text dark:text-dark-text">
-                          <GripVerticalIcon className="size-4 text-light-text-muted dark:text-dark-text-muted" />
+                        <span className="inline-flex items-center gap-4 text-body">
+                          <GripVerticalIcon className="size-4 text-light-text-secondary dark:text-dark-text-secondary" />
                           {columnDefinitions[column.key].label}
                         </span>
                         <ToggleSwitch
@@ -573,14 +606,15 @@ function SettingsModalContent() {
                       </li>
                     ))}
                   </ul>
-                </div>
+                  <ResetExpander onReset={onReset} />
+                </>
               ) : null}
 
               {section === 'dates' ? (
-                <div>
-                  <SectionLabel className="mb-3">Date display</SectionLabel>
+                <>
+                  <SectionLabel>Date display</SectionLabel>
                   <SettingRow
-                    fixedCopy
+                    icon={<CalendarIcon className={iconClass} />}
                     title="Date format"
                     description="How modified and created dates are written in lists and properties"
                     control={
@@ -595,6 +629,7 @@ function SettingsModalContent() {
                     }
                   />
                   <SettingRow
+                    icon={<ClockIcon className={iconClass} />}
                     title="Show time"
                     description="Append the time of day (HH:MM) to the date"
                     control={
@@ -608,6 +643,7 @@ function SettingsModalContent() {
                     }
                   />
                   <SettingRow
+                    icon={<TimerIcon className={iconClass} />}
                     title="Show seconds"
                     description="Include seconds (HH:MM:SS) when the time is shown"
                     control={
@@ -621,6 +657,7 @@ function SettingsModalContent() {
                     }
                   />
                   <SettingRow
+                    icon={<CalendarClockIcon className={iconClass} />}
                     title="Relative dates"
                     description="Show colour-coded phrases like “15 minutes ago” for items changed within the last 2 days, then fall back to the format above"
                     control={
@@ -633,123 +670,126 @@ function SettingsModalContent() {
                       />
                     }
                   />
-                </div>
+                  <ResetExpander onReset={onReset} />
+                </>
               ) : null}
 
               {section === 'keybindings' ? (
-                <div>
-                  <SectionLabel className="mb-3">Shortcuts</SectionLabel>
-                  <label className="mb-4 flex items-center gap-2 rounded-tab border border-light-border-strong bg-light-surface px-3 py-2 dark:border-dark-border-strong dark:bg-dark-surface">
-                    <SearchIcon className="size-4 text-light-text-muted dark:text-dark-text-muted" />
+                <>
+                  <label className="mb-3 flex h-8 items-center gap-2 rounded-control border border-light-control-stroke border-b-light-boundary bg-light-control px-2.5 text-light-text-tertiary focus-within:border-b-2 focus-within:border-b-light-accent focus-within:bg-light-card dark:border-dark-control-stroke dark:border-b-dark-boundary dark:bg-dark-control dark:text-dark-text-tertiary dark:focus-within:border-b-dark-accent dark:focus-within:bg-dark-card">
+                    <SearchIcon className={iconClass} />
                     <input
                       aria-label="Search keybindings"
+                      placeholder="Search keybindings"
                       autoComplete="off"
                       value={search}
                       onChange={(event) => setSearch(event.target.value)}
-                      className="w-full select-text bg-transparent text-row text-light-text focus-visible:outline-none dark:text-dark-text"
+                      className="w-full select-text bg-transparent text-row text-light-text outline-none placeholder:text-light-text-tertiary dark:text-dark-text dark:placeholder:text-dark-text-tertiary"
                     />
                   </label>
-                  <table className="w-full table-fixed">
-                    <thead>
-                      <tr className="border-b border-light-border text-left text-2xs uppercase tracking-wide text-light-text-muted dark:border-dark-border dark:text-dark-text-muted">
-                        <th className="pb-2 font-bold">Command</th>
-                        <th className="w-44 pb-2 font-bold">Shortcut</th>
-                        <th className="w-28 pb-2 font-bold">Status</th>
-                        <th className="w-20 pb-2 text-right font-bold">Reset</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredCommands.map((commandId) => {
-                        const shortcut = draft.bindings[commandId][0] ?? ''
-                        const hasConflict = (conflicts.get(commandId)?.length ?? 0) > 0
-                        const reserved = isReservedCommand(commandId)
-                        return (
-                          <tr
-                            key={commandId}
-                            className="border-b border-light-border dark:border-dark-border"
-                          >
-                            <td className="py-3 text-row text-light-text dark:text-dark-text">
-                              {commandLabels[commandId]}
-                            </td>
-                            {reserved ? (
-                              <>
-                                <td className="py-3">
-                                  <span className="inline-block w-36 rounded-tab border border-light-border bg-light-panel px-3 py-2 text-left font-mono text-row text-light-text-muted dark:border-dark-border dark:bg-dark-panel dark:text-dark-text-muted">
-                                    {formatShortcutLabel(shortcut, os)}
-                                  </span>
-                                </td>
-                                <td className="py-3 text-row text-light-text-muted dark:text-dark-text-muted">
-                                  System default
-                                </td>
-                                <td className="py-3" />
-                              </>
-                            ) : (
-                              <>
-                                <td className="py-3">
-                                  <button
-                                    type="button"
-                                    aria-label={`Capture ${commandLabels[commandId]} shortcut`}
-                                    onClick={() => setCapturing(commandId)}
-                                    className="w-36 cursor-pointer rounded-tab border border-light-border-strong bg-light-surface px-3 py-2 text-left font-mono text-row text-light-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border-strong dark:bg-dark-surface dark:text-dark-text"
-                                  >
-                                    {capturing === commandId
-                                      ? 'Press keys...'
-                                      : shortcut
-                                        ? formatShortcutLabel(shortcut, os)
-                                        : 'Unassigned'}
-                                  </button>
-                                </td>
-                                <td className="py-3 text-row text-light-text-muted dark:text-dark-text-muted">
-                                  {hasConflict ? (
-                                    <span className="inline-flex items-center gap-2 text-accent-amber">
-                                      <AlertTriangleIcon className="size-4" />
-                                      Conflict
+                  <div className="overflow-hidden rounded-card border border-light-stroke bg-light-card dark:border-dark-stroke dark:bg-dark-card">
+                    <table className="w-full table-fixed">
+                      <thead>
+                        <tr className="border-b border-light-divider text-left text-caption text-light-text-secondary dark:border-dark-divider dark:text-dark-text-secondary">
+                          <th className="py-2 pl-4 font-normal">Command</th>
+                          <th className="w-44 py-2 font-normal">Shortcut</th>
+                          <th className="w-28 py-2 font-normal">Status</th>
+                          <th className="w-20 py-2 pr-4 text-right font-normal">Reset</th>
+                        </tr>
+                      </thead>
+                      <tbody className="text-row">
+                        {filteredCommands.map((commandId) => {
+                          const shortcut = draft.bindings[commandId][0] ?? ''
+                          const hasConflict = (conflicts.get(commandId)?.length ?? 0) > 0
+                          const reserved = isReservedCommand(commandId)
+                          return (
+                            <tr
+                              key={commandId}
+                              className="border-b border-light-divider last:border-b-0 dark:border-dark-divider"
+                            >
+                              <td className="py-1.5 pl-4">{commandLabels[commandId]}</td>
+                              {reserved ? (
+                                <>
+                                  <td className="py-1.5">
+                                    <span className="inline-flex h-8 w-36 items-center px-3 font-mono text-light-text-secondary dark:text-dark-text-secondary">
+                                      {formatShortcutLabel(shortcut, os)}
                                     </span>
-                                  ) : (
-                                    'OK'
-                                  )}
-                                </td>
-                                <td className="py-3 text-right">
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      updateDraft((current) => ({
-                                        ...current,
-                                        bindings: {
-                                          ...current.bindings,
-                                          [commandId]: [...defaultKeymap[commandId]],
-                                        },
-                                      }))
-                                    }
-                                    className="cursor-pointer rounded-tab px-3 py-2 text-row text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:text-dark-text-soft"
-                                  >
-                                    Reset
-                                  </button>
-                                </td>
-                              </>
-                            )}
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                                  </td>
+                                  <td className="py-1.5 text-light-text-secondary dark:text-dark-text-secondary">
+                                    System default
+                                  </td>
+                                  <td className="py-1.5 pr-4" />
+                                </>
+                              ) : (
+                                <>
+                                  <td className="py-1.5">
+                                    <Button
+                                      aria-label={`Capture ${commandLabels[commandId]} shortcut`}
+                                      onClick={() => setCapturing(commandId)}
+                                      className="w-36 font-mono"
+                                    >
+                                      {capturing === commandId
+                                        ? 'Press keys...'
+                                        : shortcut
+                                          ? formatShortcutLabel(shortcut, os)
+                                          : 'Unassigned'}
+                                    </Button>
+                                  </td>
+                                  <td className="py-1.5 text-light-text-secondary dark:text-dark-text-secondary">
+                                    {hasConflict ? (
+                                      <span className="inline-flex items-center gap-2 text-light-warning dark:text-dark-warning">
+                                        <AlertTriangleIcon className={iconClass} />
+                                        Conflict
+                                      </span>
+                                    ) : (
+                                      'OK'
+                                    )}
+                                  </td>
+                                  <td className="py-1.5 pr-4 text-right">
+                                    <Button
+                                      variant="subtle"
+                                      onClick={() =>
+                                        updateDraft((current) => ({
+                                          ...current,
+                                          bindings: {
+                                            ...current.bindings,
+                                            [commandId]: [...defaultKeymap[commandId]],
+                                          },
+                                        }))
+                                      }
+                                    >
+                                      Reset
+                                    </Button>
+                                  </td>
+                                </>
+                              )}
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <ResetExpander onReset={onReset} />
+                </>
               ) : null}
 
               {section === 'updates' ? (
-                <UpdatesSettings
-                  value={draft.updateCheckInterval}
-                  onChange={(value) =>
-                    updateDraft((current) => ({ ...current, updateCheckInterval: value }))
-                  }
-                />
+                <>
+                  <UpdatesSettings
+                    value={draft.updateCheckInterval}
+                    onChange={(value) =>
+                      updateDraft((current) => ({ ...current, updateCheckInterval: value }))
+                    }
+                  />
+                  <ResetExpander onReset={onReset} />
+                </>
               ) : null}
 
               {section === 'logs' ? (
-                <div>
-                  <SectionLabel className="mb-3">Logging</SectionLabel>
+                <>
+                  <SectionLabel>Logging</SectionLabel>
                   <SettingRow
-                    fixedCopy
+                    icon={<ListFilterIcon className={iconClass} />}
                     title="Capture level"
                     description="Minimum severity written to the daily log file"
                     control={
@@ -762,22 +802,48 @@ function SettingsModalContent() {
                     }
                   />
                   <LogViewer />
-                </div>
+                  <ResetExpander onReset={onReset} />
+                </>
               ) : null}
             </div>
           </div>
         </div>
-
-        <footer className="flex h-modal-footer flex-none items-center gap-2.5 border-t border-light-border bg-light-titlebar px-4 dark:border-dark-border dark:bg-dark-titlebar">
-          <Button variant="ghost" onClick={onReset}>
-            Reset to defaults
-          </Button>
-          <div className="flex-1" />
-          <span className="text-uxs text-light-text-muted dark:text-dark-text-muted">
-            Changes apply immediately.
-          </span>
-        </footer>
       </div>
+    </div>
+  )
+}
+
+/**
+ * "Reset to defaults" at the foot of every settings page: a card that expands
+ * to confirm, so a stray click can't wipe the configuration.
+ */
+function ResetExpander({ onReset }: { onReset: () => void }) {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <div className="mt-4.5 rounded-card border border-light-stroke bg-light-card dark:border-dark-stroke dark:bg-dark-card">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+        className={`flex min-h-16 w-full cursor-pointer items-center gap-4 rounded-card px-4 py-2.5 text-left hover:bg-light-hover dark:hover:bg-dark-hover ${FOCUS_RING}`}
+      >
+        <RotateCcwIcon className={iconClass} />
+        <span className="grid min-w-0 flex-1">
+          <span className="text-body">Reset to defaults</span>
+          <span className="text-caption text-light-text-secondary dark:text-dark-text-secondary">
+            Restore every setting to how AxoPane ships
+          </span>
+        </span>
+        <ChevronDownIcon
+          className={`size-3 text-light-text-secondary dark:text-dark-text-secondary ${expanded ? 'rotate-180' : ''}`}
+        />
+      </button>
+      {expanded ? (
+        <div className="flex items-center gap-4 border-t border-light-divider py-3 pl-12 pr-4 dark:border-dark-divider">
+          <span className="flex-1 text-body">Settings change right away. You can't undo this.</span>
+          <Button onClick={onReset}>Reset</Button>
+        </div>
+      ) : null}
     </div>
   )
 }

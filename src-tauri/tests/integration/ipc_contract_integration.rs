@@ -191,6 +191,16 @@ fn restart_as_admin_command_uses_safe_test_utils_fallback() {
 
 #[cfg(feature = "test-utils")]
 #[test]
+fn open_full_disk_access_settings_command_uses_safe_test_utils_fallback() {
+    let error = commands::open_full_disk_access_settings()
+        .expect_err("test-utils should block opening System Settings");
+
+    assert!(error.contains("Failed to open Full Disk Access settings"));
+    assert!(error.contains("unsupported"));
+}
+
+#[cfg(feature = "test-utils")]
+#[test]
 fn file_clipboard_commands_are_safe_noops_under_test_utils() {
     commands::write_file_clipboard(WriteFileClipboardRequest {
         mode: FileClipboardMode::Copy,

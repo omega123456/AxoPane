@@ -23,6 +23,7 @@ import {
 import { fileTypesListDir } from './file-types'
 import { itemsSortPendingListDir, itemsSortPendingSession } from './item-counts'
 import { relativeDatesListDir } from './relative-dates'
+import { capacityLevelVolumes, ejectRefused, everythingUnavailable } from './states'
 import { stickyTreeChildrenByPath, stickyTreeListDir, stickyTreeSession } from './tree'
 import type { TreeChildrenByPath } from './tree-states'
 import {
@@ -87,7 +88,7 @@ const lightConfig: AppConfig = {
   ],
   layout: {
     detailsVisible: false,
-    treeWidthPx: 204,
+    treeWidthPx: 212,
     paneSplit: 0.5,
     columnWidths: {
       name: 320,
@@ -886,4 +887,24 @@ export const screenshotScenarios = {
     },
     'macos',
   ),
+  ejectRefused: scenarioByTheme(
+    {
+      queue_snapshot: emptyQueueSnapshot,
+      eject_volume: ejectRefused,
+    },
+    'macos',
+  ),
+  capacityLevels: scenarioByTheme({
+    queue_snapshot: emptyQueueSnapshot,
+    list_volumes: capacityLevelVolumes,
+  }),
+  everythingBanner: scenarioByTheme(
+    {
+      queue_snapshot: emptyQueueSnapshot,
+      folder_size_index_status: everythingUnavailable,
+    },
+    'windows',
+  ),
+  permissionWindows: errorScenarioByTheme({}, { list_dir: 'Access is denied.' }, 'windows'),
+  permissionMacos: errorScenarioByTheme({}, { list_dir: 'Access is denied.' }, 'macos'),
 } satisfies Record<string, { light: PlaywrightScenario; dark: PlaywrightScenario }>

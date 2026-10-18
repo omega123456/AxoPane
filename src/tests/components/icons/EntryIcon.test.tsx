@@ -37,42 +37,28 @@ describe('EntryIcon', () => {
 
   it('honors a colorClassName override', () => {
     const { container } = render(
-      <EntryIcon entry={{ name: 'main.ts', isDir: false }} colorClassName="text-accent-red" />,
+      <EntryIcon entry={{ name: 'main.ts', isDir: false }} colorClassName="text-file-exec" />,
     )
     const svg = container.querySelector('svg')
-    expect(svg).toHaveClass('text-accent-red')
+    expect(svg).toHaveClass('text-file-exec')
     expect(svg).not.toHaveClass('text-file-code')
   })
 
   it('allows an empty colorClassName to inherit the surrounding color', () => {
     const { container } = render(
-      <EntryIcon entry={{ name: 'Documents', isDir: true }} colorClassName="" />,
+      <EntryIcon entry={{ name: 'main.ts', isDir: false }} colorClassName="" />,
     )
     const svg = container.querySelector('svg')
     expect(svg?.getAttribute('class')).not.toMatch(/text-/)
   })
 
-  it('renders a closed folder with a faint fill', () => {
-    const svg = svgFor('Documents', true)
-    expect(svg).toHaveAttribute('data-file-category', 'folder')
-    expect(svg).toHaveAttribute('fill', 'currentColor')
-    expect(svg).toHaveAttribute('fill-opacity', '0.18')
-  })
-
-  it('renders an open folder with a stronger fill', () => {
-    const { container } = render(<EntryIcon entry={{ name: 'Documents', isDir: true }} isOpen />)
-    const svg = container.querySelector('svg')
-    expect(svg).toHaveAttribute('fill-opacity', '0.26')
-  })
-
-  it('uses special-folder glyphs by name', () => {
-    const downloads = svgFor('Downloads', true)
-    const git = svgFor('.git', true)
-    const modules = svgFor('node_modules', true)
-    // lucide encodes the glyph identity in its class list (e.g. lucide-folder-down).
-    expect(downloads?.getAttribute('class')).toMatch(/folder-down/)
-    expect(git?.getAttribute('class')).toMatch(/folder-git/)
-    expect(modules?.getAttribute('class')).toMatch(/folder-cog/)
+  it('renders every folder with the two-tone folder glyph', () => {
+    for (const name of ['Documents', 'Downloads', '.git', 'node_modules']) {
+      const svg = svgFor(name, true)
+      expect(svg).toHaveAttribute('data-file-category', 'folder')
+      expect(svg?.querySelector('.fill-folder')).not.toBeNull()
+      expect(svg?.querySelector('.fill-folder-back')).not.toBeNull()
+    }
   })
 
   it('files render without a fill so they stay stroke-only', () => {

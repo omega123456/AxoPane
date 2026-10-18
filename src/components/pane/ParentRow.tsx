@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { ArrowUpIcon, FolderIcon } from '@/components/icons'
+import { ArrowUpIcon, FolderGlyph } from '@/components/icons'
 import { columnCellClassName } from '@/lib/columns'
 import { useLayoutStore } from '@/stores/layout-store'
 import { columnFlexStyle } from './HeaderRow'
@@ -55,8 +55,8 @@ export function ParentRow({
           onActivate()
         }
       }}
-      className={`group flex h-row w-full cursor-pointer items-center gap-3 border-b border-light-border bg-light-surface px-3 text-row text-left focus-visible:outline-none dark:border-dark-border dark:bg-dark-surface ${
-        isFocused && isActivePane ? 'ring-2 ring-inset ring-accent-blue-border' : ''
+      className={`group flex h-row w-full cursor-pointer items-center rounded-control px-2 text-row text-left focus-visible:outline-none ${
+        isFocused && isActivePane ? 'ring-1 ring-inset ring-light-accent dark:ring-dark-accent' : ''
       } hover:bg-light-hover dark:hover:bg-dark-hover`}
     >
       {visibleColumns.map((column) => {
@@ -69,10 +69,12 @@ export function ParentRow({
             >
               <span className="flex min-w-0 items-center gap-2">
                 <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
-                  <FolderIcon className="h-4 w-4 text-light-text-muted dark:text-dark-text-muted" />
-                  <ArrowUpIcon className="absolute h-2.5 w-2.5 text-accent-blue-light dark:text-accent-blue" />
+                  <FolderGlyph className="h-4 w-4" />
+                  <ArrowUpIcon className="absolute top-1.5 h-2.5 w-2.5 text-light-text dark:text-dark-base" />
                 </span>
-                <span className="truncate text-light-text-soft dark:text-dark-text-soft">..</span>
+                <span className="truncate text-light-text-secondary dark:text-dark-text-secondary">
+                  ..
+                </span>
               </span>
             </span>
           )
@@ -85,7 +87,7 @@ export function ParentRow({
               style={columnFlexStyle(column.key, columnWidths)}
               className={columnCellClassName(column.key)}
             >
-              <span className="truncate text-usm text-light-text-muted dark:text-dark-text-muted">
+              <span className="truncate text-caption text-light-text-secondary dark:text-dark-text-secondary">
                 Parent folder
               </span>
             </span>
@@ -98,8 +100,8 @@ export function ParentRow({
             style={columnFlexStyle(column.key, columnWidths)}
             className={columnCellClassName(column.key)}
           >
-            <span className="font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-              -
+            <span className="font-mono text-caption text-light-text-secondary dark:text-dark-text-secondary">
+              —
             </span>
           </span>
         )

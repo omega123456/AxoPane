@@ -18,7 +18,10 @@ import type { PaneState } from '@/types/pane'
 import { useLayoutStore } from '@/stores/layout-store'
 
 const PARENT_ROW_ID = '..'
-const rowHeightPx = 30
+export const DETAILS_ROW_HEIGHT_PX = 28
+/** Blank band above the first row and below the last, matching the 3px side inset. */
+export const DETAILS_LIST_INSET_PX = 3
+const rowHeightPx = DETAILS_ROW_HEIGHT_PX
 
 export type DetailsViewHandle = {
   scrollToRow: (index: number) => void
@@ -96,6 +99,7 @@ export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(funct
     getScrollElement: () => parentRef.current,
     estimateSize: () => rowHeightPx,
     overscan: 10,
+    padding: DETAILS_LIST_INSET_PX,
   })
   const virtualItems = rowVirtualizer.getVirtualItems()
   const itemsToRender =
@@ -104,9 +108,12 @@ export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(funct
       : Array.from({ length: Math.min(rowCount, 30) }, (_, index) => ({
           key: `row-${index}`,
           index,
-          start: index * rowHeightPx,
+          start: DETAILS_LIST_INSET_PX + index * rowHeightPx,
         }))
-  const totalHeight = rowCount === 0 ? 0 : rowVirtualizer.getTotalSize() || rowCount * rowHeightPx
+  const totalHeight =
+    rowCount === 0
+      ? 0
+      : rowVirtualizer.getTotalSize() || rowCount * rowHeightPx + 2 * DETAILS_LIST_INSET_PX
   const configuredColumns = useLayoutStore((state) => state.columns)
   const columnWidths = useLayoutStore((state) => state.columnWidths)
   const contentWidth = useMemo(
@@ -199,7 +206,7 @@ export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(funct
         {usesDetachedMacScrollbars ? (
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-y-0 right-0 w-2 bg-light-header dark:bg-dark-header"
+            className="pointer-events-none absolute bottom-px right-0 top-0 w-2 bg-light-layer dark:bg-dark-layer"
           />
         ) : null}
       </div>
@@ -208,7 +215,7 @@ export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(funct
           <div
             ref={parentRef}
             data-testid={`file-pane-scroll-${pane.id}`}
-            className={`h-full min-h-0 overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:scrollbar-thumb-dark-text-faint ${usesDetachedMacScrollbars ? 'overflow-x-hidden overflow-y-auto pb-2' : 'overflow-x-auto overflow-y-auto'} ${isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-accent-blue-border' : ''}`}
+            className={`h-full min-h-0 overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary ${usesDetachedMacScrollbars ? 'overflow-x-hidden overflow-y-auto pb-2' : 'overflow-x-auto overflow-y-auto'} ${isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-light-accent dark:outline-dark-accent' : ''}`}
             onMouseDown={onContainerMouseDown}
             onWheel={handleBodyWheel}
             onScroll={(event: UIEvent<HTMLDivElement>) => {
@@ -234,7 +241,7 @@ export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(funct
                 const style = { top: `${virtualRow.start}px` }
                 if (hasParent && virtualRow.index === 0)
                   return (
-                    <div key={PARENT_ROW_ID} className="absolute inset-x-0" style={style}>
+                    <div key={PARENT_ROW_ID} className="absolute inset-x-0.75" style={style}>
                       <ParentRow
                         isActivePane={isActivePane}
                         isFocused={pane.focusedEntryId === PARENT_ROW_ID}
@@ -246,7 +253,7 @@ export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(funct
                   )
                 const entry = pane.entries[virtualRow.index - parentOffset]
                 return entry ? (
-                  <div key={entry.id} className="absolute inset-x-0" style={style}>
+                  <div key={entry.id} className="absolute inset-x-0.75" style={style}>
                     <FileRow
                       entry={entry}
                       isActivePane={isActivePane}
@@ -267,7 +274,7 @@ export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(funct
               {marqueeRect ? (
                 <div
                   data-testid="marquee-selection"
-                  className="pointer-events-none absolute border border-accent-blue-border bg-accent-blue-soft"
+                  className="pointer-events-none absolute border border-light-accent dark:border-dark-accent bg-light-tint dark:bg-dark-tint"
                   style={{
                     left: `${marqueeRect.left}px`,
                     top: `${marqueeRect.top}px`,
@@ -282,7 +289,7 @@ export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(funct
             <div
               ref={horizontalScrollRef}
               data-testid={`file-pane-horizontal-scroll-${pane.id}`}
-              className="absolute inset-x-0 bottom-0 z-20 h-2 overflow-x-auto overflow-y-hidden overscroll-contain bg-light-surface scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-faint dark:bg-dark-surface dark:scrollbar-thumb-dark-text-faint"
+              className="absolute inset-x-0 bottom-0 z-20 h-2 overflow-x-auto overflow-y-hidden overscroll-contain bg-light-layer scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:bg-dark-layer dark:scrollbar-thumb-dark-text-tertiary"
               onScroll={(event) => syncHorizontalScroll(event.currentTarget.scrollLeft)}
             >
               <div style={{ width: `${contentWidth}px`, height: '1px' }} />

@@ -93,7 +93,7 @@ pub fn default_view_mode() -> String {
 }
 
 pub fn default_tree_width_px() -> f64 {
-    204.0
+    212.0
 }
 
 pub fn default_pane_split() -> f64 {

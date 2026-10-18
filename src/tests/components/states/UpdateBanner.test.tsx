@@ -40,9 +40,12 @@ describe('UpdateBanner', () => {
     })
 
     render(<UpdateBanner />)
-    expect(screen.getByText(/Update available: 0\.2\.0/)).toBeInTheDocument()
+    const bar = screen.getByRole('status', { name: 'Update available' })
+    expect(bar).toHaveAttribute('data-severity', 'info')
+    expect(bar).toHaveTextContent('Update ready')
+    expect(bar).toHaveTextContent('AxoPane 0.2.0 installs when you restart.')
 
-    await user.click(screen.getByRole('button', { name: /install & restart/i }))
+    await user.click(screen.getByRole('button', { name: 'Restart' }))
     expect(downloadAndInstall).toHaveBeenCalledOnce()
   })
 
@@ -52,7 +55,10 @@ describe('UpdateBanner', () => {
     useUpdaterStore.setState({ status: 'error', error: 'network down' })
 
     render(<UpdateBanner />)
-    expect(screen.getByText(/Update failed: network down/)).toBeInTheDocument()
+    const bar = screen.getByRole('alert', { name: 'Update available' })
+    expect(bar).toHaveAttribute('data-severity', 'error')
+    expect(bar).toHaveTextContent('Update failed')
+    expect(bar).toHaveTextContent('network down')
     expect(useUpdaterStore.getState().status).toBe('error')
   })
 

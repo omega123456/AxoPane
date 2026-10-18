@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangleIcon, CheckIcon, DownloadIcon, RefreshIcon } from '@/components/icons'
+import {
+  AlertTriangleIcon,
+  CheckIcon,
+  DownloadIcon,
+  InfoIcon,
+  RefreshIcon,
+} from '@/components/icons'
 import { Button, SectionLabel, SelectField, SettingRow } from '@/components/controls'
 import { log } from '@/lib/app-log-commands'
 import { getAppVersion } from '@/lib/updater'
@@ -41,24 +47,24 @@ export function UpdatesSettings({
   }, [])
 
   return (
-    <div data-testid="settings-updates">
-      <SectionLabel className="mb-3">Software Updates</SectionLabel>
+    <div data-testid="settings-updates" className="contents">
+      <SectionLabel>Software updates</SectionLabel>
 
       <SettingRow
-        fixedCopy
+        icon={<InfoIcon className="size-4" />}
         title="Current version"
         description="The version of AxoPane you are running"
         control={
           <span
             data-testid="updates-app-version"
-            className="w-50 text-right font-mono text-row text-light-text dark:text-dark-text"
+            className="font-mono text-row text-light-text-secondary dark:text-dark-text-secondary"
           >
             {appVersion}
           </span>
         }
       />
 
-      <div className="border-b border-light-border py-4 dark:border-dark-border">
+      <div className="rounded-card border border-light-stroke bg-light-card px-4 py-3 dark:border-dark-stroke dark:bg-dark-card">
         <UpdateStatus
           status={status}
           version={summary?.version ?? null}
@@ -69,9 +75,9 @@ export function UpdatesSettings({
         />
       </div>
 
-      <SectionLabel className="mb-3 mt-5">Automatic Updates</SectionLabel>
+      <SectionLabel>Automatic updates</SectionLabel>
       <SettingRow
-        fixedCopy
+        icon={<RefreshIcon className="size-4" />}
         title="Check for updates"
         description="How often AxoPane looks for a newer version in the background"
         control={
@@ -127,7 +133,7 @@ function UpdateStatus({
     case 'up-to-date':
       return (
         <div className="flex items-center gap-3" data-testid="updates-up-to-date">
-          <span className="inline-flex items-center gap-2 text-row text-accent-green">
+          <span className="inline-flex flex-1 items-center gap-2 text-body text-light-success dark:text-dark-success">
             <CheckIcon className="size-4" />
             You&apos;re up to date (v{appVersion})
           </span>
@@ -136,11 +142,8 @@ function UpdateStatus({
       )
     case 'available':
       return (
-        <div
-          className="flex items-center justify-between gap-3 rounded-tab border border-accent-blue-border bg-accent-blue-soft px-3 py-2.5"
-          data-testid="updates-available"
-        >
-          <span className="text-row text-light-text dark:text-dark-text">
+        <div className="flex items-center justify-between gap-3" data-testid="updates-available">
+          <span className="text-body text-light-text dark:text-dark-text">
             Version {version ?? 'new'} is available
           </span>
           <Button variant="primary" onClick={onInstall} data-testid="updates-install-button">
@@ -163,7 +166,7 @@ function UpdateStatus({
     case 'error':
       return (
         <div className="flex items-center gap-3" data-testid="updates-error">
-          <span className="inline-flex items-center gap-2 text-row text-accent-amber">
+          <span className="inline-flex flex-1 items-center gap-2 text-body text-light-warning dark:text-dark-warning">
             <AlertTriangleIcon className="size-4" />
             {error ?? 'Update check failed'}
           </span>

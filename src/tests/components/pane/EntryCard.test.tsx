@@ -63,7 +63,9 @@ describe('EntryCard', () => {
     expect(card).toHaveAttribute('aria-rowindex', '2')
     expect(card).toHaveAttribute('aria-colindex', '3')
     expect(card).toHaveAttribute('aria-selected', 'true')
-    expect(card).toHaveClass('opacity-50')
+    // Cut cards fade their contents, not the selection fill.
+    expect(card).not.toHaveClass('opacity-50')
+    expect(card.querySelector('.opacity-50')).toBeTruthy()
     expect(card.querySelector('[data-symlink="true"]')).toBeTruthy()
     fireEvent.click(card)
     fireEvent.doubleClick(card, { detail: 2 })
@@ -184,7 +186,48 @@ describe('EntryCard', () => {
     expect(secondRender).not.toHaveBeenCalled()
   })
 
-  it('centers a larger thumbnail label beneath its larger preview stage', () => {
+  it.each([
+    [{ isDir: false, sizeBytes: 2048 }, '2.0 KB'],
+    [{ isDir: true, sizeBytes: null, itemCount: 8 }, '8 items'],
+    [{ isDir: true, sizeBytes: null, itemCount: 1 }, '1 item'],
+    [{ isDir: true, sizeBytes: null, itemCount: null }, '—'],
+  ] as const)('shows %o as the meta line "%s"', (overrides, meta) => {
+    render(
+      <EntryCard
+        entry={{ ...entry, ...overrides }}
+        mode="icons"
+        isActivePane
+        isFocused={false}
+        isSelected={false}
+        rowIndex={1}
+        columnIndex={1}
+        actions={actions()}
+      />,
+    )
+
+    expect(screen.getByRole('gridcell', { name: entry.name })).toHaveTextContent(meta)
+  })
+
+  it('marks a selection in the inactive pane with the neutral fill and no accent border', () => {
+    render(
+      <EntryCard
+        entry={entry}
+        mode="icons"
+        isActivePane={false}
+        isFocused
+        isSelected
+        rowIndex={1}
+        columnIndex={1}
+        actions={actions()}
+      />,
+    )
+
+    const card = screen.getByRole('gridcell', { name: entry.name })
+    expect(card).toHaveClass('bg-light-neutral-selection', 'border-transparent')
+    expect(card).not.toHaveClass('ring-1')
+  })
+
+  it('puts the name and a meta line beneath the thumbnail preview', () => {
     render(
       <EntryCard
         entry={entry}
@@ -198,9 +241,10 @@ describe('EntryCard', () => {
       />,
     )
     const card = screen.getByRole('gridcell', { name: entry.name })
-    expect(card).toHaveClass('h-thumbnail-card', 'min-w-thumbnail-cell')
-    expect(card.querySelector('.size-thumbnail-preview')).toBeTruthy()
-    expect(card.querySelector('.text-center')).toHaveTextContent(entry.name)
+    expect(card).toHaveClass('h-thumbnail-card', 'min-w-thumbnail-cell', 'rounded-overlay')
+    expect(card.querySelector('.h-thumbnail-preview')).toHaveClass('bg-light-recessed')
+    expect(card.querySelector('.text-row')).toHaveTextContent(entry.name)
+    expect(card.querySelector('.text-caption')).toBeTruthy()
   })
 
   it('presents inline rename with submit, cancel, and error feedback', () => {

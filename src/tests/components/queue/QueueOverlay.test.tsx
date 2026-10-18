@@ -62,7 +62,9 @@ describe('QueueOverlay', () => {
 
     render(<QueueOverlay />)
 
-    expect(await screen.findByText('Deleting 1 job')).toBeInTheDocument()
+    expect(await screen.findByText('Deleting 4 items')).toBeInTheDocument()
+    // Percent and time left, in caption text beside the label.
+    expect(screen.getByText('25% · 12 sec')).toBeInTheDocument()
   })
 
   it('summarizes active archive operations by their job kind', async () => {
@@ -72,7 +74,7 @@ describe('QueueOverlay', () => {
 
     render(<QueueOverlay />)
 
-    expect(await screen.findByText('Extracting 1 job')).toBeInTheDocument()
+    expect(await screen.findByText('Extracting 4 items')).toBeInTheDocument()
   })
 
   it('expands the collapsed toast into the panel and collapses again', async () => {

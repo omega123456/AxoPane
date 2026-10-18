@@ -3,8 +3,10 @@ use std::fs;
 use std::path::Path;
 
 use file_explorer_lib::launch::{
-    elevation_failure_detail, launch_directory, launch_failure_detail, open_path, restart_as_admin,
-    shell_execute_succeeded, should_prompt_open_with, OpenPathError, OPEN_WITH_VERB, RUNAS_VERB,
+    elevation_failure_detail, launch_directory, launch_failure_detail,
+    open_full_disk_access_settings, open_path, restart_as_admin, shell_execute_succeeded,
+    should_prompt_open_with, OpenPathError, FULL_DISK_ACCESS_SETTINGS_URL, OPEN_WITH_VERB,
+    RUNAS_VERB,
 };
 use tempfile::tempdir;
 
@@ -112,4 +114,19 @@ fn other_elevation_failures_keep_the_shell_status_code() {
 fn restart_as_admin_uses_the_safe_test_fallback() {
     let error = restart_as_admin().expect_err("test-utils blocks real elevation");
     assert!(matches!(error, OpenPathError::Unsupported));
+}
+
+#[cfg(feature = "test-utils")]
+#[test]
+fn open_full_disk_access_settings_uses_the_safe_test_fallback() {
+    let error = open_full_disk_access_settings().expect_err("test-utils blocks System Settings");
+    assert!(matches!(error, OpenPathError::Unsupported));
+}
+
+#[test]
+fn full_disk_access_settings_url_targets_the_privacy_pane() {
+    assert_eq!(
+        FULL_DISK_ACCESS_SETTINGS_URL,
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+    );
 }

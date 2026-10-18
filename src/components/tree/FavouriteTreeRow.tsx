@@ -3,6 +3,8 @@ import { EntryIcon } from '@/components/icons/EntryIcon'
 import { pathsMatch } from '@/lib/path-compare'
 import { useConfigStore } from '@/stores/config-store'
 import { useDragStore } from '@/stores/drag-store'
+import { FOCUS_RING_INSET } from '@/lib/focus-ring'
+import { SelectionPill } from '@/components/controls/SelectionPill'
 
 export function favouriteLabel(path: string) {
   const trimmed = path.replace(/[\\/]+$/, '')
@@ -72,12 +74,12 @@ function FavouriteTreeRowImpl({ path, index, isCurrent, actions }: Props) {
       onDragLeave={() => setIsDropTarget(false)}
       onDrop={(event) => void handleDrop(event)}
       onContextMenu={(event) => actions.onContextMenu(path, event)}
-      className={`flex h-tree-row items-center gap-2 rounded-tab px-3 text-row hover:bg-light-hover dark:hover:bg-dark-hover ${
-        isCurrent
-          ? 'bg-accent-blue-soft text-accent-blue-light dark:text-accent-blue'
-          : 'text-light-text-soft dark:text-dark-text-soft'
-      } ${isDropTarget ? 'ring-2 ring-inset ring-accent-blue-border' : ''}`}
+      className={`relative flex h-tree-row items-center gap-2 rounded-control pl-2 pr-2 text-row text-light-text hover:bg-light-hover dark:text-dark-text dark:hover:bg-dark-hover ${
+        isCurrent ? 'bg-light-hover dark:bg-dark-hover' : ''
+      } ${isDropTarget ? 'ring-2 ring-inset ring-light-accent dark:ring-dark-accent' : ''}`}
     >
+      {isCurrent ? <SelectionPill /> : null}
+      <span className="w-3 flex-none" aria-hidden="true" />
       <button
         type="button"
         onClick={() => actions.onNavigate(path)}
@@ -88,7 +90,7 @@ function FavouriteTreeRowImpl({ path, index, isCurrent, actions }: Props) {
             actions.onOpenTab(path)
           }
         }}
-        className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-tab py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
+        className={`flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-control text-left ${FOCUS_RING_INSET}`}
       >
         <EntryIcon entry={{ name: favouriteLabel(path), isDir: true }} />
         <span className="truncate">{favouriteLabel(path)}</span>

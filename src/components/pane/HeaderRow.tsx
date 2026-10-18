@@ -8,9 +8,11 @@ import { isTrashPath } from '@/lib/trash'
 import { defaultColumnWidths, useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import type { ColumnConfig, ColumnKey } from '@/lib/types/ipc'
+import { FOCUS_RING } from '@/lib/focus-ring'
 
-const paneColumnGapPx = 12
-const paneRowHorizontalPaddingPx = 24
+const paneColumnGapPx = 0
+/** 3px list inset + 8px row padding on each side (the header uses 11px directly). */
+const paneRowHorizontalPaddingPx = 22
 
 type HeaderRowProps = {
   pane: PaneState
@@ -63,7 +65,7 @@ export function HeaderRow({ pane }: HeaderRowProps) {
   return (
     <div
       style={{ minWidth: `${contentWidth}px` }}
-      className="flex h-headrow w-full items-center gap-3 border-b border-light-border bg-light-header px-3 text-uxs uppercase tracking-wide text-light-text-muted dark:border-dark-border dark:bg-dark-header dark:text-dark-text-muted"
+      className="group/header flex h-headrow w-full items-center border-b border-light-divider px-2.75 text-caption text-light-text-secondary dark:border-dark-divider dark:text-dark-text-secondary"
     >
       {columns.map((column) => {
         const active = pane.sortKey === column.key
@@ -75,7 +77,7 @@ export function HeaderRow({ pane }: HeaderRowProps) {
             style={columnFlexStyle(column.key, columnWidths)}
             role="columnheader"
             aria-label={label}
-            className={`${definition.className} group relative flex h-full items-center`}
+            className={`${definition.className} ${column.key === 'name' ? 'pl-6' : ''} group relative flex h-full items-center`}
             aria-sort={
               active ? (pane.sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'
             }
@@ -88,12 +90,12 @@ export function HeaderRow({ pane }: HeaderRowProps) {
                   ? `${pane.id}-items-sort-status`
                   : undefined
               }
-              className="flex h-full w-full min-w-0 cursor-pointer items-center gap-1 rounded-tab text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
+              className={`flex h-full w-full min-w-0 cursor-pointer items-center gap-2 rounded-control ${definition.align === 'right' ? 'justify-end' : ''} ${FOCUS_RING}`}
             >
               <span className="truncate">{label}</span>
               {active ? (
                 <ChevronDownIcon
-                  className={`ml-auto h-3.5 w-3.5 shrink-0 ${pane.sortDirection === 'asc' ? 'rotate-180' : ''} text-accent-blue-light dark:text-accent-blue`}
+                  className={`h-3 w-3 shrink-0 ${pane.sortDirection === 'asc' ? 'rotate-180' : ''}`}
                 />
               ) : null}
             </button>
@@ -128,9 +130,10 @@ export function HeaderRow({ pane }: HeaderRowProps) {
                   void persistAppConfig()
                 }
               }}
-              className="absolute -right-1 top-0 h-full w-2 cursor-col-resize touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
+              className={`absolute -right-1 top-0 h-full w-2 cursor-col-resize touch-none ${FOCUS_RING}`}
             >
-              <span className="absolute inset-y-1 left-1 w-px bg-light-border dark:bg-dark-border" />
+              {/* Column dividers appear while the header is hovered, as in Explorer. */}
+              <span className="absolute inset-y-1 left-1 w-px bg-light-divider opacity-0 group-hover/header:opacity-100 dark:bg-dark-divider" />
             </div>
           </div>
         )

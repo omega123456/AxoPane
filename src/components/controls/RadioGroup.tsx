@@ -1,5 +1,7 @@
+import { FOCUS_RING } from '@/lib/focus-ring'
 export type RadioOption<T extends string> = { value: T; label: string }
 
+/** Fluent radio: a 20px ring on the input boundary; selected is a 5px accent ring. */
 export function RadioGroup<T extends string>({
   value,
   onChange,
@@ -12,7 +14,7 @@ export function RadioGroup<T extends string>({
   ariaLabel: string
 }) {
   return (
-    <div role="radiogroup" aria-label={ariaLabel}>
+    <div role="radiogroup" aria-label={ariaLabel} className="grid gap-1">
       {options.map((option) => {
         const selected = option.value === value
         return (
@@ -22,19 +24,15 @@ export function RadioGroup<T extends string>({
             role="radio"
             aria-checked={selected}
             onClick={() => onChange(option.value)}
-            className="flex w-full items-center gap-2.5 rounded-tab py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border"
+            className={`flex items-center gap-2 rounded-control py-1.5 text-left ${FOCUS_RING}`}
           >
             <span
-              className={`flex size-control-dot flex-none items-center justify-center rounded-full border ${
+              className={`size-5 flex-none rounded-full ${
                 selected
-                  ? 'border-accent-blue-light dark:border-accent-blue'
-                  : 'border-light-border-strong dark:border-dark-border-strong'
+                  ? 'border-5 border-light-accent bg-light-on-accent dark:border-dark-accent dark:bg-dark-on-accent'
+                  : 'border border-light-boundary bg-light-control dark:border-dark-boundary dark:bg-dark-control'
               }`}
-            >
-              {selected ? (
-                <span className="size-radio-dot rounded-full bg-accent-blue-light dark:bg-accent-blue" />
-              ) : null}
-            </span>
+            />
             <span className="text-row text-light-text dark:text-dark-text">{option.label}</span>
           </button>
         )

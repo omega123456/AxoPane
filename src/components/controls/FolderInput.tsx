@@ -10,10 +10,10 @@ export function FolderInput({
   readOnly?: boolean
 }) {
   return (
-    <div className="flex h-9 items-center gap-2.5 rounded-tab border border-light-border-strong bg-light-surface px-3 dark:border-dark-border-strong dark:bg-dark-surface">
+    <div className="flex h-9 items-center gap-2.5 rounded-control border border-light-control-stroke bg-light-layer px-3 dark:border-dark-control-stroke dark:bg-dark-layer">
       <span
         aria-hidden
-        className="h-2.5 w-3 flex-none rounded-sm border border-accent-blue-border bg-accent-blue-soft"
+        className="h-2.5 w-3 flex-none rounded-control border border-light-accent dark:border-dark-accent bg-light-tint dark:bg-dark-tint"
       />
       <input
         aria-label={ariaLabel}

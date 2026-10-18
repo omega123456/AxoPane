@@ -10,6 +10,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { CheckIcon } from '@/components/icons'
+import { FOCUS_RING_INSET } from '@/lib/focus-ring'
 
 export type MenuPopoverItem = {
   id: string
@@ -148,7 +149,7 @@ export function MenuPopover({ ariaLabel, trigger, items, radio = false }: MenuPo
               role="menu"
               aria-label={ariaLabel}
               onKeyDown={onMenuKeyDown}
-              className="fixed z-30 w-72 rounded-menu border border-light-border-strong bg-light-surface p-1.5 shadow-menu dark:border-dark-border-strong dark:bg-dark-surface"
+              className="fixed z-30 w-menu rounded-overlay border border-light-flyout-stroke bg-light-card p-1 shadow-light-flyout dark:border-dark-flyout-stroke dark:bg-dark-card dark:shadow-dark-flyout"
             >
               {items.map((item, index) => {
                 const radioItem = item as MenuPopoverRadioItem
@@ -166,14 +167,14 @@ export function MenuPopover({ ariaLabel, trigger, items, radio = false }: MenuPo
                       item.onSelect()
                       closeAndRestoreFocus()
                     }}
-                    className="flex h-8 w-full cursor-pointer items-center gap-3 whitespace-nowrap rounded-lg px-2.5 text-left text-row text-light-text hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-blue-border disabled:cursor-not-allowed disabled:opacity-50 dark:text-dark-text dark:hover:bg-dark-hover"
+                    className={`flex h-8 w-full cursor-pointer items-center gap-3 whitespace-nowrap rounded-control px-3 text-left text-row text-light-text hover:bg-light-hover active:bg-light-press disabled:cursor-not-allowed disabled:text-light-text-disabled dark:text-dark-text dark:hover:bg-dark-hover dark:active:bg-dark-press dark:disabled:text-dark-text-disabled ${FOCUS_RING_INSET}`}
                   >
                     <span
                       className="flex size-4 shrink-0 items-center justify-center"
                       aria-hidden="true"
                     >
                       {radio && radioItem.checked ? (
-                        <CheckIcon className="size-3.5 text-accent-blue-light dark:text-accent-blue" />
+                        <CheckIcon className="size-3.5 text-light-accent dark:text-dark-accent" />
                       ) : (
                         item.icon
                       )}

@@ -1,3 +1,4 @@
+import { FOCUS_RING_INSET } from '@/lib/focus-ring'
 export function Stepper({
   value,
   onChange,
@@ -15,14 +16,13 @@ export function Stepper({
   format?: (value: number) => string
   ariaLabel: string
 }) {
-  const cell =
-    'flex size-8 items-center justify-center text-light-text-soft hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-blue-border disabled:opacity-40 dark:text-dark-text-soft dark:hover:bg-dark-hover'
+  const cell = `flex size-8 items-center justify-center text-light-text-secondary hover:bg-light-hover disabled:opacity-40 dark:text-dark-text-secondary dark:hover:bg-dark-hover ${FOCUS_RING_INSET}`
 
   return (
     <div
       role="group"
       aria-label={ariaLabel}
-      className="inline-flex flex-none items-center overflow-hidden rounded-tab border border-light-border-strong dark:border-dark-border-strong"
+      className="inline-flex flex-none items-center overflow-hidden rounded-control border border-light-control-stroke dark:border-dark-control-stroke"
     >
       <button
         type="button"
@@ -33,7 +33,7 @@ export function Stepper({
       >
         −
       </button>
-      <div className="w-16 border-x border-light-border-strong py-1.5 text-center font-mono text-row text-light-text dark:border-dark-border-strong dark:text-dark-text">
+      <div className="w-16 border-x border-light-control-stroke py-1.5 text-center font-mono text-row text-light-text dark:border-dark-control-stroke dark:text-dark-text">
         {format ? format(value) : value}
       </div>
       <button

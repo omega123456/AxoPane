@@ -1,16 +1,15 @@
-import { FolderOpenIcon } from '@/components/icons'
+import { FolderGlyph } from '@/components/icons'
+import { StatePanel } from './StatePanel'
 
-export function EmptyState() {
+export function EmptyState({ onNewFolder }: { onNewFolder?: () => void }) {
   return (
-    <div
+    <StatePanel
       role="status"
-      aria-label="Empty folder"
-      className="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-10 text-center"
-    >
-      <FolderOpenIcon className="h-8 w-8 text-light-text-faint dark:text-dark-text-faint" />
-      <p className="text-row text-light-text-muted dark:text-dark-text-muted">
-        This folder is empty
-      </p>
-    </div>
+      label="Empty folder"
+      icon={<FolderGlyph className="size-6" />}
+      title="This folder is empty"
+      message={onNewFolder ? 'Drag files here, or create a folder.' : 'Nothing is here.'}
+      action={onNewFolder ? { label: 'New folder', onClick: onNewFolder } : undefined}
+    />
   )
 }

@@ -30,6 +30,7 @@ import type {
   ContextMenuRowItem,
   ContextMenuSubmenuRow,
 } from '@/lib/types/context-menu'
+import { FOCUS_RING_INSET } from '@/lib/focus-ring'
 
 type IconComponent = ComponentType<SVGProps<SVGSVGElement>>
 
@@ -68,11 +69,11 @@ function itemTextClass(
   item: Pick<ContextMenuRowItem | ContextMenuSubmenuRow, 'disabled' | 'danger'>,
 ) {
   if (item.disabled) {
-    return 'text-light-text-faint dark:text-dark-text-faint'
+    return 'text-light-text-disabled dark:text-dark-text-disabled'
   }
 
   if (item.danger) {
-    return 'text-accent-red'
+    return 'text-light-danger dark:text-dark-danger'
   }
 
   return 'text-light-text dark:text-dark-text'
@@ -124,9 +125,6 @@ export function ContextMenuRow({
   onActivate: () => void
   buttonRef?: Ref<HTMLButtonElement>
 }) {
-  const iconClass = item.disabled
-    ? 'text-light-text-faint dark:text-dark-text-faint'
-    : 'text-light-text-muted dark:text-dark-text-muted'
   const hasSubmenu = 'kind' in item && item.kind === 'submenu'
 
   return (
@@ -138,8 +136,10 @@ export function ContextMenuRow({
         aria-haspopup={hasSubmenu ? 'menu' : undefined}
         aria-expanded={hasSubmenu ? submenuOpen : undefined}
         disabled={item.disabled}
-        className={`flex h-8 w-full items-center gap-3 rounded-lg px-2.5 text-left text-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-blue-border ${
-          active ? 'bg-accent-blue-soft' : 'hover:bg-light-hover dark:hover:bg-dark-hover'
+        className={`flex h-8 w-full items-center gap-3 rounded-control px-3 text-left text-row ${FOCUS_RING_INSET} ${
+          active
+            ? 'bg-light-hover dark:bg-dark-hover'
+            : 'hover:bg-light-hover dark:hover:bg-dark-hover'
         } ${itemTextClass(item)} ${item.strong ? 'font-semibold' : ''}`}
         onMouseEnter={() => {
           if (!item.disabled) {
@@ -153,7 +153,7 @@ export function ContextMenuRow({
         }}
       >
         {item.icon ? (
-          <span className={`flex size-4 flex-none items-center justify-center ${iconClass}`}>
+          <span className="flex size-4 flex-none items-center justify-center">
             <ContextMenuIconGlyph icon={item.icon} className="size-4" />
           </span>
         ) : (
@@ -161,18 +161,12 @@ export function ContextMenuRow({
         )}
         <span className="flex-1 truncate">{item.label}</span>
         {item.shortcut ? (
-          <span className="flex-none font-mono text-2xs text-light-text-faint dark:text-dark-text-faint">
+          <span className="flex-none text-caption text-light-text-tertiary dark:text-dark-text-tertiary">
             {item.shortcut}
           </span>
         ) : null}
         {hasSubmenu ? (
-          <ChevronRightIcon
-            className={`size-3 flex-none ${
-              submenuOpen
-                ? 'text-accent-blue-light dark:text-accent-blue'
-                : 'text-light-text-faint dark:text-dark-text-faint'
-            }`}
-          />
+          <ChevronRightIcon className="size-3 flex-none text-light-text-tertiary dark:text-dark-text-tertiary" />
         ) : null}
       </button>
     </div>

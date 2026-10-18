@@ -73,10 +73,10 @@ export type FormatDateOptions = {
 
 /** Tailwind colour utilities per tone (paired light/dark). */
 export const dateToneClassName: Record<DateTone, string> = {
-  recent: 'text-accent-green',
-  today: 'text-accent-blue-light dark:text-accent-blue',
-  yesterday: 'text-accent-amber',
-  default: 'text-light-text-muted dark:text-dark-text-muted',
+  recent: 'text-light-success dark:text-dark-success',
+  today: 'text-light-accent dark:text-dark-accent',
+  yesterday: 'text-light-warning dark:text-dark-warning',
+  default: 'text-light-text-secondary dark:text-dark-text-secondary',
 }
 
 const EMPTY: FormattedDate = { text: '—', tone: 'default' }

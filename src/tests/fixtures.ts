@@ -206,6 +206,9 @@ export const fixtures: {
   delete_from_trash: undefined,
   open_path: undefined,
   restart_as_admin: undefined,
+  open_full_disk_access_settings: undefined,
+  set_window_theme: undefined,
+  get_window_backdrop: 'solid',
   write_file_clipboard: undefined,
   read_file_clipboard: { mode: 'copy', items: [] },
   clear_file_clipboard: undefined,
@@ -418,7 +421,7 @@ export const fixtures: {
     ],
     layout: {
       detailsVisible: false,
-      treeWidthPx: 204,
+      treeWidthPx: 212,
       paneSplit: 0.5,
       columnWidths: {
         name: 320,
@@ -458,7 +461,7 @@ export const fixtures: {
     ],
     layout: {
       detailsVisible: false,
-      treeWidthPx: 204,
+      treeWidthPx: 212,
       paneSplit: 0.5,
       columnWidths: {
         name: 320,

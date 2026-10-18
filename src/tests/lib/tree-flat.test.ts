@@ -2,6 +2,8 @@ import {
   buildTreeFlatModel,
   type TreeFlatRow,
   treeRowHeight,
+  TREE_DRIVE_ROW_HEIGHT_PX,
+  TREE_FIRST_HEADER_HEIGHT_PX,
   TREE_HEADER_HEIGHT_PX,
   TREE_ROW_HEIGHT_PX,
 } from '@/lib/tree-flat'
@@ -78,9 +80,9 @@ describe('buildTreeFlatModel', () => {
       { kind: 'node', path: 'C:\\', depth: 0, volume: volumes[0] },
       { kind: 'node', path: 'C:\\aa', depth: 1, volume: undefined },
       { kind: 'trash' },
-      { kind: 'header', label: 'Removable Drives' },
+      { kind: 'header', label: 'Removable' },
       { kind: 'node', path: 'E:\\', depth: 0, volume: volumes[1] },
-      { kind: 'header', label: 'Network Drives' },
+      { kind: 'header', label: 'Network' },
       { kind: 'node', path: 'Z:\\', depth: 0, volume: volumes[2] },
     ])
   })
@@ -187,7 +189,7 @@ describe('buildTreeFlatModel', () => {
       { kind: 'node', path: '/', depth: 0, volume: volumes[0] },
       { kind: 'node', path: '/Volumes', depth: 1, volume: undefined },
       { kind: 'trash' },
-      { kind: 'header', label: 'Network Drives' },
+      { kind: 'header', label: 'Network' },
       { kind: 'node', path: '/Volumes/team', depth: 0, volume: volumes[1] },
       { kind: 'node', path: '/Volumes/team/Project', depth: 1, volume: undefined },
     ])
@@ -202,13 +204,20 @@ describe('buildTreeFlatModel', () => {
 
     const { rows, offsets } = buildTreeFlatModel(treeNodes, volumes)
 
-    // favourites header + empty row, drives header, C:\, C:\aa, trash
+    // favourites header (taller lead-in) + empty row, drives header, C:\ (a
+    // drive with a capacity bar), C:\aa, trash
     expect(offsets).toHaveLength(rows.length + 1)
     expect(offsets[0]).toBe(0)
     for (let i = 0; i < rows.length; i += 1) {
       expect(offsets[i + 1] - offsets[i]).toBeCloseTo(treeRowHeight(rows[i]), 5)
     }
-    expect(offsets[rows.length]).toBeCloseTo(TREE_HEADER_HEIGHT_PX * 2 + TREE_ROW_HEIGHT_PX * 4, 5)
+    expect(offsets[rows.length]).toBeCloseTo(
+      TREE_FIRST_HEADER_HEIGHT_PX +
+        TREE_HEADER_HEIGHT_PX +
+        TREE_DRIVE_ROW_HEIGHT_PX +
+        TREE_ROW_HEIGHT_PX * 3,
+      5,
+    )
   })
 
   it('maps every node path and the trash sentinel to its flat index', () => {
@@ -241,6 +250,20 @@ describe('buildTreeFlatModel', () => {
     )
   })
 
+  it('gives the first heading its lead-in and capacity-bar drives their taller row', () => {
+    expect(
+      treeRowHeight({ kind: 'header', label: 'Favourites', renderKey: 'header-favourites' }),
+    ).toBe(TREE_FIRST_HEADER_HEIGHT_PX)
+    const drive = volume({ mountRoot: 'C:\\', totalBytes: 100, freeBytes: 40 })
+    expect(
+      treeRowHeight({ kind: 'node', path: 'C:\\', depth: 0, volume: drive, renderKey: 'n' }),
+    ).toBe(TREE_DRIVE_ROW_HEIGHT_PX)
+    const network = volume({ mountRoot: 'Z:\\', totalBytes: 100, freeBytes: 40, isNetwork: true })
+    expect(
+      treeRowHeight({ kind: 'node', path: 'Z:\\', depth: 0, volume: network, renderKey: 'z' }),
+    ).toBe(TREE_ROW_HEIGHT_PX)
+  })
+
   it('places favourites first and keeps them out of the hierarchy path index', () => {
     const { rows, indexByPath } = buildTreeFlatModel({}, [], ['C:\\Users\\Omega', '/Users/omega'])
     expect(rowShapes(rows)).toEqual([
@@ -255,5 +278,7 @@ describe('buildTreeFlatModel', () => {
   it('keeps virtual row heights on whole CSS pixels', () => {
     expect(Number.isInteger(TREE_ROW_HEIGHT_PX)).toBe(true)
     expect(Number.isInteger(TREE_HEADER_HEIGHT_PX)).toBe(true)
+    expect(Number.isInteger(TREE_FIRST_HEADER_HEIGHT_PX)).toBe(true)
+    expect(Number.isInteger(TREE_DRIVE_ROW_HEIGHT_PX)).toBe(true)
   })
 })

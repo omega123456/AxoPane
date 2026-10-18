@@ -1,5 +1,5 @@
 import type { FileCategory } from '@/lib/file-type'
-import { getFileCategory, getFolderGlyphKind } from '@/lib/file-type'
+import { getFileCategory } from '@/lib/file-type'
 
 function categoryOf(name: string, isDir = false): FileCategory {
   return getFileCategory({ name, isDir })
@@ -96,19 +96,5 @@ describe('getFileCategory', () => {
     expect(categoryOf('mystery.qwzzz')).toBe('generic')
     expect(categoryOf('.env')).toBe('generic')
     expect(categoryOf('noextension')).toBe('generic')
-  })
-})
-
-describe('getFolderGlyphKind', () => {
-  it('matches special folders case-insensitively', () => {
-    expect(getFolderGlyphKind('Downloads', false)).toBe('downloads')
-    expect(getFolderGlyphKind('downloads', true)).toBe('downloads')
-    expect(getFolderGlyphKind('.git', false)).toBe('git')
-    expect(getFolderGlyphKind('node_modules', true)).toBe('modules')
-  })
-
-  it('reflects open state for ordinary folders', () => {
-    expect(getFolderGlyphKind('Documents', false)).toBe('closed')
-    expect(getFolderGlyphKind('Documents', true)).toBe('open')
   })
 })

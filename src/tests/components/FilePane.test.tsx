@@ -5,6 +5,7 @@ import { ipc } from '@/tests/ipc-mock'
 import { ActionDialog } from '@/components/dialogs/ActionDialog'
 import { ContextMenu } from '@/components/menus/ContextMenu'
 import { FilePane } from '@/components/pane/FilePane'
+import { CommandBar } from '@/components/shell/CommandBar'
 import { executeCommand } from '@/lib/commands'
 import { resolveCommandForEvent } from '@/lib/keymap'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
@@ -55,6 +56,16 @@ function seedPane(partial: Partial<ReturnType<typeof usePanesStore.getState>['pa
   }))
 }
 
+/** The shared filter and view menu live in the command bar, outside the pane. */
+function renderWithCommandBar() {
+  return render(
+    <>
+      <CommandBar theme="light" setTheme={() => undefined} />
+      <FilePane paneId="left" />
+    </>,
+  )
+}
+
 function doubleClick(target: Element, detail: number, timeStamp: number) {
   const event = new MouseEvent('dblclick', { bubbles: true, detail })
   Object.defineProperty(event, 'timeStamp', { value: timeStamp })
@@ -89,7 +100,7 @@ describe('FilePane state rendering', () => {
     })
     seedPane({ path: 'C:\\root\\dir', entries: [entry('Alpha'), entry('notes.txt', false)] })
 
-    render(<FilePane paneId="left" />)
+    renderWithCommandBar()
 
     expect(screen.getByRole('grid', { name: 'Icons for C:\\root\\dir' })).toBeInTheDocument()
     expect(screen.getAllByRole('gridcell')).toHaveLength(2)
@@ -111,7 +122,7 @@ describe('FilePane state rendering', () => {
     })
     seedPane({ path: 'C:\\root\\other', entries: [entry('Preview.png', false)] })
 
-    render(<FilePane paneId="left" />)
+    renderWithCommandBar()
 
     expect(
       screen.getByRole('grid', { name: 'Large thumbnails for C:\\root\\other' }),
@@ -211,7 +222,7 @@ describe('FilePane state rendering', () => {
     })
     seedPane({ entries: [entry('Alpha'), entry('Media')] })
 
-    render(<FilePane paneId="left" />)
+    renderWithCommandBar()
     screen.getByRole('grid', { name: `${viewLabel} for C:\\root\\dir` }).focus()
 
     await user.keyboard('m')
@@ -246,7 +257,7 @@ describe('FilePane state rendering', () => {
         ipc.override('list_dir', (payload) => ({ path: payload.path, entries }))
         seedPane({ entries, focusedEntryId: 'Alpha' })
 
-        render(<FilePane paneId="left" />)
+        renderWithCommandBar()
         const grid = screen.getByRole('grid', { name: `${viewLabel} for C:\\root\\dir` })
         await waitFor(() => expect(grid).toHaveAttribute('aria-colcount', '3'))
         grid.focus()
@@ -586,7 +597,7 @@ describe('FilePane state rendering', () => {
       'overflow-y-hidden',
     )
     const row = within(screen.getByLabelText('Left pane')).getByRole('row', { name: /Alpha/ })
-    expect(row.parentElement).toHaveClass('inset-x-0')
+    expect(row.parentElement).toHaveClass('inset-x-0.75')
   })
 
   it('keeps the header aligned with the pane body while horizontally scrolling on macOS', () => {
@@ -992,7 +1003,7 @@ describe('FilePane state rendering', () => {
     usePanesStore.setState({ goUp })
     seedPane({ entries: [entry('Alpha')], filterDraft: 'Media', filterApplied: 'Media' })
 
-    render(<FilePane paneId="left" />)
+    renderWithCommandBar()
     const filter = screen.getByRole('textbox', { name: 'Left pane filter' })
 
     await user.click(filter)
@@ -1023,7 +1034,7 @@ describe('FilePane state rendering', () => {
       focusedEntryId: 'Alpha',
     })
 
-    render(<FilePane paneId="left" />)
+    renderWithCommandBar()
     const filter = screen.getByRole('textbox', { name: 'Left pane filter' })
     await user.click(filter)
 
@@ -1057,7 +1068,7 @@ describe('FilePane state rendering', () => {
       filterApplied: 'Media',
     })
 
-    render(<FilePane paneId="left" />)
+    renderWithCommandBar()
     const pane = screen.getByLabelText('Left pane')
     const filter = screen.getByRole('textbox', { name: 'Left pane filter' })
 
@@ -1074,7 +1085,7 @@ describe('FilePane state rendering', () => {
     ipc.override('list_dir', (payload) => ({ path: payload.path, entries: [entry('Alpha')] }))
     seedPane({ entries: [entry('Alpha')], filterDraft: 'Me', filterApplied: 'Me' })
 
-    render(<FilePane paneId="left" />)
+    renderWithCommandBar()
     const filter = screen.getByRole('textbox', { name: 'Left pane filter' })
 
     await user.click(filter)
@@ -1181,7 +1192,7 @@ describe('FilePane state rendering', () => {
     expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('Alpha')
     expect(useSelectionStore.getState().selections.left.selectedIds).toEqual(['Alpha'])
     const alphaRow = await within(pane).findByRole('row', { name: /Alpha/ })
-    expect(alphaRow.className).toContain('bg-accent-blue-soft')
+    expect(alphaRow.className).toContain('bg-light-tint dark:bg-dark-tint')
   })
 
   it('moves DOM focus into a pane when a tab is opened into it via openTabFromPath', async () => {
@@ -1240,7 +1251,7 @@ describe('FilePane state rendering', () => {
     expect(copyDialog).toBeInTheDocument()
     expect(within(copyDialog).getByText('C:\\root')).toBeInTheDocument()
     expect(within(copyDialog).getByText('D:\\dest')).toBeInTheDocument()
-    expect(within(copyDialog).getByText('Alpha')).toBeInTheDocument()
+    expect(within(copyDialog).getByText('Alpha · 10 B')).toBeInTheDocument()
     expect(startSpy).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: 'Copy' }))
@@ -1518,8 +1529,10 @@ describe('FilePane state rendering', () => {
     const cutRow = within(screen.getByLabelText('Left pane')).getByRole('row', { name: /Alpha/ })
     const normalRow = within(screen.getByLabelText('Left pane')).getByRole('row', { name: /Beta/ })
 
-    expect(cutRow).toHaveClass('opacity-50')
-    expect(normalRow).not.toHaveClass('opacity-50')
+    // Cut items fade their cells, not the row (and its selection fill).
+    expect(cutRow).not.toHaveClass('opacity-50')
+    expect(cutRow.querySelectorAll('.opacity-50').length).toBeGreaterThan(0)
+    expect(normalRow.querySelector('.opacity-50')).toBeNull()
   })
 
   it('requests native enrichment for the selected filesystem row without disturbing selection semantics', async () => {

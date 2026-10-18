@@ -103,3 +103,4 @@ pub mod watch_patch_integration;
 pub mod watch_private_integration;
 pub mod watch_runtime_integration;
 pub mod watch_service_integration;
+pub mod window_chrome_integration;

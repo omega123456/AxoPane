@@ -20,6 +20,15 @@ function iconClass(path: string, volumes: VolumeInfo[]) {
   return container.querySelector('svg')?.getAttribute('class') ?? ''
 }
 
+/** Folders use the filled two-tone glyph rather than a Lucide outline. */
+function isFolderGlyph(path: string, volumes: VolumeInfo[]) {
+  const { container } = render(<LocationIcon path={path} volumes={volumes} />)
+  return (
+    container.querySelector('path.fill-folder-back') !== null &&
+    container.querySelector('path.fill-folder') !== null
+  )
+}
+
 describe('LocationIcon', () => {
   it('shows a hard-drive glyph at a fixed volume root', () => {
     expect(iconClass('C:\\', [volume()])).toContain('lucide-hard-drive')
@@ -37,17 +46,17 @@ describe('LocationIcon', () => {
     ).toContain('lucide-network')
   })
 
-  it('shows a folder glyph for a folder inside a volume', () => {
-    expect(iconClass('C:\\Users\\me', [volume()])).toContain('lucide-folder')
+  it('shows the two-tone folder glyph for a folder inside a volume', () => {
+    expect(isFolderGlyph('C:\\Users\\me', [volume()])).toBe(true)
   })
 
-  it('shows special-folder glyphs by name', () => {
-    expect(iconClass('C:\\Users\\me\\Downloads', [volume()])).toContain('lucide-folder-down')
-    expect(iconClass('C:\\code\\repo\\.git', [volume()])).toContain('lucide-folder-git')
+  it('uses the same folder glyph for special folders', () => {
+    expect(isFolderGlyph('C:\\Users\\me\\Downloads', [volume()])).toBe(true)
+    expect(isFolderGlyph('C:\\code\\repo\\.git', [volume()])).toBe(true)
   })
 
   it('falls back to a plain folder when no volume is known', () => {
-    expect(iconClass('C:\\anywhere', [])).toContain('lucide-folder')
+    expect(isFolderGlyph('C:\\anywhere', [])).toBe(true)
   })
 
   it('shows the trash glyph for the trash pane, regardless of volumes', () => {
@@ -55,13 +64,12 @@ describe('LocationIcon', () => {
   })
 
   it('colors icons to match the folder tree', () => {
-    expect(iconClass('C:\\', [volume()])).toContain('text-light-text-muted')
+    expect(iconClass('C:\\', [volume()])).toContain('text-light-text-secondary')
     expect(iconClass('E:\\', [volume({ mountRoot: 'E:\\', isRemovable: true })])).toContain(
-      'text-accent-amber',
+      'text-volume-removable',
     )
     expect(
       iconClass('\\\\server\\share', [volume({ mountRoot: '\\\\server\\share', isNetwork: true })]),
-    ).toContain('text-accent-green')
-    expect(iconClass('C:\\Users\\me', [volume()])).toContain('text-accent-blue')
+    ).toContain('text-volume-network')
   })
 })

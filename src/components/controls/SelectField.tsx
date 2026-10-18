@@ -1,7 +1,9 @@
 import { ChevronDownIcon } from '@/components/icons'
+import { FOCUS_RING } from '@/lib/focus-ring'
 
 export type SelectOption<T extends string> = { value: T; label: string }
 
+/** Fluent combo box: 32px, control fill and strokes, 12px chevron. */
 export function SelectField<T extends string>({
   value,
   onChange,
@@ -19,7 +21,7 @@ export function SelectField<T extends string>({
         aria-label={ariaLabel}
         value={value}
         onChange={(event) => onChange(event.target.value as T)}
-        className="h-9 w-50 cursor-pointer appearance-none rounded-tab border border-light-border-strong bg-light-surface pl-3 pr-9 text-row text-light-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border-strong dark:bg-dark-surface dark:text-dark-text"
+        className={`h-8 min-w-35 cursor-pointer appearance-none rounded-control border border-light-control-stroke border-b-light-control-stroke-bottom bg-light-control pl-3 pr-8.5 text-row text-light-text hover:bg-light-control-hover dark:border-dark-control-stroke dark:border-b-dark-control-stroke-bottom dark:bg-dark-control dark:text-dark-text dark:hover:bg-dark-control-hover ${FOCUS_RING}`}
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
@@ -27,7 +29,7 @@ export function SelectField<T extends string>({
           </option>
         ))}
       </select>
-      <ChevronDownIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-light-text-muted dark:text-dark-text-muted" />
+      <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-1/2 size-3 -translate-y-1/2 text-light-text-secondary dark:text-dark-text-secondary" />
     </div>
   )
 }

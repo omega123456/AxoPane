@@ -4,6 +4,7 @@ import { columnDefinitions } from '@/lib/columns'
 import type { SortKey } from '@/lib/types/ipc'
 import type { PaneState } from '@/types/pane'
 import { usePanesStore } from '@/stores/panes-store'
+import { FOCUS_RING } from '@/lib/focus-ring'
 
 const sortKeys: SortKey[] = ['name', 'size', 'items', 'type', 'modified', 'created']
 
@@ -36,8 +37,8 @@ export function GraphicalSortBar({ pane }: { pane: PaneState }) {
     },
   ]
   return (
-    <div className="flex h-headrow items-center gap-2 border-b border-light-border bg-light-header px-3 text-row text-light-text-soft dark:border-dark-border dark:bg-dark-header dark:text-dark-text-soft">
-      <span className="text-light-text-muted dark:text-dark-text-muted">Sort by</span>
+    <div className="flex h-headrow items-center gap-2 border-b border-light-divider px-2.75 text-caption text-light-text-secondary dark:border-dark-divider dark:text-dark-text-secondary">
+      <span className="shrink-0 whitespace-nowrap">Sort by</span>
       <MenuPopover
         ariaLabel="Sort field"
         radio
@@ -52,7 +53,7 @@ export function GraphicalSortBar({ pane }: { pane: PaneState }) {
             aria-controls={controls}
             onClick={toggle}
             onKeyDown={onTriggerKeyDown}
-            className="inline-flex items-center gap-1 rounded-tab px-2 py-1 hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:hover:bg-dark-hover"
+            className={`inline-flex items-center gap-1 rounded-control px-2 py-1 hover:bg-light-hover dark:hover:bg-dark-hover ${FOCUS_RING}`}
           >
             {columnDefinitions[pane.sortKey].label}
             <ChevronDownIcon className="size-3" />
@@ -73,7 +74,7 @@ export function GraphicalSortBar({ pane }: { pane: PaneState }) {
             aria-controls={controls}
             onClick={toggle}
             onKeyDown={onTriggerKeyDown}
-            className="inline-flex items-center gap-1 rounded-tab px-2 py-1 hover:bg-light-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:hover:bg-dark-hover"
+            className={`inline-flex items-center gap-1 rounded-control px-2 py-1 hover:bg-light-hover dark:hover:bg-dark-hover ${FOCUS_RING}`}
           >
             {pane.sortDirection === 'asc' ? 'Ascending' : 'Descending'}
             <ChevronDownIcon className="size-3" />

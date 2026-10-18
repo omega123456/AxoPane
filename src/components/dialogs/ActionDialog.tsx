@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { DialogShell } from '@/components/dialogs/DialogShell'
-import { AlertTriangleIcon, LockIcon } from '@/components/icons'
+import { Button, TextField } from '@/components/controls'
+import {
+  DialogError,
+  DialogField,
+  DialogList,
+  DialogShell,
+  DialogText,
+} from '@/components/dialogs/DialogShell'
+import { formatBytes } from '@/lib/format'
+import { detectPlatformOs } from '@/lib/keymap'
 import { log } from '@/lib/app-log-commands'
 import { createFileInPane, createFolderInPane } from '@/lib/file-actions'
 import { deleteFromTrash, emptyTrash, restartAsAdmin } from '@/lib/ipc/commands'
@@ -69,6 +77,16 @@ function joinPath(basePath: string, name: string) {
     return `${trimmedBase}${name}`
   }
   return `${trimmedBase}${separator}${name}`
+}
+
+/** Up to three "name · size" lines, then "and N more". */
+function targetSummary(targets: Array<{ name: string; sizeBytes?: number | null }>) {
+  const shown = targets
+    .slice(0, 3)
+    .map((target) =>
+      target.sizeBytes == null ? target.name : `${target.name} · ${formatBytes(target.sizeBytes)}`,
+    )
+  return targets.length > 3 ? [...shown, `and ${targets.length - 3} more`] : shown
 }
 
 function archiveStem(targets: Array<{ name: string }>) {
@@ -141,49 +159,34 @@ function PromptDialog({
   }
 
   return (
-    <DialogShell label={copy.title} onDismiss={close}>
-      <div className="border-b border-light-border p-4 dark:border-dark-border">
-        <div className="text-sm font-semibold text-light-text dark:text-dark-text">
-          {copy.title}
-        </div>
-      </div>
-      <div className="p-4">
-        <label className="block text-uxs uppercase tracking-wide text-light-text-muted dark:text-dark-text-muted">
-          {copy.label}
-        </label>
-        <input
+    <DialogShell
+      label={copy.title}
+      title={copy.title}
+      onDismiss={close}
+      footer={
+        <>
+          <Button
+            variant="primary"
+            disabled={busy || value.trim().length === 0}
+            onClick={() => void submit()}
+          >
+            {copy.confirm}
+          </Button>
+          <Button onClick={close}>Cancel</Button>
+        </>
+      }
+    >
+      <DialogField label={copy.label} htmlFor="action-dialog-name">
+        <TextField
+          id="action-dialog-name"
           ref={inputRef}
-          autoComplete="off"
           value={value}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={onKeyDown}
           aria-label={copy.label}
-          className="mt-2 h-9 w-full select-text rounded-tab border border-accent-blue-border bg-light-window px-3 font-mono text-xs text-light-text outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:bg-dark-window dark:text-dark-text"
         />
-        {error ? (
-          <p className="mt-2 flex items-center gap-2 text-uxs text-accent-amber">
-            <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" />
-            {error}
-          </p>
-        ) : null}
-      </div>
-      <div className="flex justify-end gap-2 border-t border-light-border p-4 dark:border-dark-border">
-        <button
-          type="button"
-          onClick={close}
-          className="rounded-md border border-light-border px-4 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          disabled={busy || value.trim().length === 0}
-          onClick={() => void submit()}
-          className="rounded-md bg-accent-blue-soft px-4 py-2 text-xs font-semibold text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border disabled:opacity-40 dark:text-accent-blue"
-        >
-          {copy.confirm}
-        </button>
-      </div>
+      </DialogField>
+      <DialogError message={error} />
     </DialogShell>
   )
 }
@@ -237,50 +240,26 @@ function DeleteDialog({ dialog }: { dialog: Extract<ActionDialogState, { kind: '
   }
 
   return (
-    <DialogShell label="Confirm delete" onDismiss={close} onKeyDown={onKeyDown}>
-      <div className="flex items-start gap-3 border-b border-light-border p-4 dark:border-dark-border">
-        <AlertTriangleIcon className="mt-0.5 h-5 w-5 shrink-0 text-accent-amber" />
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-light-text dark:text-dark-text">
-            Delete {count === 1 ? '1 item' : `${count} items`}?
-          </div>
-          <div className="mt-1 break-all font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-            {count === 1
-              ? dialog.targets[0].name
-              : `${dialog.targets[0].name} and ${count - 1} more`}
-          </div>
-        </div>
-      </div>
-      <div className="p-4">
-        <p className="text-row text-light-text-soft dark:text-dark-text-soft">
-          This permanently deletes the selected {count === 1 ? 'item' : 'items'}. This cannot be
-          undone.
-        </p>
-        {error ? (
-          <p className="mt-2 flex items-center gap-2 text-uxs text-accent-amber">
-            <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" />
-            {error}
-          </p>
-        ) : null}
-      </div>
-      <div className="flex justify-end gap-2 border-t border-light-border p-4 dark:border-dark-border">
-        <button
-          type="button"
-          onClick={close}
-          className="rounded-md border border-light-border px-4 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
-        >
-          Cancel
-        </button>
-        <button
-          ref={confirmRef}
-          type="button"
-          disabled={busy}
-          onClick={() => void confirm()}
-          className="rounded-md bg-accent-red-soft px-4 py-2 text-xs font-semibold text-accent-red focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-red disabled:opacity-40"
-        >
-          Delete
-        </button>
-      </div>
+    <DialogShell
+      label="Confirm delete"
+      title={`Delete ${count === 1 ? '1 item' : `${count} items`} permanently?`}
+      onDismiss={close}
+      onKeyDown={onKeyDown}
+      footer={
+        <>
+          <Button variant="primary" ref={confirmRef} disabled={busy} onClick={() => void confirm()}>
+            Delete
+          </Button>
+          <Button onClick={close}>Cancel</Button>
+        </>
+      }
+    >
+      <DialogText>
+        {count === 1 ? 'This item skips' : 'These items skip'} the{' '}
+        {detectPlatformOs() === 'macos' ? 'Trash' : 'Recycle Bin'}. You can't undo this.
+      </DialogText>
+      <DialogList items={targetSummary(dialog.targets)} />
+      <DialogError message={error} />
     </DialogShell>
   )
 }
@@ -330,48 +309,25 @@ function AdminRequiredDialog({
   }
 
   return (
-    <DialogShell label="Administrator permissions needed" onDismiss={close} onKeyDown={onKeyDown}>
-      <div className="flex items-start gap-3 border-b border-light-border p-4 dark:border-dark-border">
-        <LockIcon className="mt-0.5 h-5 w-5 shrink-0 text-accent-amber" />
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-light-text dark:text-dark-text">
-            Administrator permissions needed
-          </div>
-          <div className="mt-1 break-all font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-            {dialog.message}
-          </div>
-        </div>
-      </div>
-      <div className="p-4">
-        <p className="text-row text-light-text-soft dark:text-dark-text-soft">
-          Windows refused this operation. Restart the application as an administrator, then try
-          again.
-        </p>
-        {error ? (
-          <p className="mt-2 flex items-center gap-2 text-uxs text-accent-amber">
-            <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" />
-            {error}
-          </p>
-        ) : null}
-      </div>
-      <div className="flex justify-end gap-2 border-t border-light-border p-4 dark:border-dark-border">
-        <button
-          type="button"
-          onClick={close}
-          className="rounded-md border border-light-border px-4 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
-        >
-          Cancel
-        </button>
-        <button
-          ref={confirmRef}
-          type="button"
-          disabled={busy}
-          onClick={() => void confirm()}
-          className="rounded-md bg-accent-blue-soft px-4 py-2 text-xs font-semibold text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border disabled:opacity-40 dark:text-accent-blue"
-        >
-          Restart as administrator
-        </button>
-      </div>
+    <DialogShell
+      label="Administrator permissions needed"
+      title="Administrator permissions needed"
+      onDismiss={close}
+      onKeyDown={onKeyDown}
+      footer={
+        <>
+          <Button variant="primary" ref={confirmRef} disabled={busy} onClick={() => void confirm()}>
+            Restart as administrator
+          </Button>
+          <Button onClick={close}>Cancel</Button>
+        </>
+      }
+    >
+      <DialogText>
+        Windows refused this operation. Restart the application as an administrator, then try again.
+      </DialogText>
+      <DialogList items={[dialog.message]} />
+      <DialogError message={error} />
     </DialogShell>
   )
 }
@@ -419,44 +375,24 @@ function EmptyTrashDialog({
   }
 
   return (
-    <DialogShell label="Confirm empty trash" onDismiss={close} onKeyDown={onKeyDown}>
-      <div className="flex items-start gap-3 border-b border-light-border p-4 dark:border-dark-border">
-        <AlertTriangleIcon className="mt-0.5 h-5 w-5 shrink-0 text-accent-amber" />
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-light-text dark:text-dark-text">
-            Empty trash ({count === 1 ? '1 item' : `${count} items`})?
-          </div>
-        </div>
-      </div>
-      <div className="p-4">
-        <p className="text-row text-light-text-soft dark:text-dark-text-soft">
-          This permanently deletes everything currently in the trash. This cannot be undone.
-        </p>
-        {error ? (
-          <p className="mt-2 flex items-center gap-2 text-uxs text-accent-amber">
-            <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" />
-            {error}
-          </p>
-        ) : null}
-      </div>
-      <div className="flex justify-end gap-2 border-t border-light-border p-4 dark:border-dark-border">
-        <button
-          type="button"
-          onClick={close}
-          className="rounded-md border border-light-border px-4 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
-        >
-          Cancel
-        </button>
-        <button
-          ref={confirmRef}
-          type="button"
-          disabled={busy}
-          onClick={() => void confirm()}
-          className="rounded-md bg-accent-red-soft px-4 py-2 text-xs font-semibold text-accent-red focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-red disabled:opacity-40"
-        >
-          Empty trash
-        </button>
-      </div>
+    <DialogShell
+      label="Confirm empty trash"
+      title={`Empty trash (${count === 1 ? '1 item' : `${count} items`})?`}
+      onDismiss={close}
+      onKeyDown={onKeyDown}
+      footer={
+        <>
+          <Button variant="primary" ref={confirmRef} disabled={busy} onClick={() => void confirm()}>
+            Empty trash
+          </Button>
+          <Button onClick={close}>Cancel</Button>
+        </>
+      }
+    >
+      <DialogText>
+        This permanently deletes everything currently in the trash. You can't undo this.
+      </DialogText>
+      <DialogError message={error} />
     </DialogShell>
   )
 }
@@ -505,45 +441,25 @@ function CalculateAllSizesDialog({
   }
 
   return (
-    <DialogShell label="Confirm calculate all folder sizes" onDismiss={close} onKeyDown={onKeyDown}>
-      <div className="flex items-start gap-3 border-b border-light-border p-4 dark:border-dark-border">
-        <AlertTriangleIcon className="mt-0.5 h-5 w-5 shrink-0 text-accent-amber" />
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-light-text dark:text-dark-text">
-            Calculate all folder sizes?
-          </div>
-        </div>
-      </div>
-      <div className="p-4">
-        <p className="text-row text-light-text-soft dark:text-dark-text-soft">
-          This scans every folder in this pane to compute its size. It may take a while for folders
-          with many files.
-        </p>
-        {error ? (
-          <p className="mt-2 flex items-center gap-2 text-uxs text-accent-amber">
-            <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" />
-            {error}
-          </p>
-        ) : null}
-      </div>
-      <div className="flex justify-end gap-2 border-t border-light-border p-4 dark:border-dark-border">
-        <button
-          type="button"
-          onClick={close}
-          className="rounded-md border border-light-border px-4 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
-        >
-          Cancel
-        </button>
-        <button
-          ref={confirmRef}
-          type="button"
-          disabled={busy}
-          onClick={() => void confirm()}
-          className="rounded-md bg-accent-blue-soft px-4 py-2 text-xs font-semibold text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border disabled:opacity-40 dark:text-accent-blue"
-        >
-          Calculate
-        </button>
-      </div>
+    <DialogShell
+      label="Confirm calculate all folder sizes"
+      title="Calculate all folder sizes?"
+      onDismiss={close}
+      onKeyDown={onKeyDown}
+      footer={
+        <>
+          <Button variant="primary" ref={confirmRef} disabled={busy} onClick={() => void confirm()}>
+            Calculate
+          </Button>
+          <Button onClick={close}>Cancel</Button>
+        </>
+      }
+    >
+      <DialogText>
+        This scans every folder in this pane to compute its size. It may take a while for folders
+        with many files.
+      </DialogText>
+      <DialogError message={error} />
     </DialogShell>
   )
 }
@@ -591,50 +507,26 @@ function DeleteFromTrashDialog({
   }
 
   return (
-    <DialogShell label="Confirm delete from trash" onDismiss={close} onKeyDown={onKeyDown}>
-      <div className="flex items-start gap-3 border-b border-light-border p-4 dark:border-dark-border">
-        <AlertTriangleIcon className="mt-0.5 h-5 w-5 shrink-0 text-accent-amber" />
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-light-text dark:text-dark-text">
-            Delete {count === 1 ? '1 item' : `${count} items`} from trash?
-          </div>
-          <div className="mt-1 break-all font-mono text-uxs text-light-text-muted dark:text-dark-text-muted">
-            {count === 1
-              ? dialog.targets[0].name
-              : `${dialog.targets[0].name} and ${count - 1} more`}
-          </div>
-        </div>
-      </div>
-      <div className="p-4">
-        <p className="text-row text-light-text-soft dark:text-dark-text-soft">
-          This permanently deletes the selected {count === 1 ? 'item' : 'items'} from the trash.
-          This cannot be undone.
-        </p>
-        {error ? (
-          <p className="mt-2 flex items-center gap-2 text-uxs text-accent-amber">
-            <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" />
-            {error}
-          </p>
-        ) : null}
-      </div>
-      <div className="flex justify-end gap-2 border-t border-light-border p-4 dark:border-dark-border">
-        <button
-          type="button"
-          onClick={close}
-          className="rounded-md border border-light-border px-4 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
-        >
-          Cancel
-        </button>
-        <button
-          ref={confirmRef}
-          type="button"
-          disabled={busy}
-          onClick={() => void confirm()}
-          className="rounded-md bg-accent-red-soft px-4 py-2 text-xs font-semibold text-accent-red focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-red disabled:opacity-40"
-        >
-          Delete
-        </button>
-      </div>
+    <DialogShell
+      label="Confirm delete from trash"
+      title={`Delete ${count === 1 ? '1 item' : `${count} items`} from trash?`}
+      onDismiss={close}
+      onKeyDown={onKeyDown}
+      footer={
+        <>
+          <Button variant="primary" ref={confirmRef} disabled={busy} onClick={() => void confirm()}>
+            Delete
+          </Button>
+          <Button onClick={close}>Cancel</Button>
+        </>
+      }
+    >
+      <DialogText>
+        This permanently deletes the selected {count === 1 ? 'item' : 'items'} from the trash. You
+        can't undo this.
+      </DialogText>
+      <DialogList items={targetSummary(dialog.targets)} />
+      <DialogError message={error} />
     </DialogShell>
   )
 }
@@ -651,8 +543,6 @@ function TransferConfirmDialog({
   const setError = useActionDialogStore((state) => state.setError)
   const confirmRef = useRef<HTMLButtonElement>(null)
   const count = dialog.targets.length
-  const previewTargets = dialog.targets.slice(0, 4)
-  const remainingCount = dialog.targets.length - previewTargets.length
   const actionLabel = dialog.operation === 'copy' ? 'Copy' : 'Move'
 
   useEffect(() => {
@@ -696,79 +586,33 @@ function TransferConfirmDialog({
   }
 
   return (
-    <DialogShell label={`Confirm ${dialog.operation}`} onDismiss={close} onKeyDown={onKeyDown}>
-      <div className="flex items-start gap-3 border-b border-light-border p-4 dark:border-dark-border">
-        <AlertTriangleIcon className="mt-0.5 h-5 w-5 shrink-0 text-accent-amber" />
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-light-text dark:text-dark-text">
-            {actionLabel} {count === 1 ? '1 item' : `${count} items`} to the other pane?
-          </div>
-          <p className="mt-1 text-row text-light-text-soft dark:text-dark-text-soft">
-            Review the transfer before it is added to the queue.
-          </p>
+    <DialogShell
+      label={`Confirm ${dialog.operation}`}
+      title={`${actionLabel} ${count === 1 ? '1 item' : `${count} items`} to the other pane?`}
+      onDismiss={close}
+      onKeyDown={onKeyDown}
+      footer={
+        <>
+          <Button variant="primary" ref={confirmRef} disabled={busy} onClick={() => void confirm()}>
+            {actionLabel}
+          </Button>
+          <Button onClick={close}>Cancel</Button>
+        </>
+      }
+    >
+      <DialogText>Review the transfer before it is added to the queue.</DialogText>
+      <DialogList items={targetSummary(dialog.targets)} />
+      <dl className="grid gap-2 text-caption">
+        <div className="grid gap-0.5">
+          <dt className="text-light-text-secondary dark:text-dark-text-secondary">From folder</dt>
+          <dd className="break-all font-mono">{dialog.sourceDir}</dd>
         </div>
-      </div>
-      <div className="space-y-4 p-4">
-        <div>
-          <div className="text-uxs uppercase tracking-wide text-light-text-muted dark:text-dark-text-muted">
-            Items
-          </div>
-          <ul className="mt-2 space-y-1 rounded-tab border border-light-border bg-light-window p-3 font-mono text-uxs text-light-text dark:border-dark-border dark:bg-dark-window dark:text-dark-text">
-            {previewTargets.map((target) => (
-              <li key={target.id} className="break-all">
-                {target.name}
-              </li>
-            ))}
-            {remainingCount > 0 ? (
-              <li className="text-light-text-muted dark:text-dark-text-muted">
-                and {remainingCount} more
-              </li>
-            ) : null}
-          </ul>
+        <div className="grid gap-0.5">
+          <dt className="text-light-text-secondary dark:text-dark-text-secondary">To folder</dt>
+          <dd className="break-all font-mono">{dialog.destinationDir}</dd>
         </div>
-        <div className="grid gap-3">
-          <div>
-            <div className="text-uxs uppercase tracking-wide text-light-text-muted dark:text-dark-text-muted">
-              From folder
-            </div>
-            <div className="mt-1 break-all rounded-tab border border-light-border bg-light-window px-3 py-2 font-mono text-uxs text-light-text dark:border-dark-border dark:bg-dark-window dark:text-dark-text">
-              {dialog.sourceDir}
-            </div>
-          </div>
-          <div>
-            <div className="text-uxs uppercase tracking-wide text-light-text-muted dark:text-dark-text-muted">
-              To folder
-            </div>
-            <div className="mt-1 break-all rounded-tab border border-light-border bg-light-window px-3 py-2 font-mono text-uxs text-light-text dark:border-dark-border dark:bg-dark-window dark:text-dark-text">
-              {dialog.destinationDir}
-            </div>
-          </div>
-        </div>
-        {error ? (
-          <p className="flex items-center gap-2 text-uxs text-accent-amber">
-            <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" />
-            {error}
-          </p>
-        ) : null}
-      </div>
-      <div className="flex justify-end gap-2 border-t border-light-border p-4 dark:border-dark-border">
-        <button
-          type="button"
-          onClick={close}
-          className="rounded-md border border-light-border px-4 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
-        >
-          Cancel
-        </button>
-        <button
-          ref={confirmRef}
-          type="button"
-          disabled={busy}
-          onClick={() => void confirm()}
-          className="rounded-md bg-accent-blue-soft px-4 py-2 text-xs font-semibold text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border disabled:opacity-40 dark:text-accent-blue"
-        >
-          {actionLabel}
-        </button>
-      </div>
+      </dl>
+      <DialogError message={error} />
     </DialogShell>
   )
 }
@@ -837,61 +681,42 @@ function ArchiveConfirmDialog({
   }
 
   return (
-    <DialogShell label={title} onDismiss={close} onKeyDown={onKeyDown}>
-      <div className="flex items-start gap-3 border-b border-light-border p-4 dark:border-dark-border">
-        <AlertTriangleIcon className="mt-0.5 h-5 w-5 shrink-0 text-accent-amber" />
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-light-text dark:text-dark-text">
-            {actionLabel} {count === 1 ? '1 item' : `${count} items`}?
-          </div>
-          <p className="mt-1 text-row text-light-text-soft dark:text-dark-text-soft">
-            {dialog.operation === 'compress'
-              ? 'Choose the archive file to create before it is added to the queue.'
-              : 'Choose the base folder before it is added to the queue.'}
-          </p>
-        </div>
-      </div>
-      <div className="space-y-4 p-4">
-        <div>
-          <label
-            htmlFor="archive-destination"
-            className="text-uxs uppercase tracking-wide text-light-text-muted dark:text-dark-text-muted"
+    <DialogShell
+      label={title}
+      title={`${actionLabel} ${count === 1 ? '1 item' : `${count} items`}?`}
+      onDismiss={close}
+      onKeyDown={onKeyDown}
+      footer={
+        <>
+          <Button
+            variant="primary"
+            ref={confirmRef}
+            disabled={busy || destinationPath.trim().length === 0}
+            onClick={() => void confirm()}
           >
-            {dialog.operation === 'compress' ? 'Archive path' : 'Base folder'}
-          </label>
-          <input
-            id="archive-destination"
-            autoComplete="off"
-            value={destinationPath}
-            onChange={(event) => setDestinationPath(event.target.value)}
-            className="mt-1 h-9 w-full select-text rounded-tab border border-light-border bg-light-window px-3 font-mono text-uxs text-light-text outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border dark:border-dark-border dark:bg-dark-window dark:text-dark-text"
-          />
-        </div>
-        {error ? (
-          <p className="flex items-center gap-2 text-uxs text-accent-amber">
-            <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" />
-            {error}
-          </p>
-        ) : null}
-      </div>
-      <div className="flex justify-end gap-2 border-t border-light-border p-4 dark:border-dark-border">
-        <button
-          type="button"
-          onClick={close}
-          className="rounded-md border border-light-border px-4 py-2 text-xs text-light-text-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border hover:bg-light-hover dark:border-dark-border dark:text-dark-text-soft dark:hover:bg-dark-hover"
-        >
-          Cancel
-        </button>
-        <button
-          ref={confirmRef}
-          type="button"
-          disabled={busy || destinationPath.trim().length === 0}
-          onClick={() => void confirm()}
-          className="rounded-md bg-accent-blue-soft px-4 py-2 text-xs font-semibold text-accent-blue-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue-border disabled:opacity-40 dark:text-accent-blue"
-        >
-          {actionLabel}
-        </button>
-      </div>
+            {actionLabel}
+          </Button>
+          <Button onClick={close}>Cancel</Button>
+        </>
+      }
+    >
+      <DialogText>
+        {dialog.operation === 'compress'
+          ? 'Choose the archive file to create before it is added to the queue.'
+          : 'Choose the base folder before it is added to the queue.'}
+      </DialogText>
+      <DialogField
+        label={dialog.operation === 'compress' ? 'Archive path' : 'Base folder'}
+        htmlFor="archive-destination"
+      >
+        <TextField
+          id="archive-destination"
+          value={destinationPath}
+          onChange={(event) => setDestinationPath(event.target.value)}
+          className="font-mono"
+        />
+      </DialogField>
+      <DialogError message={error} />
     </DialogShell>
   )
 }

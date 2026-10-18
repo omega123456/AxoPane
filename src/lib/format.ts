@@ -18,17 +18,21 @@ export function formatRate(bytesPerSecond: number): string {
   return `${formatBytes(bytesPerSecond)}/s`
 }
 
-/** Coarse "about N min left" / "about N sec left" ETA phrasing. */
-export function formatEta(seconds: number): string {
+/** Coarse duration, e.g. `3 min` / `12 sec` / `2 hr`. */
+export function formatDuration(seconds: number): string {
   if (seconds < 60) {
-    return `about ${Math.max(1, Math.round(seconds))} sec left`
+    return `${Math.max(1, Math.round(seconds))} sec`
   }
   const minutes = Math.round(seconds / 60)
   if (minutes < 60) {
-    return `about ${minutes} min left`
+    return `${minutes} min`
   }
-  const hours = Math.round(minutes / 60)
-  return `about ${hours} hr left`
+  return `${Math.round(minutes / 60)} hr`
+}
+
+/** Coarse "about N min left" / "about N sec left" ETA phrasing. */
+export function formatEta(seconds: number): string {
+  return `about ${formatDuration(seconds)} left`
 }
 
 /** Integer with thousands separators, e.g. `1,248`. */

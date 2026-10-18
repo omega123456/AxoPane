@@ -386,7 +386,7 @@ export function ThroughputChart({ samples, currentPercent, peakRate }: Throughpu
     <div
       data-testid="throughput-chart"
       data-scale-settled={chartSettled ? 'true' : 'false'}
-      className="relative w-full overflow-hidden rounded-tab border border-light-border bg-light-skeleton dark:border-dark-border dark:bg-dark-skeleton"
+      className="relative w-full overflow-hidden rounded-control border border-light-stroke bg-light-skeleton dark:border-dark-stroke dark:bg-dark-skeleton"
     >
       <svg
         aria-hidden="true"
@@ -412,7 +412,7 @@ export function ThroughputChart({ samples, currentPercent, peakRate }: Throughpu
           y="0"
           width={currentX}
           height={VIEWBOX_HEIGHT}
-          className="fill-accent-blue-light/10 dark:fill-accent-blue/10"
+          className="fill-light-accent/10 dark:fill-dark-accent/10"
         />
 
         <rect
@@ -421,7 +421,7 @@ export function ThroughputChart({ samples, currentPercent, peakRate }: Throughpu
           y="0"
           width={unfilledWidth}
           height={VIEWBOX_HEIGHT}
-          className="fill-light-surface/60 dark:fill-dark-surface/45"
+          className="fill-light-card/60 dark:fill-dark-layer/45"
         />
 
         <line
@@ -430,7 +430,7 @@ export function ThroughputChart({ samples, currentPercent, peakRate }: Throughpu
           x2={VIEWBOX_WIDTH}
           y1={CEILING_Y}
           y2={CEILING_Y}
-          className="stroke-light-border dark:stroke-dark-border"
+          className="stroke-light-divider dark:stroke-dark-divider"
           strokeWidth="1"
           strokeDasharray="2 2"
           vectorEffect="non-scaling-stroke"
@@ -442,7 +442,7 @@ export function ThroughputChart({ samples, currentPercent, peakRate }: Throughpu
           x2={VIEWBOX_WIDTH}
           y1={BASELINE_Y}
           y2={BASELINE_Y}
-          className="stroke-light-border dark:stroke-dark-border"
+          className="stroke-light-divider dark:stroke-dark-divider"
           strokeWidth="1"
           vectorEffect="non-scaling-stroke"
         />
@@ -456,7 +456,7 @@ export function ThroughputChart({ samples, currentPercent, peakRate }: Throughpu
               yScale={yScale}
               curve={curveLinear}
               clipPath={`url(#${clipId})`}
-              className="fill-accent-blue-light/18 dark:fill-accent-blue/55"
+              className="fill-light-accent/18 dark:fill-dark-accent/55"
               data-testid="throughput-chart-area"
             />
             <LinePath
@@ -465,7 +465,7 @@ export function ThroughputChart({ samples, currentPercent, peakRate }: Throughpu
               y={(sample) => scaleRate(sample.rate)}
               curve={curveLinear}
               clipPath={`url(#${clipId})`}
-              className="stroke-accent-blue-light dark:stroke-accent-blue"
+              className="stroke-light-accent dark:stroke-dark-accent"
               strokeWidth="1.5"
               fill="none"
               vectorEffect="non-scaling-stroke"
@@ -480,7 +480,7 @@ export function ThroughputChart({ samples, currentPercent, peakRate }: Throughpu
             y1={BASELINE_Y}
             y2={BASELINE_Y}
             clipPath={`url(#${clipId})`}
-            className="stroke-accent-blue-light/35 dark:stroke-accent-blue/40"
+            className="stroke-light-accent/35 dark:stroke-dark-accent/40"
             strokeWidth="1.5"
             vectorEffect="non-scaling-stroke"
           />
@@ -489,7 +489,7 @@ export function ThroughputChart({ samples, currentPercent, peakRate }: Throughpu
       <span
         data-testid="throughput-chart-leading-edge"
         style={{ left: `${currentX}%` }}
-        className="pointer-events-none absolute inset-y-0 w-px bg-accent-blue-light/45 dark:bg-accent-blue/45"
+        className="pointer-events-none absolute inset-y-0 w-px bg-light-accent/45 dark:bg-dark-accent/45"
       />
     </div>
   )
