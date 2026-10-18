@@ -5,6 +5,7 @@ import { GraphicalView, type GraphicalViewHandle } from '@/components/pane/Graph
 import type { FileRowActions } from '@/components/pane/FileRow'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import type { PaneState } from '@/types/pane'
+import { mockComputedWidth } from '@/tests/element-width'
 
 function entries(count: number): DirectoryEntry[] {
   return Array.from({ length: count }, (_, index) => ({
@@ -100,6 +101,7 @@ describe('GraphicalView', () => {
       bottom: 480,
       toJSON: () => ({}),
     })
+    mockComputedWidth(640)
   })
 
   afterEach(() => vi.restoreAllMocks())
@@ -125,6 +127,7 @@ describe('GraphicalView', () => {
       bottom: 480,
       toJSON: () => ({}),
     })
+    mockComputedWidth(80)
     renderView()
     await waitFor(() => expect(screen.getByRole('grid')).toHaveAttribute('aria-colcount', '1'))
   })

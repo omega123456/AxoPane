@@ -17,6 +17,7 @@ import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useTabsStore } from '@/stores/tabs-store'
 import { useThumbnailStore } from '@/stores/thumbnail-store'
+import { mockComputedWidth } from '@/tests/element-width'
 import type {
   DirectoryEntry,
   LoadNativeMenuRequest,
@@ -245,6 +246,7 @@ describe('FilePane state rendering', () => {
       const getBoundingClientRect = vi
         .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
         .mockReturnValue(DOMRect.fromRect({ width: 640, height: 480 }))
+      const computedWidth = mockComputedWidth(640)
       const entries = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon', 'Zeta'].map((name) =>
         entry(name),
       )
@@ -276,6 +278,7 @@ describe('FilePane state rendering', () => {
         await waitFor(() => expect(usePanesStore.getState().panes.left.typing).toBe(false))
       } finally {
         getBoundingClientRect.mockRestore()
+        computedWidth.mockRestore()
       }
     },
   )
@@ -1389,6 +1392,7 @@ describe('FilePane state rendering', () => {
     const getBoundingClientRect = vi
       .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
       .mockReturnValue(DOMRect.fromRect({ x: 0, y: 0, width: 640, height: 480 }))
+    const computedWidth = mockComputedWidth(640)
     try {
       act(() => {
         useTabsStore.getState().patchActiveTab('left', { viewMode: 'icons' })
@@ -1411,6 +1415,7 @@ describe('FilePane state rendering', () => {
     } finally {
       fireEvent.mouseUp(document)
       getBoundingClientRect.mockRestore()
+      computedWidth.mockRestore()
     }
   })
 
@@ -1418,6 +1423,7 @@ describe('FilePane state rendering', () => {
     const getBoundingClientRect = vi
       .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
       .mockReturnValue(DOMRect.fromRect({ x: 0, y: 0, width: 640, height: 480 }))
+    const computedWidth = mockComputedWidth(640)
     try {
       act(() => {
         useTabsStore.getState().patchActiveTab('left', { viewMode: 'thumbnails' })
@@ -1448,6 +1454,7 @@ describe('FilePane state rendering', () => {
     } finally {
       fireEvent.mouseUp(document)
       getBoundingClientRect.mockRestore()
+      computedWidth.mockRestore()
     }
   })
 

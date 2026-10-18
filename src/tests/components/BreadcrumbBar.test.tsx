@@ -141,17 +141,6 @@ describe('BreadcrumbBar navigation', () => {
   it('renders a visual collapse marker and title tooltip for truncated crumbs when measured widths are narrow', () => {
     const originalGetComputedStyle = window.getComputedStyle
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function mockRect(
-      this: HTMLElement,
-    ) {
-      if (this.getAttribute('aria-label') === 'Left pane path') {
-        // Measured at 10px a character plus each crumb's chrome, this keeps
-        // "…", "Br" and "Charlie" but not "Bra".
-        return DOMRect.fromRect({ width: 164 })
-      }
-
-      return DOMRect.fromRect()
-    })
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
       font: '',
       measureText: (label: string) => ({ width: label.length * 10 }) as TextMetrics,
@@ -163,6 +152,9 @@ describe('BreadcrumbBar navigation', () => {
           configurable: true,
           value: '12px ui-monospace',
         })
+        // Measured at 10px a character plus each crumb's chrome, this keeps
+        // "…", "Br" and "Charlie" but not "Bra".
+        Object.defineProperty(style, 'width', { configurable: true, value: '164px' })
       }
       return style
     })

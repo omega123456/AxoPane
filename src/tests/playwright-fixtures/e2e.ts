@@ -567,6 +567,32 @@ export const screenshotScenarios = {
       platform: 'windows',
     },
   },
+  breadcrumbsZoomed: {
+    light: {
+      commands: {
+        load_config: {
+          ...lightConfig,
+          layout: { ...lightConfig.layout, paneSplit: 0.18, zoom: '125' },
+        },
+        load_session: deepBreadcrumbSession,
+        list_dir: deepBreadcrumbListDir,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+      platform: 'windows',
+    },
+    dark: {
+      commands: {
+        load_config: {
+          ...darkConfig,
+          layout: { ...darkConfig.layout, paneSplit: 0.18, zoom: '80' },
+        },
+        load_session: deepBreadcrumbSession,
+        list_dir: deepBreadcrumbListDir,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+      platform: 'windows',
+    },
+  },
   fileTypes: {
     light: {
       commands: {
