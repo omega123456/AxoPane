@@ -1,319 +1,253 @@
 # AxoPane
 
-A cross-platform **dual-pane desktop file explorer** for **Windows and macOS**, inspired by xplorer2. AxoPane pairs two independent file panes with a shared folder tree, per-pane tabs, a classic details view, breadcrumb navigation, and a background copy/move queue. The UI is a native [Tauri](https://tauri.app/) 2 shell with [React](https://react.dev/) 19 (TypeScript). **Filesystem work runs in Rust**; the frontend handles presentation and interaction state through typed Tauri IPC (`invoke`) and events.
+A fast, lightweight **dual-pane file explorer** for **Windows and macOS**, inspired by xplorer2. AxoPane pairs two independent file panes with a shared folder tree, per-pane tabs, details / icon / thumbnail views, and a background copy/move queue. It is a native [Tauri](https://tauri.app/) 2 app: **filesystem work runs in Rust**, and the React 19 UI talks to it over typed IPC.
 
 ## Contents
 
-- **Install & downloads**
-  - [GitHub releases](#github-releases-ci)
-  - [Install by OS](#install-by-operating-system)
-  - [macOS Gatekeeper / quarantine](#macos-quarantine-exclusion-step-by-step)
-- **Using the app**
-  - [How it works](#how-it-works)
-  - [Features](#features)
-  - [Keyboard shortcuts](#keyboard-shortcuts)
-  - [Copy / move queue](#copy--move-queue)
-  - [Folder sizes](#folder-sizes)
-  - [Settings](#settings)
-- **Develop locally**
-  - [Requirements](#requirements)
-  - [Setup](#setup)
-  - [Quick start](#quick-start)
-  - [Scripts](#scripts)
-- **Reference**
-  - [Stack](#stack)
-  - [Project layout](#project-layout)
-  - [Contributing](#contributing)
-  - [License](LICENSE)
-  - [CLAUDE.md](CLAUDE.md)
+- [Installation](#installation)
+  - [System requirements](#system-requirements)
+  - [Windows](#windows)
+  - [macOS](#macos)
+  - [Updating](#updating)
+  - [Uninstalling](#uninstalling)
+- [Features](#features)
+- [Keyboard shortcuts](#keyboard-shortcuts)
+- [Copy / move queue](#copy--move-queue)
+- [Folder sizes](#folder-sizes)
+- [Settings](#settings)
+- [Development](#development)
+- [Releasing](#releasing)
+- [License](#license)
 
-## How it works
+## Installation
 
-AxoPane splits responsibilities between a Rust backend and a React frontend:
+Download the latest installer from **[GitHub Releases](https://github.com/omega123456/AxoPane/releases/latest)**.
 
-| Layer            | Responsibility                                                                                                                                 |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Rust (Tauri)** | Directory listing, sorting, in-folder filtering, folder-size capability, copy/move queue, filesystem watching, volume enumeration, persistence |
-| **React**        | Dual-pane shell, folder tree, tabs, details grid, breadcrumbs, transfer queue UI, settings modal, keyboard handling                            |
+### System requirements
 
-When you open a folder, the active pane asks Rust for entries. Sorting and filtering happen on the backend so large directories stay responsive; the details list is virtualized in the UI. Filesystem changes on watched paths arrive as incremental patches instead of full reloads.
+| OS          | Supported                                      | Release asset                 |
+| ----------- | ---------------------------------------------- | ----------------------------- |
+| **Windows** | Windows 10 / 11, x64                           | `.exe` (NSIS setup) or `.msi` |
+| **macOS**   | macOS 12 Monterey or later, Apple Silicon only | `.dmg`                        |
 
-Each pane maintains its own tabs, current path, sort order, and filter. A shared folder tree on the left follows whichever pane is active. Copy and move operations are queued jobs with per-volume concurrency, conflict prompts, and a bottom-right progress panel.
+Intel Macs and Linux are not currently built.
 
-On **Windows**, folder sizes can be filled eagerly from the [Everything](https://www.voidtools.com/) index when the Everything service is running. On **macOS** (and on Windows without Everything), sizes are computed on demand when you press **Space** on a selected folder.
+### Windows
 
-## Features
+1. Download the `…-setup.exe` (recommended) or the `.msi` from the [latest release](https://github.com/omega123456/AxoPane/releases/latest).
+2. Run the installer and follow the prompts. If SmartScreen warns about an unrecognised publisher, choose **More info → Run anyway**.
+3. Launch **AxoPane** from the Start menu.
 
-- **Dual panes** — browse two locations side by side; resize the split; switch to single-pane mode in Settings
-- **Shared folder tree** — lazy-loaded tree that tracks the active pane; expand/collapse nodes; open paths from the tree
-- **Per-pane tabs** — independent tab sets per pane; middle-click a folder to open it in a new tab; close tabs from the tab bar or context menu
-- **Classic details view** — columns for Name, Size, Items, Type, Modified, and Created; per-pane sorting with folders always first and natural-sort names; show/hide and reorder columns in Settings
-- **In-folder filtering** — type to filter the current directory, or use the filter bar; **Esc** clears the filter
-- **Folder sizes** — eager progressive sizes on Windows with Everything; manual **Space** calculation elsewhere; network paths always show **N/A**
-- **Copy / move queue** — background transfers with progress, speed, ETA, pause/resume/cancel, job reordering, and per-conflict Replace / Skip / Rename / Apply-to-all prompts
-- **Cross-pane transfers** — **F5** copies and **F6** moves from the active pane to the other pane (with confirmation)
-- **Filesystem watching** — active tabs update incrementally when files change; background tabs recheck when activated
-- **File operations** — copy, cut, paste, rename, delete, new folder, new file via keyboard, toolbar, or context menu
-- **Selection** — **Ctrl+Click** toggles selection; **Shift+Click** range-selects; **Ctrl+A** selects all
-- **Navigation** — breadcrumb path bar, **Backspace** to go up, per-pane back/forward history, open in other pane / new tab
-- **Hidden files** — global toggle in the command bar
-- **Session restore** — optional restore of open tabs, paths, sort, and layout on startup
-- **Light / dark theme** — toggle from the command bar; preference persisted locally
-- **Keyboard-first UX** — shared default shortcuts across OSes, fully customizable in Settings (clipboard shortcuts stay on OS defaults)
-- **Software updates** — background update checks, in-app download/install on Windows, update banner and Settings panel
-- **Native desktop app** — Tauri shell with native window decorations; smaller footprint than typical Electron stacks
+Notes:
 
-### Out of scope (v1)
+- **WebView2** is required. It ships with Windows 10/11; the installer fetches it if it is missing.
+- **Everything (optional)** — with [Everything](https://www.voidtools.com/) installed and running, AxoPane can size folders automatically while you browse. Without it, sizes are calculated on demand (see [Folder sizes](#folder-sizes)).
+- **Windows 11** gets a native Mica window backdrop; Windows 10 uses a solid background.
 
-File previews/thumbnails, global search, drag-and-drop between panes, batch rename tools, plugins, and Linux builds.
+### macOS
 
-## Keyboard shortcuts
-
-Default shortcuts are editable in **Settings → Keybindings**. Clipboard commands (**Ctrl+C / X / V**) follow the platform defaults and cannot be remapped.
-
-| Action                | Default              |
-| --------------------- | -------------------- |
-| Open                  | **Enter**            |
-| Go up                 | **Backspace**        |
-| Refresh               | **Ctrl+R**           |
-| Rename                | **F2**               |
-| Delete                | **Delete**           |
-| Copy to other pane    | **F5**               |
-| Move to other pane    | **F6**               |
-| New folder            | **Ctrl+Shift+N**     |
-| Calculate folder size | **Space**            |
-| Open in new tab       | **Ctrl+Enter**       |
-| Open in other pane    | **Ctrl+Shift+Enter** |
-| Select all            | **Ctrl+A**           |
-| Clear filter          | **Esc**              |
-| Settings              | **Ctrl+,**           |
-
-On macOS, **Ctrl** in the table above is shown as **⌘** in the UI.
-
-Start typing in a pane (when not focused in an input) to jump to the filter field.
-
-## Copy / move queue
-
-Copy and move actions enqueue background jobs instead of blocking the UI.
-
-- **One user action = one job.** Jobs that touch different volumes can run in parallel; jobs sharing a volume are serialized.
-- **Controls** — pause, resume, cancel, reorder pending jobs from the expanded queue panel.
-- **Conflicts** — when a destination file already exists, the affected job pauses and prompts for **Replace**, **Skip**, **Rename**, or **Apply to all**; other jobs keep running.
-- **Progress** — per-job bar, current file name, throughput, and ETA once it stabilizes.
-- **Completion** — successful jobs auto-dismiss after a delay; failed jobs stay until cleared; cancel stops as soon as possible and keeps files already copied.
-- **App close** — AxoPane warns and asks for confirmation if transfers are still active or pending.
-
-Open the queue from the bottom-right toast or expand it to manage all jobs.
-
-## Folder sizes
-
-| Platform                         | Behavior                                                                                                    |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| **Windows + Everything running** | Sizes populate progressively for the full directory; size sorting works as values arrive                    |
-| **Windows without Everything**   | Press **Space** on a folder (or use **Calculate size** in the context menu) for an on-demand recursive scan |
-| **macOS**                        | Same manual on-demand behavior as Windows without Everything                                                |
-| **Network drives / folders**     | Always **N/A** — never calculated                                                                           |
-
-If Everything is not available on Windows, a banner offers a download link and can be dismissed.
-
-## Settings
-
-Settings opens as an in-app modal with sidebar navigation:
-
-- **View & Layout** — single vs dual pane, tree width, pane split, details panel visibility, zoom, session restore, theme, hidden files, update check frequency
-- **Columns** — show/hide and reorder detail columns
-- **Keybindings** — inspect and remap shortcuts; conflict detection for duplicate bindings
-- **Updates** — current version, manual check, install downloaded updates, automatic check interval (**Off**, every hour, 5 hours, day, or 7 days)
-
-## Stack
-
-| Layer          | Technologies                                                                                                |
-| -------------- | ----------------------------------------------------------------------------------------------------------- |
-| Desktop shell  | Tauri 2, Rust (filesystem, queue, watching, persistence)                                                    |
-| UI             | React 19, TypeScript, Vite 8, Zustand, Tailwind CSS v4                                                      |
-| Virtualization | `@tanstack/react-virtual`                                                                                   |
-| Updates        | `@tauri-apps/plugin-updater`                                                                                |
-| Tests          | Vitest (coverage gates), Rust integration tests (nextest / llvm-cov), Playwright E2E + screenshot baselines |
-
-## Requirements
-
-| Tool                                                   | Notes                                                                                                                         |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| [Node.js](https://nodejs.org/)                         | LTS recommended                                                                                                               |
-| [pnpm](https://pnpm.io/)                               | Package manager (`corepack enable` or install globally)                                                                       |
-| [Rust](https://www.rust-lang.org/tools/install)        | Required to build the Tauri backend                                                                                           |
-| [cargo-nextest](https://nexte.st/book/installing.html) | For `pnpm test:rust` and `pnpm test:all`                                                                                      |
-| Rust coverage (optional)                               | For `pnpm test:rust:coverage` / `pnpm test:all`: `cargo install cargo-llvm-cov` and `rustup component add llvm-tools-preview` |
-| OS deps                                                | See [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform                                        |
-
-**Windows only (optional, for eager folder sizes):** [Everything](https://www.voidtools.com/) installed and running.
-
-## Setup
-
-Follow these steps on a new machine before **Quick start** or **Contributing**.
-
-1. **Node.js** — Install [Node.js](https://nodejs.org/) (LTS). Verify with `node -v`.
-2. **pnpm** — Enable via Corepack (`corepack enable` then `corepack prepare pnpm@latest --activate`) or [install pnpm](https://pnpm.io/installation) globally. Verify with `pnpm -v`.
-3. **Rust** — Install [rustup](https://www.rust-lang.org/tools/install) and the stable toolchain. Verify with `cargo -v` and `rustc -V`.
-4. **Tauri OS dependencies** — Install platform tools from [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) (WebView2 on Windows, Xcode CLT on macOS, etc.).
-5. **Clone and install JS deps** — From the repo root:
-   ```bash
-   git clone <repository-url>
-   cd file-explorer
-   pnpm install
-   ```
-6. **Playwright (for E2E / `pnpm test:all`)** — Install Chromium once:
-   ```bash
-   pnpm exec playwright install chromium
-   ```
-7. **cargo-nextest** — Required for Rust integration tests:
-   ```bash
-   cargo install cargo-nextest
-   ```
-8. **Rust coverage tools (optional)** — For the full CI-equivalent test run:
-   ```bash
-   rustup component add llvm-tools-preview
-   cargo install cargo-llvm-cov
-   ```
-
-For day-to-day development, steps 1–5 and **Quick start** are enough.
-
-## Quick start
-
-From the repository root (after **[Setup](#setup)** if this is a fresh clone):
-
-```bash
-pnpm install
-pnpm dev
-```
-
-The dev server uses port **1420** (`http://127.0.0.1:1420`).
-
-## Scripts
-
-| Command                       | Purpose                                                                                                                      |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm dev`                    | Run the full Tauri app in development                                                                                        |
-| `pnpm build`                  | Build frontend + native app (no bundle)                                                                                      |
-| `pnpm preview`                | Preview the built frontend                                                                                                   |
-| `pnpm tauri build`            | Build installable bundles for your OS                                                                                        |
-| `pnpm release:tauri-version`  | Interactive release helper: bumps version, prompts for release notes, runs `pnpm build`, then commits, tags `v*`, and pushes |
-| `pnpm test`                   | Run Vitest once                                                                                                              |
-| `pnpm test:watch`             | Vitest in watch mode                                                                                                         |
-| `pnpm test:coverage`          | Vitest with coverage thresholds                                                                                              |
-| `pnpm test:rust`              | Rust integration tests via cargo-nextest                                                                                     |
-| `pnpm test:rust:coverage`     | Same tests under cargo-llvm-cov                                                                                              |
-| `pnpm test:all`               | Vitest coverage + Rust llvm-cov + Playwright E2E                                                                             |
-| `pnpm test:e2e`               | Playwright E2E tests (including visual regression)                                                                           |
-| `pnpm lint` / `pnpm lint:fix` | ESLint                                                                                                                       |
-| `pnpm format`                 | Prettier check                                                                                                               |
-| `pnpm typecheck`              | TypeScript + `cargo check`                                                                                                   |
-| `pnpm clippy`                 | Rust clippy with warnings denied                                                                                             |
-
-## GitHub releases (CI)
-
-The workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) publishes GitHub Release assets for these platforms:
-
-| Platform                  | Artifacts                                          | Notes                                                                                                                                                                                     |
-| ------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Windows (x64)**         | Updater bundle + `.msi` / `.exe` (NSIS) installers | Signed when `TAURI_SIGNING_PRIVATE_KEY` secrets are configured; in-app updates download first, then restart to finish                                                                     |
-| **macOS (Apple Silicon)** | Updater bundle + `.dmg`                            | Code-signed with the self-signed `AxoPane Local Code Signing` identity when the Apple certificate secrets are configured; not Apple-notarized, so users may still see Gatekeeper warnings |
-
-The release workflow runs on **`workflow_dispatch`** (Actions → Release → Run workflow) or when you push a version tag matching `v*` (for example `v0.1.0`).
-
-1. From the repo root, run **`pnpm release:tauri-version`**. It bumps **`version`** in [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json), prompts for release notes, writes [`.github/tauri-release-body.md`](.github/tauri-release-body.md), runs **`pnpm build`** first, and only commits/tags/pushes on success.
-2. Or bump `tauri.conf.json` yourself, commit, create and push the tag (`git tag v0.1.0 && git push origin v0.1.0`), or run the workflow manually after tagging.
-3. Before the first updater-enabled release, configure `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; the workflow asserts that the updater endpoint, public key, and bundle identifier in `tauri.conf.json` are real values.
-4. For macOS releases, export the `AxoPane Local Code Signing` certificate/private-key identity as a `.p12`, base64 encode it with `openssl base64 -A -in AxoPaneLocalCodeSigning.p12 -out certificate-base64.txt`, then set `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, and `KEYCHAIN_PASSWORD` repository secrets. CI verifies the imported certificate SHA-1 is `A1006E17504884874FB91995CB27E336FC1BC348`.
-
-Releases are published directly (non-draft) by default.
-
-> See the release assets to download installers for Windows and the macOS disk image.
-
-## Install by operating system
-
-Download installers from **GitHub Releases** for your repository. Use the table below, then see the linked sections for platform-specific notes.
-
-| OS                        | Artifacts (CI)                 | Install                                                  | In-app updates                                                     | More detail                                                                                                                       |
-| ------------------------- | ------------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| **Windows (x64)**         | `.msi`, `.exe`, updater bundle | Run the installer from the release asset                 | Yes — download then restart to finish                              | [GitHub releases](#github-releases-ci)                                                                                            |
-| **macOS (Apple Silicon)** | `.dmg`, updater bundle         | Open the `.dmg` and drag **AxoPane** to **Applications** | Yes, when CI uses the stable `AxoPane Local Code Signing` identity | [macOS quarantine](#macos-quarantine-exclusion-step-by-step) · [Tauri macOS signing](https://v2.tauri.app/distribute/sign-macos/) |
-
-For **building from source** on any supported OS, use [Requirements](#requirements), [Setup](#setup), and [Quick start](#quick-start) instead of prebuilt installers.
-
-### Windows prerequisites
-
-- **WebView2** — usually already installed on Windows 10/11; Tauri bundles it when needed for older systems.
-- **Everything (optional)** — install [Everything](https://www.voidtools.com/) and keep it running for instant folder sizes and size sorting in large directories.
-
-### Windows installation
-
-1. Download the `.msi` or `.exe` installer from GitHub Releases.
-2. Run the installer and follow the prompts.
-3. Launch **AxoPane** from the Start menu or desktop shortcut.
-
-### macOS installation
-
-1. Download the `.dmg` from GitHub Releases.
+1. Download the `.dmg` from the [latest release](https://github.com/omega123456/AxoPane/releases/latest).
 2. Open the disk image and drag **AxoPane** into **Applications**.
-3. If macOS blocks the app because it is not Apple-notarized, follow [macOS quarantine exclusion](#macos-quarantine-exclusion-step-by-step) below.
+3. Clear the quarantine flag (the app is signed but **not Apple-notarized**, so Gatekeeper reports it as "damaged" or refuses to open it otherwise):
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/AxoPane.app
+   ```
+4. Launch AxoPane from Applications or Spotlight.
+5. **Recommended:** grant **Full Disk Access** in **System Settings → Privacy & Security → Full Disk Access** (add AxoPane with **+**, then restart it). Without it, macOS hides protected folders (Mail, Safari, other apps' containers, …) and background folder sizing skips them.
 
-macOS builds from CI are signed with the same self-signed `AxoPane Local Code Signing` identity so macOS sees a stable designated requirement across updates. That is what preserves Full Disk Access/TCC grants. It is not Developer ID notarization, so Gatekeeper may still report the app as damaged or refuse to open it until quarantine is cleared or you use **Open** from the context menu.
-
-After installing a CI artifact, this command should show the certificate-based requirement:
+Release builds are signed with a stable self-signed identity (`AxoPane Local Code Signing`), so Full Disk Access and other privacy grants survive in-app updates. To confirm you have a properly signed build:
 
 ```bash
 codesign -d -r- /Applications/AxoPane.app
 ```
 
-Expected requirement fragment:
+The output should contain:
 
 ```text
 identifier "com.axopane.app" and certificate leaf = H"a1006e17504884874fb91995cb27e336fc1bc348"
 ```
 
-If it shows `cdhash`, the app was ad-hoc signed and Full Disk Access will not persist across updates.
+If it shows `cdhash` instead, the build was ad-hoc signed and privacy grants will not persist across updates.
 
-## macOS quarantine exclusion (step by step)
+### Updating
 
-If macOS blocks AxoPane because it is not Apple-notarized (for example, "app is damaged" or "cannot be opened"), remove quarantine attributes from the app bundle.
+AxoPane checks GitHub Releases in the background (interval configurable in **Settings → Updates**, or **Off**). When an update is available, a banner appears; click **Download & install** and the app restarts into the new version. You can also check manually from **Settings → Updates**. Updates are signature-verified before install.
 
-1. Move the app to a stable location, such as `/Applications/AxoPane.app`.
-2. Open Terminal.
-3. Verify the quarantine flag is present:
-   ```bash
-   xattr -l "/Applications/AxoPane.app"
-   ```
-4. Remove the quarantine attribute recursively:
-   ```bash
-   xattr -dr com.apple.quarantine "/Applications/AxoPane.app"
-   ```
-5. Confirm the attribute is gone:
-   ```bash
-   xattr -l "/Applications/AxoPane.app"
-   ```
-   If nothing prints for `com.apple.quarantine`, quarantine is removed.
-6. Start the app from Finder. If Gatekeeper still prompts, right-click the app, choose **Open**, then confirm **Open**.
+On macOS, updating in-app keeps the quarantine flag cleared — you only need step 3 above for the first install (or after manually downloading a new `.dmg`).
 
-Use this only for binaries you trust.
+### Uninstalling
 
-## Project layout
+- **Windows** — **Settings → Apps → Installed apps → AxoPane → Uninstall**.
+- **macOS** — quit AxoPane and move `/Applications/AxoPane.app` to the Trash. To remove settings and caches too, delete `~/Library/Application Support/com.axopane.app` and `~/Library/Caches/com.axopane.app`.
+
+## Features
+
+**Layout and navigation**
+
+- **Dual panes** — two locations side by side with a resizable split, or single-pane mode
+- **Shared folder tree** — lazy-loaded, follows the active pane; shows drives/volumes with capacity bars, **Favourites**, and the **Trash / Recycle Bin**
+- **Per-pane tabs** — middle-click or **Ctrl+Enter** to open in a new tab; drag to reorder or move tabs between panes; lock tabs; close tabs to the left/right; add a tab's folder to Favourites
+- **Views** — **Details**, **Icons**, and **Large thumbnails** (native OS thumbnails), chosen per tab
+- **Details view** — Name, Size, Items, Type, Modified, Created; folders first, natural-sort names; show/hide and reorder columns
+- **Breadcrumb path bar** — click segments, or edit the path directly; on Windows, environment variables such as `%USERPROFILE%` expand
+- **History** — per-pane back/forward, **Backspace** to go up, open in the other pane / new tab
+- **In-folder filtering** — start typing in a pane to filter; **Esc** clears
+- **Details panel** — type, path, and dates for the current selection
+- **Live updates** — open folders refresh through native filesystem watches, with no polling
+
+**File operations**
+
+- Copy, cut, paste, rename (filename selected without the extension), new folder / file, delete to Trash / Recycle Bin, delete permanently
+- **OS clipboard integration** — copy in AxoPane and paste in Explorer / Finder, or the other way round
+- **Drag and drop** — between panes, tabs, the tree, and Favourites; drag files out to other applications, with copy/move feedback
+- **Copy / move queue** — background jobs with progress, conflict prompts, and folder merging on move (see [below](#copy--move-queue))
+- **F5 / F6** copy or move the selection to the other pane
+- **ZIP archives** — compress and extract from the context menu, preserving permissions and symlinks
+- **Trash / Recycle Bin** — browse, restore items to their original location, empty
+- **Properties** dialog; **Copy as path**; **Open with**, and on macOS change the default app for a file type
+- **Native context menu items** — Windows shell extensions (classic and Windows 11) appear in AxoPane's context menu
+- **Eject** removable volumes from the tree
+- **Windows permissions** — read-only files are deleted cleanly, and access-denied errors offer to restart AxoPane as administrator
+
+**Look and feel**
+
+- Light, dark, or follow-system theme; adjustable zoom
+- Configurable date format (absolute or relative, with optional time / seconds)
+- Hidden files toggle
+- Optional session restore (tabs, paths, sort, layout)
+- Keyboard-first: every command has a remappable shortcut
+- Built-in log viewer with adjustable log level
+
+## Keyboard shortcuts
+
+Shortcuts are editable in **Settings → Keybindings** (with conflict detection). Clipboard shortcuts (**Ctrl+C / X / V**) follow the OS and cannot be remapped. On macOS, **Ctrl** below means **⌘**.
+
+| Action                | Windows              | macOS                            |
+| --------------------- | -------------------- | -------------------------------- |
+| Open                  | **Enter**            | **Enter**                        |
+| Go up                 | **Backspace**        | **Backspace**                    |
+| Refresh               | **Ctrl+R**           | **⌘R**                           |
+| Rename                | **F2**               | **F2**                           |
+| Delete (to Trash)     | **Delete**           | **F8** or **Delete**             |
+| Delete permanently    | **Shift+Delete**     | **Shift+F8** or **Shift+Delete** |
+| Copy to other pane    | **F5**               | **F5**                           |
+| Move to other pane    | **F6**               | **F6**                           |
+| New folder            | **Ctrl+Shift+N**     | **⌘⇧N**                          |
+| Calculate folder size | **Space**            | **Space**                        |
+| Open in new tab       | **Ctrl+Enter**       | **⌘Enter**                       |
+| Open in other pane    | **Ctrl+Shift+Enter** | **⌘⇧Enter**                      |
+| Select all            | **Ctrl+A**           | **⌘A**                           |
+| Clear filter          | **Esc**              | **Esc**                          |
+| Settings              | **Ctrl+,**           | **⌘,**                           |
+
+**New file**, **Restore**, and **Empty Trash** have no default shortcut but can be bound.
+
+Selection: **Ctrl+Click** toggles, **Shift+Click** selects a range.
+
+## Copy / move queue
+
+Copy, move, delete, and archive actions run as background jobs instead of blocking the UI.
+
+- **One user action = one job.** Jobs on different volumes run in parallel; jobs sharing a volume are serialized.
+- **Controls** — pause, resume, skip, cancel, and reorder pending jobs from the expanded queue panel.
+- **Conflicts** — when a destination already exists, only that job pauses and asks **Replace**, **Skip**, **Rename**, or **Apply to all**. Moving a folder onto an existing one merges them.
+- **Progress** — per-job bar, current file, throughput chart, and ETA.
+- **Completion** — successful jobs auto-dismiss; failed jobs stay until cleared; cancel keeps files already copied.
+- **App close** — AxoPane asks for confirmation if transfers are still running or pending.
+
+## Folder sizes
+
+| Platform                         | Behaviour                                                                                                                                        |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **macOS**                        | A background folder-size index sizes folders as you browse; folders you open are sized right away. Grant Full Disk Access for complete coverage. |
+| **Windows + Everything running** | Sizes populate progressively from the Everything index; size sorting works as values arrive.                                                     |
+| **Windows without Everything**   | On demand: press **Space** on a folder, use **Calculate size** in the context menu, or **Calculate all folder sizes** in the toolbar.            |
+| **Network locations**            | Always **N/A** — never calculated.                                                                                                               |
+
+Automatic sizing can be turned off in **Settings → View and layout**; on-demand calculation always works.
+
+## Settings
+
+Open with **Ctrl+,** / **⌘,** or the gear icon.
+
+- **View and layout** — hidden files, theme, zoom, default pane mode (dual / single), default view for new tabs, queue toast behaviour, session restore, automatic folder sizes
+- **Columns** — show/hide and reorder detail columns
+- **Dates** — date format, show time / seconds, relative dates
+- **Keybindings** — search, inspect, and remap shortcuts
+- **Updates** — current version, manual check, download & install, automatic check interval (**Off**, hourly, every 5 hours, daily, weekly)
+- **Logs** — capture level and an in-app log viewer
+
+## Development
+
+### Requirements
+
+- [Node.js](https://nodejs.org/) LTS and [pnpm](https://pnpm.io/) (`corepack enable`)
+- [Rust](https://www.rust-lang.org/tools/install) stable
+- Platform tooling from the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) (WebView2 + MSVC build tools on Windows, Xcode Command Line Tools on macOS)
+- For the full test suite: `cargo install cargo-nextest cargo-llvm-cov`, `rustup component add llvm-tools-preview`, and `pnpm exec playwright install chromium`
+
+### Quick start
+
+```bash
+git clone https://github.com/omega123456/AxoPane.git
+cd AxoPane
+pnpm install
+pnpm dev            # runs the app with the Vite dev server on port 1420
+```
+
+To build installable bundles for your own OS: `pnpm tauri build`.
+
+### Scripts
+
+| Command                       | Purpose                                                  |
+| ----------------------------- | -------------------------------------------------------- |
+| `pnpm dev`                    | Run the Tauri app in development                         |
+| `pnpm build`                  | Build frontend + native app (no bundle)                  |
+| `pnpm tauri build`            | Build installable bundles for your OS                    |
+| `pnpm test` / `test:watch`    | Vitest                                                   |
+| `pnpm test:coverage`          | Vitest with 90% coverage gates                           |
+| `pnpm test:rust`              | Rust integration tests via cargo-nextest                 |
+| `pnpm test:rust:coverage`     | Rust tests under cargo-llvm-cov with coverage gates      |
+| `pnpm test:e2e`               | Playwright E2E + screenshot regression                   |
+| `pnpm test:all`               | All of the above                                         |
+| `pnpm lint` / `pnpm lint:fix` | ESLint                                                   |
+| `pnpm format`                 | Prettier check                                           |
+| `pnpm typecheck`              | TypeScript + `cargo check`                               |
+| `pnpm clippy`                 | Rust clippy with warnings denied                         |
+| `pnpm release:tauri-version`  | Interactive release helper (see [Releasing](#releasing)) |
+
+### Stack
+
+| Layer         | Technologies                                                                   |
+| ------------- | ------------------------------------------------------------------------------ |
+| Desktop shell | Tauri 2, Rust (filesystem, queue, watching, folder sizes, persistence)         |
+| UI            | React 19, TypeScript, Vite, Zustand, TanStack Query / Virtual, Tailwind CSS v4 |
+| Tests         | Vitest, Rust integration tests (nextest / llvm-cov), Playwright                |
+
+### Project layout
 
 ```
-file-explorer/
-├── src/                 # React app: components, lib (IPC wrappers), stores, styles, types
-├── src-tauri/           # Rust backend, Tauri config, permissions, persistence, icons
-├── e2e/                 # Playwright specs (including visual regression)
-├── package.json         # Frontend scripts and dependencies
-└── CLAUDE.md            # Maintainer/agent notes: architecture, commands, testing gates
+AxoPane/
+├── src/          # React app: components, lib (IPC wrappers), stores, types; tests in src/tests/
+├── src-tauri/    # Rust backend, Tauri config, capabilities, icons; tests in src-tauri/tests/
+├── e2e/          # Playwright specs and screenshot baselines
+├── scripts/      # Build, coverage, and release helpers
+└── CLAUDE.md     # Architecture, styling, and testing rules for contributors
 ```
 
-## Contributing
+### Contributing
 
-1. Complete **[Setup](#setup)** (including Playwright, cargo-nextest, and Rust coverage tools if you run the full suite), then stay on the latest dependencies with `pnpm install` as needed.
-2. Run `pnpm lint`, `pnpm typecheck`, and `pnpm test:all` (Vitest coverage, Rust with llvm-cov, Playwright) before opening a PR.
-3. For behavior that depends on the native shell, verify with `pnpm dev` when possible. See **[CLAUDE.md](CLAUDE.md)** for IPC conventions, styling constraints, and screenshot baseline workflow.
+Run `pnpm lint`, `pnpm typecheck`, and `pnpm test:all` before opening a PR. Every change must work on both Windows and macOS. See [CLAUDE.md](CLAUDE.md) for IPC conventions, styling constraints, and the screenshot baseline workflow.
+
+## Releasing
+
+[`.github/workflows/release.yml`](.github/workflows/release.yml) builds and publishes a GitHub Release (Windows x64 `.msi` / `.exe`, macOS Apple Silicon `.dmg`, plus updater bundles and `latest.json`) when a `v*` tag is pushed or the workflow is run manually.
+
+1. Run **`pnpm release:tauri-version`**. It bumps the version, prompts for release notes (written to [`.github/tauri-release-body.md`](.github/tauri-release-body.md)), runs `pnpm build`, and only then commits, tags, and pushes.
+2. Required repository secrets:
+   - `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — updater signing.
+   - `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `KEYCHAIN_PASSWORD` — the `AxoPane Local Code Signing` identity exported as `.p12` and base64-encoded (`openssl base64 -A -in AxoPaneLocalCodeSigning.p12 -out certificate-base64.txt`). CI verifies its SHA-1 is `A1006E17504884874FB91995CB27E336FC1BC348`.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+[MIT](LICENSE)
