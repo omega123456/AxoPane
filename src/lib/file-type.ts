@@ -12,6 +12,7 @@ export type FileCategory =
   | 'config'
   | 'text'
   | 'office'
+  | 'pdf'
   | 'image'
   | 'audio'
   | 'video'
@@ -385,8 +386,8 @@ const EXTENSIONS: Record<Exclude<FileCategory, 'folder' | 'generic'>, string[]> 
     'sub',
     'ass',
   ],
+  pdf: ['pdf'],
   office: [
-    'pdf',
     'doc',
     'docx',
     'dot',

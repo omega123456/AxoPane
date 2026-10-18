@@ -52,3 +52,38 @@ export function FolderGlyph(props: IconProps) {
     </svg>
   )
 }
+
+/**
+ * Page outline with a filled "PDF" label, like the Acrobat/Explorer document
+ * icon. Both the outline and the label follow `currentColor`.
+ */
+export function PdfGlyph(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+      <rect x="1" y="11" width="17" height="8.5" rx="1.5" fill="currentColor" stroke="none" />
+      <text
+        x="9.5"
+        y="17.6"
+        textAnchor="middle"
+        fontSize="6.5"
+        fontWeight="700"
+        fontFamily="Arial, Helvetica, sans-serif"
+        className="fill-white"
+        stroke="none"
+      >
+        PDF
+      </text>
+    </svg>
+  )
+}

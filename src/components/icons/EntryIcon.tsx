@@ -19,7 +19,7 @@ import {
   FileVideoIcon,
   TypeIcon,
 } from '@/components/icons'
-import { FolderGlyph } from '@/components/icons/custom-icons'
+import { FolderGlyph, PdfGlyph } from '@/components/icons/custom-icons'
 
 type IconComponent = ComponentType<LucideProps>
 
@@ -35,6 +35,7 @@ const CATEGORY_STYLES: Record<Exclude<FileCategory, 'folder'>, CategoryStyle> = 
   config: { Glyph: FileCogIcon, colorClassName: 'text-file-config' },
   text: { Glyph: FileTextIcon, colorClassName: 'text-file-doc' },
   office: { Glyph: FileTypeIcon, colorClassName: 'text-file-office' },
+  pdf: { Glyph: PdfGlyph, colorClassName: 'text-file-pdf' },
   image: { Glyph: FileImageIcon, colorClassName: 'text-file-image' },
   audio: { Glyph: FileAudioIcon, colorClassName: 'text-file-audio' },
   video: { Glyph: FileVideoIcon, colorClassName: 'text-file-video' },

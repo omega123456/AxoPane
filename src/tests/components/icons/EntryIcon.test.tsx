@@ -13,7 +13,7 @@ describe('EntryIcon', () => {
     ['index.html', 'web'],
     ['settings.json', 'config'],
     ['notes.txt', 'text'],
-    ['report.pdf', 'office'],
+    ['report.pdf', 'pdf'],
     ['photo.png', 'image'],
     ['song.mp3', 'audio'],
     ['clip.mp4', 'video'],
