@@ -1,0 +1,26 @@
+/* Selawik: Microsoft's OFL, Segoe UI metric-compatible font. Bundled so macOS
+   matches the Windows UI font; Windows resolves real Segoe UI first. U+2026 is
+   excluded because Selawik's ellipsis glyph renders as a single dot. */
+@font-face {
+  font-family: 'Selawik';
+  font-weight: 400;
+  font-display: block;
+  unicode-range: U+0000-2025, U+2027-FFFF;
+  src: url(./selawik-regular.woff2) format('woff2');
+}
+
+@font-face {
+  font-family: 'Selawik';
+  font-weight: 600;
+  font-display: block;
+  unicode-range: U+0000-2025, U+2027-FFFF;
+  src: url(./selawik-semibold.woff2) format('woff2');
+}
+
+@font-face {
+  font-family: 'Selawik';
+  font-weight: 700;
+  font-display: block;
+  unicode-range: U+0000-2025, U+2027-FFFF;
+  src: url(./selawik-bold.woff2) format('woff2');
+}

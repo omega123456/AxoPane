@@ -1,6 +1,8 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import '@fontsource-variable/cascadia-code'
 import App from './App'
+import './assets/fonts/selawik.css'
 import './index.css'
 import { AppQueryProvider } from './providers/AppQueryProvider'
 import { initializeTheme } from './stores/theme-store'
