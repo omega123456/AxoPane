@@ -1,6 +1,8 @@
 import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
+import { formatBytes } from '@/lib/format'
 import { isPathInsideVolume } from '@/lib/volumes'
+import { useConfigStore } from '@/stores/config-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { LoaderCircleIcon } from '@/components/icons'
@@ -38,9 +40,30 @@ export function StatusBar() {
     [entries, focusedEntryId],
   )
   const volumes = usePanesStore(useShallow((state) => state.volumes))
-  const selectionCount = useSelectionStore(
-    (state) => state.selections[activePaneId]?.selectedIds.length ?? 0,
+  const selectedIds = useSelectionStore((state) => state.selections[activePaneId]?.selectedIds)
+  const selectionCount = selectedIds?.length ?? 0
+  // Folder sizes only count where an index (Everything / the macOS index)
+  // keeps them current; otherwise the total is files only.
+  const autoFolderSize = useConfigStore((state) => state.autoFolderSize)
+  const sizeStates = usePanesStore((state) =>
+    autoFolderSize && state.folderSizeIndexStatus?.isAvailable ? state.sizeStates : undefined,
   )
+  // With a multi-selection the focused row's name says nothing useful and
+  // would crowd out the selection stats.
+  const shownEntry = selectionCount <= 1 ? focusedEntry : undefined
+  // `null` when no selected item has a known size, so an unsized folder
+  // selection reads as blank rather than "0 B".
+  const selectedBytes = useMemo(() => {
+    const ids = new Set(selectedIds)
+    let total: number | null = null
+    for (const entry of entries) {
+      const size = entry.isDir ? sizeStates?.[entry.path]?.sizeBytes : entry.sizeBytes
+      if (ids.has(entry.id) && size != null) {
+        total = (total ?? 0) + size
+      }
+    }
+    return total
+  }, [entries, selectedIds, sizeStates])
   const volume = volumes.find((candidate) => isPathInsideVolume(path ?? '', candidate.mountRoot))
   const freeLabel = volume ? formatBytes(volume.freeBytes) : 'Unknown'
   const totalLabel = volume ? formatBytes(volume.totalBytes) : 'Unknown'
@@ -57,6 +80,12 @@ export function StatusBar() {
       <span>{itemCount} items</span>
       <Dot />
       <span>{selectionCount} selected</span>
+      {selectedBytes !== null ? (
+        <>
+          <Dot />
+          <span>{formatBytes(selectedBytes)}</span>
+        </>
+      ) : null}
       {countingItems ? (
         <>
           <Dot />
@@ -68,10 +97,10 @@ export function StatusBar() {
       <Dot />
       <span className="truncate">{typing ? 'Filtering…' : path}</span>
       <div className="flex-1" />
-      {focusedEntry ? (
+      {shownEntry ? (
         <span className="truncate">
-          {focusedEntry.name}
-          {focusedEntry.isDir ? ' · folder' : ` · ${focusedEntry.typeLabel}`}
+          {shownEntry.name}
+          {shownEntry.isDir ? ' · folder' : ` · ${shownEntry.typeLabel}`}
         </span>
       ) : null}
       {sizesUpdating ? (
@@ -82,7 +111,7 @@ export function StatusBar() {
       ) : null}
       {volume ? (
         <>
-          {focusedEntry ? <Dot /> : null}
+          {shownEntry ? <Dot /> : null}
           <span>
             {freeLabel} free of {totalLabel}
           </span>
@@ -90,17 +119,4 @@ export function StatusBar() {
       ) : null}
     </footer>
   )
-}
-
-function formatBytes(value: number) {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let current = value
-  let unitIndex = 0
-
-  while (current >= 1024 && unitIndex < units.length - 1) {
-    current /= 1024
-    unitIndex += 1
-  }
-
-  return `${current.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`
 }

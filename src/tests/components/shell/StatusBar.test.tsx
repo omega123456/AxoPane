@@ -2,6 +2,7 @@ import { act, render, screen } from '@testing-library/react'
 import { beforeEach } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { StatusBar } from '@/components/shell/StatusBar'
+import { useConfigStore } from '@/stores/config-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import type { DirectoryEntry } from '@/lib/types/ipc'
@@ -40,7 +41,41 @@ beforeEach(() => {
   ipc.install()
   usePanesStore.getState().reset()
   useSelectionStore.getState().reset()
+  useConfigStore.setState({ autoFolderSize: true })
 })
+
+function selectAll(indexAvailable: boolean) {
+  act(() => {
+    usePanesStore.setState((state) => ({
+      activePaneId: 'left',
+      panes: {
+        ...state.panes,
+        left: {
+          ...state.panes.left,
+          path: 'C:\\Users',
+          typing: false,
+          entries: [reportEntry, docsEntry],
+          focusedEntryId: 'r',
+        },
+      },
+      volumes: [],
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: indexAvailable,
+        state: indexAvailable ? 'upToDate' : 'unavailable',
+      },
+      sizeStates: {
+        [docsEntry.path]: { state: 'ready', source: 'everything', sizeBytes: 2048 },
+      },
+    }))
+    useSelectionStore.setState((state) => ({
+      selections: {
+        ...state.selections,
+        left: { ...state.selections.left, selectedIds: ['r', 'd'] },
+      },
+    }))
+  })
+}
 
 describe('StatusBar', () => {
   it('renders counts, focused entry, and volume free space from the stores', () => {
@@ -152,5 +187,53 @@ describe('StatusBar', () => {
 
     expect(screen.getByText('C:\\Right')).toBeInTheDocument()
     expect(screen.getByText('1 items')).toBeInTheDocument()
+  })
+
+  it('totals selected files only when no folder-size index is available', () => {
+    selectAll(false)
+
+    render(<StatusBar />)
+
+    expect(screen.getByText('2 selected')).toBeInTheDocument()
+    expect(screen.getByText('1.0 KB')).toBeInTheDocument()
+  })
+
+  it('adds indexed folder sizes to the selection total', () => {
+    selectAll(true)
+
+    render(<StatusBar />)
+
+    expect(screen.getByText('3.0 KB')).toBeInTheDocument()
+  })
+
+  it('leaves folder sizes out when automatic folder sizing is off', () => {
+    selectAll(true)
+    useConfigStore.setState({ autoFolderSize: false })
+
+    render(<StatusBar />)
+
+    expect(screen.getByText('1.0 KB')).toBeInTheDocument()
+  })
+
+  it('omits the size when no selected item has a known size', () => {
+    selectAll(false)
+    act(() => {
+      useSelectionStore.setState((state) => ({
+        selections: { ...state.selections, left: { ...state.selections.left, selectedIds: ['d'] } },
+      }))
+    })
+
+    render(<StatusBar />)
+
+    expect(screen.getByText('1 selected')).toBeInTheDocument()
+    expect(screen.queryByText(/ B$/)).not.toBeInTheDocument()
+  })
+
+  it('hides the focused entry name while several items are selected', () => {
+    selectAll(true)
+
+    render(<StatusBar />)
+
+    expect(screen.queryByText(/Report.txt/)).not.toBeInTheDocument()
   })
 })
