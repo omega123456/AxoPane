@@ -6,7 +6,7 @@ import { focusRenameInput, type FileRowActions } from './FileRow'
 import { SizeValue } from './SizeValue'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import { thumbnailFingerprintKey, useThumbnailStore } from '@/stores/thumbnail-store'
-import { FOCUS_RING, FOCUS_RING_INSET } from '@/lib/focus-ring'
+import { FOCUS_RING_INSET } from '@/lib/focus-ring'
 
 export type EntryCardThumbnail = {
   state: 'ready' | 'loading' | 'unavailable' | 'failed'
@@ -190,7 +190,7 @@ function EntryCardImpl({
         onBlur={actions.onRenameBlur}
         onChange={(event) => actions.onRenameChange(event.target.value)}
         onKeyDown={onRenameKeyDown}
-        className={`w-full min-w-0 select-text rounded-control border border-light-accent dark:border-dark-accent bg-light-base px-2 py-1 font-mono text-caption text-light-text outline-none dark:bg-dark-base dark:text-dark-text ${FOCUS_RING}`}
+        className={`w-full min-w-0 select-text rounded-control border border-light-accent dark:border-dark-accent bg-light-base px-2 py-1 font-mono text-caption text-light-text outline-none dark:bg-dark-base dark:text-dark-text`}
       />
       {renameError ? (
         <span className="block truncate pt-1 text-caption text-light-warning dark:text-dark-warning">

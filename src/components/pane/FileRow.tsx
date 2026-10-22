@@ -10,7 +10,6 @@ import { SizeValue } from './SizeValue'
 
 import type { DragEvent, KeyboardEvent, MouseEvent } from 'react'
 import { memo, useEffect, useMemo, useRef } from 'react'
-import { FOCUS_RING } from '@/lib/focus-ring'
 
 /**
  * Stable, id-keyed handler dispatcher for a pane's rows.
@@ -145,7 +144,7 @@ function FileRowImpl({
                     onBlur={actions.onRenameBlur}
                     onChange={(event) => actions.onRenameChange(event.target.value)}
                     onKeyDown={onRenameKeyDown}
-                    className={`min-w-0 flex-1 select-text rounded-control border border-light-accent dark:border-dark-accent bg-light-base px-2 py-1 font-mono text-caption text-light-text outline-none dark:bg-dark-base dark:text-dark-text ${FOCUS_RING}`}
+                    className={`min-w-0 flex-1 select-text rounded-control border border-light-accent dark:border-dark-accent bg-light-base px-2 py-1 font-mono text-caption text-light-text outline-none dark:bg-dark-base dark:text-dark-text`}
                   />
                 </span>
               </span>
