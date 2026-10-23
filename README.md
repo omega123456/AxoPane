@@ -2,6 +2,9 @@
 
 A fast, lightweight **dual-pane file explorer** for **Windows and macOS**, inspired by xplorer2. AxoPane pairs two independent file panes with a shared folder tree, per-pane tabs, details / icon / thumbnail views, and a background copy/move queue. It is a native [Tauri](https://tauri.app/) 2 app: **filesystem work runs in Rust**, and the React 19 UI talks to it over typed IPC.
 
+[feature-tour.webm](https://github.com/user-attachments/assets/8b8db964-8d03-44bc-b7f0-0beb31e6275b)
+
+
 ## Contents
 
 - [Installation](#installation)
