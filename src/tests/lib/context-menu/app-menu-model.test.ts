@@ -148,6 +148,18 @@ describe('buildAppContextMenuContent', () => {
         .flatMap((item) => item.rows)
         .find((row) => row.label === 'Remove from Favourites'),
     ).toMatchObject({ action: { kind: 'remove-favourite', path: folderEntry.path } })
+    expect(
+      favouriteContent.sections
+        .flatMap((item) => item.rows)
+        .find((row) => row.label === 'Rename Favourite'),
+    ).toMatchObject({ action: { kind: 'rename-favourite', path: folderEntry.path } })
+
+    const treeRows = buildAppContextMenuContent(
+      'left',
+      { kind: 'tree', path: folderEntry.path },
+      'windows',
+    ).sections.flatMap((item) => item.rows)
+    expect(treeRows.some((row) => row.label === 'Rename Favourite')).toBe(false)
   })
 
   it('uses the targeted tab path and exposes lock state in tab menus', () => {

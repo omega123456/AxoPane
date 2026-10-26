@@ -57,6 +57,8 @@ describe('dispatchContextMenuAction', () => {
 
     dispatchContextMenuAction('left', { kind: 'add-favourite', path: 'C:\\root' })
     await waitFor(() => expect(useConfigStore.getState().favourites).toEqual(['C:\\root']))
+    dispatchContextMenuAction('left', { kind: 'rename-favourite', path: 'C:\\root' })
+    expect(useConfigStore.getState().renamingFavourite).toBe('C:\\root')
     dispatchContextMenuAction('left', { kind: 'remove-favourite', path: 'C:\\root' })
     await waitFor(() => expect(useConfigStore.getState().favourites).toEqual([]))
   })

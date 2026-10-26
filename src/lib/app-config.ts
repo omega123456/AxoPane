@@ -29,6 +29,7 @@ export function defaultAppConfig(): AppConfig {
     autoFolderSize: true,
     autoExpandActiveQueueToasts: false,
     favourites: [],
+    favouriteNames: {},
     favouritesCollapsed: false,
   }
 }
@@ -70,6 +71,7 @@ export function buildAppConfig(): AppConfig {
     autoFolderSize: config.autoFolderSize,
     autoExpandActiveQueueToasts: config.autoExpandActiveQueueToasts,
     favourites: config.favourites,
+    favouriteNames: config.favouriteNames,
     favouritesCollapsed: config.favouritesCollapsed,
   }
 }
@@ -135,6 +137,7 @@ export function hydrateAppConfig(config: AppConfig) {
     autoFolderSize: next.autoFolderSize ?? true,
     autoExpandActiveQueueToasts: next.autoExpandActiveQueueToasts,
     favourites: next.favourites ?? [],
+    favouriteNames: next.favouriteNames ?? {},
     favouritesCollapsed: next.favouritesCollapsed ?? false,
   })
   useLayoutStore.getState().hydrate(next.layout, next.columns)

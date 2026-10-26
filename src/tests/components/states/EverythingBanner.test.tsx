@@ -43,6 +43,7 @@ describe('EverythingBanner', () => {
       autoFolderSize: true,
       autoExpandActiveQueueToasts: false,
       favourites: [],
+      favouriteNames: {},
       favouritesCollapsed: false,
       keybindings: {},
       columns: [],

@@ -51,6 +51,8 @@ async function handleFavouritesDrop(event: DragEvent<HTMLElement>) {
  */
 export function FavouritesPanel() {
   const favourites = useConfigStore((state) => state.favourites)
+  const favouriteNames = useConfigStore((state) => state.favouriteNames)
+  const renamingFavourite = useConfigStore((state) => state.renamingFavourite)
   const collapsed = useConfigStore((state) => state.favouritesCollapsed)
   const activePath = usePanesStore((state) => state.panes[state.activePaneId].path)
   const heightPx = useLayoutStore((state) => state.favouritesHeightPx)
@@ -77,13 +79,15 @@ export function FavouritesPanel() {
         const paneId = usePanesStore.getState().activePaneId
         useContextMenuStore.getState().openMenu({
           paneId,
-          title: favouriteLabel(path),
+          title: useConfigStore.getState().favouriteNames[path] ?? favouriteLabel(path),
           chip: 'DIR',
           x: event.clientX,
           y: event.clientY,
           ...buildContextMenuContent(paneId, { kind: 'favourite', path }, detectPlatformOs()),
         })
       },
+      onRename: (path, name) => void useConfigStore.getState().renameFavourite(path, name),
+      onRenameCancel: () => useConfigStore.getState().setRenamingFavourite(null),
     }),
     [],
   )
@@ -126,8 +130,10 @@ export function FavouritesPanel() {
             <FavouriteTreeRow
               key={path}
               path={path}
+              name={favouriteNames[path]}
               index={index}
               isCurrent={pathsMatch(activePath, path)}
+              isRenaming={renamingFavourite === path}
               actions={actions}
             />
           ))}

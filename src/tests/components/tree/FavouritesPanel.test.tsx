@@ -4,6 +4,7 @@ import { beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { FavouritesPanel } from '@/components/tree/FavouritesPanel'
 import { useConfigStore } from '@/stores/config-store'
+import { useContextMenuStore } from '@/stores/context-menu-store'
 import { useDragStore } from '@/stores/drag-store'
 import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
@@ -148,5 +149,55 @@ describe('FavouritesPanel', () => {
     await waitFor(() =>
       expect(useConfigStore.getState().favourites).toEqual(['C:\\B', 'C:\\C', 'C:\\A']),
     )
+  })
+
+  it('shows a custom name with the path as a tooltip and in the context menu title', () => {
+    useConfigStore.setState({
+      favourites: FAVOURITES,
+      favouriteNames: { 'D:\\projects': 'Code' },
+    })
+    render(<FavouritesPanel />)
+
+    const row = screen.getByRole('button', { name: 'Code' })
+    expect(row).toHaveAttribute('title', 'D:\\projects')
+    expect(screen.getByRole('button', { name: 'Documents' })).not.toHaveAttribute('title')
+
+    fireEvent.contextMenu(row, { clientX: 10, clientY: 20 })
+    expect(useContextMenuStore.getState().menu?.title).toBe('Code')
+  })
+
+  it('renames a favourite inline and commits on Enter', async () => {
+    const user = userEvent.setup()
+    const saveConfig = vi.fn((payload) => payload.config)
+    ipc.override('save_config', saveConfig)
+    useConfigStore.setState({ favourites: FAVOURITES, renamingFavourite: 'D:\\projects' })
+    render(<FavouritesPanel />)
+
+    const input = screen.getByRole('textbox', { name: 'Rename favourite projects' })
+    expect(input).toHaveFocus()
+    expect(input.closest('[data-favourite-row]')).toHaveAttribute('draggable', 'false')
+    await user.keyboard('Code{Enter}')
+
+    expect(await screen.findByRole('button', { name: 'Code' })).toBeInTheDocument()
+    expect(useConfigStore.getState().renamingFavourite).toBeNull()
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({ favouriteNames: { 'D:\\projects': 'Code' } }),
+      }),
+    )
+  })
+
+  it('cancels an inline rename on Escape without saving', async () => {
+    const user = userEvent.setup()
+    const saveConfig = vi.fn((payload) => payload.config)
+    ipc.override('save_config', saveConfig)
+    useConfigStore.setState({ favourites: FAVOURITES, renamingFavourite: 'D:\\projects' })
+    render(<FavouritesPanel />)
+
+    await user.keyboard('Code{Escape}')
+
+    expect(await screen.findByRole('button', { name: 'projects' })).toBeInTheDocument()
+    expect(useConfigStore.getState().favouriteNames).toEqual({})
+    expect(saveConfig).not.toHaveBeenCalled()
   })
 })

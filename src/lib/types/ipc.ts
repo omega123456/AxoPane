@@ -304,6 +304,8 @@ export type AppConfig = {
   autoFolderSize: boolean
   autoExpandActiveQueueToasts: boolean
   favourites: string[]
+  /** Custom display names for favourites, keyed by the favourite's path. */
+  favouriteNames: Record<string, string>
   favouritesCollapsed: boolean
 }
 

@@ -30,6 +30,14 @@ describe('app-config favourites', () => {
     expect(buildAppConfig().favouritesCollapsed).toBe(true)
   })
 
+  it('defaults favourite names to none and round-trips them', () => {
+    expect(defaultAppConfig().favouriteNames).toEqual({})
+    hydrateAppConfig(baseConfig({ favouriteNames: undefined as unknown as Record<string, string> }))
+    expect(useConfigStore.getState().favouriteNames).toEqual({})
+    hydrateAppConfig(baseConfig({ favouriteNames: { 'D:\\projects': 'Code' } }))
+    expect(buildAppConfig().favouriteNames).toEqual({ 'D:\\projects': 'Code' })
+  })
+
   it('round-trips favourites through the config store', () => {
     hydrateAppConfig(baseConfig({ favourites: ['C:\\Users\\Omega', '/Users/omega'] }))
     expect(buildAppConfig().favourites).toEqual(['C:\\Users\\Omega', '/Users/omega'])

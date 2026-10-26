@@ -15,6 +15,7 @@ import {
   addFavouriteContextAction,
   moveTabContextAction,
   removeFavouriteContextAction,
+  renameFavouriteContextAction,
   setTabLockedContextAction,
 } from '@/lib/context-menu/context-menu-actions'
 import { getFileCategory } from '@/lib/file-type'
@@ -551,6 +552,16 @@ function buildTreeContent(
       ]),
       section('footer', [
         favouriteRow(target.path, target.kind === 'favourite'),
+        ...(target.kind === 'favourite'
+          ? [
+              customRow(
+                `rename-favourite-${target.path}`,
+                'Rename Favourite',
+                renameFavouriteContextAction(target.path),
+                { icon: { kind: 'app', name: 'rename' } },
+              ),
+            ]
+          : []),
         customRow(
           `copy-tree-path-${target.path}`,
           'Copy as path',

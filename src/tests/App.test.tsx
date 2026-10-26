@@ -301,6 +301,7 @@ describe('App', () => {
       autoFolderSize: true,
       autoExpandActiveQueueToasts: false,
       favourites: [],
+      favouriteNames: {},
       favouritesCollapsed: false,
       keybindings: {
         refresh: ['F5'],

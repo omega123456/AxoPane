@@ -55,6 +55,7 @@ export type ContextMenuAction =
     }
   | { kind: 'add-favourite'; path: string }
   | { kind: 'remove-favourite'; path: string }
+  | { kind: 'rename-favourite'; path: string }
   | {
       kind: 'copy-paths'
       paths: string[]
@@ -154,6 +155,10 @@ export function removeFavouriteContextAction(path: string): ContextMenuAction {
   return { kind: 'remove-favourite', path }
 }
 
+export function renameFavouriteContextAction(path: string): ContextMenuAction {
+  return { kind: 'rename-favourite', path }
+}
+
 export function copyPathsContextAction(paths: string[]): ContextMenuAction {
   return { kind: 'copy-paths', paths }
 }
@@ -238,6 +243,9 @@ export function dispatchContextMenuAction(paneId: PaneId, action: ContextMenuAct
       return
     case 'remove-favourite':
       void useConfigStore.getState().removeFavourite(action.path)
+      return
+    case 'rename-favourite':
+      useConfigStore.getState().setRenamingFavourite(action.path)
       return
     case 'copy-paths':
       void copyPathsToClipboard(action.paths)

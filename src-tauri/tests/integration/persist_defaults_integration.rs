@@ -37,6 +37,7 @@ fn persistence_defaults_match_the_frontend_contract() {
     assert!(config.auto_folder_size);
     assert!(!config.auto_expand_active_queue_toasts);
     assert!(config.favourites.is_empty());
+    assert!(config.favourite_names.is_empty());
     assert!(!config.favourites_collapsed);
     assert_eq!(config.columns, columns);
     assert_eq!(config.layout, LayoutConfig::default());

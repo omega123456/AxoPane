@@ -84,6 +84,7 @@ const lightConfig: AppConfig = {
   autoFolderSize: true,
   autoExpandActiveQueueToasts: false,
   favourites: [],
+  favouriteNames: {},
   favouritesCollapsed: false,
   keybindings: {},
   columns: [
@@ -536,6 +537,10 @@ export const screenshotScenarios = {
     favouritesCollapsed: true,
   }),
   favouritesOverflow: favouritesTreeScenario({ favourites: overflowFavourites }),
+  favouritesRenamed: favouritesTreeScenario({
+    favourites: overflowFavourites.slice(0, 4),
+    favouriteNames: { 'D:\\projects': 'Code' },
+  }),
   breadcrumbs: {
     light: {
       commands: {

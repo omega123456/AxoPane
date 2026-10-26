@@ -29,6 +29,37 @@ describe('config-store', () => {
     expect(saveConfig).toHaveBeenCalled()
   })
 
+  it('renames favourites, restores the folder name when blank, and drops names on removal', async () => {
+    const saveConfig = vi.fn((payload) => payload.config)
+    ipc.override('save_config', saveConfig)
+    useConfigStore.setState({ favourites: ['C:\\A', '/Users/b'], renamingFavourite: 'C:\\A' })
+    const store = useConfigStore.getState()
+
+    await store.renameFavourite('C:\\A', '  Work  ')
+    await store.renameFavourite('/Users/b', 'Bee')
+    expect(useConfigStore.getState()).toMatchObject({
+      favouriteNames: { 'C:\\A': 'Work', '/Users/b': 'Bee' },
+      renamingFavourite: null,
+    })
+    expect(saveConfig).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          favouriteNames: { 'C:\\A': 'Work', '/Users/b': 'Bee' },
+        }),
+      }),
+    )
+
+    saveConfig.mockClear()
+    await store.renameFavourite('C:\\A', 'Work')
+    await store.renameFavourite('C:\\Z', ' ')
+    expect(saveConfig).not.toHaveBeenCalled()
+
+    await store.renameFavourite('C:\\A', ' ')
+    expect(useConfigStore.getState().favouriteNames).toEqual({ '/Users/b': 'Bee' })
+    await store.removeFavourite('/Users/b')
+    expect(useConfigStore.getState().favouriteNames).toEqual({})
+  })
+
   it('inserts a forward-dragged favourite before the targeted row', async () => {
     ipc.override('save_config', (payload) => payload.config)
     useConfigStore.setState({ favourites: ['C:\\A', 'C:\\B', 'C:\\C'] })
@@ -50,6 +81,7 @@ describe('config-store', () => {
       autoFolderSize: false,
       autoExpandActiveQueueToasts: true,
       favourites: ['C:\\Users\\Omega'],
+      favouriteNames: {},
       favouritesCollapsed: true,
     })
 
@@ -191,6 +223,7 @@ describe('config-store', () => {
       autoFolderSize: true,
       autoExpandActiveQueueToasts: false,
       favourites: [],
+      favouriteNames: {},
       favouritesCollapsed: false,
     })
     expect(useConfigStore.getState().logLevel).toBe('warn')
@@ -218,6 +251,7 @@ describe('config-store', () => {
       autoFolderSize: true,
       autoExpandActiveQueueToasts: false,
       favourites: [],
+      favouriteNames: {},
       favouritesCollapsed: false,
       keybindings: {},
       columns: [],

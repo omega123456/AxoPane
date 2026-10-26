@@ -19,10 +19,13 @@ type ConfigSnapshot = {
   autoFolderSize: boolean
   autoExpandActiveQueueToasts: boolean
   favourites: string[]
+  favouriteNames: Record<string, string>
   favouritesCollapsed: boolean
 }
 
 type ConfigStore = ConfigSnapshot & {
+  /** Favourite path whose name is being edited inline; never persisted. */
+  renamingFavourite: string | null
   hydrate: (config: ConfigSnapshot) => void
   setThemePreference: (theme: ThemePreference) => Promise<void>
   setShowHiddenFiles: (showHiddenFiles: boolean) => Promise<void>
@@ -38,6 +41,9 @@ type ConfigStore = ConfigSnapshot & {
   addFavourite: (path: string, index?: number) => Promise<void>
   removeFavourite: (path: string) => Promise<void>
   reorderFavourite: (path: string, index: number) => Promise<void>
+  setRenamingFavourite: (path: string | null) => void
+  /** A blank name restores the folder's own name. */
+  renameFavourite: (path: string, name: string) => Promise<void>
   setFavouritesCollapsed: (favouritesCollapsed: boolean) => Promise<void>
   reset: () => void
 }
@@ -56,12 +62,14 @@ function defaultState(): ConfigSnapshot {
     autoFolderSize: true,
     autoExpandActiveQueueToasts: false,
     favourites: [],
+    favouriteNames: {},
     favouritesCollapsed: false,
   }
 }
 
 export const useConfigStore = create<ConfigStore>((set) => ({
   ...defaultState(),
+  renamingFavourite: null,
   hydrate: (config) => set(config),
   setThemePreference: async (theme) => {
     set({ theme })
@@ -133,7 +141,22 @@ export const useConfigStore = create<ConfigStore>((set) => ({
     set((state) => {
       const favourites = state.favourites.filter((item) => !pathsMatch(item, path))
       changed = favourites.length !== state.favourites.length
-      return changed ? { favourites } : state
+      const favouriteNames = Object.fromEntries(
+        Object.entries(state.favouriteNames).filter(([key]) => favourites.includes(key)),
+      )
+      return changed ? { favourites, favouriteNames } : state
+    })
+    if (changed) await persistAppConfig()
+  },
+  setRenamingFavourite: (renamingFavourite) => set({ renamingFavourite }),
+  renameFavourite: async (path, name) => {
+    let changed = false
+    set((state) => {
+      const trimmed = name.trim()
+      const { [path]: previous, ...rest } = state.favouriteNames
+      changed = (trimmed || undefined) !== previous
+      const favouriteNames = trimmed ? { ...rest, [path]: trimmed } : rest
+      return { renamingFavourite: null, ...(changed ? { favouriteNames } : {}) }
     })
     if (changed) await persistAppConfig()
   },
@@ -152,5 +175,5 @@ export const useConfigStore = create<ConfigStore>((set) => ({
     })
     if (changed) await persistAppConfig()
   },
-  reset: () => set(defaultState()),
+  reset: () => set({ ...defaultState(), renamingFavourite: null }),
 }))

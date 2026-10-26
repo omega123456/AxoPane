@@ -41,6 +41,9 @@ pub struct Config {
     pub auto_expand_active_queue_toasts: bool,
     #[serde(default)]
     pub favourites: Vec<String>,
+    /// Custom display names for favourites, keyed by the favourite's path.
+    #[serde(default)]
+    pub favourite_names: HashMap<String, String>,
     #[serde(default)]
     pub favourites_collapsed: bool,
 }
@@ -182,6 +185,7 @@ impl Default for Config {
             auto_folder_size: true,
             auto_expand_active_queue_toasts: false,
             favourites: Vec::new(),
+            favourite_names: HashMap::new(),
             favourites_collapsed: false,
         }
     }

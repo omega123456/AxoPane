@@ -1712,8 +1712,7 @@ fn compress_item_with_progress(
             .filter(|path| !path.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        let archive_file =
-            fs::File::create_new(archive_path).map_err(|error| error.to_string())?;
+        let archive_file = fs::File::create_new(archive_path).map_err(|error| error.to_string())?;
         ZipWriter::new(archive_file)
     };
     let add_discovered_totals = item.size_bytes == 0;

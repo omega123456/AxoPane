@@ -236,6 +236,19 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('aside').first()).toHaveScreenshot(`favourites-overflow-${mode}.png`)
   })
 
+  test(`favourites rename ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.favouritesRenamed[mode])
+    const panel = page.getByTestId('favourites-panel')
+    await expect(panel.getByRole('button', { name: 'Code', exact: true })).toBeVisible()
+    await panel.getByRole('button', { name: 'Downloads', exact: true }).click({ button: 'right' })
+    await page
+      .getByRole('menu', { name: 'Downloads' })
+      .getByRole('menuitem', { name: 'Rename Favourite' })
+      .click()
+    await expect(panel.getByRole('textbox', { name: 'Rename favourite Downloads' })).toBeFocused()
+    await expect(page.locator('aside').first()).toHaveScreenshot(`favourites-rename-${mode}.png`)
+  })
+
   test(`favourites resize handle hover ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.favouritesOverflow[mode])
     const handle = page.getByRole('separator', { name: 'Resize favourites' })

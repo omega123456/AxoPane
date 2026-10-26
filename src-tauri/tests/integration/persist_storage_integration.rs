@@ -61,6 +61,10 @@ fn config_and_session_round_trip_through_atomic_storage() {
         auto_folder_size: true,
         auto_expand_active_queue_toasts: true,
         favourites: vec!["C:\\left".to_string()],
+        favourite_names: std::collections::HashMap::from([(
+            "C:\\left".to_string(),
+            "Left".to_string(),
+        )]),
         favourites_collapsed: true,
     });
     session_store.replace(Session {
@@ -115,6 +119,10 @@ fn config_and_session_round_trip_through_atomic_storage() {
             auto_folder_size: true,
             auto_expand_active_queue_toasts: true,
             favourites: vec!["C:\\left".to_string()],
+            favourite_names: std::collections::HashMap::from([(
+                "C:\\left".to_string(),
+                "Left".to_string(),
+            )]),
             favourites_collapsed: true,
         }
     );
