@@ -1683,20 +1683,39 @@ fn compress_item_with_progress(
             source.display()
         ));
     }
-    if archive_path.exists() {
-        return Err(format!(
-            "Archive already exists: {}",
-            archive_path.display()
-        ));
-    }
-
-    let parent = archive_path
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    let archive_file = fs::File::create_new(archive_path).map_err(|error| error.to_string())?;
-    let mut writer = ZipWriter::new(archive_file);
+    // A multi-item compress builds one archive: the first item creates it and
+    // every later item appends to it.
+    let is_later_item = ctx
+        .op_arc
+        .lock()
+        .expect("op lock")
+        .items
+        .iter()
+        .position(|queued| queued.source_path == item.source_path)
+        .is_some_and(|index| index > 0);
+    let mut writer = if is_later_item && archive_path.exists() {
+        let archive_file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(archive_path)
+            .map_err(|error| error.to_string())?;
+        ZipWriter::new_append(archive_file).map_err(|error| error.to_string())?
+    } else {
+        if archive_path.exists() {
+            return Err(format!(
+                "Archive already exists: {}",
+                archive_path.display()
+            ));
+        }
+        let parent = archive_path
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        let archive_file =
+            fs::File::create_new(archive_path).map_err(|error| error.to_string())?;
+        ZipWriter::new(archive_file)
+    };
     let add_discovered_totals = item.size_bytes == 0;
     let root_name = archive_root_name(source);
     // One throttle shared across every member appended below (mirrors how

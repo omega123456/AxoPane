@@ -603,6 +603,45 @@ fn process_item_test_hook_covers_queue_private_paths() {
 }
 
 #[test]
+fn process_item_compresses_every_selected_item_into_one_archive() {
+    let fixture = tempfile::tempdir().expect("temp dir");
+    let folder = fixture.path().join("folder");
+    std::fs::create_dir_all(&folder).expect("folder");
+    std::fs::write(folder.join("inside.txt"), b"inside").expect("inside");
+    let file = fixture.path().join("file.txt");
+    std::fs::write(&file, b"file").expect("file");
+    let archive_path = fixture.path().join("bundle.zip");
+
+    let mut compress_state = state();
+    compress_state.kind = OpKind::Compress;
+    compress_state.destination_dir = archive_path.clone();
+    compress_state.error_message = None;
+    compress_state.items = [&folder, &file]
+        .iter()
+        .map(|path| OpItem {
+            source_path: path.to_string_lossy().into_owned(),
+            name: path.file_name().unwrap().to_string_lossy().into_owned(),
+            size_bytes: 0,
+        })
+        .collect();
+    let (compress_op, _resolver, ctx) = worker_ctx(compress_state);
+    let items = compress_op.lock().expect("compress lock").items.clone();
+    for item in &items {
+        process_item_for_tests(&ctx, item, None);
+    }
+
+    let op = compress_op.lock().expect("compress lock");
+    assert_eq!(op.error_message, None);
+    assert_eq!(op.completed_items, 2);
+    drop(op);
+    let archive =
+        zip::ZipArchive::new(std::fs::File::open(&archive_path).expect("open")).expect("zip");
+    let mut names: Vec<&str> = archive.file_names().collect();
+    names.sort_unstable();
+    assert_eq!(names, ["file.txt", "folder/", "folder/inside.txt"]);
+}
+
+#[test]
 fn ops_service_test_hooks_cover_private_worker_paths() {
     let fixture = tempfile::tempdir().expect("temp dir");
 
