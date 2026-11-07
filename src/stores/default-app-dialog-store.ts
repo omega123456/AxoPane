@@ -1,4 +1,4 @@
-import { create } from 'zustand'
+import { createDialogStore } from '@/stores/dialog-store-factory'
 import type { MacApp } from '@/lib/types/ipc'
 
 export type DefaultAppDialogState = {
@@ -7,14 +7,4 @@ export type DefaultAppDialogState = {
   apps: MacApp[]
 }
 
-type Store = {
-  dialog: DefaultAppDialogState | null
-  open: (dialog: DefaultAppDialogState) => void
-  close: () => void
-}
-
-export const useDefaultAppDialogStore = create<Store>((set) => ({
-  dialog: null,
-  open: (dialog) => set({ dialog }),
-  close: () => set({ dialog: null }),
-}))
+export const useDefaultAppDialogStore = createDialogStore<DefaultAppDialogState>()

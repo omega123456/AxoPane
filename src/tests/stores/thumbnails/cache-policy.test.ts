@@ -4,13 +4,13 @@ import {
   MAX_THUMBNAIL_CACHE_ENTRIES,
   THUMBNAIL_NEGATIVE_TTL_MS,
   pruneThumbnailCache,
-  thumbnailWeight,
 } from '@/stores/thumbnails/cache-policy'
+import { utf16ByteWeight } from '@/lib/numbers'
 
 describe('thumbnail cache policy', () => {
   it('estimates UTF-16 data-url storage and expires unprotected negative records', () => {
     const now = 100_000
-    expect(thumbnailWeight('abc')).toBe(6)
+    expect(utf16ByteWeight('abc')).toBe(6)
     const cache = {
       expired: {
         state: 'failed' as const,

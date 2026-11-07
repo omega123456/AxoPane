@@ -20,6 +20,9 @@ use serde::{Deserialize, Serialize};
 mod manifest;
 
 #[cfg(any(feature = "test-utils", target_os = "macos"))]
+mod directory_bin;
+
+#[cfg(any(feature = "test-utils", target_os = "macos"))]
 mod macos_adapter;
 
 // Available under `test-utils` (any OS) so its parsing logic is unit-testable
@@ -214,10 +217,7 @@ where
         // test may remove it between the initial setup and this rename.
         ensure_fake_trash_dir(trash_dir)?;
         move_to_fake_trash_path(source, &target)?;
-        let deleted_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_secs() as i64)
-            .unwrap_or(0);
+        let deleted_at = crate::epoch::now_since_epoch().as_secs() as i64;
         manifest_entries.push((target_name, path.to_string(), deleted_at));
     }
 
@@ -280,177 +280,28 @@ pub fn delete_from_trash(ids: &[String]) -> Result<(), String> {
 }
 
 #[cfg(feature = "test-utils")]
-fn list_trash_in(trash_dir: &std::path::Path) -> Result<Vec<TrashEntry>, String> {
-    if !trash_dir.exists() {
-        return Ok(Vec::new());
-    }
-
-    let entries = std::fs::read_dir(trash_dir)
-        .map_err(|error| format!("{}: {error}", trash_dir.display()))?;
-    let manifest = manifest::Transaction::load(trash_dir)?;
-    let mut result = Vec::new();
-
-    for entry in entries {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(error) => {
-                log::warn!(
-                    "Skipping unreadable trash entry in '{}': {error}",
-                    trash_dir.display()
-                );
-                continue;
-            }
-        };
-        let path = entry.path();
-        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-            continue;
-        };
-        if manifest::is_manifest_file(name) {
-            continue;
-        }
-
-        let file_type = match entry.file_type() {
-            Ok(file_type) => file_type,
-            Err(error) => {
-                log::warn!(
-                    "Skipping trash entry '{}': failed to read file type: {error}",
-                    path.display()
-                );
-                continue;
-            }
-        };
-        let metadata = match std::fs::metadata(&path) {
-            Ok(metadata) => Some(metadata),
-            Err(error) => {
-                log::warn!(
-                    "Trash entry '{}' is listed without metadata: {error}",
-                    path.display()
-                );
-                None
-            }
-        };
-        let is_dir = file_type.is_dir();
-        let (original_path, deleted_at) = match manifest.lookup(name) {
-            Some((original_path, deleted_at)) => (Some(original_path), Some(deleted_at)),
-            None => (None, None),
-        };
-
-        result.push(TrashEntry {
-            id: name.to_string(),
-            name: name.to_string(),
-            original_path,
-            size_bytes: metadata
-                .as_ref()
-                .and_then(|metadata| (!is_dir).then_some(metadata.len())),
-            is_dir,
-            deleted_at,
-        });
-    }
-
-    Ok(result)
-}
-
-#[cfg(feature = "test-utils")]
-fn restore_from_trash_in(ids: &[String], trash_dir: &std::path::Path) -> Result<(), String> {
-    let mut manifest = manifest::Transaction::load(trash_dir)?;
-    for id in ids {
-        let Some((original_path, _)) = manifest.lookup(id) else {
-            return Err(format!(
-                "'{id}' has no known original location and cannot be restored"
-            ));
-        };
-
-        let source = trash_dir.join(id);
-        let target = std::path::PathBuf::from(&original_path);
-        if target.exists() {
-            return Err(format!(
-                "cannot restore '{id}': an item already exists at {original_path}"
-            ));
-        }
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-
-        std::fs::rename(&source, &target).map_err(|error| error.to_string())?;
-        manifest.remove(id);
-    }
-    manifest.commit()
-}
-
-#[cfg(feature = "test-utils")]
-fn delete_from_trash_in(ids: &[String], trash_dir: &std::path::Path) -> Result<(), String> {
-    for id in ids {
-        let path = trash_dir.join(id);
-        if !path.exists() {
-            return Err(format!("'{id}' is no longer in the trash"));
-        }
-
-        if path.is_dir() {
-            std::fs::remove_dir_all(&path).map_err(|error| error.to_string())?;
-        } else {
-            std::fs::remove_file(&path).map_err(|error| error.to_string())?;
-        }
-    }
-    // Purging does not need provenance to remove an item.  Preserve that
-    // behavior if a corrupt manifest is discovered only after the filesystem
-    // mutations, then perform one sidecar transaction for the whole command.
-    let mut manifest = manifest::Transaction::load(trash_dir)?;
-    for id in ids {
-        manifest.remove(id);
-    }
-    manifest.force_commit()
-}
-
-#[cfg(feature = "test-utils")]
-fn empty_trash_in(trash_dir: &std::path::Path) -> Result<(), String> {
-    if !trash_dir.exists() {
-        return Ok(());
-    }
-
-    let entries = std::fs::read_dir(trash_dir).map_err(|error| error.to_string())?;
-    let mut manifest = manifest::Transaction::load(trash_dir)?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-            continue;
-        };
-        if manifest::is_manifest_file(name) {
-            continue;
-        }
-
-        if path.is_dir() {
-            std::fs::remove_dir_all(&path).map_err(|error| error.to_string())?;
-        } else {
-            std::fs::remove_file(&path).map_err(|error| error.to_string())?;
-        }
-    }
-
-    manifest.force_clear_commit()
-}
-
-#[cfg(feature = "test-utils")]
 pub fn list_trash() -> Result<Vec<TrashEntry>, String> {
-    list_trash_in(&fake_trash_dir())
+    directory_bin::list_trash_in::<manifest::Transaction>(&fake_trash_dir())
 }
 
 #[cfg(feature = "test-utils")]
 pub fn restore_from_trash(ids: &[String]) -> Result<(), String> {
-    restore_from_trash_in(ids, &fake_trash_dir())
+    directory_bin::restore_from_trash_in::<manifest::Transaction>(ids, &fake_trash_dir())
 }
 
 #[cfg(feature = "test-utils")]
 pub fn empty_trash() -> Result<(), String> {
-    empty_trash_in(&fake_trash_dir())
+    directory_bin::empty_trash_in::<manifest::Transaction>(&fake_trash_dir())
 }
 
 #[cfg(feature = "test-utils")]
 pub fn delete_from_trash(ids: &[String]) -> Result<(), String> {
-    delete_from_trash_in(ids, &fake_trash_dir())
+    directory_bin::delete_from_trash_in::<manifest::Transaction>(ids, &fake_trash_dir())
 }
 
 #[cfg(feature = "test-utils")]
 pub fn list_trash_for_tests(trash_dir: &std::path::Path) -> Result<Vec<TrashEntry>, String> {
-    list_trash_in(trash_dir)
+    directory_bin::list_trash_in::<manifest::Transaction>(trash_dir)
 }
 
 #[cfg(feature = "test-utils")]
@@ -458,12 +309,12 @@ pub fn restore_from_trash_for_tests(
     ids: &[String],
     trash_dir: &std::path::Path,
 ) -> Result<(), String> {
-    restore_from_trash_in(ids, trash_dir)
+    directory_bin::restore_from_trash_in::<manifest::Transaction>(ids, trash_dir)
 }
 
 #[cfg(feature = "test-utils")]
 pub fn empty_trash_for_tests(trash_dir: &std::path::Path) -> Result<(), String> {
-    empty_trash_in(trash_dir)
+    directory_bin::empty_trash_in::<manifest::Transaction>(trash_dir)
 }
 
 #[cfg(feature = "test-utils")]
@@ -471,5 +322,5 @@ pub fn delete_from_trash_for_tests(
     ids: &[String],
     trash_dir: &std::path::Path,
 ) -> Result<(), String> {
-    delete_from_trash_in(ids, trash_dir)
+    directory_bin::delete_from_trash_in::<manifest::Transaction>(ids, trash_dir)
 }

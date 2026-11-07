@@ -3,6 +3,7 @@ import type { LucideProps } from 'lucide-react'
 import type { VolumeCategory, VolumeInfo } from '@/lib/types/ipc'
 import { volumeCategory } from '@/lib/volumes'
 import { HardDriveIcon, NetworkIcon, UsbIcon } from '@/components/icons'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 type IconComponent = ComponentType<LucideProps>
 
@@ -19,7 +20,7 @@ type VolumeStyle = {
 const VOLUME_STYLES: Record<VolumeCategory, VolumeStyle> = {
   fixed: {
     Glyph: HardDriveIcon,
-    colorClassName: 'text-light-text-secondary dark:text-dark-text-secondary',
+    colorClassName: TEXT_SECONDARY,
   },
   removable: { Glyph: UsbIcon, colorClassName: 'text-volume-removable' },
   network: { Glyph: NetworkIcon, colorClassName: 'text-volume-network' },

@@ -17,6 +17,8 @@ import { formatCount, formatRate } from '@/lib/format'
 import { formatItemPreview, formatJobProgress, verb } from '@/lib/queue-format'
 import type { OpProgress, ThroughputSample } from '@/lib/types/ipc'
 import { clampPercent } from '@/lib/numbers'
+import { SCROLLBAR_THIN } from '@/lib/class-names'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 type JobCardProps = {
   operation: OpProgress
@@ -232,9 +234,7 @@ export function JobCard({
         {isFailed ? (
           <XCircleIcon className="size-4 shrink-0 text-light-danger dark:text-dark-danger" />
         ) : null}
-        {isCancelled ? (
-          <XCircleIcon className="size-4 shrink-0 text-light-text-secondary dark:text-dark-text-secondary" />
-        ) : null}
+        {isCancelled ? <XCircleIcon className={`size-4 shrink-0 ${TEXT_SECONDARY}`} /> : null}
         <span
           id={headingId}
           className="min-w-0 truncate text-body font-semibold text-light-text dark:text-dark-text"
@@ -260,7 +260,7 @@ export function JobCard({
         ) : null}
       </div>
 
-      <div className="flex min-w-0 justify-between gap-3 text-caption text-light-text-secondary dark:text-dark-text-secondary">
+      <div className={`flex min-w-0 justify-between gap-3 text-caption ${TEXT_SECONDARY}`}>
         <span className="min-w-0 truncate" title={where}>
           {where}
         </span>
@@ -276,7 +276,7 @@ export function JobCard({
       {itemsExpanded ? (
         <ul
           id={itemListId}
-          className="flex max-h-queue-items flex-col gap-0.5 overflow-y-auto rounded-control bg-light-recessed px-2.5 py-1.5 text-caption text-light-text-secondary scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:bg-dark-recessed dark:text-dark-text-secondary dark:scrollbar-thumb-dark-text-tertiary"
+          className={`flex max-h-queue-items flex-col gap-0.5 overflow-y-auto rounded-control bg-light-recessed px-2.5 py-1.5 text-caption ${TEXT_SECONDARY} ${SCROLLBAR_THIN} dark:bg-dark-recessed`}
         >
           {listedNames.map((name, index) => {
             const done = index < displayed.completedItems
@@ -318,7 +318,9 @@ export function JobCard({
             labelledBy={headingId}
             tone={isPaused ? 'neutral' : 'accent'}
           />
-          <div className="flex min-w-0 justify-between gap-3 text-caption tabular-nums text-light-text-secondary dark:text-dark-text-secondary">
+          <div
+            className={`flex min-w-0 justify-between gap-3 text-caption tabular-nums ${TEXT_SECONDARY}`}
+          >
             <span className="min-w-0 truncate">{summary}</span>
             {showRate ? <span className="shrink-0">{rate}</span> : null}
           </div>
@@ -330,7 +332,7 @@ export function JobCard({
           {operation.errorMessage}
         </div>
       ) : isCancelled ? (
-        <div className="text-caption text-light-text-secondary dark:text-dark-text-secondary">
+        <div className={`text-caption ${TEXT_SECONDARY}`}>
           Job cancelled. Any completed file changes were kept.
         </div>
       ) : showChart ? (

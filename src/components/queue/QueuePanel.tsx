@@ -17,6 +17,8 @@ import { formatItemPreview, verb } from '@/lib/queue-format'
 import type { OpProgress, ThroughputSample } from '@/lib/types/ipc'
 import { useQueueStore } from '@/stores/queue-store'
 import { clampPercent } from '@/lib/numbers'
+import { SCROLLBAR_THIN } from '@/lib/class-names'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 /** Move a pending operation within the pending sub-list and persist the order. */
 function reorder(operations: OpProgress[], id: string, delta: number) {
@@ -120,14 +122,12 @@ function CompactJobRow({
           {failed ? (
             <XCircleIcon className="size-4 shrink-0 text-light-danger dark:text-dark-danger" />
           ) : null}
-          {cancelled ? (
-            <XCircleIcon className="size-4 shrink-0 text-light-text-secondary dark:text-dark-text-secondary" />
-          ) : null}
+          {cancelled ? <XCircleIcon className={`size-4 shrink-0 ${TEXT_SECONDARY}`} /> : null}
           <span className="truncate text-body font-semibold text-light-text dark:text-dark-text">
             {title(operation)}
           </span>
         </div>
-        <span className="truncate text-caption text-light-text-secondary dark:text-dark-text-secondary">
+        <span className={`truncate text-caption ${TEXT_SECONDARY}`}>
           {summaryText}
           {!pending && !completed && !cancelled ? ` · ${percent}%` : ''}
         </span>
@@ -268,7 +268,7 @@ export function QueuePanel() {
         {secondary.length > 0 ? (
           <div
             aria-label="Queued jobs"
-            className="min-h-0 flex-1 overflow-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary"
+            className={`min-h-0 flex-1 overflow-auto ${SCROLLBAR_THIN}`}
           >
             {secondary.map((operation) => {
               const reorderable = operation.status === 'pending'

@@ -4,6 +4,10 @@ pub mod directory_session {
     }
 }
 
+pub mod error_text {
+    pub use file_explorer_lib::error_text::*;
+}
+
 pub mod fs {
     pub use file_explorer_lib::fs::*;
 }
@@ -24,6 +28,11 @@ pub mod traversal {
 
 pub mod volumes {
     pub use file_explorer_lib::volumes::*;
+}
+
+#[cfg(windows)]
+pub mod win32 {
+    pub use file_explorer_lib::win32::*;
 }
 
 pub mod common;
@@ -71,6 +80,7 @@ pub mod ops_state_methods_integration;
 pub mod path_text_integration;
 pub mod persist_defaults_integration;
 pub mod persist_storage_integration;
+pub mod pixels_integration;
 pub mod reconcile_coordinator_integration;
 pub mod resource_coordinator_integration;
 pub mod search_commands_integration;

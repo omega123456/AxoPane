@@ -10,6 +10,7 @@ import { isTrashPath } from '@/lib/trash'
 import type { DirectoryEntry, LoadNativeMenuRequest } from '@/lib/types/ipc'
 import { usePanesStore } from '@/stores/panes-store'
 import type { PaneId } from '@/types/pane'
+import { withKeyFlags } from '@/lib/collections'
 
 /**
  * Session-scoped, in-memory record of native-menu cache type keys
@@ -96,7 +97,7 @@ export const useNativeMenuWarmStore = create<NativeMenuWarmStore>((set, get) => 
     })
 
     set((state) => ({
-      warmedTypeKeys: withWarmedTypeKeys(state.warmedTypeKeys, newKeys, true),
+      warmedTypeKeys: withKeyFlags(state.warmedTypeKeys, newKeys, true),
     }))
 
     try {
@@ -109,7 +110,7 @@ export const useNativeMenuWarmStore = create<NativeMenuWarmStore>((set, get) => 
       })
     } catch (error) {
       set((state) => ({
-        warmedTypeKeys: withWarmedTypeKeys(state.warmedTypeKeys, newKeys, false),
+        warmedTypeKeys: withKeyFlags(state.warmedTypeKeys, newKeys, false),
       }))
       log.warn('native menu warm batch failed; rolling back warmed keys', {
         paneId,
@@ -178,21 +179,4 @@ function collectWarmRequests(
     skippedDuplicateInBatch,
     skippedMissingEntry,
   }
-}
-
-function withWarmedTypeKeys(
-  warmedTypeKeys: WarmedTypeKeys,
-  keys: string[],
-  warmed: boolean,
-): WarmedTypeKeys {
-  const next = { ...warmedTypeKeys }
-  for (const key of keys) {
-    if (warmed) {
-      next[key] = true
-    } else {
-      delete next[key]
-    }
-  }
-
-  return next
 }

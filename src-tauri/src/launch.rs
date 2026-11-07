@@ -135,38 +135,36 @@ mod platform {
 #[cfg(all(not(feature = "test-utils"), windows))]
 mod platform {
     use std::ffi::OsStr;
-    use std::os::windows::ffi::OsStrExt;
     use std::path::Path;
 
-    use windows::core::PCWSTR;
-    use windows::Win32::UI::Shell::{IsUserAnAdmin, ShellExecuteW};
-    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows::Win32::UI::Shell::IsUserAnAdmin;
 
     use super::OpenPathError;
-
-    fn wide(value: &OsStr) -> Vec<u16> {
-        value.encode_wide().chain(std::iter::once(0)).collect()
-    }
+    use crate::win32::shell::{shell_execute, ShellExecuteRequest};
 
     pub fn open_path(path: &Path) -> Result<(), OpenPathError> {
-        let target = wide(path.as_os_str());
-        let directory = super::launch_directory(path).map(|value| wide(value.as_os_str()));
-        let directory_ptr = directory
-            .as_ref()
-            .map_or(PCWSTR::null(), |value| PCWSTR(value.as_ptr()));
+        let directory = super::launch_directory(path);
+        let open_default = ShellExecuteRequest {
+            verb: None,
+            file: path.as_os_str(),
+            parameters: None,
+            directory: directory.as_deref().map(Path::as_os_str),
+        };
 
         // A null verb makes the shell pick the file type's *default* verb, which
         // is what a double-click in Explorer does. Hard-coding "open" breaks
         // every type whose default verb is something else — `.iso` registers
         // `mount`, so "open" failed with SE_ERR_NOASSOC instead of mounting.
-        let status = shell_execute(PCWSTR::null(), &target, directory_ptr);
+        let status = shell_execute(&open_default);
         if super::shell_execute_succeeded(status) {
             return Ok(());
         }
 
         if super::should_prompt_open_with(status) {
-            let open_with = wide(OsStr::new(super::OPEN_WITH_VERB));
-            let fallback = shell_execute(PCWSTR(open_with.as_ptr()), &target, directory_ptr);
+            let fallback = shell_execute(&ShellExecuteRequest {
+                verb: Some(OsStr::new(super::OPEN_WITH_VERB)),
+                ..open_default
+            });
             if super::shell_execute_succeeded(fallback) {
                 return Ok(());
             }
@@ -188,14 +186,13 @@ mod platform {
             });
         }
 
-        let verb = wide(OsStr::new(super::RUNAS_VERB));
-        let target = wide(executable.as_os_str());
-        let directory = super::launch_directory(executable).map(|value| wide(value.as_os_str()));
-        let directory_ptr = directory
-            .as_ref()
-            .map_or(PCWSTR::null(), |value| PCWSTR(value.as_ptr()));
-
-        let status = shell_execute(PCWSTR(verb.as_ptr()), &target, directory_ptr);
+        let directory = super::launch_directory(executable);
+        let status = shell_execute(&ShellExecuteRequest {
+            verb: Some(OsStr::new(super::RUNAS_VERB)),
+            file: executable.as_os_str(),
+            parameters: None,
+            directory: directory.as_deref().map(Path::as_os_str),
+        });
         if super::shell_execute_succeeded(status) {
             return Ok(());
         }
@@ -209,21 +206,6 @@ mod platform {
     /// Full Disk Access is a macOS setting; Windows blocks folders through ACLs.
     pub fn open_full_disk_access_settings() -> Result<(), OpenPathError> {
         Err(OpenPathError::Unsupported)
-    }
-
-    fn shell_execute(operation: PCWSTR, target: &[u16], directory: PCWSTR) -> isize {
-        let result = unsafe {
-            ShellExecuteW(
-                None,
-                operation,
-                PCWSTR(target.as_ptr()),
-                PCWSTR::null(),
-                directory,
-                SW_SHOWNORMAL,
-            )
-        };
-
-        result.0 as isize
     }
 }
 

@@ -1,4 +1,5 @@
 import { fractionToPercent } from '@/lib/numbers'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 // The two-tone focus ring (see lib/focus-ring), drawn on the thumb when the
 // transparent input above it has keyboard focus.
@@ -55,7 +56,7 @@ export function RangeSlider({
           <span className="size-3 rounded-full bg-light-accent dark:bg-dark-accent" />
         </span>
       </span>
-      <span className="w-14 flex-none text-right font-mono text-row text-light-text-secondary dark:text-dark-text-secondary">
+      <span className={`w-14 flex-none text-right font-mono text-row ${TEXT_SECONDARY}`}>
         {valueLabel ?? value}
       </span>
     </>

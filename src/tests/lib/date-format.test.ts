@@ -16,6 +16,7 @@ import {
   dateToneClassName,
   formatEntryDate,
   isDateFormat,
+  formatUtcLogTimestamp,
 } from '@/lib/date-format'
 
 // A fixed UTC reference; every absolute expectation below is the UTC rendering.
@@ -303,5 +304,15 @@ describe('date-format', () => {
       // second call reuses the first's cached result.
       expect(viaAbsolute).toBe(viaRelativeFallback)
     })
+  })
+})
+
+describe('formatUtcLogTimestamp', () => {
+  it('formats in UTC regardless of the local zone', () => {
+    expect(formatUtcLogTimestamp('2026-06-30T23:15:04.123Z')).toBe('Jun 30 23:15:04')
+  })
+
+  it('returns unparseable input unchanged', () => {
+    expect(formatUtcLogTimestamp('not a date')).toBe('not a date')
   })
 })

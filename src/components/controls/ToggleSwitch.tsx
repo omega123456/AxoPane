@@ -1,4 +1,5 @@
 import { FOCUS_RING } from '@/lib/focus-ring'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 /** Fluent toggle: 40×20 on the input boundary, with an On/Off label to its left. */
 export function ToggleSwitch({
@@ -11,7 +12,7 @@ export function ToggleSwitch({
   label?: string
 }) {
   return (
-    <span className="inline-flex items-center gap-3 text-body text-light-text-secondary dark:text-dark-text-secondary">
+    <span className={`inline-flex items-center gap-3 text-body ${TEXT_SECONDARY}`}>
       <span aria-hidden="true">{checked ? 'On' : 'Off'}</span>
       <button
         type="button"

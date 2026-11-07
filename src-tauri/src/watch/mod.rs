@@ -20,6 +20,7 @@ use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 
 use self::coordinator::{CompactedBatch, MutationKind, RawMutation, WatchCoordinator, WatchId};
+use crate::error_text::StringifyError;
 use crate::fs::{self, DirectoryEntry, ListDirOptions, ListDirResponse, SortDirection, SortKey};
 
 /// A paired rename event carries the old path and then the new one.
@@ -219,7 +220,7 @@ pub fn create_runtime(
         notify::recommended_watcher(move |result: Result<notify::Event, notify::Error>| {
             forward_notify_result(&tabs_for_callback, &raw_sender, result);
         })
-        .map_err(|error| error.to_string())?;
+        .stringify_err()?;
 
     Ok(WatchRuntime {
         watcher,
@@ -730,8 +731,7 @@ fn patch_changed_path(
         return Ok(());
     }
 
-    let entry = fs::directory_entry_from_path_without_item_count(path)
-        .map_err(|error| error.to_string())?;
+    let entry = fs::directory_entry_from_path_without_item_count(path).stringify_err()?;
     if !matches_target_filter(&entry, target) {
         next.remove(&display_path);
         if !removed.contains(&display_path) {
@@ -886,17 +886,17 @@ fn snapshot_from_entries(
 }
 
 fn list_dir_for_snapshot(options: &ListDirOptions) -> Result<ListDirResponse, String> {
-    fs::list_dir(options).map_err(|error| error.to_string())
+    fs::list_dir(options).stringify_err()
 }
 
 fn watch_path(watcher: &mut notify::RecommendedWatcher, path: &Path) -> Result<(), String> {
     watcher
         .watch(path, RecursiveMode::NonRecursive)
-        .map_err(|error| error.to_string())
+        .stringify_err()
 }
 
 fn unwatch_path(watcher: &mut notify::RecommendedWatcher, path: &Path) -> Result<(), String> {
-    watcher.unwatch(path).map_err(|error| error.to_string())
+    watcher.unwatch(path).stringify_err()
 }
 
 // ---------------------------------------------------------------------
@@ -950,10 +950,10 @@ pub fn begin_capture(path: &Path) -> Result<CaptureHandle, String> {
             overflowed_for_callback.store(true, std::sync::atomic::Ordering::SeqCst);
         }
     })
-    .map_err(|error| error.to_string())?;
+    .stringify_err()?;
     watcher
         .watch(path, RecursiveMode::NonRecursive)
-        .map_err(|error| error.to_string())?;
+        .stringify_err()?;
 
     Ok(CaptureHandle {
         watcher,

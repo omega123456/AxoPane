@@ -4,6 +4,9 @@ import { Button, SelectField } from '@/components/controls'
 import { readLogs } from '@/lib/ipc/commands'
 import { log } from '@/lib/app-log-commands'
 import type { LogDisplayFilter, LogEntry } from '@/lib/types/ipc'
+import { formatUtcLogTimestamp } from '@/lib/date-format'
+import { SCROLLBAR_THIN } from '@/lib/class-names'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 const PAGE_SIZE = 20
 const AUTO_REFRESH_MS = 5000
@@ -34,29 +37,12 @@ const FILTER_RANK: Record<LogDisplayFilter, number> = {
   error: 4,
 }
 
-const TIMESTAMP_FIELD_DIGITS = 2
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-/** Format an ISO timestamp as `Jun 30 12:00:00` in UTC (deterministic). */
-function formatTimestamp(iso: string): string {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) {
-    return iso
-  }
-  const pad = (value: number) => value.toString().padStart(TIMESTAMP_FIELD_DIGITS, '0')
-  return (
-    `${MONTHS[date.getUTCMonth()]} ${pad(date.getUTCDate())} ` +
-    `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`
-  )
-}
-
 const BADGE_TONES: Record<string, string> = {
   error:
     'border-light-danger/30 dark:border-dark-danger/30 bg-light-danger/15 dark:bg-dark-danger/15 text-light-danger dark:text-dark-danger',
   warn: 'border-light-warning/30 dark:border-dark-warning/30 bg-light-warning/15 dark:bg-dark-warning/15 text-light-warning dark:text-dark-warning',
   info: 'border-light-accent/30 dark:border-dark-accent/30 bg-light-accent/15 dark:bg-dark-accent/15 text-light-accent dark:text-dark-accent',
-  debug:
-    'border-light-divider bg-light-hover text-light-text-secondary dark:border-dark-divider dark:bg-dark-hover dark:text-dark-text-secondary',
+  debug: `border-light-divider bg-light-hover ${TEXT_SECONDARY} dark:border-dark-divider dark:bg-dark-hover`,
   trace:
     'border-light-divider bg-light-card text-light-text-tertiary dark:border-dark-divider dark:bg-dark-card dark:text-dark-text-tertiary',
 }
@@ -211,7 +197,7 @@ export function LogViewer() {
           >
             <ArrowLeftIcon className="size-4" />
           </Button>
-          <span className="min-w-20 text-center text-caption text-light-text-secondary dark:text-dark-text-secondary">
+          <span className={`min-w-20 text-center text-caption ${TEXT_SECONDARY}`}>
             Page {safePage} / {totalPages}
           </span>
           <Button
@@ -224,10 +210,7 @@ export function LogViewer() {
             <ArrowRightIcon className="size-4" />
           </Button>
         </div>
-        <span
-          className="text-caption text-light-text-secondary dark:text-dark-text-secondary"
-          data-testid="log-viewer-summary"
-        >
+        <span className={`text-caption ${TEXT_SECONDARY}`} data-testid="log-viewer-summary">
           {summary}
         </span>
       </div>
@@ -243,15 +226,15 @@ export function LogViewer() {
       ) : !isLoading && filtered.length === 0 ? (
         <div
           data-testid="log-viewer-empty"
-          className="px-3 py-8 text-center text-row text-light-text-secondary dark:text-dark-text-secondary"
+          className={`px-3 py-8 text-center text-row ${TEXT_SECONDARY}`}
         >
           No log entries to show.
         </div>
       ) : (
-        <div className="overflow-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary">
+        <div className={`overflow-auto ${SCROLLBAR_THIN}`}>
           <table className="w-full table-fixed border-collapse">
             <thead>
-              <tr className="text-left text-caption text-light-text-secondary dark:text-dark-text-secondary">
+              <tr className={`text-left text-caption ${TEXT_SECONDARY}`}>
                 <th className="w-20 py-2 pl-4 pr-3 font-normal">Level</th>
                 <th className="px-3 py-2 font-normal">Message</th>
                 <th className="w-32 px-3 py-2 font-normal">Time</th>
@@ -275,8 +258,10 @@ export function LogViewer() {
                       {entry.message}
                     </span>
                   </td>
-                  <td className="whitespace-nowrap px-3 py-2 align-top font-mono text-caption text-light-text-secondary dark:text-dark-text-secondary">
-                    {formatTimestamp(entry.timestamp)}
+                  <td
+                    className={`whitespace-nowrap px-3 py-2 align-top font-mono text-caption ${TEXT_SECONDARY}`}
+                  >
+                    {formatUtcLogTimestamp(entry.timestamp)}
                   </td>
                 </tr>
               ))}

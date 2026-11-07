@@ -24,6 +24,7 @@ import { PaneViewMenu } from '@/components/pane/PaneViewMenu'
 import { FOCUS_RING } from '@/lib/focus-ring'
 import { detectPlatformOs, formatShortcutLabel } from '@/lib/keymap'
 import { forwardPaneFilterKey } from '@/lib/pane-filter-keys'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 type CommandBarProps = {
   theme: ThemeMode
@@ -172,7 +173,7 @@ export function CommandBar({ theme, setTheme }: CommandBarProps) {
         label="Navigate to ~"
         title="Navigate to ~"
         onClick={() => void navigatePane(activePaneId, '~')}
-        className="font-mono text-body text-light-text-secondary dark:text-dark-text-secondary"
+        className={`font-mono text-body ${TEXT_SECONDARY}`}
       >
         ~
       </CommandButton>
@@ -180,7 +181,7 @@ export function CommandBar({ theme, setTheme }: CommandBarProps) {
         label="Navigate to /"
         title="Navigate to /"
         onClick={() => void navigatePane(activePaneId, '/')}
-        className="font-mono text-body text-light-text-secondary dark:text-dark-text-secondary"
+        className={`font-mono text-body ${TEXT_SECONDARY}`}
       >
         /
       </CommandButton>

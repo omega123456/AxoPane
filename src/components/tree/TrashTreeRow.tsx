@@ -3,6 +3,7 @@ import { Trash2Icon } from '@/components/icons'
 import { detectPlatformOs } from '@/lib/keymap'
 import { SelectionPill } from '@/components/controls/SelectionPill'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 type TrashTreeRowProps = {
   isCurrent: boolean
@@ -41,7 +42,7 @@ function TrashTreeRowImpl({ isCurrent, onNavigate, onOpenTab, onContextMenu }: T
         }}
         className={`flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-control ${FOCUS_RING_INSET}`}
       >
-        <Trash2Icon className="size-4 flex-none text-light-text-secondary dark:text-dark-text-secondary" />
+        <Trash2Icon className={`size-4 flex-none ${TEXT_SECONDARY}`} />
         <span className="truncate">{trashLabel}</span>
       </button>
     </div>

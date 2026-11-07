@@ -9,8 +9,6 @@ use std::collections::HashSet;
 #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
 use std::fs;
 use std::path::{Path, PathBuf};
-#[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
 use super::manifest;
@@ -303,8 +301,5 @@ fn facts_for_path(path: &Path, display_path: String) -> Result<TrashFacts, Strin
 
 #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
 fn now_seconds() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs() as i64)
-        .unwrap_or(0)
+    crate::epoch::now_since_epoch().as_secs() as i64
 }

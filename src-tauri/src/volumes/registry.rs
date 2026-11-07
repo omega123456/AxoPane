@@ -253,10 +253,7 @@ fn path_is_within_root(path: &str, root: &str) -> bool {
 }
 
 fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or(0)
+    crate::epoch::now_since_epoch().as_millis() as u64
 }
 
 /// Platform-specific native registration session owned by the registry. In

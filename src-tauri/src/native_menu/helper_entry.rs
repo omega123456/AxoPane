@@ -8,7 +8,7 @@ use super::helper_protocol::{
 };
 
 #[cfg(all(target_os = "windows", not(feature = "test-utils")))]
-use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+use windows::Win32::System::Com::COINIT_APARTMENTTHREADED;
 
 pub const HELPER_ARGUMENT: &str = "--axopane-native-menu-helper";
 
@@ -18,18 +18,13 @@ pub fn try_run_from_args() -> bool {
         return false;
     }
     #[cfg(all(target_os = "windows", not(feature = "test-utils")))]
-    let initialized_com = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok() };
+    let apartment = crate::win32::com::ComApartment::initialize(COINIT_APARTMENTTHREADED);
     #[cfg(all(target_os = "windows", not(feature = "test-utils")))]
-    if !initialized_com {
+    if !apartment.is_initialized() {
         return true;
     }
 
     let _ = run_framed_stdio(io::stdin().lock(), io::stdout().lock());
-
-    #[cfg(all(target_os = "windows", not(feature = "test-utils")))]
-    unsafe {
-        CoUninitialize();
-    }
     true
 }
 

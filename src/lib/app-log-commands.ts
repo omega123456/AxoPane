@@ -16,8 +16,7 @@
  */
 
 import { dispatch } from '@/lib/ipc/dispatch'
-
-type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+import type { FrontendLogLevel as LogLevel } from '@/lib/types/ipc'
 type LogContext = Record<string, unknown>
 
 function isDev() {

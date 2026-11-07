@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Button } from '@/components/controls'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 /**
  * The one template for empty, error and permission states: a 48px icon tile,
@@ -31,9 +32,7 @@ export function StatePanel({
       <div className="grid w-state justify-items-center gap-2.5 text-center">
         <span
           className={`flex size-state-tile items-center justify-center rounded-overlay bg-light-hover dark:bg-dark-hover ${
-            danger
-              ? 'text-light-danger dark:text-dark-danger'
-              : 'text-light-text-secondary dark:text-dark-text-secondary'
+            danger ? 'text-light-danger dark:text-dark-danger' : TEXT_SECONDARY
           }`}
         >
           {icon}
@@ -41,9 +40,7 @@ export function StatePanel({
         <h3 className="mt-1 break-words font-display text-subtitle font-semibold leading-6.5 text-light-text dark:text-dark-text">
           {title}
         </h3>
-        <p className="break-words text-row text-light-text-secondary dark:text-dark-text-secondary">
-          {message}
-        </p>
+        <p className={`break-words text-row ${TEXT_SECONDARY}`}>{message}</p>
         {action ? <Button onClick={action.onClick}>{action.label}</Button> : null}
       </div>
     </div>

@@ -12,6 +12,7 @@ import type { CommandId } from '@/lib/types/ipc'
 import { usePanesStore } from '@/stores/panes-store'
 import { useConfigStore } from '@/stores/config-store'
 import type { PaneId } from '@/types/pane'
+import { otherPane } from '@/lib/pane-id'
 
 export type ContextMenuAction =
   | {
@@ -211,7 +212,7 @@ export function dispatchContextMenuAction(paneId: PaneId, action: ContextMenuAct
       return
     case 'navigate': {
       if (action.destination === 'other-pane') {
-        const destinationPaneId = paneId === 'left' ? 'right' : 'left'
+        const destinationPaneId = otherPane(paneId)
         void usePanesStore.getState().openTabFromPath(destinationPaneId, action.path)
         return
       }

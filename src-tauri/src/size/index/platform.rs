@@ -285,9 +285,7 @@ mod mac {
     }
 
     pub fn home_dir() -> Option<PathBuf> {
-        std::env::var_os("HOME")
-            .filter(|home| !home.is_empty())
-            .map(PathBuf::from)
+        crate::fs::home_dir()
     }
 
     pub struct MacPlatform;
@@ -579,12 +577,12 @@ mod mac {
             let sink = &*(info as *const EventSink);
             let paths = paths as *const *const c_char;
             let batch = (0..count)
-                .map(|i| {
-                    let path = CStr::from_ptr(*paths.add(i));
-                    let flags = *flags.add(i);
+                .map(|index| {
+                    let path = CStr::from_ptr(*paths.add(index));
+                    let flags = *flags.add(index);
                     RawEvent {
                         path: PathBuf::from(OsStr::from_bytes(path.to_bytes())),
-                        id: *ids.add(i),
+                        id: *ids.add(index),
                         flags: ChangeFlags {
                             must_scan_sub_dirs: flags & fse::kFSEventStreamEventFlagMustScanSubDirs
                                 != 0,

@@ -29,10 +29,6 @@ use super::registry::RegistryReconcileBridge;
 const WINDOW_CLASS_NAME_STR: &str = "AxoPaneVolumeMonitorWindow";
 const CHANGE_MESSAGE_NAME: &str = "AxoPaneVolumeMonitorChanged";
 
-fn wide_null(value: &str) -> Vec<u16> {
-    value.encode_utf16().chain(std::iter::once(0)).collect()
-}
-
 /// Owns the message-only-window thread. Dropping posts `WM_QUIT` into the
 /// thread's message queue (breaking the blocking `GetMessageW` loop), then
 /// joins it once the thread has deregistered and torn down its window.
@@ -130,7 +126,7 @@ fn run(bridge: Arc<RegistryReconcileBridge>, ready: Sender<Result<u32, String>>)
 unsafe fn setup_window_and_registration(
     bridge: Arc<RegistryReconcileBridge>,
 ) -> Result<(HWND, u32, *mut ThreadContext), String> {
-    let class_name = wide_null(WINDOW_CLASS_NAME_STR);
+    let class_name = crate::win32::wide_nul(WINDOW_CLASS_NAME_STR);
     let class_name_ptr = PCWSTR(class_name.as_ptr());
 
     let class = WNDCLASSEXW {
@@ -160,7 +156,7 @@ unsafe fn setup_window_and_registration(
     )
     .map_err(|error| error.to_string())?;
 
-    let change_message_name = wide_null(CHANGE_MESSAGE_NAME);
+    let change_message_name = crate::win32::wide_nul(CHANGE_MESSAGE_NAME);
     let change_message = RegisterWindowMessageW(PCWSTR(change_message_name.as_ptr()));
     if change_message == 0 {
         return Err("RegisterWindowMessageW failed".to_string());

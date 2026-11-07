@@ -53,6 +53,7 @@ import { useDefaultAppDialogStore } from '@/stores/default-app-dialog-store'
 import { initializeTheme, useThemeStore } from '@/stores/theme-store'
 import { applyWindowBackdrop } from '@/lib/window-commands'
 import { useThumbnailStore } from '@/stores/thumbnail-store'
+import { otherPane } from '@/lib/pane-id'
 
 const MOUSE_BUTTON_BACK = 3
 const MOUSE_BUTTON_FORWARD = 4
@@ -173,7 +174,7 @@ function App() {
 
       if (event.key === 'Tab' && defaultPaneMode === 'dual') {
         event.preventDefault()
-        const nextPaneId = usePanesStore.getState().activePaneId === 'left' ? 'right' : 'left'
+        const nextPaneId = otherPane(usePanesStore.getState().activePaneId)
         usePanesStore.getState().setActivePane(nextPaneId)
         document.querySelector<HTMLElement>(`[data-pane-id="${nextPaneId}"]`)?.focus()
         return

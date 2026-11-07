@@ -1,4 +1,5 @@
 import type { PaneViewMode } from './pane-view'
+import { clamp } from '@/lib/numbers'
 
 export const PANE_GRID_GAP = 4
 export const PANE_GRID_MAX_COLUMNS = 12
@@ -48,7 +49,7 @@ export function paneGridRowPitch(mode: GraphicalViewMode) {
 export function columnsForPaneWidth(width: number, cellMinimum: number) {
   const safeWidth = Math.max(0, width)
   const fittingColumns = Math.floor((safeWidth + PANE_GRID_GAP) / (cellMinimum + PANE_GRID_GAP))
-  return Math.min(PANE_GRID_MAX_COLUMNS, Math.max(1, fittingColumns))
+  return clamp(fittingColumns, 1, PANE_GRID_MAX_COLUMNS)
 }
 
 export function paneGridLayout(

@@ -10,6 +10,8 @@ import {
   type DefaultAppDialogState,
 } from '@/stores/default-app-dialog-store'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
+import { SCROLLBAR_THIN } from '@/lib/class-names'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 /** Extracts the extension (without the leading dot) from a file name, e.g. "sql" for "query.sql". */
 function extensionFromFileName(fileName: string): string {
@@ -114,15 +116,13 @@ export function DefaultAppDialog() {
     >
       <DialogText>Choose the app to always open “{dialog.fileName}” files with.</DialogText>
       {loadState === 'error' ? (
-        <p className="text-body text-light-text-secondary dark:text-dark-text-secondary">
-          No applications were found.
-        </p>
+        <p className={`text-body ${TEXT_SECONDARY}`}>No applications were found.</p>
       ) : null}
       {loadState === 'loaded' ? (
         <ul
           role="listbox"
           aria-label="Applications"
-          className="grid max-h-72 gap-0.5 overflow-auto rounded-control border border-light-stroke bg-light-layer p-1 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:border-dark-stroke dark:bg-dark-layer dark:scrollbar-thumb-dark-text-tertiary"
+          className={`grid max-h-72 gap-0.5 overflow-auto rounded-control border border-light-stroke bg-light-layer p-1 ${SCROLLBAR_THIN} dark:border-dark-stroke dark:bg-dark-layer`}
         >
           {apps.map((app) => {
             const selected = app.bundlePath === selectedBundlePath

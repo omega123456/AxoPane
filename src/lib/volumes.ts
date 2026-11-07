@@ -1,5 +1,6 @@
 import type { VolumeCategory, VolumeGroup, VolumeInfo } from '@/lib/types/ipc'
 import { normalizeWindowsCompatibilityPath, pathKey } from '@/lib/path-compare'
+import { clamp } from '@/lib/numbers'
 
 const windowsDriveRootPattern = /^([A-Za-z]:)[\\/]?$/
 
@@ -141,7 +142,7 @@ export function volumeUsedFraction(volume: VolumeInfo): number | null {
     return null
   }
   const used = (volume.totalBytes - volume.freeBytes) / volume.totalBytes
-  return Math.min(1, Math.max(0, used))
+  return clamp(used, 0, 1)
 }
 
 const CAPACITY_CRITICAL_FRACTION = 0.95

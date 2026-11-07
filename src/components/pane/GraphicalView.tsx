@@ -25,6 +25,7 @@ import type { InlineRenameState } from '@/stores/inline-rename-store'
 import type { PaneState } from '@/types/pane'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
 import { BOTH_SIDES } from '@/lib/numbers'
+import { SCROLLBAR_THIN } from '@/lib/class-names'
 
 const THUMBNAIL_OVERSCAN_ROWS = 2
 const ICON_OVERSCAN_ROWS = 4
@@ -317,7 +318,7 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
           aria-rowcount={rowCount}
           aria-colcount={grid.columns}
           tabIndex={0}
-          className={`h-full min-h-0 overflow-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary ${FOCUS_RING_INSET} ${isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-light-accent dark:outline-dark-accent' : ''}`}
+          className={`h-full min-h-0 overflow-auto overscroll-contain ${SCROLLBAR_THIN} ${FOCUS_RING_INSET} ${isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-light-accent dark:outline-dark-accent' : ''}`}
           onKeyDown={onGridKeyDown}
           onMouseDown={onContainerMouseDown}
           onScroll={(event: UIEvent<HTMLDivElement>) => {

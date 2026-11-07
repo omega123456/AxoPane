@@ -19,11 +19,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 #[cfg(not(feature = "test-utils"))]
 use std::time::Duration;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
 use cache::ThumbnailCache;
 use provider::ThumbnailProvider;
-use scheduler::{ThumbnailScheduler, ThumbnailSubscriber};
+use scheduler::{ResultPublisher, ThumbnailScheduler, ThumbnailSubscriber};
 use types::{ThumbnailCacheKey, ThumbnailCandidate, ThumbnailState};
 
 use crate::ipc::types::{ThumbnailPriority, ThumbnailResultEvent, ThumbnailResultKind};
@@ -34,8 +34,6 @@ pub const MAX_RESULT_BYTES_PER_BATCH: usize = 512 * 1024;
 pub const PARTIAL_BATCH_FLUSH_MILLIS: u64 = 16;
 
 type ResultEmitter = Arc<dyn Fn(Vec<ThumbnailResultEvent>) + Send + Sync>;
-type ResultPublisher =
-    Arc<dyn Fn(ThumbnailCandidate, ThumbnailState, Vec<ThumbnailSubscriber>) + Send + Sync>;
 pub type ThumbnailClock = Arc<dyn Fn() -> u64 + Send + Sync>;
 
 struct BatchState {
@@ -393,9 +391,7 @@ fn emit_batches(
 }
 
 fn now_seconds() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_secs())
+    crate::epoch::now_since_epoch().as_secs()
 }
 
 fn result_event(

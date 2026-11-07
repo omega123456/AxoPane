@@ -405,22 +405,7 @@ pub fn write_json_atomic<T>(path: &Path, value: &T) -> Result<(), PersistError>
 where
     T: Serialize,
 {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let serialized = serde_json::to_vec_pretty(value)?;
-    let temp_path = path.with_extension(format!(
-        "{}.tmp",
-        path.extension()
-            .and_then(|extension| extension.to_str())
-            .unwrap_or("json")
-    ));
-
-    fs::write(&temp_path, serialized)?;
-    replace_file_atomic(&temp_path, path)?;
-
-    Ok(())
+    write_json_atomic_with_failure(path, value, false)
 }
 
 pub fn write_json_atomic_with_failure<T>(
@@ -456,18 +441,12 @@ where
 
 #[cfg(windows)]
 fn replace_file_atomic(source: &Path, target: &Path) -> Result<(), PersistError> {
-    use std::ffi::OsStr;
-    use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
         MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
     };
 
-    fn wide(value: &OsStr) -> Vec<u16> {
-        value.encode_wide().chain(std::iter::once(0)).collect()
-    }
-
-    let source_wide = wide(source.as_os_str());
-    let target_wide = wide(target.as_os_str());
+    let source_wide = crate::win32::wide_nul(source);
+    let target_wide = crate::win32::wide_nul(target);
 
     let moved = unsafe {
         MoveFileExW(

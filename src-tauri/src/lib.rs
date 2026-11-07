@@ -2,6 +2,8 @@ pub mod app_picker;
 pub mod bounded_cache;
 mod clipboard;
 pub mod directory_session;
+pub mod epoch;
+pub mod error_text;
 pub mod file_icons;
 pub mod fs;
 pub mod ipc;
@@ -13,6 +15,7 @@ pub mod native_menu;
 pub mod ops;
 pub mod path_text;
 pub mod persist;
+pub mod pixels;
 pub mod reconcile;
 pub mod resource_coordinator;
 pub mod search;
@@ -22,6 +25,7 @@ pub mod trash;
 pub mod traversal;
 pub mod volumes;
 pub mod watch;
+pub mod win32;
 pub mod window_chrome;
 
 use std::path::{Path, PathBuf};
@@ -110,6 +114,21 @@ fn prevent_default_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             .with_flags(flags)
             .build()
     }
+}
+
+/// A callback that forwards each payload to the webview as `event`.
+#[cfg(not(feature = "test-utils"))]
+fn frontend_emitter<Payload>(
+    handle: &tauri::AppHandle,
+    event: &'static str,
+) -> Arc<dyn Fn(Payload) + Send + Sync>
+where
+    Payload: serde::Serialize + Clone + 'static,
+{
+    let handle = handle.clone();
+    Arc::new(move |payload| {
+        let _ = handle.emit(event, payload);
+    })
 }
 
 #[cfg(not(feature = "test-utils"))]
@@ -299,10 +318,7 @@ pub fn run() {
             let thumbnails = Arc::new(thumbnails::ThumbnailService::new(Arc::clone(
                 &resource_coordinator,
             )));
-            let thumbnail_handle = app.handle().clone();
-            thumbnails.set_emitter(Arc::new(move |events| {
-                let _ = thumbnail_handle.emit(ipc::events::THUMBNAIL_STATE, events);
-            }));
+            thumbnails.set_emitter(frontend_emitter(app.handle(), ipc::events::THUMBNAIL_STATE));
             app.manage(thumbnails);
             app.manage(Arc::new(ipc::executor::IpcExecutor::new(Arc::clone(
                 &resource_coordinator,
@@ -320,7 +336,6 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             let sizes = {
                 let size_handle = app.handle().clone();
-                let status_handle = app.handle().clone();
                 SizeService::with_folder_size_index(
                     size::DEFAULT_MANUAL_SIZE_TIMEOUT,
                     Arc::clone(&resource_coordinator),
@@ -332,9 +347,7 @@ pub fn run() {
                             .collect::<Vec<_>>();
                         let _ = size_handle.emit(ipc::events::SIZE_STATE, batch);
                     }),
-                    Arc::new(move |status| {
-                        let _ = status_handle.emit(ipc::events::SIZE_INDEX_STATUS, status);
-                    }),
+                    frontend_emitter(app.handle(), ipc::events::SIZE_INDEX_STATUS),
                 )
             };
             #[cfg(not(target_os = "macos"))]
@@ -350,18 +363,9 @@ pub fn run() {
             app.manage(sizes);
 
             let ops = OpsService::with_resource_coordinator(resource_coordinator);
-            let progress_handle = app.handle().clone();
-            ops.set_progress_emitter(Arc::new(move |progress| {
-                let _ = progress_handle.emit(ipc::events::QUEUE_PROGRESS, progress);
-            }));
-            let conflict_handle = app.handle().clone();
-            ops.set_conflict_emitter(Arc::new(move |conflict| {
-                let _ = conflict_handle.emit(ipc::events::QUEUE_CONFLICT, conflict);
-            }));
-            let removed_handle = app.handle().clone();
-            ops.set_removed_emitter(Arc::new(move |operation_id| {
-                let _ = removed_handle.emit(ipc::events::QUEUE_REMOVED, operation_id);
-            }));
+            ops.set_progress_emitter(frontend_emitter(app.handle(), ipc::events::QUEUE_PROGRESS));
+            ops.set_conflict_emitter(frontend_emitter(app.handle(), ipc::events::QUEUE_CONFLICT));
+            ops.set_removed_emitter(frontend_emitter(app.handle(), ipc::events::QUEUE_REMOVED));
             app.manage(ops);
 
             Ok(())

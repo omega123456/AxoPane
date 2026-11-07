@@ -1,5 +1,6 @@
 import { ChevronDownIcon } from '@/components/icons'
 import { FOCUS_RING } from '@/lib/focus-ring'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 export type SelectOption<T extends string> = { value: T; label: string }
 
@@ -29,7 +30,9 @@ export function SelectField<T extends string>({
           </option>
         ))}
       </select>
-      <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-1/2 size-3 -translate-y-1/2 text-light-text-secondary dark:text-dark-text-secondary" />
+      <ChevronDownIcon
+        className={`pointer-events-none absolute right-2.5 top-1/2 size-3 -translate-y-1/2 ${TEXT_SECONDARY}`}
+      />
     </div>
   )
 }

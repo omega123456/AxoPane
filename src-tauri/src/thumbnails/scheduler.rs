@@ -11,6 +11,10 @@ use crate::resource_coordinator::{JobClass, JobSpec, ResourceCoordinator};
 use super::provider::ThumbnailProvider;
 use super::types::{ThumbnailCacheKey, ThumbnailCandidate, ThumbnailState};
 
+pub type ResultPublisher =
+    Arc<dyn Fn(ThumbnailCandidate, ThumbnailState, Vec<ThumbnailSubscriber>) + Send + Sync>;
+pub type MetadataMatcher = Arc<dyn Fn(&ThumbnailCandidate) -> bool + Send + Sync>;
+
 pub const MAX_ACTIVE_JOBS: usize = 2;
 pub const MAX_DESIRED_PER_SCOPE: usize = 4_096;
 
@@ -77,11 +81,9 @@ struct Shared {
     wake: Condvar,
     provider: Arc<dyn ThumbnailProvider>,
     coordinator: Arc<ResourceCoordinator>,
-    complete:
-        Arc<dyn Fn(ThumbnailCandidate, ThumbnailState, Vec<ThumbnailSubscriber>) + Send + Sync>,
-    progress:
-        Arc<dyn Fn(ThumbnailCandidate, ThumbnailState, Vec<ThumbnailSubscriber>) + Send + Sync>,
-    metadata_matches: Arc<dyn Fn(&ThumbnailCandidate) -> bool + Send + Sync>,
+    complete: ResultPublisher,
+    progress: ResultPublisher,
+    metadata_matches: MetadataMatcher,
 }
 
 #[derive(Clone)]
@@ -94,9 +96,7 @@ impl ThumbnailScheduler {
     pub fn new(
         provider: Arc<dyn ThumbnailProvider>,
         coordinator: Arc<ResourceCoordinator>,
-        complete: Arc<
-            dyn Fn(ThumbnailCandidate, ThumbnailState, Vec<ThumbnailSubscriber>) + Send + Sync,
-        >,
+        complete: ResultPublisher,
     ) -> Self {
         Self::new_with_progress_and_metadata_verifier(
             provider,
@@ -110,10 +110,8 @@ impl ThumbnailScheduler {
     pub fn new_with_metadata_verifier(
         provider: Arc<dyn ThumbnailProvider>,
         coordinator: Arc<ResourceCoordinator>,
-        complete: Arc<
-            dyn Fn(ThumbnailCandidate, ThumbnailState, Vec<ThumbnailSubscriber>) + Send + Sync,
-        >,
-        metadata_matches: Arc<dyn Fn(&ThumbnailCandidate) -> bool + Send + Sync>,
+        complete: ResultPublisher,
+        metadata_matches: MetadataMatcher,
     ) -> Self {
         Self::new_with_progress_and_metadata_verifier(
             provider,
@@ -127,13 +125,9 @@ impl ThumbnailScheduler {
     pub fn new_with_progress_and_metadata_verifier(
         provider: Arc<dyn ThumbnailProvider>,
         coordinator: Arc<ResourceCoordinator>,
-        complete: Arc<
-            dyn Fn(ThumbnailCandidate, ThumbnailState, Vec<ThumbnailSubscriber>) + Send + Sync,
-        >,
-        progress: Arc<
-            dyn Fn(ThumbnailCandidate, ThumbnailState, Vec<ThumbnailSubscriber>) + Send + Sync,
-        >,
-        metadata_matches: Arc<dyn Fn(&ThumbnailCandidate) -> bool + Send + Sync>,
+        complete: ResultPublisher,
+        progress: ResultPublisher,
+        metadata_matches: MetadataMatcher,
     ) -> Self {
         let shared = Arc::new(Shared {
             state: Mutex::new(State {

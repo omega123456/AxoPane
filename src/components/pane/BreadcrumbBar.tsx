@@ -8,6 +8,7 @@ import { useElementWidth } from '@/lib/use-element-width'
 import { usePanesStore } from '@/stores/panes-store'
 import { FOCUS_RING } from '@/lib/focus-ring'
 import { normalizeWindowsCompatibilityPath } from '@/lib/path-compare'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 type BreadcrumbBarProps = {
   pane: PaneState
@@ -155,7 +156,7 @@ export function BreadcrumbBar({ pane }: BreadcrumbBarProps) {
               <span
                 aria-hidden="true"
                 data-testid="breadcrumb-collapse-marker"
-                className="inline-flex shrink-0 items-center text-light-text-secondary dark:text-dark-text-secondary"
+                className={`inline-flex shrink-0 items-center ${TEXT_SECONDARY}`}
               >
                 <span className="px-1.5">{'…'}</span>
                 <CrumbSeparator />
@@ -173,7 +174,7 @@ export function BreadcrumbBar({ pane }: BreadcrumbBarProps) {
                     className={`inline-flex shrink-0 items-center rounded-control px-1.5 py-1 text-row ${FOCUS_RING} ${
                       isCurrent
                         ? 'cursor-default font-semibold text-light-text dark:text-dark-text'
-                        : 'cursor-pointer text-light-text-secondary hover:bg-light-hover active:bg-light-press dark:text-dark-text-secondary dark:hover:bg-dark-hover dark:active:bg-dark-press'
+                        : `cursor-pointer ${TEXT_SECONDARY} hover:bg-light-hover active:bg-light-press dark:hover:bg-dark-hover dark:active:bg-dark-press`
                     }`}
                   >
                     <span className="truncate">{segment.label}</span>

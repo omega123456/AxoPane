@@ -13,6 +13,7 @@ import { useContextMenuStore } from '@/stores/context-menu-store'
 import { useDragStore } from '@/stores/drag-store'
 import { FAVOURITES_HEIGHT_MAX, FAVOURITES_HEIGHT_MIN, useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
+import { SCROLLBAR_THIN } from '@/lib/class-names'
 
 function canDropOnFavourites() {
   const drag = useDragStore.getState().drag
@@ -124,7 +125,7 @@ export function FavouritesPanel() {
         <div
           // Height is user-draggable runtime geometry; no static token can express it.
           style={{ maxHeight: `${heightPx}px` }}
-          className="overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary"
+          className={`overflow-x-hidden overflow-y-auto overscroll-contain ${SCROLLBAR_THIN}`}
         >
           {favourites.map((path, index) => (
             <FavouriteTreeRow

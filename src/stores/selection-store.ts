@@ -1,6 +1,5 @@
 import { create } from 'zustand'
-
-type PaneId = 'left' | 'right'
+import type { PaneId } from '@/types/pane'
 
 type PaneSelection = {
   anchorId: string | null

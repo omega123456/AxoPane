@@ -5,8 +5,10 @@ import { DEFAULT_UPDATE_INTERVAL, type UpdateInterval } from '@/lib/update-inter
 import { persistAppConfig } from '@/lib/app-config'
 import { setLogLevel as setBackendLogLevel } from '@/lib/ipc/commands'
 import { pathsMatch } from '@/lib/path-compare'
+import { clamp } from '@/lib/numbers'
+import { moveItem } from '@/lib/collections'
 
-type ConfigSnapshot = {
+export type ConfigSnapshot = {
   theme: ThemePreference
   showHiddenFiles: boolean
   dismissedEverythingBanner: boolean
@@ -48,7 +50,7 @@ type ConfigStore = ConfigSnapshot & {
   reset: () => void
 }
 
-function defaultState(): ConfigSnapshot {
+export function defaultConfigSnapshot(): ConfigSnapshot {
   return {
     theme: 'system',
     showHiddenFiles: false,
@@ -67,8 +69,18 @@ function defaultState(): ConfigSnapshot {
   }
 }
 
+const CONFIG_SNAPSHOT_FIELDS = Object.keys(defaultConfigSnapshot()) as (keyof ConfigSnapshot)[]
+
+/** The config-store fields of `source`, each falling back to its default when nullish. */
+export function pickConfigSnapshot(source: Partial<ConfigSnapshot>): ConfigSnapshot {
+  const defaults = defaultConfigSnapshot()
+  return Object.fromEntries(
+    CONFIG_SNAPSHOT_FIELDS.map((field) => [field, source[field] ?? defaults[field]]),
+  ) as ConfigSnapshot
+}
+
 export const useConfigStore = create<ConfigStore>((set) => ({
-  ...defaultState(),
+  ...defaultConfigSnapshot(),
   renamingFavourite: null,
   hydrate: (config) => set(config),
   setThemePreference: async (theme) => {
@@ -126,11 +138,7 @@ export const useConfigStore = create<ConfigStore>((set) => ({
     set((state) => {
       if (state.favourites.some((item) => pathsMatch(item, path))) return state
       const favourites = [...state.favourites]
-      favourites.splice(
-        Math.max(0, Math.min(index ?? favourites.length, favourites.length)),
-        0,
-        path,
-      )
+      favourites.splice(clamp(index ?? favourites.length, 0, favourites.length), 0, path)
       changed = true
       return { favourites }
     })
@@ -165,15 +173,13 @@ export const useConfigStore = create<ConfigStore>((set) => ({
     set((state) => {
       const sourceIndex = state.favourites.findIndex((item) => pathsMatch(item, path))
       if (sourceIndex === -1) return state
-      const favourites = [...state.favourites]
-      const [item] = favourites.splice(sourceIndex, 1)
       const adjustedIndex = sourceIndex < index ? index - 1 : index
-      const targetIndex = Math.max(0, Math.min(adjustedIndex, favourites.length))
-      favourites.splice(targetIndex, 0, item)
+      const targetIndex = clamp(adjustedIndex, 0, state.favourites.length - 1)
+      const favourites = moveItem(state.favourites, sourceIndex, targetIndex)
       changed = sourceIndex !== targetIndex
       return changed ? { favourites } : state
     })
     if (changed) await persistAppConfig()
   },
-  reset: () => set({ ...defaultState(), renamingFavourite: null }),
+  reset: () => set({ ...defaultConfigSnapshot(), renamingFavourite: null }),
 }))

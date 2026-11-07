@@ -3,6 +3,7 @@ import { ArrowUpIcon, FolderGlyph } from '@/components/icons'
 import { columnCellClassName } from '@/lib/columns'
 import { useLayoutStore } from '@/stores/layout-store'
 import { columnFlexStyle } from './HeaderRow'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 type ParentRowProps = {
   isActivePane: boolean
@@ -72,9 +73,7 @@ export function ParentRow({
                   <FolderGlyph className="h-4 w-4" />
                   <ArrowUpIcon className="absolute top-1.5 h-2.5 w-2.5 text-light-text dark:text-dark-base" />
                 </span>
-                <span className="truncate text-light-text-secondary dark:text-dark-text-secondary">
-                  ..
-                </span>
+                <span className={`truncate ${TEXT_SECONDARY}`}>..</span>
               </span>
             </span>
           )
@@ -87,9 +86,7 @@ export function ParentRow({
               style={columnFlexStyle(column.key, columnWidths)}
               className={columnCellClassName(column.key)}
             >
-              <span className="truncate text-caption text-light-text-secondary dark:text-dark-text-secondary">
-                Parent folder
-              </span>
+              <span className={`truncate text-caption ${TEXT_SECONDARY}`}>Parent folder</span>
             </span>
           )
         }
@@ -100,9 +97,7 @@ export function ParentRow({
             style={columnFlexStyle(column.key, columnWidths)}
             className={columnCellClassName(column.key)}
           >
-            <span className="font-mono text-caption text-light-text-secondary dark:text-dark-text-secondary">
-              —
-            </span>
+            <span className={`font-mono text-caption ${TEXT_SECONDARY}`}>—</span>
           </span>
         )
       })}

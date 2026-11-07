@@ -74,10 +74,13 @@ mod platform {
 
     use super::WindowBackdrop;
 
+    /// `CurrentBuildNumber` is a short decimal string.
+    const BUILD_NUMBER_BUFFER_UNITS: usize = 16;
+
     /// `CurrentBuildNumber` is reliable without an OS-compatibility manifest,
     /// unlike `GetVersionEx`.
     pub fn windows_build() -> Option<u32> {
-        let mut buffer = [0u16; 16];
+        let mut buffer = [0u16; BUILD_NUMBER_BUFFER_UNITS];
         let mut size = (buffer.len() * std::mem::size_of::<u16>()) as u32;
         let status = unsafe {
             RegGetValueW(

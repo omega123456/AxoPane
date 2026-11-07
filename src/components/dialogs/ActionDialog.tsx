@@ -19,6 +19,8 @@ import {
 } from '@/stores/action-dialog-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { WINDOWS_DRIVE_PREFIX_LENGTH } from '@/lib/path-compare'
+import { TEXT_SECONDARY } from '@/lib/class-names'
+import { handleKeyByTable } from '@/lib/key-table'
 
 export function ActionDialog() {
   const dialog = useActionDialogStore((state) => state.dialog)
@@ -153,13 +155,7 @@ function PromptDialog({
   }
 
   function onKeyDown(event: React.KeyboardEvent) {
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      void submit()
-    } else if (event.key === 'Escape') {
-      event.preventDefault()
-      close()
-    }
+    handleKeyByTable(event, { Enter: () => void submit(), Escape: close })
   }
 
   return (
@@ -237,10 +233,7 @@ function DeleteDialog({ dialog }: { dialog: Extract<ActionDialogState, { kind: '
   }
 
   function onKeyDown(event: React.KeyboardEvent) {
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      close()
-    }
+    handleKeyByTable(event, { Escape: close })
   }
 
   return (
@@ -306,10 +299,7 @@ function AdminRequiredDialog({
   }
 
   function onKeyDown(event: React.KeyboardEvent) {
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      close()
-    }
+    handleKeyByTable(event, { Escape: close })
   }
 
   return (
@@ -372,10 +362,7 @@ function EmptyTrashDialog({
   }
 
   function onKeyDown(event: React.KeyboardEvent) {
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      close()
-    }
+    handleKeyByTable(event, { Escape: close })
   }
 
   return (
@@ -435,13 +422,7 @@ function CalculateAllSizesDialog({
   }
 
   function onKeyDown(event: React.KeyboardEvent) {
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      void confirm()
-    } else if (event.key === 'Escape') {
-      event.preventDefault()
-      close()
-    }
+    handleKeyByTable(event, { Enter: () => void confirm(), Escape: close })
   }
 
   return (
@@ -504,10 +485,7 @@ function DeleteFromTrashDialog({
   }
 
   function onKeyDown(event: React.KeyboardEvent) {
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      close()
-    }
+    handleKeyByTable(event, { Escape: close })
   }
 
   return (
@@ -580,13 +558,7 @@ function TransferConfirmDialog({
   }
 
   function onKeyDown(event: React.KeyboardEvent) {
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      void confirm()
-    } else if (event.key === 'Escape') {
-      event.preventDefault()
-      close()
-    }
+    handleKeyByTable(event, { Enter: () => void confirm(), Escape: close })
   }
 
   return (
@@ -608,11 +580,11 @@ function TransferConfirmDialog({
       <DialogList items={targetSummary(dialog.targets)} />
       <dl className="grid gap-2 text-caption">
         <div className="grid gap-0.5">
-          <dt className="text-light-text-secondary dark:text-dark-text-secondary">From folder</dt>
+          <dt className={TEXT_SECONDARY}>From folder</dt>
           <dd className="break-all font-mono">{dialog.sourceDir}</dd>
         </div>
         <div className="grid gap-0.5">
-          <dt className="text-light-text-secondary dark:text-dark-text-secondary">To folder</dt>
+          <dt className={TEXT_SECONDARY}>To folder</dt>
           <dd className="break-all font-mono">{dialog.destinationDir}</dd>
         </div>
       </dl>
@@ -675,13 +647,7 @@ function ArchiveConfirmDialog({
   }
 
   function onKeyDown(event: React.KeyboardEvent) {
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      void confirm()
-    } else if (event.key === 'Escape') {
-      event.preventDefault()
-      close()
-    }
+    handleKeyByTable(event, { Enter: () => void confirm(), Escape: close })
   }
 
   return (

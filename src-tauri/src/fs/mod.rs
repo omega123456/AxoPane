@@ -192,7 +192,7 @@ pub fn platform_root() -> PathBuf {
     }
 }
 
-fn home_dir() -> Option<PathBuf> {
+pub fn home_dir() -> Option<PathBuf> {
     #[cfg(windows)]
     let keys = ["USERPROFILE", "HOME"];
     #[cfg(not(windows))]
@@ -252,13 +252,11 @@ pub fn expand_env_vars_with(path: &str, lookup: impl Fn(&str) -> Option<String>)
 }
 
 pub fn expand_home_path_with(path: &str, home: Option<&Path>) -> PathBuf {
-    let Some(rest) = path.strip_prefix('~') else {
+    let Some(rest) =
+        crate::path_text::strip_home_prefix(path, |character| matches!(character, '/' | '\\'))
+    else {
         return PathBuf::from(path);
     };
-
-    if !rest.is_empty() && !rest.starts_with(['/', '\\']) {
-        return PathBuf::from(path);
-    }
 
     let Some(home) = home else {
         return PathBuf::from(path);

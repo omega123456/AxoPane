@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { XIcon } from '@/components/icons'
 import { FOCUS_RING } from '@/lib/focus-ring'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 export type InfoBarSeverity = 'info' | 'success' | 'warning' | 'error'
 
@@ -82,7 +83,7 @@ export function InfoBar({
           aria-label={dismissLabel}
           disabled={dismissDisabled}
           onClick={onDismiss}
-          className={`-my-1 flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-control text-light-text-secondary hover:bg-light-hover disabled:cursor-default disabled:opacity-40 dark:text-dark-text-secondary dark:hover:bg-dark-hover ${FOCUS_RING}`}
+          className={`-my-1 flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-control ${TEXT_SECONDARY} hover:bg-light-hover disabled:cursor-default disabled:opacity-40 dark:hover:bg-dark-hover ${FOCUS_RING}`}
         >
           <XIcon className="size-4" />
         </button>

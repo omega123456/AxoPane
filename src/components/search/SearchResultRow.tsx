@@ -5,6 +5,7 @@ import { formatEntryDate } from '@/lib/date-format'
 import type { SearchActivation } from '@/lib/search-actions'
 import type { SearchHit } from '@/lib/types/ipc'
 import { useConfigStore } from '@/stores/config-store'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 export function searchOptionId(index: number) {
   return `search-option-${index}`
@@ -74,7 +75,7 @@ export function SearchResultRow({
         <span className="truncate text-body text-light-text dark:text-dark-text">
           <HighlightedText text={hit.name} ranges={hit.nameRanges} />
         </span>
-        <span className="truncate text-caption text-light-text-secondary dark:text-dark-text-secondary">
+        <span className={`truncate text-caption ${TEXT_SECONDARY}`}>
           <HighlightedText text={hit.parentPath} ranges={hit.parentRanges} />
         </span>
       </span>

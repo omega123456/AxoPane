@@ -11,6 +11,12 @@ import {
 import { createPortal } from 'react-dom'
 import { CheckIcon } from '@/components/icons'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
+import {
+  applyMenuGeometry,
+  documentZoom,
+  placePopoverAtTrigger,
+  toZoomedGeometry,
+} from '@/components/menus/menu-geometry'
 
 export type MenuPopoverItem = {
   id: string
@@ -86,21 +92,11 @@ export function MenuPopover({ ariaLabel, trigger, items, radio = false }: MenuPo
     const trigger = triggerRef.current
     if (!open || !menu || !trigger) return
 
-    const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1
-    const triggerRect = trigger.getBoundingClientRect()
-    const menuRect = menu.getBoundingClientRect()
-    const margin = 8
-    const left = Math.max(
-      margin,
-      Math.min(triggerRect.left, window.innerWidth - menuRect.width - margin),
+    const geometry = placePopoverAtTrigger(
+      trigger.getBoundingClientRect(),
+      menu.getBoundingClientRect(),
     )
-    const top =
-      triggerRect.bottom + menuRect.height <= window.innerHeight - margin
-        ? triggerRect.bottom
-        : triggerRect.top - menuRect.height
-
-    menu.style.left = `${left / zoom}px`
-    menu.style.top = `${Math.max(margin, top) / zoom}px`
+    applyMenuGeometry(menu, toZoomedGeometry(geometry, documentZoom()))
   }, [open])
 
   function onMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {

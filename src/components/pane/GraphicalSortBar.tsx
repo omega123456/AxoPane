@@ -5,6 +5,7 @@ import type { SortKey } from '@/lib/types/ipc'
 import type { PaneState } from '@/types/pane'
 import { usePanesStore } from '@/stores/panes-store'
 import { FOCUS_RING } from '@/lib/focus-ring'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 const sortKeys: SortKey[] = ['name', 'size', 'items', 'type', 'modified', 'created']
 
@@ -37,7 +38,9 @@ export function GraphicalSortBar({ pane }: { pane: PaneState }) {
     },
   ]
   return (
-    <div className="flex h-headrow items-center gap-2 border-b border-light-divider px-2.75 text-caption text-light-text-secondary dark:border-dark-divider dark:text-dark-text-secondary">
+    <div
+      className={`flex h-headrow items-center gap-2 border-b border-light-divider px-2.75 text-caption ${TEXT_SECONDARY} dark:border-dark-divider`}
+    >
       <span className="shrink-0 whitespace-nowrap">Sort by</span>
       <MenuPopover
         ariaLabel="Sort field"

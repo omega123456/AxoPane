@@ -94,6 +94,31 @@ async fn latency_filesystem_cancellable<T: Send + 'static>(
         .await
 }
 
+/// Runs `work` through the latency executor unless the request was
+/// cancelled before it reached a worker, in which case it fails with
+/// `cancelled_message`.
+#[cfg(not(feature = "test-utils"))]
+async fn latency_filesystem_unless_cancelled<T: Send + 'static>(
+    executor: &crate::ipc::executor::IpcExecutor,
+    resource_key: String,
+    cancelled_message: &'static str,
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    latency_filesystem_cancellable(executor, resource_key, move |cancel| {
+        if cancel.is_cancelled() {
+            return Err(cancelled_message.to_string());
+        }
+        work()
+    })
+    .await
+}
+
+/// Logs `message` as an error and hands it back for the IPC response.
+fn logged_error(message: String) -> String {
+    log::error!("{message}");
+    message
+}
+
 #[tauri::command]
 pub fn get_initial_shell() -> InitialShellResponse {
     mock::initial_shell()
@@ -189,11 +214,8 @@ pub fn list_dir(payload: ListDirRequest) -> Result<ListDirResponse, String> {
 
 #[cfg(feature = "test-utils")]
 fn list_dir_impl(payload: ListDirRequest) -> Result<ListDirResponse, String> {
-    fs::list_dir(&payload).map_err(|error| {
-        let message = format!("Failed to load \"{}\": {error}", payload.path);
-        log::error!("{message}");
-        message
-    })
+    fs::list_dir(&payload)
+        .map_err(|error| logged_error(format!("Failed to load \"{}\": {error}", payload.path)))
 }
 
 /// Establishes (or replaces) the directory session for a pane.
@@ -294,12 +316,10 @@ fn list_tree_children_impl(
     payload: ListTreeChildrenRequest,
 ) -> Result<ListTreeChildrenResponse, String> {
     fs::list_tree_children(&payload).map_err(|error| {
-        let message = format!(
+        logged_error(format!(
             "Failed to load tree children for \"{}\": {error}",
             payload.path
-        );
-        log::error!("{message}");
-        message
+        ))
     })
 }
 
@@ -310,10 +330,7 @@ pub async fn create_folder(
     executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
 ) -> Result<DirectoryEntry, String> {
     let key = payload.parent.clone();
-    latency_filesystem_cancellable(&executor, key, move |cancel| {
-        if cancel.is_cancelled() {
-            return Err("create folder cancelled".to_string());
-        }
+    latency_filesystem_unless_cancelled(&executor, key, "create folder cancelled", move || {
         create_folder_impl(payload)
     })
     .await
@@ -327,9 +344,10 @@ pub fn create_folder(payload: CreateEntryRequest) -> Result<DirectoryEntry, Stri
 
 fn create_folder_impl(payload: CreateEntryRequest) -> Result<DirectoryEntry, String> {
     fs::create_directory(&payload.parent, &payload.name).map_err(|error| {
-        let message = format!("Failed to create folder \"{}\": {error}", payload.name);
-        log::error!("{message}");
-        message
+        logged_error(format!(
+            "Failed to create folder \"{}\": {error}",
+            payload.name
+        ))
     })
 }
 
@@ -340,10 +358,7 @@ pub async fn create_file(
     executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
 ) -> Result<DirectoryEntry, String> {
     let key = payload.parent.clone();
-    latency_filesystem_cancellable(&executor, key, move |cancel| {
-        if cancel.is_cancelled() {
-            return Err("create file cancelled".to_string());
-        }
+    latency_filesystem_unless_cancelled(&executor, key, "create file cancelled", move || {
         create_file_impl(payload)
     })
     .await
@@ -357,9 +372,10 @@ pub fn create_file(payload: CreateEntryRequest) -> Result<DirectoryEntry, String
 
 fn create_file_impl(payload: CreateEntryRequest) -> Result<DirectoryEntry, String> {
     fs::create_file(&payload.parent, &payload.name).map_err(|error| {
-        let message = format!("Failed to create file \"{}\": {error}", payload.name);
-        log::error!("{message}");
-        message
+        logged_error(format!(
+            "Failed to create file \"{}\": {error}",
+            payload.name
+        ))
     })
 }
 
@@ -370,10 +386,7 @@ pub async fn rename_entry(
     executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
 ) -> Result<DirectoryEntry, String> {
     let key = payload.path.clone();
-    latency_filesystem_cancellable(&executor, key, move |cancel| {
-        if cancel.is_cancelled() {
-            return Err("rename cancelled".to_string());
-        }
+    latency_filesystem_unless_cancelled(&executor, key, "rename cancelled", move || {
         rename_entry_impl(payload)
     })
     .await
@@ -386,11 +399,8 @@ pub fn rename_entry(payload: RenameEntryRequest) -> Result<DirectoryEntry, Strin
 }
 
 fn rename_entry_impl(payload: RenameEntryRequest) -> Result<DirectoryEntry, String> {
-    fs::rename_entry(&payload.path, &payload.new_name).map_err(|error| {
-        let message = format!("Failed to rename \"{}\": {error}", payload.path);
-        log::error!("{message}");
-        message
-    })
+    fs::rename_entry(&payload.path, &payload.new_name)
+        .map_err(|error| logged_error(format!("Failed to rename \"{}\": {error}", payload.path)))
 }
 
 #[cfg(not(feature = "test-utils"))]
@@ -418,11 +428,8 @@ pub fn move_to_trash(payload: TrashEntriesRequest) -> Result<(), String> {
 
 #[cfg(feature = "test-utils")]
 fn move_to_trash_impl(payload: TrashEntriesRequest) -> Result<(), String> {
-    crate::trash::move_to_trash(&payload.paths).map_err(|error| {
-        let message = format!("Failed to move items to trash: {error}");
-        log::error!("{message}");
-        message
-    })
+    crate::trash::move_to_trash(&payload.paths)
+        .map_err(|error| logged_error(format!("Failed to move items to trash: {error}")))
 }
 
 #[cfg(not(feature = "test-utils"))]
@@ -482,11 +489,8 @@ pub fn restore_from_trash(payload: RestoreTrashRequest) -> Result<(), String> {
 }
 
 fn restore_from_trash_impl(payload: RestoreTrashRequest) -> Result<(), String> {
-    crate::trash::restore_from_trash(&payload.ids).map_err(|error| {
-        let message = format!("Failed to restore items from trash: {error}");
-        log::error!("{message}");
-        message
-    })
+    crate::trash::restore_from_trash(&payload.ids)
+        .map_err(|error| logged_error(format!("Failed to restore items from trash: {error}")))
 }
 
 #[cfg(not(feature = "test-utils"))]
@@ -504,11 +508,8 @@ pub fn empty_trash() -> Result<(), String> {
 }
 
 fn empty_trash_impl() -> Result<(), String> {
-    crate::trash::empty_trash().map_err(|error| {
-        let message = format!("Failed to empty trash: {error}");
-        log::error!("{message}");
-        message
-    })
+    crate::trash::empty_trash()
+        .map_err(|error| logged_error(format!("Failed to empty trash: {error}")))
 }
 
 #[cfg(not(feature = "test-utils"))]
@@ -531,9 +532,9 @@ pub fn delete_from_trash(payload: DeleteFromTrashRequest) -> Result<(), String> 
 
 fn delete_from_trash_impl(payload: DeleteFromTrashRequest) -> Result<(), String> {
     crate::trash::delete_from_trash(&payload.ids).map_err(|error| {
-        let message = format!("Failed to permanently delete items from trash: {error}");
-        log::error!("{message}");
-        message
+        logged_error(format!(
+            "Failed to permanently delete items from trash: {error}"
+        ))
     })
 }
 
@@ -571,11 +572,8 @@ pub fn restart_as_admin() -> Result<(), String> {
 
 #[tauri::command]
 pub fn open_full_disk_access_settings() -> Result<(), String> {
-    crate::launch::open_full_disk_access_settings().map_err(|error| {
-        let message = format!("Failed to open Full Disk Access settings: {error}");
-        log::error!("{message}");
-        message
-    })
+    crate::launch::open_full_disk_access_settings()
+        .map_err(|error| logged_error(format!("Failed to open Full Disk Access settings: {error}")))
 }
 
 /// Keeps the native title bar in step with the app theme.
@@ -597,18 +595,15 @@ pub fn get_window_backdrop() -> crate::window_chrome::WindowBackdrop {
 
 fn restart_as_admin_impl() -> Result<(), String> {
     crate::launch::restart_as_admin().map_err(|error| {
-        let message = format!("Failed to restart with administrator permissions: {error}");
-        log::error!("{message}");
-        message
+        logged_error(format!(
+            "Failed to restart with administrator permissions: {error}"
+        ))
     })
 }
 
 fn open_path_impl(payload: OpenPathRequest) -> Result<(), String> {
-    crate::launch::open_path(Path::new(&payload.path)).map_err(|error| {
-        let message = format!("Failed to open \"{}\": {error}", payload.path);
-        log::error!("{message}");
-        message
-    })
+    crate::launch::open_path(Path::new(&payload.path))
+        .map_err(|error| logged_error(format!("Failed to open \"{}\": {error}", payload.path)))
 }
 
 #[cfg(not(feature = "test-utils"))]

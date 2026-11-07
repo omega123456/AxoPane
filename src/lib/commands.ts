@@ -18,6 +18,7 @@ import { indexEntriesById, usePanesStore } from '@/stores/panes-store'
 import { useSearchPaletteStore } from '@/stores/search-palette-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useSettingsStore } from '@/stores/settings-store'
+import { otherPane } from '@/lib/pane-id'
 
 const PARENT_ROW_ID = '..'
 
@@ -112,7 +113,7 @@ export function executeCommand(
       break
     case 'openInOtherPane':
       if (entry?.isDir) {
-        const otherPaneId = paneId === 'left' ? 'right' : 'left'
+        const otherPaneId = otherPane(paneId)
         void panes.openTabFromPath(otherPaneId, entry.path)
       }
       break
@@ -314,7 +315,7 @@ export function executeCommand(
         break
       }
 
-      const otherPaneId = paneId === 'left' ? 'right' : 'left'
+      const otherPaneId = otherPane(paneId)
       const destinationDir = panes.panes[otherPaneId].path
 
       useActionDialogStore.getState().open({

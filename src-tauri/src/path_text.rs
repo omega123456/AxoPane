@@ -41,3 +41,10 @@ fn strip_prefix_ignore_ascii_case<'a>(text: &'a str, prefix: &str) -> Option<&'a
     head.eq_ignore_ascii_case(prefix)
         .then(|| &text[prefix.len()..])
 }
+
+/// The text after a leading `~` that names the home directory (`~` alone or
+/// `~` followed by a separator), or `None` for any other text.
+pub fn strip_home_prefix(text: &str, is_separator: impl Fn(char) -> bool) -> Option<&str> {
+    let rest = text.strip_prefix('~')?;
+    (rest.is_empty() || rest.starts_with(is_separator)).then_some(rest)
+}

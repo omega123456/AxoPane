@@ -6,10 +6,10 @@ import type { ThumbnailCandidateRequest, ThumbnailResultEvent } from '@/lib/type
 import {
   isThumbnailCacheRecordUsable,
   pruneThumbnailCache,
-  thumbnailCacheNow,
-  thumbnailWeight,
   type ThumbnailCacheRecord,
 } from '@/stores/thumbnails/cache-policy'
+import { cacheNow } from '@/stores/weighted-cache'
+import { utf16ByteWeight } from '@/lib/numbers'
 
 export type ThumbnailScope = {
   paneId: string
@@ -114,7 +114,7 @@ export const useThumbnailStore = create<ThumbnailStore>((set, get) => ({
       candidateSignature: signature,
     }
     const scopes = { ...get().scopes, [key]: nextScope }
-    const now = thumbnailCacheNow()
+    const now = cacheNow()
     const touchedCache = { ...get().cache }
     for (const fingerprint of Object.keys(candidatesByFingerprint)) {
       const record = touchedCache[fingerprint]
@@ -148,7 +148,7 @@ export const useThumbnailStore = create<ThumbnailStore>((set, get) => ({
         throw new Error('thumbnail request was not fully accepted')
       }
     } catch (error) {
-      const failedAt = thumbnailCacheNow()
+      const failedAt = cacheNow()
       set((state) => {
         const current = state.scopes[key]
         if (!current || current.generation !== generation || current.revision !== revision)
@@ -179,14 +179,14 @@ export const useThumbnailStore = create<ThumbnailStore>((set, get) => ({
       delete scopes[key]
       return {
         scopes,
-        cache: pruneThumbnailCache(state.cache, visibleProtection(scopes), thumbnailCacheNow()),
+        cache: pruneThumbnailCache(state.cache, visibleProtection(scopes), cacheNow()),
       }
     })
   },
   applyThumbnailResults: (events) =>
     set((state) => {
       if (events.length === 0) return state
-      const now = thumbnailCacheNow()
+      const now = cacheNow()
       const cache = { ...state.cache }
       let changed = false
       for (const event of events) {
@@ -210,7 +210,7 @@ export const useThumbnailStore = create<ThumbnailStore>((set, get) => ({
           quality: event.state === 'ready' ? event.quality : null,
           dataUrl: event.state === 'ready' ? event.dataUrl : null,
           touched: now,
-          weight: thumbnailWeight(event.state === 'ready' ? event.dataUrl : null),
+          weight: utf16ByteWeight(event.state === 'ready' ? event.dataUrl : null),
         }
         changed = true
       }
@@ -219,7 +219,7 @@ export const useThumbnailStore = create<ThumbnailStore>((set, get) => ({
     }),
   getRecord: (candidate) => {
     const record = get().cache[thumbnailFingerprintKey(candidate)]
-    return record && isThumbnailCacheRecordUsable(record, thumbnailCacheNow()) ? record : undefined
+    return record && isThumbnailCacheRecordUsable(record, cacheNow()) ? record : undefined
   },
   reset: () => set({ scopes: {}, cache: {} }),
 }))

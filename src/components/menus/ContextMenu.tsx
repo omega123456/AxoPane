@@ -5,7 +5,13 @@ import { log } from '@/lib/app-log-commands'
 import { dedupeNativeMenuItems } from '@/lib/context-menu/menu-dedupe'
 import { requestNativeMenu } from '@/lib/context-menu/native-menu-commands'
 import { useContextMenuStore } from '@/stores/context-menu-store'
-import { MENU_VIEWPORT_MARGIN_PX, menuAvailableHeight } from '@/components/menus/menu-geometry'
+import {
+  applyMenuGeometry,
+  documentZoom,
+  placeMenuAtPoint,
+  toZoomedGeometry,
+} from '@/components/menus/menu-geometry'
+import { SCROLLBAR_THIN } from '@/lib/class-names'
 
 export function ContextMenu() {
   const menu = useContextMenuStore((state) => state.menu)
@@ -83,38 +89,10 @@ export function ContextMenu() {
     node.style.height = ''
     node.style.maxHeight = ''
 
-    // The app zooms the UI via CSS `zoom` on <html> (see layout-store). Pointer
-    // coordinates (`menu.x/y`), `getBoundingClientRect()` and `innerWidth/
-    // Height` are all in real viewport pixels, but `left`/`top` written on a
-    // node inside the zoomed root are interpreted in *zoomed* units (the browser
-    // multiplies them by the zoom factor). So we do all the geometry math in
-    // real pixels, then divide the final offsets by the zoom factor.
-    const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1
-    const { width, height } = node.getBoundingClientRect()
-    const margin = MENU_VIEWPORT_MARGIN_PX
-    const availableHeight = menuAvailableHeight()
-    const clampedHeight = Math.min(height, availableHeight)
-    const maxLeft = window.innerWidth - width - margin
-    const maxTop = window.innerHeight - clampedHeight - margin
-
-    // Flip the menu around the cursor when it would overflow, so a corner stays
-    // pinned to the pointer instead of detaching toward the viewport edge.
-    let left = menu.x
-    if (left > maxLeft) {
-      left = menu.x - width
-    }
-    left = Math.max(margin, Math.min(left, maxLeft))
-
-    let top = menu.y
-    if (top > maxTop) {
-      top = menu.y - height
-    }
-    top = Math.max(margin, Math.min(top, maxTop))
-
-    node.style.left = `${left / zoom}px`
-    node.style.top = `${top / zoom}px`
-    node.style.height = `${clampedHeight / zoom}px`
-    node.style.maxHeight = `${availableHeight / zoom}px`
+    // Flipping around the cursor keeps a corner pinned to the pointer instead
+    // of detaching toward the viewport edge.
+    const geometry = placeMenuAtPoint(menu.x, menu.y, node.getBoundingClientRect())
+    applyMenuGeometry(node, toZoomedGeometry(geometry, documentZoom()))
   }, [menu, nativeFailed, nativeLoading, nativePlaceholderVisible, nativeSectionLocked])
 
   if (!menu) {
@@ -188,7 +166,7 @@ export function ContextMenu() {
         <div
           ref={bodyRef}
           data-testid="context-menu-scroll-body"
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary"
+          className={`min-h-0 flex-1 overflow-y-auto overscroll-contain ${SCROLLBAR_THIN}`}
         >
           {beforeNativeSections.map((section, index) => (
             <ContextMenuSection

@@ -16,6 +16,7 @@ import type { OpKind, OpProgress } from '@/lib/types/ipc'
 import { isTerminal, useQueueStore } from '@/stores/queue-store'
 import { FOCUS_RING } from '@/lib/focus-ring'
 import { fractionToPercent } from '@/lib/numbers'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 const kindIcons: Record<OpKind, typeof CopyIcon> = {
   copy: CopyIcon,
@@ -132,7 +133,7 @@ export function QueueToast() {
         ) : summary.icon === 'failed' ? (
           <XCircleIcon className="size-4 shrink-0 text-light-danger dark:text-dark-danger" />
         ) : (
-          <XCircleIcon className="size-4 shrink-0 text-light-text-secondary dark:text-dark-text-secondary" />
+          <XCircleIcon className={`size-4 shrink-0 ${TEXT_SECONDARY}`} />
         )}
         <button
           type="button"
@@ -142,7 +143,7 @@ export function QueueToast() {
           {summary.label}
         </button>
         {summary.detail ? (
-          <span className="shrink-0 text-caption tabular-nums text-light-text-secondary dark:text-dark-text-secondary">
+          <span className={`shrink-0 text-caption tabular-nums ${TEXT_SECONDARY}`}>
             {summary.detail}
           </span>
         ) : null}

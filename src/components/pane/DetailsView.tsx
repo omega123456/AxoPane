@@ -17,6 +17,8 @@ import type { InlineRenameState } from '@/stores/inline-rename-store'
 import type { PaneState } from '@/types/pane'
 import { useLayoutStore } from '@/stores/layout-store'
 import { BOTH_SIDES } from '@/lib/numbers'
+import { documentZoom } from '@/components/menus/menu-geometry'
+import { SCROLLBAR_THIN } from '@/lib/class-names'
 
 /** Rows rendered before the virtualizer has measured its scroll element. */
 const UNMEASURED_FALLBACK_ROWS = 30
@@ -139,7 +141,7 @@ export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(funct
         const container = parentRef.current
         if (!container) return null
         const bounds = container.getBoundingClientRect()
-        const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1
+        const zoom = documentZoom()
         return {
           x:
             (clientX - bounds.left) / zoom +
@@ -219,7 +221,7 @@ export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(funct
           <div
             ref={parentRef}
             data-testid={`file-pane-scroll-${pane.id}`}
-            className={`h-full min-h-0 overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary ${usesDetachedMacScrollbars ? 'overflow-x-hidden overflow-y-auto pb-2' : 'overflow-x-auto overflow-y-auto'} ${isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-light-accent dark:outline-dark-accent' : ''}`}
+            className={`h-full min-h-0 overscroll-contain ${SCROLLBAR_THIN} ${usesDetachedMacScrollbars ? 'overflow-x-hidden overflow-y-auto pb-2' : 'overflow-x-auto overflow-y-auto'} ${isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-light-accent dark:outline-dark-accent' : ''}`}
             onMouseDown={onContainerMouseDown}
             onWheel={handleBodyWheel}
             onScroll={(event: UIEvent<HTMLDivElement>) => {
@@ -293,7 +295,7 @@ export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(funct
             <div
               ref={horizontalScrollRef}
               data-testid={`file-pane-horizontal-scroll-${pane.id}`}
-              className="absolute inset-x-0 bottom-0 z-20 h-2 overflow-x-auto overflow-y-hidden overscroll-contain bg-light-layer scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:bg-dark-layer dark:scrollbar-thumb-dark-text-tertiary"
+              className={`absolute inset-x-0 bottom-0 z-20 h-2 overflow-x-auto overflow-y-hidden overscroll-contain bg-light-layer ${SCROLLBAR_THIN} dark:bg-dark-layer`}
               onScroll={(event) => syncHorizontalScroll(event.currentTarget.scrollLeft)}
             >
               <div style={{ width: `${contentWidth}px`, height: '1px' }} />

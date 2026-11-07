@@ -8,7 +8,8 @@ import type {
   LayoutConfig,
   ZoomLevel,
 } from '@/lib/types/ipc'
-import { PERCENT_SCALE, percentToFraction } from '@/lib/numbers'
+import { clamp, PERCENT_SCALE, percentToFraction } from '@/lib/numbers'
+import { moveItem } from '@/lib/collections'
 
 export const zoomLevels: ZoomLevel[] = ['80', '90', '100', '110', '120', '125', '150']
 
@@ -64,19 +65,19 @@ export const COLUMN_WIDTH_MIN = 56
 export const COLUMN_WIDTH_MAX = 520
 
 export function clampTreeWidth(width: number) {
-  return Math.min(TREE_WIDTH_MAX, Math.max(TREE_WIDTH_MIN, width))
+  return clamp(width, TREE_WIDTH_MIN, TREE_WIDTH_MAX)
 }
 
 export function clampFavouritesHeight(height: number) {
-  return Math.min(FAVOURITES_HEIGHT_MAX, Math.max(FAVOURITES_HEIGHT_MIN, height))
+  return clamp(height, FAVOURITES_HEIGHT_MIN, FAVOURITES_HEIGHT_MAX)
 }
 
 export function clampPaneSplit(split: number) {
-  return Math.min(PANE_SPLIT_MAX, Math.max(PANE_SPLIT_MIN, split))
+  return clamp(split, PANE_SPLIT_MIN, PANE_SPLIT_MAX)
 }
 
 export function clampColumnWidth(width: number) {
-  return Math.min(COLUMN_WIDTH_MAX, Math.max(COLUMN_WIDTH_MIN, width))
+  return clamp(width, COLUMN_WIDTH_MIN, COLUMN_WIDTH_MAX)
 }
 
 export const defaultLayout: LayoutConfig = {
@@ -89,6 +90,14 @@ export const defaultLayout: LayoutConfig = {
   defaultViewMode: 'details',
   restoreSession: true,
   zoom: '100',
+}
+
+const LAYOUT_CONFIG_FIELDS = Object.keys(defaultLayout) as (keyof LayoutConfig)[]
+
+export function pickLayoutConfig(layout: LayoutConfig): LayoutConfig {
+  return Object.fromEntries(
+    LAYOUT_CONFIG_FIELDS.map((field) => [field, layout[field]]),
+  ) as LayoutConfig
 }
 
 type LayoutStore = LayoutConfig & {
@@ -184,16 +193,14 @@ export const useLayoutStore = create<LayoutStore>((set) => ({
   setColumns: (columns) => set({ columns: normalizeColumns(columns) }),
   moveColumn: (fromKey, toKey) => {
     set((state) => {
-      const columns = [...state.columns]
+      const { columns } = state
       const fromIndex = columns.findIndex((column) => column.key === fromKey)
       const toIndex = columns.findIndex((column) => column.key === toKey)
       if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) {
         return state
       }
 
-      const [moved] = columns.splice(fromIndex, 1)
-      columns.splice(toIndex, 0, moved)
-      return { columns }
+      return { columns: moveItem(columns, fromIndex, toIndex) }
     })
   },
   toggleColumn: (key) =>

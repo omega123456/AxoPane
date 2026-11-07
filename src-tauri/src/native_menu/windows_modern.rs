@@ -43,9 +43,10 @@ use crate::native_menu::types::{
     LoadNativeMenuRequest, NativeMenuIcon, NativeMenuIconKind, NativeMenuTargetKind,
 };
 use crate::native_menu::windows_shell::{
-    classify_canonical_action, icon_resource_to_data_url, normalize_verb, path_to_wide,
-    sanitize_menu_label, OwnedPidl,
+    classify_canonical_action, icon_resource_to_data_url, normalize_verb, sanitize_menu_label,
+    OwnedPidl,
 };
+use crate::win32::wide_nul;
 
 use windows::core::{Interface, GUID, PCWSTR, PWSTR};
 use windows::Win32::Foundation::ERROR_SUCCESS;
@@ -62,6 +63,10 @@ use windows::Win32::UI::Shell::{
 };
 
 const MAX_SUBMENU_DEPTH: usize = 1;
+/// Registry key names are at most 255 characters plus the NUL.
+const REGISTRY_KEY_NAME_UNITS: usize = 256;
+/// Value names we read (CLSIDs and verbs) fit well inside this buffer.
+const REGISTRY_VALUE_NAME_UNITS: usize = 512;
 
 /// Fixed shell classes scanned (and cached) for unpackaged `IExplorerCommand`
 /// verb handlers. Extension/ProgID-specific classes are resolved per query.
@@ -508,7 +513,7 @@ fn parse_manifest_associations(manifest_path: &Path) -> HashMap<u128, HashSet<St
 }
 
 fn package_install_path(package_full_name: &str) -> Option<PathBuf> {
-    let wide = path_to_wide(package_full_name);
+    let wide = wide_nul(package_full_name);
     let mut length = 0u32;
     // First call sizes the buffer (returns ERROR_INSUFFICIENT_BUFFER).
     let _ = unsafe { GetPackagePathByFullName(PCWSTR(wide.as_ptr()), &mut length, None) };
@@ -625,7 +630,7 @@ struct RegKey(HKEY);
 
 impl RegKey {
     fn open(root: HKEY, sub: &str) -> Option<Self> {
-        let wide = path_to_wide(sub);
+        let wide = wide_nul(sub);
         let mut handle = HKEY(null_mut());
         let result =
             unsafe { RegOpenKeyExW(root, PCWSTR(wide.as_ptr()), Some(0), KEY_READ, &mut handle) };
@@ -637,7 +642,7 @@ impl RegKey {
     }
 
     fn open_sub(&self, sub: &str) -> Option<Self> {
-        let wide = path_to_wide(sub);
+        let wide = wide_nul(sub);
         let mut handle = HKEY(null_mut());
         let result = unsafe {
             RegOpenKeyExW(
@@ -659,7 +664,7 @@ impl RegKey {
         let mut names = Vec::new();
         let mut index = 0u32;
         loop {
-            let mut buffer = [0u16; 256];
+            let mut buffer = [0u16; REGISTRY_KEY_NAME_UNITS];
             let mut length = buffer.len() as u32;
             let result = unsafe {
                 RegEnumKeyExW(
@@ -686,7 +691,7 @@ impl RegKey {
         let mut names = Vec::new();
         let mut index = 0u32;
         loop {
-            let mut buffer = [0u16; 512];
+            let mut buffer = [0u16; REGISTRY_VALUE_NAME_UNITS];
             let mut length = buffer.len() as u32;
             let result = unsafe {
                 RegEnumValueW(
@@ -710,7 +715,7 @@ impl RegKey {
     }
 
     fn read_sz(&self, name: &str) -> Option<String> {
-        let wide_name = path_to_wide(name);
+        let wide_name = wide_nul(name);
         let mut value_type = REG_VALUE_TYPE(0);
         let mut size = 0u32;
         let result = unsafe {

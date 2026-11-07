@@ -10,6 +10,7 @@ import { SizeValue } from './SizeValue'
 
 import type { DragEvent, KeyboardEvent, MouseEvent } from 'react'
 import { memo, useEffect, useMemo, useRef } from 'react'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 /**
  * Stable, id-keyed handler dispatcher for a pane's rows.
@@ -158,7 +159,7 @@ function FileRowImpl({
                 style={columnFlexStyle(column.key, columnWidths)}
                 className={cellClassName(column.key)}
               >
-                <span className="font-mono text-caption text-light-text-secondary dark:text-dark-text-secondary">
+                <span className={`font-mono text-caption ${TEXT_SECONDARY}`}>
                   <SizeValue entry={entry} />
                 </span>
               </span>
@@ -172,7 +173,7 @@ function FileRowImpl({
                 style={columnFlexStyle(column.key, columnWidths)}
                 className={cellClassName(column.key)}
               >
-                <span className="font-mono text-caption text-light-text-secondary dark:text-dark-text-secondary">
+                <span className={`font-mono text-caption ${TEXT_SECONDARY}`}>
                   {entry.isDir ? (entry.itemCount ?? '—') : '—'}
                 </span>
               </span>
@@ -192,7 +193,7 @@ function FileRowImpl({
                     <span className="truncate">{renameError}</span>
                   </span>
                 ) : (
-                  <span className="truncate text-caption text-light-text-secondary dark:text-dark-text-secondary">
+                  <span className={`truncate text-caption ${TEXT_SECONDARY}`}>
                     {renameBusy ? 'Renaming…' : 'Rename'}
                   </span>
                 )}
@@ -281,7 +282,7 @@ function FileRowImpl({
               style={columnFlexStyle(column.key, columnWidths)}
               className={cellClassName(column.key)}
             >
-              <span className="font-mono text-caption text-light-text-secondary dark:text-dark-text-secondary">
+              <span className={`font-mono text-caption ${TEXT_SECONDARY}`}>
                 <SizeValue entry={entry} />
               </span>
             </span>
@@ -295,7 +296,7 @@ function FileRowImpl({
               style={columnFlexStyle(column.key, columnWidths)}
               className={cellClassName(column.key)}
             >
-              <span className="font-mono text-caption text-light-text-secondary dark:text-dark-text-secondary">
+              <span className={`font-mono text-caption ${TEXT_SECONDARY}`}>
                 {entry.isDir ? (entry.itemCount ?? '—') : '—'}
               </span>
             </span>
@@ -309,9 +310,7 @@ function FileRowImpl({
               style={columnFlexStyle(column.key, columnWidths)}
               className={cellClassName(column.key)}
             >
-              <span className="truncate text-caption text-light-text-secondary dark:text-dark-text-secondary">
-                {entry.typeLabel}
-              </span>
+              <span className={`truncate text-caption ${TEXT_SECONDARY}`}>{entry.typeLabel}</span>
             </span>
           )
         }

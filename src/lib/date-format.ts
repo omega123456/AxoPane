@@ -1,3 +1,4 @@
+import { UTCDate } from '@date-fns/utc'
 import { format, getTime, isValid, parseISO } from 'date-fns'
 import {
   millisecondsInDay,
@@ -5,6 +6,7 @@ import {
   millisecondsInMinute,
   millisecondsInWeek,
 } from 'date-fns/constants'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 /**
  * Date formatting for directory listings and the properties dialog.
@@ -82,7 +84,7 @@ export const dateToneClassName: Record<DateTone, string> = {
   recent: 'text-light-success dark:text-dark-success',
   today: 'text-light-accent dark:text-dark-accent',
   yesterday: 'text-light-warning dark:text-dark-warning',
-  default: 'text-light-text-secondary dark:text-dark-text-secondary',
+  default: TEXT_SECONDARY,
 }
 
 const EMPTY: FormattedDate = { text: '—', tone: 'default' }
@@ -210,4 +212,12 @@ export function formatEntryDate(
     text: format(date, pattern),
     tone: 'default',
   }))
+}
+
+const LOG_TIMESTAMP_PATTERN = 'MMM dd HH:mm:ss'
+
+/** An ISO timestamp as `Jun 30 12:00:00` in UTC, or the input when unparseable. */
+export function formatUtcLogTimestamp(iso: string): string {
+  const date = new UTCDate(iso)
+  return isValid(date) ? format(date, LOG_TIMESTAMP_PATTERN) : iso
 }

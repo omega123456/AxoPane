@@ -11,6 +11,7 @@ import { log } from '@/lib/app-log-commands'
 import { getAppVersion } from '@/lib/updater'
 import { UPDATE_INTERVAL_OPTIONS, type UpdateInterval } from '@/lib/update-intervals'
 import { useUpdaterStore } from '@/stores/updater-store'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 export function UpdatesSettings({
   value,
@@ -57,7 +58,7 @@ export function UpdatesSettings({
         control={
           <span
             data-testid="updates-app-version"
-            className="font-mono text-row text-light-text-secondary dark:text-dark-text-secondary"
+            className={`font-mono text-row ${TEXT_SECONDARY}`}
           >
             {appVersion}
           </span>

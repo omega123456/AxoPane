@@ -13,8 +13,8 @@ fn application_roots() -> Vec<PathBuf> {
         PathBuf::from("/System/Applications"),
     ];
 
-    if let Ok(home) = std::env::var("HOME") {
-        roots.push(PathBuf::from(home).join("Applications"));
+    if let Some(home) = crate::fs::home_dir() {
+        roots.push(home.join("Applications"));
     }
 
     roots
@@ -67,10 +67,10 @@ pub fn list_applications() -> ListApplicationsResponse {
         })
         .collect();
 
-    apps.sort_by(|a, b| {
-        a.name
+    apps.sort_by(|left, right| {
+        left.name
             .to_ascii_lowercase()
-            .cmp(&b.name.to_ascii_lowercase())
+            .cmp(&right.name.to_ascii_lowercase())
     });
 
     ListApplicationsResponse { apps }

@@ -49,7 +49,7 @@ import {
   dateFormatLabels,
   DEFAULT_DATE_FORMAT,
 } from '@/lib/date-format'
-import { DEFAULT_UPDATE_INTERVAL, type UpdateInterval } from '@/lib/update-intervals'
+import { DEFAULT_UPDATE_INTERVAL } from '@/lib/update-intervals'
 import { log } from '@/lib/app-log-commands'
 import { getAppVersion } from '@/lib/updater'
 import {
@@ -69,15 +69,23 @@ import type {
   LayoutConfig,
   LogLevel,
   Shortcut,
-  ThemePreference,
 } from '@/lib/types/ipc'
-import { useConfigStore } from '@/stores/config-store'
-import { defaultColumns, defaultLayout, useLayoutStore, zoomLevels } from '@/stores/layout-store'
+import { type ConfigSnapshot, useConfigStore } from '@/stores/config-store'
+import {
+  defaultColumns,
+  defaultLayout,
+  pickLayoutConfig,
+  useLayoutStore,
+  zoomLevels,
+} from '@/stores/layout-store'
 import { useKeymapStore } from '@/stores/keymap-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useThemeStore } from '@/stores/theme-store'
 import { FOCUS_RING, FOCUS_RING_INSET } from '@/lib/focus-ring'
+import { moveItem } from '@/lib/collections'
+import { SCROLLBAR_THIN } from '@/lib/class-names'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 type Section = 'layout' | 'columns' | 'keybindings' | 'dates' | 'updates' | 'logs'
 
@@ -105,67 +113,47 @@ const LOG_LEVEL_OPTIONS: { value: LogLevel; label: string }[] = [
   { value: 'trace', label: 'Trace' },
 ]
 
-type DraftState = {
+const DRAFT_CONFIG_FIELDS = [
+  'theme',
+  'showHiddenFiles',
+  'updateCheckInterval',
+  'dateFormat',
+  'showTime',
+  'showSeconds',
+  'relativeDates',
+  'autoFolderSize',
+  'autoExpandActiveQueueToasts',
+] as const satisfies readonly (keyof ConfigSnapshot)[]
+
+type DraftConfig = Pick<ConfigSnapshot, (typeof DRAFT_CONFIG_FIELDS)[number]>
+
+type DraftState = DraftConfig & {
   bindings: Record<CommandId, Shortcut[]>
   columns: ColumnConfig[]
   layout: LayoutConfig
-  theme: ThemePreference
-  showHiddenFiles: boolean
-  updateCheckInterval: UpdateInterval
-  dateFormat: DateFormat
-  showTime: boolean
-  showSeconds: boolean
-  relativeDates: boolean
-  autoFolderSize: boolean
-  autoExpandActiveQueueToasts: boolean
+}
+
+function pickDraftConfig(config: DraftConfig): DraftConfig {
+  return Object.fromEntries(
+    DRAFT_CONFIG_FIELDS.map((field) => [field, config[field]]),
+  ) as DraftConfig
 }
 
 function cloneDraft(): DraftState {
   const layout = useLayoutStore.getState()
   const keymap = useKeymapStore.getState()
-  const config = useConfigStore.getState()
   return {
+    ...pickDraftConfig(useConfigStore.getState()),
     bindings: mergeKeymap(keymap.bindings),
     columns: layout.columns.map((column) => ({ ...column })),
-    layout: {
-      detailsVisible: layout.detailsVisible,
-      treeWidthPx: layout.treeWidthPx,
-      favouritesHeightPx: layout.favouritesHeightPx,
-      paneSplit: layout.paneSplit,
-      columnWidths: layout.columnWidths,
-      defaultPaneMode: layout.defaultPaneMode,
-      defaultViewMode: layout.defaultViewMode,
-      restoreSession: layout.restoreSession,
-      zoom: layout.zoom,
-    },
-    theme: config.theme,
-    showHiddenFiles: config.showHiddenFiles,
-    updateCheckInterval: config.updateCheckInterval,
-    dateFormat: config.dateFormat,
-    showTime: config.showTime,
-    showSeconds: config.showSeconds,
-    relativeDates: config.relativeDates,
-    autoFolderSize: config.autoFolderSize,
-    autoExpandActiveQueueToasts: config.autoExpandActiveQueueToasts,
+    layout: pickLayoutConfig(layout),
   }
 }
 
 function applyDraft(draft: DraftState) {
-  const config = useConfigStore.getState()
   useKeymapStore.getState().hydrate(draft.bindings)
   useLayoutStore.getState().hydrate(draft.layout, draft.columns)
-  useConfigStore.setState({
-    ...config,
-    theme: draft.theme,
-    showHiddenFiles: draft.showHiddenFiles,
-    updateCheckInterval: draft.updateCheckInterval,
-    dateFormat: draft.dateFormat,
-    showTime: draft.showTime,
-    showSeconds: draft.showSeconds,
-    relativeDates: draft.relativeDates,
-    autoFolderSize: draft.autoFolderSize,
-    autoExpandActiveQueueToasts: draft.autoExpandActiveQueueToasts,
-  })
+  useConfigStore.setState({ ...useConfigStore.getState(), ...pickDraftConfig(draft) })
   useThemeStore.getState().setThemePreference(draft.theme)
   usePanesStore.setState({ showHiddenFiles: draft.showHiddenFiles })
 }
@@ -382,7 +370,7 @@ function SettingsModalContent() {
             </div>
           </nav>
 
-          <div className="min-h-0 flex-1 overflow-auto pb-7 pl-3 pr-7 pt-1 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary">
+          <div className={`min-h-0 flex-1 overflow-auto pb-7 pl-3 pr-7 pt-1 ${SCROLLBAR_THIN}`}>
             <div className="mx-auto grid w-full max-w-settings-content content-start gap-1">
               <h2 className="mb-3.5 font-display text-title font-semibold">
                 {sectionNav.find((item) => item.key === section)?.label}
@@ -552,21 +540,19 @@ function SettingsModalContent() {
                             'text/column',
                           ) as ColumnConfig['key']
                           updateDraft((current) => {
-                            const columns = [...current.columns]
+                            const { columns } = current
                             const fromIndex = columns.findIndex((item) => item.key === fromKey)
                             const toIndex = columns.findIndex((item) => item.key === column.key)
                             if (fromIndex === -1 || toIndex === -1) {
                               return current
                             }
-                            const [moved] = columns.splice(fromIndex, 1)
-                            columns.splice(toIndex, 0, moved)
-                            return { ...current, columns }
+                            return { ...current, columns: moveItem(columns, fromIndex, toIndex) }
                           })
                         }}
                         className="flex min-h-12 cursor-grab items-center justify-between gap-4 rounded-card border border-light-stroke bg-light-card px-4 py-2 dark:border-dark-stroke dark:bg-dark-card"
                       >
                         <span className="inline-flex items-center gap-4 text-body">
-                          <GripVerticalIcon className="size-4 text-light-text-secondary dark:text-dark-text-secondary" />
+                          <GripVerticalIcon className={`size-4 ${TEXT_SECONDARY}`} />
                           {columnDefinitions[column.key].label}
                         </span>
                         <ToggleSwitch
@@ -670,7 +656,9 @@ function SettingsModalContent() {
                   <div className="overflow-hidden rounded-card border border-light-stroke bg-light-card dark:border-dark-stroke dark:bg-dark-card">
                     <table className="w-full table-fixed">
                       <thead>
-                        <tr className="border-b border-light-divider text-left text-caption text-light-text-secondary dark:border-dark-divider dark:text-dark-text-secondary">
+                        <tr
+                          className={`border-b border-light-divider text-left text-caption ${TEXT_SECONDARY} dark:border-dark-divider`}
+                        >
                           <th className="py-2 pl-4 font-normal">Command</th>
                           <th className="w-44 py-2 font-normal">Shortcut</th>
                           <th className="w-28 py-2 font-normal">Status</th>
@@ -691,13 +679,13 @@ function SettingsModalContent() {
                               {reserved ? (
                                 <>
                                   <td className="py-1.5">
-                                    <span className="inline-flex h-8 w-36 items-center px-3 font-mono text-light-text-secondary dark:text-dark-text-secondary">
+                                    <span
+                                      className={`inline-flex h-8 w-36 items-center px-3 font-mono ${TEXT_SECONDARY}`}
+                                    >
                                       {formatShortcutLabel(shortcut, platform)}
                                     </span>
                                   </td>
-                                  <td className="py-1.5 text-light-text-secondary dark:text-dark-text-secondary">
-                                    System default
-                                  </td>
+                                  <td className={`py-1.5 ${TEXT_SECONDARY}`}>System default</td>
                                   <td className="py-1.5 pr-4" />
                                 </>
                               ) : (
@@ -715,7 +703,7 @@ function SettingsModalContent() {
                                           : 'Unassigned'}
                                     </Button>
                                   </td>
-                                  <td className="py-1.5 text-light-text-secondary dark:text-dark-text-secondary">
+                                  <td className={`py-1.5 ${TEXT_SECONDARY}`}>
                                     {hasConflict ? (
                                       <span className="inline-flex items-center gap-2 text-light-warning dark:text-dark-warning">
                                         <AlertTriangleIcon className={iconClass} />
@@ -810,13 +798,11 @@ function ResetExpander({ onReset }: { onReset: () => void }) {
         <RotateCcwIcon className={iconClass} />
         <span className="grid min-w-0 flex-1">
           <span className="text-body">Reset to defaults</span>
-          <span className="text-caption text-light-text-secondary dark:text-dark-text-secondary">
+          <span className={`text-caption ${TEXT_SECONDARY}`}>
             Restore every setting to how AxoPane ships
           </span>
         </span>
-        <ChevronDownIcon
-          className={`size-3 text-light-text-secondary dark:text-dark-text-secondary ${expanded ? 'rotate-180' : ''}`}
-        />
+        <ChevronDownIcon className={`size-3 ${TEXT_SECONDARY} ${expanded ? 'rotate-180' : ''}`} />
       </button>
       {expanded ? (
         <div className="flex items-center gap-4 border-t border-light-divider py-3 pl-12 pr-4 dark:border-dark-divider">

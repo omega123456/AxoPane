@@ -212,8 +212,6 @@ mod platform {
         EverythingQueryResult, EverythingRow, EverythingSort, EVERYTHING_BATCH_CHUNK_SIZE,
     };
     use std::collections::HashMap;
-    use std::ffi::OsStr;
-    use std::os::windows::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
 
@@ -466,7 +464,7 @@ mod platform {
             query: &EverythingQuery,
             flags: u32,
         ) -> Result<EverythingQueryResult, EverythingError> {
-            let wide_search = to_wide(&query.search);
+            let wide_search = crate::win32::wide_nul(&query.search);
             let _query_guard = self.query_lock.lock().expect("everything query lock");
             unsafe {
                 (self.set_search_w)(wide_search.as_ptr());
@@ -491,10 +489,13 @@ mod platform {
                 let result_count = (self.get_num_results)();
                 let mut rows = Vec::with_capacity(result_count as usize);
                 for index in 0..result_count {
-                    let Some(path) = wide_ptr_to_string((self.get_result_path_w)(index)) else {
+                    let Some(path) =
+                        crate::win32::string_from_wide_ptr((self.get_result_path_w)(index))
+                    else {
                         continue;
                     };
-                    let Some(file_name) = wide_ptr_to_string((self.get_result_file_name_w)(index))
+                    let Some(file_name) =
+                        crate::win32::string_from_wide_ptr((self.get_result_file_name_w)(index))
                     else {
                         continue;
                     };
@@ -543,168 +544,17 @@ mod platform {
 
         candidates
     }
-
-    fn to_wide(value: &str) -> Vec<u16> {
-        OsStr::new(value)
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect()
-    }
-
-    fn wide_ptr_to_string(value: *const u16) -> Option<String> {
-        if value.is_null() {
-            return None;
-        }
-
-        let mut length = 0;
-        unsafe {
-            while *value.add(length) != 0 {
-                length += 1;
-            }
-            let slice = std::slice::from_raw_parts(value, length);
-            Some(String::from_utf16_lossy(slice))
-        }
-    }
 }
 
 #[cfg(all(windows, not(feature = "test-utils")))]
 pub use platform::*;
 
-// Under `test-utils`, Windows builds must never load the real `Everything64.dll`
-// or hit the Everything IPC service. This stub mirrors the Windows API surface so
-// `size::mod` compiles identically, but reports the safe unavailable fallback.
-#[cfg(all(windows, feature = "test-utils"))]
-mod platform {
-    use super::{EverythingQuery, EverythingQueryResult, EverythingResponder, FakeSearch};
-    use std::collections::HashMap;
-    use std::path::Path;
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub enum EverythingAvailability {
-        Available,
-        NotReady,
-        Unavailable,
-    }
-
-    #[derive(Debug)]
-    pub enum EverythingError {
-        NotReady,
-    }
-
-    pub struct EverythingHandle {
-        availability: EverythingAvailability,
-        results: HashMap<String, Option<u64>>,
-        fail_queries: bool,
-        search: FakeSearch,
-    }
-
-    impl EverythingHandle {
-        /// The fake loader always succeeds, but the handle reports the service as
-        /// unavailable so no test path can ever observe a real Everything result.
-        pub fn load() -> Result<Self, EverythingError> {
-            Ok(Self {
-                availability: EverythingAvailability::Unavailable,
-                results: HashMap::new(),
-                fail_queries: false,
-                search: FakeSearch::default(),
-            })
-        }
-
-        pub fn test_available(results: HashMap<String, Option<u64>>) -> Self {
-            Self {
-                availability: EverythingAvailability::Available,
-                results,
-                fail_queries: false,
-                search: FakeSearch::default(),
-            }
-        }
-
-        /// An available handle whose search queries `responder` answers.
-        pub fn test_with_responder(responder: EverythingResponder) -> Self {
-            Self {
-                availability: EverythingAvailability::Available,
-                results: HashMap::new(),
-                fail_queries: false,
-                search: FakeSearch::with(responder),
-            }
-        }
-
-        /// Every search query run so far, oldest first.
-        pub fn recorded_queries(&self) -> Vec<EverythingQuery> {
-            self.search.recorded()
-        }
-
-        /// A handle whose service is installed but not answering yet.
-        pub fn test_not_ready() -> Self {
-            Self {
-                availability: EverythingAvailability::NotReady,
-                results: HashMap::new(),
-                fail_queries: false,
-                search: FakeSearch::default(),
-            }
-        }
-
-        pub fn test_available_error() -> Self {
-            Self {
-                availability: EverythingAvailability::Available,
-                results: HashMap::new(),
-                fail_queries: true,
-                search: FakeSearch::default(),
-            }
-        }
-
-        pub fn availability(&self) -> EverythingAvailability {
-            self.availability.clone()
-        }
-
-        pub fn query_folder_size(&self, _path: &Path) -> Result<Option<u64>, EverythingError> {
-            self.query_folder_sizes(&[_path.to_string_lossy().into_owned()], &|| false)
-                .map(|sizes| sizes.values().next().copied().flatten())
-        }
-
-        pub fn query_folder_sizes(
-            &self,
-            paths: &[String],
-            should_cancel: &dyn Fn() -> bool,
-        ) -> Result<HashMap<String, Option<u64>>, EverythingError> {
-            if self.availability != EverythingAvailability::Available || self.fail_queries {
-                return Err(EverythingError::NotReady);
-            }
-
-            if should_cancel() {
-                return Ok(HashMap::new());
-            }
-
-            Ok(paths
-                .iter()
-                .cloned()
-                .map(|path| {
-                    let size_bytes = self.results.get(&path).copied().flatten();
-                    (path, size_bytes)
-                })
-                .collect())
-        }
-
-        pub fn run_query(
-            &self,
-            query: &EverythingQuery,
-        ) -> Result<EverythingQueryResult, EverythingError> {
-            if self.availability != EverythingAvailability::Available || self.fail_queries {
-                return Err(EverythingError::NotReady);
-            }
-            self.search.run(query).ok_or(EverythingError::NotReady)
-        }
-    }
-}
-
-#[cfg(all(windows, feature = "test-utils"))]
-pub use platform::*;
-
-// Non-Windows targets never have Everything. This stub mirrors the Windows API
-// surface (including the unused `Available` / `NotReady` variants) so `size::mod`
-// compiles identically across platforms; it always reports the unavailable
-// fallback. The variants are `pub`, so they raise no dead-code warnings.
-#[cfg(not(windows))]
+// Non-Windows targets never have Everything, and under `test-utils` Windows
+// builds must never load the real `Everything64.dll` or hit the Everything IPC
+// service. This stub mirrors the Windows API surface (including the unused
+// `Available` / `NotReady` variants) so `size::mod` compiles identically, and
+// always reports the safe unavailable fallback.
+#[cfg(any(not(windows), feature = "test-utils"))]
 mod platform {
     use super::{EverythingQuery, EverythingQueryResult, EverythingResponder, FakeSearch};
     use std::collections::HashMap;
@@ -738,8 +588,20 @@ mod platform {
     }
 
     impl EverythingHandle {
+        /// On Windows the fake loader succeeds but reports the service as
+        /// unavailable, so no test path can ever observe a real Everything
+        /// result; elsewhere Everything does not exist.
         pub fn load() -> Result<Self, EverythingError> {
-            Err(EverythingError::Unsupported)
+            if cfg!(windows) {
+                Ok(Self {
+                    availability: EverythingAvailability::Unavailable,
+                    results: HashMap::new(),
+                    fail_queries: false,
+                    search: FakeSearch::default(),
+                })
+            } else {
+                Err(EverythingError::Unsupported)
+            }
         }
 
         pub fn test_available(results: HashMap<String, Option<u64>>) -> Self {
@@ -829,5 +691,5 @@ mod platform {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(any(not(windows), feature = "test-utils"))]
 pub use platform::*;

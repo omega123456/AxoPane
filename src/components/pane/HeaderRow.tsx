@@ -9,6 +9,7 @@ import { defaultColumnWidths, useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import type { ColumnConfig, ColumnKey } from '@/lib/types/ipc'
 import { FOCUS_RING } from '@/lib/focus-ring'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 const COLUMN_RESIZE_KEYBOARD_STEP_PX = 8
 
@@ -67,7 +68,7 @@ export function HeaderRow({ pane }: HeaderRowProps) {
   return (
     <div
       style={{ minWidth: `${contentWidth}px` }}
-      className="group/header flex h-headrow w-full items-center border-b border-light-divider px-2.75 text-caption text-light-text-secondary dark:border-dark-divider dark:text-dark-text-secondary"
+      className={`group/header flex h-headrow w-full items-center border-b border-light-divider px-2.75 text-caption ${TEXT_SECONDARY} dark:border-dark-divider`}
     >
       {columns.map((column) => {
         const active = pane.sortKey === column.key

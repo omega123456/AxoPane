@@ -13,13 +13,10 @@ use std::ffi::CStr;
 use sysinfo::Disks;
 
 #[cfg(all(not(feature = "test-utils"), windows))]
-use std::ffi::{c_void, OsStr};
+use std::ffi::c_void;
 
 #[cfg(all(not(feature = "test-utils"), windows))]
 use std::path::Path;
-
-#[cfg(all(not(feature = "test-utils"), windows))]
-use std::os::windows::ffi::OsStrExt;
 
 #[cfg(all(not(feature = "test-utils"), windows))]
 use windows_sys::Win32::Foundation::{ERROR_MORE_DATA, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS, HANDLE};
@@ -34,9 +31,11 @@ use windows_sys::Win32::NetworkManagement::WNet::{
 use windows::core::{Interface, PCWSTR};
 
 #[cfg(all(not(feature = "test-utils"), windows))]
+use windows::Win32::Foundation::MAX_PATH;
+
+#[cfg(all(not(feature = "test-utils"), windows))]
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
-    COINIT_APARTMENTTHREADED, STGM_READ,
+    CoCreateInstance, IPersistFile, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, STGM_READ,
 };
 
 #[cfg(all(not(feature = "test-utils"), windows))]
@@ -47,6 +46,13 @@ use windows_sys::Win32::Storage::FileSystem::{
     GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW,
 };
 
+#[cfg(all(not(feature = "test-utils"), windows))]
+const DRIVE_LETTER_COUNT: u32 = 26;
+#[cfg(all(not(feature = "test-utils"), windows))]
+const NETWORK_ENUM_BUFFER_BYTES: usize = 16 * 1024;
+/// The longest path the Unicode file APIs accept, in UTF-16 units.
+#[cfg(all(not(feature = "test-utils"), windows))]
+const MAX_EXTENDED_PATH_UNITS: usize = 32_768;
 #[cfg(all(not(feature = "test-utils"), windows))]
 const DRIVE_UNKNOWN: u32 = 0;
 #[cfg(all(not(feature = "test-utils"), windows))]
@@ -118,14 +124,14 @@ pub fn list_volumes() -> Vec<VolumeInfo> {
     let bitmask = unsafe { GetLogicalDrives() };
     let mut volumes = Vec::new();
 
-    for offset in 0..26_u32 {
+    for offset in 0..DRIVE_LETTER_COUNT {
         if bitmask & (1 << offset) == 0 {
             continue;
         }
 
         let drive_letter = char::from_u32(u32::from(b'A') + offset).expect("drive letter");
         let mount_root = format!("{drive_letter}:\\");
-        let wide_mount_root = to_wide(&mount_root);
+        let wide_mount_root = crate::win32::wide_nul(&mount_root);
         let drive_type = unsafe { GetDriveTypeW(wide_mount_root.as_ptr()) };
 
         if matches!(drive_type, DRIVE_UNKNOWN | DRIVE_NO_ROOT_DIR) {
@@ -396,13 +402,8 @@ fn macos_statfs_string(value: &[libc::c_char]) -> String {
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]
-fn to_wide(value: &str) -> Vec<u16> {
-    OsStr::new(value).encode_wide().chain(Some(0)).collect()
-}
-
-#[cfg(all(not(feature = "test-utils"), windows))]
 fn read_volume_label(root: &[u16]) -> String {
-    let mut buffer = [0_u16; 261];
+    let mut buffer = [0_u16; MAX_PATH as usize + 1];
     let ok = unsafe {
         GetVolumeInformationW(
             root.as_ptr(),
@@ -464,7 +465,7 @@ fn extend_network_resources_for_scope(volumes: &mut Vec<VolumeInfo>, scope: u32)
         return;
     }
 
-    let mut buffer = vec![0_u8; 16 * 1024];
+    let mut buffer = vec![0_u8; NETWORK_ENUM_BUFFER_BYTES];
     loop {
         let mut count = u32::MAX;
         let mut buffer_size = buffer.len() as u32;
@@ -524,21 +525,10 @@ fn extend_network_resources_for_scope(volumes: &mut Vec<VolumeInfo>, scope: u32)
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]
-fn wide_ptr_to_string(ptr: *const u16) -> String {
-    if ptr.is_null() {
-        return String::new();
-    }
-
-    let mut len = 0_usize;
-    unsafe {
-        while *ptr.add(len) != 0 {
-            len += 1;
-        }
-
-        String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len))
-            .trim()
-            .to_string()
-    }
+fn wide_ptr_to_string(pointer: *const u16) -> String {
+    unsafe { crate::win32::string_from_wide_ptr(pointer) }
+        .map(|text| text.trim().to_string())
+        .unwrap_or_default()
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]
@@ -552,15 +542,10 @@ fn extend_network_shortcuts(volumes: &mut Vec<VolumeInfo>) {
         .join("Windows")
         .join("Network Shortcuts");
 
-    let initialized_com = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok() };
+    let _apartment = crate::win32::com::ComApartment::initialize(COINIT_APARTMENTTHREADED);
 
     {
         let Ok(entries) = std::fs::read_dir(shortcuts_dir) else {
-            if initialized_com {
-                unsafe {
-                    CoUninitialize();
-                }
-            }
             return;
         };
 
@@ -574,12 +559,6 @@ fn extend_network_shortcuts(volumes: &mut Vec<VolumeInfo>) {
             {
                 extend_network_shortcut_file(volumes, &path, None);
             }
-        }
-    }
-
-    if initialized_com {
-        unsafe {
-            CoUninitialize();
         }
     }
 }
@@ -641,7 +620,7 @@ fn push_network_volume(
         .unwrap_or_else(|| label_for_unc_root(&mount_root));
 
     let (total_bytes, free_bytes, label) = if query_space {
-        let space_root = to_wide(&space_query_root(&mount_root));
+        let space_root = crate::win32::wide_nul(space_query_root(&mount_root));
         let (total_bytes, free_bytes) = disk_space_for_root(&space_root);
         let volume_label = read_volume_label(&space_root);
         let label = if volume_label.is_empty() {
@@ -669,7 +648,7 @@ fn resolve_shell_link_target(path: &Path) -> Option<String> {
     let link: IShellLinkW =
         unsafe { CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()? };
     let persist_file: IPersistFile = link.cast().ok()?;
-    let link_path = to_wide_path(path);
+    let link_path = crate::win32::wide_nul(path);
 
     unsafe {
         persist_file
@@ -677,7 +656,7 @@ fn resolve_shell_link_target(path: &Path) -> Option<String> {
             .ok()?;
     }
 
-    let mut target = [0_u16; 32_768];
+    let mut target = [0_u16; MAX_EXTENDED_PATH_UNITS];
     unsafe {
         link.GetPath(&mut target, std::ptr::null_mut(), SLGP_UNCPRIORITY.0 as u32)
             .ok()?;
@@ -694,11 +673,6 @@ fn resolve_shell_link_target(path: &Path) -> Option<String> {
     } else {
         Some(value)
     }
-}
-
-#[cfg(all(not(feature = "test-utils"), windows))]
-fn to_wide_path(path: &Path) -> Vec<u16> {
-    path.as_os_str().encode_wide().chain(Some(0)).collect()
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]

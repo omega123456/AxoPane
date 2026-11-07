@@ -1,4 +1,5 @@
 import { FOCUS_RING } from '@/lib/focus-ring'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 export function ColorSwatches({
   value,
   onChange,
@@ -40,9 +41,7 @@ export function ColorSwatches({
           onChange={(event) => onChange(event.target.value)}
           className="size-color-input cursor-pointer rounded-control border border-light-control-stroke bg-light-layer p-0.5 dark:border-dark-control-stroke dark:bg-dark-layer"
         />
-        <span className="font-mono text-row uppercase text-light-text-secondary dark:text-dark-text-secondary">
-          {value}
-        </span>
+        <span className={`font-mono text-row uppercase ${TEXT_SECONDARY}`}>{value}</span>
       </label>
     </div>
   )

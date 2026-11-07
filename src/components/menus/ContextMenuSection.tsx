@@ -6,10 +6,11 @@ import {
   type ContextMenuSection as ContextMenuSectionModel,
 } from '@/lib/types/context-menu'
 import {
-  MENU_VIEWPORT_MARGIN_PX,
-  menuAvailableHeight,
-  SUBMENU_GAP_PX,
+  documentZoom,
+  placeSubmenuBesideAnchor,
+  toZoomedGeometry,
 } from '@/components/menus/menu-geometry'
+import { SCROLLBAR_THIN } from '@/lib/class-names'
 
 export function ContextMenuSection({
   section,
@@ -60,29 +61,18 @@ export function ContextMenuSection({
     submenuRef.current.style.height = ''
     submenuRef.current.style.maxHeight = ''
 
-    const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1
-    const margin = MENU_VIEWPORT_MARGIN_PX
-    const gap = SUBMENU_GAP_PX
-    const anchorRect = openSubmenuAnchor.getBoundingClientRect()
-    const submenuRect = submenuRef.current.getBoundingClientRect()
-    const availableHeight = menuAvailableHeight()
-    const clampedHeight = Math.min(submenuRect.height, availableHeight)
-    const maxLeft = window.innerWidth - margin - submenuRect.width
-    let left = anchorRect.right + gap
-    if (anchorRect.right + gap + submenuRect.width > window.innerWidth - margin) {
-      left = anchorRect.left - submenuRect.width - gap
-    }
-    left = Math.max(margin, Math.min(left, maxLeft))
-
-    const maxTop = window.innerHeight - margin - clampedHeight
-    const top = Math.max(margin, Math.min(anchorRect.top, maxTop))
+    const geometry = placeSubmenuBesideAnchor(
+      openSubmenuAnchor.getBoundingClientRect(),
+      submenuRef.current.getBoundingClientRect(),
+    )
+    const zoomed = toZoomedGeometry(geometry, documentZoom())
 
     setOpenSubmenuPosition((current) => {
       const next = {
-        left: left / zoom,
-        top: top / zoom,
-        height: clampedHeight / zoom,
-        maxHeight: availableHeight / zoom,
+        left: zoomed.left,
+        top: zoomed.top,
+        height: zoomed.height ?? 0,
+        maxHeight: zoomed.maxHeight ?? 0,
       }
       if (
         current &&
@@ -165,7 +155,7 @@ export function ContextMenuSection({
         >
           <div
             data-testid="context-submenu-scroll-body"
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary"
+            className={`min-h-0 flex-1 overflow-y-auto overscroll-contain ${SCROLLBAR_THIN}`}
           >
             {openSubmenuItem.children.rows.map((child) => (
               <ContextMenuRow

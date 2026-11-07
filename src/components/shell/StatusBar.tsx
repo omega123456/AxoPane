@@ -6,6 +6,7 @@ import { useConfigStore } from '@/stores/config-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { LoaderCircleIcon } from '@/components/icons'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 function Dot() {
   return (
@@ -76,7 +77,9 @@ export function StatusBar() {
   )
 
   return (
-    <footer className="flex h-status shrink-0 items-center gap-1.5 whitespace-nowrap bg-light-base mica:bg-transparent px-3 text-caption text-light-text-secondary dark:bg-dark-base dark:text-dark-text-secondary">
+    <footer
+      className={`flex h-status shrink-0 items-center gap-1.5 whitespace-nowrap bg-light-base mica:bg-transparent px-3 text-caption ${TEXT_SECONDARY} dark:bg-dark-base`}
+    >
       <span>{itemCount} items</span>
       <Dot />
       <span>{selectionCount} selected</span>

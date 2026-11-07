@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { AlertTriangleIcon, SearchIcon } from '@/components/icons'
 import { FOCUS_RING } from '@/lib/focus-ring'
 import type { SearchRejection } from '@/lib/types/ipc'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 /** The StatePanel layout, sized for the palette and allowing a link action. */
 function PaletteState({
@@ -23,7 +24,7 @@ function PaletteState({
         className={`flex size-state-tile items-center justify-center rounded-overlay ${
           warning
             ? 'bg-light-warning-bg text-light-warning dark:bg-dark-warning-bg dark:text-dark-warning'
-            : 'bg-light-hover text-light-text-secondary dark:bg-dark-hover dark:text-dark-text-secondary'
+            : `bg-light-hover ${TEXT_SECONDARY} dark:bg-dark-hover`
         }`}
       >
         {icon}
@@ -31,9 +32,7 @@ function PaletteState({
       <h3 className="font-display text-subtitle font-semibold text-light-text dark:text-dark-text">
         {title}
       </h3>
-      <p className="max-w-dialog text-row text-light-text-secondary dark:text-dark-text-secondary">
-        {message}
-      </p>
+      <p className={`max-w-dialog text-row ${TEXT_SECONDARY}`}>{message}</p>
       {action}
     </div>
   )
@@ -100,7 +99,7 @@ export function SearchNoResults({ query, foldersOnly }: { query: string; folders
       <p className="text-body text-light-text dark:text-dark-text">
         {foldersOnly ? `No folders match “${query.trim()}”` : `No results for “${query.trim()}”`}
       </p>
-      <p className="text-caption text-light-text-secondary dark:text-dark-text-secondary">
+      <p className={`text-caption ${TEXT_SECONDARY}`}>
         {foldersOnly
           ? 'This Mac searches folder names on the startup disk. To find a file, open its folder and type to filter.'
           : 'Check the spelling, drop a path segment, or try a wildcard such as invoice*.'}

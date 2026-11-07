@@ -10,20 +10,17 @@ use super::types::{
     validated_png_data_url, ThumbnailCandidate, ThumbnailState, MAX_PNG_BYTES,
     MAX_PREVIEW_DIMENSION, MAX_PREVIEW_PIXELS,
 };
-use base64::Engine;
-use png::{BitDepth, ColorType, Encoder};
-use std::mem::size_of;
+use crate::pixels::png_data_url;
+use crate::win32::com::ComApartment;
+use crate::win32::gdi::{bitmap_to_png_bytes, BitmapGuard};
+use crate::win32::wide_nul;
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::sync::Mutex;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::SIZE;
-use windows::Win32::Graphics::Gdi::{
-    CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, GetObjectW, BITMAP, BITMAPINFO,
-    BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP,
-};
-use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+use windows::Win32::System::Com::COINIT_MULTITHREADED;
 use windows::Win32::UI::Shell::{
     IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_INCACHEONLY, SIIGBF_RESIZETOFIT,
     SIIGBF_THUMBNAILONLY,
@@ -133,7 +130,7 @@ impl ThumbnailProvider for WindowsThumbnailProvider {
 }
 
 fn worker_loop(receiver: std::sync::Arc<Mutex<Receiver<Work>>>) {
-    let initialized = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).is_ok() };
+    let _apartment = ComApartment::initialize(COINIT_MULTITHREADED);
     loop {
         let message = match receiver.lock() {
             Ok(receiver) => receiver.recv(),
@@ -146,19 +143,10 @@ fn worker_loop(receiver: std::sync::Arc<Mutex<Receiver<Work>>>) {
         }
         let _ = work.reply.send(extract(&work.candidate, work.deadline));
     }
-    if initialized {
-        unsafe { CoUninitialize() };
-    }
 }
 
 fn extract(candidate: &ThumbnailCandidate, deadline: Instant) -> ThumbnailState {
-    let wide = candidate
-        .fingerprint
-        .path
-        .to_string_lossy()
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
+    let wide = wide_nul(&candidate.fingerprint.path);
     let item: IShellItemImageFactory =
         match unsafe { SHCreateItemFromParsingName(PCWSTR(wide.as_ptr()), None) } {
             Ok(item) => item,
@@ -185,110 +173,19 @@ fn extract(candidate: &ThumbnailCandidate, deadline: Instant) -> ThumbnailState 
         Ok(bitmap) => BitmapGuard(bitmap),
         Err(_) => return ThumbnailState::Unavailable,
     };
-    let Some(png) = bitmap_to_png(bitmap.0) else {
+    let Some(png) = bitmap_to_png_bytes(bitmap.0, is_preview_size) else {
         return ThumbnailState::Failed;
     };
     if png.len() > MAX_PNG_BYTES {
         return ThumbnailState::Failed;
     }
-    validated_png_data_url(format!(
-        "data:image/png;base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(png)
-    ))
-    .unwrap_or(ThumbnailState::Failed)
+    validated_png_data_url(png_data_url(&png)).unwrap_or(ThumbnailState::Failed)
 }
 
-struct BitmapGuard(HBITMAP);
-impl Drop for BitmapGuard {
-    fn drop(&mut self) {
-        if !self.0.is_invalid() {
-            let _ = unsafe { DeleteObject(self.0.into()) };
-        }
-    }
-}
-struct DcGuard(windows::Win32::Graphics::Gdi::HDC);
-impl Drop for DcGuard {
-    fn drop(&mut self) {
-        let _ = unsafe { DeleteDC(self.0) };
-    }
-}
-
-fn bitmap_to_png(bitmap: HBITMAP) -> Option<Vec<u8>> {
-    let mut object = BITMAP::default();
-    if unsafe {
-        GetObjectW(
-            bitmap.into(),
-            i32::try_from(size_of::<BITMAP>()).ok()?,
-            Some((&mut object as *mut BITMAP).cast()),
-        )
-    } == 0
-    {
-        return None;
-    }
-    let width = u32::try_from(object.bmWidth).ok()?;
-    let height = u32::try_from(object.bmHeight.abs()).ok()?;
-    if width == 0
-        || height == 0
-        || width > MAX_PREVIEW_DIMENSION
-        || height > MAX_PREVIEW_DIMENSION
-        || width.checked_mul(height)? > MAX_PREVIEW_PIXELS
-    {
-        return None;
-    }
-    let stride = width.checked_mul(4)?;
-    let len = usize::try_from(stride.checked_mul(height)?).ok()?;
-    let mut info = BITMAPINFO {
-        bmiHeader: BITMAPINFOHEADER {
-            biSize: size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: width as i32,
-            biHeight: -(height as i32),
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: BI_RGB.0,
-            biSizeImage: len as u32,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let mut bgra = vec![0; len];
-    let dc = unsafe { CreateCompatibleDC(None) };
-    if dc.0.is_null() {
-        return None;
-    }
-    let dc = DcGuard(dc);
-    if unsafe {
-        GetDIBits(
-            dc.0,
-            bitmap,
-            0,
-            height,
-            Some(bgra.as_mut_ptr().cast()),
-            &mut info,
-            DIB_RGB_COLORS,
-        )
-    } == 0
-    {
-        return None;
-    }
-    let mut rgba = Vec::with_capacity(len);
-    for pixel in bgra.chunks_exact(4) {
-        let alpha = u32::from(pixel[3]);
-        let unpremultiply = |channel: u8| {
-            (u32::from(channel) * 255 + alpha / 2)
-                .checked_div(alpha)
-                .map_or(0, |value| value.min(255) as u8)
-        };
-        rgba.extend_from_slice(&[
-            unpremultiply(pixel[2]),
-            unpremultiply(pixel[1]),
-            unpremultiply(pixel[0]),
-            pixel[3],
-        ]);
-    }
-    let mut output = Vec::new();
-    let mut encoder = Encoder::new(&mut output, width, height);
-    encoder.set_color(ColorType::Rgba);
-    encoder.set_depth(BitDepth::Eight);
-    encoder.write_header().ok()?.write_image_data(&rgba).ok()?;
-    Some(output)
+fn is_preview_size(width: u32, height: u32) -> bool {
+    width <= MAX_PREVIEW_DIMENSION
+        && height <= MAX_PREVIEW_DIMENSION
+        && width
+            .checked_mul(height)
+            .is_some_and(|pixels| pixels <= MAX_PREVIEW_PIXELS)
 }

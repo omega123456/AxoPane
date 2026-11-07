@@ -46,6 +46,7 @@ import { useConfigStore } from '@/stores/config-store'
 import type { CommandId, DirectoryEntry } from '@/lib/types/ipc'
 import type { PaneId } from '@/types/pane'
 import { pathsMatch } from '@/lib/path-compare'
+import { otherPane } from '@/lib/pane-id'
 
 function favouriteRow(path: string, remove = false): ContextMenuActionRow {
   const isFavourite = useConfigStore.getState().favourites.some((item) => pathsMatch(item, path))
@@ -614,7 +615,7 @@ function buildTabContent(
   const tabs = useTabsStore.getState().panes[paneId]
   const tab = tabs.tabs.find((item) => item.id === target.tabId)
   const tabIndex = tabs.tabs.findIndex((item) => item.id === target.tabId)
-  const destinationPaneId = paneId === 'left' ? 'right' : 'left'
+  const destinationPaneId = otherPane(paneId)
   const destination = useTabsStore.getState().panes[destinationPaneId]
   const path = tab?.path ?? usePanesStore.getState().panes[paneId].path
 

@@ -156,18 +156,23 @@ mod real {
         NativeMenuCanonicalActionKind, NativeMenuIcon, NativeMenuIconKind,
     };
     use crate::native_menu::windows_shell::{
-        bitmap_to_data_url, classify_canonical_action, is_background_target, normalize_verb,
-        parent_directory, path_to_wide, sanitize_menu_label, selected_target_paths, OwnedPidl,
+        classify_canonical_action, is_background_target, normalize_verb, parent_directory,
+        sanitize_menu_label, selected_target_paths, OwnedPidl,
     };
+    use crate::win32::gdi::bitmap_to_data_url;
+    use crate::win32::shell::ShellExecuteRequest;
+    use crate::win32::wide_nul;
+    use std::ffi::OsStr;
     use windows::core::{Interface, PCWSTR};
-    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::Foundation::E_FAIL;
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, MAX_PATH, WPARAM};
     use windows::Win32::System::Com::IBindCtx;
     use windows::Win32::UI::Shell::{
         Common::ITEMIDLIST, IContextMenu, IContextMenu2, IContextMenu3, IShellFolder,
-        SHBindToObject, SHBindToParent, SHGetDesktopFolder, SHOpenWithDialog, ShellExecuteW,
-        CMF_CANRENAME, CMF_EXPLORE, CMF_EXTENDEDVERBS, CMF_INCLUDESTATIC, CMF_ITEMMENU,
-        CMF_NODEFAULT, CMF_NORMAL, CMF_SYNCCASCADEMENU, CMINVOKECOMMANDINFO, GCS_VERBW,
-        OAIF_ALLOW_REGISTRATION, OAIF_EXEC, OPENASINFO,
+        SHBindToObject, SHBindToParent, SHGetDesktopFolder, SHOpenWithDialog, CMF_CANRENAME,
+        CMF_EXPLORE, CMF_EXTENDEDVERBS, CMF_INCLUDESTATIC, CMF_ITEMMENU, CMF_NODEFAULT, CMF_NORMAL,
+        CMF_SYNCCASCADEMENU, CMINVOKECOMMANDINFO, GCS_VERBW, OAIF_ALLOW_REGISTRATION, OAIF_EXEC,
+        OPENASINFO,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         CreatePopupMenu, DestroyMenu, GetMenuItemCount, GetMenuItemInfoW, MENUITEMINFOW,
@@ -260,7 +265,7 @@ mod real {
             return MenuActionStatus::unsupported("properties-launch-failed");
         };
 
-        match shell_execute("properties", path) {
+        match shell_execute_verb("properties", path) {
             Ok(()) => MenuActionStatus::handled_with_message("properties-opened"),
             Err(error) => {
                 log::warn!("windows properties launch failed for {}: {}", path, error);
@@ -281,7 +286,7 @@ mod real {
                     request.path,
                     dialog_error
                 );
-                shell_execute("openas", &request.path)
+                shell_execute_verb(crate::launch::OPEN_WITH_VERB, &request.path)
             })
             .or_else(|verb_error| {
                 log::debug!(
@@ -496,7 +501,7 @@ mod real {
         depth: usize,
         parent_path: &[u32],
     ) -> windows::core::Result<Option<ProviderNativeMenuItem>> {
-        let mut text_buffer = vec![0u16; 260];
+        let mut text_buffer = vec![0u16; MAX_PATH as usize];
         let mut info = MENUITEMINFOW {
             cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
             fMask: MIIM_BITMAP | MIIM_FTYPE | MIIM_STATE | MIIM_ID | MIIM_SUBMENU | MIIM_STRING,
@@ -565,7 +570,7 @@ mod real {
 
     fn command_verb(context_menu: &IContextMenu, menu_id: u32) -> Option<String> {
         let command_index = menu_id.checked_sub(COMMAND_ID_FIRST)? as usize;
-        let mut buffer = [0u16; 260];
+        let mut buffer = [0u16; MAX_PATH as usize];
         let result = unsafe {
             context_menu.GetCommandString(
                 command_index,
@@ -618,63 +623,28 @@ mod real {
         Some(path)
     }
 
-    fn shell_execute(operation: &str, path: &str) -> windows::core::Result<()> {
-        let operation = path_to_wide(operation);
-        let target = path_to_wide(path);
-        let result = unsafe {
-            ShellExecuteW(
-                None,
-                PCWSTR(operation.as_ptr()),
-                PCWSTR(target.as_ptr()),
-                PCWSTR::null(),
-                PCWSTR::null(),
-                SW_SHOWNORMAL,
-            )
-        };
-
-        let status = result.0 as isize;
-        if status <= 32 {
-            return Err(windows::core::Error::new(
-                windows::core::HRESULT(0x80004005u32 as i32),
-                format!("ShellExecuteW returned status code {status}"),
-            ));
-        }
-
-        Ok(())
+    fn shell_execute_verb(verb: &str, path: &str) -> windows::core::Result<()> {
+        shell_execute(&ShellExecuteRequest {
+            verb: Some(OsStr::new(verb)),
+            file: OsStr::new(path),
+            parameters: None,
+            directory: None,
+        })
     }
 
-    fn shell_execute_program(
-        operation: &str,
-        program: &str,
-        parameters: &str,
-    ) -> windows::core::Result<()> {
-        let operation = path_to_wide(operation);
-        let program = path_to_wide(program);
-        let parameters = path_to_wide(parameters);
-        let result = unsafe {
-            ShellExecuteW(
-                None,
-                PCWSTR(operation.as_ptr()),
-                PCWSTR(program.as_ptr()),
-                PCWSTR(parameters.as_ptr()),
-                PCWSTR::null(),
-                SW_SHOWNORMAL,
-            )
-        };
-
-        let status = result.0 as isize;
-        if status <= 32 {
-            return Err(windows::core::Error::new(
-                windows::core::HRESULT(0x80004005u32 as i32),
-                format!("ShellExecuteW returned status code {status}"),
-            ));
+    fn shell_execute(request: &ShellExecuteRequest<'_>) -> windows::core::Result<()> {
+        let status = crate::win32::shell::shell_execute(request);
+        if crate::launch::shell_execute_succeeded(status) {
+            return Ok(());
         }
-
-        Ok(())
+        Err(windows::core::Error::new(
+            E_FAIL,
+            crate::launch::launch_failure_detail(status),
+        ))
     }
 
     fn open_with_dialog(path: &str) -> windows::core::Result<()> {
-        let target = path_to_wide(path);
+        let target = wide_nul(path);
         let info = OPENASINFO {
             pcszFile: PCWSTR(target.as_ptr()),
             pcszClass: PCWSTR::null(),
@@ -685,11 +655,13 @@ mod real {
     }
 
     fn open_with_rundll32(path: &str) -> windows::core::Result<()> {
-        shell_execute_program(
-            "open",
-            "rundll32.exe",
-            &format!("shell32.dll,OpenAs_RunDLL \"{path}\""),
-        )
+        let parameters = format!("shell32.dll,OpenAs_RunDLL \"{path}\"");
+        shell_execute(&ShellExecuteRequest {
+            verb: Some(OsStr::new("open")),
+            file: OsStr::new("rundll32.exe"),
+            parameters: Some(OsStr::new(&parameters)),
+            directory: None,
+        })
     }
 
     struct MenuGuard(windows::Win32::UI::WindowsAndMessaging::HMENU);
@@ -786,7 +758,7 @@ mod real {
         }
 
         for index in 0..count {
-            let mut text_buffer = vec![0u16; 260];
+            let mut text_buffer = vec![0u16; MAX_PATH as usize];
             let mut info = MENUITEMINFOW {
                 cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
                 fMask: MIIM_FTYPE | MIIM_ID | MIIM_STATE | MIIM_STRING | MIIM_SUBMENU,
@@ -931,7 +903,7 @@ mod real {
             lpVerb: windows::core::PCSTR(command_index as usize as *const u8),
             lpParameters: windows::core::PCSTR::null(),
             lpDirectory: windows::core::PCSTR::null(),
-            nShow: 1,
+            nShow: SW_SHOWNORMAL.0,
             dwHotKey: 0,
             hIcon: Default::default(),
         };

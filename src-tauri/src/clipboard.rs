@@ -244,7 +244,7 @@ mod windows_impl {
     }
 
     fn register_preferred_drop_effect() -> Result<u32, ClipboardError> {
-        let format_name = wide("Preferred DropEffect");
+        let format_name = crate::win32::wide_nul("Preferred DropEffect");
         let format = unsafe { RegisterClipboardFormatW(PCWSTR(format_name.as_ptr())) };
         if format == 0 {
             return Err(windows_error(windows::core::Error::from_win32()));
@@ -343,10 +343,6 @@ mod windows_impl {
         fn drop(&mut self) {
             let _ = unsafe { GlobalUnlock(self.handle) };
         }
-    }
-
-    fn wide(value: &str) -> Vec<u16> {
-        value.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
     fn windows_error(error: windows::core::Error) -> ClipboardError {

@@ -3,6 +3,7 @@ import { openPath } from '@/lib/ipc/commands'
 import { resolveCommandForEvent } from '@/lib/keymap'
 import type { CommandId, SearchHit, Shortcut } from '@/lib/types/ipc'
 import { getParentPath, usePanesStore } from '@/stores/panes-store'
+import { otherPane } from '@/lib/pane-id'
 
 /** `open` launches a file; everything else opens in a new tab in a pane. */
 export type SearchActivation = 'default' | 'open' | 'newTab' | 'otherPane'
@@ -23,7 +24,7 @@ export async function activateSearchHit(hit: SearchHit, how: SearchActivation) {
   }
   const folder = hit.isDir ? hit.path : (getParentPath(hit.path) ?? hit.path)
   const revealPath = hit.isDir ? undefined : hit.path
-  const targetPaneId = how === 'otherPane' ? (paneId === 'left' ? 'right' : 'left') : paneId
+  const targetPaneId = how === 'otherPane' ? otherPane(paneId) : paneId
   await panes.openTabFromPath(targetPaneId, folder, { revealPath })
 }
 

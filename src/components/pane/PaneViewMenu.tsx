@@ -1,9 +1,10 @@
 import { ChevronDownIcon, Grid2X2Icon, ImagesIcon, ListIcon } from '@/components/icons'
 import { MenuPopover, type MenuPopoverRadioItem } from '@/components/controls'
 import { paneViewMetadata, paneViewModes } from '@/lib/pane-view'
-import type { PaneId } from '@/stores/tabs-store'
+import type { PaneId } from '@/types/pane'
 import { useTabsStore } from '@/stores/tabs-store'
 import { FOCUS_RING } from '@/lib/focus-ring'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 const modeIcons = { details: ListIcon, icons: Grid2X2Icon, thumbnails: ImagesIcon } as const
 
@@ -45,7 +46,7 @@ export function PaneViewMenu({ paneId }: { paneId: PaneId }) {
         >
           <Icon className="size-4" />
           <span>{paneViewMetadata[viewMode].label}</span>
-          <ChevronDownIcon className="size-3 text-light-text-secondary dark:text-dark-text-secondary" />
+          <ChevronDownIcon className={`size-3 ${TEXT_SECONDARY}`} />
         </button>
       )}
     />

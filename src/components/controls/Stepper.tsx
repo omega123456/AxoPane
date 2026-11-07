@@ -1,4 +1,5 @@
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 export function Stepper({
   value,
   onChange,
@@ -16,7 +17,7 @@ export function Stepper({
   format?: (value: number) => string
   ariaLabel: string
 }) {
-  const cell = `flex size-8 items-center justify-center text-light-text-secondary hover:bg-light-hover disabled:opacity-40 dark:text-dark-text-secondary dark:hover:bg-dark-hover ${FOCUS_RING_INSET}`
+  const cell = `flex size-8 items-center justify-center ${TEXT_SECONDARY} hover:bg-light-hover disabled:opacity-40 dark:hover:bg-dark-hover ${FOCUS_RING_INSET}`
 
   return (
     <div

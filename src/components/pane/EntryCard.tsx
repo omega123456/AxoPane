@@ -7,6 +7,7 @@ import { SizeValue } from './SizeValue'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import { thumbnailFingerprintKey, useThumbnailStore } from '@/stores/thumbnail-store'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 export type EntryCardThumbnail = {
   state: 'ready' | 'loading' | 'unavailable' | 'failed'
@@ -133,9 +134,7 @@ function EntryCardImpl({
   const labels = (
     <>
       <span className="truncate text-row text-light-text dark:text-dark-text">{entry.name}</span>
-      <span className="-mt-1 truncate text-caption text-light-text-secondary dark:text-dark-text-secondary">
-        {meta}
-      </span>
+      <span className={`-mt-1 truncate text-caption ${TEXT_SECONDARY}`}>{meta}</span>
     </>
   )
   const minimumCellClassName = mode === 'icons' ? 'min-w-icon-cell' : 'min-w-thumbnail-cell'

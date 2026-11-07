@@ -2,6 +2,7 @@ import { CopyIcon, CornerUpRightIcon } from 'lucide-react'
 import { useDragCursorStore } from '@/stores/drag-cursor-store'
 import { useLayoutStore } from '@/stores/layout-store'
 import { percentToFraction } from '@/lib/numbers'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 /**
  * Copy-vs-move feedback that follows the pointer during an OS-owned drag.
@@ -36,7 +37,7 @@ export function DragCursorBadge() {
       aria-hidden="true"
     >
       <span className="flex items-center gap-1 rounded-control border border-light-flyout-stroke bg-light-card px-1.5 py-0.5 text-caption font-medium text-light-text dark:border-dark-flyout-stroke dark:bg-dark-card dark:text-dark-text">
-        <Icon className="h-3 w-3 shrink-0 text-light-text-secondary dark:text-dark-text-secondary" />
+        <Icon className={`h-3 w-3 shrink-0 ${TEXT_SECONDARY}`} />
         {copying ? 'Copy' : 'Move'}
       </span>
     </div>

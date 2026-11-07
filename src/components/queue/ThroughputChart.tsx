@@ -3,7 +3,7 @@ import { curveLinear } from '@visx/curve'
 import { scaleLinear } from '@visx/scale'
 import { AreaClosed, LinePath } from '@visx/shape'
 import type { ThroughputSample } from '@/lib/types/ipc'
-import { clampPercent, PERCENT_SCALE } from '@/lib/numbers'
+import { clamp, clampPercent, PERCENT_SCALE } from '@/lib/numbers'
 import scaleSteps from './throughput-scale-steps.json'
 
 type ThroughputChartProps = {
@@ -175,7 +175,7 @@ function useAppendedTail(target: ThroughputSample[]): {
     const tick = (time: number) => {
       const progress = reducedMotion
         ? 1
-        : Math.min(1, Math.max(0, (time - startedAtRef.current) / APPEND_ANIMATION_MS))
+        : clamp((time - startedAtRef.current) / APPEND_ANIMATION_MS, 0, 1)
       setState((previous) =>
         previous.identity === state.identity
           ? { ...previous, progress, start: progress >= 1 ? null : previous.start }
@@ -257,7 +257,7 @@ function useEasedScalar(target: number, durationMs: number, easing: (progress: n
     const startedAt = performance.now()
 
     const tick = (time: number) => {
-      const progress = reducedMotion ? 1 : Math.min(1, Math.max(0, (time - startedAt) / durationMs))
+      const progress = reducedMotion ? 1 : clamp((time - startedAt) / durationMs, 0, 1)
       const nextValue = interpolate(startValue, target, easing(progress))
       displayedRef.current = nextValue
       setDisplayed(nextValue)

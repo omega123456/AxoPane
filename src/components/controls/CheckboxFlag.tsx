@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { CheckIcon } from '@/components/icons'
 import { FOCUS_RING } from '@/lib/focus-ring'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 /** Fluent checkbox: an 18px box on the input boundary, solid accent when checked. */
 export function CheckboxFlag({
@@ -40,9 +41,7 @@ export function CheckboxFlag({
       <span className="min-w-0 flex-1">
         <span className="block text-row text-light-text dark:text-dark-text">{title}</span>
         {description ? (
-          <span className="block text-caption text-light-text-secondary dark:text-dark-text-secondary">
-            {description}
-          </span>
+          <span className={`block text-caption ${TEXT_SECONDARY}`}>{description}</span>
         ) : null}
       </span>
     </button>

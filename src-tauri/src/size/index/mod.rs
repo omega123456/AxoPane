@@ -603,8 +603,7 @@ mod service {
     }
 
     fn unix_secs(time: SystemTime) -> u64 {
-        time.duration_since(UNIX_EPOCH)
-            .map_or(0, |since| since.as_secs())
+        crate::epoch::since_epoch(time).as_secs()
     }
 
     // ----- walk lanes -------------------------------------------------------

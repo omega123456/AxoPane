@@ -1,4 +1,5 @@
 import { FOCUS_RING } from '@/lib/focus-ring'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 export function TextAreaField({
   label,
   description,
@@ -22,9 +23,7 @@ export function TextAreaField({
         </div>
       ) : null}
       {description ? (
-        <div className="mb-2 text-caption text-light-text-secondary dark:text-dark-text-secondary">
-          {description}
-        </div>
+        <div className={`mb-2 text-caption ${TEXT_SECONDARY}`}>{description}</div>
       ) : null}
       <textarea
         aria-label={ariaLabel ?? label}
@@ -33,7 +32,7 @@ export function TextAreaField({
         rows={rows}
         spellCheck={false}
         onChange={(event) => onChange(event.target.value)}
-        className={`w-full resize-y select-text rounded-control border border-light-control-stroke bg-light-layer p-3 font-mono text-caption leading-relaxed text-light-text-secondary dark:border-dark-control-stroke dark:bg-dark-layer dark:text-dark-text-secondary ${FOCUS_RING}`}
+        className={`w-full resize-y select-text rounded-control border border-light-control-stroke bg-light-layer p-3 font-mono text-caption leading-relaxed ${TEXT_SECONDARY} dark:border-dark-control-stroke dark:bg-dark-layer ${FOCUS_RING}`}
       />
     </div>
   )

@@ -13,7 +13,7 @@ import {
   setTabWatch,
 } from '@/lib/ipc/commands'
 import { isTrashPath, trashEntryToDirectoryEntry } from '@/lib/trash'
-import { SESSION_PAGE_SIZE } from '@/lib/types/ipc'
+import { pageIndexForRow } from '@/stores/panes/entry-collection'
 import type {
   DirectoryEntry,
   DirPatchEvent,
@@ -54,14 +54,13 @@ import { useRecentFoldersStore } from '@/stores/recent-folders-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { ListingSession } from '@/stores/panes/listing-session'
 import { expandabilityOf, pruneTreeCache, type LazyTreeNode } from '@/stores/panes/tree-cache'
-import {
-  iconCacheNow,
-  iconWeight,
-  pruneIconCache,
-  pruneSizeCache,
-} from '@/stores/panes/cache-policy'
+import { pruneIconCache, pruneSizeCache } from '@/stores/panes/cache-policy'
+import type { PaneId } from '@/types/pane'
+import { otherPane } from '@/lib/pane-id'
+import { withKeyFlags } from '@/lib/collections'
+import { cacheNow } from '@/stores/weighted-cache'
+import { utf16ByteWeight } from '@/lib/numbers'
 
-type PaneId = 'left' | 'right'
 type SizeStateKind = SizeStateEvent['state']
 
 // When `viaHistory` is set the navigation is a back/forward step and must not
@@ -358,7 +357,7 @@ async function ensureSessionFullyLoaded(paneId: PaneId, session: ListingSession)
   }
 
   const stillCurrent = () => session.currentBaseline === baselineAtStart
-  const lastPageIndex = Math.floor((collection.totalRows - 1) / SESSION_PAGE_SIZE)
+  const lastPageIndex = pageIndexForRow(collection.totalRows - 1)
   const allPageIndexes = Array.from({ length: lastPageIndex + 1 }, (_, index) => index)
   collection.setPinnedPages(allPageIndexes)
 
@@ -728,24 +727,6 @@ function collectPendingSizeRequests(
   })
 }
 
-function withPendingSizeRequests(
-  pendingSizeRequests: PendingSizeRequests,
-  paths: string[],
-  value: boolean,
-) {
-  const next = { ...pendingSizeRequests }
-
-  for (const path of paths) {
-    if (value) {
-      next[path] = true
-    } else {
-      delete next[path]
-    }
-  }
-
-  return next
-}
-
 function collectPendingIconRequests(
   entries: DirectoryEntry[],
   paths: string[],
@@ -983,24 +964,6 @@ function hydrateEntryIcon(
   return { ...entry, iconDataUrl }
 }
 
-function withPendingIconRequests(
-  pendingIconRequests: PendingIconRequests,
-  paths: string[],
-  value: boolean,
-) {
-  const next = { ...pendingIconRequests }
-
-  for (const path of paths) {
-    if (value) {
-      next[path] = true
-    } else {
-      delete next[path]
-    }
-  }
-
-  return next
-}
-
 // Eager folder-size requests are only valid where a folder-size index can
 // answer them cheaply (Everything on Windows, the macOS index). Without one,
 // sizes are strictly manual (Space / "Calculate size"). The request is sent in
@@ -1182,10 +1145,6 @@ function entryMatchesPane(entry: DirectoryEntry, pane: PaneState, showHiddenFile
   )
 }
 
-function pathsEqual(left: string, right: string) {
-  return pathsMatch(left, right)
-}
-
 function matchesListingContext(
   pane: PaneState,
   expected: {
@@ -1208,11 +1167,11 @@ function treeNodeKeyForPath(treeNodes: Record<string, TreeNodeState>, path: stri
     return path
   }
 
-  return Object.keys(treeNodes).find((nodePath) => pathsEqual(nodePath, path)) ?? null
+  return Object.keys(treeNodes).find((nodePath) => pathsMatch(nodePath, path)) ?? null
 }
 
 function childPathInList(children: string[], path: string) {
-  return children.find((childPath) => pathsEqual(childPath, path)) ?? null
+  return children.find((childPath) => pathsMatch(childPath, path)) ?? null
 }
 
 function collectTreeSubtreePaths(
@@ -1275,7 +1234,7 @@ function applyTreeDirPatch(state: PanesStore, event: DirPatchEvent) {
     const childPath = childPathInList(nextChildren, path)
     if (childPath) {
       const children = mutableChildren()
-      nextChildren = children.filter((candidate) => !pathsEqual(candidate, path))
+      nextChildren = children.filter((candidate) => !pathsMatch(candidate, path))
     }
 
     if (!pruneTree) {
@@ -1288,7 +1247,7 @@ function applyTreeDirPatch(state: PanesStore, event: DirPatchEvent) {
     }
 
     const node = nextTreeNodes[nodeKey]
-    if (!pathsEqual(node.parentPath ?? '', parent.path) && !childPath) {
+    if (!pathsMatch(node.parentPath ?? '', parent.path) && !childPath) {
       return
     }
 
@@ -1714,7 +1673,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       delete pendingRevealPaths[paneId]
     }
 
-    const otherPaneId: PaneId = paneId === 'left' ? 'right' : 'left'
+    const otherPaneId = otherPane(paneId)
     const otherDirPaths = new Set(directoryPaths(get().panes[otherPaneId].entries))
     const leavingDirPaths = directoryPaths(leaving.entries)
     const staleSizePaths = leavingDirPaths.filter(
@@ -2111,13 +2070,13 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     }
 
     set((state) => ({
-      pendingSizeRequests: withPendingSizeRequests(state.pendingSizeRequests, paths, true),
+      pendingSizeRequests: withKeyFlags(state.pendingSizeRequests, paths, true),
     }))
     try {
       await requestFolderSizes({ paths, mode: 'refresh' })
     } catch (error) {
       set((state) => ({
-        pendingSizeRequests: withPendingSizeRequests(state.pendingSizeRequests, paths, false),
+        pendingSizeRequests: withKeyFlags(state.pendingSizeRequests, paths, false),
       }))
       throw error
     }
@@ -2150,7 +2109,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       }
 
       set((state) => ({
-        pendingSizeRequests: withPendingSizeRequests(state.pendingSizeRequests, pending, true),
+        pendingSizeRequests: withKeyFlags(state.pendingSizeRequests, pending, true),
       }))
 
       try {
@@ -2158,7 +2117,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         return pending
       } catch (error) {
         set((state) => ({
-          pendingSizeRequests: withPendingSizeRequests(state.pendingSizeRequests, pending, false),
+          pendingSizeRequests: withKeyFlags(state.pendingSizeRequests, pending, false),
         }))
         throw error
       }
@@ -2685,7 +2644,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       return {
         pendingSizeRequests:
           terminalPaths.length > 0
-            ? withPendingSizeRequests(state.pendingSizeRequests, terminalPaths, false)
+            ? withKeyFlags(state.pendingSizeRequests, terminalPaths, false)
             : state.pendingSizeRequests,
         sizeStates: pruneSizeCache(nextSizeStates, protectedSizePaths),
       }
@@ -2852,14 +2811,14 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     }
 
     set((state) => ({
-      pendingIconRequests: withPendingIconRequests(state.pendingIconRequests, pending, true),
+      pendingIconRequests: withKeyFlags(state.pendingIconRequests, pending, true),
     }))
 
     try {
       await requestIcons({ paths: pending })
     } catch (error) {
       set((state) => ({
-        pendingIconRequests: withPendingIconRequests(state.pendingIconRequests, pending, false),
+        pendingIconRequests: withKeyFlags(state.pendingIconRequests, pending, false),
       }))
       throw error
     }
@@ -2908,7 +2867,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
 
       const resolvedIconPaths = { ...state.resolvedIconPaths }
       const iconCacheTouched = { ...state.iconCacheTouched }
-      const now = iconCacheNow()
+      const now = cacheNow()
       const paths: string[] = []
       for (const event of events) {
         paths.push(event.path)
@@ -2925,7 +2884,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       const iconRecords = Object.fromEntries(
         Object.entries(resolvedIconPaths).map(([path, value]) => [
           path,
-          { value, touched: iconCacheTouched[path] ?? now, weight: iconWeight(value) },
+          { value, touched: iconCacheTouched[path] ?? now, weight: utf16ByteWeight(value) },
         ]),
       )
       const retainedIcons = pruneIconCache(
@@ -2943,7 +2902,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
 
       return {
         panes: panesChanged ? nextPanes : state.panes,
-        pendingIconRequests: withPendingIconRequests(state.pendingIconRequests, paths, false),
+        pendingIconRequests: withKeyFlags(state.pendingIconRequests, paths, false),
         resolvedIconPaths: boundedResolvedIconPaths,
         iconCacheTouched: boundedIconCacheTouched,
       }
@@ -3000,7 +2959,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     }
 
     set((state) => ({
-      pendingSizeRequests: withPendingSizeRequests(state.pendingSizeRequests, pending, true),
+      pendingSizeRequests: withKeyFlags(state.pendingSizeRequests, pending, true),
     }))
 
     const startedAt = performance.now()
@@ -3013,7 +2972,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       })
     } catch (error) {
       set((state) => ({
-        pendingSizeRequests: withPendingSizeRequests(state.pendingSizeRequests, pending, false),
+        pendingSizeRequests: withKeyFlags(state.pendingSizeRequests, pending, false),
       }))
       throw error
     }

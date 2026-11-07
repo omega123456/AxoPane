@@ -17,6 +17,8 @@ import {
   type PropertiesDialogState,
 } from '@/stores/properties-dialog-store'
 import type { MacApp } from '@/lib/types/ipc'
+import { SCROLLBAR_THIN } from '@/lib/class-names'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 function formatItemSize(sizeBytes: number | null, itemCount: number | null, isDir: boolean) {
   if (typeof sizeBytes === 'number') {
@@ -179,9 +181,7 @@ export function PropertiesDialog() {
         </>
       }
     >
-      <p className="-mt-2 text-caption text-light-text-secondary dark:text-dark-text-secondary">
-        {summary.itemCountLabel}
-      </p>
+      <p className={`-mt-2 text-caption ${TEXT_SECONDARY}`}>{summary.itemCountLabel}</p>
       {summary.singleItem ? (
         <dl className="grid gap-1.5">
           <PropertyRow label="Type" value={summary.singleItem.typeLabel} />
@@ -226,10 +226,10 @@ export function PropertiesDialog() {
         </dl>
       ) : (
         <div className="grid gap-1">
-          <div className="text-caption text-light-text-secondary dark:text-dark-text-secondary">
-            Selected paths
-          </div>
-          <ul className="grid max-h-56 gap-0.5 overflow-auto font-mono text-caption scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary">
+          <div className={`text-caption ${TEXT_SECONDARY}`}>Selected paths</div>
+          <ul
+            className={`grid max-h-56 gap-0.5 overflow-auto font-mono text-caption ${SCROLLBAR_THIN}`}
+          >
             {dialog.items.map((item) => (
               <li key={item.path} className="break-all">
                 {item.path}
@@ -255,9 +255,7 @@ function PropertyRow({
 }) {
   return (
     <div className="flex items-baseline gap-4">
-      <dt className="w-24 shrink-0 text-caption text-light-text-secondary dark:text-dark-text-secondary">
-        {label}
-      </dt>
+      <dt className={`w-24 shrink-0 text-caption ${TEXT_SECONDARY}`}>{label}</dt>
       <dd
         className={`min-w-0 flex-1 break-words ${valueClassName ?? ''} ${
           monospace ? 'break-all font-mono text-caption' : 'text-row'
@@ -272,9 +270,7 @@ function PropertyRow({
 function DefaultAppRow({ loaded, app }: { loaded: boolean; app: MacApp | null }) {
   return (
     <div className="flex items-baseline gap-4">
-      <dt className="w-24 shrink-0 text-caption text-light-text-secondary dark:text-dark-text-secondary">
-        Default App
-      </dt>
+      <dt className={`w-24 shrink-0 text-caption ${TEXT_SECONDARY}`}>Default App</dt>
       <dd className="flex min-w-0 flex-1 items-center gap-2 text-row">
         {!loaded ? (
           'Loading…'

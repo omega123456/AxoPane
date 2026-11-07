@@ -12,6 +12,7 @@ import { useElementVirtualizer } from '@/lib/use-element-virtualizer'
 import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
+import { SCROLLBAR_THIN } from '@/lib/class-names'
 
 const PINNED_ROW_BASE_Z_INDEX = 10
 
@@ -210,7 +211,7 @@ export function FolderTree() {
         <div
           ref={scrollRef}
           data-testid="folder-tree-scroll"
-          className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pb-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary"
+          className={`min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pb-2 ${SCROLLBAR_THIN}`}
           onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
         >
           {/*

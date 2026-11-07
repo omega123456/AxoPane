@@ -20,6 +20,7 @@ import {
   TypeIcon,
 } from '@/components/icons'
 import { FolderGlyph, PdfGlyph } from '@/components/icons/custom-icons'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 type IconComponent = ComponentType<LucideProps>
 
@@ -46,7 +47,7 @@ const CATEGORY_STYLES: Record<Exclude<FileCategory, 'folder'>, CategoryStyle> = 
   database: { Glyph: DatabaseIcon, colorClassName: 'text-file-config' },
   generic: {
     Glyph: FileIcon,
-    colorClassName: 'text-light-text-secondary dark:text-dark-text-secondary',
+    colorClassName: TEXT_SECONDARY,
   },
 }
 
@@ -68,7 +69,7 @@ function SymlinkBadge() {
     <CornerUpRightIcon
       aria-hidden="true"
       strokeWidth={2.5}
-      className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-light-base text-light-text-secondary dark:bg-dark-base dark:text-dark-text-secondary"
+      className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-light-base ${TEXT_SECONDARY} dark:bg-dark-base`}
     />
   )
 }

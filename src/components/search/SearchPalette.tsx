@@ -19,6 +19,7 @@ import { useKeymapStore } from '@/stores/keymap-store'
 import { getParentPath, usePanesStore } from '@/stores/panes-store'
 import { useRecentFoldersStore } from '@/stores/recent-folders-store'
 import { isSearchable, useSearchPaletteStore } from '@/stores/search-palette-store'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 const ROW_HEIGHT = 44
 const PAGE_ROWS = 8
@@ -277,7 +278,7 @@ function SearchPaletteFlyout() {
         className="pointer-events-auto flex w-palette max-w-full flex-col overflow-hidden rounded-overlay border border-light-flyout-stroke bg-light-card text-light-text shadow-light-flyout dark:border-dark-flyout-stroke dark:bg-dark-card dark:text-dark-text dark:shadow-dark-flyout"
       >
         <label className="relative mx-2 mt-2 flex h-command items-center gap-2.5 rounded-control border border-light-control-stroke border-b-2 border-b-light-accent bg-light-control px-2.5 focus-within:ring-2 focus-within:ring-light-focus-outer dark:border-dark-control-stroke dark:border-b-dark-accent dark:bg-dark-control dark:focus-within:ring-dark-focus-outer">
-          <SearchIcon className="size-4 shrink-0 text-light-text-secondary dark:text-dark-text-secondary" />
+          <SearchIcon className={`size-4 shrink-0 ${TEXT_SECONDARY}`} />
           <input
             ref={inputRef}
             role="combobox"
@@ -330,7 +331,7 @@ function SearchPaletteFlyout() {
                 className={`h-6 rounded-control px-2.5 text-caption disabled:cursor-not-allowed disabled:text-light-text-disabled dark:disabled:text-dark-text-disabled ${
                   scope === option.scope
                     ? 'bg-light-card font-semibold text-light-text shadow-thumb dark:bg-dark-card dark:text-dark-text'
-                    : 'text-light-text-secondary hover:bg-light-hover dark:text-dark-text-secondary dark:hover:bg-dark-hover'
+                    : `${TEXT_SECONDARY} hover:bg-light-hover dark:hover:bg-dark-hover`
                 } ${FOCUS_RING_INSET}`}
               >
                 {option.label}
@@ -398,7 +399,7 @@ function SearchPaletteFlyout() {
         </div>
 
         <div className="flex h-8 shrink-0 items-center gap-3.5 overflow-hidden whitespace-nowrap border-t border-light-divider px-3 text-caption text-light-text-tertiary dark:border-dark-divider dark:text-dark-text-tertiary">
-          <span className="truncate text-light-text-secondary dark:text-dark-text-secondary">
+          <span className={`truncate ${TEXT_SECONDARY}`}>
             {footerText(backend, indexStatus, status === 'ready', items.length, total, truncated)}
           </span>
           <span aria-hidden="true" className="ml-auto flex gap-3">

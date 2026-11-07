@@ -64,6 +64,9 @@ import { getUnixTime, parseISO } from 'date-fns'
 import type { GridMovement } from '@/lib/pane-grid'
 import type { ThumbnailCandidateRequest } from '@/lib/types/ipc'
 import type { PaneId } from '@/types/pane'
+import { clamp } from '@/lib/numbers'
+import { documentZoom } from '@/components/menus/menu-geometry'
+import { SCROLLBAR_THIN } from '@/lib/class-names'
 
 const SKELETON_DELAY_MS = 1000
 const DOUBLE_CLICK_COUNT = 2
@@ -451,7 +454,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   }
 
   function focusByRowIndex(nextRowIndex: number) {
-    const bounded = Math.max(0, Math.min(nextRowIndex, rowCount - 1))
+    const bounded = clamp(nextRowIndex, 0, rowCount - 1)
 
     if (hasParent && bounded === 0) {
       setFocusedEntry(paneId, PARENT_ROW_ID)
@@ -591,7 +594,7 @@ export function FilePane({ paneId }: FilePaneProps) {
     const container = parentRef.current
     if (!container) return null
     const bounds = container.getBoundingClientRect()
-    const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1
+    const zoom = documentZoom()
     return {
       x: (clientX - bounds.left) / zoom + container.scrollLeft,
       y: (clientY - bounds.top) / zoom + container.scrollTop,
@@ -1087,7 +1090,9 @@ export function FilePane({ paneId }: FilePaneProps) {
           scrollContainerRef={parentRef}
           body={
             showSkeleton ? (
-              <div className="min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent scrollbar-thumb-light-text-tertiary dark:scrollbar-thumb-dark-text-tertiary">
+              <div
+                className={`min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain ${SCROLLBAR_THIN}`}
+              >
                 <LoadingSkeleton />
               </div>
             ) : permissionDenied ? (

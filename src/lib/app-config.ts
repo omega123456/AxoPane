@@ -1,36 +1,28 @@
 import { saveConfig } from '@/lib/ipc/commands'
-import type { AppConfig, LogLevel, ThemePreference } from '@/lib/types/ipc'
+import type { AppConfig, LogLevel } from '@/lib/types/ipc'
 import { DEFAULT_DATE_FORMAT, type DateFormat, isDateFormat } from '@/lib/date-format'
 import {
   DEFAULT_UPDATE_INTERVAL,
   isUpdateInterval,
   type UpdateInterval,
 } from '@/lib/update-intervals'
-import { useConfigStore } from '@/stores/config-store'
-import { defaultColumns, defaultLayout, useLayoutStore } from '@/stores/layout-store'
+import { defaultConfigSnapshot, pickConfigSnapshot, useConfigStore } from '@/stores/config-store'
+import {
+  defaultColumns,
+  defaultLayout,
+  pickLayoutConfig,
+  useLayoutStore,
+} from '@/stores/layout-store'
 import { useKeymapStore } from '@/stores/keymap-store'
 import { migrateKeymap } from '@/lib/keymap'
 import { resolvePaneViewMode } from '@/lib/pane-view'
 
 export function defaultAppConfig(): AppConfig {
   return {
-    theme: 'system',
-    showHiddenFiles: false,
-    dismissedEverythingBanner: false,
+    ...defaultConfigSnapshot(),
     keybindings: {},
     columns: defaultColumns,
     layout: defaultLayout,
-    updateCheckInterval: DEFAULT_UPDATE_INTERVAL,
-    logLevel: 'info',
-    dateFormat: DEFAULT_DATE_FORMAT,
-    showTime: false,
-    showSeconds: false,
-    relativeDates: false,
-    autoFolderSize: true,
-    autoExpandActiveQueueToasts: false,
-    favourites: [],
-    favouriteNames: {},
-    favouritesCollapsed: false,
   }
 }
 
@@ -46,33 +38,10 @@ export function buildAppConfig(): AppConfig {
   const keymap = useKeymapStore.getState()
 
   return {
-    theme: config.theme,
-    showHiddenFiles: config.showHiddenFiles,
-    dismissedEverythingBanner: config.dismissedEverythingBanner,
+    ...pickConfigSnapshot(config),
     keybindings: keymap.bindings,
     columns: layout.columns,
-    layout: {
-      detailsVisible: false,
-      treeWidthPx: layout.treeWidthPx,
-      favouritesHeightPx: layout.favouritesHeightPx,
-      paneSplit: layout.paneSplit,
-      columnWidths: layout.columnWidths,
-      defaultPaneMode: layout.defaultPaneMode,
-      defaultViewMode: layout.defaultViewMode,
-      restoreSession: layout.restoreSession,
-      zoom: layout.zoom,
-    },
-    updateCheckInterval: config.updateCheckInterval,
-    logLevel: config.logLevel,
-    dateFormat: config.dateFormat,
-    showTime: config.showTime,
-    showSeconds: config.showSeconds,
-    relativeDates: config.relativeDates,
-    autoFolderSize: config.autoFolderSize,
-    autoExpandActiveQueueToasts: config.autoExpandActiveQueueToasts,
-    favourites: config.favourites,
-    favouriteNames: config.favouriteNames,
-    favouritesCollapsed: config.favouritesCollapsed,
+    layout: { ...pickLayoutConfig(layout), detailsVisible: false },
   }
 }
 
@@ -124,22 +93,7 @@ export function hydrateAppConfig(config: AppConfig) {
     autoExpandActiveQueueToasts: config.autoExpandActiveQueueToasts ?? false,
   }
 
-  useConfigStore.getState().hydrate({
-    theme: next.theme as ThemePreference,
-    showHiddenFiles: next.showHiddenFiles,
-    dismissedEverythingBanner: next.dismissedEverythingBanner,
-    updateCheckInterval: next.updateCheckInterval,
-    logLevel: next.logLevel,
-    dateFormat: next.dateFormat,
-    showTime: next.showTime,
-    showSeconds: next.showSeconds,
-    relativeDates: next.relativeDates,
-    autoFolderSize: next.autoFolderSize ?? true,
-    autoExpandActiveQueueToasts: next.autoExpandActiveQueueToasts,
-    favourites: next.favourites ?? [],
-    favouriteNames: next.favouriteNames ?? {},
-    favouritesCollapsed: next.favouritesCollapsed ?? false,
-  })
+  useConfigStore.getState().hydrate(pickConfigSnapshot(next))
   useLayoutStore.getState().hydrate(next.layout, next.columns)
   useKeymapStore.getState().hydrate(next.keybindings)
 

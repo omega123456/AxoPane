@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 /** Windows Settings card: icon, title and one-line description, control on the right. */
 export function SettingRow({
@@ -19,11 +20,7 @@ export function SettingRow({
       ) : null}
       <div className="grid min-w-0 flex-1">
         <div className="text-body text-light-text dark:text-dark-text">{title}</div>
-        {description ? (
-          <div className="text-caption text-light-text-secondary dark:text-dark-text-secondary">
-            {description}
-          </div>
-        ) : null}
+        {description ? <div className={`text-caption ${TEXT_SECONDARY}`}>{description}</div> : null}
       </div>
       <div className="flex shrink-0 items-center gap-3">{control}</div>
     </div>

@@ -13,6 +13,7 @@ import { usePanesStore } from '@/stores/panes-store'
 import { tabLabel, useTabsStore } from '@/stores/tabs-store'
 import type { PaneId } from '@/types/pane'
 import { FOCUS_RING } from '@/lib/focus-ring'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 type TabBarProps = {
   paneId: PaneId
@@ -77,7 +78,7 @@ export function TabBar({ paneId, title, currentPath }: TabBarProps) {
             className={`group relative inline-flex h-8 w-tab min-w-0 shrink items-center gap-2 rounded-t-control border-x border-t pl-2.75 pr-1.5 text-caption ${
               tabIsActive
                 ? 'z-10 border-light-stroke bg-light-layer font-semibold text-light-text dark:border-dark-stroke dark:bg-dark-layer dark:text-dark-text'
-                : 'border-transparent text-light-text-secondary hover:bg-light-hover dark:text-dark-text-secondary dark:hover:bg-dark-hover'
+                : `border-transparent ${TEXT_SECONDARY} hover:bg-light-hover dark:hover:bg-dark-hover`
             }`}
           >
             {(handleRef) => (
@@ -101,7 +102,7 @@ export function TabBar({ paneId, title, currentPath }: TabBarProps) {
                 {tab.locked ? (
                   <span
                     aria-label={`Locked tab ${tabLabel(tab)} in ${title}`}
-                    className="inline-flex size-5.5 shrink-0 items-center justify-center font-normal text-light-text-secondary dark:text-dark-text-secondary"
+                    className={`inline-flex size-5.5 shrink-0 items-center justify-center font-normal ${TEXT_SECONDARY}`}
                   >
                     <LockIcon className="size-3.5" />
                   </span>
@@ -111,7 +112,7 @@ export function TabBar({ paneId, title, currentPath }: TabBarProps) {
                     aria-label={`Close tab ${tabLabel(tab)} in ${title}`}
                     onClick={(event) => onCloseClick(event, tab.id)}
                     // Close shows on the selected tab and on hover, as Windows tabs do.
-                    className={`relative z-10 inline-flex size-5.5 shrink-0 cursor-pointer items-center justify-center rounded-control font-normal text-light-text-secondary hover:bg-light-hover hover:text-light-text focus-visible:opacity-100 dark:text-dark-text-secondary dark:hover:bg-dark-hover dark:hover:text-dark-text ${
+                    className={`relative z-10 inline-flex size-5.5 shrink-0 cursor-pointer items-center justify-center rounded-control font-normal ${TEXT_SECONDARY} hover:bg-light-hover hover:text-light-text focus-visible:opacity-100 dark:hover:bg-dark-hover dark:hover:text-dark-text ${
                       tabIsActive ? '' : 'opacity-0 group-hover:opacity-100'
                     } ${FOCUS_RING}`}
                   >
@@ -127,7 +128,7 @@ export function TabBar({ paneId, title, currentPath }: TabBarProps) {
         type="button"
         aria-label={`New tab in ${title}`}
         onClick={() => void openTabFromPath(paneId, currentPath)}
-        className={`ml-1 inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-control text-light-text-secondary hover:bg-light-hover hover:text-light-text dark:text-dark-text-secondary dark:hover:bg-dark-hover dark:hover:text-dark-text ${FOCUS_RING}`}
+        className={`ml-1 inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-control ${TEXT_SECONDARY} hover:bg-light-hover hover:text-light-text dark:hover:bg-dark-hover dark:hover:text-dark-text ${FOCUS_RING}`}
       >
         <PlusIcon className="h-4 w-4" />
       </button>

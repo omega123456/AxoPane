@@ -13,7 +13,7 @@ use std::sync::Mutex;
 use std::thread;
 
 #[cfg(all(target_os = "windows", not(feature = "test-utils")))]
-use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+use windows::Win32::System::Com::COINIT_APARTMENTTHREADED;
 
 #[derive(Clone)]
 pub struct ShellExecutor {
@@ -92,15 +92,10 @@ fn default_inner() -> ShellExecutorInner {
         thread::Builder::new()
             .name("native-menu-shell".to_string())
             .spawn(move || {
-                let initialized_com =
-                    unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok() };
+                let _apartment =
+                    crate::win32::com::ComApartment::initialize(COINIT_APARTMENTTHREADED);
                 while let Ok(task) = receiver.recv() {
                     task();
-                }
-                if initialized_com {
-                    unsafe {
-                        CoUninitialize();
-                    }
                 }
             })
             .expect("native menu shell executor thread");

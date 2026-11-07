@@ -1,5 +1,6 @@
 import type { KeyboardEvent, ReactNode } from 'react'
 import { AlertTriangleIcon } from '@/components/icons'
+import { TEXT_SECONDARY } from '@/lib/class-names'
 
 /** ContentDialog bands hold two buttons, or three with a secondary action. */
 type FooterColumnCount = 2 | 3
@@ -70,7 +71,7 @@ export function DialogText({ children }: { children: ReactNode }) {
 /** Item list under the body text, in caption secondary. */
 export function DialogList({ items }: { items: string[] }) {
   return (
-    <ul className="grid gap-0.5 text-caption text-light-text-secondary dark:text-dark-text-secondary">
+    <ul className={`grid gap-0.5 text-caption ${TEXT_SECONDARY}`}>
       {items.map((item, index) => (
         <li key={`${index}-${item}`} className="break-all">
           {item}
@@ -101,10 +102,7 @@ export function DialogField({
 }) {
   return (
     <div className="grid gap-1">
-      <label
-        htmlFor={htmlFor}
-        className="text-caption text-light-text-secondary dark:text-dark-text-secondary"
-      >
+      <label htmlFor={htmlFor} className={`text-caption ${TEXT_SECONDARY}`}>
         {label}
       </label>
       {children}

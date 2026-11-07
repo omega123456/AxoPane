@@ -2,8 +2,9 @@ import { create } from 'zustand'
 import type { SessionPane, SortDirection, SortKey } from '@/lib/types/ipc'
 import { resolvePaneViewMode, type PaneViewMode } from '@/lib/pane-view'
 import { useLayoutStore } from '@/stores/layout-store'
-
-export type PaneId = 'left' | 'right'
+import type { PaneId } from '@/types/pane'
+import { clamp } from '@/lib/numbers'
+import { moveItem } from '@/lib/collections'
 
 export type TabState = {
   id: string
@@ -104,7 +105,7 @@ function clampIndex(index: number, length: number) {
     return 0
   }
 
-  return Math.max(0, Math.min(index, length - 1))
+  return clamp(index, 0, length - 1)
 }
 
 export const useTabsStore = create<TabsStore>((set) => ({
@@ -223,10 +224,8 @@ export const useTabsStore = create<TabsStore>((set) => ({
           return state
         }
 
-        const tabs = [...source.tabs]
-        const [tab] = tabs.splice(sourceIndex, 1)
-        const insertionIndex = Math.min(destinationIndex, tabs.length)
-        tabs.splice(insertionIndex, 0, tab)
+        const insertionIndex = Math.min(destinationIndex, source.tabs.length - 1)
+        const tabs = moveItem(source.tabs, sourceIndex, insertionIndex)
         if (tabs.every((item, index) => item.id === source.tabs[index]?.id)) {
           return state
         }

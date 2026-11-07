@@ -6,8 +6,9 @@ export const UTF16_BYTES_PER_CODE_UNIT = 2
 export const BOTH_SIDES = 2
 export const HALF_DIVISOR = 2
 
+/** Bounds `value` to `[minimum, maximum]`; `minimum` wins when the range is empty. */
 export function clamp(value: number, minimum: number, maximum: number) {
-  return Math.min(maximum, Math.max(minimum, value))
+  return Math.max(minimum, Math.min(value, maximum))
 }
 
 export function clampPercent(percent: number) {

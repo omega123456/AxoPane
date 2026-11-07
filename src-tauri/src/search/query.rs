@@ -5,6 +5,7 @@
 
 use super::matcher::{self, FoldedName, Match, NameKind, Pattern, Token};
 use super::path_style::PathStyle;
+use crate::path_text::strip_home_prefix;
 
 /// Searches start at this many non-space characters (anchored browses
 /// like `~/` are exempt).
@@ -168,17 +169,14 @@ fn expand_home(text: &str, style: PathStyle, home: Option<&str>) -> String {
     let Some(home) = home else {
         return text.to_owned();
     };
-    let Some(rest) = text.strip_prefix('~') else {
+    let Some(rest) = strip_home_prefix(text, |character| style.is_separator(character)) else {
         return text.to_owned();
     };
     if rest.is_empty() {
         return home.to_owned();
     }
-    if rest.starts_with(|character| style.is_separator(character)) {
-        return format!(
-            "{}{rest}",
-            home.trim_end_matches(|character| style.is_separator(character))
-        );
-    }
-    text.to_owned()
+    format!(
+        "{}{rest}",
+        home.trim_end_matches(|character| style.is_separator(character))
+    )
 }
