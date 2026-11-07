@@ -24,7 +24,7 @@ export type FileCategory =
   | 'generic'
 
 /** Special-folder glyph kinds, resolved by name (never by contents). */
-const EXTENSIONS: Record<Exclude<FileCategory, 'folder' | 'generic'>, string[]> = {
+export const CATEGORY_EXTENSIONS: Record<Exclude<FileCategory, 'folder' | 'generic'>, string[]> = {
   image: [
     'jpg',
     'jpeg',
@@ -94,9 +94,6 @@ const EXTENSIONS: Record<Exclude<FileCategory, 'folder' | 'generic'>, string[]> 
     'm2v',
     'mp2',
     'm2ts',
-    'mts',
-    'ts',
-    'tsv',
     'vob',
     'ogv',
     'ogm',
@@ -507,7 +504,10 @@ const SPECIAL_NAMES = new Map<string, FileCategory>([
 ])
 
 const EXTENSION_CATEGORY = new Map<string, FileCategory>()
-for (const [category, extensions] of Object.entries(EXTENSIONS) as [FileCategory, string[]][]) {
+for (const [category, extensions] of Object.entries(CATEGORY_EXTENSIONS) as [
+  FileCategory,
+  string[],
+][]) {
   for (const ext of extensions) {
     EXTENSION_CATEGORY.set(ext, category)
   }

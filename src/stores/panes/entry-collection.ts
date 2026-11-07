@@ -99,9 +99,8 @@ export class PaneEntryCollection {
 
   /**
    * Installs a fetched page, replacing any prior content at that index.
-   * Pinned/prefetch-adjacent pages are supplied via `pin` so the eviction
-   * pass below never removes the page that was just requested for the
-   * current viewport.
+   * Pages marked through {@link setPinnedPages} survive the eviction pass
+   * that follows, so the viewport's pages are never dropped on install.
    */
   installPage(pageIndex: number, entries: DirectoryEntry[]): void {
     this.evictPageIndexFromIndexes(pageIndex)

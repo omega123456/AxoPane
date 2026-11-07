@@ -1,11 +1,11 @@
 import type { VolumeCategory, VolumeGroup, VolumeInfo } from '@/lib/types/ipc'
-import { pathKey } from '@/lib/path-compare'
+import { normalizeWindowsCompatibilityPath, pathKey } from '@/lib/path-compare'
 
 const windowsDriveRootPattern = /^([A-Za-z]:)[\\/]?$/
 
 export function isPathInsideVolume(path: string, mountRoot: string) {
-  const normalizedPath = pathKey(normalizeExtendedWindowsPath(path))
-  const normalizedRoot = pathKey(normalizeExtendedWindowsPath(mountRoot))
+  const normalizedPath = pathKey(normalizeWindowsCompatibilityPath(path))
+  const normalizedRoot = pathKey(normalizeWindowsCompatibilityPath(mountRoot))
 
   if (normalizedPath === normalizedRoot) {
     return true
@@ -21,21 +21,9 @@ export function isPathInsideVolume(path: string, mountRoot: string) {
     : remainder.startsWith('\\') || remainder.startsWith('/')
 }
 
-function normalizeExtendedWindowsPath(path: string) {
-  if (path.toLowerCase().startsWith('\\\\?\\unc\\')) {
-    return `\\\\${path.slice(8)}`
-  }
-
-  if (/^\\\\\?\\[A-Za-z]:[\\/]/.test(path)) {
-    return path.slice(4)
-  }
-
-  return path
-}
-
 /** Strip trailing separators and apply OS-appropriate identity normalization. */
 function normalizeRoot(path: string) {
-  const normalized = normalizeExtendedWindowsPath(path).replace(/[\\/]+$/, '')
+  const normalized = normalizeWindowsCompatibilityPath(path).replace(/[\\/]+$/, '')
   return /^[A-Za-z]:$/.test(normalized) ? normalized.toLowerCase() : pathKey(normalized)
 }
 
@@ -70,7 +58,7 @@ export function isNetworkPath(path: string, volumes: VolumeInfo[]): boolean {
     return volume.isNetwork
   }
 
-  return normalizeExtendedWindowsPath(path).startsWith('\\\\')
+  return normalizeWindowsCompatibilityPath(path).startsWith('\\\\')
 }
 
 /** True when `path` is itself a volume's mount root (not a folder inside it). */

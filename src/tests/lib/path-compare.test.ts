@@ -1,4 +1,4 @@
-import { pathKey, pathsMatch } from '@/lib/path-compare'
+import { normalizeWindowsCompatibilityPath, pathKey, pathsMatch } from '@/lib/path-compare'
 
 describe('pathsMatch', () => {
   it('matches exact paths first', () => {
@@ -35,5 +35,21 @@ describe('pathsMatch', () => {
     expect(pathsMatch('/Volumes/Work/Foo', '/volumes/work/foo', 'macos')).toBe(true)
     expect(pathKey('/Volumes/Work/Foo', 'macos')).toBe(pathKey('/volumes/work/foo', 'macos'))
     expect(pathsMatch('/Work/Foo', '/Work/foo', 'case-sensitive')).toBe(false)
+  })
+})
+
+describe('normalizeWindowsCompatibilityPath', () => {
+  it.each([
+    ['\\\\?\\UNC\\server\\share\\dir', '\\\\server\\share\\dir'],
+    ['\\\\?\\unc\\server\\share', '\\\\server\\share'],
+    ['\\\\?\\Unc\\Server\\Share', '\\\\Server\\Share'],
+    ['\\\\?\\C:\\Users', 'C:\\Users'],
+    ['\\\\?\\d:/data', 'd:/data'],
+    ['C:\\Users', 'C:\\Users'],
+    ['\\\\server\\share', '\\\\server\\share'],
+    ['/Users/AxoPane', '/Users/AxoPane'],
+    ['\\\\?\\Volume{abc}\\', '\\\\?\\Volume{abc}\\'],
+  ])('normalizes %s to %s', (input, expected) => {
+    expect(normalizeWindowsCompatibilityPath(input)).toBe(expected)
   })
 })

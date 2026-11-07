@@ -16,7 +16,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -688,11 +688,4 @@ impl RegistryReconcileBridge {
     pub(super) fn reconcile(&self) {
         let _ = self.registry.refresh();
     }
-}
-
-/// Records the instant a refresh was requested, for future debugging/log
-/// context. Not currently surfaced to consumers; kept private and small.
-#[allow(dead_code)]
-fn elapsed_since(start: Instant) -> Duration {
-    start.elapsed()
 }

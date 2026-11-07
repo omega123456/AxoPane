@@ -16,8 +16,6 @@ pub struct StartNativeDragRequest {
     pub paths: Vec<String>,
 }
 
-/// Cursor position during a live drag session, in CSS pixels relative to the
-/// webview's top-left corner.
 /// Cursor position during a live drag session, in **physical** pixels relative to
 /// the window frame's top-left, alongside the frame's own physical size.
 ///

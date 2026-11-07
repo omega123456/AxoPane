@@ -1,10 +1,15 @@
+const EXTENDED_UNC_PREFIX = '\\\\?\\UNC\\'
+const EXTENDED_PATH_PREFIX = '\\\\?\\'
+const UNC_PREFIX = '\\\\'
+const extendedDrivePathPattern = /^\\\\\?\\[A-Za-z]:[\\/]/
+
 export function normalizeWindowsCompatibilityPath(path: string) {
-  if (path.startsWith('\\\\?\\UNC\\')) {
-    return `\\\\${path.slice(8)}`
+  if (path.toUpperCase().startsWith(EXTENDED_UNC_PREFIX)) {
+    return UNC_PREFIX + path.slice(EXTENDED_UNC_PREFIX.length)
   }
 
-  if (/^\\\\\?\\[A-Za-z]:[\\/]/.test(path)) {
-    return path.slice(4)
+  if (extendedDrivePathPattern.test(path)) {
+    return path.slice(EXTENDED_PATH_PREFIX.length)
   }
 
   return path

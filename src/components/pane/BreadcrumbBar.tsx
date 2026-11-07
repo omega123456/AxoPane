@@ -7,6 +7,7 @@ import { computeBreadcrumbLayout, createBreadcrumbMeasurer } from '@/lib/breadcr
 import { useElementWidth } from '@/lib/use-element-width'
 import { usePanesStore } from '@/stores/panes-store'
 import { FOCUS_RING } from '@/lib/focus-ring'
+import { normalizeWindowsCompatibilityPath } from '@/lib/path-compare'
 
 type BreadcrumbBarProps = {
   pane: PaneState
@@ -223,7 +224,7 @@ export function splitPath(path: string): Segment[] {
     return [{ label: '.', path: '.' }]
   }
 
-  const displayPath = normalizeExtendedWindowsPath(path)
+  const displayPath = normalizeWindowsCompatibilityPath(path)
 
   const uncRoot = displayPath.match(/^\\\\([^\\/]+)[\\/]([^\\/]+)[\\/]?/)
   if (uncRoot) {
@@ -261,16 +262,4 @@ export function splitPath(path: string): Segment[] {
     segments.push({ label: part, path: current })
   }
   return segments
-}
-
-function normalizeExtendedWindowsPath(path: string) {
-  if (path.toLowerCase().startsWith('\\\\?\\unc\\')) {
-    return `\\\\${path.slice(8)}`
-  }
-
-  if (/^\\\\\?\\[A-Za-z]:[\\/]/.test(path)) {
-    return path.slice(4)
-  }
-
-  return path
 }

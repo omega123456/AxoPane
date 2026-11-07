@@ -38,7 +38,12 @@ import {
 } from '@/stores/tabs-store'
 import { useConfigStore } from '@/stores/config-store'
 import { log } from '@/lib/app-log-commands'
-import { pathKey, pathsMatch, samePathOrWindowsCaseFold } from '@/lib/path-compare'
+import {
+  normalizeWindowsCompatibilityPath,
+  pathKey,
+  pathsMatch,
+  samePathOrWindowsCaseFold,
+} from '@/lib/path-compare'
 import {
   findVolumeForPath,
   formatVolumeTreeName,
@@ -461,7 +466,7 @@ export function getParentPath(path: string): string | null {
     return null
   }
 
-  path = normalizeExtendedWindowsPath(path)
+  path = normalizeWindowsCompatibilityPath(path)
 
   // UNC share root: "\\server\share" is already the highest listable folder.
   if (/^\\\\[^\\/]+[\\/]?$/.test(path) || /^\\\\[^\\/]+[\\/][^\\/]+[\\/]?$/.test(path)) {
@@ -505,25 +510,13 @@ export function getParentPath(path: string): string | null {
  * to the full (normalized) path only for roots with no separator at all.
  */
 function basenameFromPath(path: string): string {
-  const normalized = normalizeExtendedWindowsPath(path)
+  const normalized = normalizeWindowsCompatibilityPath(path)
   const stripped = normalized.replace(/[\\/]+$/, '')
   const lastSep = Math.max(stripped.lastIndexOf('\\'), stripped.lastIndexOf('/'))
   if (lastSep < 0 || lastSep === stripped.length - 1) {
     return stripped || normalized
   }
   return stripped.slice(lastSep + 1)
-}
-
-function normalizeExtendedWindowsPath(path: string) {
-  if (path.toLowerCase().startsWith('\\\\?\\unc\\')) {
-    return `\\\\${path.slice(8)}`
-  }
-
-  if (/^\\\\\?\\[A-Za-z]:[\\/]/.test(path)) {
-    return path.slice(4)
-  }
-
-  return path
 }
 
 function entrySortValue(

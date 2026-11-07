@@ -293,9 +293,8 @@ impl From<serde_json::Error> for PersistError {
 pub struct PersistedStore<T> {
     path: PathBuf,
     value: Arc<Mutex<T>>,
-    write_generation: Arc<Mutex<u64>>,
     /// One coalescing wake slot owned by the store's dedicated persistence
-    /// worker. Replaces the former thread-per-mutation debounce scheme.
+    /// worker.
     flush_wake: Sender<()>,
     _marker: PhantomData<T>,
 }
@@ -338,7 +337,6 @@ where
         Ok(Self {
             path,
             value,
-            write_generation: Arc::new(Mutex::new(0)),
             flush_wake,
             _marker: PhantomData,
         })
@@ -366,16 +364,6 @@ where
     }
 
     fn schedule_flush(&self) {
-        let generation = {
-            let mut current_generation = self
-                .write_generation
-                .lock()
-                .expect("persist generation mutex poisoned");
-            *current_generation += 1;
-            *current_generation
-        };
-
-        let _ = generation;
         // Full means the worker already has an outstanding debounce wake;
         // it always snapshots the latest value after its quiet interval.
         let _ = self.flush_wake.try_send(());

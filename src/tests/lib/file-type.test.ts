@@ -1,5 +1,5 @@
 import type { FileCategory } from '@/lib/file-type'
-import { getFileCategory } from '@/lib/file-type'
+import { CATEGORY_EXTENSIONS, getFileCategory } from '@/lib/file-type'
 
 function categoryOf(name: string, isDir = false): FileCategory {
   return getFileCategory({ name, isDir })
@@ -97,5 +97,23 @@ describe('getFileCategory', () => {
     expect(categoryOf('mystery.qwzzz')).toBe('generic')
     expect(categoryOf('.env')).toBe('generic')
     expect(categoryOf('noextension')).toBe('generic')
+  })
+})
+
+describe('CATEGORY_EXTENSIONS', () => {
+  it('lists every extension in exactly one category', () => {
+    const allExtensions = Object.values(CATEGORY_EXTENSIONS).flat()
+    const duplicates = allExtensions.filter(
+      (extension, position) => allExtensions.indexOf(extension) !== position,
+    )
+    expect(duplicates).toEqual([])
+  })
+
+  it.each([
+    ['module.mts', 'code'],
+    ['component.ts', 'code'],
+    ['table.tsv', 'config'],
+  ] satisfies Array<[string, FileCategory]>)('keeps %s classified as %s', (name, expected) => {
+    expect(categoryOf(name)).toBe(expected)
   })
 })

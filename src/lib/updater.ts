@@ -1,7 +1,8 @@
 import { log } from '@/lib/app-log-commands'
 
-// Fixed, version-bump-proof app version surfaced in Playwright visual tests.
-const MOCK_APP_VERSION = '0.1.0'
+// Fixed, version-bump-proof app version surfaced in Playwright visual tests
+// and when a non-native build carries no injected version.
+const PLACEHOLDER_APP_VERSION = '0.1.0'
 
 export type UpdateSummary = {
   currentVersion: string
@@ -58,9 +59,9 @@ export async function getAppVersion(): Promise<string> {
     // Under Playwright, ignore the real bundled version so visual baselines
     // stay stable across version bumps; use the static mock build version.
     if (import.meta.env.VITE_PLAYWRIGHT) {
-      return MOCK_APP_VERSION
+      return PLACEHOLDER_APP_VERSION
     }
-    return import.meta.env.VITE_APP_VERSION ?? '0.1.0'
+    return import.meta.env.VITE_APP_VERSION ?? PLACEHOLDER_APP_VERSION
   }
 
   const { getVersion } = await import('@tauri-apps/api/app')
