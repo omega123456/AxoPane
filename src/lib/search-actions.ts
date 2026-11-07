@@ -4,13 +4,13 @@ import { resolveCommandForEvent } from '@/lib/keymap'
 import type { CommandId, SearchHit, Shortcut } from '@/lib/types/ipc'
 import { getParentPath, usePanesStore } from '@/stores/panes-store'
 
-/** `open` launches a file; folders always open in a new tab in a pane. */
+/** `open` launches a file; everything else opens in a new tab in a pane. */
 export type SearchActivation = 'default' | 'open' | 'newTab' | 'otherPane'
 
 /**
  * Acts on a Search everywhere hit: a folder opens in a new tab of the active
- * pane, a file is revealed (selected in its folder) unless `open` asks to
- * launch it.
+ * pane, and a file is revealed (selected in its folder) in a new tab of the
+ * active pane unless `open` asks to launch it.
  */
 export async function activateSearchHit(hit: SearchHit, how: SearchActivation) {
   const panes = usePanesStore.getState()
@@ -23,13 +23,8 @@ export async function activateSearchHit(hit: SearchHit, how: SearchActivation) {
   }
   const folder = hit.isDir ? hit.path : (getParentPath(hit.path) ?? hit.path)
   const revealPath = hit.isDir ? undefined : hit.path
-  if (how === 'otherPane') {
-    await panes.openTabFromPath(paneId === 'left' ? 'right' : 'left', folder, { revealPath })
-  } else if (how === 'newTab' || hit.isDir) {
-    await panes.openTabFromPath(paneId, folder, { revealPath })
-  } else {
-    await panes.navigatePane(paneId, folder, { revealPath })
-  }
+  const targetPaneId = how === 'otherPane' ? (paneId === 'left' ? 'right' : 'left') : paneId
+  await panes.openTabFromPath(targetPaneId, folder, { revealPath })
 }
 
 /**

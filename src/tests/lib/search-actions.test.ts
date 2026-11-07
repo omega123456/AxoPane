@@ -47,14 +47,16 @@ afterEach(() => {
 })
 
 describe('activateSearchHit', () => {
-  it('opens folders in a new tab and reveals files in the active pane', async () => {
+  it('opens folders and reveals files in a new tab of the active pane', async () => {
     await activateSearchHit(folder, 'default')
     expect(openTabFromPath).toHaveBeenCalledWith('left', folder.path, { revealPath: undefined })
     await activateSearchHit(folder, 'open')
     expect(openTabFromPath).toHaveBeenCalledTimes(2)
     await activateSearchHit(file, 'default')
-    expect(navigatePane).toHaveBeenCalledWith('left', folder.path, { revealPath: file.path })
-    expect(navigatePane).toHaveBeenCalledTimes(1)
+    expect(openTabFromPath).toHaveBeenLastCalledWith('left', folder.path, {
+      revealPath: file.path,
+    })
+    expect(navigatePane).not.toHaveBeenCalled()
   })
 
   it('targets a new tab or the other pane', async () => {
@@ -86,7 +88,7 @@ describe('activateSearchHit', () => {
 
   it('falls back to the path itself for a root-level file', async () => {
     await activateSearchHit({ ...file, path: 'C:\\' }, 'default')
-    expect(navigatePane).toHaveBeenCalledWith('left', 'C:\\', { revealPath: 'C:\\' })
+    expect(openTabFromPath).toHaveBeenCalledWith('left', 'C:\\', { revealPath: 'C:\\' })
   })
 })
 
