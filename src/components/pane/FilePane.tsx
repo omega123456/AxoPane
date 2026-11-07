@@ -43,6 +43,8 @@ import { activeConflict, useQueueStore } from '@/stores/queue-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
 import { useClipboardStore } from '@/stores/clipboard-store'
 import { useKeymapStore } from '@/stores/keymap-store'
+import { useDefaultAppDialogStore } from '@/stores/default-app-dialog-store'
+import { useSearchPaletteStore } from '@/stores/search-palette-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
@@ -114,6 +116,8 @@ function useModalOpen() {
   const actionDialog = useActionDialogStore((state) => state.dialog)
   const propertiesDialog = usePropertiesDialogStore((state) => state.dialog)
   const contextMenu = useContextMenuStore((state) => state.menu)
+  const defaultAppDialog = useDefaultAppDialogStore((state) => state.dialog)
+  const searchPaletteOpen = useSearchPaletteStore((state) => state.isOpen)
   const conflict = useQueueStore(activeConflict)
 
   return (
@@ -121,6 +125,8 @@ function useModalOpen() {
     actionDialog !== null ||
     propertiesDialog !== null ||
     contextMenu !== null ||
+    defaultAppDialog !== null ||
+    searchPaletteOpen ||
     conflict !== undefined
   )
 }
@@ -997,6 +1003,10 @@ export function FilePane({ paneId }: FilePaneProps) {
         // the filter input.
         focusPaneShell()
         void activateEntry(pane.focusedEntryId)
+      } else if (resolveCommandForEvent(event.nativeEvent, keymap) === 'searchEverywhere') {
+        // The one command that also works while typing in the filter.
+        event.preventDefault()
+        executeCommand('searchEverywhere', paneId)
       }
     } else if (
       event.key.length === 1 &&

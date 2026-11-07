@@ -3,6 +3,8 @@ import type { ThemeMode } from '@/stores/theme-store'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useConfigStore } from '@/stores/config-store'
 import { autoFolderSizeDisabledForPane, usePanesStore } from '@/stores/panes-store'
+import { useKeymapStore } from '@/stores/keymap-store'
+import { useSearchPaletteStore } from '@/stores/search-palette-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import { tabLabel } from '@/stores/tabs-store'
 import {
@@ -20,6 +22,7 @@ import {
 } from '@/components/icons'
 import { PaneViewMenu } from '@/components/pane/PaneViewMenu'
 import { FOCUS_RING } from '@/lib/focus-ring'
+import { detectPlatformOs, formatShortcutLabel } from '@/lib/keymap'
 import { forwardPaneFilterKey } from '@/lib/pane-filter-keys'
 
 type CommandBarProps = {
@@ -58,6 +61,39 @@ function CommandButton({
     >
       {children}
     </button>
+  )
+}
+
+/** Opens Search everywhere; hidden when no backend can search. */
+function SearchEverywhereButton() {
+  const backend = usePanesStore((state) => state.folderSizeIndexStatus?.backend ?? 'none')
+  const isOpen = useSearchPaletteStore((state) => state.isOpen)
+  const shortcut = useKeymapStore((state) => state.bindings.searchEverywhere[0])
+  if (backend === 'none') {
+    return null
+  }
+  const title = shortcut
+    ? `Search everywhere (${formatShortcutLabel(shortcut, detectPlatformOs())})`
+    : 'Search everywhere'
+  return (
+    // The palette's light dismiss ignores its trigger, so a click toggles it.
+    <span data-search-trigger="" className="contents">
+      <CommandButton
+        label="Search everywhere"
+        title={title}
+        pressed={isOpen}
+        onClick={() => {
+          const palette = useSearchPaletteStore.getState()
+          if (palette.isOpen) {
+            palette.close()
+          } else {
+            palette.open()
+          }
+        }}
+      >
+        <SearchIcon className="size-4" />
+      </CommandButton>
+    </span>
   )
 }
 
@@ -198,6 +234,7 @@ export function CommandBar({ theme, setTheme }: CommandBarProps) {
       >
         {theme === 'dark' ? <SunIcon className="size-4" /> : <MoonStarIcon className="size-4" />}
       </CommandButton>
+      <SearchEverywhereButton />
       <label
         title="Filters the active pane"
         className="ml-1.5 flex h-7 w-search shrink-0 items-center gap-1.5 rounded-control border border-light-control-stroke border-b-light-control-stroke-bottom bg-light-control px-2 text-light-text-tertiary focus-within:border-b-light-accent focus-within:bg-light-card dark:border-dark-control-stroke dark:border-b-dark-control-stroke-bottom dark:bg-dark-control dark:text-dark-text-tertiary dark:focus-within:border-b-dark-accent dark:focus-within:bg-dark-card"

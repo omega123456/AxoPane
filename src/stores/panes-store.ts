@@ -45,6 +45,7 @@ import {
   isPathInsideVolume,
   sortVolumesForTree,
 } from '@/lib/volumes'
+import { useRecentFoldersStore } from '@/stores/recent-folders-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { ListingSession } from '@/stores/panes/listing-session'
 import { expandabilityOf, pruneTreeCache, type LazyTreeNode } from '@/stores/panes/tree-cache'
@@ -60,7 +61,11 @@ type SizeStateKind = SizeStateEvent['state']
 
 // When `viaHistory` is set the navigation is a back/forward step and must not
 // rewrite the pane's history stack (the index has already been moved).
-type NavigateOptions = { viaHistory?: boolean }
+type NavigateOptions = {
+  viaHistory?: boolean
+  /** An entry to select and scroll to once the listing resolves. */
+  revealPath?: string
+}
 
 export type TreeFoldReveals = {
   /** `pathKey` of the leaf these reveals belong to. */
@@ -174,7 +179,11 @@ type PanesStore = {
   goUp: (paneId: PaneId) => Promise<void>
   goBack: (paneId: PaneId) => Promise<void>
   goForward: (paneId: PaneId) => Promise<void>
-  openTabFromPath: (paneId: PaneId, path: string) => Promise<void>
+  openTabFromPath: (
+    paneId: PaneId,
+    path: string,
+    options?: { revealPath?: string },
+  ) => Promise<void>
   closeTab: (paneId: PaneId, tabId: string) => Promise<void>
   /** Closes every unlocked tab on one side of `tabId`, keeping `tabId` itself open. */
   closeTabsBeside: (paneId: PaneId, tabId: string, side: 'left' | 'right') => Promise<void>
@@ -236,13 +245,13 @@ const AUTO_VISIBLE_ITEM_COUNT_LIMIT = 200
 const treeLoadFlights = new Map<string, Promise<void>>()
 let treeLoadGeneration = 0
 
-// When a navigation moves a pane to the direct parent of the folder it is
-// leaving (Up/Backspace, the synthetic ".." row, or a history step that lands
-// one level above), the leaving path is parked here so the parent's listing
-// can select and reveal that folder once it resolves. Keyed per pane and
-// consumed (cleared) by the next `reloadPane` for that pane, so a superseding
+// An entry to select and reveal once a pane's next listing resolves: the
+// folder being left when a navigation moves to its direct parent (Up/Backspace,
+// the synthetic ".." row, or a history step that lands one level above), or an
+// explicit `revealPath` (a Search everywhere hit). Keyed per pane and consumed
+// (cleared) by the next `reloadPane` for that pane, so a superseding
 // navigation or an unrelated reload never applies a stale reveal.
-const pendingParentRevealPaths: Partial<Record<PaneId, string>> = {}
+const pendingRevealPaths: Partial<Record<PaneId, string>> = {}
 let revealScrollRequestCounter = 0
 
 // ---------------------------------------------------------------------------
@@ -1083,6 +1092,7 @@ function buildSessionState(activePaneId: PaneId): SessionState {
     rightPath: activeTab('right').path,
     left: toSessionPane('left'),
     right: toSessionPane('right'),
+    recentFolders: useRecentFoldersStore.getState().folders,
   }
 }
 
@@ -1384,6 +1394,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     }
     tabsStore.hydrate('left', fromSessionPane('left', leftPane))
     tabsStore.hydrate('right', fromSessionPane('right', rightPane))
+    useRecentFoldersStore.getState().hydrate(session.recentFolders ?? [])
 
     const activeLeft = activeTab('left')
     const activeRight = activeTab('right')
@@ -1434,8 +1445,8 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     // Consume the parked reveal target up front so it binds to exactly this
     // reload; a superseded/stale attempt drops it instead of leaking into a
     // later unrelated reload.
-    const revealChildPath = pendingParentRevealPaths[paneId]
-    delete pendingParentRevealPaths[paneId]
+    const revealChildPath = pendingRevealPaths[paneId]
+    delete pendingRevealPaths[paneId]
     const tabId = activeTab(paneId).id
     const requestContext = {
       path: pane.path,
@@ -1591,11 +1602,11 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       listRequestIdCounter += 1
       const requestId = listRequestIdCounter
 
-      // Navigating up to this folder's listing highlights the folder we came
-      // from: it wins over the generic focus restore below, and also becomes
-      // the selection so the row is visibly highlighted, not just focused.
+      // The reveal target (the folder we came up from, or a search hit) wins
+      // over the generic focus restore below, and also becomes the selection
+      // so the row is visibly highlighted, not just focused.
       const revealEntry = revealChildPath
-        ? sortedEntries.find((entry) => entry.isDir && pathsMatch(entry.path, revealChildPath))
+        ? sortedEntries.find((entry) => pathsMatch(entry.path, revealChildPath))
         : undefined
       if (revealEntry) {
         revealScrollRequestCounter += 1
@@ -1655,6 +1666,8 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         sortDirection: nextPane.sortDirection,
         filter: nextPane.filterApplied,
       })
+      // Trash listings return earlier, so only real folders are recorded.
+      useRecentFoldersStore.getState().record(nextPane.path)
       schedulePersistSession(get().activePaneId)
 
       await runActiveItemsSort(paneId, currentItemCountContext(paneId, nextPane), {
@@ -1695,7 +1708,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     log.debug('navigatePane', { paneId, path, viaHistory: options.viaHistory ?? false })
     const currentTab = activeTab(paneId)
     if (currentTab.locked && !pathsMatch(currentTab.path, path)) {
-      await get().openTabFromPath(paneId, path)
+      await get().openTabFromPath(paneId, path, { revealPath: options.revealPath })
       return
     }
     const timer = get().filterTimers[paneId]
@@ -1712,10 +1725,12 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     // selected and focused, matching Explorer/xplorer2. Park the leaving path
     // for `reloadPane` to resolve against the parent's fresh listing.
     const leavingParentPath = getParentPath(leaving.path)
-    if (leavingParentPath && pathsMatch(leavingParentPath, path)) {
-      pendingParentRevealPaths[paneId] = leaving.path
+    if (options.revealPath) {
+      pendingRevealPaths[paneId] = options.revealPath
+    } else if (leavingParentPath && pathsMatch(leavingParentPath, path)) {
+      pendingRevealPaths[paneId] = leaving.path
     } else {
-      delete pendingParentRevealPaths[paneId]
+      delete pendingRevealPaths[paneId]
     }
 
     const otherPaneId: PaneId = paneId === 'left' ? 'right' : 'left'
@@ -1857,8 +1872,13 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     }))
     await get().navigatePane(paneId, path, { viaHistory: true })
   },
-  openTabFromPath: async (paneId, path) => {
+  openTabFromPath: async (paneId, path, options = {}) => {
     log.debug('openTabFromPath', { paneId, path })
+    if (options.revealPath) {
+      pendingRevealPaths[paneId] = options.revealPath
+    } else {
+      delete pendingRevealPaths[paneId]
+    }
     useTabsStore.getState().addTab(paneId, {
       path,
       sortKey: 'name',
@@ -3257,8 +3277,8 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
   reset: () => {
     treeLoadGeneration += 1
     treeLoadFlights.clear()
-    delete pendingParentRevealPaths.left
-    delete pendingParentRevealPaths.right
+    delete pendingRevealPaths.left
+    delete pendingRevealPaths.right
     useTabsStore.getState().reset()
     // `release()` resets each session's baseline/collection synchronously
     // before its own (best-effort) async IPC call, so this clears in-memory

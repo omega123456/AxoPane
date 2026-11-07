@@ -116,6 +116,7 @@ fn commands_cover_filesystem_and_persistence_state() {
         right_path: root.join("right").to_string_lossy().into_owned(),
         left: None,
         right: None,
+        recent_folders: Vec::new(),
     };
     assert_eq!(
         commands::save_session(

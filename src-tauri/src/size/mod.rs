@@ -383,9 +383,20 @@ impl SizeService {
         self.inner.lock().expect("size service lock").index = Some(Arc::new(index));
     }
 
+    /// The macOS folder-size index, once attached.
     #[cfg(target_os = "macos")]
-    fn index(&self) -> Option<Arc<index::FolderSizeIndex>> {
+    pub fn folder_size_index(&self) -> Option<Arc<index::FolderSizeIndex>> {
         self.inner.lock().expect("size service lock").index.clone()
+    }
+
+    /// The loaded Everything handle, shared so search reuses the same DLL
+    /// and query lock.
+    pub fn everything_handle(&self) -> Option<Arc<EverythingHandle>> {
+        self.inner
+            .lock()
+            .expect("size service lock")
+            .everything
+            .clone()
     }
 
     /// The neutral folder-size capability: Everything when a handle is
@@ -416,7 +427,7 @@ impl SizeService {
 
     #[cfg(target_os = "macos")]
     fn status_without_everything(&self) -> FolderSizeIndexStatus {
-        self.index()
+        self.folder_size_index()
             .map_or_else(unsupported_status, |index| index.status())
     }
 
@@ -468,7 +479,7 @@ impl SizeService {
         folders: Vec<String>,
     ) {
         #[cfg(target_os = "macos")]
-        if let Some(index) = self.index() {
+        if let Some(index) = self.folder_size_index() {
             index.set_subscriptions(pane_id, current_path, folders);
         }
         #[cfg(not(target_os = "macos"))]
@@ -479,7 +490,7 @@ impl SizeService {
     /// weekly verification; blur writes the index snapshot.
     pub fn window_focus_changed(&self, focused: bool) {
         #[cfg(target_os = "macos")]
-        if let Some(index) = self.index() {
+        if let Some(index) = self.folder_size_index() {
             index.focus_changed(focused);
         }
         #[cfg(not(target_os = "macos"))]
@@ -488,13 +499,14 @@ impl SizeService {
 
     #[cfg(all(target_os = "macos", feature = "test-utils"))]
     pub fn index_lanes_for_tests(&self) -> Option<index::LaneSnapshot> {
-        self.index().map(|index| index.lanes_for_tests())
+        self.folder_size_index()
+            .map(|index| index.lanes_for_tests())
     }
 
     /// Writes the index snapshot before the app exits.
     pub fn flush_index(&self) {
         #[cfg(target_os = "macos")]
-        if let Some(index) = self.index() {
+        if let Some(index) = self.folder_size_index() {
             index.flush();
         }
     }
@@ -644,7 +656,7 @@ impl SizeService {
             emitter(network_updates);
         }
         #[cfg(target_os = "macos")]
-        if let Some(index) = self.index() {
+        if let Some(index) = self.folder_size_index() {
             if !index_paths.is_empty() {
                 index.request(index_paths, mode, Arc::clone(&emitter));
             }

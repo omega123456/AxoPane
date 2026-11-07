@@ -72,6 +72,17 @@ pub mod persist_defaults_integration;
 pub mod persist_storage_integration;
 pub mod reconcile_coordinator_integration;
 pub mod resource_coordinator_integration;
+pub mod search_commands_integration;
+pub mod search_everything_plan_integration;
+pub mod search_everything_strategy_integration;
+pub mod search_matcher_integration;
+pub mod search_path_style_integration;
+pub mod search_query_parse_integration;
+pub mod search_rank_integration;
+pub mod search_results_integration;
+pub mod search_service_integration;
+pub mod search_tree_scan_integration;
+pub mod size_everything_run_query_integration;
 #[cfg(target_os = "macos")]
 pub mod size_fast_walk_integration;
 pub mod size_index_persist_integration;

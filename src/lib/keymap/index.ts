@@ -31,6 +31,7 @@ export const commandLabels: Record<CommandId, string> = {
   selectAll: 'Select all',
   clearFilter: 'Clear filter',
   showSettings: 'Settings',
+  searchEverywhere: 'Search everywhere',
 }
 
 // MacBook keyboards have no forward-delete key (the labelled "delete" key emits
@@ -42,6 +43,11 @@ const deleteDefaults: { delete: Shortcut[]; deletePermanent: Shortcut[] } =
   detectPlatformOs() === 'macos'
     ? { delete: ['F8', 'Delete'], deletePermanent: ['Shift+F8', 'Shift+Delete'] }
     : { delete: ['Delete'], deletePermanent: ['Shift+Delete'] }
+
+// F4 is a media/Spotlight key on most Mac keyboards unless Fn is held, so
+// macOS also gets ⌘⇧F ("Ctrl" renders as ⌘ there) for Search everywhere.
+const searchEverywhereDefaults: Shortcut[] =
+  detectPlatformOs() === 'macos' ? ['F4', 'Ctrl+Shift+F'] : ['F4']
 
 export const defaultKeymap: Record<CommandId, Shortcut[]> = {
   open: ['Enter'],
@@ -65,6 +71,7 @@ export const defaultKeymap: Record<CommandId, Shortcut[]> = {
   selectAll: ['Ctrl+A'],
   clearFilter: ['Escape'],
   showSettings: ['Ctrl+,'],
+  searchEverywhere: searchEverywhereDefaults,
 }
 
 // Clipboard commands are bound to the platform's native editing shortcuts

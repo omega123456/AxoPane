@@ -87,6 +87,32 @@ describe('keymap', () => {
     expect(resolveCommandForEvent(event, conflicted)).toBe('copyToOtherPane')
   })
 
+  it('binds Search everywhere to F4, plus Cmd+Shift+F on macOS', async () => {
+    setPlatform('MacIntel')
+    vi.resetModules()
+    const macKeymap = await import('@/lib/keymap')
+    expect(macKeymap.defaultKeymap.searchEverywhere).toEqual(['F4', 'Ctrl+Shift+F'])
+    expect(macKeymap.commandLabels.searchEverywhere).toBe('Search everywhere')
+    expect(
+      macKeymap.resolveCommandForEvent(
+        new KeyboardEvent('keydown', { key: 'F', metaKey: true, shiftKey: true }),
+        macKeymap.defaultKeymap,
+      ),
+    ).toBe('searchEverywhere')
+
+    setPlatform('Win32')
+    vi.resetModules()
+    const windowsKeymap = await import('@/lib/keymap')
+    expect(windowsKeymap.defaultKeymap.searchEverywhere).toEqual(['F4'])
+    expect(windowsKeymap.isReservedCommand('searchEverywhere')).toBe(false)
+    expect(
+      windowsKeymap.resolveCommandForEvent(
+        new KeyboardEvent('keydown', { key: 'F4', altKey: true }),
+        windowsKeymap.defaultKeymap,
+      ),
+    ).toBeNull()
+  })
+
   it('uses platform-aware delete defaults and resolves permanent delete shortcuts', async () => {
     setPlatform('MacIntel')
     vi.resetModules()

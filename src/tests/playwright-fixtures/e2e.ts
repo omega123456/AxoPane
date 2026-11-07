@@ -25,6 +25,17 @@ import { itemsSortPendingListDir, itemsSortPendingSession } from './item-counts'
 import { relativeDatesListDir } from './relative-dates'
 import { capacityLevelVolumes, ejectRefused, everythingUnavailable } from './states'
 import {
+  everythingNotRunning,
+  searchBrowseResults,
+  searchFavourites,
+  searchMacIndexing,
+  searchMacResults,
+  searchMoreResults,
+  searchNameResults,
+  searchNoResults,
+  searchRecentFolders,
+} from './search'
+import {
   deepTreeChildrenByPath,
   deepTreeListDir,
   deepTreeSession,
@@ -45,7 +56,8 @@ type CommandMap = Partial<{
   [CommandName in keyof IpcCommandMap]: IpcCommandMap[CommandName]['response']
 }>
 
-type ErrorMap = Partial<Record<keyof IpcCommandMap, string>>
+/** A message (thrown as an `Error`) or a typed rejection thrown as-is. */
+type ErrorMap = Partial<Record<keyof IpcCommandMap, string | { kind: string }>>
 type DelayMap = Partial<Record<keyof IpcCommandMap, number>>
 type EventMap = Partial<{
   [EventName in keyof IpcEventMap]: IpcEventMap[EventName][]
@@ -309,6 +321,32 @@ function errorScenarioByTheme(
       },
       commandErrors,
       platform,
+    },
+  }
+}
+
+/** Search everywhere states: favourites configured, Everything ready by default. */
+function searchScenario(
+  commands: CommandMap,
+  platform: PlatformOs,
+  extra: Pick<PlaywrightScenario, 'commandErrors' | 'delaysMs'> = {},
+): { light: PlaywrightScenario; dark: PlaywrightScenario } {
+  const shared: CommandMap = {
+    queue_snapshot: emptyQueueSnapshot,
+    folder_size_index_status: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+    load_session: { ...rootSession, recentFolders: searchRecentFolders },
+    ...commands,
+  }
+  return {
+    light: {
+      commands: { load_config: { ...lightConfig, favourites: searchFavourites }, ...shared },
+      platform,
+      ...extra,
+    },
+    dark: {
+      commands: { load_config: { ...darkConfig, favourites: searchFavourites }, ...shared },
+      platform,
+      ...extra,
     },
   }
 }
@@ -999,6 +1037,26 @@ export const screenshotScenarios = {
     },
     'windows',
   ),
+  searchRecents: searchScenario({}, 'windows'),
+  searchNameResults: searchScenario({ search_query: searchNameResults }, 'windows'),
+  searchBrowse: searchScenario({ search_query: searchBrowseResults }, 'windows'),
+  searchNoResults: searchScenario({ search_query: searchNoResults }, 'windows'),
+  searchEverythingNotRunning: searchScenario(
+    { folder_size_index_status: everythingNotRunning },
+    'windows',
+    { commandErrors: { search_query: { kind: 'notReady' } } },
+  ),
+  searchMacIndexing: searchScenario(
+    {
+      folder_size_index_status: searchMacIndexing,
+      load_session: { activePane: 'left', leftPath: '/Users/alex', rightPath: '/Users/alex' },
+      search_query: searchMacResults,
+    },
+    'macos',
+  ),
+  searchLoadingMore: searchScenario({ search_query: searchMoreResults }, 'windows', {
+    delaysMs: { search_page: 30_000 },
+  }),
   permissionWindows: errorScenarioByTheme({}, { list_dir: 'Access is denied.' }, 'windows'),
   permissionMacos: errorScenarioByTheme({}, { list_dir: 'Access is denied.' }, 'macos'),
 } satisfies Record<string, { light: PlaywrightScenario; dark: PlaywrightScenario }>

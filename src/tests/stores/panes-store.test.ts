@@ -1,6 +1,7 @@
 import { beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
 import { getParentPath, schedulePersistSession, usePanesStore } from '@/stores/panes-store'
+import { useRecentFoldersStore } from '@/stores/recent-folders-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { activeTab, useTabsStore } from '@/stores/tabs-store'
 import { useConfigStore } from '@/stores/config-store'
@@ -12,6 +13,7 @@ import type {
   ListTreeChildrenRequest,
   ListTreeChildrenResponse,
   SaveConfigRequest,
+  SessionState,
 } from '@/lib/types/ipc'
 
 function dir(name: string, isDir = true): DirectoryEntry {
@@ -2843,5 +2845,89 @@ describe('panes-store active items sort', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('panes-store search reveals and recent folders', () => {
+  const library = (payload: ListDirRequest): ListDirResponse => ({
+    path: payload.path,
+    entries: [dirAt(`${payload.path}\\Sub`), dirAt(`${payload.path}\\report.docx`, false)],
+  })
+
+  beforeEach(() => {
+    ipc.override('list_dir', library)
+    useRecentFoldersStore.getState().hydrate([])
+  })
+
+  it('selects and reveals a file once its folder lists', async () => {
+    await usePanesStore
+      .getState()
+      .navigatePane('left', 'C:\\work', { revealPath: 'C:\\work\\report.docx' })
+    expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('C:\\work\\report.docx')
+    expect(useSelectionStore.getState().selections.left.selectedIds).toEqual([
+      'C:\\work\\report.docx',
+    ])
+    expect(usePanesStore.getState().revealScrollRequests.left).toBeGreaterThan(0)
+  })
+
+  it('carries the reveal through a locked tab and into a new tab', async () => {
+    await usePanesStore.getState().navigatePane('left', 'C:\\root')
+    const lockedId = useTabsStore.getState().panes.left.tabs[0].id
+    usePanesStore.getState().setTabLocked('left', lockedId, true)
+    await usePanesStore
+      .getState()
+      .navigatePane('left', 'C:\\work', { revealPath: 'C:\\work\\report.docx' })
+    expect(useTabsStore.getState().panes.left.tabs).toHaveLength(2)
+    expect(useSelectionStore.getState().selections.left.selectedIds).toEqual([
+      'C:\\work\\report.docx',
+    ])
+
+    await usePanesStore
+      .getState()
+      .openTabFromPath('right', 'D:\\docs', { revealPath: 'D:\\docs\\Sub' })
+    expect(usePanesStore.getState().panes.right.focusedEntryId).toBe('D:\\docs\\Sub')
+    const revealed = usePanesStore.getState().revealScrollRequests.right
+    await usePanesStore.getState().openTabFromPath('right', 'D:\\other')
+    expect(usePanesStore.getState().revealScrollRequests.right).toBe(revealed)
+  })
+
+  it('records visited folders and persists them with the session', async () => {
+    vi.useFakeTimers()
+    try {
+      const saved: SessionState[] = []
+      ipc.override('save_session', (payload) => {
+        saved.push(payload.session)
+        return payload.session
+      })
+      await usePanesStore.getState().navigatePane('left', 'C:\\one')
+      await usePanesStore.getState().navigatePane('left', 'C:\\two')
+      await vi.advanceTimersByTimeAsync(250)
+      expect(useRecentFoldersStore.getState().folders).toEqual(['C:\\two', 'C:\\one'])
+      expect(saved.at(-1)?.recentFolders).toEqual(['C:\\two', 'C:\\one'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('restores recent folders from the saved session', () => {
+    usePanesStore.getState().initialize({
+      session: {
+        activePane: 'left',
+        leftPath: 'C:\\one',
+        rightPath: 'C:\\two',
+        recentFolders: ['C:\\two', 'C:\\one'],
+      },
+      showHiddenFiles: false,
+      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      volumes: [],
+    })
+    expect(useRecentFoldersStore.getState().folders).toEqual(['C:\\two', 'C:\\one'])
+    usePanesStore.getState().initialize({
+      session: { activePane: 'left', leftPath: 'C:\\one', rightPath: 'C:\\two' },
+      showHiddenFiles: false,
+      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      volumes: [],
+    })
+    expect(useRecentFoldersStore.getState().folders).toEqual([])
   })
 })

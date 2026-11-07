@@ -15,6 +15,7 @@ import { useClipboardStore } from '@/stores/clipboard-store'
 import { useErrorToastStore } from '@/stores/error-toast-store'
 import { useInlineRenameStore } from '@/stores/inline-rename-store'
 import { indexEntriesById, usePanesStore } from '@/stores/panes-store'
+import { useSearchPaletteStore } from '@/stores/search-palette-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useSettingsStore } from '@/stores/settings-store'
 
@@ -33,6 +34,7 @@ const trashPaneCommands = new Set<CommandId>([
   'selectAll',
   'clearFilter',
   'showSettings',
+  'searchEverywhere',
 ])
 
 export function executeCommand(
@@ -127,6 +129,9 @@ export function executeCommand(
       break
     case 'showSettings':
       useSettingsStore.getState().open()
+      break
+    case 'searchEverywhere':
+      useSearchPaletteStore.getState().open()
       break
     case 'newFolder':
       useActionDialogStore.getState().open({ kind: 'newFolder', paneId })

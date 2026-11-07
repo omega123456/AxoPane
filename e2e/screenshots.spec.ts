@@ -276,6 +276,54 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`everything-infobar-${mode}.png`)
   })
 
+  const searchStates = [
+    { name: 'recents', scenario: 'searchRecents', query: '', expectText: 'Desktop' },
+    {
+      name: 'results',
+      scenario: 'searchNameResults',
+      query: 'report',
+      expectText: 'Q3 report.docx',
+    },
+    { name: 'browse', scenario: 'searchBrowse', query: 'alex/', expectText: 'invoice.pdf' },
+    {
+      name: 'no-results',
+      scenario: 'searchNoResults',
+      query: 'taxes 2019',
+      expectText: 'No results for “taxes 2019”',
+    },
+    {
+      name: 'everything-not-running',
+      scenario: 'searchEverythingNotRunning',
+      query: 'report',
+      expectText: 'Everything isn’t running',
+    },
+    {
+      name: 'macos-indexing',
+      scenario: 'searchMacIndexing',
+      query: 'photo',
+      expectText: 'Photo Booth Library',
+    },
+    {
+      name: 'loading-more',
+      scenario: 'searchLoadingMore',
+      query: 'invoice',
+      expectText: 'Loading more…',
+    },
+  ] as const
+
+  for (const state of searchStates) {
+    test(`search everywhere ${state.name} ${mode}`, async ({ page }) => {
+      await gotoScenario(page, screenshotScenarios[state.scenario][mode])
+      await page.getByRole('button', { name: 'Search everywhere' }).click()
+      const palette = page.getByRole('dialog', { name: 'Search everywhere' })
+      if (state.query) {
+        await palette.getByRole('combobox', { name: 'Search everywhere' }).fill(state.query)
+      }
+      await expect(palette.getByText(state.expectText, { exact: true }).first()).toBeVisible()
+      await expect(palette).toHaveScreenshot(`search-everywhere-${state.name}-${mode}.png`)
+    })
+  }
+
   test(`error infobar ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.ejectRefused[mode])
     const treeScroll = page.getByTestId('folder-tree-scroll')

@@ -1,4 +1,5 @@
 import { useEffect, useEffectEvent, useMemo, useState } from 'react'
+import { compactCount, folderSizeStatusLabel } from '@/lib/folder-size-status'
 import {
   AlertTriangleIcon,
   CalendarClockIcon,
@@ -167,28 +168,6 @@ function applyDraft(draft: DraftState) {
   })
   useThemeStore.getState().setThemePreference(draft.theme)
   usePanesStore.setState({ showHiddenFiles: draft.showHiddenFiles })
-}
-
-const compactCount = new Intl.NumberFormat('en', {
-  notation: 'compact',
-  maximumFractionDigits: 1,
-})
-
-function folderSizeStatusLabel(status: FolderSizeIndexStatus) {
-  switch (status.state) {
-    case 'upToDate':
-      return 'Up to date'
-    case 'paused':
-      return status.pauseReason === 'thermal'
-        ? 'Paused to keep your Mac cool'
-        : 'Paused in Low Power Mode'
-    case 'indexing':
-      return 'Indexing…'
-    case 'updating':
-      return 'Updating…'
-    default:
-      return 'Preparing…'
-  }
 }
 
 /** The macOS index's state, shown under the auto folder size description. */

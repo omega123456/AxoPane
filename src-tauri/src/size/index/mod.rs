@@ -128,6 +128,15 @@ mod service {
         }
     }
 
+    /// Why [`FolderSizeIndex::read_tree`] could not read the tree.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum TreeUnavailable {
+        /// The snapshot has not loaded yet.
+        NotReady,
+        /// The change stream failed to start.
+        Unavailable,
+    }
+
     pub struct FolderSizeIndex {
         shared: Arc<Shared>,
         tx: Sender<Msg>,
@@ -275,6 +284,32 @@ mod service {
                 tx,
                 threads,
             }
+        }
+
+        /// Runs `read` under the shared read lock with the protected roots
+        /// whose contents must stay hidden (the folder-size privacy rule).
+        pub fn read_tree<R>(
+            &self,
+            read: impl FnOnce(&FolderSizeTree, &[PathBuf]) -> R,
+        ) -> Result<R, TreeUnavailable> {
+            if !self.shared.booted.load(Ordering::Acquire) {
+                return Err(TreeUnavailable::NotReady);
+            }
+            let view = self.shared.view();
+            if !view.available {
+                return Err(TreeUnavailable::Unavailable);
+            }
+            let blocked: Vec<PathBuf> = if view.full_disk_access {
+                Vec::new()
+            } else {
+                self.shared
+                    .protected
+                    .iter()
+                    .filter(|root| !view.visited.contains(*root))
+                    .cloned()
+                    .collect()
+            };
+            Ok(read(&view.tree, &blocked))
         }
 
         /// Whether `path` lies inside an index root and outside the exclusions.

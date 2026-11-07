@@ -14,6 +14,7 @@ pub mod ops;
 pub mod persist;
 pub mod reconcile;
 pub mod resource_coordinator;
+pub mod search;
 pub mod size;
 pub mod thumbnails;
 pub mod trash;
@@ -342,6 +343,11 @@ pub fn run() {
                 size::DEFAULT_MANUAL_SIZE_TIMEOUT,
                 Arc::clone(&resource_coordinator),
             );
+            // Search shares the size service's Everything handle or index.
+            app.manage(Arc::new(search::service::SearchService::new(
+                search::service::SearchBackend::from_sizes(&sizes),
+                Some(fs::default_start_dir().to_string_lossy().into_owned()),
+            )));
             app.manage(sizes);
 
             let ops = OpsService::with_resource_coordinator(resource_coordinator);
@@ -396,6 +402,9 @@ pub fn run() {
             commands::list_volumes,
             commands::eject_volume,
             commands::folder_size_index_status,
+            commands::search_query,
+            commands::search_page,
+            commands::search_close,
             commands::set_size_subscriptions,
             commands::request_folder_size,
             commands::request_folder_sizes,

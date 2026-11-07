@@ -6,6 +6,8 @@ import { registerPaneFilterKeys } from '@/lib/pane-filter-keys'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useConfigStore } from '@/stores/config-store'
 import { usePanesStore } from '@/stores/panes-store'
+import { useSearchPaletteStore } from '@/stores/search-palette-store'
+import { useKeymapStore } from '@/stores/keymap-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useTabsStore } from '@/stores/tabs-store'
 import type { DirectoryEntry } from '@/lib/types/ipc'
@@ -165,6 +167,32 @@ describe('CommandBar', () => {
         ]),
     )
     expect(screen.getByRole('button', { name: calculateName })).toBeInTheDocument()
+  })
+
+  it('shows Search everywhere only with a backend and toggles the palette', async () => {
+    const user = userEvent.setup()
+    renderBar()
+    expect(screen.queryByRole('button', { name: 'Search everywhere' })).toBeNull()
+
+    act(() => {
+      usePanesStore.setState({
+        folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      })
+    })
+    const button = screen.getByRole('button', { name: 'Search everywhere' })
+    expect(button).toHaveAttribute('title', 'Search everywhere (F4)')
+    await user.click(button)
+    expect(useSearchPaletteStore.getState().isOpen).toBe(true)
+    expect(button).toHaveAttribute('aria-pressed', 'true')
+    await user.click(button)
+    expect(useSearchPaletteStore.getState().isOpen).toBe(false)
+
+    act(() => useKeymapStore.getState().setBinding('searchEverywhere', []))
+    expect(screen.getByRole('button', { name: 'Search everywhere' })).toHaveAttribute(
+      'title',
+      'Search everywhere',
+    )
+    act(() => useKeymapStore.getState().reset())
   })
 
   it('toggles hidden files with a pressed state', async () => {

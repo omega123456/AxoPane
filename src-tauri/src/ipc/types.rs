@@ -28,6 +28,11 @@ pub use crate::ops::{
     StartOpRequest,
 };
 pub use crate::persist::{Config as AppConfig, Session as SessionState};
+pub use crate::search::service::{
+    SearchBackendKind, SearchCapabilities, SearchHit, SearchPage, SearchPageRequest,
+    SearchQueryRequest, SearchRejection,
+};
+pub use crate::search::SearchScope;
 pub use crate::size::{FolderSizeIndexStatus, NaReason, RequestMode, SizeSource, SizeStateKind};
 pub use crate::trash::TrashEntry;
 pub use crate::volumes::VolumeInfo;

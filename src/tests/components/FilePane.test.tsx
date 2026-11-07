@@ -14,6 +14,7 @@ import { useInlineRenameStore } from '@/stores/inline-rename-store'
 import { useKeymapStore } from '@/stores/keymap-store'
 import { useNativeMenuWarmStore } from '@/stores/native-menu-warm-store'
 import { usePanesStore } from '@/stores/panes-store'
+import { useSearchPaletteStore } from '@/stores/search-palette-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useTabsStore } from '@/stores/tabs-store'
 import { useThumbnailStore } from '@/stores/thumbnail-store'
@@ -1057,6 +1058,26 @@ describe('FilePane state rendering', () => {
     })
     // Opening the folder returns focus to the pane shell so arrow keys keep working.
     expect(document.activeElement).toBe(screen.getByLabelText('Left pane'))
+  })
+
+  it('opens Search everywhere from the filter input and ignores pane keys while it is open', async () => {
+    const user = userEvent.setup()
+    seedPane({
+      path: 'C:\\root',
+      entries: [entry('Alpha'), entry('Beta')],
+      focusedEntryId: 'Alpha',
+    })
+
+    renderWithCommandBar()
+    const filter = screen.getByRole('textbox', { name: 'Left pane filter' })
+    await user.click(filter)
+    await user.keyboard('{F4}')
+    expect(useSearchPaletteStore.getState().isOpen).toBe(true)
+
+    await user.click(screen.getByLabelText('Left pane'))
+    await user.keyboard('{ArrowDown}')
+    expect(usePanesStore.getState().panes.left.focusedEntryId).toBe('Alpha')
+    act(() => useSearchPaletteStore.getState().reset())
   })
 
   it('clears the filter and returns focus to the pane on Escape', async () => {

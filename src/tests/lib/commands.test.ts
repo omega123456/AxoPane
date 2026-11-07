@@ -11,6 +11,7 @@ import { useErrorToastStore } from '@/stores/error-toast-store'
 import { useInlineRenameStore } from '@/stores/inline-rename-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
+import { useSearchPaletteStore } from '@/stores/search-palette-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import type { DirectoryEntry } from '@/lib/types/ipc'
@@ -126,6 +127,10 @@ describe('executeCommand file actions', () => {
     expect(clearFilter).toHaveBeenCalledWith('left')
     expect(useSelectionStore.getState().selections.left.selectedIds).toEqual(['Alpha', 'Beta'])
     expect(useSettingsStore.getState().isOpen).toBe(true)
+
+    executeCommand('searchEverywhere', 'left')
+    expect(useSearchPaletteStore.getState().isOpen).toBe(true)
+    act(() => useSearchPaletteStore.getState().reset())
     expect(useSettingsStore.getState().section).toBe('columns')
   })
 
@@ -460,6 +465,13 @@ describe('trash pane commands', () => {
     }))
     expect(canExecuteCommand('restore', 'left', 'report.txt')).toBe(false)
     expect(canExecuteCommand('emptyTrash', 'left')).toBe(false)
+  })
+
+  it('keeps Search everywhere available from the trash pane', () => {
+    expect(canExecuteCommand('searchEverywhere', 'left')).toBe(true)
+    executeCommand('searchEverywhere', 'left')
+    expect(useSearchPaletteStore.getState().isOpen).toBe(true)
+    act(() => useSearchPaletteStore.getState().reset())
   })
 
   it('requires a known original location to allow restore', () => {

@@ -182,6 +182,7 @@ fn session_with_per_pane_tabs_round_trips_through_storage() {
                 locked: false,
             }],
         }),
+        recent_folders: vec!["D:\\right".to_string(), "C:\\left".to_string()],
     };
 
     session_store.replace(session.clone());
@@ -208,6 +209,7 @@ fn legacy_flat_session_deserializes_with_no_tab_state() {
     assert_eq!(loaded.right_path, "D:\\old");
     assert!(loaded.left.is_none());
     assert!(loaded.right.is_none());
+    assert!(loaded.recent_folders.is_empty());
 }
 
 #[test]

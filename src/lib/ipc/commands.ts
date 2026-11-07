@@ -41,6 +41,9 @@ import type {
   CancelThumbnailsRequest,
   RestoreTrashRequest,
   ReviseSessionViewRequest,
+  SearchPage,
+  SearchPageRequest,
+  SearchQueryRequest,
   SessionRangeResponse,
   SetDefaultApplicationRequest,
   SizeSubscriptionsRequest,
@@ -235,6 +238,18 @@ export function ejectVolume(payload: EjectVolumeRequest) {
 
 export function folderSizeIndexStatus() {
   return invokeCommand({ command: 'folder_size_index_status' }) as Promise<FolderSizeIndexStatus>
+}
+
+export function searchQuery(payload: SearchQueryRequest) {
+  return invokeCommand({ command: 'search_query', payload }) as Promise<SearchPage>
+}
+
+export function searchPage(payload: SearchPageRequest) {
+  return invokeCommand({ command: 'search_page', payload }) as Promise<SearchPage>
+}
+
+export function searchClose() {
+  return invokeCommand({ command: 'search_close' }) as Promise<void>
 }
 
 export function setSizeSubscriptions(payload: SizeSubscriptionsRequest) {

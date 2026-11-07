@@ -236,6 +236,7 @@ fn ipc_commands_cover_shell_filesystem_and_persistence_flows() {
         right_path: root.join("right").to_string_lossy().into_owned(),
         left: None,
         right: None,
+        recent_folders: vec!["C:\\Users\\alex\\Documents".to_string()],
     };
     let echoed_session: SessionState = test_app
         .invoke_payload(

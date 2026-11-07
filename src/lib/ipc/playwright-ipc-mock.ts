@@ -142,10 +142,15 @@ export async function invokePlaywrightCommand<CommandName extends keyof IpcComma
     await new Promise((resolve) => window.setTimeout(resolve, delayMs))
   }
 
-  const message =
+  const failure =
     readCommandError(command) ?? (inheritsListDirTiming ? readCommandError('list_dir') : undefined)
-  if (message) {
-    throw new Error(message)
+  if (typeof failure === 'string') {
+    throw new Error(failure)
+  }
+  if (failure) {
+    // A typed rejection (e.g. `{ kind: 'notReady' }`) reaches the caller as-is,
+    // like a Rust command returning a serialized error enum.
+    throw structuredClone(failure)
   }
 
   if (command === 'list_tree_children') {

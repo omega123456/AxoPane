@@ -1,0 +1,338 @@
+use std::cell::Cell;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
+
+use file_explorer_lib::search::path_style::PathStyle;
+use file_explorer_lib::search::query::{parse, ParsedQuery};
+use file_explorer_lib::search::results::{rank_candidates, CANDIDATE_CAP};
+use file_explorer_lib::search::source::FolderTreeSource;
+use file_explorer_lib::search::tree_scan::{candidates, candidates_in_chunks, SLOTS_PER_READ};
+use file_explorer_lib::search::{CandidateBatch, Control, SearchError, SearchOptions, SearchScope};
+use file_explorer_lib::size::index::tree::FolderSizeTree;
+
+/// A folder tree behind the source trait, counting reads.
+struct Source {
+    tree: Mutex<FolderSizeTree>,
+    blocked: Vec<PathBuf>,
+    reads: AtomicUsize,
+    fail: Option<SearchError>,
+}
+
+impl Source {
+    fn new(folders: &[&str]) -> Self {
+        Self::from_tree(build(folders))
+    }
+
+    fn from_tree(tree: FolderSizeTree) -> Self {
+        Self {
+            tree: Mutex::new(tree),
+            blocked: Vec::new(),
+            reads: AtomicUsize::new(0),
+            fail: None,
+        }
+    }
+
+    fn reads(&self) -> usize {
+        self.reads.load(Ordering::SeqCst)
+    }
+}
+
+impl FolderTreeSource for Source {
+    fn read(&self, read: &mut dyn FnMut(&FolderSizeTree, &[PathBuf])) -> Result<(), SearchError> {
+        if let Some(error) = &self.fail {
+            return Err(error.clone());
+        }
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        read(&self.tree.lock().unwrap(), &self.blocked);
+        Ok(())
+    }
+}
+
+/// A tree rooted at `/` holding every listed folder (and its ancestors).
+fn build(folders: &[&str]) -> FolderSizeTree {
+    let mut children: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    children.entry("/".to_owned()).or_default();
+    for folder in folders {
+        let mut parent = "/".to_owned();
+        for name in folder.trim_start_matches('/').split('/') {
+            children
+                .entry(parent.clone())
+                .or_default()
+                .push(name.to_owned());
+            parent = PathStyle::Posix.join(&parent, name);
+            children.entry(parent.clone()).or_default();
+        }
+    }
+    let mut tree = FolderSizeTree::default();
+    assert!(tree.add_root(Path::new("/")));
+    for (parent, names) in &children {
+        assert!(
+            tree.merge_record(Path::new(parent), 0, names, false),
+            "{parent}"
+        );
+    }
+    tree
+}
+
+const LIBRARY: &[&str] = &[
+    "/Users/alex/Desktop",
+    "/Users/alex/Documents/Invoices 2026",
+    "/Users/alex/Documents/Work/Invoices",
+    "/Users/alex/Invoices",
+    "/Users/alex/.config/invoices",
+    "/Users/alex/Projects/alex-site/invoices-api",
+    "/Users/alexios/Invoices",
+    "/Applications",
+];
+
+const VISIBLE: SearchOptions = SearchOptions {
+    include_hidden: false,
+    scope: SearchScope::All,
+};
+
+fn q(raw: &str) -> ParsedQuery {
+    parse(raw, PathStyle::Posix, Some("/Users/alex")).expect("query")
+}
+
+fn never() -> bool {
+    false
+}
+
+fn run(source: &Source, raw: &str, options: &SearchOptions) -> CandidateBatch {
+    let control = Control {
+        cancelled: &never,
+        expired: &never,
+    };
+    candidates(source, &q(raw), options, &control).expect("batch")
+}
+
+fn sorted(batch: &CandidateBatch) -> Vec<&str> {
+    let mut paths: Vec<&str> = batch.candidates.iter().map(|c| c.path.as_str()).collect();
+    paths.sort_unstable();
+    paths
+}
+
+#[test]
+fn name_scans_return_matching_folders_as_posix_paths() {
+    let source = Source::new(LIBRARY);
+    let batch = run(&source, "inv", &VISIBLE);
+    assert_eq!(
+        sorted(&batch),
+        [
+            "/Users/alex/Documents/Invoices 2026",
+            "/Users/alex/Documents/Work/Invoices",
+            "/Users/alex/Invoices",
+            "/Users/alex/Projects/alex-site/invoices-api",
+            "/Users/alexios/Invoices",
+        ]
+    );
+    assert!(batch
+        .candidates
+        .iter()
+        .all(|c| c.is_dir && c.modified.is_none()));
+    assert!(!batch.truncated);
+    assert_eq!(source.reads(), 1);
+    assert_eq!(SLOTS_PER_READ, 32_768);
+}
+
+#[test]
+fn hidden_folders_follow_the_option() {
+    let source = Source::new(LIBRARY);
+    let with_hidden = SearchOptions {
+        include_hidden: true,
+        ..VISIBLE
+    };
+    assert!(sorted(&run(&source, "inv", &with_hidden)).contains(&"/Users/alex/.config/invoices"));
+    assert!(!sorted(&run(&source, "config", &VISIBLE)).contains(&"/Users/alex/.config"));
+}
+
+#[test]
+fn blocked_protected_roots_hide_their_contents_only() {
+    let mut source = Source::new(LIBRARY);
+    source.blocked = vec![PathBuf::from("/Users/alex/Documents/")];
+    let hits = sorted(&run(&source, "doc", &VISIBLE)).join(",");
+    assert_eq!(hits, "/Users/alex/Documents");
+    assert!(!sorted(&run(&source, "inv", &VISIBLE))
+        .iter()
+        .any(|p| p.contains("/Documents/")));
+}
+
+#[test]
+fn file_scope_finds_nothing_in_a_folder_only_index() {
+    let source = Source::new(LIBRARY);
+    let files = SearchOptions {
+        scope: SearchScope::Files,
+        ..VISIBLE
+    };
+    assert!(run(&source, "inv", &files).candidates.is_empty());
+    assert_eq!(source.reads(), 0);
+}
+
+#[test]
+fn browsing_lists_children_of_the_best_matching_folders() {
+    let source = Source::new(LIBRARY);
+    let batch = run(&source, "alex/", &VISIBLE);
+    let hits = rank_candidates(batch.candidates, &q("alex/"), PathStyle::Posix);
+    let paths: Vec<&str> = hits.iter().map(|h| h.path.as_str()).collect();
+    assert_eq!(
+        &paths[..4],
+        [
+            "/Users/alex/Desktop",
+            "/Users/alex/Documents",
+            "/Users/alex/Invoices",
+            "/Users/alex/Projects",
+        ]
+    );
+    assert!(paths.contains(&"/Users/alexios/Invoices"));
+    assert!(!paths.iter().any(|p| p.ends_with(".config")));
+}
+
+#[test]
+fn anchored_queries_list_or_scan_inside_the_anchor() {
+    let source = Source::new(LIBRARY);
+    assert_eq!(
+        sorted(&run(&source, "~/Documents/", &VISIBLE)),
+        [
+            "/Users/alex/Documents/Invoices 2026",
+            "/Users/alex/Documents/Work"
+        ]
+    );
+    assert!(run(&source, "/Nowhere/", &VISIBLE).candidates.is_empty());
+    let scanned = run(&source, "~/Documents/inv", &VISIBLE);
+    let hits = rank_candidates(scanned.candidates, &q("~/Documents/inv"), PathStyle::Posix);
+    let paths: Vec<&str> = hits.iter().map(|h| h.path.as_str()).collect();
+    assert_eq!(
+        paths,
+        [
+            "/Users/alex/Documents/Invoices 2026",
+            "/Users/alex/Documents/Work/Invoices"
+        ]
+    );
+}
+
+#[test]
+fn scans_read_in_chunks_and_honour_cancellation_and_budget() {
+    let source = Source::new(LIBRARY);
+    let control = Control {
+        cancelled: &never,
+        expired: &never,
+    };
+    let chunked = candidates_in_chunks(&source, &q("inv"), &VISIBLE, &control, 4).expect("batch");
+    assert_eq!(chunked.candidates.len(), 5);
+    assert!(source.reads() > 2);
+
+    let yes = || true;
+    let cancelled = Control {
+        cancelled: &yes,
+        expired: &never,
+    };
+    assert_eq!(
+        candidates(&source, &q("inv"), &VISIBLE, &cancelled),
+        Err(SearchError::Cancelled)
+    );
+
+    let checks = Cell::new(0);
+    let after_one = || {
+        checks.set(checks.get() + 1);
+        checks.get() > 1
+    };
+    let expiring = Control {
+        cancelled: &never,
+        expired: &after_one,
+    };
+    let partial =
+        candidates_in_chunks(&source, &q("inv"), &VISIBLE, &expiring, 1).expect("partial");
+    assert!(partial.truncated);
+}
+
+#[test]
+fn freed_slots_are_skipped_and_reused_slots_reported() {
+    let mut tree = build(LIBRARY);
+    assert!(tree.prune(Path::new("/Users/alex/Documents")));
+    let source = Source::from_tree(tree);
+    assert!(!sorted(&run(&source, "inv", &VISIBLE))
+        .iter()
+        .any(|p| p.contains("Documents")));
+    {
+        let mut tree = source.tree.lock().unwrap();
+        assert!(tree.merge_record(Path::new("/Users/alex"), 0, &["Invoices", "Ledger"], false));
+    }
+    assert!(sorted(&run(&source, "ledger", &VISIBLE)).contains(&"/Users/alex/Ledger"));
+}
+
+#[test]
+fn read_errors_propagate() {
+    let mut source = Source::new(LIBRARY);
+    source.fail = Some(SearchError::NotReady);
+    let control = Control {
+        cancelled: &never,
+        expired: &never,
+    };
+    assert_eq!(
+        candidates(&source, &q("inv"), &VISIBLE, &control),
+        Err(SearchError::NotReady)
+    );
+    assert_eq!(
+        candidates(&source, &q("~/"), &VISIBLE, &control),
+        Err(SearchError::NotReady)
+    );
+}
+
+#[test]
+fn a_query_with_nothing_to_match_finds_nothing() {
+    let source = Source::new(LIBRARY);
+    let empty = ParsedQuery {
+        anchor: None,
+        folder_segs: Vec::new(),
+        name_seg: None,
+        browse: true,
+    };
+    let control = Control {
+        cancelled: &never,
+        expired: &never,
+    };
+    assert!(candidates(&source, &empty, &VISIBLE, &control)
+        .expect("batch")
+        .candidates
+        .is_empty());
+}
+
+fn bulk(count: usize, exact: usize) -> Source {
+    let mut names: Vec<String> = (0..count).map(|i| format!("inv-{i:05}")).collect();
+    names.extend((0..exact).map(|i| format!("inv{i}")));
+    names.push("inv".to_owned());
+    let mut tree = FolderSizeTree::default();
+    assert!(tree.add_root(Path::new("/")));
+    assert!(tree.merge_record(Path::new("/"), 0, &["bulk"], false));
+    assert!(tree.merge_record(Path::new("/bulk"), 0, &names, false));
+    Source::from_tree(tree)
+}
+
+#[test]
+fn broad_scans_keep_the_best_tiers_up_to_the_cap() {
+    let control = Control {
+        cancelled: &never,
+        expired: &never,
+    };
+    for count in [2 * CANDIDATE_CAP + 500, CANDIDATE_CAP + 500] {
+        let source = bulk(count, 0);
+        let batch =
+            candidates_in_chunks(&source, &q("inv"), &VISIBLE, &control, 1_000).expect("batch");
+        assert!(batch.truncated, "{count}");
+        assert_eq!(batch.candidates.len(), CANDIDATE_CAP);
+        assert!(
+            batch.candidates.iter().any(|c| c.path == "/bulk/inv"),
+            "{count}"
+        );
+    }
+}
+
+#[test]
+fn listing_a_huge_folder_stops_at_the_cap() {
+    let source = bulk(CANDIDATE_CAP + 10, 0);
+    let batch = run(&source, "/bulk/", &VISIBLE);
+    assert!(batch.truncated);
+    assert_eq!(batch.candidates.len(), CANDIDATE_CAP);
+}

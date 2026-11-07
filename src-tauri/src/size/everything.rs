@@ -1,7 +1,110 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::{Duration, SystemTime};
 
 pub const EVERYTHING_BATCH_CHUNK_SIZE: usize = 64;
+
+/// Result orders the SDK can apply before `max` truncates a query.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EverythingSort {
+    NameAscending,
+    DateModifiedDescending,
+}
+
+impl EverythingSort {
+    /// The SDK's `EVERYTHING_SORT_*` value.
+    pub fn code(self) -> u32 {
+        match self {
+            Self::NameAscending => 1,
+            Self::DateModifiedDescending => 14,
+        }
+    }
+}
+
+/// One Everything query. Every field is applied on every call, so no SDK
+/// state leaks between search and folder-size queries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EverythingQuery {
+    pub search: String,
+    pub sort: EverythingSort,
+    pub offset: u32,
+    pub max: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EverythingRow {
+    /// The containing folder, as Everything reports it (`C:` for a drive).
+    pub path: String,
+    pub file_name: String,
+    pub is_folder: bool,
+    pub size: Option<u64>,
+    /// Windows FILETIME: 100 ns intervals since 1601-01-01 UTC.
+    pub modified_filetime: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EverythingQueryResult {
+    pub rows: Vec<EverythingRow>,
+    /// Matches before `offset` and `max` were applied.
+    pub total: u32,
+}
+
+/// FILETIME ticks between 1601-01-01 and the Unix epoch.
+const FILETIME_UNIX_EPOCH: u64 = 116_444_736_000_000_000;
+
+/// Converts a FILETIME; `0` and `u64::MAX` mean "unknown".
+pub fn filetime_to_system_time(filetime: u64) -> Option<SystemTime> {
+    if filetime == 0 || filetime == u64::MAX {
+        return None;
+    }
+    match filetime.checked_sub(FILETIME_UNIX_EPOCH) {
+        Some(since) => {
+            SystemTime::UNIX_EPOCH.checked_add(Duration::from_nanos(since.saturating_mul(100)))
+        }
+        None => SystemTime::UNIX_EPOCH.checked_sub(Duration::from_nanos(
+            (FILETIME_UNIX_EPOCH - filetime).saturating_mul(100),
+        )),
+    }
+}
+
+/// Canned search results for the in-memory handles. `None` fails the query.
+#[cfg(any(not(windows), feature = "test-utils"))]
+pub type EverythingResponder =
+    std::sync::Arc<dyn Fn(&EverythingQuery) -> Option<EverythingQueryResult> + Send + Sync>;
+
+/// The search half of the in-memory handles: records each query and answers
+/// it from an optional responder.
+#[cfg(any(not(windows), feature = "test-utils"))]
+#[derive(Default)]
+struct FakeSearch {
+    responder: Option<EverythingResponder>,
+    recorded: std::sync::Mutex<Vec<EverythingQuery>>,
+}
+
+#[cfg(any(not(windows), feature = "test-utils"))]
+impl FakeSearch {
+    fn with(responder: EverythingResponder) -> Self {
+        Self {
+            responder: Some(responder),
+            recorded: Default::default(),
+        }
+    }
+
+    fn run(&self, query: &EverythingQuery) -> Option<EverythingQueryResult> {
+        self.recorded
+            .lock()
+            .expect("recorded queries")
+            .push(query.clone());
+        match &self.responder {
+            Some(respond) => respond(query),
+            None => Some(EverythingQueryResult::default()),
+        }
+    }
+
+    fn recorded(&self) -> Vec<EverythingQuery> {
+        self.recorded.lock().expect("recorded queries").clone()
+    }
+}
 
 pub fn escape_exact_folder_query_path(path: &str) -> String {
     path.replace('"', "\"\"")
@@ -104,7 +207,8 @@ fn is_windows_root_like(path: &str) -> bool {
 #[cfg(all(windows, not(feature = "test-utils")))]
 mod platform {
     use super::{
-        build_exact_folder_or_queries, map_everything_result_sizes, EVERYTHING_BATCH_CHUNK_SIZE,
+        build_exact_folder_or_queries, map_everything_result_sizes, EverythingQuery,
+        EverythingQueryResult, EverythingRow, EverythingSort, EVERYTHING_BATCH_CHUNK_SIZE,
     };
     use std::collections::HashMap;
     use std::ffi::OsStr;
@@ -117,6 +221,7 @@ mod platform {
     const EVERYTHING_REQUEST_FILE_NAME: u32 = 0x0000_0001;
     const EVERYTHING_REQUEST_PATH: u32 = 0x0000_0002;
     const EVERYTHING_REQUEST_SIZE: u32 = 0x0000_0010;
+    const EVERYTHING_REQUEST_DATE_MODIFIED: u32 = 0x0000_0040;
     const EVERYTHING_ERROR_IPC: u32 = 2;
 
     type SetSearchW = unsafe extern "system" fn(*const u16);
@@ -129,6 +234,11 @@ mod platform {
     type GetResultFileNameW = unsafe extern "system" fn(u32) -> *const u16;
     type GetLastError = unsafe extern "system" fn() -> u32;
     type IsDbLoaded = unsafe extern "system" fn() -> bool;
+    type SetFlag = unsafe extern "system" fn(i32);
+    type SetDword = unsafe extern "system" fn(u32);
+    type GetTotResults = unsafe extern "system" fn() -> u32;
+    type IsFolderResult = unsafe extern "system" fn(u32) -> i32;
+    type GetResultDateModified = unsafe extern "system" fn(u32, *mut u64) -> i32;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum EverythingAvailability {
@@ -171,6 +281,15 @@ mod platform {
         get_result_file_name_w: GetResultFileNameW,
         get_last_error: GetLastError,
         is_db_loaded: IsDbLoaded,
+        set_match_path: SetFlag,
+        set_match_case: SetFlag,
+        set_match_whole_word: SetFlag,
+        set_regex: SetFlag,
+        set_sort: SetDword,
+        set_offset: SetDword,
+        get_tot_results: GetTotResults,
+        is_folder_result: IsFolderResult,
+        get_result_date_modified: GetResultDateModified,
     }
 
     impl EverythingHandle {
@@ -217,6 +336,33 @@ mod platform {
                     is_db_loaded: *library
                         .get(b"Everything_IsDBLoaded\0")
                         .map_err(|_| EverythingError::DllUnavailable)?,
+                    set_match_path: *library
+                        .get(b"Everything_SetMatchPath\0")
+                        .map_err(|_| EverythingError::DllUnavailable)?,
+                    set_match_case: *library
+                        .get(b"Everything_SetMatchCase\0")
+                        .map_err(|_| EverythingError::DllUnavailable)?,
+                    set_match_whole_word: *library
+                        .get(b"Everything_SetMatchWholeWord\0")
+                        .map_err(|_| EverythingError::DllUnavailable)?,
+                    set_regex: *library
+                        .get(b"Everything_SetRegex\0")
+                        .map_err(|_| EverythingError::DllUnavailable)?,
+                    set_sort: *library
+                        .get(b"Everything_SetSort\0")
+                        .map_err(|_| EverythingError::DllUnavailable)?,
+                    set_offset: *library
+                        .get(b"Everything_SetOffset\0")
+                        .map_err(|_| EverythingError::DllUnavailable)?,
+                    get_tot_results: *library
+                        .get(b"Everything_GetTotResults\0")
+                        .map_err(|_| EverythingError::DllUnavailable)?,
+                    is_folder_result: *library
+                        .get(b"Everything_IsFolderResult\0")
+                        .map_err(|_| EverythingError::DllUnavailable)?,
+                    get_result_date_modified: *library
+                        .get(b"Everything_GetResultDateModified\0")
+                        .map_err(|_| EverythingError::DllUnavailable)?,
                     _library: library,
                 })
             }
@@ -255,7 +401,6 @@ mod platform {
                 return Ok(HashMap::new());
             }
 
-            let _query_guard = self.query_lock.lock().expect("everything query lock");
             let mut sizes = paths
                 .iter()
                 .cloned()
@@ -267,61 +412,113 @@ mod platform {
                     break;
                 }
                 let chunk_paths = chunk.to_vec();
-                let query =
+                let search =
                     build_exact_folder_or_queries(&chunk_paths, EVERYTHING_BATCH_CHUNK_SIZE)
                         .into_iter()
                         .next()
                         .expect("chunk query");
-                let wide_query = to_wide(&query);
-
-                unsafe {
-                    (self.set_search_w)(wide_query.as_ptr());
-                    (self.set_request_flags)(
-                        EVERYTHING_REQUEST_FILE_NAME
-                            | EVERYTHING_REQUEST_PATH
-                            | EVERYTHING_REQUEST_SIZE,
-                    );
-                    (self.set_max)(chunk_paths.len() as u32);
-
-                    if !(self.query_w)(true) {
-                        let code = (self.get_last_error)();
-                        return if code == EVERYTHING_ERROR_IPC {
-                            Err(EverythingError::NotReady)
-                        } else {
-                            Err(EverythingError::QueryFailed(code))
-                        };
-                    }
-
-                    let result_count = (self.get_num_results)();
-                    let mut results = Vec::with_capacity(result_count as usize);
-                    for index in 0..result_count {
-                        let Some(result_path) = wide_ptr_to_string((self.get_result_path_w)(index))
-                        else {
-                            continue;
-                        };
-                        let Some(file_name) =
-                            wide_ptr_to_string((self.get_result_file_name_w)(index))
-                        else {
-                            continue;
-                        };
-
-                        let mut size = 0_i64;
-                        let size_bytes =
-                            if (self.get_result_size)(index, &mut size as *mut i64) && size >= 0 {
-                                Some(size as u64)
-                            } else {
-                                None
-                            };
-                        results.push((result_path, file_name, size_bytes));
-                    }
-
-                    for (path, size_bytes) in map_everything_result_sizes(&chunk_paths, &results) {
-                        sizes.insert(path, size_bytes);
-                    }
+                let result = self.execute(
+                    &EverythingQuery {
+                        search,
+                        sort: EverythingSort::NameAscending,
+                        offset: 0,
+                        max: chunk_paths.len() as u32,
+                    },
+                    EVERYTHING_REQUEST_FILE_NAME
+                        | EVERYTHING_REQUEST_PATH
+                        | EVERYTHING_REQUEST_SIZE,
+                )?;
+                let results: Vec<(String, String, Option<u64>)> = result
+                    .rows
+                    .into_iter()
+                    .map(|row| (row.path, row.file_name, row.size))
+                    .collect();
+                for (path, size_bytes) in map_everything_result_sizes(&chunk_paths, &results) {
+                    sizes.insert(path, size_bytes);
                 }
             }
 
             Ok(sizes)
+        }
+
+        /// Runs one search query (names, paths, folder flags, modified times).
+        pub fn run_query(
+            &self,
+            query: &EverythingQuery,
+        ) -> Result<EverythingQueryResult, EverythingError> {
+            if self.availability() != EverythingAvailability::Available {
+                return Err(EverythingError::NotReady);
+            }
+            self.execute(
+                query,
+                EVERYTHING_REQUEST_FILE_NAME
+                    | EVERYTHING_REQUEST_PATH
+                    | EVERYTHING_REQUEST_DATE_MODIFIED,
+            )
+        }
+
+        /// The SDK keeps one process-wide query state, so each call sets all
+        /// of it under the lock: a search must never leave match-path, sort or
+        /// offset settings behind for a folder-size query, or the reverse.
+        fn execute(
+            &self,
+            query: &EverythingQuery,
+            flags: u32,
+        ) -> Result<EverythingQueryResult, EverythingError> {
+            let wide_search = to_wide(&query.search);
+            let _query_guard = self.query_lock.lock().expect("everything query lock");
+            unsafe {
+                (self.set_search_w)(wide_search.as_ptr());
+                (self.set_match_path)(0);
+                (self.set_match_case)(0);
+                (self.set_match_whole_word)(0);
+                (self.set_regex)(0);
+                (self.set_sort)(query.sort.code());
+                (self.set_offset)(query.offset);
+                (self.set_max)(query.max);
+                (self.set_request_flags)(flags);
+
+                if !(self.query_w)(true) {
+                    let code = (self.get_last_error)();
+                    return if code == EVERYTHING_ERROR_IPC {
+                        Err(EverythingError::NotReady)
+                    } else {
+                        Err(EverythingError::QueryFailed(code))
+                    };
+                }
+
+                let result_count = (self.get_num_results)();
+                let mut rows = Vec::with_capacity(result_count as usize);
+                for index in 0..result_count {
+                    let Some(path) = wide_ptr_to_string((self.get_result_path_w)(index)) else {
+                        continue;
+                    };
+                    let Some(file_name) = wide_ptr_to_string((self.get_result_file_name_w)(index))
+                    else {
+                        continue;
+                    };
+                    let mut size = 0_i64;
+                    let size = (flags & EVERYTHING_REQUEST_SIZE != 0
+                        && (self.get_result_size)(index, &mut size as *mut i64)
+                        && size >= 0)
+                        .then_some(size as u64);
+                    let mut modified = 0_u64;
+                    let modified_filetime = (flags & EVERYTHING_REQUEST_DATE_MODIFIED != 0
+                        && (self.get_result_date_modified)(index, &mut modified as *mut u64) != 0)
+                        .then_some(modified);
+                    rows.push(EverythingRow {
+                        path,
+                        file_name,
+                        is_folder: (self.is_folder_result)(index) != 0,
+                        size,
+                        modified_filetime,
+                    });
+                }
+                Ok(EverythingQueryResult {
+                    rows,
+                    total: (self.get_tot_results)(),
+                })
+            }
         }
     }
 
@@ -377,6 +574,7 @@ pub use platform::*;
 // `size::mod` compiles identically, but reports the safe unavailable fallback.
 #[cfg(all(windows, feature = "test-utils"))]
 mod platform {
+    use super::{EverythingQuery, EverythingQueryResult, EverythingResponder, FakeSearch};
     use std::collections::HashMap;
     use std::path::Path;
 
@@ -396,6 +594,7 @@ mod platform {
         availability: EverythingAvailability,
         results: HashMap<String, Option<u64>>,
         fail_queries: bool,
+        search: FakeSearch,
     }
 
     impl EverythingHandle {
@@ -406,6 +605,7 @@ mod platform {
                 availability: EverythingAvailability::Unavailable,
                 results: HashMap::new(),
                 fail_queries: false,
+                search: FakeSearch::default(),
             })
         }
 
@@ -414,6 +614,32 @@ mod platform {
                 availability: EverythingAvailability::Available,
                 results,
                 fail_queries: false,
+                search: FakeSearch::default(),
+            }
+        }
+
+        /// An available handle whose search queries `responder` answers.
+        pub fn test_with_responder(responder: EverythingResponder) -> Self {
+            Self {
+                availability: EverythingAvailability::Available,
+                results: HashMap::new(),
+                fail_queries: false,
+                search: FakeSearch::with(responder),
+            }
+        }
+
+        /// Every search query run so far, oldest first.
+        pub fn recorded_queries(&self) -> Vec<EverythingQuery> {
+            self.search.recorded()
+        }
+
+        /// A handle whose service is installed but not answering yet.
+        pub fn test_not_ready() -> Self {
+            Self {
+                availability: EverythingAvailability::NotReady,
+                results: HashMap::new(),
+                fail_queries: false,
+                search: FakeSearch::default(),
             }
         }
 
@@ -422,6 +648,7 @@ mod platform {
                 availability: EverythingAvailability::Available,
                 results: HashMap::new(),
                 fail_queries: true,
+                search: FakeSearch::default(),
             }
         }
 
@@ -456,6 +683,16 @@ mod platform {
                 })
                 .collect())
         }
+
+        pub fn run_query(
+            &self,
+            query: &EverythingQuery,
+        ) -> Result<EverythingQueryResult, EverythingError> {
+            if self.availability != EverythingAvailability::Available || self.fail_queries {
+                return Err(EverythingError::NotReady);
+            }
+            self.search.run(query).ok_or(EverythingError::NotReady)
+        }
     }
 }
 
@@ -468,6 +705,7 @@ pub use platform::*;
 // fallback. The variants are `pub`, so they raise no dead-code warnings.
 #[cfg(not(windows))]
 mod platform {
+    use super::{EverythingQuery, EverythingQueryResult, EverythingResponder, FakeSearch};
     use std::collections::HashMap;
     use std::path::Path;
 
@@ -495,6 +733,7 @@ mod platform {
         availability: EverythingAvailability,
         results: HashMap<String, Option<u64>>,
         fail_queries: bool,
+        search: FakeSearch,
     }
 
     impl EverythingHandle {
@@ -507,6 +746,32 @@ mod platform {
                 availability: EverythingAvailability::Available,
                 results,
                 fail_queries: false,
+                search: FakeSearch::default(),
+            }
+        }
+
+        /// An available handle whose search queries `responder` answers.
+        pub fn test_with_responder(responder: EverythingResponder) -> Self {
+            Self {
+                availability: EverythingAvailability::Available,
+                results: HashMap::new(),
+                fail_queries: false,
+                search: FakeSearch::with(responder),
+            }
+        }
+
+        /// Every search query run so far, oldest first.
+        pub fn recorded_queries(&self) -> Vec<EverythingQuery> {
+            self.search.recorded()
+        }
+
+        /// A handle whose service is installed but not answering yet.
+        pub fn test_not_ready() -> Self {
+            Self {
+                availability: EverythingAvailability::NotReady,
+                results: HashMap::new(),
+                fail_queries: false,
+                search: FakeSearch::default(),
             }
         }
 
@@ -515,6 +780,7 @@ mod platform {
                 availability: EverythingAvailability::Available,
                 results: HashMap::new(),
                 fail_queries: true,
+                search: FakeSearch::default(),
             }
         }
 
@@ -548,6 +814,16 @@ mod platform {
                     (path, size_bytes)
                 })
                 .collect())
+        }
+
+        pub fn run_query(
+            &self,
+            query: &EverythingQuery,
+        ) -> Result<EverythingQueryResult, EverythingError> {
+            if self.availability != EverythingAvailability::Available || self.fail_queries {
+                return Err(EverythingError::Unsupported);
+            }
+            self.search.run(query).ok_or(EverythingError::Unsupported)
         }
     }
 }

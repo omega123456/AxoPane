@@ -51,5 +51,6 @@ pub fn session() -> SessionState {
         right_path: "D:\\projects".to_string(),
         left: None,
         right: None,
+        recent_folders: Vec::new(),
     }
 }

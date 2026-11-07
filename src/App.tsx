@@ -3,6 +3,7 @@ import { ActionDialog } from '@/components/dialogs/ActionDialog'
 import { ConflictDialog } from '@/components/dialogs/ConflictDialog'
 import { DefaultAppDialog } from '@/components/dialogs/DefaultAppDialog'
 import { PropertiesDialog } from '@/components/dialogs/PropertiesDialog'
+import { SearchPalette } from '@/components/search/SearchPalette'
 import { SettingsModal } from '@/components/dialogs/SettingsModal'
 import { ContextMenu } from '@/components/menus/ContextMenu'
 import { AppFrame } from '@/components/shell/AppFrame'
@@ -45,6 +46,7 @@ import { useLayoutStore } from '@/stores/layout-store'
 import { useKeymapStore } from '@/stores/keymap-store'
 import { initializePanes, usePanesStore } from '@/stores/panes-store'
 import { activeConflict, useQueueStore } from '@/stores/queue-store'
+import { useSearchPaletteStore } from '@/stores/search-palette-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 import { useDefaultAppDialogStore } from '@/stores/default-app-dialog-store'
@@ -82,6 +84,7 @@ function App() {
   const actionDialogOpen = useActionDialogStore((state) => state.dialog !== null)
   const propertiesDialogOpen = usePropertiesDialogStore((state) => state.dialog !== null)
   const defaultAppDialogOpen = useDefaultAppDialogStore((state) => state.dialog !== null)
+  const searchPaletteOpen = useSearchPaletteStore((state) => state.isOpen)
   const updateCheckInterval = useConfigStore((state) => state.updateCheckInterval)
   const conflict = useQueueStore(activeConflict)
   const resolveConflict = useQueueStore((state) => state.resolve)
@@ -155,6 +158,7 @@ function App() {
         actionDialogOpen ||
         propertiesDialogOpen ||
         defaultAppDialogOpen ||
+        searchPaletteOpen ||
         conflict !== undefined
       ) {
         return
@@ -191,6 +195,7 @@ function App() {
     keymap,
     menuOpen,
     propertiesDialogOpen,
+    searchPaletteOpen,
     settingsOpen,
   ])
 
@@ -209,6 +214,7 @@ function App() {
         actionDialogOpen ||
         propertiesDialogOpen ||
         defaultAppDialogOpen ||
+        searchPaletteOpen ||
         conflict !== undefined
       ) {
         return
@@ -231,6 +237,7 @@ function App() {
     defaultAppDialogOpen,
     menuOpen,
     propertiesDialogOpen,
+    searchPaletteOpen,
     settingsOpen,
   ])
 
@@ -361,6 +368,7 @@ function App() {
       <ActionDialog />
       <PropertiesDialog />
       <DefaultAppDialog />
+      <SearchPalette />
       {conflict ? (
         <ConflictDialog
           key={conflict.operationId}

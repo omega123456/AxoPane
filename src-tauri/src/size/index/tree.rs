@@ -116,12 +116,14 @@ pub struct FolderSizeTree {
 }
 
 impl FolderSizeTree {
-    /// Adds an index root such as `/Users`; returns false if it exists.
+    /// Adds an index root such as `/Users`; returns false if it exists or
+    /// is empty (an empty name marks a freed slot).
     pub fn add_root(&mut self, path: &Path) -> bool {
-        if self
-            .roots
-            .iter()
-            .any(|&r| Path::new(&*self.node(r).name) == path)
+        if path.as_os_str().is_empty()
+            || self
+                .roots
+                .iter()
+                .any(|&r| Path::new(&*self.node(r).name) == path)
         {
             return false;
         }
@@ -567,6 +569,31 @@ impl FolderSizeTree {
             }
             self.collect_skipped_names(child, out);
         }
+    }
+
+    /// Arena slots, live or freed: node ids run `0..slot_len()`.
+    pub(crate) fn slot_len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    /// A live node's name and parent (`None` for a root); `None` for a freed
+    /// or out-of-range slot.
+    pub(crate) fn live_node(&self, id: u32) -> Option<(&str, Option<u32>)> {
+        let node = self.nodes.get(id as usize)?;
+        if node.name.is_empty() {
+            return None;
+        }
+        Some((&node.name, (node.parent != NONE).then_some(node.parent)))
+    }
+
+    pub(crate) fn lookup(&self, path: &Path) -> Option<u32> {
+        self.find(path)
+    }
+
+    pub(crate) fn child_ids(&self, id: u32) -> &[u32] {
+        self.nodes
+            .get(id as usize)
+            .map_or(&[], |node| &node.children)
     }
 
     fn node(&self, id: NodeId) -> &Node {

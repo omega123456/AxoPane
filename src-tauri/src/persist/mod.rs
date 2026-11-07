@@ -239,6 +239,9 @@ pub struct Session {
     pub left: Option<SessionPane>,
     #[serde(default)]
     pub right: Option<SessionPane>,
+    /// Recently visited folders, most recent first (Search everywhere).
+    #[serde(default)]
+    pub recent_folders: Vec<String>,
 }
 
 impl Default for Session {
@@ -252,6 +255,7 @@ impl Default for Session {
             right_path: start,
             left: None,
             right: None,
+            recent_folders: Vec::new(),
         }
     }
 }

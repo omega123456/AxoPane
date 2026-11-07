@@ -174,6 +174,12 @@
   --spacing-details: 18.75rem;
   --spacing-search: 13.75rem;
   --spacing-menu: 17.5rem;
+  /* Search everywhere flyout: 640px wide, 56px below the window top, eight
+     44px result rows tall. */
+  --spacing-palette: 40rem;
+  --spacing-palette-top: 3.5rem;
+  --spacing-palette-list: 22rem;
+  --spacing-search-row: 2.75rem;
   --spacing-dialog: 26.25rem;
   --spacing-infobar: 30rem;
   --spacing-queue: 25rem;

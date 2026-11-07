@@ -10,13 +10,18 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use file_explorer_lib::resource_coordinator::ResourceCoordinator;
+use file_explorer_lib::search::service::{
+    SearchBackend, SearchBackendKind, SearchQueryRequest, SearchService,
+};
+use file_explorer_lib::search::source::FolderTreeSource;
+use file_explorer_lib::search::{SearchError, SearchScope};
 use file_explorer_lib::size::fast_walk::{subtree_total, TestHooks, WalkOptions};
 use file_explorer_lib::size::index::persist::{self, ChangeFlags};
 use file_explorer_lib::size::index::platform::{
     normalize, protected_roots, stream_exclusions, FakePlatform, PowerSignal, RawEvent,
     DATA_VOLUME_PREFIX,
 };
-use file_explorer_lib::size::index::{IndexOptions, LaneSnapshot, SNAPSHOT_FILE};
+use file_explorer_lib::size::index::{IndexOptions, LaneSnapshot, TreeUnavailable, SNAPSHOT_FILE};
 use file_explorer_lib::size::{
     FolderSizeIndexStatus, IndexBackend, IndexState, NaReason, PauseReason, RequestMode,
     SizeBackend, SizeService, SizeSource, SizeStateKind, SizeUpdate,
@@ -1092,5 +1097,94 @@ fn platform_helpers_list_stream_exclusions_and_protected_folders() {
     assert_eq!(
         normalize(Path::new("/Users/me")),
         PathBuf::from("/Users/me")
+    );
+}
+
+/// The protected roots search must hide right now.
+fn blocked_now(index: &Harness) -> Vec<PathBuf> {
+    index
+        .service()
+        .folder_size_index()
+        .expect("index attached")
+        .read_tree(|_, blocked| blocked.to_vec())
+        .expect("readable")
+}
+
+#[test]
+fn search_reads_the_tree_hiding_protected_roots_until_visited() {
+    let mut index = Harness::new();
+    index.start();
+    index.wait_state(IndexState::UpToDate);
+    let tree_index = index.service().folder_size_index().expect("index attached");
+    let nodes = tree_index
+        .read_tree(|tree, _| tree.node_count())
+        .expect("readable");
+    assert!(nodes >= 5, "{nodes}");
+    assert_eq!(blocked_now(&index), vec![index.path("home/Documents")]);
+
+    let mut seen = Vec::new();
+    FolderTreeSource::read(tree_index.as_ref(), &mut |_, blocked| {
+        seen = blocked.to_vec();
+    })
+    .expect("search read");
+    assert_eq!(seen, vec![index.path("home/Documents")]);
+
+    index.service().set_subscriptions(
+        "left".into(),
+        Some(index.key("home/Documents/inner")),
+        Vec::new(),
+    );
+    wait_until("documents visited", || blocked_now(&index).is_empty());
+}
+
+#[test]
+fn full_disk_access_shows_every_protected_root_to_search() {
+    let mut index = Harness::new();
+    index.platform.set_full_disk_access(true);
+    index.start();
+    index.service().window_focus_changed(true);
+    wait_until("access detected", || blocked_now(&index).is_empty());
+}
+
+#[test]
+fn search_cannot_read_an_index_whose_stream_failed() {
+    let mut index = Harness::new();
+    index.platform.fail_stream();
+    index.start();
+    wait_until("unavailable", || index.state() == IndexState::Unavailable);
+    let tree_index = index.service().folder_size_index().expect("index attached");
+    assert_eq!(
+        tree_index.read_tree(|_, _| ()),
+        Err(TreeUnavailable::Unavailable)
+    );
+    assert_eq!(
+        FolderTreeSource::read(tree_index.as_ref(), &mut |_, _| {}),
+        Err(SearchError::Unavailable)
+    );
+}
+
+#[test]
+fn search_finds_folders_through_the_live_index() {
+    let mut index = Harness::new();
+    index.start();
+    index.wait_state(IndexState::UpToDate);
+    let search = SearchService::new(SearchBackend::from_sizes(index.service()), None);
+    assert_eq!(search.capabilities().backend, SearchBackendKind::MacIndex);
+    assert!(search.capabilities().folders_only);
+    let ticket = search.begin();
+    let page = search
+        .run(
+            ticket,
+            &SearchQueryRequest {
+                query: "home".into(),
+                include_hidden: false,
+                scope: SearchScope::All,
+            },
+            &|| false,
+        )
+        .expect("page");
+    assert!(
+        page.items.iter().any(|hit| hit.path == index.key("home")),
+        "{page:?}"
     );
 }
