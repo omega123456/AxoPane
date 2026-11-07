@@ -15,24 +15,24 @@ pub struct WindowsCapabilities {
 }
 
 impl TransferAdapter for WindowsCapabilities {
-    fn select(&self, r: TransferRequirements) -> AdapterSelection {
+    fn select(&self, requirements: TransferRequirements) -> AdapterSelection {
         let reason = if !self.api_available {
             Some(PortableReason::ApiUnavailable)
         } else if !self.supported_build {
             Some(PortableReason::UnsupportedBuild)
         } else if !self.local_filesystem && !self.server_supports_copyfile2 {
             Some(PortableReason::NetworkServerUnsupported)
-        } else if r.sparse && !self.sparse {
+        } else if requirements.sparse && !self.sparse {
             Some(PortableReason::SparseUnsupported)
-        } else if r.offload && !self.offload {
+        } else if requirements.offload && !self.offload {
             Some(PortableReason::OffloadUnsupported)
-        } else if r.preserve_metadata && !self.metadata {
+        } else if requirements.preserve_metadata && !self.metadata {
             Some(PortableReason::MetadataUnsupported)
-        } else if r.preserve_link && !self.reparse_links {
+        } else if requirements.preserve_link && !self.reparse_links {
             Some(PortableReason::LinkUnsupported)
-        } else if r.progress && !self.progress {
+        } else if requirements.progress && !self.progress {
             Some(PortableReason::ProgressUnsupported)
-        } else if r.cancellation && !self.cancellation {
+        } else if requirements.cancellation && !self.cancellation {
             Some(PortableReason::CancellationUnsupported)
         } else {
             None

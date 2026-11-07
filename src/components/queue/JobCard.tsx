@@ -16,6 +16,7 @@ import { ThroughputChart } from '@/components/queue/ThroughputChart'
 import { formatCount, formatRate } from '@/lib/format'
 import { formatItemPreview, formatJobProgress, verb } from '@/lib/queue-format'
 import type { OpProgress, ThroughputSample } from '@/lib/types/ipc'
+import { clampPercent } from '@/lib/numbers'
 
 type JobCardProps = {
   operation: OpProgress
@@ -62,7 +63,7 @@ export function JobCard({
 }: JobCardProps) {
   const headingId = useId()
   const itemListId = useId()
-  const percent = Math.min(100, Math.max(0, operation.progressPercent))
+  const percent = clampPercent(operation.progressPercent)
   const roundedPercent = Math.round(percent)
   const isCompleted = operation.status === 'completed'
   const isFailed = operation.status === 'failed'
@@ -335,7 +336,7 @@ export function JobCard({
       ) : showChart ? (
         <ThroughputChart
           samples={view.samples}
-          currentPercent={Math.min(100, Math.max(0, displayed.progressPercent))}
+          currentPercent={clampPercent(displayed.progressPercent)}
           peakRate={view.peak}
         />
       ) : null}

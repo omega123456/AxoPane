@@ -112,12 +112,10 @@ impl MenuCache {
         )
     }
 
-    /// Number of distinct file-type entries currently cached.
     pub fn len(&self) -> usize {
         self.entries.lock().expect("menu cache lock").len()
     }
 
-    /// Whether the cache holds no entries.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }

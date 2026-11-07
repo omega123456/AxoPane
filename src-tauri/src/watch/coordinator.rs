@@ -1,4 +1,4 @@
-//! Bounded watch traffic coordinator (Phase 5 / Functional Requirement 2).
+//! Bounded watch traffic coordinator.
 //!
 //! Platform `notify` callbacks push raw events into a fixed-capacity lane
 //! ([`RAW_LANE_CAPACITY`]) using non-blocking [`crossbeam_channel::Sender::try_send`]
@@ -33,7 +33,7 @@ use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender, TrySendErro
 
 /// Fixed capacity of the raw notification lane. A `try_send` that finds this
 /// lane full marks the affected watch dirty rather than blocking or growing
-/// without bound (Functional Requirement 2).
+/// without bound.
 pub const RAW_LANE_CAPACITY: usize = 4096;
 
 /// Fixed capacity of the priority control lane (unwatch/replace/shutdown/
@@ -55,6 +55,11 @@ pub const QUIET_WINDOW: Duration = Duration::from_millis(150);
 /// its oldest still-pending event, even under continuous traffic that never
 /// goes quiet.
 pub const MAX_BATCH_AGE: Duration = Duration::from_millis(500);
+
+/// Bounds how long the thread can block without re-checking flush deadlines;
+/// kept well under `QUIET_WINDOW` so a batch that goes quiet is flushed close
+/// to on time rather than waiting for the next unrelated message.
+const POLL_TICK: Duration = Duration::from_millis(25);
 
 /// Opaque identity for one watch registration. The coordinator does not
 /// interpret this beyond using it as a compaction/grouping key; callers
@@ -122,7 +127,7 @@ pub enum CompactedBatch {
 /// is cheap (an `Arc`-backed `crossbeam_channel::Sender` clone).
 #[derive(Clone)]
 pub struct RawLaneSender {
-    tx: Sender<RawMutation>,
+    sender: Sender<RawMutation>,
     overflow: Arc<OverflowTracker>,
 }
 
@@ -133,7 +138,7 @@ impl RawLaneSender {
     pub fn push(&self, mutation: RawMutation) {
         let watch_id = mutation.watch_id;
         if let Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) =
-            self.tx.try_send(mutation)
+            self.sender.try_send(mutation)
         {
             self.overflow.mark_dirty(watch_id);
         }
@@ -212,8 +217,8 @@ impl PendingWatchState {
 /// watcher — callers push [`RawMutation`]s via [`WatchCoordinator::raw_sender`]
 /// from their own `notify` callback.
 pub struct WatchCoordinator {
-    raw_tx: Sender<RawMutation>,
-    control_tx: Sender<ControlMessage>,
+    raw_sender: Sender<RawMutation>,
+    control_sender: Sender<ControlMessage>,
     overflow: Arc<OverflowTracker>,
     thread: Mutex<Option<JoinHandle<()>>>,
 }
@@ -223,21 +228,26 @@ impl WatchCoordinator {
     /// compactor thread whenever a watch's pending state is ready to flush;
     /// it must not block on further coordinator work.
     pub fn spawn(on_batch: Arc<dyn Fn(CompactedBatch) + Send + Sync>) -> Self {
-        let (raw_tx, raw_rx) = bounded::<RawMutation>(RAW_LANE_CAPACITY);
-        let (control_tx, control_rx) = bounded::<ControlMessage>(CONTROL_LANE_CAPACITY);
+        let (raw_sender, raw_receiver) = bounded::<RawMutation>(RAW_LANE_CAPACITY);
+        let (control_sender, control_receiver) = bounded::<ControlMessage>(CONTROL_LANE_CAPACITY);
         let overflow = Arc::new(OverflowTracker::default());
         let overflow_for_thread = Arc::clone(&overflow);
 
         let thread = std::thread::Builder::new()
             .name("watch-coordinator".to_string())
             .spawn(move || {
-                run_compactor(raw_rx, control_rx, overflow_for_thread, on_batch);
+                run_compactor(
+                    raw_receiver,
+                    control_receiver,
+                    overflow_for_thread,
+                    on_batch,
+                );
             })
             .expect("failed to spawn watch coordinator thread");
 
         Self {
-            raw_tx,
-            control_tx,
+            raw_sender,
+            control_sender,
             overflow,
             thread: Mutex::new(Some(thread)),
         }
@@ -247,7 +257,7 @@ impl WatchCoordinator {
     /// push [`RawMutation`]s through.
     pub fn raw_sender(&self) -> RawLaneSender {
         RawLaneSender {
-            tx: self.raw_tx.clone(),
+            sender: self.raw_sender.clone(),
             overflow: Arc::clone(&self.overflow),
         }
     }
@@ -259,7 +269,7 @@ impl WatchCoordinator {
     /// practice at 64 capacity, but callers get an explicit signal rather
     /// than a silent block) or the coordinator has shut down.
     pub fn send_control(&self, message: ControlMessage) -> bool {
-        self.control_tx.try_send(message).is_ok()
+        self.control_sender.try_send(message).is_ok()
     }
 
     /// Shuts the compactor thread down deterministically. Safe to call more
@@ -270,9 +280,9 @@ impl WatchCoordinator {
             return;
         };
         // Shutdown travels the control lane so it is never stuck behind
-        // queued mutation batches, matching the "control messages complete
-        // promptly under mutation saturation" acceptance criterion.
-        let _ = self.control_tx.send(ControlMessage::Shutdown);
+        // queued mutation batches and completes promptly under mutation
+        // saturation.
+        let _ = self.control_sender.send(ControlMessage::Shutdown);
         let _ = handle.join();
     }
 }
@@ -289,25 +299,20 @@ impl Drop for WatchCoordinator {
 /// (either a new message arriving or a bounded poll tick so quiet-window/
 /// max-age deadlines are honored even without new traffic).
 fn run_compactor(
-    raw_rx: Receiver<RawMutation>,
-    control_rx: Receiver<ControlMessage>,
+    raw_receiver: Receiver<RawMutation>,
+    control_receiver: Receiver<ControlMessage>,
     overflow: Arc<OverflowTracker>,
     on_batch: Arc<dyn Fn(CompactedBatch) + Send + Sync>,
 ) {
     let mut pending: HashMap<WatchId, PendingWatchState> = HashMap::new();
     let mut dirty_generation = 1u64;
-    // Poll tick bounds how long the thread can block without re-checking
-    // flush deadlines; kept well under `QUIET_WINDOW` so a batch that goes
-    // quiet is flushed close to on time rather than waiting for the next
-    // unrelated message.
-    let poll_tick = Duration::from_millis(25);
 
     loop {
         // Control lane is always drained first and completely, ahead of any
         // raw-mutation processing, so control work can never be starved by
         // mutation volume.
         let mut shutting_down = false;
-        while let Ok(message) = control_rx.try_recv() {
+        while let Ok(message) = control_receiver.try_recv() {
             match message {
                 ControlMessage::Unwatch(id) => {
                     pending.remove(&id);
@@ -347,7 +352,7 @@ fn run_compactor(
         }
 
         let now = Instant::now();
-        match raw_rx.recv_timeout(poll_tick) {
+        match raw_receiver.recv_timeout(POLL_TICK) {
             Ok(mutation) => {
                 let watch_id = mutation.watch_id;
                 let state = pending
@@ -358,7 +363,7 @@ fn run_compactor(
                 // Drain everything else immediately available without
                 // blocking, so a burst arriving together is compacted in one
                 // pass rather than one wake per event.
-                while let Ok(next) = raw_rx.try_recv() {
+                while let Ok(next) = raw_receiver.try_recv() {
                     let watch_id = next.watch_id;
                     let state = pending
                         .entry(watch_id)

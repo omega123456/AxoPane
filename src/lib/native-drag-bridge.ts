@@ -3,6 +3,7 @@ import { log } from '@/lib/app-log-commands'
 import { useDragCursorStore, type DragCursor } from '@/stores/drag-cursor-store'
 import type { DropKind } from '@/lib/drag-drop'
 import type { DragPositionEvent } from '@/lib/types/ipc'
+import { BOTH_SIDES } from '@/lib/numbers'
 
 function setCursor(cursor: DragCursor | null) {
   useDragCursorStore.getState().setCursor(cursor)
@@ -94,7 +95,7 @@ function dispatchDragEvent(
  */
 function toViewport({ cursorX, cursorY, frameWidth, frameHeight }: DragPositionEvent) {
   const ratio = window.devicePixelRatio || 1
-  const sideChrome = Math.max(0, (frameWidth / ratio - window.innerWidth) / 2)
+  const sideChrome = Math.max(0, (frameWidth / ratio - window.innerWidth) / BOTH_SIDES)
   const topChrome = Math.max(0, frameHeight / ratio - window.innerHeight - sideChrome)
   return { x: cursorX / ratio - sideChrome, y: cursorY / ratio - topChrome }
 }
@@ -158,16 +159,16 @@ function isDropKind(effect: string): effect is DropKind {
  * both sides are rows, and fall back to containment elsewhere (pane backgrounds
  * and tree nodes are stable nodes).
  */
-function sameRegion(a: Element | null, b: Element | null) {
-  const rowA = a?.closest('[data-entry-id]')?.getAttribute('data-entry-id') ?? null
-  const rowB = b?.closest('[data-entry-id]')?.getAttribute('data-entry-id') ?? null
-  if (rowA !== null || rowB !== null) {
-    return rowA === rowB
+function sameRegion(previous: Element | null, next: Element | null) {
+  const previousRow = previous?.closest('[data-entry-id]')?.getAttribute('data-entry-id') ?? null
+  const nextRow = next?.closest('[data-entry-id]')?.getAttribute('data-entry-id') ?? null
+  if (previousRow !== null || nextRow !== null) {
+    return previousRow === nextRow
   }
-  if (a === null || b === null) {
-    return a === b
+  if (previous === null || next === null) {
+    return previous === next
   }
-  return a === b || a.contains(b) || b.contains(a)
+  return previous === next || previous.contains(next) || next.contains(previous)
 }
 
 /**

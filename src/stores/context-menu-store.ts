@@ -17,6 +17,8 @@ import {
 } from '@/lib/types/context-menu'
 import type { NativeMenuIcon, NativeMenuItem } from '@/lib/types/ipc'
 
+const NATIVE_PLACEHOLDER_DELAY_MS = 1000
+
 type FocusableItem = ContextMenuStripItem | ContextMenuRowItem | ContextMenuSubmenuRow
 
 type FocusableLookup = {
@@ -361,7 +363,7 @@ export const useContextMenuStore = create<Store>((set, get) => ({
           nativeSectionLocked: true,
         })
       }
-    }, 1000)
+    }, NATIVE_PLACEHOLDER_DELAY_MS)
     return { requestId, request: state.nativeRequest }
   },
   resolveNativeLoad: (requestId, items) =>

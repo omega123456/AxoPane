@@ -174,17 +174,15 @@ mod windows_impl {
 
         clipboard
             .set_data(CF_HDROP.0 as u32, dropfiles_handle)
-            .map_err(|error| {
+            .inspect_err(|_| {
                 let _ = unsafe { GlobalFree(Some(dropfiles_handle)) };
-                error
             })?;
 
         let preferred_effect_format = register_preferred_drop_effect()?;
         clipboard
             .set_data(preferred_effect_format, preferred_effect_handle)
-            .map_err(|error| {
+            .inspect_err(|_| {
                 let _ = unsafe { GlobalFree(Some(preferred_effect_handle)) };
-                error
             })?;
 
         Ok(())

@@ -72,7 +72,7 @@ pub struct TreeChildEntry {
     pub name: String,
     pub path: String,
     pub expandability: TreeExpandability,
-    /// Compatibility field retained through Phase 13.  A false value means
+    /// Compatibility field. A false value means
     /// "not proven non-empty", not that the directory is empty.
     pub has_children: bool,
 }
@@ -155,16 +155,13 @@ pub fn display_path_from_path(path: &Path) -> String {
 pub fn display_path_from_text(path: &str) -> String {
     #[cfg(windows)]
     {
-        if let Some(rest) = path.strip_prefix("\\\\?\\UNC\\") {
-            return format!("\\\\{rest}");
-        }
-
-        if let Some(rest) = path.strip_prefix("\\\\?\\") {
-            return rest.to_string();
-        }
+        crate::path_text::strip_verbatim_prefix(path)
     }
 
-    path.to_string()
+    #[cfg(not(windows))]
+    {
+        path.to_string()
+    }
 }
 
 /// The directory the app should open into on a fresh session: the user's home
@@ -595,11 +592,13 @@ fn build_entry(entry: &DirEntry) -> Result<DirectoryEntry, FsError> {
     })
 }
 
+const ITEM_COUNT_POOL_THREADS: usize = 4;
+
 fn item_count_pool() -> Option<&'static ThreadPool> {
     static POOL: OnceLock<Option<ThreadPool>> = OnceLock::new();
     POOL.get_or_init(|| {
         ThreadPoolBuilder::new()
-            .num_threads(4)
+            .num_threads(ITEM_COUNT_POOL_THREADS)
             .thread_name(|index| format!("fe-item-count-{index}"))
             .build()
             .ok()

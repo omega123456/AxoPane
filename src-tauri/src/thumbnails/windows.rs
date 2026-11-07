@@ -1,9 +1,9 @@
 //! Windows Shell thumbnail provider.
 //!
-//! Shell and GDI objects never leave the two provider-owned MTA workers.  The
-//! synchronous provider boundary is intentional for Phase 2: a later
-//! scheduler submits work to this already-bounded executor instead of creating
-//! another pool or putting COM work on a Tauri worker.
+//! Shell and GDI objects never leave the two provider-owned MTA workers. The
+//! synchronous provider boundary is intentional: the scheduler submits work to
+//! this already-bounded executor instead of creating another pool or putting
+//! COM work on a Tauri worker.
 
 use super::provider::{ProviderCapability, ThumbnailPreviewCallback, ThumbnailProvider};
 use super::types::{
@@ -274,11 +274,9 @@ fn bitmap_to_png(bitmap: HBITMAP) -> Option<Vec<u8>> {
     for pixel in bgra.chunks_exact(4) {
         let alpha = u32::from(pixel[3]);
         let unpremultiply = |channel: u8| {
-            if alpha == 0 {
-                0
-            } else {
-                ((u32::from(channel) * 255 + alpha / 2) / alpha).min(255) as u8
-            }
+            (u32::from(channel) * 255 + alpha / 2)
+                .checked_div(alpha)
+                .map_or(0, |value| value.min(255) as u8)
         };
         rgba.extend_from_slice(&[
             unpremultiply(pixel[2]),

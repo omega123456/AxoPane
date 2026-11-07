@@ -1,6 +1,7 @@
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import { LoaderCircleIcon } from '@/components/icons'
 import { usePanesStore } from '@/stores/panes-store'
+import { formatBytes } from '@/lib/format'
 
 type SizeValueProps = {
   entry: DirectoryEntry
@@ -55,17 +56,4 @@ function lowerBoundTitle(names: string[], more: number) {
   return items.length === 1
     ? `Doesn't include ${list}. Open it to include it.`
     : `Doesn't include ${list}. Open them to include them.`
-}
-
-function formatBytes(value: number) {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let current = value
-  let unitIndex = 0
-
-  while (current >= 1024 && unitIndex < units.length - 1) {
-    current /= 1024
-    unitIndex += 1
-  }
-
-  return `${current.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`
 }

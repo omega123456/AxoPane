@@ -20,10 +20,12 @@ export const TREE_HEADER_HEIGHT_PX = 30
 
 /** Depth after which rows stop indenting, so deep names stay readable in a narrow sidebar. */
 export const TREE_INDENT_MAX_DEPTH = 4
+const TREE_INDENT_STEP_PX = 16
+const TREE_ROW_BASE_PADDING_PX = 8
 
 /** Left padding of a tree row at `depth`; flat beyond `TREE_INDENT_MAX_DEPTH`. */
 export function treeIndentPx(depth: number): number {
-  return Math.min(depth, TREE_INDENT_MAX_DEPTH) * 16 + 8
+  return Math.min(depth, TREE_INDENT_MAX_DEPTH) * TREE_INDENT_STEP_PX + TREE_ROW_BASE_PADDING_PX
 }
 
 /**
@@ -78,7 +80,7 @@ export function buildTreeFlatModel(
   treeNodes: Record<string, TreeNodeState>,
   volumes: VolumeInfo[],
   fold: TreeFoldState = EMPTY_TREE_FOLD,
-  os: PlatformOs = 'windows',
+  platform: PlatformOs = 'windows',
 ): TreeFlatModel {
   const groups = groupVolumesByCategory(volumes)
   const volumeRootKeys = new Set(volumes.map((volume) => volume.mountRoot.toLowerCase()))
@@ -87,7 +89,7 @@ export function buildTreeFlatModel(
 
   for (const group of groups) {
     // Finder calls fixed volumes "Locations"; Windows users expect "Drives".
-    const label = group.category === 'fixed' && os === 'macos' ? 'Locations' : group.label
+    const label = group.category === 'fixed' && platform === 'macos' ? 'Locations' : group.label
     rows.push({ kind: 'header', label, renderKey: `header-${group.category}` })
     for (const volume of group.volumes) {
       const nestedVolumeRoots = new Set(volumeRootKeys)
@@ -122,8 +124,8 @@ export function buildTreeFlatModel(
 
   const offsets = new Array<number>(rows.length + 1)
   offsets[0] = 0
-  for (let i = 0; i < rows.length; i += 1) {
-    offsets[i + 1] = offsets[i] + treeRowHeight(rows[i])
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    offsets[rowIndex + 1] = offsets[rowIndex] + treeRowHeight(rows[rowIndex])
   }
 
   return { rows, offsets, indexByPath }

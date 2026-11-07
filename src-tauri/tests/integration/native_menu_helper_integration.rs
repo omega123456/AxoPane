@@ -105,24 +105,24 @@ fn equivalent_warm_cache_loads_are_single_flight_and_path_independent() {
         selected_paths: vec!["C:\\other\\same.txt".to_string()],
     };
     let calls = Arc::new(AtomicUsize::new(0));
-    let (started_tx, started_rx) = mpsc::sync_channel(1);
-    let (release_tx, release_rx) = mpsc::sync_channel(1);
+    let (started_sender, started_receiver) = mpsc::sync_channel(1);
+    let (release_sender, release_receiver) = mpsc::sync_channel(1);
 
     let leader_cache = Arc::clone(&cache);
     let leader_calls = Arc::clone(&calls);
     let leader = thread::spawn(move || {
         leader_cache.get_or_load(&first_request, || {
             leader_calls.fetch_add(1, Ordering::SeqCst);
-            started_tx.send(()).expect("leader announces load");
-            release_rx.recv().expect("leader released");
+            started_sender.send(()).expect("leader announces load");
+            release_receiver.recv().expect("leader released");
             Vec::new()
         })
     });
-    started_rx.recv().expect("leader is loading");
+    started_receiver.recv().expect("leader is loading");
 
     let waiter_cache = Arc::clone(&cache);
     let waiter = thread::spawn(move || waiter_cache.get_or_load(&second_request, Vec::new));
-    release_tx.send(()).expect("release leader");
+    release_sender.send(()).expect("release leader");
 
     assert!(leader.join().expect("leader result").1);
     assert!(!waiter.join().expect("waiter result").1);

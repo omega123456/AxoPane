@@ -1,7 +1,6 @@
 /**
  * `PaneEntryCollection`: a sparse, bounded, page-indexed store for one pane's
- * directory rows, backing the v2 range-session contract (Functional
- * Requirement 11 / Design Decision 8 in the perf remediation plan).
+ * directory rows, backing the v2 range-session contract.
  *
  * Contract this module implements:
  *  - At most `MAX_RETAINED_PAGES` (12) 500-row range pages are retained per
@@ -78,9 +77,8 @@ export class PaneEntryCollection {
   /**
    * Sets the total-row geometry for the current view. Rows beyond `total`
    * that were previously loaded (e.g. after a shrinking view revision) are
-   * dropped; a `total` of `0` clears every page (Phase 4 acceptance: "empty
-   * directories render with no phantom/fallback ranges, zero rows, zero
-   * pages").
+   * dropped; a `total` of `0` clears every page so an empty directory renders
+   * with no phantom ranges, rows or pages.
    */
   setTotalRows(total: number): void {
     this.total = Math.max(0, total)
@@ -209,8 +207,7 @@ export class PaneEntryCollection {
   /**
    * Drops every loaded page (used when a view revision changes: sparse
    * unloaded ranges must be invalidated so a stale page index can never be
-   * confused with fresh content — Functional Requirement 1 / Phase 4
-   * acceptance). `totalRows` and pin state are left to the caller to reset
+   * confused with fresh content). `totalRows` and pin state are left to the caller to reset
    * via `setTotalRows`/`setPinnedPages` immediately after.
    */
   invalidateAll(): void {

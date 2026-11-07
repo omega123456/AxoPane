@@ -76,3 +76,6 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+[lints.clippy]
+min_ident_chars = "warn"

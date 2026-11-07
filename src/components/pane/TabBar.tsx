@@ -27,7 +27,7 @@ export function TabBar({ paneId, title, currentPath }: TabBarProps) {
   const closeTab = usePanesStore((state) => state.closeTab)
   const openTabFromPath = usePanesStore((state) => state.openTabFromPath)
   const openMenu = useContextMenuStore((state) => state.openMenu)
-  const os = detectPlatformOs()
+  const platform = detectPlatformOs()
   const dragState = useTabDragState()
   const { ref: stripRef } = useTabStripDropTarget(paneId)
 
@@ -69,7 +69,7 @@ export function TabBar({ paneId, title, currentPath }: TabBarProps) {
                 chip: 'TAB',
                 x: event.clientX,
                 y: event.clientY,
-                ...buildContextMenuContent(paneId, { kind: 'tab', tabId: tab.id }, os),
+                ...buildContextMenuContent(paneId, { kind: 'tab', tabId: tab.id }, platform),
               })
             }}
             // The selected tab shares the command bar's layer colour and covers the

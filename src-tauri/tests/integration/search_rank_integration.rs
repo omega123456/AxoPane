@@ -26,7 +26,7 @@ fn file(path: &str) -> Candidate {
     }
 }
 
-fn q(raw: &str, style: PathStyle) -> ParsedQuery {
+fn parsed(raw: &str, style: PathStyle) -> ParsedQuery {
     parse(
         raw,
         style,
@@ -40,7 +40,7 @@ fn q(raw: &str, style: PathStyle) -> ParsedQuery {
 }
 
 fn ranked(raw: &str, style: PathStyle, candidates: Vec<Candidate>) -> Vec<String> {
-    rank_candidates(candidates, &q(raw, style), style)
+    rank_candidates(candidates, &parsed(raw, style), style)
         .into_iter()
         .map(|hit| hit.path)
         .collect()
@@ -93,7 +93,7 @@ fn browsing_lists_direct_children_of_matching_folders() {
     );
     assert!(!hits
         .iter()
-        .any(|p| p.contains("Finance") || p.contains("0398")));
+        .any(|path| path.contains("Finance") || path.contains("0398")));
     assert!(hits.contains(&r"C:\Users\alexios\invoice.pdf".to_owned()));
     // A top-level item has no parent folder to match.
     assert!(ranked("alex/", WIN, vec![folder(r"C:\alex")]).is_empty());
@@ -103,28 +103,28 @@ fn browsing_lists_direct_children_of_matching_folders() {
 fn alignment_prefers_better_tiers_then_the_nearest_folder() {
     let nearest = score(
         &file(r"C:\alex\alex\report.txt"),
-        &q("alex/report", WIN),
+        &parsed("alex/report", WIN),
         WIN,
     )
     .expect("hit");
     assert_eq!((nearest.penalty, nearest.gap), (0, 0));
     let better = score(
         &file(r"C:\alex\alexios\report.txt"),
-        &q("alex/report", WIN),
+        &parsed("alex/report", WIN),
         WIN,
     )
     .expect("hit");
     assert_eq!((better.penalty, better.gap), (0, 1));
     let chained = score(
         &folder(r"C:\Users\x\alex\Docs"),
-        &q("users/alex/", WIN),
+        &parsed("users/alex/", WIN),
         WIN,
     )
     .expect("hit");
     assert_eq!((chained.penalty, chained.gap), (0, 1));
     assert!(score(
         &file(r"C:\alex\report.txt"),
-        &q("users/alex/report", WIN),
+        &parsed("users/alex/report", WIN),
         WIN
     )
     .is_none());
@@ -148,7 +148,7 @@ fn anchored_queries_stay_inside_the_anchor() {
     );
     let deeper = score(
         &folder("/Users/alex/Documents/Invoices"),
-        &q("~/inv", POSIX),
+        &parsed("~/inv", POSIX),
         POSIX,
     )
     .expect("hit");
@@ -159,7 +159,7 @@ fn anchored_queries_stay_inside_the_anchor() {
 fn hits_carry_display_paths_and_highlight_ranges() {
     let hit = score(
         &folder(r"\\?\C:\Users\alex\Invoices"),
-        &q("alex/inv", WIN),
+        &parsed("alex/inv", WIN),
         WIN,
     )
     .expect("hit");
@@ -172,17 +172,17 @@ fn hits_carry_display_paths_and_highlight_ranges() {
 
     let nfd = score(
         &folder("/Users/cafe\u{301}/Recettes"),
-        &q("café/rec", POSIX),
+        &parsed("café/rec", POSIX),
         POSIX,
     )
     .expect("hit");
     assert_eq!(nfd.parent, "/Users/café");
     assert_eq!(nfd.parent_ranges, vec![(7, 11)]);
 
-    let relative = score(&folder(r"alex\Invoices"), &q("alex/inv", WIN), WIN).expect("hit");
+    let relative = score(&folder(r"alex\Invoices"), &parsed("alex/inv", WIN), WIN).expect("hit");
     assert_eq!(relative.parent, "alex");
-    assert!(score(&folder(r"C:\"), &q("abc", WIN), WIN).is_none());
-    assert!(score(&file(r"C:\notes.txt"), &q("invoice", WIN), WIN).is_none());
+    assert!(score(&folder(r"C:\"), &parsed("abc", WIN), WIN).is_none());
+    assert!(score(&file(r"C:\notes.txt"), &parsed("invoice", WIN), WIN).is_none());
 }
 
 fn scored(path: &str, is_dir: bool, modified: Option<u64>) -> Scored {
@@ -190,9 +190,9 @@ fn scored(path: &str, is_dir: bool, modified: Option<u64>) -> Scored {
         &Candidate {
             path: path.to_owned(),
             is_dir,
-            modified: modified.map(|s| SystemTime::UNIX_EPOCH + Duration::from_secs(s)),
+            modified: modified.map(|seconds| SystemTime::UNIX_EPOCH + Duration::from_secs(seconds)),
         },
-        &q("report", POSIX),
+        &parsed("report", POSIX),
         POSIX,
     )
     .expect("hit");

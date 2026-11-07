@@ -16,7 +16,7 @@ use file_explorer_lib::ops::transfer::{
 };
 use file_explorer_lib::ops::worker::{rename_or_cross_device, transfer_admission};
 use file_explorer_lib::ops::{
-    adapter_selection_calls_for_tests, copy_path, move_path, OpItem, OpKind, OpState, WorkerCtx,
+    adapter_selection_calls_for_tests, copy_path, move_path, OpItem, OpKind, OpState, WorkerContext,
 };
 use file_explorer_lib::resource_coordinator::JobClass;
 
@@ -60,32 +60,32 @@ fn state() -> OpState {
     }
 }
 
-fn worker_ctx(
+fn worker_context(
     state: OpState,
 ) -> (
     Arc<Mutex<OpState>>,
     Arc<std::sync::Condvar>,
-    WorkerCtx<'static>,
+    WorkerContext<'static>,
 ) {
-    let op_arc = Arc::new(Mutex::new(state));
+    let shared_operation = Arc::new(Mutex::new(state));
     let resolver = Arc::new(std::sync::Condvar::new());
     let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
     let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
 
-    let op_arc_ref = Box::leak(Box::new(op_arc.clone()));
+    let shared_operation_ref = Box::leak(Box::new(shared_operation.clone()));
     let resolver_ref = Box::leak(Box::new(resolver.clone()));
     let progress_ref = Box::leak(Box::new(progress));
     let instant_now_ref = Box::leak(Box::new(instant_now));
 
-    let ctx = WorkerCtx {
-        op_arc: op_arc_ref,
+    let context = WorkerContext {
+        shared_operation: shared_operation_ref,
         resolver: resolver_ref,
         progress: progress_ref,
         start: Instant::now(),
         rate_window: std::time::Duration::from_secs(1),
         instant_now: instant_now_ref,
     };
-    (op_arc, resolver, ctx)
+    (shared_operation, resolver, context)
 }
 
 #[test]
@@ -283,9 +283,9 @@ fn real_file_copy_invokes_capability_adapter_selection() {
     std::fs::write(&source, b"payload").expect("source file");
     let target = fixture.path().join("dest/a.txt");
 
-    let (_op_arc, _resolver, ctx) = worker_ctx(state());
+    let (_shared_operation, _resolver, context) = worker_context(state());
     let before = adapter_selection_calls_for_tests();
-    copy_path(&source, &target, &ctx).expect("copy succeeds");
+    copy_path(&source, &target, &context).expect("copy succeeds");
     let after = adapter_selection_calls_for_tests();
 
     assert!(after > before, "select_adapter must run during a real copy");
@@ -303,8 +303,8 @@ fn move_path_same_filesystem_uses_rename_first() {
     std::fs::write(&source, b"move-payload").expect("source file");
     let target = fixture.path().join("moved.txt");
 
-    let (_op_arc, _resolver, ctx) = worker_ctx(state());
-    move_path(&source, &target, &ctx).expect("move succeeds");
+    let (_shared_operation, _resolver, context) = worker_context(state());
+    move_path(&source, &target, &context).expect("move succeeds");
 
     assert!(!source.exists());
     assert_eq!(

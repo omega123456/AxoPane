@@ -12,6 +12,13 @@ pub const MAX_PREVIEW_PIXELS: u32 = MAX_PREVIEW_DIMENSION * MAX_PREVIEW_DIMENSIO
 pub const MAX_PNG_BYTES: usize = 256 * 1024;
 pub const MAX_DATA_URL_BYTES: usize = 350 * 1024;
 
+const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+const PNG_IHDR_TYPE: &[u8] = b"IHDR";
+/// The IHDR chunk follows the signature and the chunk's 4-byte length.
+const PNG_IHDR_TYPE_RANGE: std::ops::Range<usize> = 12..16;
+const PNG_WIDTH_RANGE: std::ops::Range<usize> = 16..20;
+const PNG_HEIGHT_RANGE: std::ops::Range<usize> = 20..24;
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ThumbnailFingerprint {
     pub path: PathBuf,
@@ -116,14 +123,22 @@ pub fn validated_png_data_url(data_url: String) -> Result<ThumbnailState, Thumbn
         return Err(ThumbnailState::Failed);
     };
     if png.len() > MAX_PNG_BYTES
-        || png.len() < 24
-        || &png[..8] != b"\x89PNG\r\n\x1a\n"
-        || &png[12..16] != b"IHDR"
+        || png.len() < PNG_HEIGHT_RANGE.end
+        || !png.starts_with(PNG_SIGNATURE)
+        || &png[PNG_IHDR_TYPE_RANGE] != PNG_IHDR_TYPE
     {
         return Err(ThumbnailState::Failed);
     }
-    let width = u32::from_be_bytes(png[16..20].try_into().map_err(|_| ThumbnailState::Failed)?);
-    let height = u32::from_be_bytes(png[20..24].try_into().map_err(|_| ThumbnailState::Failed)?);
+    let width = u32::from_be_bytes(
+        png[PNG_WIDTH_RANGE]
+            .try_into()
+            .map_err(|_| ThumbnailState::Failed)?,
+    );
+    let height = u32::from_be_bytes(
+        png[PNG_HEIGHT_RANGE]
+            .try_into()
+            .map_err(|_| ThumbnailState::Failed)?,
+    );
     if width == 0
         || height == 0
         || width > MAX_PREVIEW_DIMENSION

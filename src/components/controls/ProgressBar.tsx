@@ -1,3 +1,5 @@
+import { clampPercent, PERCENT_SCALE } from '@/lib/numbers'
+
 export type ProgressTone = 'accent' | 'success' | 'danger' | 'neutral'
 
 const toneFill: Record<ProgressTone, string> = {
@@ -22,14 +24,14 @@ export function ProgressBar({
   tone?: ProgressTone
   className?: string
 }) {
-  const clamped = Math.min(100, Math.max(0, value))
+  const clamped = clampPercent(value)
   return (
     <div
       role="progressbar"
       aria-label={label}
       aria-labelledby={labelledBy}
       aria-valuemin={0}
-      aria-valuemax={100}
+      aria-valuemax={PERCENT_SCALE}
       aria-valuenow={Math.round(clamped)}
       className={`h-1 overflow-hidden rounded-full bg-light-divider dark:bg-dark-divider ${className}`}
     >

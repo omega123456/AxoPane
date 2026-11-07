@@ -19,6 +19,7 @@ use crate::resource_coordinator::{JobClass, JobSpec, ResourceCoordinator};
 pub const IPC_QUEUE_CAPACITY: usize = 32;
 pub const IPC_WORKER_COUNT: usize = 4;
 pub const IPC_DEADLINE: Duration = Duration::from_secs(2);
+const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 /// Cooperative cancellation shared with an owned IPC job. Platform helpers
 /// with hard-kill semantics retain their own owner; ordinary filesystem work
@@ -119,10 +120,10 @@ impl IpcExecutor {
     {
         let coordinator = Arc::clone(&self.coordinator);
         let worker_cancellation = cancellation.clone();
-        let (reply_tx, reply_rx) = oneshot::channel();
+        let (reply_sender, reply_receiver) = oneshot::channel();
         let message = Message::Run(Box::new(move || {
             if worker_cancellation.is_cancelled() {
-                let _ = reply_tx.send(Err("IPC latency request cancelled".to_string()));
+                let _ = reply_sender.send(Err("IPC latency request cancelled".to_string()));
                 return;
             }
             let result = coordinator
@@ -135,7 +136,7 @@ impl IpcExecutor {
                         work(&worker_cancellation)
                     }
                 });
-            let _ = reply_tx.send(result);
+            let _ = reply_sender.send(result);
         }));
         {
             let _lifecycle = self.lifecycle.lock().expect("IPC executor lifecycle lock");
@@ -150,7 +151,7 @@ impl IpcExecutor {
             })?;
         }
 
-        match tokio::time::timeout(deadline, reply_rx).await {
+        match tokio::time::timeout(deadline, reply_receiver).await {
             Ok(reply) => {
                 reply.map_err(|_| "IPC executor stopped before completing request".to_string())?
             }
@@ -256,7 +257,7 @@ fn spawn_worker(
         .name(format!("ipc-latency-{index}"))
         .spawn(move || {
             while !shutting_down.load(Ordering::Acquire) {
-                let Ok(message) = receiver.recv_timeout(Duration::from_millis(25)) else {
+                let Ok(message) = receiver.recv_timeout(SHUTDOWN_POLL_INTERVAL) else {
                     continue;
                 };
                 // Shutdown may begin after the loop condition is checked but

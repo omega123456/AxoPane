@@ -58,7 +58,7 @@ pub fn encode(meta: &SnapshotMeta, tree: &FolderSizeTree) -> Vec<u8> {
         out.push(flags);
         count += 1;
     });
-    out[count_at..count_at + 4].copy_from_slice(&count.to_le_bytes());
+    out[count_at..count_at + size_of::<u32>()].copy_from_slice(&count.to_le_bytes());
     let checksum = fnv1a(&out);
     out.extend_from_slice(&checksum.to_le_bytes());
     out
@@ -66,7 +66,7 @@ pub fn encode(meta: &SnapshotMeta, tree: &FolderSizeTree) -> Vec<u8> {
 
 /// `None` for anything but an intact snapshot of the current version.
 pub fn decode(bytes: &[u8]) -> Option<Snapshot> {
-    let (body, checksum) = bytes.split_last_chunk::<8>()?;
+    let (body, checksum) = bytes.split_last_chunk::<{ size_of::<u64>() }>()?;
     if fnv1a(body) != u64::from_le_bytes(*checksum) {
         return None;
     }
@@ -171,7 +171,7 @@ pub enum ReplayOutcome {
     FullRescan,
 }
 
-/// Launch catch-up (FR2.4/FR2.5): `events` are those replayed since
+/// Launch catch-up: `events` are those replayed since
 /// `saved.event_id`. Any `MustScanSubDirs` during replay means history was
 /// coalesced, so it forces a full rescan here, as does a different volume or
 /// OS build (an update rewrites the sealed system volume without events).
@@ -185,7 +185,7 @@ pub fn plan_catch_up(
     if saved.volume_uuid != current_uuid
         || saved.os_build != current_os_build
         || saved.event_id > current_event_id
-        || events.iter().any(|e| e.flags.must_scan_sub_dirs)
+        || events.iter().any(|event| event.flags.must_scan_sub_dirs)
     {
         return ReplayOutcome::FullRescan;
     }
@@ -199,19 +199,25 @@ pub fn plan_catch_up(
 /// rescans that subtree only; dropped, wrapped or root-changed events force a
 /// full rescan.
 pub fn plan_batch(events: &[ChangeEvent]) -> ReplayOutcome {
-    let full = |f: ChangeFlags| {
-        f.user_dropped || f.kernel_dropped || f.event_ids_wrapped || f.root_changed
-    };
-    if events.iter().any(|e| full(e.flags)) {
+    if events.iter().any(|event| forces_full_rescan(event.flags)) {
         return ReplayOutcome::FullRescan;
     }
-    let (rescans, rereads): (Vec<_>, Vec<_>) =
-        events.iter().partition(|e| e.flags.must_scan_sub_dirs);
-    let rescan = outermost(rescans.into_iter().map(|e| e.path.clone()).collect());
-    let mut reread: Vec<PathBuf> = rereads.into_iter().map(|e| e.path.clone()).collect();
+    let (rescans, rereads): (Vec<_>, Vec<_>) = events
+        .iter()
+        .partition(|event| event.flags.must_scan_sub_dirs);
+    let rescan = outermost(
+        rescans
+            .into_iter()
+            .map(|event| event.path.clone())
+            .collect(),
+    );
+    let mut reread: Vec<PathBuf> = rereads
+        .into_iter()
+        .map(|event| event.path.clone())
+        .collect();
     reread.sort();
     reread.dedup();
-    reread.retain(|p| !rescan.iter().any(|r| p.starts_with(r)));
+    reread.retain(|path| !rescan.iter().any(|rescanned| path.starts_with(rescanned)));
     if reread.is_empty() && rescan.is_empty() {
         ReplayOutcome::UpToDate
     } else {
@@ -219,12 +225,16 @@ pub fn plan_batch(events: &[ChangeEvent]) -> ReplayOutcome {
     }
 }
 
+fn forces_full_rescan(flags: ChangeFlags) -> bool {
+    flags.user_dropped || flags.kernel_dropped || flags.event_ids_wrapped || flags.root_changed
+}
+
 /// Sorted paths with every path inside another one dropped.
 fn outermost(mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
     paths.sort();
     let mut kept: Vec<PathBuf> = Vec::new();
     for path in paths {
-        if !kept.iter().any(|k| path.starts_with(k)) {
+        if !kept.iter().any(|kept_path| path.starts_with(kept_path)) {
             kept.push(path);
         }
     }
@@ -236,9 +246,12 @@ fn put_str(out: &mut Vec<u8>, value: &str) {
     out.extend_from_slice(value.as_bytes());
 }
 
+const FNV1A_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV1A_PRIME: u64 = 0x0100_0000_01b3;
+
 fn fnv1a(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &b| {
-        (hash ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+    bytes.iter().fold(FNV1A_OFFSET_BASIS, |hash, &byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(FNV1A_PRIME)
     })
 }
 
@@ -246,25 +259,29 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 struct Reader<'a>(&'a [u8]);
 
 impl<'a> Reader<'a> {
-    fn take(&mut self, len: usize) -> Option<&'a [u8]> {
-        let (head, rest) = self.0.split_at_checked(len)?;
+    fn take(&mut self, byte_count: usize) -> Option<&'a [u8]> {
+        let (head, rest) = self.0.split_at_checked(byte_count)?;
         self.0 = rest;
         Some(head)
     }
 
     fn u32(&mut self) -> Option<u32> {
-        Some(u32::from_le_bytes(self.take(4)?.try_into().ok()?))
+        Some(u32::from_le_bytes(
+            self.take(size_of::<u32>())?.try_into().ok()?,
+        ))
     }
 
     fn u64(&mut self) -> Option<u64> {
-        Some(u64::from_le_bytes(self.take(8)?.try_into().ok()?))
+        Some(u64::from_le_bytes(
+            self.take(size_of::<u64>())?.try_into().ok()?,
+        ))
     }
 
     fn string(&mut self) -> Option<String> {
-        let len = self.u32()? as usize;
-        if len > MAX_STRING_BYTES {
+        let byte_count = self.u32()? as usize;
+        if byte_count > MAX_STRING_BYTES {
             return None;
         }
-        String::from_utf8(self.take(len)?.to_vec()).ok()
+        String::from_utf8(self.take(byte_count)?.to_vec()).ok()
     }
 }

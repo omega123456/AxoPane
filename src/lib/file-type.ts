@@ -508,8 +508,8 @@ for (const [category, extensions] of Object.entries(CATEGORY_EXTENSIONS) as [
   FileCategory,
   string[],
 ][]) {
-  for (const ext of extensions) {
-    EXTENSION_CATEGORY.set(ext, category)
+  for (const extension of extensions) {
+    EXTENSION_CATEGORY.set(extension, category)
   }
 }
 
@@ -530,13 +530,13 @@ export function getFileCategory(entry: Pick<DirectoryEntry, 'name' | 'isDir'>): 
     return special
   }
 
-  const dot = name.lastIndexOf('.')
+  const extensionStart = name.lastIndexOf('.')
   // No dot, or a leading dot with nothing after the basename (e.g. `.env` has
   // its category covered by SPECIAL_NAMES; a bare `.foo` is treated as generic).
-  if (dot <= 0) {
+  if (extensionStart <= 0) {
     return 'generic'
   }
 
-  const ext = name.slice(dot + 1)
-  return EXTENSION_CATEGORY.get(ext) ?? 'generic'
+  const extension = name.slice(extensionStart + 1)
+  return EXTENSION_CATEGORY.get(extension) ?? 'generic'
 }

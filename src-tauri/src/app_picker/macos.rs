@@ -308,7 +308,7 @@ mod nsworkspace {
             };
             let app_url = file_url(&bundle_dir);
 
-            let (tx, rx) = mpsc::channel::<Option<String>>();
+            let (sender, receiver) = mpsc::channel::<Option<String>>();
 
             let completion = RcBlock::new(move |error: *mut NSError| {
                 let failure = if error.is_null() {
@@ -321,7 +321,7 @@ mod nsworkspace {
                     let error = unsafe { &*error };
                     Some(error.localizedDescription().to_string())
                 };
-                let _ = tx.send(failure);
+                let _ = sender.send(failure);
             });
 
             NSWorkspace::sharedWorkspace()
@@ -331,7 +331,7 @@ mod nsworkspace {
                     Some(&completion),
                 );
 
-            match rx.recv_timeout(COMPLETION_TIMEOUT) {
+            match receiver.recv_timeout(COMPLETION_TIMEOUT) {
                 Ok(None) => Ok(()),
                 Ok(Some(reason)) => Err(WriteError::Failed(reason)),
                 Err(mpsc::RecvTimeoutError::Timeout) => {

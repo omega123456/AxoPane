@@ -54,6 +54,9 @@ import { initializeTheme, useThemeStore } from '@/stores/theme-store'
 import { applyWindowBackdrop } from '@/lib/window-commands'
 import { useThumbnailStore } from '@/stores/thumbnail-store'
 
+const MOUSE_BUTTON_BACK = 3
+const MOUSE_BUTTON_FORWARD = 4
+
 function isEditableTarget(target: EventTarget | null) {
   return (
     target instanceof HTMLInputElement ||
@@ -200,11 +203,11 @@ function App() {
   ])
 
   useEffect(() => {
-    // Mouse buttons 3 (back) and 4 (forward) drive history navigation on the
-    // active pane. A mousedown over a pane already sets it active, so by the
-    // time we read `activePaneId` here it reflects the pane under the cursor.
+    // The back/forward mouse buttons drive history navigation on the active
+    // pane. A mousedown over a pane already sets it active, so by the time we
+    // read `activePaneId` here it reflects the pane under the cursor.
     function onMouseUp(event: MouseEvent) {
-      if (event.button !== 3 && event.button !== 4) {
+      if (event.button !== MOUSE_BUTTON_BACK && event.button !== MOUSE_BUTTON_FORWARD) {
         return
       }
 
@@ -222,7 +225,7 @@ function App() {
 
       event.preventDefault()
       const paneId = usePanesStore.getState().activePaneId
-      if (event.button === 3) {
+      if (event.button === MOUSE_BUTTON_BACK) {
         void usePanesStore.getState().goBack(paneId)
       } else {
         void usePanesStore.getState().goForward(paneId)

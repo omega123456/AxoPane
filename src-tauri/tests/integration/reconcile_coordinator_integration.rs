@@ -18,9 +18,9 @@ const PROMPT: Duration = Duration::from_millis(800);
 
 #[test]
 fn continuous_mutations_compact_to_one_bounded_dirty_resnapshot() {
-    let (batches_tx, batches_rx) = bounded(4);
+    let (batches_sender, batches_receiver) = bounded(4);
     let coordinator = WatchCoordinator::spawn(Arc::new(move |batch| {
-        batches_tx.send(batch).expect("test receives batch");
+        batches_sender.send(batch).expect("test receives batch");
     }));
     let raw = coordinator.raw_sender();
     let watch_id = WatchId(7);
@@ -33,7 +33,7 @@ fn continuous_mutations_compact_to_one_bounded_dirty_resnapshot() {
         });
     }
 
-    match batches_rx
+    match batches_receiver
         .recv_timeout(PROMPT)
         .expect("dirty batch arrives")
     {
@@ -47,9 +47,9 @@ fn continuous_mutations_compact_to_one_bounded_dirty_resnapshot() {
 
 #[test]
 fn priority_control_is_not_starved_by_raw_mutation_saturation() {
-    let (batches_tx, batches_rx) = bounded(4);
+    let (batches_sender, batches_receiver) = bounded(4);
     let coordinator = WatchCoordinator::spawn(Arc::new(move |batch| {
-        batches_tx.send(batch).expect("test receives batch");
+        batches_sender.send(batch).expect("test receives batch");
     }));
     let raw = coordinator.raw_sender();
     let watch_id = WatchId(8);
@@ -66,7 +66,7 @@ fn priority_control_is_not_starved_by_raw_mutation_saturation() {
     let deadline = Instant::now() + PROMPT;
     let mut saw_dirty = false;
     while Instant::now() < deadline {
-        match batches_rx.recv_timeout(Duration::from_millis(50)) {
+        match batches_receiver.recv_timeout(Duration::from_millis(50)) {
             Ok(CompactedBatch::Dirty {
                 watch_id: actual, ..
             }) if actual == watch_id => {
@@ -150,20 +150,20 @@ fn generation_for_tests_reports_the_reserved_test_targets_generation() {
 fn distinct_focus_targets_each_run_when_requested_by_the_same_focus_event() {
     let resources = Arc::new(ResourceCoordinator::new());
     let reconcile = Arc::new(ReconcileCoordinator::default());
-    let (published_tx, published_rx) = bounded(2);
+    let (published_sender, published_receiver) = bounded(2);
 
     for target in ["volume-registry", "watch-service"] {
-        let published_tx = published_tx.clone();
+        let published_sender = published_sender.clone();
         reconcile.request_reconcile(Arc::clone(&resources), target.to_string(), move |_| {
-            published_tx.send(target).expect("test receives target");
+            published_sender.send(target).expect("test receives target");
         });
     }
 
     let mut published = vec![
-        published_rx
+        published_receiver
             .recv_timeout(PROMPT)
             .expect("first target runs"),
-        published_rx
+        published_receiver
             .recv_timeout(PROMPT)
             .expect("second target runs"),
     ];

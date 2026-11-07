@@ -88,7 +88,7 @@ export type ListDirResponse = {
 }
 
 // -----------------------------------------------------------------------
-// Version-2 directory-session contract (Phase 3 backend, Phase 4 frontend).
+// Version-2 directory-session contract.
 // Mirrors `src-tauri/src/directory_session/model.rs` field-for-field; Rust
 // serializes every one of these with `#[serde(rename_all = "camelCase")]`.
 // -----------------------------------------------------------------------
@@ -1175,7 +1175,7 @@ export type IpcEventMap = {
   /** Batched: the backend flushes folder-size state changes in arrays to avoid IPC floods. */
   'size://state': SizeStateEvent[]
   'size://index-status': FolderSizeIndexStatus
-  /** Batched: the backend flushes resolved icons in chunks (see Phase 3 backend batching). */
+  /** Batched: the backend flushes resolved icons in chunks. */
   'icon://state': IconStateEvent[]
   /** Batched contextual native thumbnail outcomes. */
   'thumbnail://state': ThumbnailResultEvent[]

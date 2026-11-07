@@ -15,8 +15,8 @@ impl EverythingSort {
     /// The SDK's `EVERYTHING_SORT_*` value.
     pub fn code(self) -> u32 {
         match self {
-            Self::NameAscending => 1,
-            Self::DateModifiedDescending => 14,
+            Self::NameAscending => EVERYTHING_SORT_NAME_ASCENDING,
+            Self::DateModifiedDescending => EVERYTHING_SORT_DATE_MODIFIED_DESCENDING,
         }
     }
 }
@@ -51,6 +51,9 @@ pub struct EverythingQueryResult {
 
 /// FILETIME ticks between 1601-01-01 and the Unix epoch.
 const FILETIME_UNIX_EPOCH: u64 = 116_444_736_000_000_000;
+const NANOS_PER_FILETIME_TICK: u64 = 100;
+const EVERYTHING_SORT_NAME_ASCENDING: u32 = 1;
+const EVERYTHING_SORT_DATE_MODIFIED_DESCENDING: u32 = 14;
 
 /// Converts a FILETIME; `0` and `u64::MAX` mean "unknown".
 pub fn filetime_to_system_time(filetime: u64) -> Option<SystemTime> {
@@ -58,11 +61,11 @@ pub fn filetime_to_system_time(filetime: u64) -> Option<SystemTime> {
         return None;
     }
     match filetime.checked_sub(FILETIME_UNIX_EPOCH) {
-        Some(since) => {
-            SystemTime::UNIX_EPOCH.checked_add(Duration::from_nanos(since.saturating_mul(100)))
-        }
+        Some(since) => SystemTime::UNIX_EPOCH.checked_add(Duration::from_nanos(
+            since.saturating_mul(NANOS_PER_FILETIME_TICK),
+        )),
         None => SystemTime::UNIX_EPOCH.checked_sub(Duration::from_nanos(
-            (FILETIME_UNIX_EPOCH - filetime).saturating_mul(100),
+            (FILETIME_UNIX_EPOCH - filetime).saturating_mul(NANOS_PER_FILETIME_TICK),
         )),
     }
 }
@@ -132,13 +135,7 @@ pub fn build_exact_folder_or_queries(paths: &[String], chunk_size: usize) -> Vec
 pub fn normalize_result_path(path: &str) -> String {
     #[cfg(windows)]
     {
-        let mut normalized = path.replace('/', "\\");
-        let lower = normalized.to_lowercase();
-        if lower.starts_with("\\\\?\\unc\\") {
-            normalized = format!("\\\\{}", normalized[8..].replace('/', "\\"));
-        } else if lower.starts_with("\\\\?\\") {
-            normalized = normalized[4..].to_string();
-        }
+        let mut normalized = crate::path_text::strip_verbatim_prefix(&path.replace('/', "\\"));
 
         if !is_windows_root_like(&normalized) {
             normalized = normalized.trim_end_matches(['\\', '/']).to_string();
@@ -196,12 +193,16 @@ pub fn join_everything_result_path(result_path: &str, file_name: &str) -> String
         .into_owned()
 }
 
+/// `\\server\share` holds three separators; anything deeper is a subfolder.
+#[cfg(windows)]
+const UNC_SHARE_ROOT_MAX_SEPARATORS: usize = 3;
+
 #[cfg(windows)]
 fn is_windows_root_like(path: &str) -> bool {
     let trimmed = path.trim_end_matches(['\\', '/']);
-    let lower = trimmed.to_lowercase();
-    (trimmed.len() == 2 && trimmed.ends_with(':'))
-        || (lower.starts_with("\\\\") && lower.matches('\\').count() <= 3)
+    crate::path_text::is_drive_designator(trimmed)
+        || (trimmed.starts_with(crate::path_text::UNC_PREFIX)
+            && trimmed.matches('\\').count() <= UNC_SHARE_ROOT_MAX_SEPARATORS)
 }
 
 #[cfg(all(windows, not(feature = "test-utils")))]

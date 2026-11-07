@@ -13,6 +13,8 @@ import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
 
+const PINNED_ROW_BASE_Z_INDEX = 10
+
 function rowKey(row: TreeFlatRow): string {
   return row.renderKey
 }
@@ -45,7 +47,7 @@ export function FolderTree() {
     [treeNodes, activePath],
   )
 
-  const os = detectPlatformOs()
+  const platform = detectPlatformOs()
   const fold = useMemo(
     () => ({
       chain: stickyChain,
@@ -58,10 +60,10 @@ export function FolderTree() {
   // One flat, virtualization-ready model spanning every category, volume subtree
   // and the trash row. Rebuilt only when the underlying tree/volumes change.
   const { rows, offsets, indexByPath } = useMemo(
-    () => buildTreeFlatModel(treeNodes, volumes, fold, os),
-    [treeNodes, volumes, fold, os],
+    () => buildTreeFlatModel(treeNodes, volumes, fold, platform),
+    [treeNodes, volumes, fold, platform],
   )
-  const isMacOs = os === 'macos'
+  const isMacOs = platform === 'macos'
   const rowLayerClassName =
     'absolute inset-x-0 overflow-hidden bg-light-base dark:bg-dark-base mica:bg-transparent'
 
@@ -330,7 +332,7 @@ export function FolderTree() {
                 className="pointer-events-auto absolute inset-x-0"
                 style={{
                   top: `${top}px`,
-                  zIndex: 10 + chainIndex,
+                  zIndex: PINNED_ROW_BASE_Z_INDEX + chainIndex,
                 }}
               >
                 <TreeNode

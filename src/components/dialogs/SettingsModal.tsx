@@ -213,7 +213,7 @@ function SettingsModalContent() {
   const section = useSettingsStore((state) => state.section)
   const close = useSettingsStore((state) => state.close)
   const open = useSettingsStore((state) => state.open)
-  const os = detectPlatformOs()
+  const platform = detectPlatformOs()
   const folderSizeStatus = usePanesStore((state) => state.folderSizeIndexStatus)
   const logLevel = useConfigStore((state) => state.logLevel)
   const setLogLevel = useConfigStore((state) => state.setLogLevel)
@@ -692,7 +692,7 @@ function SettingsModalContent() {
                                 <>
                                   <td className="py-1.5">
                                     <span className="inline-flex h-8 w-36 items-center px-3 font-mono text-light-text-secondary dark:text-dark-text-secondary">
-                                      {formatShortcutLabel(shortcut, os)}
+                                      {formatShortcutLabel(shortcut, platform)}
                                     </span>
                                   </td>
                                   <td className="py-1.5 text-light-text-secondary dark:text-dark-text-secondary">
@@ -711,7 +711,7 @@ function SettingsModalContent() {
                                       {capturing === commandId
                                         ? 'Press keys...'
                                         : shortcut
-                                          ? formatShortcutLabel(shortcut, os)
+                                          ? formatShortcutLabel(shortcut, platform)
                                           : 'Unassigned'}
                                     </Button>
                                   </td>

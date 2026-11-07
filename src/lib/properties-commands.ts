@@ -59,7 +59,7 @@ export function createPathPropertiesDialogItem(path: string): PropertiesDialogIt
   }
 }
 
-export function createTrashPropertiesDialogItem(os: PlatformOs): PropertiesDialogItem {
+export function createTrashPropertiesDialogItem(platform: PlatformOs): PropertiesDialogItem {
   return {
     attributes: [],
     createdAt: null,
@@ -70,7 +70,7 @@ export function createTrashPropertiesDialogItem(os: PlatformOs): PropertiesDialo
     itemCount: null,
     modifiedAt: null,
     name: 'Recycle Bin',
-    path: os === 'windows' ? WINDOWS_RECYCLE_BIN_SHELL_PATH : TRASH_PATH,
+    path: platform === 'windows' ? WINDOWS_RECYCLE_BIN_SHELL_PATH : TRASH_PATH,
     sizeBytes: null,
     typeLabel: 'System Folder',
   }

@@ -12,7 +12,7 @@ use super::view::SessionView;
 /// revision field), then materializes the requested page from `view`.
 /// Re-requesting the same `page_index` against the same `expected` baseline
 /// always returns the same content, because `view` is immutable for the
-/// lifetime of one baseline (Phase 3's idempotency requirement).
+/// lifetime of one baseline.
 pub fn materialize_range(
     request: &GetSessionRangeRequest,
     expected_pane_id: &PaneId,

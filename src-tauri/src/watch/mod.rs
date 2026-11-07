@@ -22,6 +22,9 @@ use serde::{Deserialize, Serialize};
 use self::coordinator::{CompactedBatch, MutationKind, RawMutation, WatchCoordinator, WatchId};
 use crate::fs::{self, DirectoryEntry, ListDirOptions, ListDirResponse, SortDirection, SortKey};
 
+/// A paired rename event carries the old path and then the new one.
+const RENAME_EVENT_PATH_COUNT: usize = 2;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DirEntryPatch {
@@ -661,7 +664,7 @@ fn patch_for_events(
                 }
             }
             EventKind::Modify(ModifyKind::Name(RenameMode::Both)) => {
-                if event.paths.len() < 2 {
+                if event.paths.len() < RENAME_EVENT_PATH_COUNT {
                     return Ok(PatchResult::NeedsResnapshot);
                 }
                 let from = &event.paths[0];
@@ -897,7 +900,7 @@ fn unwatch_path(watcher: &mut notify::RecommendedWatcher, path: &Path) -> Result
 }
 
 // ---------------------------------------------------------------------
-// Watch-first session capture (Phase 3: directory_session)
+// Watch-first session capture for directory_session
 // ---------------------------------------------------------------------
 //
 // `DirectorySessionService` needs to register a native watch and start
@@ -927,7 +930,7 @@ fn unwatch_path(watcher: &mut notify::RecommendedWatcher, path: &Path) -> Result
 pub struct CaptureHandle {
     watcher: notify::RecommendedWatcher,
     watched_path: PathBuf,
-    rx: crossbeam_channel::Receiver<Result<notify::Event, notify::Error>>,
+    receiver: crossbeam_channel::Receiver<Result<notify::Event, notify::Error>>,
     overflowed: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -935,7 +938,7 @@ pub struct CaptureHandle {
 /// a [`CaptureHandle`] whose buffered mutation paths can be read with
 /// [`drain_captured_mutations`] once enumeration completes.
 pub fn begin_capture(path: &Path) -> Result<CaptureHandle, String> {
-    let (tx, rx) = crossbeam_channel::bounded(coordinator::RAW_LANE_CAPACITY);
+    let (sender, receiver) = crossbeam_channel::bounded(coordinator::RAW_LANE_CAPACITY);
     let overflowed = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let overflowed_for_callback = Arc::clone(&overflowed);
     let mut watcher = notify::recommended_watcher(move |result| {
@@ -943,7 +946,7 @@ pub fn begin_capture(path: &Path) -> Result<CaptureHandle, String> {
         // overflowed (forcing a resnapshot) instead of blocking the
         // platform callback thread, matching the same non-blocking
         // contract the long-lived `WatchCoordinator` compactor lane uses.
-        if tx.try_send(result).is_err() {
+        if sender.try_send(result).is_err() {
             overflowed_for_callback.store(true, std::sync::atomic::Ordering::SeqCst);
         }
     })
@@ -955,7 +958,7 @@ pub fn begin_capture(path: &Path) -> Result<CaptureHandle, String> {
     Ok(CaptureHandle {
         watcher,
         watched_path: path.to_path_buf(),
-        rx,
+        receiver,
         overflowed,
     })
 }
@@ -974,7 +977,7 @@ pub fn drain_captured_mutations(mut handle: CaptureHandle) -> Option<HashSet<Pat
     }
 
     let mut mutated = HashSet::new();
-    while let Ok(result) = handle.rx.try_recv() {
+    while let Ok(result) = handle.receiver.try_recv() {
         let event = match result {
             Ok(event) => event,
             Err(_) => return None,
@@ -988,7 +991,7 @@ pub fn drain_captured_mutations(mut handle: CaptureHandle) -> Option<HashSet<Pat
             EventKind::Access(_) => {}
             EventKind::Any | EventKind::Other => return None,
             EventKind::Modify(ModifyKind::Name(RenameMode::Both)) => {
-                if event.paths.len() < 2 {
+                if event.paths.len() < RENAME_EVENT_PATH_COUNT {
                     return None;
                 }
                 mutated.insert(event.paths[0].clone());

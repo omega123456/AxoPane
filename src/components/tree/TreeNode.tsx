@@ -80,9 +80,9 @@ function TreeNodeImpl({
       : 'hover:bg-light-tree-hover dark:hover:bg-dark-tree-hover'
     : 'hover:bg-light-hover dark:hover:bg-dark-hover'
 
-  const os = detectPlatformOs()
+  const platform = detectPlatformOs()
   function dropModifiers(event: DragEvent) {
-    if (os === 'macos') {
+    if (platform === 'macos') {
       return { ctrlKey: event.altKey, shiftKey: event.metaKey }
     }
     return { ctrlKey: event.ctrlKey, shiftKey: event.shiftKey }
@@ -90,13 +90,13 @@ function TreeNodeImpl({
 
   function handleDragOver(event: DragEvent<HTMLDivElement>) {
     const drag = useDragStore.getState().drag
-    if (drag?.kind !== 'file-transfer' || !canDropInto(drag, node.path, os)) {
+    if (drag?.kind !== 'file-transfer' || !canDropInto(drag, node.path, platform)) {
       return
     }
     event.preventDefault()
     setDropEffect(
       event.dataTransfer,
-      resolveDropKind(dropModifiers(event), drag.sourceDir, node.path, os),
+      resolveDropKind(dropModifiers(event), drag.sourceDir, node.path, platform),
     )
     setIsDropTarget(true)
   }
@@ -114,7 +114,7 @@ function TreeNodeImpl({
     const modifiers = dropModifiers(event)
     setIsDropTarget(false)
     useDragStore.getState().end()
-    await performDrop(drag, node.path, modifiers, os)
+    await performDrop(drag, node.path, modifiers, platform)
   }
 
   return (

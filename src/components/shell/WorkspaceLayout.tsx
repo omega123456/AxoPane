@@ -14,6 +14,7 @@ import {
 } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import type { PaneId } from '@/types/pane'
+import { fractionToPercent } from '@/lib/numbers'
 
 // Keyboard nudge granularity for each divider.
 const TREE_STEP_PX = 16
@@ -128,9 +129,9 @@ export function WorkspaceLayout({ commandBar }: { commandBar?: ReactNode }) {
                 <div className="pointer-events-auto h-full">
                   <ResizeHandle
                     ariaLabel="Resize panes"
-                    value={paneSplit * 100}
-                    min={PANE_SPLIT_MIN * 100}
-                    max={PANE_SPLIT_MAX * 100}
+                    value={fractionToPercent(paneSplit)}
+                    min={fractionToPercent(PANE_SPLIT_MIN)}
+                    max={fractionToPercent(PANE_SPLIT_MAX)}
                     showRestLine={false}
                     onDragStart={() => {
                       dragStartSplit.current = paneSplit

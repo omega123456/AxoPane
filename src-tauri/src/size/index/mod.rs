@@ -139,7 +139,7 @@ mod service {
 
     pub struct FolderSizeIndex {
         shared: Arc<Shared>,
-        tx: Sender<Msg>,
+        sender: Sender<Message>,
         threads: Vec<JoinHandle<()>>,
     }
 
@@ -175,7 +175,7 @@ mod service {
         boosts: VecDeque<BoostJob>,
         running_background: Option<Arc<AtomicBool>>,
         running_boost: Option<(String, Arc<AtomicBool>)>,
-        /// Sleep, Low Power Mode or thermal pressure (FR4.1).
+        /// Sleep, Low Power Mode or thermal pressure.
         power_paused: bool,
         shutdown: bool,
     }
@@ -205,7 +205,7 @@ mod service {
         Failed(ManualSizeError),
     }
 
-    enum Msg {
+    enum Message {
         Events(Vec<RawEvent>),
         Power(PowerSignal),
         Records {
@@ -266,22 +266,22 @@ mod service {
                 #[cfg(feature = "test-utils")]
                 on_background_parked: Arc::clone(&options.on_background_parked),
             });
-            let (tx, rx) = unbounded();
-            let machine = Machine::new(Arc::clone(&shared), options, tx.clone());
+            let (sender, receiver) = unbounded();
+            let machine = Machine::new(Arc::clone(&shared), options, sender.clone());
             let threads = vec![
-                spawn("size-index", move || machine.run(&rx)),
+                spawn("size-index", move || machine.run(&receiver)),
                 spawn("size-index-scan", {
-                    let (shared, tx) = (Arc::clone(&shared), tx.clone());
-                    move || run_background(&shared, &tx)
+                    let (shared, sender) = (Arc::clone(&shared), sender.clone());
+                    move || run_background(&shared, &sender)
                 }),
                 spawn("size-index-boost", {
-                    let (shared, tx) = (Arc::clone(&shared), tx.clone());
-                    move || run_boosts(&shared, &tx)
+                    let (shared, sender) = (Arc::clone(&shared), sender.clone());
+                    move || run_boosts(&shared, &sender)
                 }),
             ];
             Self {
                 shared,
-                tx,
+                sender,
                 threads,
             }
         }
@@ -325,11 +325,11 @@ mod service {
                 .clone()
         }
 
-        /// Answers indexed paths at once (FR3.1); the rest are boosted and
-        /// answered through `emitter` when their walk completes (FR3.2).
+        /// Answers indexed paths at once; the rest are boosted and
+        /// answered through `emitter` when their walk completes.
         pub fn request(&self, paths: Vec<String>, mode: RequestMode, emitter: SizeEmitter) {
             if !self.shared.booted.load(Ordering::Acquire) {
-                let _ = self.tx.send(Msg::Request {
+                let _ = self.sender.send(Message::Request {
                     paths,
                     mode,
                     emitter,
@@ -369,7 +369,7 @@ mod service {
             if let Some(root) =
                 current_path.and_then(|path| self.shared.visit(&self.tracked(Path::new(&path))))
             {
-                let _ = self.tx.send(Msg::Visited(root));
+                let _ = self.sender.send(Message::Visited(root));
             }
             let folders = folders
                 .into_iter()
@@ -378,7 +378,7 @@ mod service {
                     (folder, tracked)
                 })
                 .collect();
-            let _ = self.tx.send(Msg::Subscribe { pane, folders });
+            let _ = self.sender.send(Message::Subscribe { pane, folders });
         }
 
         /// The normalized path `path`'s total lives at. Only indexed paths
@@ -394,7 +394,7 @@ mod service {
         }
 
         pub fn focus_changed(&self, focused: bool) {
-            let _ = self.tx.send(Msg::Focus(focused));
+            let _ = self.sender.send(Message::Focus(focused));
         }
 
         #[cfg(feature = "test-utils")]
@@ -412,7 +412,7 @@ mod service {
         /// Writes the snapshot on the index thread and waits (bounded) for it.
         pub fn flush(&self) {
             let (ack, done) = bounded(1);
-            if self.tx.send(Msg::Flush(ack)).is_ok() {
+            if self.sender.send(Message::Flush(ack)).is_ok() {
                 let _ = done.recv_timeout(FLUSH_TIMEOUT);
             }
         }
@@ -432,7 +432,7 @@ mod service {
                 }
             }
             self.shared.wake.notify_all();
-            let _ = self.tx.send(Msg::Shutdown);
+            let _ = self.sender.send(Message::Shutdown);
             for thread in self.threads.drain(..) {
                 let _ = thread.join();
             }
@@ -497,7 +497,7 @@ mod service {
             self.protected.iter().find(|root| within(path, root))
         }
 
-        /// Background and automatic work must not read `path` (FR5.1).
+        /// Background and automatic work must not read `path`.
         fn privacy_blocked(&self, view: &View, path: &Path) -> bool {
             !view.full_disk_access
                 && self
@@ -609,7 +609,7 @@ mod service {
 
     // ----- walk lanes -------------------------------------------------------
 
-    fn run_background(shared: &Shared, tx: &Sender<Msg>) {
+    fn run_background(shared: &Shared, sender: &Sender<Message>) {
         loop {
             let (job, cancel) = {
                 let mut lanes = shared.lanes();
@@ -629,17 +629,17 @@ mod service {
             };
             let outcome = walk(
                 shared,
-                tx,
+                sender,
                 &job.root,
                 Lane::Background { full: job.full },
                 &cancel,
             );
             shared.lanes().running_background = None;
-            let _ = tx.send(Msg::ScanDone { job, outcome });
+            let _ = sender.send(Message::ScanDone { job, outcome });
         }
     }
 
-    fn run_boosts(shared: &Shared, tx: &Sender<Msg>) {
+    fn run_boosts(shared: &Shared, sender: &Sender<Message>) {
         loop {
             let (job, cancel) = {
                 let mut lanes = shared.lanes();
@@ -661,7 +661,7 @@ mod service {
             )) {
                 Ok(_admission) => walk(
                     shared,
-                    tx,
+                    sender,
                     &platform::normalize(Path::new(&job.path)),
                     Lane::Boost {
                         refresh: job.refresh,
@@ -672,7 +672,7 @@ mod service {
             };
             shared.lanes().running_boost = None;
             shared.wake.notify_all();
-            let _ = tx.send(Msg::BoostDone { job, outcome });
+            let _ = sender.send(Message::BoostDone { job, outcome });
         }
     }
 
@@ -688,7 +688,7 @@ mod service {
     /// Walks `root`, streaming record batches to the coordination thread.
     fn walk(
         shared: &Shared,
-        tx: &Sender<Msg>,
+        sender: &Sender<Message>,
         root: &Path,
         lane: Lane,
         cancel: &Arc<AtomicBool>,
@@ -737,7 +737,7 @@ mod service {
         let flush = |batch: &mut Vec<DirRecord>| {
             if !batch.is_empty() {
                 let records = std::mem::take(batch);
-                let _ = tx.send(Msg::Records { records, full });
+                let _ = sender.send(Message::Records { records, full });
             }
         };
         let gentle = matches!(lane, Lane::Background { .. })
@@ -811,7 +811,7 @@ mod service {
     // ----- coordination thread ---------------------------------------------
 
     struct FullScan {
-        /// The event ID captured before the scan (FR2.2).
+        /// The event ID captured before the scan.
         captured_id: u64,
         remaining: usize,
     }
@@ -829,7 +829,7 @@ mod service {
 
     struct Machine {
         shared: Arc<Shared>,
-        tx: Sender<Msg>,
+        sender: Sender<Message>,
         platform: Arc<dyn IndexPlatform>,
         clock: Clock,
         emit_sizes: SizeEmitter,
@@ -852,10 +852,10 @@ mod service {
     }
 
     impl Machine {
-        fn new(shared: Arc<Shared>, options: IndexOptions, tx: Sender<Msg>) -> Self {
+        fn new(shared: Arc<Shared>, options: IndexOptions, sender: Sender<Message>) -> Self {
             Self {
                 shared,
-                tx,
+                sender,
                 platform: options.platform,
                 clock: options.clock,
                 emit_sizes: options.emit_sizes,
@@ -878,7 +878,7 @@ mod service {
             }
         }
 
-        fn run(mut self, rx: &Receiver<Msg>) {
+        fn run(mut self, receiver: &Receiver<Message>) {
             (self.emit_status)(
                 self.shared
                     .status
@@ -888,19 +888,19 @@ mod service {
             );
             self.boot();
             self.after_change();
-            while let Ok(msg) = rx.recv() {
-                match msg {
-                    Msg::Shutdown => break,
-                    msg => self.handle(msg),
+            while let Ok(message) = receiver.recv() {
+                match message {
+                    Message::Shutdown => break,
+                    message => self.handle(message),
                 }
                 self.after_change();
             }
         }
 
         fn boot(&mut self) {
-            let power_tx = self.tx.clone();
+            let power_sender = self.sender.clone();
             let conditions = self.platform.observe_power(Arc::new(move |signal| {
-                let _ = power_tx.send(Msg::Power(signal));
+                let _ = power_sender.send(Message::Power(signal));
             }));
             self.power(conditions);
 
@@ -941,7 +941,7 @@ mod service {
                 stale => {
                     // Missing, corrupt, foreign, from another OS build or
                     // ahead: rescan, keeping any old totals visible meanwhile
-                    // (FR2.5).
+                    //.
                     if let Some(snapshot) = stale {
                         self.load_tree(snapshot.tree);
                     }
@@ -958,13 +958,13 @@ mod service {
             self.apply_privacy();
             self.shared.booted.store(true, Ordering::Release);
 
-            let tx = self.tx.clone();
+            let sender = self.sender.clone();
             self.stream = self.platform.start_stream(
                 &self.shared.roots,
                 &self.stream_excluded,
                 since,
                 Arc::new(move |events| {
-                    let _ = tx.send(Msg::Events(events));
+                    let _ = sender.send(Message::Events(events));
                 }),
             );
             if self.stream.is_none() {
@@ -989,27 +989,27 @@ mod service {
             self.shared.view_mut().tree = tree;
         }
 
-        fn handle(&mut self, msg: Msg) {
-            match msg {
-                Msg::Events(events) => self.events(events),
-                Msg::Power(signal) => self.power(signal),
-                Msg::Records { records, full } => self.records(records, full),
-                Msg::ScanDone { job, outcome } => self.scan_done(job, outcome),
-                Msg::BoostDone { job, outcome } => self.boost_done(job, outcome),
-                Msg::Request {
+        fn handle(&mut self, message: Message) {
+            match message {
+                Message::Events(events) => self.events(events),
+                Message::Power(signal) => self.power(signal),
+                Message::Records { records, full } => self.records(records, full),
+                Message::ScanDone { job, outcome } => self.scan_done(job, outcome),
+                Message::BoostDone { job, outcome } => self.boost_done(job, outcome),
+                Message::Request {
                     paths,
                     mode,
                     emitter,
                 } => self.shared.request(paths, mode, emitter),
-                Msg::Subscribe { pane, folders } => self.subscribe(pane, folders),
-                Msg::Visited(root) => self.visited(root),
-                Msg::Focus(true) => self.focused(),
-                Msg::Focus(false) => self.save_snapshot(),
-                Msg::Flush(ack) => {
+                Message::Subscribe { pane, folders } => self.subscribe(pane, folders),
+                Message::Visited(root) => self.visited(root),
+                Message::Focus(true) => self.focused(),
+                Message::Focus(false) => self.save_snapshot(),
+                Message::Flush(ack) => {
                     self.save_snapshot();
                     let _ = ack.send(());
                 }
-                Msg::Shutdown => {}
+                Message::Shutdown => {}
             }
         }
 
@@ -1087,7 +1087,7 @@ mod service {
             }
         }
 
-        /// Re-reads one reported directory (FR2.3). Directories a scan has
+        /// Re-reads one reported directory. Directories a scan has
         /// not reached yet, and unvisited protected ones, are left alone.
         fn reread(&mut self, dir: &Path) {
             {
@@ -1182,7 +1182,7 @@ mod service {
             }
             self.reskip_protected();
             if full {
-                // Items are folders plus their files (FR7.1).
+                // Items are folders plus their files.
                 self.items_scanned += records
                     .iter()
                     .map(|record| 1 + record.file_count)
@@ -1205,7 +1205,7 @@ mod service {
 
         fn finish_full_scan(&mut self) {
             if let Some(full) = self.full.take() {
-                // Saved as is, even if later events were applied (FR2.2).
+                // Saved as is, even if later events were applied.
                 self.meta.event_id = full.captured_id;
                 self.last_applied_id = full.captured_id;
                 self.meta.last_full_scan_secs = unix_secs((self.clock)());
@@ -1476,7 +1476,7 @@ mod service {
         }
 
         /// Emits on every transition; item-count progress at most once per
-        /// [`PROGRESS_INTERVAL`] of the injected clock (FR7.4).
+        /// [`PROGRESS_INTERVAL`] of the injected clock.
         fn publish_status(&mut self) {
             let next = self.compute_status();
             let mut current = self.shared.status.lock().expect("index status lock");
@@ -1504,7 +1504,7 @@ mod service {
 
         // ----- snapshot ------------------------------------------------------
 
-        /// Writes the snapshot if anything changed (FR2.6). The saved event ID
+        /// Writes the snapshot if anything changed. The saved event ID
         /// is the pre-scan one while a full scan runs, and stays put while
         /// subtree scans are in flight, so a relaunch replays what they cover.
         fn save_snapshot(&mut self) {

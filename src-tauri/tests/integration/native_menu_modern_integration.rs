@@ -24,7 +24,7 @@ fn request(
         target_kind,
         target_path: target_path.map(str::to_string),
         folder_path: None,
-        selected_paths: selected.iter().map(|p| (*p).to_string()).collect(),
+        selected_paths: selected.iter().map(|path| (*path).to_string()).collect(),
     }
 }
 

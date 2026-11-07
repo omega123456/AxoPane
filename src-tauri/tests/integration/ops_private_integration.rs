@@ -27,7 +27,7 @@ mod tests {
         }
     }
 
-    fn op_state(status: OpStatus, volumes: &[&str]) -> OpState {
+    fn operation_state(status: OpStatus, volumes: &[&str]) -> OpState {
         OpState {
             id: "op-1".to_string(),
             kind: OpKind::Copy,
@@ -67,11 +67,11 @@ mod tests {
         Arc<Mutex<OpState>>,
         Arc<Condvar>,
         Arc<Mutex<Vec<OpProgress>>>,
-        WorkerCtx<'static>,
+        WorkerContext<'static>,
     );
 
-    fn make_ctx(state: OpState) -> OpCtx {
-        let op_arc = Arc::new(Mutex::new(state));
+    fn make_context(state: OpState) -> OpCtx {
+        let shared_operation = Arc::new(Mutex::new(state));
         let resolver = Arc::new(Condvar::new());
         let progress_log = Arc::new(Mutex::new(Vec::<OpProgress>::new()));
         let progress_for_emitter = progress_log.clone();
@@ -84,13 +84,13 @@ mod tests {
             }));
         let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
 
-        let op_arc_ref = Box::leak(Box::new(op_arc.clone()));
+        let shared_operation_ref = Box::leak(Box::new(shared_operation.clone()));
         let resolver_ref = Box::leak(Box::new(resolver.clone()));
         let progress_ref = Box::leak(Box::new(progress));
         let instant_now_ref = Box::leak(Box::new(instant_now));
 
-        let ctx = WorkerCtx {
-            op_arc: op_arc_ref,
+        let context = WorkerContext {
+            shared_operation: shared_operation_ref,
             resolver: resolver_ref,
             progress: progress_ref,
             start: Instant::now() - Duration::from_secs(1),
@@ -98,10 +98,10 @@ mod tests {
             instant_now: instant_now_ref,
         };
 
-        (op_arc, resolver, progress_log, ctx)
+        (shared_operation, resolver, progress_log, context)
     }
 
-    /// Like [`make_ctx`], but the injected clock advances by `step` on every
+    /// Like [`make_context`], but the injected clock advances by `step` on every
     /// call instead of tracking real wall-clock time. Phase 1's
     /// `TransferThrottle` (shared by `compress_item_with_progress` /
     /// `extract_item_with_progress`) now gates every intra-member progress
@@ -119,7 +119,7 @@ mod tests {
             *guard
         });
 
-        let op_arc = Arc::new(Mutex::new(state));
+        let shared_operation = Arc::new(Mutex::new(state));
         let resolver = Arc::new(Condvar::new());
         let progress_log = Arc::new(Mutex::new(Vec::<OpProgress>::new()));
         let progress_for_emitter = progress_log.clone();
@@ -131,13 +131,13 @@ mod tests {
                     .push(progress);
             }));
 
-        let op_arc_ref = Box::leak(Box::new(op_arc.clone()));
+        let shared_operation_ref = Box::leak(Box::new(shared_operation.clone()));
         let resolver_ref = Box::leak(Box::new(resolver.clone()));
         let progress_ref = Box::leak(Box::new(progress));
         let instant_now_ref = Box::leak(Box::new(instant_now));
 
-        let ctx = WorkerCtx {
-            op_arc: op_arc_ref,
+        let context = WorkerContext {
+            shared_operation: shared_operation_ref,
             resolver: resolver_ref,
             progress: progress_ref,
             start: Instant::now() - Duration::from_secs(1),
@@ -145,7 +145,7 @@ mod tests {
             instant_now: instant_now_ref,
         };
 
-        (op_arc, resolver, progress_log, ctx)
+        (shared_operation, resolver, progress_log, context)
     }
 
     #[test]
@@ -165,12 +165,13 @@ mod tests {
         // past the interval between calls guarantees at least one emission
         // still carries the 7-byte file's `current_file_total_bytes`, rather
         // than racing a real (fast) clock that never crosses the interval.
-        let (_op_arc, _resolver, progress_log, ctx) = make_ctx_with_ever_advancing_clock(
-            op_state(OpStatus::Active, &["/"]),
-            Duration::from_millis(100),
-        );
+        let (_shared_operation, _resolver, progress_log, context) =
+            make_ctx_with_ever_advancing_clock(
+                operation_state(OpStatus::Active, &["/"]),
+                Duration::from_millis(100),
+            );
 
-        compress_item_with_progress(&source_dir, &archive_path, &source_item, &ctx)
+        compress_item_with_progress(&source_dir, &archive_path, &source_item, &context)
             .expect("compress");
         assert!(archive_path.exists());
         assert!(is_zip_archive_path(&archive_path));
@@ -189,7 +190,7 @@ mod tests {
             Path::new("nested/inside.txt")
         );
 
-        extract_item_with_progress(&archive_path, &extract_root, &archive_item, &ctx)
+        extract_item_with_progress(&archive_path, &extract_root, &archive_item, &context)
             .expect("extract");
         assert_eq!(
             std::fs::read(
@@ -226,13 +227,14 @@ mod tests {
         std::fs::write(&destination_file, b"x").expect("destination file");
 
         let bad_archive_item = item(&source_file, 0);
-        let (_op_arc, _resolver, _progress_log, ctx) = make_ctx(op_state(OpStatus::Active, &["/"]));
+        let (_shared_operation, _resolver, _progress_log, context) =
+            make_context(operation_state(OpStatus::Active, &["/"]));
 
         assert!(compress_item_with_progress(
             &source_file,
             &fixture.path().join("output.bin"),
             &bad_archive_item,
-            &ctx
+            &context
         )
         .expect_err("invalid extension")
         .contains(".zip"));
@@ -240,7 +242,7 @@ mod tests {
             &fixture.path().join("missing"),
             &fixture.path().join("missing.zip"),
             &bad_archive_item,
-            &ctx
+            &context
         )
         .expect_err("missing source")
         .contains("does not exist"));
@@ -248,7 +250,7 @@ mod tests {
             &source_file,
             &existing_archive,
             &bad_archive_item,
-            &ctx
+            &context
         )
         .expect_err("existing archive")
         .contains("already exists"));
@@ -257,7 +259,7 @@ mod tests {
             &source_file,
             &destination_file,
             &bad_archive_item,
-            &ctx
+            &context
         )
         .expect_err("extract destination file")
         .contains("not a folder"));
@@ -270,19 +272,19 @@ mod tests {
 
     #[test]
     fn scheduler_helpers_collect_ready_ops_and_auto_remove_terminal_entries() {
-        let op_a = Arc::new(Mutex::new(op_state(OpStatus::Pending, &["alpha"])));
-        let mut op_b_state = op_state(OpStatus::Pending, &["beta"]);
-        op_b_state.id = "op-2".to_string();
-        let op_b = Arc::new(Mutex::new(op_b_state));
-        let mut op_c_state = op_state(OpStatus::Completed, &["gamma"]);
-        op_c_state.id = "op-3".to_string();
-        let op_c = Arc::new(Mutex::new(op_c_state));
+        let operation_a = Arc::new(Mutex::new(operation_state(OpStatus::Pending, &["alpha"])));
+        let mut operation_b_state = operation_state(OpStatus::Pending, &["beta"]);
+        operation_b_state.id = "op-2".to_string();
+        let operation_b = Arc::new(Mutex::new(operation_b_state));
+        let mut operation_c_state = operation_state(OpStatus::Completed, &["gamma"]);
+        operation_c_state.id = "op-3".to_string();
+        let operation_c = Arc::new(Mutex::new(operation_c_state));
 
         let inner = Arc::new(Mutex::new(Inner {
             ops: HashMap::from([
-                ("op-1".to_string(), op_a.clone()),
-                ("op-2".to_string(), op_b.clone()),
-                ("op-3".to_string(), op_c.clone()),
+                ("op-1".to_string(), operation_a.clone()),
+                ("op-2".to_string(), operation_b.clone()),
+                ("op-3".to_string(), operation_c.clone()),
             ]),
             signals: HashMap::from([
                 ("op-1".to_string(), Arc::new(Condvar::new())),
@@ -325,18 +327,19 @@ mod tests {
 
     #[test]
     fn progress_helpers_update_state_and_cancelled_copies_short_circuit() {
-        let (op_arc, resolver, progress_log, ctx) = make_ctx(op_state(OpStatus::Active, &["/"]));
+        let (shared_operation, resolver, progress_log, context) =
+            make_context(operation_state(OpStatus::Active, &["/"]));
 
-        add_discovered_total(&ctx, 12, None);
-        begin_file_progress(&ctx, Path::new("/tmp/example.txt"), 12, None);
-        report_chunk_progress(&ctx, 5, None);
-        count_skipped_bytes(&ctx, 2);
-        finish_file_progress(&ctx, None);
-        let tracked_item = { ctx.op_arc.lock().expect("op lock").items[0].clone() };
-        advance_item(&ctx, &tracked_item);
+        add_discovered_total(&context, 12, None);
+        begin_file_progress(&context, Path::new("/tmp/example.txt"), 12, None);
+        report_chunk_progress(&context, 5, None);
+        count_skipped_bytes(&context, 2);
+        finish_file_progress(&context, None);
+        let tracked_item = { context.shared_operation.lock().expect("op lock").items[0].clone() };
+        advance_item(&context, &tracked_item);
 
         {
-            let mut state = op_arc.lock().expect("op lock");
+            let mut state = shared_operation.lock().expect("op lock");
             refresh_rate_locked_with_now(
                 &mut state,
                 Instant::now() - Duration::from_secs(3),
@@ -346,13 +349,14 @@ mod tests {
             state.pause.store(true, Ordering::Relaxed);
             state.cancel.store(true, Ordering::Relaxed);
         }
-        wait_while_paused(&op_arc, &resolver);
+        wait_while_paused(&shared_operation, &resolver);
 
         let mut reader = Cursor::new(b"cancelled".to_vec());
         let mut writer = Cursor::new(Vec::<u8>::new());
-        copy_reader_with_progress(&mut reader, &mut writer, &ctx, None).expect("cancelled copy");
+        copy_reader_with_progress(&mut reader, &mut writer, &context, None)
+            .expect("cancelled copy");
 
-        let state = op_arc.lock().expect("op lock");
+        let state = shared_operation.lock().expect("op lock");
         assert_eq!(state.total_bytes, 12);
         assert_eq!(state.completed_items, 1);
         assert_eq!(state.copied_bytes, 7);
@@ -370,8 +374,9 @@ mod tests {
         let target = fixture.path().join("target.txt");
         std::fs::write(&target, b"existing").expect("target");
 
-        let (op_arc, resolver, progress_log, ctx) = make_ctx(op_state(OpStatus::Active, &["/"]));
-        let cancel_arc = op_arc.clone();
+        let (shared_operation, resolver, progress_log, context) =
+            make_context(operation_state(OpStatus::Active, &["/"]));
+        let cancel_arc = shared_operation.clone();
         let resolver_for_thread = resolver.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(20));
@@ -384,7 +389,7 @@ mod tests {
         });
 
         let resolution = resolve_or_park(
-            &ctx,
+            &context,
             &OpItem {
                 source_path: fixture
                     .path()
@@ -399,7 +404,7 @@ mod tests {
         );
 
         assert!(resolution.is_none());
-        let state = op_arc.lock().expect("op lock");
+        let state = shared_operation.lock().expect("op lock");
         assert_eq!(state.status, OpStatus::Conflict);
         assert!(state.conflict.is_some());
         drop(state);
@@ -414,15 +419,15 @@ mod tests {
         std::fs::create_dir_all(&nested_dest).expect("nested");
         std::fs::write(source.join("top.txt"), b"top").expect("top");
 
-        let mut state = op_state(OpStatus::Active, &["/"]);
+        let mut state = operation_state(OpStatus::Active, &["/"]);
         state.kind = OpKind::Move;
         state.destination_dir = nested_dest.clone();
         state.items = vec![item(&source, 3)];
-        let (op_arc, _resolver, _progress_log, ctx) = make_ctx(state);
+        let (shared_operation, _resolver, _progress_log, context) = make_context(state);
 
-        process_item(&ctx, &item(&source, 3), &None);
+        process_item(&context, &item(&source, 3), &None);
 
-        let state = op_arc.lock().expect("op lock");
+        let state = shared_operation.lock().expect("op lock");
         assert!(state
             .error_message
             .as_deref()
@@ -437,11 +442,11 @@ mod tests {
 
         let delete_source = fixture.path().join("delete.txt");
         std::fs::write(&delete_source, b"delete").expect("delete source");
-        let mut delete_state = op_state(OpStatus::Active, &["/"]);
+        let mut delete_state = operation_state(OpStatus::Active, &["/"]);
         delete_state.kind = OpKind::Delete;
         delete_state.items = vec![item(&delete_source, 6)];
-        let (delete_arc, _resolver, _progress_log, delete_ctx) = make_ctx(delete_state);
-        process_item(&delete_ctx, &item(&delete_source, 6), &None);
+        let (delete_arc, _resolver, _progress_log, delete_context) = make_context(delete_state);
+        process_item(&delete_context, &item(&delete_source, 6), &None);
         assert!(!delete_source.exists());
         assert_eq!(delete_arc.lock().expect("op lock").completed_items, 1);
 
@@ -449,22 +454,23 @@ mod tests {
         std::fs::create_dir_all(&source_dir).expect("source dir");
         std::fs::write(source_dir.join("inside.txt"), b"payload").expect("source file");
         let archive_path = fixture.path().join("archive.zip");
-        let mut compress_state = op_state(OpStatus::Active, &["/"]);
+        let mut compress_state = operation_state(OpStatus::Active, &["/"]);
         compress_state.kind = OpKind::Compress;
         compress_state.destination_dir = archive_path.clone();
         compress_state.items = vec![item(&source_dir, 0)];
-        let (compress_arc, _resolver, _progress_log, compress_ctx) = make_ctx(compress_state);
-        process_item(&compress_ctx, &item(&source_dir, 0), &None);
+        let (compress_arc, _resolver, _progress_log, compress_context) =
+            make_context(compress_state);
+        process_item(&compress_context, &item(&source_dir, 0), &None);
         assert!(archive_path.exists());
         assert_eq!(compress_arc.lock().expect("op lock").completed_items, 1);
 
         let extract_root = fixture.path().join("extract");
-        let mut extract_state = op_state(OpStatus::Active, &["/"]);
+        let mut extract_state = operation_state(OpStatus::Active, &["/"]);
         extract_state.kind = OpKind::Extract;
         extract_state.destination_dir = extract_root.clone();
         extract_state.items = vec![item(&archive_path, 0)];
-        let (extract_arc, _resolver, _progress_log, extract_ctx) = make_ctx(extract_state);
-        process_item(&extract_ctx, &item(&archive_path, 0), &None);
+        let (extract_arc, _resolver, _progress_log, extract_context) = make_context(extract_state);
+        process_item(&extract_context, &item(&archive_path, 0), &None);
         assert_eq!(
             std::fs::read(
                 extract_root
@@ -484,30 +490,30 @@ mod tests {
 
         let delete_source = fixture.path().join("done.txt");
         std::fs::write(&delete_source, b"done").expect("done source");
-        let mut completed_state = op_state(OpStatus::Pending, &["alpha"]);
+        let mut completed_state = operation_state(OpStatus::Pending, &["alpha"]);
         completed_state.kind = OpKind::Delete;
         completed_state.items = vec![item(&delete_source, 4)];
         completed_state.total_bytes = 4;
-        let completed_op = Arc::new(Mutex::new(completed_state));
+        let completed_operation = Arc::new(Mutex::new(completed_state));
 
         let missing_source = fixture.path().join("missing.txt");
-        let mut failed_state = op_state(OpStatus::Pending, &["beta"]);
+        let mut failed_state = operation_state(OpStatus::Pending, &["beta"]);
         failed_state.items = vec![item(&missing_source, 5)];
-        let failed_op = Arc::new(Mutex::new(failed_state));
+        let failed_operation = Arc::new(Mutex::new(failed_state));
 
         let cancelled_source = fixture.path().join("cancelled.txt");
         std::fs::write(&cancelled_source, b"cancelled").expect("cancelled source");
-        let mut cancelled_state = op_state(OpStatus::Pending, &["gamma"]);
+        let mut cancelled_state = operation_state(OpStatus::Pending, &["gamma"]);
         cancelled_state.kind = OpKind::Delete;
         cancelled_state.items = vec![item(&cancelled_source, 9)];
         cancelled_state.cancel.store(true, Ordering::Relaxed);
-        let cancelled_op = Arc::new(Mutex::new(cancelled_state));
+        let cancelled_operation = Arc::new(Mutex::new(cancelled_state));
 
         let inner = Arc::new(Mutex::new(Inner {
             ops: HashMap::from([
-                ("op-1".to_string(), completed_op.clone()),
-                ("op-2".to_string(), failed_op.clone()),
-                ("op-3".to_string(), cancelled_op.clone()),
+                ("op-1".to_string(), completed_operation.clone()),
+                ("op-2".to_string(), failed_operation.clone()),
+                ("op-3".to_string(), cancelled_operation.clone()),
             ]),
             signals: HashMap::from([
                 ("op-1".to_string(), Arc::new(Condvar::new())),
@@ -532,16 +538,16 @@ mod tests {
         run_operation("op-2".to_string(), &inner, &runtime);
         run_operation("op-3".to_string(), &inner, &runtime);
 
-        let completed = completed_op.lock().expect("completed lock");
+        let completed = completed_operation.lock().expect("completed lock");
         assert_eq!(completed.status, OpStatus::Completed);
         drop(completed);
 
-        let failed = failed_op.lock().expect("failed lock");
+        let failed = failed_operation.lock().expect("failed lock");
         assert_eq!(failed.status, OpStatus::Failed);
         assert!(failed.error_message.is_some());
         drop(failed);
 
-        let cancelled = cancelled_op.lock().expect("cancelled lock");
+        let cancelled = cancelled_operation.lock().expect("cancelled lock");
         assert_eq!(cancelled.status, OpStatus::Cancelled);
     }
 
@@ -553,23 +559,23 @@ mod tests {
         std::fs::write(&completed_file, b"done").expect("completed");
         std::fs::write(&pending_file, b"wait").expect("pending");
 
-        let mut completed_state = op_state(OpStatus::Completed, &["alpha"]);
+        let mut completed_state = operation_state(OpStatus::Completed, &["alpha"]);
         completed_state.kind = OpKind::Delete;
         completed_state.items = vec![item(&completed_file, 4)];
-        let mut pending_state = op_state(OpStatus::Pending, &["beta"]);
+        let mut pending_state = operation_state(OpStatus::Pending, &["beta"]);
         pending_state.kind = OpKind::Delete;
         pending_state.items = vec![item(&pending_file, 4)];
         pending_state.id = "op-2".to_string();
 
-        let completed_op = Arc::new(Mutex::new(completed_state));
-        let pending_op = Arc::new(Mutex::new(pending_state));
+        let completed_operation = Arc::new(Mutex::new(completed_state));
+        let pending_operation = Arc::new(Mutex::new(pending_state));
         let removed = Arc::new(Mutex::new(Vec::<String>::new()));
         let removed_for_emitter = removed.clone();
 
         let inner = Arc::new(Mutex::new(Inner {
             ops: HashMap::from([
-                ("op-1".to_string(), completed_op),
-                ("op-2".to_string(), pending_op.clone()),
+                ("op-1".to_string(), completed_operation),
+                ("op-2".to_string(), pending_operation.clone()),
             ]),
             signals: HashMap::from([
                 ("op-1".to_string(), Arc::new(Condvar::new())),
@@ -596,7 +602,7 @@ mod tests {
 
         assert!(!pending_file.exists());
         assert_eq!(
-            pending_op.lock().expect("pending lock").status,
+            pending_operation.lock().expect("pending lock").status,
             OpStatus::Completed
         );
         assert!(removed
@@ -614,21 +620,21 @@ mod tests {
         std::fs::write(&completed_file, b"done").expect("completed");
         std::fs::write(&pending_file, b"wait").expect("pending");
 
-        let mut completed_state = op_state(OpStatus::Completed, &["alpha"]);
+        let mut completed_state = operation_state(OpStatus::Completed, &["alpha"]);
         completed_state.kind = OpKind::Delete;
         completed_state.items = vec![item(&completed_file, 4)];
-        let mut pending_state = op_state(OpStatus::Pending, &["beta"]);
+        let mut pending_state = operation_state(OpStatus::Pending, &["beta"]);
         pending_state.kind = OpKind::Delete;
         pending_state.items = vec![item(&pending_file, 4)];
         pending_state.id = "op-2".to_string();
 
-        let completed_op = Arc::new(Mutex::new(completed_state));
-        let pending_op = Arc::new(Mutex::new(pending_state));
+        let completed_operation = Arc::new(Mutex::new(completed_state));
+        let pending_operation = Arc::new(Mutex::new(pending_state));
 
         let inner = Arc::new(Mutex::new(Inner {
             ops: HashMap::from([
-                ("op-1".to_string(), completed_op),
-                ("op-2".to_string(), pending_op.clone()),
+                ("op-1".to_string(), completed_operation),
+                ("op-2".to_string(), pending_operation.clone()),
             ]),
             signals: HashMap::from([
                 ("op-1".to_string(), Arc::new(Condvar::new())),
@@ -671,7 +677,7 @@ mod tests {
         // op-2 would complete almost immediately despite "beta" being held.
         std::thread::sleep(Duration::from_millis(80));
         assert_eq!(
-            pending_op.lock().expect("pending lock").status,
+            pending_operation.lock().expect("pending lock").status,
             OpStatus::Pending,
             "op-2 must stay pending while its resource's coordinator slot is held, \
              even though it is not in the legacy busy_volumes set"
@@ -684,13 +690,13 @@ mod tests {
         drop(hold);
 
         let deadline = std::time::Instant::now() + Duration::from_millis(500);
-        while pending_op.lock().expect("pending lock").status == OpStatus::Pending
+        while pending_operation.lock().expect("pending lock").status == OpStatus::Pending
             && std::time::Instant::now() < deadline
         {
             std::thread::sleep(Duration::from_millis(5));
         }
         assert_eq!(
-            pending_op.lock().expect("pending lock").status,
+            pending_operation.lock().expect("pending lock").status,
             OpStatus::Completed,
             "op-2 must run once the coordinator admits it"
         );

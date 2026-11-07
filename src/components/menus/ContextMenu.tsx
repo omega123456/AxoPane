@@ -5,6 +5,7 @@ import { log } from '@/lib/app-log-commands'
 import { dedupeNativeMenuItems } from '@/lib/context-menu/menu-dedupe'
 import { requestNativeMenu } from '@/lib/context-menu/native-menu-commands'
 import { useContextMenuStore } from '@/stores/context-menu-store'
+import { MENU_VIEWPORT_MARGIN_PX, menuAvailableHeight } from '@/components/menus/menu-geometry'
 
 export function ContextMenu() {
   const menu = useContextMenuStore((state) => state.menu)
@@ -90,8 +91,8 @@ export function ContextMenu() {
     // real pixels, then divide the final offsets by the zoom factor.
     const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1
     const { width, height } = node.getBoundingClientRect()
-    const margin = 8
-    const availableHeight = window.innerHeight - margin * 2
+    const margin = MENU_VIEWPORT_MARGIN_PX
+    const availableHeight = menuAvailableHeight()
     const clampedHeight = Math.min(height, availableHeight)
     const maxLeft = window.innerWidth - width - margin
     const maxTop = window.innerHeight - clampedHeight - margin

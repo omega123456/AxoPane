@@ -1,6 +1,6 @@
 /**
  * `ListingSession`: per-pane orchestration for the v2 seekable directory
- * session (Functional Requirement 11 / Design Decision 8 / Phase 4).
+ * session.
  *
  * Owns:
  *  - Issuing `getDirectorySessionRange` page requests against a
@@ -314,8 +314,7 @@ export class ListingSession {
     this.collection.invalidateAll()
     this.collection.setTotalRows(response.totalRows)
     // An empty view (`totalRows === 0`) must produce zero loaded pages, not a
-    // phantom page 0 record with an empty entries array (Phase 4 acceptance:
-    // "empty directories render with no phantom/fallback ranges").
+    // phantom page 0 record with an empty entries array.
     if (response.totalRows > 0) {
       this.collection.installPage(response.firstPage.pageIndex, response.firstPage.entries)
       this.pinViewportPages(response.firstPage.pageIndex)

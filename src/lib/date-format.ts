@@ -1,4 +1,10 @@
 import { format, getTime, isValid, parseISO } from 'date-fns'
+import {
+  millisecondsInDay,
+  millisecondsInHour,
+  millisecondsInMinute,
+  millisecondsInWeek,
+} from 'date-fns/constants'
 
 /**
  * Date formatting for directory listings and the properties dialog.
@@ -116,12 +122,13 @@ function cachedAbsoluteFormat(
   return result
 }
 
-const MINUTE = 60_000
-const HOUR = 60 * MINUTE
-const DAY = 24 * HOUR
-const RELATIVE_DAY_PRIORITY_CUTOFF = 4 * DAY
+const MINUTE = millisecondsInMinute
+const HOUR = millisecondsInHour
+const DAY = millisecondsInDay
+const RELATIVE_DAY_PRIORITY_CUTOFF_DAYS = 4
+const RELATIVE_DAY_PRIORITY_CUTOFF = RELATIVE_DAY_PRIORITY_CUTOFF_DAYS * DAY
 /** Beyond this age the relative phrasing is dropped for the absolute format. */
-const RELATIVE_CUTOFF = 7 * DAY
+const RELATIVE_CUTOFF = millisecondsInWeek
 
 function absolutePattern(format: DateFormat, showTime: boolean, showSeconds: boolean): string {
   const datePattern = datePatterns[format]
@@ -184,11 +191,11 @@ export function formatEntryDate(
   if (!isValid(date)) {
     return EMPTY
   }
-  const ms = getTime(date)
+  const timestamp = getTime(date)
   if (options.relative) {
     const phrase = formatRelative(
       date,
-      (options.now ?? Date.now()) - ms,
+      (options.now ?? Date.now()) - timestamp,
       options.showTime,
       options.showSeconds,
     )

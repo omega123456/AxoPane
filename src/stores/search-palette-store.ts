@@ -49,7 +49,7 @@ const cleared = {
 
 let debounceTimer: ReturnType<typeof setTimeout> | undefined
 // Replies to anything but the latest request are dropped.
-let requestSeq = 0
+let latestRequestSequence = 0
 
 /**
  * Mirrors the Rust rule: three non-space characters, or an anchored listing
@@ -75,13 +75,13 @@ function cancelPending() {
     clearTimeout(debounceTimer)
     debounceTimer = undefined
   }
-  requestSeq += 1
+  latestRequestSequence += 1
 }
 
 export const useSearchPaletteStore = create<SearchPaletteState>((set, get) => {
   async function runQuery() {
     debounceTimer = undefined
-    const seq = ++requestSeq
+    const requestSequence = ++latestRequestSequence
     const { query, scope } = get()
     try {
       const page = await searchQuery({
@@ -89,7 +89,7 @@ export const useSearchPaletteStore = create<SearchPaletteState>((set, get) => {
         scope,
         includeHidden: usePanesStore.getState().showHiddenFiles,
       })
-      if (seq !== requestSeq) {
+      if (requestSequence !== latestRequestSequence) {
         return
       }
       set({
@@ -103,7 +103,7 @@ export const useSearchPaletteStore = create<SearchPaletteState>((set, get) => {
       })
     } catch (error) {
       const rejection = asRejection(error)
-      if (seq !== requestSeq || rejection.kind === 'stale') {
+      if (requestSequence !== latestRequestSequence || rejection.kind === 'stale') {
         return
       }
       set(

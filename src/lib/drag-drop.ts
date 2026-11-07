@@ -1,5 +1,6 @@
 import type { PaneId } from '@/types/pane'
 import { detectPlatformOs, type PlatformOs } from '@/lib/keymap'
+import { UNC_PREFIX, WINDOWS_DRIVE_PREFIX_LENGTH } from '@/lib/path-compare'
 import { startOp } from '@/lib/queue-commands'
 import type { OpKind } from '@/lib/types/ipc'
 
@@ -37,18 +38,18 @@ export type DropModifiers = {
 // Windows and default macOS filesystems are case-insensitive, so path
 // comparisons are lowercased. Trailing separators are stripped so `C:\a\` and
 // `C:\a` compare equal.
-function separator(os: PlatformOs) {
-  return os === 'windows' ? '\\' : '/'
+function separatorFor(platform: PlatformOs) {
+  return platform === 'windows' ? '\\' : '/'
 }
 
-function normalizePath(path: string, os: PlatformOs) {
-  const sep = separator(os)
+function normalizePath(path: string, platform: PlatformOs) {
+  const separator = separatorFor(platform)
   // Preserve a leading UNC-style double separator (`\\server\share`); collapse
   // every other run of separators to a single one.
   const hasLeadingDouble = /^[\\/]{2}/.test(path)
-  const leading = hasLeadingDouble ? sep + sep : ''
-  let normalized = leading + path.slice(hasLeadingDouble ? 2 : 0).replace(/[\\/]+/g, sep)
-  while (normalized.length > leading.length + 1 && normalized.endsWith(sep)) {
+  const leading = hasLeadingDouble ? separator + separator : ''
+  let normalized = leading + path.slice(leading.length).replace(/[\\/]+/g, separator)
+  while (normalized.length > leading.length + 1 && normalized.endsWith(separator)) {
     normalized = normalized.slice(0, -1)
   }
   return normalized.toLowerCase()
@@ -58,12 +59,15 @@ function normalizePath(path: string, os: PlatformOs) {
 export function isSameOrDescendant(
   candidate: string,
   folder: string,
-  os: PlatformOs = detectPlatformOs(),
+  platform: PlatformOs = detectPlatformOs(),
 ) {
-  const sep = separator(os)
-  const a = normalizePath(candidate, os)
-  const b = normalizePath(folder, os)
-  return a === b || a.startsWith(b + sep)
+  const separator = separatorFor(platform)
+  const normalizedCandidate = normalizePath(candidate, platform)
+  const normalizedFolder = normalizePath(folder, platform)
+  return (
+    normalizedCandidate === normalizedFolder ||
+    normalizedCandidate.startsWith(normalizedFolder + separator)
+  )
 }
 
 /**
@@ -72,19 +76,23 @@ export function isSameOrDescendant(
  * Drives the default drop gesture: same volume moves, different volume copies —
  * matching Explorer/Finder.
  */
-export function sameVolume(a: string, b: string, os: PlatformOs = detectPlatformOs()) {
-  return volumeKey(a, os) === volumeKey(b, os)
+export function sameVolume(
+  leftPath: string,
+  rightPath: string,
+  platform: PlatformOs = detectPlatformOs(),
+) {
+  return volumeKey(leftPath, platform) === volumeKey(rightPath, platform)
 }
 
-function volumeKey(path: string, os: PlatformOs) {
-  const normalized = normalizePath(path, os)
-  if (os === 'windows') {
+function volumeKey(path: string, platform: PlatformOs) {
+  const normalized = normalizePath(path, platform)
+  if (platform === 'windows') {
     // UNC path: key on \\server\share; otherwise on the drive letter.
-    if (normalized.startsWith('\\\\')) {
-      const parts = normalized.slice(2).split('\\')
-      return `\\\\${parts[0] ?? ''}\\${parts[1] ?? ''}`
+    if (normalized.startsWith(UNC_PREFIX)) {
+      const parts = normalized.slice(UNC_PREFIX.length).split('\\')
+      return `${UNC_PREFIX}${parts[0] ?? ''}\\${parts[1] ?? ''}`
     }
-    return normalized.slice(0, 2)
+    return normalized.slice(0, WINDOWS_DRIVE_PREFIX_LENGTH)
   }
   // POSIX: `/Volumes/name` is its own mount; everything else keys on `/`.
   const parts = normalized.split('/').filter(Boolean)
@@ -111,7 +119,7 @@ export function resolveDropKind(
   modifiers: DropModifiers,
   sourceDir: string,
   destinationDir: string,
-  os: PlatformOs = detectPlatformOs(),
+  platform: PlatformOs = detectPlatformOs(),
 ): DropKind {
   if (modifiers.ctrlKey) {
     return 'copy'
@@ -119,7 +127,7 @@ export function resolveDropKind(
   if (modifiers.shiftKey) {
     return 'move'
   }
-  return sameVolume(sourceDir, destinationDir, os) ? 'move' : 'copy'
+  return sameVolume(sourceDir, destinationDir, platform) ? 'move' : 'copy'
 }
 
 /**
@@ -130,27 +138,27 @@ export function resolveDropKind(
 export function canDropInto(
   payload: DragPayload | null,
   destinationDir: string,
-  os: PlatformOs = detectPlatformOs(),
+  platform: PlatformOs = detectPlatformOs(),
 ): boolean {
   if (!payload || payload.kind !== 'file-transfer' || payload.items.length === 0) {
     return false
   }
   // Same directory: a move would be a no-op and a copy would collide with the
   // originals, so treat dropping onto the source folder as invalid.
-  if (normalizedEqual(destinationDir, payload.sourceDir, os)) {
+  if (normalizedEqual(destinationDir, payload.sourceDir, platform)) {
     return false
   }
   for (const item of payload.items) {
     // Dropping a folder into itself (or its own subtree) is impossible.
-    if (item.isDir && isSameOrDescendant(destinationDir, item.path, os)) {
+    if (item.isDir && isSameOrDescendant(destinationDir, item.path, platform)) {
       return false
     }
   }
   return true
 }
 
-function normalizedEqual(a: string, b: string, os: PlatformOs) {
-  return normalizePath(a, os) === normalizePath(b, os)
+function normalizedEqual(leftPath: string, rightPath: string, platform: PlatformOs) {
+  return normalizePath(leftPath, platform) === normalizePath(rightPath, platform)
 }
 
 /**
@@ -162,13 +170,13 @@ export async function performDrop(
   payload: DragPayload | null,
   destinationDir: string,
   modifiers: DropModifiers,
-  os: PlatformOs = detectPlatformOs(),
+  platform: PlatformOs = detectPlatformOs(),
 ): Promise<string | null> {
-  if (!payload || !canDropInto(payload, destinationDir, os)) {
+  if (!payload || !canDropInto(payload, destinationDir, platform)) {
     return null
   }
   if (payload.kind !== 'file-transfer') return null
-  const kind = resolveDropKind(modifiers, payload.sourceDir, destinationDir, os)
+  const kind = resolveDropKind(modifiers, payload.sourceDir, destinationDir, platform)
   return startOp({
     kind,
     destinationDir,

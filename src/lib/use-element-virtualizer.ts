@@ -6,6 +6,9 @@ import {
   observeElementRect,
 } from '@tanstack/react-virtual'
 
+const INITIAL_VIEWPORT_HEIGHT_PX = 480
+const DEFAULT_OVERSCAN_ROWS = 10
+
 type ElementVirtualizerOptions = {
   count: number
   estimateSize: (index: number) => number
@@ -29,9 +32,9 @@ export function useElementVirtualizer(options: ElementVirtualizerOptions) {
         scrollToFn: elementScroll,
         initialRect: {
           width: 0,
-          height: 480,
+          height: INITIAL_VIEWPORT_HEIGHT_PX,
         },
-        overscan: options.overscan ?? 10,
+        overscan: options.overscan ?? DEFAULT_OVERSCAN_ROWS,
         paddingStart: options.padding ?? 0,
         paddingEnd: options.padding ?? 0,
         onChange: () => {
@@ -49,9 +52,9 @@ export function useElementVirtualizer(options: ElementVirtualizerOptions) {
     scrollToFn: elementScroll,
     initialRect: {
       width: 0,
-      height: 480,
+      height: INITIAL_VIEWPORT_HEIGHT_PX,
     },
-    overscan: options.overscan ?? 10,
+    overscan: options.overscan ?? DEFAULT_OVERSCAN_ROWS,
     paddingStart: options.padding ?? 0,
     paddingEnd: options.padding ?? 0,
     onChange: () => {
@@ -75,9 +78,7 @@ export function useElementVirtualizer(options: ElementVirtualizerOptions) {
   // uses (`estimateSize: () => rowHeightPx` / `treeRowHeight`), there is
   // nothing stale to correct. `measurementKey` is the narrow exception for a
   // real fixed-height change such as Icons -> Thumbnails. A full remeasure on every row-count change was
-  // wasted work that scaled with total rendered rows on every page load
-  // (Functional Requirement 11 / Phase 4 acceptance: "fixed-height row-count
-  // changes must not trigger full measurement resets").
+  // wasted work that scaled with total rendered rows on every page load.
 
   return instance
 }

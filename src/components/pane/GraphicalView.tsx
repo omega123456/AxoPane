@@ -24,6 +24,14 @@ import type { PaneViewMode } from '@/lib/pane-view'
 import type { InlineRenameState } from '@/stores/inline-rename-store'
 import type { PaneState } from '@/types/pane'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
+import { BOTH_SIDES } from '@/lib/numbers'
+
+const THUMBNAIL_OVERSCAN_ROWS = 2
+const ICON_OVERSCAN_ROWS = 4
+/** Rows rendered before the virtualizer has measured its scroll element. */
+const UNMEASURED_FALLBACK_ROWS = 8
+const FALLBACK_VIEWPORT_HEIGHT_PX = 480
+const THUMBNAIL_PREFETCH_ROWS = 2
 
 export type GraphicalViewHandle = {
   scrollToEntry: (index: number) => void
@@ -107,14 +115,14 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
       count: rowCount,
       getScrollElement: () => scrollRef.current,
       estimateSize: () => grid.rowPitch,
-      overscan: mode === 'thumbnails' ? 2 : 4,
+      overscan: mode === 'thumbnails' ? THUMBNAIL_OVERSCAN_ROWS : ICON_OVERSCAN_ROWS,
       measurementKey: grid.rowPitch,
     })
     const virtualRows = rowVirtualizer.getVirtualItems()
     const rowsToRender =
       virtualRows.length > 0 || rowCount === 0
         ? virtualRows
-        : Array.from({ length: Math.min(rowCount, 8) }, (_, index) => ({
+        : Array.from({ length: Math.min(rowCount, UNMEASURED_FALLBACK_ROWS) }, (_, index) => ({
             key: `visual-row-${index}`,
             index,
             start: index * grid.rowPitch,
@@ -182,7 +190,8 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
           const gridWidth = scrollRef.current?.clientWidth || width
           const gridPaddingPx = PANE_GRID_GAP
           const cardWidth =
-            (gridWidth - gridPaddingPx * 2 - PANE_GRID_GAP * (grid.columns - 1)) / grid.columns
+            (gridWidth - gridPaddingPx * BOTH_SIDES - PANE_GRID_GAP * (grid.columns - 1)) /
+            grid.columns
           const cardHeight = grid.rowPitch - gridPaddingPx
           const rectRight = rect.left + rect.width
           const rectBottom = rect.top + rect.height
@@ -230,15 +239,18 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
     useEffect(() => {
       if (mode !== 'thumbnails' || !onThumbnailRangeChange || pane.entries.length === 0) return
       const element = scrollRef.current
-      const viewportHeight = element?.clientHeight || element?.getBoundingClientRect().height || 480
+      const viewportHeight =
+        element?.clientHeight ||
+        element?.getBoundingClientRect().height ||
+        FALLBACK_VIEWPORT_HEIGHT_PX
       const scrollTop = element?.scrollTop ?? 0
       const firstRow = Math.max(0, Math.floor(scrollTop / grid.rowPitch))
       const lastRow = Math.min(
         rowCount - 1,
         Math.max(firstRow, Math.ceil((scrollTop + viewportHeight) / grid.rowPitch) - 1),
       )
-      const prefetchFirstRow = Math.max(0, firstRow - 2)
-      const prefetchLastRow = Math.min(rowCount - 1, lastRow + 2)
+      const prefetchFirstRow = Math.max(0, firstRow - THUMBNAIL_PREFETCH_ROWS)
+      const prefetchLastRow = Math.min(rowCount - 1, lastRow + THUMBNAIL_PREFETCH_ROWS)
       onThumbnailRangeChange({
         visibleStart: firstRow * grid.columns,
         visibleEnd: Math.min(pane.entries.length - 1, (lastRow + 1) * grid.columns - 1),

@@ -44,7 +44,7 @@ pub use model::{
 use view::SessionView;
 
 /// Identifies one pane+tab so `begin_navigation`/`release_session` can be
-/// scoped precisely (Phase 3 keeps at most one active session *per pane*, but
+/// scoped precisely (at most one session is active *per pane*, but
 /// the tab id is still carried and validated so a release/range request can
 /// never accidentally cross tabs within the same pane).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -274,7 +274,7 @@ impl DirectorySessionService {
     /// valid page index may be requested repeatedly (forward or backward) and
     /// returns identical content while the baseline stays current; a stale
     /// baseline field (session/navigation/watch/view) is rejected rather than
-    /// served (Functional Requirement 1).
+    /// served.
     pub fn get_range(
         &self,
         request: &GetSessionRangeRequest,
@@ -384,8 +384,7 @@ impl DirectorySessionService {
     /// [`crate::watch::coordinator::CompactedBatch::Targeted`]) to the active
     /// session for `pane_id`, if any, and if the on-disk `path` still matches
     /// that session's path (a stale/superseded watch reporting against an old
-    /// path is a silent no-op, per Functional Requirement 5's "only current
-    /// generations may publish").
+    /// path is a silent no-op: only current generations may publish).
     ///
     /// Updates the unfiltered snapshot, re-derives the view, bumps the watch
     /// and view revisions, and classifies the resulting change into the
@@ -471,7 +470,7 @@ impl DirectorySessionService {
         })
     }
 
-    /// Applies a `metadata-only` update (Phase 8 reuse target): fields on an
+    /// Applies a `metadata-only` update: fields on an
     /// already-visible row change without affecting sort/filter membership
     /// or position. The caller is responsible for confirming the change does
     /// not alter ordering (e.g. it does not touch the active sort key's
@@ -504,8 +503,7 @@ impl DirectorySessionService {
 
     /// Forces a `replace-view` patch for `pane_id` by resnapshotting the
     /// directory from disk (used when a watch coordinator overflow marks a
-    /// watch dirty — Functional Requirement 2's "schedule one authoritative
-    /// resnapshot"). Returns `None` if there is no active session or the
+    /// watch dirty, scheduling one authoritative resnapshot). Returns `None` if there is no active session or the
     /// resnapshot fails (the caller should fall back to leaving the session
     /// as-is; a later navigation/explicit refresh will recover it).
     pub fn resnapshot(&self, pane_id: &PaneId) -> Option<SessionPatch> {

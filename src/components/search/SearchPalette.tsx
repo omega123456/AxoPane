@@ -22,6 +22,7 @@ import { isSearchable, useSearchPaletteStore } from '@/stores/search-palette-sto
 
 const ROW_HEIGHT = 44
 const PAGE_ROWS = 8
+const UNMEASURED_FALLBACK_ROWS = PAGE_ROWS + PAGE_ROWS
 const MAX_RECENTS = 6
 const LISTBOX_ID = 'search-everywhere-results'
 const SCOPES: { scope: SearchScope; label: string }[] = [
@@ -108,7 +109,7 @@ function SearchPaletteFlyout() {
   const foldersOnly = capabilities?.foldersOnly ?? backend === 'macIndex'
   const searching = status !== 'idle'
   const shortcut = keymap.searchEverywhere[0]
-  const os = detectPlatformOs()
+  const platform = detectPlatformOs()
 
   const favouriteRows = useMemo(
     () => favourites.map((path) => folderRow(path, favouriteNames[path] ?? favouriteLabel(path))),
@@ -139,7 +140,7 @@ function SearchPaletteFlyout() {
   const virtualRows =
     measuredRows.length > 0 || rowCount === 0
       ? measuredRows
-      : Array.from({ length: Math.min(rowCount, PAGE_ROWS * 2) }, (_, index) => ({
+      : Array.from({ length: Math.min(rowCount, UNMEASURED_FALLBACK_ROWS) }, (_, index) => ({
           index,
           start: index * ROW_HEIGHT,
         }))
@@ -299,7 +300,7 @@ function SearchPaletteFlyout() {
           />
           {shortcut ? (
             <kbd className="shrink-0 rounded-control border border-light-divider px-1.5 font-ui text-caption text-light-text-tertiary dark:border-dark-divider dark:text-dark-text-tertiary">
-              {formatShortcutLabel(shortcut, os)}
+              {formatShortcutLabel(shortcut, platform)}
             </kbd>
           ) : null}
           {status === 'loading' ? (

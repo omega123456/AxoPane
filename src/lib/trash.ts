@@ -1,4 +1,5 @@
 import type { DirectoryEntry, TrashEntry } from '@/lib/types/ipc'
+import { fromUnixTime } from 'date-fns'
 
 /**
  * Virtual, non-filesystem path used to navigate a pane to the trash browser.
@@ -22,7 +23,7 @@ export function trashEntryToDirectoryEntry(entry: TrashEntry): DirectoryEntry {
     sizeBytes: entry.sizeBytes,
     itemCount: null,
     typeLabel: entry.isDir ? 'Folder' : 'File',
-    modifiedAt: entry.deletedAt === null ? null : new Date(entry.deletedAt * 1000).toISOString(),
+    modifiedAt: entry.deletedAt === null ? null : fromUnixTime(entry.deletedAt).toISOString(),
     createdAt: null,
     attributes: [],
     isHidden: false,

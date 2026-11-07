@@ -187,7 +187,14 @@ function sumLayoutWidths(
   }, 0)
 }
 
-function findShortestFittingLabels(args: {
+function findShortestFittingLabels({
+  segments,
+  floorLengths,
+  availableWidth,
+  segmentMeasure,
+  currentSegmentMeasure,
+  keepLastFull = false,
+}: {
   segments: BreadcrumbSourceSegment[]
   floorLengths: number[]
   availableWidth: number
@@ -195,15 +202,6 @@ function findShortestFittingLabels(args: {
   currentSegmentMeasure: (label: string) => number
   keepLastFull?: boolean
 }): string[] | null | 'invalid' {
-  const {
-    segments,
-    floorLengths,
-    availableWidth,
-    segmentMeasure,
-    currentSegmentMeasure,
-    keepLastFull = false,
-  } = args
-
   const maxCut = Math.max(
     ...segments.map((segment, index) => {
       const isLockedLast = keepLastFull && index === segments.length - 1
@@ -238,14 +236,19 @@ function findShortestFittingLabels(args: {
   return null
 }
 
-function expandLabelsToFillAvailableWidth(args: {
+function expandLabelsToFillAvailableWidth({
+  segments,
+  labels,
+  availableWidth,
+  segmentMeasure,
+  currentSegmentMeasure,
+}: {
   segments: BreadcrumbSourceSegment[]
   labels: string[]
   availableWidth: number
   segmentMeasure: (label: string) => number
   currentSegmentMeasure: (label: string) => number
 }) {
-  const { segments, labels, availableWidth, segmentMeasure, currentSegmentMeasure } = args
   const expandedLabels = [...labels]
 
   while (true) {

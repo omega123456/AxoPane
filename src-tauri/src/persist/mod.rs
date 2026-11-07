@@ -10,6 +10,8 @@ use crossbeam_channel::{bounded, RecvTimeoutError, Sender};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+const FLUSH_DEBOUNCE: Duration = Duration::from_millis(200);
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
@@ -306,7 +308,7 @@ where
     pub fn load(path: PathBuf, debounce: Duration) -> Result<Self, PersistError> {
         let value: T = load_json_or_default(&path)?;
         let value = Arc::new(Mutex::new(value));
-        let (flush_wake, flush_rx) = bounded(1);
+        let (flush_wake, flush_receiver) = bounded(1);
         let worker_path = path.clone();
         let worker_value = Arc::clone(&value);
         thread::Builder::new()
@@ -315,9 +317,9 @@ where
                 // One worker per durable store, with a one-message wake
                 // queue. A burst resets the debounce window without creating
                 // threads or retaining an unbounded series of writes.
-                while flush_rx.recv().is_ok() {
+                while flush_receiver.recv().is_ok() {
                     loop {
-                        match flush_rx.recv_timeout(debounce) {
+                        match flush_receiver.recv_timeout(debounce) {
                             Ok(()) => continue,
                             Err(RecvTimeoutError::Timeout) => {
                                 let snapshot = worker_value
@@ -381,14 +383,8 @@ impl PersistenceState {
         fs::create_dir_all(config_dir)?;
 
         Ok(Self {
-            config: PersistedStore::load(
-                config_dir.join("config.json"),
-                Duration::from_millis(200),
-            )?,
-            session: PersistedStore::load(
-                config_dir.join("session.json"),
-                Duration::from_millis(200),
-            )?,
+            config: PersistedStore::load(config_dir.join("config.json"), FLUSH_DEBOUNCE)?,
+            session: PersistedStore::load(config_dir.join("session.json"), FLUSH_DEBOUNCE)?,
         })
     }
 }

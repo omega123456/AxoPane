@@ -134,11 +134,11 @@ impl PersistentHelper {
         let stdin = child.stdin.take().ok_or(HelperFailure::Crashed)?;
         let stdout = child.stdout.take().ok_or(HelperFailure::Crashed)?;
         let child = Arc::new(Mutex::new(child));
-        let (request_tx, request_rx) = mpsc::sync_channel(1);
-        let (response_tx, response_rx) = mpsc::sync_channel(1);
+        let (request_sender, request_receiver) = mpsc::sync_channel(1);
+        let (response_sender, response_receiver) = mpsc::sync_channel(1);
         thread::spawn(move || {
             let mut writer = BufWriter::new(stdin);
-            while let Ok(request) = request_rx.recv() {
+            while let Ok(request) = request_receiver.recv() {
                 if write_frame(&mut writer, &request).is_err() {
                     break;
                 }
@@ -149,14 +149,14 @@ impl PersistentHelper {
             loop {
                 let response = read_frame(&mut reader).map_err(|_| HelperFailure::Malformed);
                 let failed = response.is_err();
-                if response_tx.send(response).is_err() || failed {
+                if response_sender.send(response).is_err() || failed {
                     break;
                 }
             }
         });
         Ok(Self {
-            requests: request_tx,
-            responses: response_rx,
+            requests: request_sender,
+            responses: response_receiver,
             child,
         })
     }

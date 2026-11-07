@@ -174,7 +174,7 @@ impl Drop for OwnedBitmap {
     }
 }
 
-/// Wraps PNG bytes as a `data:` URL string.
+/// Renders an `HBITMAP` to a PNG `data:` URL.
 pub(crate) fn bitmap_to_data_url(bitmap: HBITMAP) -> Option<String> {
     let bitmap_bytes = bitmap_to_png_bytes(bitmap)?;
     Some(format!(
@@ -331,7 +331,7 @@ fn encode_rgba_png(width: u32, height: u32, rgba_pixels: &[u8]) -> Option<Vec<u8
 /// Converts premultiplied BGRA bytes (as `GetDIBits` returns for 32bpp) to
 /// straight-alpha RGBA for PNG encoding.
 pub(crate) fn bgra_to_rgba(pixels: &[u8]) -> Option<Vec<u8>> {
-    if pixels.len() % 4 != 0 {
+    if !pixels.len().is_multiple_of(4) {
         return None;
     }
 

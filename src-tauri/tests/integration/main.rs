@@ -68,6 +68,7 @@ pub mod ops_private_integration;
 pub mod ops_queue_integration;
 pub use ops_private_integration::ops_single_file_progress_throttle_integration;
 pub mod ops_state_methods_integration;
+pub mod path_text_integration;
 pub mod persist_defaults_integration;
 pub mod persist_storage_integration;
 pub mod reconcile_coordinator_integration;

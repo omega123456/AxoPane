@@ -8,6 +8,7 @@ import type {
   LayoutConfig,
   ZoomLevel,
 } from '@/lib/types/ipc'
+import { PERCENT_SCALE, percentToFraction } from '@/lib/numbers'
 
 export const zoomLevels: ZoomLevel[] = ['80', '90', '100', '110', '120', '125', '150']
 
@@ -15,7 +16,7 @@ function applyZoom(zoom: ZoomLevel) {
   if (typeof document === 'undefined') {
     return
   }
-  const factor = Number(zoom) / 100
+  const factor = percentToFraction(Number(zoom))
   const root = document.documentElement
   root.style.setProperty('zoom', String(factor))
   // `zoom` scales rendered size but `100vh` still resolves to the unzoomed
@@ -24,7 +25,7 @@ function applyZoom(zoom: ZoomLevel) {
   // the root height so its rendered height (height * factor) stays exactly one
   // viewport, then chain an explicit height through body/#root so the app shell
   // fills it. Runtime geometry only — no static token can express 100/factor.
-  root.style.height = `${100 / factor}vh`
+  root.style.height = `${PERCENT_SCALE / factor}vh`
   document.body.style.height = '100%'
   const appRoot = document.getElementById('root')
   if (appRoot) {

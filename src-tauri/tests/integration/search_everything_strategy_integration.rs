@@ -35,7 +35,7 @@ impl Source {
             .lock()
             .unwrap()
             .iter()
-            .map(|q| q.search.clone())
+            .map(|query| query.search.clone())
             .collect()
     }
 }
@@ -75,7 +75,7 @@ const ALL: SearchOptions = SearchOptions {
     scope: SearchScope::All,
 };
 
-fn q(raw: &str) -> ParsedQuery {
+fn parsed(raw: &str) -> ParsedQuery {
     parse(raw, PathStyle::Windows, Some(r"C:\Users\alex")).expect("query")
 }
 
@@ -85,17 +85,21 @@ fn run(source: &Source, raw: &str) -> Result<CandidateBatch, SearchError> {
         cancelled: &never,
         expired: &never,
     };
-    candidates(source, &q(raw), &ALL, &control)
+    candidates(source, &parsed(raw), &ALL, &control)
 }
 
 fn paths(batch: &CandidateBatch) -> Vec<&str> {
-    batch.candidates.iter().map(|c| c.path.as_str()).collect()
+    batch
+        .candidates
+        .iter()
+        .map(|candidate| candidate.path.as_str())
+        .collect()
 }
 
 #[test]
 fn passes_run_strictest_first_and_merge_without_duplicates() {
-    let source = Source::new(|q| {
-        Ok(if q.search.starts_with("startwith") {
+    let source = Source::new(|query| {
+        Ok(if query.search.starts_with("startwith") {
             result(&[(r"C:\a\invoice.pdf", false)], 1)
         } else {
             result(
@@ -116,14 +120,14 @@ fn passes_run_strictest_first_and_merge_without_duplicates() {
 #[test]
 fn the_fuzzy_pass_is_skipped_when_strict_passes_found_plenty() {
     let many: Vec<String> = (0..FUZZY_PASS_THRESHOLD)
-        .map(|i| format!(r"C:\x\invoice-{i}"))
+        .map(|index| format!(r"C:\x\invoice-{index}"))
         .collect();
     let source = Source::new(move |_| {
-        let refs: Vec<(&str, bool)> = many.iter().map(|p| (p.as_str(), false)).collect();
+        let refs: Vec<(&str, bool)> = many.iter().map(|path| (path.as_str(), false)).collect();
         Ok(result(&refs, refs.len() as u32))
     });
     run(&source, "invoice").expect("batch");
-    assert!(source.searches().iter().all(|s| !s.contains('*')));
+    assert!(source.searches().iter().all(|search| !search.contains('*')));
 }
 
 #[test]
@@ -134,9 +138,11 @@ fn more_matches_than_returned_mark_the_batch_truncated() {
 
 #[test]
 fn a_full_cap_stops_further_passes() {
-    let full: Vec<String> = (0..5_000).map(|i| format!(r"C:\x\invoice-{i}")).collect();
+    let full: Vec<String> = (0..5_000)
+        .map(|index| format!(r"C:\x\invoice-{index}"))
+        .collect();
     let source = Source::new(move |_| {
-        let refs: Vec<(&str, bool)> = full.iter().map(|p| (p.as_str(), false)).collect();
+        let refs: Vec<(&str, bool)> = full.iter().map(|path| (path.as_str(), false)).collect();
         Ok(result(&refs, 5_000))
     });
     let batch = run(&source, "invoice").expect("batch");
@@ -155,7 +161,7 @@ fn cancellation_errors_and_an_expired_budget_keeps_partial_results() {
         expired: &no,
     };
     assert_eq!(
-        candidates(&source, &q("invoice"), &ALL, &cancelled),
+        candidates(&source, &parsed("invoice"), &ALL, &cancelled),
         Err(SearchError::Cancelled)
     );
 
@@ -168,7 +174,7 @@ fn cancellation_errors_and_an_expired_budget_keeps_partial_results() {
         cancelled: &no,
         expired: &after_one,
     };
-    let batch = candidates(&source, &q("invoice"), &ALL, &expiring).expect("partial");
+    let batch = candidates(&source, &parsed("invoice"), &ALL, &expiring).expect("partial");
     assert!(batch.truncated);
     assert_eq!(paths(&batch), [r"C:\a\invoice"]);
 }
@@ -181,8 +187,8 @@ fn backend_errors_propagate() {
 
 #[test]
 fn unanchored_browsing_lists_children_of_the_best_matching_folders() {
-    let source = Source::new(|q| {
-        Ok(if q.search.contains("parent:") {
+    let source = Source::new(|query| {
+        Ok(if query.search.contains("parent:") {
             result(
                 &[
                     (r"C:\Users\alex\Desktop", true),

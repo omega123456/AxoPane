@@ -1,5 +1,5 @@
 //! The cross-subsystem resource coordinator: one fixed-size, globally
-//! bounded admission service that later phases (directory sessions, size
+//! bounded admission service that subsystems (directory sessions, size
 //! scheduling, transfer/ops, native-menu warm discovery) submit work
 //! through instead of each owning an independent thread pool.
 //!
@@ -225,7 +225,7 @@ enum Message {
 }
 
 struct Inner {
-    tx: Sender<Message>,
+    sender: Sender<Message>,
     next_id: AtomicU64,
     /// Guarded purely so `pending_len` (test-only introspection) can read
     /// queue depth without sending a round-trip message through the
@@ -240,13 +240,13 @@ impl Inner {
         // Best-effort: if the dispatcher has already shut down the channel
         // is closed and there is nothing left to release against (shutdown
         // itself drains all occupancy).
-        let _ = self.tx.send(Message::Release { id });
+        let _ = self.sender.send(Message::Release { id });
     }
 }
 
 /// The process-wide resource coordinator. Constructed once (e.g. as Tauri
 /// managed state, `Arc<ResourceCoordinator>`, alongside `VolumeRegistry`)
-/// and shared by every subsystem that later phases migrate onto it.
+/// and shared by every subsystem that submits work through it.
 pub struct ResourceCoordinator {
     inner: Arc<Inner>,
     dispatcher: Mutex<Option<JoinHandle<()>>>,
@@ -260,18 +260,18 @@ impl Default for ResourceCoordinator {
 
 impl ResourceCoordinator {
     pub fn new() -> Self {
-        let (tx, rx) = unbounded::<Message>();
+        let (sender, receiver) = unbounded::<Message>();
         let state = Arc::new(Mutex::new(SchedulerState::default()));
         let dispatcher_state = Arc::clone(&state);
 
         let dispatcher = std::thread::Builder::new()
             .name("resource-coordinator".to_string())
-            .spawn(move || run_dispatcher(rx, dispatcher_state))
+            .spawn(move || run_dispatcher(receiver, dispatcher_state))
             .expect("failed to spawn resource coordinator dispatcher thread");
 
         Self {
             inner: Arc::new(Inner {
-                tx,
+                sender,
                 next_id: AtomicU64::new(1),
                 state_for_introspection: state,
             }),
@@ -307,26 +307,26 @@ impl ResourceCoordinator {
             coalesce_key: spec.coalesce_key,
         };
 
-        let (reply_tx, reply_rx) = bounded(1);
+        let (reply_sender, reply_receiver) = bounded(1);
         // A closed dispatcher channel (post-shutdown) means the coordinator
         // is gone; report that directly rather than blocking forever on a
         // reply that will never arrive.
         if self
             .inner
-            .tx
+            .sender
             .send(Message::Submit {
                 request,
-                reply: reply_tx,
+                reply: reply_sender,
             })
             .is_err()
         {
-            let (immediate_tx, immediate_rx) = bounded(1);
-            let _ = immediate_tx.send(Err(SubmitError::ShuttingDown));
+            let (immediate_sender, immediate_receiver) = bounded(1);
+            let _ = immediate_sender.send(Err(SubmitError::ShuttingDown));
             return (
                 id,
                 AdmissionAwait {
                     id,
-                    reply_rx: immediate_rx,
+                    reply_receiver: immediate_receiver,
                     coordinator: Arc::clone(&self.inner),
                 },
             );
@@ -336,7 +336,7 @@ impl ResourceCoordinator {
             id,
             AdmissionAwait {
                 id,
-                reply_rx,
+                reply_receiver,
                 coordinator: Arc::clone(&self.inner),
             },
         )
@@ -355,13 +355,13 @@ impl ResourceCoordinator {
     /// than being blocked behind job *execution* (which happens entirely
     /// outside the coordinator).
     pub fn cancel(&self, id: JobId) {
-        let (reply_tx, reply_rx) = bounded(1);
+        let (reply_sender, reply_receiver) = bounded(1);
         if self
             .inner
-            .tx
+            .sender
             .send(Message::CancelQueued {
                 id,
-                reply: reply_tx,
+                reply: reply_sender,
             })
             .is_err()
         {
@@ -370,7 +370,7 @@ impl ResourceCoordinator {
         // If it was not queued (already granted, or unknown), fall back to
         // a release — this makes `cancel` safe to call regardless of
         // whether the caller knows the job's current phase.
-        if let Ok(false) = reply_rx.recv() {
+        if let Ok(false) = reply_receiver.recv() {
             self.inner.release(id);
         }
     }
@@ -410,17 +410,19 @@ impl ResourceCoordinator {
             return;
         };
 
-        let (reply_tx, reply_rx) = bounded(1);
+        let (reply_sender, reply_receiver) = bounded(1);
         if self
             .inner
-            .tx
-            .send(Message::Shutdown { reply: reply_tx })
+            .sender
+            .send(Message::Shutdown {
+                reply: reply_sender,
+            })
             .is_ok()
         {
             // Wait for the dispatcher to acknowledge it has drained all
             // state before joining, so no caller can observe a shutdown
             // that raced ahead of queued-job cancellation.
-            let _ = reply_rx.recv();
+            let _ = reply_receiver.recv();
         }
 
         // Join unconditionally: even if the send failed (channel already
@@ -440,7 +442,7 @@ impl Drop for ResourceCoordinator {
 /// admission decision.
 pub struct AdmissionAwait {
     id: JobId,
-    reply_rx: Receiver<Result<JobId, SubmitError>>,
+    reply_receiver: Receiver<Result<JobId, SubmitError>>,
     coordinator: Arc<Inner>,
 }
 
@@ -452,7 +454,7 @@ impl AdmissionAwait {
     /// Blocks until the job is granted, cancelled, or the coordinator shuts
     /// down.
     pub fn recv(self) -> Result<JobHandle, SubmitError> {
-        match self.reply_rx.recv() {
+        match self.reply_receiver.recv() {
             Ok(Ok(id)) => Ok(JobHandle {
                 id,
                 coordinator: self.coordinator,
@@ -472,7 +474,7 @@ impl AdmissionAwait {
     /// without an unbounded wait; production callers should generally
     /// prefer [`AdmissionAwait::recv`].
     pub fn recv_timeout(self, timeout: Duration) -> Result<Result<JobHandle, SubmitError>, Self> {
-        match self.reply_rx.recv_timeout(timeout) {
+        match self.reply_receiver.recv_timeout(timeout) {
             Ok(Ok(id)) => Ok(Ok(JobHandle {
                 id,
                 coordinator: self.coordinator,
@@ -492,14 +494,14 @@ impl AdmissionAwait {
 /// construction (only this thread ever touches `state`'s admission
 /// decisions), which is what makes every reservation atomic without needing
 /// per-call locking gymnastics from callers.
-fn run_dispatcher(rx: Receiver<Message>, state: Arc<Mutex<SchedulerState>>) {
+fn run_dispatcher(receiver: Receiver<Message>, state: Arc<Mutex<SchedulerState>>) {
     // Pending reply channels for jobs that are queued but not yet granted,
     // so a later admission or cancellation can find who to notify.
     let mut waiting_replies: std::collections::HashMap<JobId, Sender<Result<JobId, SubmitError>>> =
         std::collections::HashMap::new();
 
     loop {
-        let message = match rx.recv() {
+        let message = match receiver.recv() {
             Ok(message) => message,
             // All senders dropped (coordinator dropped without an explicit
             // shutdown reaching the channel first) — clear state and exit.

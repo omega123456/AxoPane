@@ -2,16 +2,13 @@
 //! volume discovery, native mount/unmount registrations, and cached
 //! mounted-volume identity/capability facts.
 //!
-//! Prior to this module, every `list_volumes` IPC call re-enumerated the
-//! platform and `VolumeMonitorService` separately owned the native
-//! Disk Arbitration session (macOS) / shell change-notification window
-//! (Windows) purely to re-emit `VOLUMES_CHANGED`. `VolumeRegistry` folds
-//! both responsibilities into one revisioned snapshot: native events and the
+//! `VolumeRegistry` owns the native Disk Arbitration session (macOS) / shell
+//! change-notification window (Windows) and one revisioned snapshot: native
+//! events and the
 //! window-focus reconcile safety net both call [`VolumeRegistry::refresh`],
 //! which re-enumerates once, builds a new [`RegistrySnapshot`] with stable
 //! resource identities, and publishes it only if the snapshot actually
-//! changed. Readers (IPC commands, and future resource-coordinator/transfer
-//! consumers) take an immutable clone of the current snapshot via
+//! changed. Readers take an immutable clone of the current snapshot via
 //! [`VolumeRegistry::snapshot`] — no platform work happens on that path.
 
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
@@ -21,6 +18,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use super::VolumeInfo;
+use crate::path_text::{strip_unc_prefix, VERBATIM_UNC_PREFIX};
 
 #[cfg(not(feature = "test-utils"))]
 use tauri::{AppHandle, Emitter};
@@ -71,11 +69,10 @@ pub enum VolumeAvailability {
     Unknown,
 }
 
-/// Transfer capability facts a volume record carries so later phases
-/// (native transfer adapters, resource admission) do not need to
-/// re-probe the platform to answer "can this destination accept a native
-/// copy/rename". Phase 1 only populates the facts derivable from ordinary
-/// volume enumeration; deeper capability probing is a later-phase concern.
+/// Transfer capability facts a volume record carries so native transfer
+/// adapters and resource admission do not need to re-probe the platform to
+/// answer "can this destination accept a native copy/rename". Only the facts
+/// derivable from ordinary volume enumeration are populated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferCapabilityFacts {
@@ -85,8 +82,8 @@ pub struct TransferCapabilityFacts {
     /// specific transfer.
     pub supports_rename: bool,
     /// Whether the filesystem kind is known to support sparse-file-aware
-    /// copy semantics. Conservative default `false` until a real capability
-    /// probe (later phases) confirms otherwise.
+    /// copy semantics. Conservative default `false`: no capability probe
+    /// confirms otherwise.
     pub sparse_aware: bool,
 }
 
@@ -151,8 +148,7 @@ impl VolumeRecord {
 
 /// An immutable, revisioned view of the registry's current volume
 /// inventory. Cloning is cheap relative to re-enumerating the platform: it
-/// is the unit consumers (IPC commands, later phases' resource coordinator)
-/// read without triggering any native work.
+/// is the unit consumers read without triggering any native work.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistrySnapshot {
@@ -389,11 +385,11 @@ impl VolumeRegistry {
         // The spawned thread — not this call — owns publishing and clearing
         // `refresh_in_flight` for this generation. Platform enumeration is
         // not cancellable, so if this call times out below, the thread keeps
-        // running well after `rx`/`tx` are gone; it must still be able to
+        // running well after `receiver`/`sender` are gone; it must still be able to
         // publish its result and settle `refresh_in_flight` on its own,
         // rather than depending on a receiver that may already be dropped.
         let this = Arc::clone(self);
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (sender, receiver) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let snapshot = build_snapshot(generation);
             let is_latest = generation == this.generation.load(AtomicOrdering::SeqCst);
@@ -405,10 +401,10 @@ impl VolumeRegistry {
             // within the deadline. A closed receiver (caller already timed
             // out) is expected and not an error — the publish above already
             // happened regardless.
-            let _ = tx.send(());
+            let _ = sender.send(());
         });
 
-        match rx.recv_timeout(REFRESH_DEADLINE) {
+        match receiver.recv_timeout(REFRESH_DEADLINE) {
             Ok(()) => {
                 // The spawned thread already published (if it was still the
                 // latest generation) and cleared `refresh_in_flight` itself.
@@ -589,20 +585,16 @@ fn to_record(info: &VolumeInfo, now_ms: u64) -> VolumeRecord {
 ///   long-path form) normalize to a `UncShare` identity keyed on
 ///   lowercased `server\share`, with both the plain and `\\?\UNC\` forms
 ///   recorded as aliases so either resolves to the same record.
-/// - Windows drive-letter roots use a `FallbackRoot` identity in Phase 1:
-///   resolving the true volume GUID requires `GetVolumeNameForVolumeMountPointW`,
-///   which is deferred to a later phase's deeper capability probing: it is
-///   deliberately not invented here so the identity strength described in
-///   `kind` stays honest. The Windows platform bullet in the plan expects a
-///   GUID identity when it is confirmed; until that probe exists, the
-///   fallback root is explicit rather than presented as GUID-backed.
+/// - Windows drive-letter roots use a `FallbackRoot` identity: resolving the
+///   true volume GUID requires `GetVolumeNameForVolumeMountPointW`, which is
+///   not probed, so the fallback root is explicit rather than presented as
+///   GUID-backed and the identity strength described in `kind` stays honest.
 /// - macOS mount roots use a `FallbackRoot` identity for the same reason:
 ///   resolving a true APFS volume UUID requires a `DiskArbitration`/`statfs`
 ///   probe not yet wired into ordinary enumeration.
 ///
-/// This keeps the identity contract honest today (no fabricated GUID/UUID)
-/// while establishing the exact shape (`kind` + `resource_key` + `aliases`)
-/// later phases extend once the platform probes are added.
+/// This keeps the identity contract honest (no fabricated GUID/UUID) while
+/// fixing its shape (`kind` + `resource_key` + `aliases`).
 fn resolve_identity(info: &VolumeInfo) -> (VolumeResourceKind, String, Vec<String>) {
     let mount_root = info.mount_root.as_str();
 
@@ -613,7 +605,7 @@ fn resolve_identity(info: &VolumeInfo) -> (VolumeResourceKind, String, Vec<Strin
             share.to_ascii_lowercase()
         );
         let plain_alias = format!("\\\\{server}\\{share}");
-        let long_alias = format!("\\\\?\\UNC\\{server}\\{share}");
+        let long_alias = format!("{VERBATIM_UNC_PREFIX}{server}\\{share}");
         let mut aliases = vec![plain_alias, long_alias];
         aliases.retain(|alias| alias != mount_root);
         return (VolumeResourceKind::UncShare, key, aliases);
@@ -633,9 +625,7 @@ fn resolve_identity(info: &VolumeInfo) -> (VolumeResourceKind, String, Vec<Strin
 fn parse_unc_share(path: &str) -> Option<(String, String)> {
     let trimmed = path.trim();
 
-    let after_prefix = trimmed
-        .strip_prefix("\\\\?\\UNC\\")
-        .or_else(|| trimmed.strip_prefix("\\\\"))?;
+    let after_prefix = strip_unc_prefix(trimmed)?;
 
     let mut parts = after_prefix
         .split(['\\', '/'])

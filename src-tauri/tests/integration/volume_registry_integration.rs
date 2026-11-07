@@ -71,7 +71,7 @@ fn simulated_add_event_increments_revision_and_updates_the_snapshot() {
     assert!(after
         .volumes
         .iter()
-        .any(|v| v.primary_path == "/Volumes/added-drive"));
+        .any(|volume| volume.primary_path == "/Volumes/added-drive"));
 }
 
 #[test]

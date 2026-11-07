@@ -123,7 +123,7 @@ impl FolderSizeTree {
             || self
                 .roots
                 .iter()
-                .any(|&r| Path::new(&*self.node(r).name) == path)
+                .any(|&root| Path::new(&*self.node(root).name) == path)
         {
             return false;
         }
@@ -191,7 +191,7 @@ impl FolderSizeTree {
 
         let mut listed: Vec<Box<str>> = subdirs
             .iter()
-            .map(|s| s.as_ref().to_string_lossy().into())
+            .map(|subdir| subdir.as_ref().to_string_lossy().into())
             .collect();
         listed.sort();
         listed.dedup();
@@ -200,7 +200,7 @@ impl FolderSizeTree {
             .children
             .iter()
             .copied()
-            .filter(|&c| listed.binary_search(&self.node(c).name).is_err())
+            .filter(|&child| listed.binary_search(&self.node(child).name).is_err())
             .collect();
         for child in stale {
             self.remove(child);
@@ -230,8 +230,10 @@ impl FolderSizeTree {
         let Some(id) = self.find(from) else {
             return false;
         };
-        let (Some(parent), Some(name)) = (to.parent().and_then(|p| self.find(p)), to.file_name())
-        else {
+        let (Some(parent), Some(name)) = (
+            to.parent().and_then(|parent_path| self.find(parent_path)),
+            to.file_name(),
+        ) else {
             return false;
         };
         if self.node(id).parent == NONE || self.is_within(parent, id) {
@@ -374,11 +376,11 @@ impl FolderSizeTree {
     ) -> Vec<PathBuf> {
         let hits = subscribed
             .into_iter()
-            .filter(|p| {
-                self.find(p.as_ref())
+            .filter(|path| {
+                self.find(path.as_ref())
                     .is_some_and(|id| self.node(id).flags & DIRTY != 0)
             })
-            .map(|p| p.as_ref().to_path_buf())
+            .map(|path| path.as_ref().to_path_buf())
             .collect();
         for id in std::mem::take(&mut self.changed) {
             self.node_mut(id).flags &= !DIRTY;
@@ -406,7 +408,7 @@ impl FolderSizeTree {
                                 .children
                                 .iter()
                                 .copied()
-                                .find(|&c| eq_fold(&self.node(c).name, &name))
+                                .find(|&child| eq_fold(&self.node(child).name, &name))
                         })
                         .flatten()
                 })?;
@@ -434,9 +436,9 @@ impl FolderSizeTree {
     fn child(&self, id: NodeId, name: &str) -> Option<NodeId> {
         let children = &self.node(id).children;
         children
-            .binary_search_by(|&c| (*self.node(c).name).cmp(name))
+            .binary_search_by(|&child| (*self.node(child).name).cmp(name))
             .ok()
-            .map(|i| children[i])
+            .map(|position| children[position])
     }
 
     fn child_or_insert(&mut self, parent: NodeId, name: Box<str>) -> NodeId {
@@ -472,7 +474,7 @@ impl FolderSizeTree {
         let slot = self
             .node(parent)
             .children
-            .partition_point(|&c| self.node(c).name < *name);
+            .partition_point(|&child| self.node(child).name < *name);
         self.node_mut(id).parent = parent;
         self.node_mut(parent).children.insert(slot, id);
     }
@@ -482,10 +484,10 @@ impl FolderSizeTree {
     fn detach(&mut self, id: NodeId, subtree: Delta) {
         let parent = self.node(id).parent;
         if parent == NONE {
-            self.roots.retain(|&r| r != id);
+            self.roots.retain(|&root| root != id);
             return;
         }
-        self.node_mut(parent).children.retain(|&c| c != id);
+        self.node_mut(parent).children.retain(|&child| child != id);
         self.bump(parent, Delta::default().minus(subtree));
     }
 
@@ -609,7 +611,8 @@ impl FolderSizeTree {
     /// so the sequence is deterministic.
     pub(crate) fn export(&self, mut visit: impl FnMut(u32, &str, u64, u8)) {
         let mut order = 0_u32;
-        let mut stack: Vec<(NodeId, u32)> = self.roots.iter().rev().map(|&r| (r, NONE)).collect();
+        let mut stack: Vec<(NodeId, u32)> =
+            self.roots.iter().rev().map(|&root| (root, NONE)).collect();
         while let Some((id, parent_order)) = stack.pop() {
             let node = self.node(id);
             visit(
@@ -618,7 +621,7 @@ impl FolderSizeTree {
                 node.direct,
                 node.flags & PERSISTED_FLAGS,
             );
-            stack.extend(node.children.iter().rev().map(|&c| (c, order)));
+            stack.extend(node.children.iter().rev().map(|&child| (child, order)));
             order += 1;
         }
     }
@@ -641,7 +644,7 @@ impl FolderSizeTree {
         } else {
             let siblings = &self.nodes.get(parent as usize)?.children;
             let slot = siblings
-                .binary_search_by(|&c| (*self.node(c).name).cmp(&name))
+                .binary_search_by(|&child| (*self.node(child).name).cmp(&name))
                 .err()?;
             self.nodes[parent as usize].children.insert(slot, id);
         }
@@ -713,8 +716,8 @@ fn normal_name(component: Component<'_>) -> Option<String> {
     }
 }
 
-fn eq_fold(a: &str, b: &str) -> bool {
-    a.chars()
+fn eq_fold(left: &str, right: &str) -> bool {
+    left.chars()
         .flat_map(char::to_lowercase)
-        .eq(b.chars().flat_map(char::to_lowercase))
+        .eq(right.chars().flat_map(char::to_lowercase))
 }

@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use file_explorer_lib::ops::{
     process_item_for_tests, ConflictResolution, OpItem, OpKind, OpProgress, OpState, OpStatus,
-    WorkerCtx,
+    WorkerContext,
 };
 
 fn replace_all_state(kind: OpKind, destination_dir: &Path, source: &Path) -> OpState {
@@ -49,24 +49,25 @@ fn replace_all_state(kind: OpKind, destination_dir: &Path, source: &Path) -> OpS
 /// Run the single item of `state` through the worker with Replace preset;
 /// returns the recorded error and completed-item count.
 fn run(state: OpState) -> (Option<String>, u64) {
-    let op_arc: &'static Arc<Mutex<OpState>> = Box::leak(Box::new(Arc::new(Mutex::new(state))));
+    let shared_operation: &'static Arc<Mutex<OpState>> =
+        Box::leak(Box::new(Arc::new(Mutex::new(state))));
     let resolver: &'static Arc<Condvar> = Box::leak(Box::new(Arc::new(Condvar::new())));
     let progress: &'static Option<Arc<dyn Fn(OpProgress) + Send + Sync>> =
         Box::leak(Box::new(None));
     let instant_now: &'static Arc<dyn Fn() -> Instant + Send + Sync> = Box::leak(Box::new(
         Arc::new(Instant::now) as Arc<dyn Fn() -> Instant + Send + Sync>,
     ));
-    let ctx = WorkerCtx {
-        op_arc,
+    let context = WorkerContext {
+        shared_operation,
         resolver,
         progress,
         start: Instant::now(),
         rate_window: Duration::from_secs(1),
         instant_now,
     };
-    let item = op_arc.lock().unwrap().items[0].clone();
-    process_item_for_tests(&ctx, &item, None);
-    let guard = op_arc.lock().unwrap();
+    let item = shared_operation.lock().unwrap().items[0].clone();
+    process_item_for_tests(&context, &item, None);
+    let guard = shared_operation.lock().unwrap();
     (guard.error_message.clone(), guard.completed_items)
 }
 

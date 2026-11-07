@@ -1,14 +1,11 @@
-//! Patch variants for Phase 5's watch-driven directory-session updates
-//! (Functional Requirement 7 / "Contract and Consistency Rules": patch modes
-//! are `delta`, `replace-view`, and `metadata-only`, each carrying the
-//! revisions required to reject stale or path-mismatched work).
+//! Patch variants for watch-driven directory-session updates: `delta`,
+//! `replace-view`, and `metadata-only`, each carrying the revisions required
+//! to reject stale or path-mismatched work.
 //!
-//! These are distinct from the legacy [`crate::watch::DirPatch`] (the v1
-//! tab-scoped `dir://patch` event, which stays byte-for-byte compatible for
-//! the un-migrated fraction of the app) — [`SessionPatch`] is the v2
-//! session/watch/view-revisioned equivalent that `directory_session`
-//! consumers (Phase 5's frontend collection, and later Phase 7's tree) can
-//! validate against their own current baseline before applying.
+//! These are distinct from [`crate::watch::DirPatch`] (the v1 tab-scoped
+//! `dir://patch` event) — [`SessionPatch`] is the session/watch/view-revisioned
+//! equivalent that `directory_session` consumers validate against their own
+//! current baseline before applying.
 
 use serde::{Deserialize, Serialize};
 
@@ -48,8 +45,8 @@ pub enum RowDelta {
 /// A `metadata-only` patch: fields on an already-loaded row change (size,
 /// item count, icon-relevant attributes) without any row ever moving pages
 /// or position. Distinct from [`RowDelta::Updated`] so a consumer can apply
-/// it as a narrow field merge rather than a full row replace, and so Phase 8
-/// (item counts) can reuse this path without implying an ordering change.
+/// it as a narrow field merge rather than a full row replace, and so item
+/// counts can reuse this path without implying an ordering change.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MetadataDelta {

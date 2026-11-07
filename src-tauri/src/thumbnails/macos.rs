@@ -35,6 +35,9 @@ const MAX_IN_FLIGHT: usize = 2;
 const COMMAND_CAPACITY: usize = 64;
 const COMPLETION_CAPACITY: usize = 8;
 const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(2);
+const SHUTDOWN_DRAIN_POLL: Duration = Duration::from_millis(10);
+/// One progressive preview plus the final representation.
+const REPLY_CAPACITY: usize = 2;
 const GENERATION_DEADLINE: Duration = Duration::from_secs(2);
 
 pub struct MacosThumbnailProvider {
@@ -122,7 +125,7 @@ impl ThumbnailProvider for MacosThumbnailProvider {
         if candidate.is_directory {
             return ThumbnailState::Unavailable;
         }
-        let (reply, result) = bounded(2);
+        let (reply, result) = bounded(REPLY_CAPACITY);
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         {
             let Ok(owner) = self.owner.lock() else {
@@ -187,12 +190,12 @@ impl ThumbnailProvider for MacosThumbnailProvider {
 
 fn owner_loop(commands: Receiver<Command>) {
     let generator = unsafe { QLThumbnailGenerator::sharedGenerator() };
-    let (completion_tx, completion_rx) = bounded::<Completion>(COMPLETION_CAPACITY);
+    let (completion_sender, completion_receiver) = bounded::<Completion>(COMPLETION_CAPACITY);
     let mut pending = HashMap::<u64, Pending>::new();
     let mut accepting = true;
     while accepting || !pending.is_empty() {
         select! {
-            recv(completion_rx) -> completion => if let Ok(completion) = completion {
+            recv(completion_receiver) -> completion => if let Ok(completion) = completion {
                 if completion.is_final {
                     if let Some(pending) = pending.remove(&completion.id) {
                         let _ = pending.reply.send(ProviderUpdate { payload: completion.payload, is_final: true });
@@ -203,7 +206,7 @@ fn owner_loop(commands: Receiver<Command>) {
             },
             recv(commands) -> command => match command {
                 Ok(Command::Generate { id, candidate, reply }) if accepting && pending.len() < MAX_IN_FLIGHT => {
-                    begin(&generator, id, candidate, reply, completion_tx.clone(), &mut pending);
+                    begin(&generator, id, candidate, reply, completion_sender.clone(), &mut pending);
                 }
                 Ok(Command::Generate { reply, .. }) => { let _ = reply.send(ProviderUpdate { payload: ProviderPayload::State(ThumbnailState::Unavailable), is_final: true }); }
                 Ok(Command::Cancel { fingerprint }) => cancel_fingerprint(&generator, &mut pending, &fingerprint),
@@ -214,7 +217,7 @@ fn owner_loop(commands: Receiver<Command>) {
                     // representation; drain only briefly, then safely close receiver state.
                     let deadline = std::time::Instant::now() + SHUTDOWN_DEADLINE;
                     while !pending.is_empty() && std::time::Instant::now() < deadline {
-                        if let Ok(completion) = completion_rx.recv_timeout(Duration::from_millis(10)) {
+                        if let Ok(completion) = completion_receiver.recv_timeout(SHUTDOWN_DRAIN_POLL) {
                             if let Some(pending) = pending.remove(&completion.id) { let _ = pending.reply.send(ProviderUpdate { payload: ProviderPayload::State(ThumbnailState::Unavailable), is_final: true }); }
                         }
                     }
@@ -230,7 +233,7 @@ fn begin(
     id: u64,
     candidate: ThumbnailCandidate,
     reply: Sender<ProviderUpdate>,
-    completion_tx: Sender<Completion>,
+    completion_sender: Sender<Completion>,
     pending: &mut HashMap<u64, Pending>,
 ) {
     let path = NSString::from_str(&candidate.fingerprint.path.to_string_lossy());
@@ -267,7 +270,7 @@ fn begin(
                 }
             };
             if is_final || matches!(payload, ProviderPayload::Frame(_)) {
-                let _ = completion_tx.try_send(Completion {
+                let _ = completion_sender.try_send(Completion {
                     id,
                     payload,
                     is_final,

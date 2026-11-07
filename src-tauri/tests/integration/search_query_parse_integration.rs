@@ -6,15 +6,19 @@ const WIN: PathStyle = PathStyle::Windows;
 const POSIX: PathStyle = PathStyle::Posix;
 
 fn ok(raw: &str, style: PathStyle, home: Option<&str>) -> ParsedQuery {
-    parse(raw, style, home).unwrap_or_else(|e| panic!("{raw:?}: {e:?}"))
+    parse(raw, style, home).unwrap_or_else(|error| panic!("{raw:?}: {error:?}"))
 }
 
 fn folder_raws(query: &ParsedQuery) -> Vec<&str> {
-    query.folder_segs.iter().map(|s| s.raw.as_str()).collect()
+    query
+        .folder_segs
+        .iter()
+        .map(|segment| segment.raw.as_str())
+        .collect()
 }
 
 fn name_raw(query: &ParsedQuery) -> Option<&str> {
-    query.name_seg.as_ref().map(|s| s.raw.as_str())
+    query.name_seg.as_ref().map(|segment| segment.raw.as_str())
 }
 
 #[test]

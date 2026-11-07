@@ -34,6 +34,7 @@ const FILTER_RANK: Record<LogDisplayFilter, number> = {
   error: 4,
 }
 
+const TIMESTAMP_FIELD_DIGITS = 2
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 /** Format an ISO timestamp as `Jun 30 12:00:00` in UTC (deterministic). */
@@ -42,7 +43,7 @@ function formatTimestamp(iso: string): string {
   if (Number.isNaN(date.getTime())) {
     return iso
   }
-  const pad = (value: number) => value.toString().padStart(2, '0')
+  const pad = (value: number) => value.toString().padStart(TIMESTAMP_FIELD_DIGITS, '0')
   return (
     `${MONTHS[date.getUTCMonth()]} ${pad(date.getUTCDate())} ` +
     `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`
@@ -137,7 +138,7 @@ export function LogViewer() {
     const threshold = FILTER_RANK[filter]
     // Newest first, then apply the severity floor.
     return entries
-      .filter((entry) => (LEVEL_RANK[entry.level.toLowerCase()] ?? 2) >= threshold)
+      .filter((entry) => (LEVEL_RANK[entry.level.toLowerCase()] ?? LEVEL_RANK.info) >= threshold)
       .slice()
       .reverse()
   }, [entries, filter])

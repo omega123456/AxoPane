@@ -1,7 +1,7 @@
 //! Rust-owned view derivation: turns a session's immutable unfiltered
 //! snapshot plus [`ViewParams`] into an ordered projection, without ever
 //! re-enumerating the filesystem. Filtering and sorting are *view* changes
-//! over the same snapshot (Phase 3 decision), never new snapshots.
+//! over the same snapshot, never new snapshots.
 
 use crate::fs::{compare_entries, DirectoryEntry};
 
@@ -41,7 +41,7 @@ impl SessionView {
     }
 
     /// The complete ordered/filtered row list. Used by watch-mutation
-    /// reconciliation (Phase 5) to diff the previous and next views and
+    /// reconciliation to diff the previous and next views and
     /// classify the smallest applicable [`crate::watch::patch::SessionPatch`].
     /// Not the hot paging path — [`SessionView::page`] stays the primary
     /// accessor for ordinary range requests.

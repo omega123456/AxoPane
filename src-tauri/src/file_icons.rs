@@ -3,11 +3,13 @@ use std::sync::OnceLock;
 
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
+const ICON_POOL_THREADS: usize = 4;
+
 pub fn icon_pool() -> Option<&'static ThreadPool> {
     static POOL: OnceLock<Option<ThreadPool>> = OnceLock::new();
     POOL.get_or_init(|| {
         ThreadPoolBuilder::new()
-            .num_threads(4)
+            .num_threads(ICON_POOL_THREADS)
             .thread_name(|index| format!("fe-icon-{index}"))
             .build()
             .ok()
@@ -22,7 +24,7 @@ pub fn icon_data_url_for_path(path: &Path, is_dir: bool) -> Option<String> {
 
     #[cfg(all(windows, not(feature = "test-utils")))]
     {
-        return windows_impl::icon_data_url_for_path(path);
+        windows_impl::icon_data_url_for_path(path)
     }
 
     #[cfg(any(not(windows), feature = "test-utils"))]
@@ -47,7 +49,7 @@ pub fn resolve_icon(path: &Path, is_dir: bool) -> Option<String> {
 
     #[cfg(all(windows, not(feature = "test-utils")))]
     {
-        return windows_impl::icon_data_url_for_type(path);
+        windows_impl::icon_data_url_for_type(path)
     }
 
     #[cfg(any(not(windows), feature = "test-utils"))]
@@ -248,7 +250,7 @@ mod windows_impl {
     }
 
     fn bgra_to_rgba(pixels: &[u8]) -> Option<Vec<u8>> {
-        if pixels.len() % 4 != 0 {
+        if !pixels.len().is_multiple_of(4) {
             return None;
         }
 

@@ -15,6 +15,7 @@ import { formatCount, formatDuration } from '@/lib/format'
 import type { OpKind, OpProgress } from '@/lib/types/ipc'
 import { isTerminal, useQueueStore } from '@/stores/queue-store'
 import { FOCUS_RING } from '@/lib/focus-ring'
+import { fractionToPercent } from '@/lib/numbers'
 
 const kindIcons: Record<OpKind, typeof CopyIcon> = {
   copy: CopyIcon,
@@ -68,7 +69,7 @@ function summarize(operations: OpProgress[]) {
 
   const totalBytes = active.reduce((sum, operation) => sum + operation.totalBytes, 0)
   const copiedBytes = active.reduce((sum, operation) => sum + operation.copiedBytes, 0)
-  const percent = totalBytes > 0 ? (copiedBytes / totalBytes) * 100 : 0
+  const percent = totalBytes > 0 ? fractionToPercent(copiedBytes / totalBytes) : 0
   const etas = active.flatMap((operation) =>
     operation.etaSeconds === null ? [] : [operation.etaSeconds],
   )

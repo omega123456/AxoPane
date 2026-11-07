@@ -1,3 +1,5 @@
+import { fractionToPercent } from '@/lib/numbers'
+
 // The two-tone focus ring (see lib/focus-ring), drawn on the thumb when the
 // transparent input above it has keyboard focus.
 const THUMB_FOCUS_RING =
@@ -25,7 +27,7 @@ export function RangeSlider({
   ariaLabel: string
   valueLabel?: string
 }) {
-  const percent = max > min ? ((value - min) / (max - min)) * 100 : 0
+  const percent = max > min ? fractionToPercent((value - min) / (max - min)) : 0
   return (
     <>
       <span className="relative flex h-5 flex-1 items-center">

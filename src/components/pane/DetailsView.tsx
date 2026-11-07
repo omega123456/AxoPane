@@ -16,6 +16,10 @@ import { pathKey } from '@/lib/path-compare'
 import type { InlineRenameState } from '@/stores/inline-rename-store'
 import type { PaneState } from '@/types/pane'
 import { useLayoutStore } from '@/stores/layout-store'
+import { BOTH_SIDES } from '@/lib/numbers'
+
+/** Rows rendered before the virtualizer has measured its scroll element. */
+const UNMEASURED_FALLBACK_ROWS = 30
 
 const PARENT_ROW_ID = '..'
 export const DETAILS_ROW_HEIGHT_PX = 28
@@ -105,7 +109,7 @@ export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(funct
   const itemsToRender =
     virtualItems.length > 0 || rowCount === 0
       ? virtualItems
-      : Array.from({ length: Math.min(rowCount, 30) }, (_, index) => ({
+      : Array.from({ length: Math.min(rowCount, UNMEASURED_FALLBACK_ROWS) }, (_, index) => ({
           key: `row-${index}`,
           index,
           start: DETAILS_LIST_INSET_PX + index * rowHeightPx,
@@ -113,7 +117,7 @@ export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(funct
   const totalHeight =
     rowCount === 0
       ? 0
-      : rowVirtualizer.getTotalSize() || rowCount * rowHeightPx + 2 * DETAILS_LIST_INSET_PX
+      : rowVirtualizer.getTotalSize() || rowCount * rowHeightPx + BOTH_SIDES * DETAILS_LIST_INSET_PX
   const configuredColumns = useLayoutStore((state) => state.columns)
   const columnWidths = useLayoutStore((state) => state.columnWidths)
   const contentWidth = useMemo(

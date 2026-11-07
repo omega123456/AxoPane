@@ -16,11 +16,13 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 /// `warm_native_menus` command warms synchronously against the in-memory
 /// fake provider (no COM, no real thread pool needed), matching the
 /// established `request_icons` / `icon_pool` pattern.
+const WARM_POOL_THREADS: usize = 2;
+
 pub fn warm_pool() -> Option<&'static ThreadPool> {
     static POOL: OnceLock<Option<ThreadPool>> = OnceLock::new();
     POOL.get_or_init(|| {
         ThreadPoolBuilder::new()
-            .num_threads(2)
+            .num_threads(WARM_POOL_THREADS)
             .thread_name(|index| format!("fe-native-menu-warm-{index}"))
             .build()
             .ok()

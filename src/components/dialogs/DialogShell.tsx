@@ -1,6 +1,14 @@
 import type { KeyboardEvent, ReactNode } from 'react'
 import { AlertTriangleIcon } from '@/components/icons'
 
+/** ContentDialog bands hold two buttons, or three with a secondary action. */
+type FooterColumnCount = 2 | 3
+
+const footerGridClasses: Record<FooterColumnCount, string> = {
+  2: 'grid-cols-2',
+  3: 'grid-cols-3',
+}
+
 /**
  * Windows ContentDialog: a 420px card over a 40% scrim with a 20px semibold
  * title, a 14px body and a button band on the base colour. Footer buttons
@@ -20,8 +28,7 @@ export function DialogShell({
   label: string
   title: ReactNode
   footer: ReactNode
-  /** ContentDialog bands hold two buttons, or three with a secondary action. */
-  footerColumns?: 2 | 3
+  footerColumns?: FooterColumnCount
   dismissLabel?: string
   onDismiss: () => void
   onKeyDown?: (event: KeyboardEvent) => void
@@ -47,7 +54,7 @@ export function DialogShell({
           {children}
         </div>
         <div
-          className={`grid ${footerColumns === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2 border-t border-light-divider bg-light-base px-6 py-5 dark:border-dark-divider dark:bg-dark-base`}
+          className={`grid ${footerGridClasses[footerColumns]} gap-2 border-t border-light-divider bg-light-base px-6 py-5 dark:border-dark-divider dark:bg-dark-base`}
         >
           {footer}
         </div>

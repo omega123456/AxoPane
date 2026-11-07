@@ -40,10 +40,10 @@ fn everything(rows: Vec<EverythingRow>) -> SearchBackend {
 
 fn library() -> Vec<EverythingRow> {
     let mut rows: Vec<EverythingRow> = (0..60)
-        .map(|i| {
+        .map(|index| {
             row(
                 r"C:\Users\alex\Invoices",
-                &format!("invoice-{i:02}.pdf"),
+                &format!("invoice-{index:02}.pdf"),
                 false,
                 None,
             )

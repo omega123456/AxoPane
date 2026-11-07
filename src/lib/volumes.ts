@@ -144,10 +144,12 @@ export function volumeUsedFraction(volume: VolumeInfo): number | null {
   return Math.min(1, Math.max(0, used))
 }
 
-/** Capacity bars turn amber at 85% full and red at 95%. */
+const CAPACITY_CRITICAL_FRACTION = 0.95
+const CAPACITY_WARNING_FRACTION = 0.85
+
 export function capacityLevel(usedFraction: number): CapacityLevel {
-  if (usedFraction >= 0.95) {
+  if (usedFraction >= CAPACITY_CRITICAL_FRACTION) {
     return 'critical'
   }
-  return usedFraction >= 0.85 ? 'warning' : 'normal'
+  return usedFraction >= CAPACITY_WARNING_FRACTION ? 'warning' : 'normal'
 }

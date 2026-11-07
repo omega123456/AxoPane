@@ -7,6 +7,7 @@ import type {
   OpSnapshot,
   ThroughputSample,
 } from '@/lib/types/ipc'
+import { clampPercent, percentToFraction } from '@/lib/numbers'
 
 type QueueStore = {
   /** Operations keyed by id. */
@@ -109,8 +110,8 @@ function shouldResetThroughputHistory(
 }
 
 function bucketOf(percent: number): number {
-  const clamped = Math.min(100, Math.max(0, percent))
-  return Math.min(THROUGHPUT_BUCKETS - 1, Math.floor((clamped / 100) * THROUGHPUT_BUCKETS))
+  const fraction = percentToFraction(clampPercent(percent))
+  return Math.min(THROUGHPUT_BUCKETS - 1, Math.floor(fraction * THROUGHPUT_BUCKETS))
 }
 
 type FoldedThroughput = {

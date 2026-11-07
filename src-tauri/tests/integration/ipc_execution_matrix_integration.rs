@@ -57,8 +57,8 @@ fn every_heavy_matrix_family_has_exactly_one_named_owner() {
 fn fixed_ipc_queue_rejects_overload_without_spawning_more_workers() {
     let coordinator = Arc::new(ResourceCoordinator::new());
     let executor = Arc::new(IpcExecutor::new(Arc::clone(&coordinator)));
-    let (started_tx, started_rx) = mpsc::channel();
-    let (release_tx, release_rx) = crossbeam_channel::bounded(4);
+    let (started_sender, started_receiver) = mpsc::channel();
+    let (release_sender, release_receiver) = crossbeam_channel::bounded(4);
     let started = Arc::new(AtomicUsize::new(0));
     let mut callers = Vec::new();
 
@@ -67,19 +67,19 @@ fn fixed_ipc_queue_rejects_overload_without_spawning_more_workers() {
     for index in 0..4 {
         let executor = Arc::clone(&executor);
         let started = Arc::clone(&started);
-        let started_tx = started_tx.clone();
-        let release_rx = release_rx.clone();
+        let started_sender = started_sender.clone();
+        let release_receiver = release_receiver.clone();
         callers.push(thread::spawn(move || {
             tauri::async_runtime::block_on(executor.latency(format!("active-{index}"), move || {
                 started.fetch_add(1, Ordering::SeqCst);
-                started_tx.send(()).expect("test start receiver");
-                release_rx.recv().expect("test releases worker");
+                started_sender.send(()).expect("test start receiver");
+                release_receiver.recv().expect("test releases worker");
                 Ok(())
             }))
         }));
     }
     for _ in 0..4 {
-        started_rx.recv().expect("all fixed workers started");
+        started_receiver.recv().expect("all fixed workers started");
     }
     assert_eq!(started.load(Ordering::SeqCst), 4);
 
@@ -102,7 +102,7 @@ fn fixed_ipc_queue_rejects_overload_without_spawning_more_workers() {
     assert_eq!(overload.unwrap_err(), "IPC latency queue is full");
 
     for _ in 0..4 {
-        release_tx.send(()).expect("release fixed worker");
+        release_sender.send(()).expect("release fixed worker");
     }
     for caller in callers {
         caller
@@ -170,24 +170,24 @@ fn bounded_ipc_executor_uses_shared_latency_admission_and_shutdown_owner() {
 fn saturated_ipc_queue_shutdown_drains_without_losing_worker_termination() {
     let coordinator = Arc::new(ResourceCoordinator::new());
     let executor = Arc::new(IpcExecutor::new(Arc::clone(&coordinator)));
-    let (started_tx, started_rx) = mpsc::channel();
-    let (release_tx, release_rx) = crossbeam_channel::bounded(4);
+    let (started_sender, started_receiver) = mpsc::channel();
+    let (release_sender, release_receiver) = crossbeam_channel::bounded(4);
     let mut active = Vec::new();
 
     for index in 0..4 {
         let executor = Arc::clone(&executor);
-        let started_tx = started_tx.clone();
-        let release_rx = release_rx.clone();
+        let started_sender = started_sender.clone();
+        let release_receiver = release_receiver.clone();
         active.push(thread::spawn(move || {
             tauri::async_runtime::block_on(executor.latency(format!("active-{index}"), move || {
-                started_tx.send(()).expect("active worker started");
-                release_rx.recv().expect("release active worker");
+                started_sender.send(()).expect("active worker started");
+                release_receiver.recv().expect("release active worker");
                 Ok(())
             }))
         }));
     }
     for _ in 0..4 {
-        started_rx.recv().expect("all workers occupied");
+        started_receiver.recv().expect("all workers occupied");
     }
 
     let mut queued = Vec::new();
@@ -203,11 +203,11 @@ fn saturated_ipc_queue_shutdown_drains_without_losing_worker_termination() {
         thread::yield_now();
     }
 
-    let (shutdown_done_tx, shutdown_done_rx) = mpsc::channel();
+    let (shutdown_done_sender, shutdown_done_receiver) = mpsc::channel();
     let shutdown_executor = Arc::clone(&executor);
     thread::spawn(move || {
         shutdown_executor.shutdown();
-        shutdown_done_tx
+        shutdown_done_sender
             .send(())
             .expect("shutdown completion receiver");
     });
@@ -220,10 +220,10 @@ fn saturated_ipc_queue_shutdown_drains_without_losing_worker_termination() {
         thread::yield_now();
     }
     for _ in 0..4 {
-        release_tx.send(()).expect("release active worker");
+        release_sender.send(()).expect("release active worker");
     }
 
-    shutdown_done_rx
+    shutdown_done_receiver
         .recv_timeout(Duration::from_millis(750))
         .expect("shutdown must not wait for a full queue to accept sentinels");
     for caller in active {
@@ -261,28 +261,28 @@ fn cancelled_ipc_job_never_enters_its_platform_or_filesystem_closure() {
 fn owned_ipc_work_honours_its_explicit_completion_deadline() {
     let coordinator = Arc::new(ResourceCoordinator::new());
     let executor = IpcExecutor::new(Arc::clone(&coordinator));
-    let (started_tx, started_rx) = mpsc::channel();
-    let (release_tx, release_rx) = crossbeam_channel::bounded::<()>(1);
+    let (started_sender, started_receiver) = mpsc::channel();
+    let (release_sender, release_receiver) = crossbeam_channel::bounded::<()>(1);
 
     let result = tauri::async_runtime::block_on(executor.latency_cancellable_with_deadline(
         "safe-test-resource".into(),
         Cancellation::default(),
         Duration::from_millis(25),
         move |_| {
-            started_tx.send(()).expect("owned work started");
-            release_rx.recv().expect("test release");
+            started_sender.send(()).expect("owned work started");
+            release_receiver.recv().expect("test release");
             Ok(())
         },
     ));
 
-    started_rx
+    started_receiver
         .recv_timeout(Duration::from_millis(100))
         .expect("owned work must start before its caller deadline");
     assert_eq!(
         result.unwrap_err(),
         "IPC latency request exceeded its deadline"
     );
-    release_tx.send(()).expect("release timed-out work");
+    release_sender.send(()).expect("release timed-out work");
     executor.shutdown();
     coordinator.shutdown();
 }

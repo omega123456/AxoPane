@@ -13,22 +13,22 @@ pub struct MacosCapabilities {
 }
 
 impl TransferAdapter for MacosCapabilities {
-    fn select(&self, r: TransferRequirements) -> AdapterSelection {
+    fn select(&self, requirements: TransferRequirements) -> AdapterSelection {
         let reason = if !self.api_available {
             Some(PortableReason::ApiUnavailable)
         } else if !self.filesystem_supports_copyfile {
             Some(PortableReason::UnsupportedFilesystem)
-        } else if r.clone && !self.clone {
+        } else if requirements.clone && !self.clone {
             Some(PortableReason::CloneUnsupported)
-        } else if r.sparse && !self.sparse {
+        } else if requirements.sparse && !self.sparse {
             Some(PortableReason::SparseUnsupported)
-        } else if r.preserve_metadata && !self.metadata {
+        } else if requirements.preserve_metadata && !self.metadata {
             Some(PortableReason::MetadataUnsupported)
-        } else if r.preserve_link && !self.links {
+        } else if requirements.preserve_link && !self.links {
             Some(PortableReason::LinkUnsupported)
-        } else if r.progress && !self.progress {
+        } else if requirements.progress && !self.progress {
             Some(PortableReason::ProgressUnsupported)
-        } else if r.cancellation && !self.cancellation {
+        } else if requirements.cancellation && !self.cancellation {
             Some(PortableReason::CancellationUnsupported)
         } else {
             None

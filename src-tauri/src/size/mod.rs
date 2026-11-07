@@ -469,7 +469,7 @@ impl SizeService {
         self.request_paths_with_mode(paths, mode, volumes, emitter);
     }
 
-    /// Replaces one pane's live-update set (FR3.3): `folders` receive
+    /// Replaces one pane's live-update set: `folders` receive
     /// `size://state` whenever their indexed totals change. `current_path`
     /// marks a protected folder as visited.
     pub fn set_subscriptions(

@@ -304,7 +304,15 @@ fn to_hit(hit: &Scored) -> SearchHit {
         parent_path: hit.parent.clone(),
         is_dir: hit.is_dir,
         modified_at: crate::fs::system_time_to_rfc3339(modified),
-        name_ranges: hit.name_ranges.iter().map(|&(s, e)| [s, e]).collect(),
-        parent_ranges: hit.parent_ranges.iter().map(|&(s, e)| [s, e]).collect(),
+        name_ranges: hit
+            .name_ranges
+            .iter()
+            .map(|&(start, end)| [start, end])
+            .collect(),
+        parent_ranges: hit
+            .parent_ranges
+            .iter()
+            .map(|&(start, end)| [start, end])
+            .collect(),
     }
 }

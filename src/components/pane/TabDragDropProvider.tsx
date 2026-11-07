@@ -6,6 +6,8 @@ import { usePanesStore } from '@/stores/panes-store'
 import { useTabsStore } from '@/stores/tabs-store'
 import type { PaneId } from '@/types/pane'
 
+const TAB_DRAG_ACTIVATION_DISTANCE_PX = 5
+
 const TAB_TYPE = 'tab'
 
 type TabDragState = {
@@ -49,7 +51,7 @@ class MouseDistanceConstraint {
 
     if (event.type === 'pointermove' && this.start) {
       const distance = Math.hypot(event.clientX - this.start.x, event.clientY - this.start.y)
-      if (distance >= 5) {
+      if (distance >= TAB_DRAG_ACTIVATION_DISTANCE_PX) {
         this.activateDrag?.(event)
       }
     }
@@ -82,8 +84,10 @@ function paneIdFromEntity(entity: { data: unknown; group?: unknown } | null | un
   return isPaneId(entity.group) ? entity.group : null
 }
 
-function paneIdAtPoint(x: number, y: number) {
-  const strip = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-tab-strip]')
+function paneIdAtPoint(clientX: number, clientY: number) {
+  const strip = document
+    .elementFromPoint(clientX, clientY)
+    ?.closest<HTMLElement>('[data-tab-strip]')
   return isPaneId(strip?.dataset.tabStrip) ? strip.dataset.tabStrip : null
 }
 

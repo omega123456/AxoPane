@@ -54,11 +54,11 @@ export function StatusBar() {
   // `null` when no selected item has a known size, so an unsized folder
   // selection reads as blank rather than "0 B".
   const selectedBytes = useMemo(() => {
-    const ids = new Set(selectedIds)
+    const selectedIdSet = new Set(selectedIds)
     let total: number | null = null
     for (const entry of entries) {
       const size = entry.isDir ? sizeStates?.[entry.path]?.sizeBytes : entry.sizeBytes
-      if (ids.has(entry.id) && size != null) {
+      if (selectedIdSet.has(entry.id) && size != null) {
         total = (total ?? 0) + size
       }
     }

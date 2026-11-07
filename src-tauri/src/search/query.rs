@@ -119,10 +119,14 @@ pub fn parse(raw: &str, style: PathStyle, home: Option<&str>) -> Result<ParsedQu
         PathStyle::Windows => typed.to_owned(),
     };
     let text = expand_home(&text, style, home);
-    let browse = text.ends_with(|c| style.is_separator(c));
+    let browse = text.ends_with(|character| style.is_separator(character));
     let parts = style.split(&text);
     let anchored = !parts.root.is_empty();
-    let short = typed.chars().filter(|c| !c.is_whitespace()).count() < MIN_QUERY_CHARS;
+    let short = typed
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .count()
+        < MIN_QUERY_CHARS;
     if short && !(anchored && browse) {
         return Err(ParseError::TooShort);
     }
@@ -170,8 +174,11 @@ fn expand_home(text: &str, style: PathStyle, home: Option<&str>) -> String {
     if rest.is_empty() {
         return home.to_owned();
     }
-    if rest.starts_with(|c| style.is_separator(c)) {
-        return format!("{}{rest}", home.trim_end_matches(|c| style.is_separator(c)));
+    if rest.starts_with(|character| style.is_separator(character)) {
+        return format!(
+            "{}{rest}",
+            home.trim_end_matches(|character| style.is_separator(character))
+        );
     }
     text.to_owned()
 }

@@ -241,12 +241,12 @@ fn immediate_progressive_results_respect_the_byte_batch_limit() {
     let directory = tempdir().expect("directory");
     let path = directory.path().join("large.png");
     fs::write(&path, b"data").expect("fixture");
-    let (started_tx, started_rx) = mpsc::channel();
-    let (release_tx, release_rx) = mpsc::channel();
+    let (started_sender, started_receiver) = mpsc::channel();
+    let (release_sender, release_receiver) = mpsc::channel();
     let service = ThumbnailService::new_with_provider_and_clock(
         Arc::new(LargeProgressiveProvider {
-            started: started_tx,
-            release: Mutex::new(release_rx),
+            started: started_sender,
+            release: Mutex::new(release_receiver),
         }),
         Arc::new(ResourceCoordinator::new()),
         Arc::new(|| 0),
@@ -260,10 +260,10 @@ fn immediate_progressive_results_respect_the_byte_batch_limit() {
         (subscriber("left"), candidate(&path)),
         (subscriber("right"), candidate(&path)),
     ]);
-    started_rx
+    started_receiver
         .recv_timeout(Duration::from_millis(200))
         .expect("provider started");
-    release_tx.send(()).expect("release provider");
+    release_sender.send(()).expect("release provider");
 
     let deadline = Instant::now() + Duration::from_secs(1);
     while batches.lock().expect("batches").len() < 2 {

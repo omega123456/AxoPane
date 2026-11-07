@@ -44,11 +44,11 @@ type NativeMenuWarmStore = {
 export const useNativeMenuWarmStore = create<NativeMenuWarmStore>((set, get) => ({
   warmedTypeKeys: {},
   warmVisibleNativeMenus: async (paneId, paths) => {
-    const os = detectPlatformOs()
-    if (os !== 'windows') {
+    const platform = detectPlatformOs()
+    if (platform !== 'windows') {
       log.debug('skipping native menu warm batch on unsupported platform', {
         paneId,
-        os,
+        platform,
         visiblePathCount: paths.length,
       })
       return

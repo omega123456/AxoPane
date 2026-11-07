@@ -70,7 +70,6 @@ mod platform {
 mod platform {
     use tauri::window::{Effect, EffectsBuilder};
     use tauri::{Runtime, WebviewWindow};
-    use windows::core::w;
     use windows::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ};
 
     use super::WindowBackdrop;
@@ -83,8 +82,8 @@ mod platform {
         let status = unsafe {
             RegGetValueW(
                 HKEY_LOCAL_MACHINE,
-                w!(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"),
-                w!("CurrentBuildNumber"),
+                windows::core::w!(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"),
+                windows::core::w!("CurrentBuildNumber"),
                 RRF_RT_REG_SZ,
                 None,
                 Some(buffer.as_mut_ptr().cast()),

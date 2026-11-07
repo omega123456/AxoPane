@@ -126,7 +126,7 @@ export function CommandBar({ theme, setTheme }: CommandBarProps) {
     (state) => state.folderSizeIndexStatus?.isAvailable ?? false,
   )
   // Folders automatic sizing could not answer: outside the macOS index or an
-  // unvisited protected folder (FR8.3).
+  // unvisited protected folder.
   const hasUnknownFolder = usePanesStore((state) =>
     pane.entries.some((entry) => entry.isDir && state.sizeStates[entry.path]?.state === 'unknown'),
   )

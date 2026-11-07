@@ -17,9 +17,9 @@ fn as_state<'a, T: Send + Sync + 'static>(value: &'a T) -> tauri::State<'a, T> {
 
 fn service() -> Arc<SearchService> {
     let rows: Vec<EverythingRow> = (0..55)
-        .map(|i| EverythingRow {
+        .map(|index| EverythingRow {
             path: r"D:\Work".to_owned(),
-            file_name: format!("report-{i:02}.docx"),
+            file_name: format!("report-{index:02}.docx"),
             is_folder: false,
             size: None,
             modified_filetime: None,

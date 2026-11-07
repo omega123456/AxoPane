@@ -6,8 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::fs::{DirectoryEntry, SortDirection, SortKey};
 
-/// Row page size for every range response. Matches the plan's approved
-/// default (Functional Requirement 1 / Constraints & Assumptions).
+/// Row page size for every range response.
 pub const SESSION_PAGE_SIZE: usize = 500;
 
 /// Identifies a pane. AxoPane has exactly two panes (`"left"` / `"right"`),
@@ -45,14 +44,14 @@ pub struct WatchRevision(pub u64);
 /// unfiltered snapshot changes (new sort key/direction, new filter text, or a
 /// watch mutation that reorders/adds/removes rows). Range requests are scoped
 /// to one view revision; a stale view revision must be rejected rather than
-/// served, per Functional Requirement 1.
+/// served.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ViewRevision(pub u64);
 
 /// The complete revision set a session/watch/view baseline publishes and
 /// every later request/response must match to be accepted. Carried by every
-/// v2 range response so the frontend (Phase 4) can validate what it has
+/// v2 range response so the frontend can validate what it has
 /// against what it is being asked to install.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

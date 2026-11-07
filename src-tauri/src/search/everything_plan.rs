@@ -7,6 +7,7 @@ use super::matcher::{Token, FUZZY_MIN_CHARS};
 use super::path_style::PathStyle;
 use super::query::{ParsedQuery, Segment};
 use super::{Candidate, SearchOptions, SearchScope};
+use crate::path_text::is_drive_designator;
 use crate::size::everything::{
     filetime_to_system_time, EverythingRow, EVERYTHING_BATCH_CHUNK_SIZE,
 };
@@ -125,8 +126,12 @@ fn token_text(token: &Token, pass: Pass) -> String {
     match token {
         Token::Literal(pattern) if pass == Pass::Fuzzy && pattern.len() >= FUZZY_MIN_CHARS => {
             let mut text = String::from("*");
-            for c in pattern.as_string().chars().filter(|c| !c.is_whitespace()) {
-                text.push(c);
+            for character in pattern
+                .as_string()
+                .chars()
+                .filter(|character| !character.is_whitespace())
+            {
+                text.push(character);
                 text.push('*');
             }
             text
@@ -152,7 +157,7 @@ fn filters(options: &SearchOptions) -> Vec<String> {
 /// parent as `C:`.
 fn parent_terms(parent: &str) -> Vec<String> {
     let trimmed = parent.trim_end_matches('\\');
-    if trimmed.len() == 2 && trimmed.ends_with(':') {
+    if is_drive_designator(trimmed) {
         vec![
             format!("parent:{}", quote(trimmed)),
             format!("parent:{}", quote(&format!("{trimmed}\\"))),

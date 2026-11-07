@@ -3,6 +3,8 @@ import { curveLinear } from '@visx/curve'
 import { scaleLinear } from '@visx/scale'
 import { AreaClosed, LinePath } from '@visx/shape'
 import type { ThroughputSample } from '@/lib/types/ipc'
+import { clampPercent, PERCENT_SCALE } from '@/lib/numbers'
+import scaleSteps from './throughput-scale-steps.json'
 
 type ThroughputChartProps = {
   samples: ThroughputSample[]
@@ -18,7 +20,8 @@ type ThroughputChartProps = {
 
 const VIEWBOX_WIDTH = 100
 const VIEWBOX_HEIGHT = 48
-const BASELINE_Y = VIEWBOX_HEIGHT - 2
+const BASELINE_INSET = 2
+const BASELINE_Y = VIEWBOX_HEIGHT - BASELINE_INSET
 const CEILING_Y = 8
 /**
  * Draw the trace as soon as there are two committed points (plus the left
@@ -33,7 +36,16 @@ const MIN_CURVE_SAMPLES = 2
  * the backend reports a slightly better burst.
  */
 const CEILING_HEADROOM = 1.35
-const SCALE_STEPS = [1, 1.25, 1.6, 2, 2.5, 3.2, 4, 5, 6.4, 8, 10] as const
+/** Rounded mantissas the ceiling snaps up to within each power of ten. */
+const SCALE_STEPS: readonly number[] = scaleSteps
+const DECIMAL_BASE = 10
+const COORDINATE_PRECISION_DIGITS = 3
+const CUBIC_POWER = 3
+const EASE_IN_OUT_HALVES = 2
+const EASE_IN_OUT_MIDPOINT = 1 / EASE_IN_OUT_HALVES
+const CLIP_ID_PERCENT_PRECISION = 100
+const SCALE_SETTLED_TOLERANCE = 0.5
+const SECOND_TO_LAST_INDEX = -2
 const CHART_ANIMATION_MS = 900
 /**
  * Duration of the subtle "draw-in" when a new committed point appends. Only the
@@ -50,28 +62,30 @@ const APPEND_ANIMATION_MS = 480
  */
 const PROGRESS_EASE_MS = 480
 
-function clampPercent(percent: number) {
-  return Math.min(100, Math.max(0, percent))
-}
-
 function normalizeCoordinate(value: number) {
-  return Number(value.toFixed(3))
+  return Number(value.toFixed(COORDINATE_PRECISION_DIGITS))
 }
 
 function niceCeilingRate(rate: number) {
   const rateWithHeadroom = Math.max(1, rate * CEILING_HEADROOM)
-  const magnitude = 10 ** Math.floor(Math.log10(rateWithHeadroom))
+  const magnitude = DECIMAL_BASE ** Math.floor(Math.log10(rateWithHeadroom))
   const normalized = rateWithHeadroom / magnitude
-  const step = SCALE_STEPS.find((candidate) => normalized <= candidate) ?? 10
+  const step = SCALE_STEPS.find((candidate) => normalized <= candidate) ?? DECIMAL_BASE
   return step * magnitude
 }
 
+function cube(value: number) {
+  return value ** CUBIC_POWER
+}
+
 function easeInOutCubic(progress: number) {
-  return progress < 0.5 ? 4 * progress ** 3 : 1 - (-2 * progress + 2) ** 3 / 2
+  return progress < EASE_IN_OUT_MIDPOINT
+    ? cube(progress * EASE_IN_OUT_HALVES) / EASE_IN_OUT_HALVES
+    : 1 - cube(EASE_IN_OUT_HALVES - progress * EASE_IN_OUT_HALVES) / EASE_IN_OUT_HALVES
 }
 
 function easeOutCubic(progress: number) {
-  return 1 - (1 - progress) ** 3
+  return 1 - cube(1 - progress)
 }
 
 function interpolate(start: number, end: number, progress: number) {
@@ -136,11 +150,12 @@ function useAppendedTail(target: ThroughputSample[]): {
 
   if (state.identity !== identity) {
     const end = target.at(-1) ?? null
-    const isAppend = end !== null && target.length > state.length && target.length >= 2
+    const previousPoint = target.at(SECOND_TO_LAST_INDEX) ?? null
+    const isAppend = end !== null && target.length > state.length && previousPoint !== null
     setState({
       identity,
       length: target.length,
-      start: isAppend ? (target[target.length - 2] ?? null) : null,
+      start: isAppend ? previousPoint : null,
       end,
       endKey: end ? sampleKey(end) : '',
       progress: isAppend ? 0 : 1,
@@ -319,7 +334,7 @@ function buildChartSamples(
     return normalized
   }
 
-  const previous = normalized.at(-2)
+  const previous = normalized.at(SECOND_TO_LAST_INDEX)
   if (!previous || previous.percent === lastSample.percent) {
     return normalized
   }
@@ -360,7 +375,7 @@ export function ThroughputChart({ samples, currentPercent, peakRate }: Throughpu
     easeOutCubic,
   )
   const xScale = scaleLinear<number>({
-    domain: [0, 100],
+    domain: [0, PERCENT_SCALE],
     range: [0, VIEWBOX_WIDTH],
   })
   const yScale = scaleLinear<number>({
@@ -372,7 +387,7 @@ export function ThroughputChart({ samples, currentPercent, peakRate }: Throughpu
   const scaleRate = (rate: number) => yScale(Math.min(rate, displayedCeilingRate))
   const showCurve = normalizedSamples.length >= MIN_CURVE_SAMPLES
   const clipId = `throughput-chart-fill-${committedSamples.length}-${Math.round(
-    clampedCurrentPercent * 100,
+    clampedCurrentPercent * CLIP_ID_PERCENT_PRECISION,
   )}-${Math.round(committedSamples.at(-1)?.rate ?? 0)}`
   // The progress fill and leading edge follow the eased percent, so the edge
   // glides while the committed trace behind it holds still.
@@ -380,7 +395,8 @@ export function ThroughputChart({ samples, currentPercent, peakRate }: Throughpu
   const unfilledWidth = normalizeCoordinate(VIEWBOX_WIDTH - currentX)
   // Settled only once the rescale *and* the tail draw-in have finished, so a
   // screenshot wait lands on a stable frame.
-  const chartSettled = Math.abs(displayedCeilingRate - ceilingRate) < 0.5 && tailSettled
+  const chartSettled =
+    Math.abs(displayedCeilingRate - ceilingRate) < SCALE_SETTLED_TOLERANCE && tailSettled
 
   return (
     <div

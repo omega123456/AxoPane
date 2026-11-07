@@ -9,7 +9,7 @@ use file_explorer_lib::ops::{
     archive_root_name_for_tests, archive_stem_for_item_for_tests, begin_file_progress_for_tests,
     copy_dir_recursive, copy_file_with_progress, copy_path, delete_path_with_progress, move_path,
     process_item_for_tests, ConflictInfo, ConflictResolution, OpItem, OpKind, OpState, OpStatus,
-    OpsService, WorkerCtx,
+    OpsService, WorkerContext,
 };
 use file_explorer_lib::volumes::VolumeInfo;
 
@@ -76,25 +76,25 @@ fn state() -> OpState {
     }
 }
 
-fn worker_ctx(
+fn worker_context(
     state: OpState,
 ) -> (
     Arc<Mutex<OpState>>,
     Arc<std::sync::Condvar>,
-    WorkerCtx<'static>,
+    WorkerContext<'static>,
 ) {
-    let op_arc = Arc::new(Mutex::new(state));
+    let shared_operation = Arc::new(Mutex::new(state));
     let resolver = Arc::new(std::sync::Condvar::new());
     let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
     let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
 
-    let op_arc_ref = Box::leak(Box::new(op_arc.clone()));
+    let shared_operation_ref = Box::leak(Box::new(shared_operation.clone()));
     let resolver_ref = Box::leak(Box::new(resolver.clone()));
     let progress_ref = Box::leak(Box::new(progress));
     let instant_now_ref = Box::leak(Box::new(instant_now));
 
-    let ctx = WorkerCtx {
-        op_arc: op_arc_ref,
+    let context = WorkerContext {
+        shared_operation: shared_operation_ref,
         resolver: resolver_ref,
         progress: progress_ref,
         start: Instant::now(),
@@ -102,7 +102,7 @@ fn worker_ctx(
         instant_now: instant_now_ref,
     };
 
-    (op_arc, resolver, ctx)
+    (shared_operation, resolver, context)
 }
 
 #[test]
@@ -185,12 +185,12 @@ fn file_operation_helpers_copy_and_move_paths_directly() {
     std::fs::create_dir(&nested_dir).expect("nested dir");
     std::fs::write(nested_dir.join("beta.txt"), b"beta").expect("nested file");
 
-    let op_arc = Arc::new(Mutex::new(state()));
+    let shared_operation = Arc::new(Mutex::new(state()));
     let resolver = Arc::new(std::sync::Condvar::new());
     let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
     let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
-    let ctx = WorkerCtx {
-        op_arc: &op_arc,
+    let context = WorkerContext {
+        shared_operation: &shared_operation,
         resolver: &resolver,
         progress: &progress,
         start: Instant::now(),
@@ -198,26 +198,32 @@ fn file_operation_helpers_copy_and_move_paths_directly() {
         instant_now: &instant_now,
     };
 
-    copy_file_with_progress(&source_file, &dest_dir.join("copied.txt"), &ctx).expect("copy file");
+    copy_file_with_progress(&source_file, &dest_dir.join("copied.txt"), &context)
+        .expect("copy file");
     assert_eq!(
         std::fs::read(dest_dir.join("copied.txt")).expect("copied file"),
         b"alpha"
     );
 
-    copy_path(&source_file, &dest_dir.join("copied-via-path.txt"), &ctx).expect("copy file path");
+    copy_path(
+        &source_file,
+        &dest_dir.join("copied-via-path.txt"),
+        &context,
+    )
+    .expect("copy file path");
     assert_eq!(
         std::fs::read(dest_dir.join("copied-via-path.txt")).expect("copied file path"),
         b"alpha"
     );
 
-    copy_path(&source_dir, &dest_dir.join("copied-tree"), &ctx).expect("copy tree");
+    copy_path(&source_dir, &dest_dir.join("copied-tree"), &context).expect("copy tree");
     assert_eq!(
         std::fs::read(dest_dir.join("copied-tree").join("nested").join("beta.txt"))
             .expect("copied nested"),
         b"beta"
     );
 
-    move_path(&source_file, &dest_dir.join("moved.txt"), &ctx).expect("move file");
+    move_path(&source_file, &dest_dir.join("moved.txt"), &context).expect("move file");
     assert!(!source_file.exists());
     assert_eq!(
         std::fs::read(dest_dir.join("moved.txt")).expect("moved file"),
@@ -228,7 +234,7 @@ fn file_operation_helpers_copy_and_move_paths_directly() {
     std::fs::create_dir(&source_dir_for_move).expect("source move dir");
     std::fs::write(source_dir_for_move.join("gamma.txt"), b"gamma").expect("source move file");
     let moved_dir = dest_dir.join("moved-tree");
-    move_path(&source_dir_for_move, &moved_dir, &ctx).expect("move dir");
+    move_path(&source_dir_for_move, &moved_dir, &context).expect("move dir");
     assert!(!source_dir_for_move.exists());
     assert_eq!(
         std::fs::read(moved_dir.join("gamma.txt")).expect("moved nested file"),
@@ -253,12 +259,12 @@ fn file_operation_helpers_respect_cancellation_before_copying() {
         .cancel
         .store(true, std::sync::atomic::Ordering::Relaxed);
 
-    let op_arc = Arc::new(Mutex::new(cancelled_state));
+    let shared_operation = Arc::new(Mutex::new(cancelled_state));
     let resolver = Arc::new(std::sync::Condvar::new());
     let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
     let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
-    let ctx = WorkerCtx {
-        op_arc: &op_arc,
+    let context = WorkerContext {
+        shared_operation: &shared_operation,
         resolver: &resolver,
         progress: &progress,
         start: Instant::now(),
@@ -266,7 +272,7 @@ fn file_operation_helpers_respect_cancellation_before_copying() {
         instant_now: &instant_now,
     };
 
-    copy_file_with_progress(&source_file, &dest_dir.join("cancelled.txt"), &ctx)
+    copy_file_with_progress(&source_file, &dest_dir.join("cancelled.txt"), &context)
         .expect("cancelled file copy");
     assert_eq!(
         std::fs::metadata(dest_dir.join("cancelled.txt"))
@@ -275,7 +281,8 @@ fn file_operation_helpers_respect_cancellation_before_copying() {
         0
     );
 
-    copy_path(&source_dir, &dest_dir.join("cancelled-tree"), &ctx).expect("cancelled tree copy");
+    copy_path(&source_dir, &dest_dir.join("cancelled-tree"), &context)
+        .expect("cancelled tree copy");
     assert!(dest_dir.join("cancelled-tree").exists());
     assert!(!dest_dir.join("cancelled-tree").join("beta.txt").exists());
 }
@@ -294,12 +301,12 @@ fn file_operation_helpers_delete_paths_with_progress_directly() {
     delete_state.kind = OpKind::Delete;
     delete_state.total_bytes = 0;
     delete_state.copied_bytes = 0;
-    let op_arc = Arc::new(Mutex::new(delete_state));
+    let shared_operation = Arc::new(Mutex::new(delete_state));
     let resolver = Arc::new(std::sync::Condvar::new());
     let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
     let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
-    let ctx = WorkerCtx {
-        op_arc: &op_arc,
+    let context = WorkerContext {
+        shared_operation: &shared_operation,
         resolver: &resolver,
         progress: &progress,
         start: Instant::now(),
@@ -307,12 +314,12 @@ fn file_operation_helpers_delete_paths_with_progress_directly() {
         instant_now: &instant_now,
     };
 
-    delete_path_with_progress(&file, true, &ctx).expect("delete file");
-    delete_path_with_progress(&dir, true, &ctx).expect("delete dir");
+    delete_path_with_progress(&file, true, &context).expect("delete file");
+    delete_path_with_progress(&dir, true, &context).expect("delete dir");
 
     assert!(!file.exists());
     assert!(!dir.exists());
-    assert_eq!(op_arc.lock().expect("op lock").copied_bytes, 9);
+    assert_eq!(shared_operation.lock().expect("op lock").copied_bytes, 9);
 }
 
 /// Deleting a folder that contains a symlink (to a file or a directory) must
@@ -342,12 +349,12 @@ fn file_operation_helpers_delete_a_folder_containing_symlinks() {
 
     let mut delete_state = state();
     delete_state.kind = OpKind::Delete;
-    let op_arc = Arc::new(Mutex::new(delete_state));
+    let shared_operation = Arc::new(Mutex::new(delete_state));
     let resolver = Arc::new(std::sync::Condvar::new());
     let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
     let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
-    let ctx = WorkerCtx {
-        op_arc: &op_arc,
+    let context = WorkerContext {
+        shared_operation: &shared_operation,
         resolver: &resolver,
         progress: &progress,
         start: Instant::now(),
@@ -355,7 +362,7 @@ fn file_operation_helpers_delete_a_folder_containing_symlinks() {
         instant_now: &instant_now,
     };
 
-    delete_path_with_progress(&container, true, &ctx).expect("delete container with symlinks");
+    delete_path_with_progress(&container, true, &context).expect("delete container with symlinks");
 
     assert!(!container.exists());
     assert!(
@@ -372,12 +379,12 @@ fn file_operation_helpers_surface_io_errors_directly() {
     let dest_dir = root.join("dest");
     std::fs::create_dir(&dest_dir).expect("dest dir");
 
-    let op_arc = Arc::new(Mutex::new(state()));
+    let shared_operation = Arc::new(Mutex::new(state()));
     let resolver = Arc::new(std::sync::Condvar::new());
     let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
     let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
-    let ctx = WorkerCtx {
-        op_arc: &op_arc,
+    let context = WorkerContext {
+        shared_operation: &shared_operation,
         resolver: &resolver,
         progress: &progress,
         start: Instant::now(),
@@ -386,16 +393,16 @@ fn file_operation_helpers_surface_io_errors_directly() {
     };
 
     let missing_file = root.join("missing.txt");
-    let copy_error =
-        copy_path(&missing_file, &dest_dir.join("copy.txt"), &ctx).expect_err("copy missing file");
+    let copy_error = copy_path(&missing_file, &dest_dir.join("copy.txt"), &context)
+        .expect_err("copy missing file");
     assert!(!copy_error.is_empty());
 
-    let move_error =
-        move_path(&missing_file, &dest_dir.join("move.txt"), &ctx).expect_err("move missing file");
+    let move_error = move_path(&missing_file, &dest_dir.join("move.txt"), &context)
+        .expect_err("move missing file");
     assert!(!move_error.is_empty());
 
     let delete_error =
-        delete_path_with_progress(&missing_file, false, &ctx).expect_err("delete missing file");
+        delete_path_with_progress(&missing_file, false, &context).expect_err("delete missing file");
     assert!(!delete_error.is_empty());
 
     let missing_dir = root.join("missing-dir");
@@ -406,7 +413,7 @@ fn file_operation_helpers_surface_io_errors_directly() {
         root,
         &mut visited,
         false,
-        &ctx,
+        &context,
         None,
         None,
     )
@@ -429,12 +436,12 @@ fn copy_dir_recursive_surfaces_create_dir_all_errors_for_the_target() {
     std::fs::write(&blocker, b"not a directory").expect("blocker file");
     let target = blocker.join("nested-target");
 
-    let op_arc = Arc::new(Mutex::new(state()));
+    let shared_operation = Arc::new(Mutex::new(state()));
     let resolver = Arc::new(std::sync::Condvar::new());
     let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
     let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
-    let ctx = WorkerCtx {
-        op_arc: &op_arc,
+    let context = WorkerContext {
+        shared_operation: &shared_operation,
         resolver: &resolver,
         progress: &progress,
         start: Instant::now(),
@@ -449,7 +456,7 @@ fn copy_dir_recursive_surfaces_create_dir_all_errors_for_the_target() {
         &source_dir,
         &mut visited,
         false,
-        &ctx,
+        &context,
         None,
         None,
     )
@@ -475,12 +482,12 @@ fn delete_path_with_progress_surfaces_read_dir_and_remove_dir_errors_for_directo
 
     let mut delete_state = state();
     delete_state.kind = OpKind::Delete;
-    let op_arc = Arc::new(Mutex::new(delete_state));
+    let shared_operation = Arc::new(Mutex::new(delete_state));
     let resolver = Arc::new(std::sync::Condvar::new());
     let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
     let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
-    let ctx = WorkerCtx {
-        op_arc: &op_arc,
+    let context = WorkerContext {
+        shared_operation: &shared_operation,
         resolver: &resolver,
         progress: &progress,
         start: Instant::now(),
@@ -489,8 +496,8 @@ fn delete_path_with_progress_surfaces_read_dir_and_remove_dir_errors_for_directo
     };
 
     if denied {
-        let read_dir_error =
-            delete_path_with_progress(&unreadable_dir, false, &ctx).expect_err("unreadable dir");
+        let read_dir_error = delete_path_with_progress(&unreadable_dir, false, &context)
+            .expect_err("unreadable dir");
         assert!(!read_dir_error.is_empty());
         std::fs::set_permissions(&unreadable_dir, std::fs::Permissions::from_mode(0o755))
             .expect("restore unreadable dir permissions");
@@ -511,7 +518,7 @@ fn delete_path_with_progress_surfaces_read_dir_and_remove_dir_errors_for_directo
         return;
     }
 
-    let remove_dir_error = delete_path_with_progress(&target_dir, false, &ctx);
+    let remove_dir_error = delete_path_with_progress(&target_dir, false, &context);
     std::fs::set_permissions(&locked_parent, std::fs::Permissions::from_mode(0o755))
         .expect("restore locked parent permissions");
 
@@ -534,11 +541,17 @@ fn process_item_test_hook_covers_queue_private_paths() {
         name: "delete.txt".to_string(),
         size_bytes: 6,
     }];
-    let (delete_op, _delete_resolver, delete_ctx) = worker_ctx(delete_state);
-    let delete_item = delete_op.lock().expect("delete lock").items[0].clone();
-    process_item_for_tests(&delete_ctx, &delete_item, None);
+    let (delete_operation, _delete_resolver, delete_context) = worker_context(delete_state);
+    let delete_item = delete_operation.lock().expect("delete lock").items[0].clone();
+    process_item_for_tests(&delete_context, &delete_item, None);
     assert!(!delete_source.exists());
-    assert_eq!(delete_op.lock().expect("delete lock").completed_items, 1);
+    assert_eq!(
+        delete_operation
+            .lock()
+            .expect("delete lock")
+            .completed_items,
+        1
+    );
 
     let source_dir = fixture.path().join("payload");
     std::fs::create_dir_all(&source_dir).expect("source dir");
@@ -552,12 +565,15 @@ fn process_item_test_hook_covers_queue_private_paths() {
         name: "payload".to_string(),
         size_bytes: 0,
     }];
-    let (compress_op, _compress_resolver, compress_ctx) = worker_ctx(compress_state);
-    let compress_item = compress_op.lock().expect("compress lock").items[0].clone();
-    process_item_for_tests(&compress_ctx, &compress_item, None);
+    let (compress_operation, _compress_resolver, compress_context) = worker_context(compress_state);
+    let compress_item = compress_operation.lock().expect("compress lock").items[0].clone();
+    process_item_for_tests(&compress_context, &compress_item, None);
     assert!(archive_path.exists());
     assert_eq!(
-        compress_op.lock().expect("compress lock").completed_items,
+        compress_operation
+            .lock()
+            .expect("compress lock")
+            .completed_items,
         1
     );
 
@@ -570,14 +586,20 @@ fn process_item_test_hook_covers_queue_private_paths() {
         name: "payload.zip".to_string(),
         size_bytes: 0,
     }];
-    let (extract_op, _extract_resolver, extract_ctx) = worker_ctx(extract_state);
-    let extract_item = extract_op.lock().expect("extract lock").items[0].clone();
-    process_item_for_tests(&extract_ctx, &extract_item, None);
+    let (extract_operation, _extract_resolver, extract_context) = worker_context(extract_state);
+    let extract_item = extract_operation.lock().expect("extract lock").items[0].clone();
+    process_item_for_tests(&extract_context, &extract_item, None);
     assert_eq!(
         std::fs::read(extract_root.join("payload").join("inside.txt")).expect("extract"),
         b"payload"
     );
-    assert_eq!(extract_op.lock().expect("extract lock").completed_items, 1);
+    assert_eq!(
+        extract_operation
+            .lock()
+            .expect("extract lock")
+            .completed_items,
+        1
+    );
 
     let source_tree = fixture.path().join("tree");
     let nested_dest = source_tree.join("nested");
@@ -591,10 +613,10 @@ fn process_item_test_hook_covers_queue_private_paths() {
         name: "tree".to_string(),
         size_bytes: 3,
     }];
-    let (move_op, _move_resolver, move_ctx) = worker_ctx(move_state);
-    let move_item = move_op.lock().expect("move lock").items[0].clone();
-    process_item_for_tests(&move_ctx, &move_item, None);
-    assert!(move_op
+    let (move_operation, _move_resolver, move_context) = worker_context(move_state);
+    let move_item = move_operation.lock().expect("move lock").items[0].clone();
+    process_item_for_tests(&move_context, &move_item, None);
+    assert!(move_operation
         .lock()
         .expect("move lock")
         .error_message
@@ -624,16 +646,20 @@ fn process_item_compresses_every_selected_item_into_one_archive() {
             size_bytes: 0,
         })
         .collect();
-    let (compress_op, _resolver, ctx) = worker_ctx(compress_state);
-    let items = compress_op.lock().expect("compress lock").items.clone();
+    let (compress_operation, _resolver, context) = worker_context(compress_state);
+    let items = compress_operation
+        .lock()
+        .expect("compress lock")
+        .items
+        .clone();
     for item in &items {
-        process_item_for_tests(&ctx, item, None);
+        process_item_for_tests(&context, item, None);
     }
 
-    let op = compress_op.lock().expect("compress lock");
-    assert_eq!(op.error_message, None);
-    assert_eq!(op.completed_items, 2);
-    drop(op);
+    let operation = compress_operation.lock().expect("compress lock");
+    assert_eq!(operation.error_message, None);
+    assert_eq!(operation.completed_items, 2);
+    drop(operation);
     let archive =
         zip::ZipArchive::new(std::fs::File::open(&archive_path).expect("open")).expect("zip");
     let mut names: Vec<&str> = archive.file_names().collect();
@@ -896,7 +922,7 @@ fn process_item_test_hook_covers_conflict_skip_and_replace_paths() {
         name: "skip.txt".to_string(),
         size_bytes: 8,
     }];
-    let (skip_op, skip_resolver, skip_ctx) = worker_ctx(skip_state);
+    let (skip_op, skip_resolver, skip_context) = worker_context(skip_state);
     let skip_item = skip_op.lock().expect("skip lock").items[0].clone();
     let skip_signal = skip_resolver.clone();
     let skip_state_arc = skip_op.clone();
@@ -907,7 +933,7 @@ fn process_item_test_hook_covers_conflict_skip_and_replace_paths() {
         drop(guard);
         skip_signal.notify_all();
     });
-    process_item_for_tests(&skip_ctx, &skip_item, None);
+    process_item_for_tests(&skip_context, &skip_item, None);
     assert_eq!(skip_op.lock().expect("skip lock").completed_items, 1);
     assert_eq!(
         std::fs::read(dest.join("skip.txt")).expect("skip dest"),
@@ -929,10 +955,10 @@ fn process_item_test_hook_covers_conflict_skip_and_replace_paths() {
         name: "replace.txt".to_string(),
         size_bytes: 5,
     }];
-    let (replace_op, replace_resolver, replace_ctx) = worker_ctx(replace_state);
-    let replace_item = replace_op.lock().expect("replace lock").items[0].clone();
+    let (replace_operation, replace_resolver, replace_context) = worker_context(replace_state);
+    let replace_item = replace_operation.lock().expect("replace lock").items[0].clone();
     let replace_signal = replace_resolver.clone();
-    let replace_state_arc = replace_op.clone();
+    let replace_state_arc = replace_operation.clone();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(10));
         let mut guard = replace_state_arc.lock().expect("replace lock");
@@ -940,8 +966,14 @@ fn process_item_test_hook_covers_conflict_skip_and_replace_paths() {
         drop(guard);
         replace_signal.notify_all();
     });
-    process_item_for_tests(&replace_ctx, &replace_item, None);
-    assert_eq!(replace_op.lock().expect("replace lock").completed_items, 1);
+    process_item_for_tests(&replace_context, &replace_item, None);
+    assert_eq!(
+        replace_operation
+            .lock()
+            .expect("replace lock")
+            .completed_items,
+        1
+    );
     assert_eq!(
         std::fs::read(dest.join("replace.txt")).expect("replace dest"),
         b"fresh"
@@ -1023,11 +1055,17 @@ fn process_item_test_hook_covers_cancelled_and_error_paths() {
         name: "delete.txt".to_string(),
         size_bytes: 6,
     }];
-    let (delete_op, _delete_resolver, delete_ctx) = worker_ctx(cancelled_delete);
-    let delete_item = delete_op.lock().expect("delete lock").items[0].clone();
-    process_item_for_tests(&delete_ctx, &delete_item, None);
+    let (delete_operation, _delete_resolver, delete_context) = worker_context(cancelled_delete);
+    let delete_item = delete_operation.lock().expect("delete lock").items[0].clone();
+    process_item_for_tests(&delete_context, &delete_item, None);
     assert!(delete_source.exists());
-    assert_eq!(delete_op.lock().expect("delete lock").completed_items, 0);
+    assert_eq!(
+        delete_operation
+            .lock()
+            .expect("delete lock")
+            .completed_items,
+        0
+    );
 
     let source_dir = fixture.path().join("source");
     std::fs::create_dir_all(&source_dir).expect("source dir");
@@ -1041,10 +1079,10 @@ fn process_item_test_hook_covers_cancelled_and_error_paths() {
         name: "source".to_string(),
         size_bytes: 0,
     }];
-    let (compress_op, _compress_resolver, compress_ctx) = worker_ctx(bad_compress);
-    let compress_item = compress_op.lock().expect("compress lock").items[0].clone();
-    process_item_for_tests(&compress_ctx, &compress_item, None);
-    assert!(compress_op
+    let (compress_operation, _compress_resolver, compress_context) = worker_context(bad_compress);
+    let compress_item = compress_operation.lock().expect("compress lock").items[0].clone();
+    process_item_for_tests(&compress_context, &compress_item, None);
+    assert!(compress_operation
         .lock()
         .expect("compress lock")
         .error_message
@@ -1061,10 +1099,10 @@ fn process_item_test_hook_covers_cancelled_and_error_paths() {
         name: "plain.txt".to_string(),
         size_bytes: 0,
     }];
-    let (extract_op, _extract_resolver, extract_ctx) = worker_ctx(bad_extract);
-    let extract_item = extract_op.lock().expect("extract lock").items[0].clone();
-    process_item_for_tests(&extract_ctx, &extract_item, None);
-    assert!(extract_op
+    let (extract_operation, _extract_resolver, extract_context) = worker_context(bad_extract);
+    let extract_item = extract_operation.lock().expect("extract lock").items[0].clone();
+    process_item_for_tests(&extract_context, &extract_item, None);
+    assert!(extract_operation
         .lock()
         .expect("extract lock")
         .error_message
@@ -1095,10 +1133,10 @@ fn process_item_test_hook_covers_conflict_emitter_and_apply_to_all() {
         name: "emit.txt".to_string(),
         size_bytes: 5,
     }];
-    let (emit_op, emit_resolver, emit_ctx) = worker_ctx(emit_state);
-    let emit_item = emit_op.lock().expect("emit lock").items[0].clone();
+    let (emit_operation, emit_resolver, emit_context) = worker_context(emit_state);
+    let emit_item = emit_operation.lock().expect("emit lock").items[0].clone();
     let emit_signal = emit_resolver.clone();
-    let emit_state_arc = emit_op.clone();
+    let emit_state_arc = emit_operation.clone();
     let emitted_sink = emitted.clone();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(10));
@@ -1108,7 +1146,7 @@ fn process_item_test_hook_covers_conflict_emitter_and_apply_to_all() {
         emit_signal.notify_all();
     });
     process_item_for_tests(
-        &emit_ctx,
+        &emit_context,
         &emit_item,
         Some(Arc::new(move |info| {
             emitted_sink.lock().expect("emitted lock").push(info);
@@ -1135,10 +1173,16 @@ fn process_item_test_hook_covers_conflict_emitter_and_apply_to_all() {
         name: "blanket.txt".to_string(),
         size_bytes: 0,
     }];
-    let (blanket_op, _blanket_resolver, blanket_ctx) = worker_ctx(blanket_state);
-    let blanket_item = blanket_op.lock().expect("blanket lock").items[0].clone();
-    process_item_for_tests(&blanket_ctx, &blanket_item, None);
-    assert_eq!(blanket_op.lock().expect("blanket lock").completed_items, 1);
+    let (blanket_operation, _blanket_resolver, blanket_context) = worker_context(blanket_state);
+    let blanket_item = blanket_operation.lock().expect("blanket lock").items[0].clone();
+    process_item_for_tests(&blanket_context, &blanket_item, None);
+    assert_eq!(
+        blanket_operation
+            .lock()
+            .expect("blanket lock")
+            .completed_items,
+        1
+    );
     assert_eq!(
         std::fs::read(dest.join("blanket.txt")).expect("blanket dest"),
         b"existing"
@@ -1148,7 +1192,7 @@ fn process_item_test_hook_covers_conflict_emitter_and_apply_to_all() {
 #[test]
 fn ops_test_hooks_cover_archive_name_fallback_paths() {
     let state = state();
-    let (op_arc, _resolver, ctx) = worker_ctx(state);
+    let (shared_operation, _resolver, context) = worker_context(state);
 
     assert_eq!(
         archive_stem_for_item_for_tests(PathBuf::from("/").as_path()),
@@ -1159,9 +1203,13 @@ fn ops_test_hooks_cover_archive_name_fallback_paths() {
         PathBuf::from("Archive")
     );
 
-    begin_file_progress_for_tests(&ctx, PathBuf::from("/").as_path(), 0);
+    begin_file_progress_for_tests(&context, PathBuf::from("/").as_path(), 0);
     assert_eq!(
-        op_arc.lock().expect("op lock").current_file_name.as_deref(),
+        shared_operation
+            .lock()
+            .expect("op lock")
+            .current_file_name
+            .as_deref(),
         Some("/")
     );
 }
@@ -1192,7 +1240,7 @@ fn copy_dir_recursive_populates_a_progressive_manifest_during_discovery() {
     }
 
     let target = fixture.path().join("dest");
-    let (_op_arc, _resolver, ctx) = worker_ctx(state());
+    let (_shared_operation, _resolver, context) = worker_context(state());
     // `copy_path_with_total_discovery` always canonicalizes the *walked*
     // source path itself before recursing (not just the `root` it passes
     // down), so mirror that here: on macOS the temp dir lives under a
@@ -1209,7 +1257,7 @@ fn copy_dir_recursive_populates_a_progressive_manifest_during_discovery() {
         &canonical_root,
         &mut visited,
         false,
-        &ctx,
+        &context,
         None,
         Some(&mut manifest),
     )

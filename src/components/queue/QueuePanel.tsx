@@ -16,6 +16,7 @@ import { formatCount } from '@/lib/format'
 import { formatItemPreview, verb } from '@/lib/queue-format'
 import type { OpProgress, ThroughputSample } from '@/lib/types/ipc'
 import { useQueueStore } from '@/stores/queue-store'
+import { clampPercent } from '@/lib/numbers'
 
 /** Move a pending operation within the pending sub-list and persist the order. */
 function reorder(operations: OpProgress[], id: string, delta: number) {
@@ -99,7 +100,7 @@ function CompactJobRow({
   onMoveUp,
   onMoveDown,
 }: CompactJobRowProps) {
-  const percent = Math.round(Math.min(100, Math.max(0, operation.progressPercent)))
+  const percent = Math.round(clampPercent(operation.progressPercent))
   const failed = operation.status === 'failed'
   const completed = operation.status === 'completed'
   const cancelled = operation.status === 'cancelled'

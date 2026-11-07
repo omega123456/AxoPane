@@ -1,13 +1,18 @@
+import { millisecondsInMinute } from 'date-fns/constants'
+import { BYTES_PER_MEBIBYTE, utf16ByteWeight } from '@/lib/numbers'
+
 /** Deterministic bounded metadata cache policies used by pane state. */
 export const MAX_SIZE_CACHE_ENTRIES = 10_000
 export const MAX_ICON_CACHE_ENTRIES = 4_096
-export const MAX_ICON_CACHE_BYTES = 32 * 1024 * 1024
-export const ICON_NEGATIVE_TTL_MS = 10 * 60 * 1000
+const MAX_ICON_CACHE_MEBIBYTES = 32
+export const MAX_ICON_CACHE_BYTES = MAX_ICON_CACHE_MEBIBYTES * BYTES_PER_MEBIBYTE
+const ICON_NEGATIVE_TTL_MINUTES = 10
+export const ICON_NEGATIVE_TTL_MS = ICON_NEGATIVE_TTL_MINUTES * millisecondsInMinute
 
 export type IconCacheRecord = { value: string | null; touched: number; weight: number }
 
 export function iconWeight(value: string | null): number {
-  return value == null ? 1 : value.length * 2
+  return utf16ByteWeight(value)
 }
 
 export function iconCacheNow(): number {

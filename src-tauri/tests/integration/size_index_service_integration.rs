@@ -312,12 +312,12 @@ fn cold_scan_reports_progress_states_and_saves_the_pre_scan_event_id() {
         .lock()
         .unwrap()
         .iter()
-        .map(|s| s.state)
+        .map(|status| status.state)
         .collect();
     assert_eq!(states.first(), Some(&IndexState::NotReady));
     let indexing = states
         .iter()
-        .position(|s| *s == IndexState::Indexing)
+        .position(|status| *status == IndexState::Indexing)
         .expect("indexing");
     assert_eq!(states.last(), Some(&IndexState::UpToDate));
     assert!(indexing > 0);
@@ -435,9 +435,14 @@ fn one_boost_runs_at_a_time_newest_first() {
         .lock()
         .unwrap()
         .iter()
-        .all(|u| u.state == SizeStateKind::Calculating));
+        .all(|update| update.state == SizeStateKind::Calculating));
     let opened = index.opened.lock().unwrap().clone();
-    let at = |path: PathBuf| opened.iter().position(|p| *p == path).expect("opened");
+    let at = |path: PathBuf| {
+        opened
+            .iter()
+            .position(|opened_path| *opened_path == path)
+            .expect("opened")
+    };
     assert!(
         at(index.path("s")) < at(index.path("home")),
         "newest first: {opened:?}"
@@ -625,7 +630,10 @@ fn live_events_add_prune_and_rescan_and_follow_the_data_volume_prefix() {
         },
     );
     wait_until("rescan", || {
-        index.live_for("s").iter().any(|u| u.size_bytes == Some(25))
+        index
+            .live_for("s")
+            .iter()
+            .any(|update| update.size_bytes == Some(25))
     });
     index.wait_state(IndexState::UpToDate);
 
@@ -643,7 +651,7 @@ fn live_events_add_prune_and_rescan_and_follow_the_data_volume_prefix() {
             .lock()
             .unwrap()
             .iter()
-            .filter(|s| s.state == IndexState::Indexing)
+            .filter(|status| status.state == IndexState::Indexing)
             .count()
             >= 2
     });
@@ -695,7 +703,7 @@ fn unvisited_protected_folders_are_unknown_until_visited() {
         index
             .live_for("home")
             .iter()
-            .any(|u| u.size_bytes == Some(1007) && !u.is_lower_bound)
+            .any(|update| update.size_bytes == Some(1007) && !update.is_lower_bound)
     });
     index.service().flush_index();
     let saved = persist::load(&index.snapshot).expect("snapshot");
@@ -934,8 +942,8 @@ fn blur_writes_the_snapshot_only_when_changed() {
     index.service().flush_index();
     let saved = persist::load(&index.snapshot).expect("snapshot");
     assert_eq!(saved.meta.event_id, 4242);
-    let s = saved.tree.total(&index.path("s")).expect("s");
-    assert_eq!(s.bytes, 7);
+    let subtree = saved.tree.total(&index.path("s")).expect("s");
+    assert_eq!(subtree.bytes, 7);
 }
 
 #[test]
@@ -982,7 +990,7 @@ fn missing_and_failed_walks_report_errors() {
         .lock()
         .unwrap()
         .iter()
-        .all(|u| u.state == SizeStateKind::Calculating));
+        .all(|update| update.state == SizeStateKind::Calculating));
 }
 
 #[test]
@@ -1073,7 +1081,7 @@ fn symlinked_folders_are_sized_as_their_resolved_target() {
         index
             .live_for("link-a")
             .iter()
-            .any(|u| u.size_bytes == Some(150))
+            .any(|update| update.size_bytes == Some(150))
     });
 }
 

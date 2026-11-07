@@ -25,12 +25,24 @@ export type PaneGridLayout = {
   className: string
 }
 
-export function paneGridMinimumCell(mode: Exclude<PaneViewMode, 'details'>) {
-  return mode === 'icons' ? 208 : 208
+type GraphicalViewMode = Exclude<PaneViewMode, 'details'>
+
+const minimumCellPxByMode: Record<GraphicalViewMode, number> = {
+  icons: 208,
+  thumbnails: 208,
 }
 
-export function paneGridRowPitch(mode: Exclude<PaneViewMode, 'details'>) {
-  return mode === 'icons' ? 60 : 204
+const rowPitchPxByMode: Record<GraphicalViewMode, number> = {
+  icons: 60,
+  thumbnails: 204,
+}
+
+export function paneGridMinimumCell(mode: GraphicalViewMode) {
+  return minimumCellPxByMode[mode]
+}
+
+export function paneGridRowPitch(mode: GraphicalViewMode) {
+  return rowPitchPxByMode[mode]
 }
 
 export function columnsForPaneWidth(width: number, cellMinimum: number) {

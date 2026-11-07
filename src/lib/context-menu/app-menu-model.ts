@@ -60,9 +60,9 @@ function favouriteRow(path: string, remove = false): ContextMenuActionRow {
   )
 }
 
-function shortcutFor(commandId: CommandId, os: PlatformOs) {
+function shortcutFor(commandId: CommandId, platform: PlatformOs) {
   const binding = useKeymapStore.getState().bindings[commandId][0]
-  return binding ? formatShortcutLabel(binding, os) : undefined
+  return binding ? formatShortcutLabel(binding, platform) : undefined
 }
 
 const commandIcons: Partial<Record<CommandId, ContextMenuIcon>> = {
@@ -109,7 +109,7 @@ function stripCommand(
 
 function commandRow(
   commandId: CommandId,
-  os: PlatformOs,
+  platform: PlatformOs,
   options?: {
     targetEntryId?: string
     disabled?: boolean
@@ -124,7 +124,7 @@ function commandRow(
     label: commandLabels[commandId],
     owner: 'app',
     icon: commandIcons[commandId],
-    shortcut: shortcutFor(commandId, os),
+    shortcut: shortcutFor(commandId, platform),
     disabled: options?.disabled,
     danger: options?.danger,
     hidden: options?.hidden,
@@ -211,7 +211,7 @@ function fileSystemStrip(
 
 /**
  * "Calculate size" shows when automatic sizing is unavailable or off, or when
- * the folder's size is `unknown` (FR8.4). A folder with no size state yet
+ * the folder's size is `unknown`. A folder with no size state yet
  * (e.g. a pane over the auto-size cap, or a tree node) counts as `unknown`.
  */
 function calculateSizeHidden(path: string) {
@@ -223,13 +223,13 @@ function calculateSizeHidden(path: string) {
   )
 }
 
-function calculateSizeRow(entry: DirectoryEntry, os: PlatformOs): ContextMenuActionRow {
+function calculateSizeRow(entry: DirectoryEntry, platform: PlatformOs): ContextMenuActionRow {
   const volumes = usePanesStore.getState().volumes
   const volume = volumes.find((item) =>
     entry.path.toLowerCase().startsWith(item.mountRoot.toLowerCase()),
   )
 
-  return commandRow('calculateSize', os, {
+  return commandRow('calculateSize', platform, {
     targetEntryId: entry.id,
     hidden: calculateSizeHidden(entry.path),
     disabled: Boolean(volume?.isNetwork),
@@ -254,7 +254,7 @@ function isTrashPane(paneId: PaneId): boolean {
 
 function buildTrashEntryContent(
   target: Extract<ContextMenuTarget, { kind: 'file' | 'folder' }>,
-  os: PlatformOs,
+  platform: PlatformOs,
 ): ContextMenuContent {
   const targetEntryId = target.entry.id
 
@@ -262,48 +262,50 @@ function buildTrashEntryContent(
     topStrip: [],
     sections: [
       section('primary', [
-        commandRow('restore', os, {
+        commandRow('restore', platform, {
           targetEntryId,
           strong: true,
           disabled: !target.entry.originalPath,
         }),
-        commandRow('deletePermanent', os, { targetEntryId, danger: true }),
+        commandRow('deletePermanent', platform, { targetEntryId, danger: true }),
       ]),
     ],
   }
 }
 
-function buildTrashMultiContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
+function buildTrashMultiContent(paneId: PaneId, platform: PlatformOs): ContextMenuContent {
   const selectedEntries = selectedEntriesForPane(paneId)
 
   return {
     topStrip: [],
     sections: [
       section('primary', [
-        commandRow('restore', os, {
+        commandRow('restore', platform, {
           strong: true,
           disabled: selectedEntries.some((entry) => !entry.originalPath),
         }),
-        commandRow('deletePermanent', os, { danger: true }),
+        commandRow('deletePermanent', platform, { danger: true }),
       ]),
     ],
   }
 }
 
-function buildTrashEmptyContent(os: PlatformOs): ContextMenuContent {
+function buildTrashEmptyContent(platform: PlatformOs): ContextMenuContent {
   return {
     topStrip: [],
-    sections: [section('primary', [commandRow('emptyTrash', os, { danger: true, strong: true })])],
+    sections: [
+      section('primary', [commandRow('emptyTrash', platform, { danger: true, strong: true })]),
+    ],
   }
 }
 
 function buildFileOrFolderContent(
   paneId: PaneId,
   target: Extract<ContextMenuTarget, { kind: 'file' | 'folder' }>,
-  os: PlatformOs,
+  platform: PlatformOs,
 ): ContextMenuContent {
   if (isTrashPane(paneId)) {
-    return buildTrashEntryContent(target, os)
+    return buildTrashEntryContent(target, platform)
   }
 
   const clipboard = useClipboardStore.getState()
@@ -316,12 +318,12 @@ function buildFileOrFolderContent(
     topStrip: fileSystemStrip(targetEntryId),
     sections: [
       section('primary', [
-        commandRow('open', os, { targetEntryId, strong: true }),
-        commandRow('openInNewTab', os, {
+        commandRow('open', platform, { targetEntryId, strong: true }),
+        commandRow('openInNewTab', platform, {
           targetEntryId,
           disabled: target.kind === 'file',
         }),
-        commandRow('openInOtherPane', os, {
+        commandRow('openInOtherPane', platform, {
           targetEntryId,
           disabled: target.kind === 'file',
         }),
@@ -334,7 +336,7 @@ function buildFileOrFolderContent(
       ]),
       section('secondary', [
         ...(target.kind === 'folder' ? [favouriteRow(target.entry.path)] : []),
-        commandRow('paste', os, { disabled: !canPaste }),
+        commandRow('paste', platform, { disabled: !canPaste }),
         customRow(
           `copy-path-${target.entry.id}`,
           'Copy as path',
@@ -353,8 +355,8 @@ function buildFileOrFolderContent(
           extractContextAction([target.entry.path], usePanesStore.getState().panes[paneId].path),
           { disabled: !canExtract, icon: { kind: 'app', name: 'extract' } },
         ),
-        ...(target.kind === 'folder' ? [calculateSizeRow(target.entry, os)] : []),
-        commandRow('deletePermanent', os, { targetEntryId, danger: true }),
+        ...(target.kind === 'folder' ? [calculateSizeRow(target.entry, platform)] : []),
+        commandRow('deletePermanent', platform, { targetEntryId, danger: true }),
       ]),
       section('footer', [
         customRow(
@@ -368,9 +370,9 @@ function buildFileOrFolderContent(
   }
 }
 
-function buildMultiContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
+function buildMultiContent(paneId: PaneId, platform: PlatformOs): ContextMenuContent {
   if (isTrashPane(paneId)) {
-    return buildTrashMultiContent(paneId, os)
+    return buildTrashMultiContent(paneId, platform)
   }
 
   const pane = usePanesStore.getState().panes[paneId]
@@ -405,18 +407,18 @@ function buildMultiContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
           ),
           { disabled: !canExtract, icon: { kind: 'app', name: 'extract' } },
         ),
-        commandRow('paste', os, { disabled: clipboard.entries.length === 0 }),
+        commandRow('paste', platform, { disabled: clipboard.entries.length === 0 }),
         customRow(
           'copy-path-selection',
           'Copy as path',
           copyPathsContextAction(selectedEntries.map((entry) => entry.path)),
           { disabled: selectedEntries.length === 0, icon: { kind: 'app', name: 'copy' } },
         ),
-        commandRow('deletePermanent', os, {
+        commandRow('deletePermanent', platform, {
           danger: true,
           disabled: selectedEntries.length === 0,
         }),
-        commandRow('selectAll', os, {
+        commandRow('selectAll', platform, {
           disabled: pane.entries.length === 0,
         }),
       ]),
@@ -432,9 +434,9 @@ function buildMultiContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
   }
 }
 
-function buildEmptyContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
+function buildEmptyContent(paneId: PaneId, platform: PlatformOs): ContextMenuContent {
   if (isTrashPane(paneId)) {
-    return buildTrashEmptyContent(os)
+    return buildTrashEmptyContent(platform)
   }
 
   const pane = usePanesStore.getState().panes[paneId]
@@ -444,14 +446,14 @@ function buildEmptyContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
     topStrip: [],
     sections: [
       section('create', [
-        commandRow('paste', os, { disabled: clipboard.entries.length === 0 }),
-        commandRow('newFolder', os),
-        commandRow('newFile', os),
+        commandRow('paste', platform, { disabled: clipboard.entries.length === 0 }),
+        commandRow('newFolder', platform),
+        commandRow('newFile', platform),
       ]),
       section('footer', [
         favouriteRow(pane.path),
-        commandRow('refresh', os),
-        commandRow('selectAll', os, {
+        commandRow('refresh', platform),
+        commandRow('selectAll', platform, {
           disabled: pane.entries.length === 0,
         }),
       ]),
@@ -467,16 +469,16 @@ function buildEmptyContent(paneId: PaneId, os: PlatformOs): ContextMenuContent {
   }
 }
 
-function buildTrashTreeContent(os: PlatformOs): ContextMenuContent {
+function buildTrashTreeContent(platform: PlatformOs): ContextMenuContent {
   return {
     topStrip: [],
     sections: [
-      section('primary', [commandRow('emptyTrash', os, { danger: true, strong: true })]),
+      section('primary', [commandRow('emptyTrash', platform, { danger: true, strong: true })]),
       section('properties', [
         customRow(
           'properties-tree-trash',
           'Properties',
-          propertiesContextAction([createTrashPropertiesDialogItem(os)]),
+          propertiesContextAction([createTrashPropertiesDialogItem(platform)]),
           { icon: { kind: 'app', name: 'properties' } },
         ),
       ]),
@@ -516,10 +518,10 @@ function buildTreeOpenTargetRows(path: string): ContextMenuActionRow[] {
 
 function buildTreeContent(
   target: Extract<ContextMenuTarget, { kind: 'tree' | 'favourite' }>,
-  os: PlatformOs,
+  platform: PlatformOs,
 ): ContextMenuContent {
   if (isTrashPath(target.path)) {
-    return buildTrashTreeContent(os)
+    return buildTrashTreeContent(platform)
   }
 
   const volumes = usePanesStore.getState().volumes
@@ -532,7 +534,8 @@ function buildTreeContent(
   // in-use volume can only be force-dismounted), so Windows users use the native
   // "Eject" entry in the shell context menu instead.
   const isEjectableRoot =
-    os === 'macos' && Boolean(volume && isVolumeRoot(target.path, volume) && volume.isRemovable)
+    platform === 'macos' &&
+    Boolean(volume && isVolumeRoot(target.path, volume) && volume.isRemovable)
 
   return {
     topStrip: [],
@@ -543,7 +546,7 @@ function buildTreeContent(
           commandLabels.open,
           navigateContextAction(target.path, 'current-pane'),
           {
-            shortcut: shortcutFor('open', os),
+            shortcut: shortcutFor('open', platform),
             strong: true,
             icon: { kind: 'app', name: 'open' },
           },
@@ -573,7 +576,7 @@ function buildTreeContent(
           commandLabels.calculateSize,
           requestFolderSizeContextAction(target.path),
           {
-            shortcut: shortcutFor('calculateSize', os),
+            shortcut: shortcutFor('calculateSize', platform),
             hidden: calculateSizeHidden(target.path),
             disabled: Boolean(networkNode),
             icon: { kind: 'app', name: 'calculate-size' },
@@ -695,20 +698,20 @@ function buildTabContent(
 export function buildAppContextMenuContent(
   paneId: PaneId,
   target: ContextMenuTarget,
-  os: PlatformOs,
+  platform: PlatformOs,
 ): ContextMenuContent {
   switch (target.kind) {
     case 'file':
     case 'folder':
-      return buildFileOrFolderContent(paneId, target, os)
+      return buildFileOrFolderContent(paneId, target, platform)
     case 'multi':
-      return buildMultiContent(paneId, os)
+      return buildMultiContent(paneId, platform)
     case 'empty':
-      return buildEmptyContent(paneId, os)
+      return buildEmptyContent(paneId, platform)
     case 'tree':
-      return buildTreeContent(target, os)
+      return buildTreeContent(target, platform)
     case 'favourite':
-      return buildTreeContent(target, os)
+      return buildTreeContent(target, platform)
     case 'tab':
       return buildTabContent(paneId, target)
   }

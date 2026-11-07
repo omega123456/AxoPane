@@ -92,7 +92,7 @@ const VISIBLE: SearchOptions = SearchOptions {
     scope: SearchScope::All,
 };
 
-fn q(raw: &str) -> ParsedQuery {
+fn parsed(raw: &str) -> ParsedQuery {
     parse(raw, PathStyle::Posix, Some("/Users/alex")).expect("query")
 }
 
@@ -105,11 +105,15 @@ fn run(source: &Source, raw: &str, options: &SearchOptions) -> CandidateBatch {
         cancelled: &never,
         expired: &never,
     };
-    candidates(source, &q(raw), options, &control).expect("batch")
+    candidates(source, &parsed(raw), options, &control).expect("batch")
 }
 
 fn sorted(batch: &CandidateBatch) -> Vec<&str> {
-    let mut paths: Vec<&str> = batch.candidates.iter().map(|c| c.path.as_str()).collect();
+    let mut paths: Vec<&str> = batch
+        .candidates
+        .iter()
+        .map(|candidate| candidate.path.as_str())
+        .collect();
     paths.sort_unstable();
     paths
 }
@@ -131,7 +135,7 @@ fn name_scans_return_matching_folders_as_posix_paths() {
     assert!(batch
         .candidates
         .iter()
-        .all(|c| c.is_dir && c.modified.is_none()));
+        .all(|candidate| candidate.is_dir && candidate.modified.is_none()));
     assert!(!batch.truncated);
     assert_eq!(source.reads(), 1);
     assert_eq!(SLOTS_PER_READ, 32_768);
@@ -156,7 +160,7 @@ fn blocked_protected_roots_hide_their_contents_only() {
     assert_eq!(hits, "/Users/alex/Documents");
     assert!(!sorted(&run(&source, "inv", &VISIBLE))
         .iter()
-        .any(|p| p.contains("/Documents/")));
+        .any(|path| path.contains("/Documents/")));
 }
 
 #[test]
@@ -174,8 +178,8 @@ fn file_scope_finds_nothing_in_a_folder_only_index() {
 fn browsing_lists_children_of_the_best_matching_folders() {
     let source = Source::new(LIBRARY);
     let batch = run(&source, "alex/", &VISIBLE);
-    let hits = rank_candidates(batch.candidates, &q("alex/"), PathStyle::Posix);
-    let paths: Vec<&str> = hits.iter().map(|h| h.path.as_str()).collect();
+    let hits = rank_candidates(batch.candidates, &parsed("alex/"), PathStyle::Posix);
+    let paths: Vec<&str> = hits.iter().map(|hit| hit.path.as_str()).collect();
     assert_eq!(
         &paths[..4],
         [
@@ -186,7 +190,7 @@ fn browsing_lists_children_of_the_best_matching_folders() {
         ]
     );
     assert!(paths.contains(&"/Users/alexios/Invoices"));
-    assert!(!paths.iter().any(|p| p.ends_with(".config")));
+    assert!(!paths.iter().any(|path| path.ends_with(".config")));
 }
 
 #[test]
@@ -201,8 +205,12 @@ fn anchored_queries_list_or_scan_inside_the_anchor() {
     );
     assert!(run(&source, "/Nowhere/", &VISIBLE).candidates.is_empty());
     let scanned = run(&source, "~/Documents/inv", &VISIBLE);
-    let hits = rank_candidates(scanned.candidates, &q("~/Documents/inv"), PathStyle::Posix);
-    let paths: Vec<&str> = hits.iter().map(|h| h.path.as_str()).collect();
+    let hits = rank_candidates(
+        scanned.candidates,
+        &parsed("~/Documents/inv"),
+        PathStyle::Posix,
+    );
+    let paths: Vec<&str> = hits.iter().map(|hit| hit.path.as_str()).collect();
     assert_eq!(
         paths,
         [
@@ -219,7 +227,8 @@ fn scans_read_in_chunks_and_honour_cancellation_and_budget() {
         cancelled: &never,
         expired: &never,
     };
-    let chunked = candidates_in_chunks(&source, &q("inv"), &VISIBLE, &control, 4).expect("batch");
+    let chunked =
+        candidates_in_chunks(&source, &parsed("inv"), &VISIBLE, &control, 4).expect("batch");
     assert_eq!(chunked.candidates.len(), 5);
     assert!(source.reads() > 2);
 
@@ -229,7 +238,7 @@ fn scans_read_in_chunks_and_honour_cancellation_and_budget() {
         expired: &never,
     };
     assert_eq!(
-        candidates(&source, &q("inv"), &VISIBLE, &cancelled),
+        candidates(&source, &parsed("inv"), &VISIBLE, &cancelled),
         Err(SearchError::Cancelled)
     );
 
@@ -243,7 +252,7 @@ fn scans_read_in_chunks_and_honour_cancellation_and_budget() {
         expired: &after_one,
     };
     let partial =
-        candidates_in_chunks(&source, &q("inv"), &VISIBLE, &expiring, 1).expect("partial");
+        candidates_in_chunks(&source, &parsed("inv"), &VISIBLE, &expiring, 1).expect("partial");
     assert!(partial.truncated);
 }
 
@@ -254,7 +263,7 @@ fn freed_slots_are_skipped_and_reused_slots_reported() {
     let source = Source::from_tree(tree);
     assert!(!sorted(&run(&source, "inv", &VISIBLE))
         .iter()
-        .any(|p| p.contains("Documents")));
+        .any(|path| path.contains("Documents")));
     {
         let mut tree = source.tree.lock().unwrap();
         assert!(tree.merge_record(Path::new("/Users/alex"), 0, &["Invoices", "Ledger"], false));
@@ -271,11 +280,11 @@ fn read_errors_propagate() {
         expired: &never,
     };
     assert_eq!(
-        candidates(&source, &q("inv"), &VISIBLE, &control),
+        candidates(&source, &parsed("inv"), &VISIBLE, &control),
         Err(SearchError::NotReady)
     );
     assert_eq!(
-        candidates(&source, &q("~/"), &VISIBLE, &control),
+        candidates(&source, &parsed("~/"), &VISIBLE, &control),
         Err(SearchError::NotReady)
     );
 }
@@ -300,8 +309,8 @@ fn a_query_with_nothing_to_match_finds_nothing() {
 }
 
 fn bulk(count: usize, exact: usize) -> Source {
-    let mut names: Vec<String> = (0..count).map(|i| format!("inv-{i:05}")).collect();
-    names.extend((0..exact).map(|i| format!("inv{i}")));
+    let mut names: Vec<String> = (0..count).map(|index| format!("inv-{index:05}")).collect();
+    names.extend((0..exact).map(|index| format!("inv{index}")));
     names.push("inv".to_owned());
     let mut tree = FolderSizeTree::default();
     assert!(tree.add_root(Path::new("/")));
@@ -318,12 +327,15 @@ fn broad_scans_keep_the_best_tiers_up_to_the_cap() {
     };
     for count in [2 * CANDIDATE_CAP + 500, CANDIDATE_CAP + 500] {
         let source = bulk(count, 0);
-        let batch =
-            candidates_in_chunks(&source, &q("inv"), &VISIBLE, &control, 1_000).expect("batch");
+        let batch = candidates_in_chunks(&source, &parsed("inv"), &VISIBLE, &control, 1_000)
+            .expect("batch");
         assert!(batch.truncated, "{count}");
         assert_eq!(batch.candidates.len(), CANDIDATE_CAP);
         assert!(
-            batch.candidates.iter().any(|c| c.path == "/bulk/inv"),
+            batch
+                .candidates
+                .iter()
+                .any(|candidate| candidate.path == "/bulk/inv"),
             "{count}"
         );
     }

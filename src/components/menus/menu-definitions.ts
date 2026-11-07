@@ -12,11 +12,12 @@ import { useSelectionStore } from '@/stores/selection-store'
 import type { PaneId } from '@/types/pane'
 
 const NATIVE_SECTION_ID = 'native-extras'
+const MAX_FILE_CHIP_LENGTH = 4
 
 function fileChip(entry: DirectoryEntry): string {
-  const dot = entry.name.lastIndexOf('.')
-  const ext = dot > 0 ? entry.name.slice(dot + 1).toUpperCase() : ''
-  return ext && ext.length <= 4 ? ext : 'FILE'
+  const extensionStart = entry.name.lastIndexOf('.')
+  const extension = extensionStart > 0 ? entry.name.slice(extensionStart + 1).toUpperCase() : ''
+  return extension && extension.length <= MAX_FILE_CHIP_LENGTH ? extension : 'FILE'
 }
 
 export function describeMenuTarget(target: ContextMenuTarget): { title: string; chip?: string } {
@@ -35,10 +36,10 @@ export function describeMenuTarget(target: ContextMenuTarget): { title: string; 
 export function buildContextMenuContent(
   paneId: PaneId,
   target: ContextMenuTarget,
-  os: PlatformOs,
+  platform: PlatformOs,
 ): ContextMenuContent {
-  const content = buildAppContextMenuContent(paneId, target, os)
-  const nativeRequest = os === 'windows' ? buildNativeMenuRequest(paneId, target) : null
+  const content = buildAppContextMenuContent(paneId, target, platform)
+  const nativeRequest = platform === 'windows' ? buildNativeMenuRequest(paneId, target) : null
 
   return {
     ...content,

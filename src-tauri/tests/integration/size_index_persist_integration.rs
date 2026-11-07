@@ -8,7 +8,7 @@ use file_explorer_lib::size::index::persist::{
 use file_explorer_lib::size::index::tree::FolderSizeTree;
 use tempfile::tempdir;
 
-fn p(parts: &[&str]) -> PathBuf {
+fn path_of(parts: &[&str]) -> PathBuf {
     std::iter::once("idx")
         .chain(parts.iter().copied())
         .collect()
@@ -22,33 +22,33 @@ fn meta() -> SnapshotMeta {
         os_build: BUILD.into(),
         event_id: 500,
         last_full_scan_secs: 1_760_000_000,
-        visited_roots: vec![p(&["home", "Desktop"])],
+        visited_roots: vec![path_of(&["home", "Desktop"])],
     }
 }
 
 fn sample_tree() -> FolderSizeTree {
     let mut tree = FolderSizeTree::default();
-    tree.add_root(&p(&[]));
+    tree.add_root(&path_of(&[]));
     tree.add_root(&["second"].iter().collect::<PathBuf>());
-    tree.merge_record(&p(&[]), 1, &["home", "pending"], false);
+    tree.merge_record(&path_of(&[]), 1, &["home", "pending"], false);
     tree.merge_record(
-        &p(&["home"]),
+        &path_of(&["home"]),
         20,
         &["zeta", "alpha", "locked", "Desktop"],
         false,
     );
-    tree.merge_record::<&str>(&p(&["home", "zeta"]), 300, &[], false);
-    tree.merge_record::<&str>(&p(&["home", "alpha"]), 4000, &[], false);
-    tree.merge_record::<&str>(&p(&["home", "locked"]), 0, &[], true);
-    tree.set_skipped(&p(&["home", "Desktop"]), true);
-    tree.merge_record::<&str>(&p(&["pending", "child"]), 7, &[], false);
+    tree.merge_record::<&str>(&path_of(&["home", "zeta"]), 300, &[], false);
+    tree.merge_record::<&str>(&path_of(&["home", "alpha"]), 4000, &[], false);
+    tree.merge_record::<&str>(&path_of(&["home", "locked"]), 0, &[], true);
+    tree.set_skipped(&path_of(&["home", "Desktop"]), true);
+    tree.merge_record::<&str>(&path_of(&["pending", "child"]), 7, &[], false);
     tree.merge_record::<&str>(&["second", "x"].iter().collect::<PathBuf>(), 9, &[], false);
     tree
 }
 
 fn fnv1a(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &b| {
-        (hash ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
     })
 }
 
@@ -99,14 +99,17 @@ fn round_trip_is_byte_exact_and_restores_totals() {
         &["pending"][..],
     ] {
         assert_eq!(
-            snapshot.tree.total(&p(parts)),
-            tree.total(&p(parts)),
+            snapshot.tree.total(&path_of(parts)),
+            tree.total(&path_of(parts)),
             "{parts:?}"
         );
     }
     let second: PathBuf = ["second"].iter().collect();
-    assert_eq!(snapshot.tree.total(&second).map(|t| t.bytes), Some(9));
-    let home = snapshot.tree.total(&p(&["home"])).expect("home");
+    assert_eq!(
+        snapshot.tree.total(&second).map(|total| total.bytes),
+        Some(9)
+    );
+    let home = snapshot.tree.total(&path_of(&["home"])).expect("home");
     assert_eq!(home.bytes, 4320);
     assert_eq!(home.lower_bound.expect("bound").denied_count, 1);
     // Pending placeholders survive, so an interrupted scan can resume.
@@ -185,7 +188,7 @@ fn old_version_and_malformed_content_yield_none_even_with_a_valid_checksum() {
 
 fn event(parts: &[&str], flags: ChangeFlags) -> ChangeEvent {
     ChangeEvent {
-        path: p(parts),
+        path: path_of(parts),
         flags,
     }
 }
@@ -218,7 +221,7 @@ fn catch_up_advanced_id_rereads_reported_directories() {
     assert_eq!(
         plan_catch_up(&meta(), "0A1B-UUID", BUILD, 900, &events),
         ReplayOutcome::Apply {
-            reread: vec![p(&["a"]), p(&["b"])],
+            reread: vec![path_of(&["a"]), path_of(&["b"])],
             rescan: vec![],
         }
     );
@@ -308,8 +311,8 @@ fn live_must_scan_sub_dirs_rescans_only_that_subtree() {
     assert_eq!(
         plan_batch(&events),
         ReplayOutcome::Apply {
-            reread: vec![p(&["b"])],
-            rescan: vec![p(&["a"]), p(&["c"])],
+            reread: vec![path_of(&["b"])],
+            rescan: vec![path_of(&["a"]), path_of(&["c"])],
         }
     );
     assert_eq!(plan_batch(&[]), ReplayOutcome::UpToDate);

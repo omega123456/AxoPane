@@ -51,9 +51,9 @@ fn sort_codes_match_the_sdk() {
 
 #[test]
 fn the_fake_handle_records_queries_and_answers_from_its_responder() {
-    let handle = EverythingHandle::test_with_responder(Arc::new(|q: &EverythingQuery| {
-        (q.search != "fail").then(|| EverythingQueryResult {
-            rows: vec![row(&q.search)],
+    let handle = EverythingHandle::test_with_responder(Arc::new(|query: &EverythingQuery| {
+        (query.search != "fail").then(|| EverythingQueryResult {
+            rows: vec![row(&query.search)],
             total: 3,
         })
     }));

@@ -22,20 +22,22 @@ impl NativeMenuProvider for WindowsNativeMenuProvider {
         #[cfg(not(feature = "test-utils"))]
         {
             let _ = executor;
-            return match super::helper_supervisor::shared().call(
+            match super::helper_supervisor::shared().call(
                 HelperRole::Interactive,
                 HelperOperation::Discover(request.clone()),
                 DISCOVERY_DEADLINE,
             ) {
                 Ok(HelperResult::Items(items)) => items,
                 _ => Vec::new(),
-            };
+            }
         }
         #[cfg(feature = "test-utils")]
-        executor.execute({
-            let request = request.clone();
-            move || load_menu_impl(&request)
-        })
+        {
+            executor.execute({
+                let request = request.clone();
+                move || load_menu_impl(&request)
+            })
+        }
     }
 
     fn invoke(
@@ -46,14 +48,14 @@ impl NativeMenuProvider for WindowsNativeMenuProvider {
         #[cfg(not(feature = "test-utils"))]
         {
             let _ = executor;
-            return match super::helper_supervisor::shared().call(
+            match super::helper_supervisor::shared().call(
                 HelperRole::Interactive,
                 HelperOperation::Invoke(invocation.clone()),
                 INVOCATION_DEADLINE,
             ) {
                 Ok(HelperResult::Status(status)) => status,
                 _ => MenuActionStatus::unsupported("native-helper-failed"),
-            };
+            }
         }
         #[cfg(feature = "test-utils")]
         {
@@ -71,14 +73,14 @@ impl NativeMenuProvider for WindowsNativeMenuProvider {
         #[cfg(not(feature = "test-utils"))]
         {
             let _ = executor;
-            return match super::helper_supervisor::shared().call(
+            match super::helper_supervisor::shared().call(
                 role,
                 HelperOperation::Discover(request.clone()),
                 DISCOVERY_DEADLINE,
             ) {
                 Ok(HelperResult::Items(items)) => items,
                 _ => Vec::new(),
-            };
+            }
         }
         #[cfg(feature = "test-utils")]
         {
@@ -91,7 +93,7 @@ impl NativeMenuProvider for WindowsNativeMenuProvider {
 pub fn show_properties(request: &ShowPropertiesRequest) -> MenuActionStatus {
     #[cfg(not(feature = "test-utils"))]
     {
-        return real::show_properties_impl(request);
+        real::show_properties_impl(request)
     }
 
     #[cfg(feature = "test-utils")]
@@ -104,7 +106,7 @@ pub fn show_properties(request: &ShowPropertiesRequest) -> MenuActionStatus {
 pub fn open_with(request: &OpenWithRequest) -> MenuActionStatus {
     #[cfg(not(feature = "test-utils"))]
     {
-        return real::open_with_impl(request);
+        real::open_with_impl(request)
     }
 
     #[cfg(feature = "test-utils")]
@@ -922,7 +924,7 @@ mod real {
         let command_index = menu_id
             .checked_sub(COMMAND_ID_FIRST)
             .ok_or_else(windows::core::Error::empty)?;
-        let mut invoke = CMINVOKECOMMANDINFO {
+        let invoke = CMINVOKECOMMANDINFO {
             cbSize: std::mem::size_of::<CMINVOKECOMMANDINFO>() as u32,
             fMask: 0,
             hwnd: HWND(null_mut()),
@@ -934,6 +936,6 @@ mod real {
             hIcon: Default::default(),
         };
 
-        unsafe { context_menu.InvokeCommand(&mut invoke) }
+        unsafe { context_menu.InvokeCommand(&invoke) }
     }
 }

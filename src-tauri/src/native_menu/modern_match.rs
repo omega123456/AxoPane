@@ -11,22 +11,25 @@ use crate::native_menu::types::{LoadNativeMenuRequest, NativeMenuTargetKind};
 /// Parses a GUID/CLSID string in any common form (`{...}`, hyphenated, or bare
 /// hex) into its canonical `u128` value. Returns `None` unless exactly 32 hex
 /// digits are present.
+const GUID_HEX_DIGITS: usize = 32;
+const HEX_RADIX: u32 = 16;
+
 pub fn parse_guid_u128(value: &str) -> Option<u128> {
     let hex: String = value.chars().filter(char::is_ascii_hexdigit).collect();
-    if hex.len() != 32 {
+    if hex.len() != GUID_HEX_DIGITS {
         return None;
     }
-    u128::from_str_radix(&hex, 16).ok()
+    u128::from_str_radix(&hex, HEX_RADIX).ok()
 }
 
 /// Formats a `u128` GUID as the braced, upper-case registry form
 /// (`{B41DB860-64E4-11D2-9906-E49FADC173CA}`).
 pub fn format_guid_braced(value: u128) -> String {
-    let b = value.to_be_bytes();
+    let bytes = value.to_be_bytes();
     format!(
         "{{{:02X}{:02X}{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
-        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13],
-        b[14], b[15]
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8],
+        bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
     )
 }
 

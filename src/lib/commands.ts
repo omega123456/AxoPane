@@ -238,15 +238,15 @@ export function executeCommand(
       break
     }
     case 'restore': {
-      const ids = effectiveEntries
+      const trashIds = effectiveEntries
         .map((item) => item.trashId)
         .filter((id): id is string => Boolean(id))
-      if (ids.length > 0) {
-        void restoreFromTrash({ ids })
+      if (trashIds.length > 0) {
+        void restoreFromTrash({ ids: trashIds })
           .then(() => panes.reloadPane(paneId))
           .catch((error) => {
             const message = error instanceof Error ? error.message : String(error)
-            log.error('restore from trash failed', { paneId, ids, error })
+            log.error('restore from trash failed', { paneId, trashIds, error })
             useErrorToastStore.getState().show(message)
           })
       }

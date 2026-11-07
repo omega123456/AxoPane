@@ -12,10 +12,7 @@ use crate::watch::WatchService;
 #[cfg(not(feature = "test-utils"))]
 use rayon::prelude::*;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
-
-#[cfg(feature = "test-utils")]
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::mock;
 #[cfg(feature = "test-utils")]
@@ -42,11 +39,19 @@ use super::types::{
 };
 use crate::fs::DirectoryEntry;
 use std::path::Path;
-#[cfg(not(feature = "test-utils"))]
-use std::time::Duration;
 use tauri::State;
 #[cfg(not(feature = "test-utils"))]
 use tauri::{AppHandle, Emitter, Manager};
+
+/// LaunchServices may keep its OS-owned confirmation UI open for longer than
+/// the normal short IPC deadline. The macOS adapter still has its own
+/// completion safeguard, so this is a margin for scheduling/serialization
+/// rather than unbounded work.
+#[cfg(not(feature = "test-utils"))]
+const SET_DEFAULT_APPLICATION_DEADLINE: Duration = Duration::from_secs(15);
+
+#[cfg(feature = "test-utils")]
+const SIZE_UPDATE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 #[cfg(feature = "test-utils")]
 #[inline(never)]
@@ -224,7 +229,7 @@ pub fn begin_directory_session(
 
 /// Idempotent page-index range fetch for an established v2 directory
 /// session. Any valid page index may be retried for the same baseline; a
-/// stale baseline field is rejected (not served) per Functional Requirement 1.
+/// stale baseline field is rejected (not served).
 ///
 /// The error is the typed [`SessionRejection`] (not a stringified message) so
 /// the frontend can branch on `kind` (e.g. "stale, silently re-navigate" vs.
@@ -238,9 +243,9 @@ pub fn get_directory_session_range(
 }
 
 /// Revises the sort/filter/show-hidden/item-count view of an already-active
-/// v2 directory session without re-enumerating the filesystem (Phase 4: the
-/// frontend calls this instead of re-running `begin_directory_session` for a
-/// plain sort/filter change on the same directory). Returns the same shape as
+/// v2 directory session without re-enumerating the filesystem (the frontend
+/// calls this instead of re-running `begin_directory_session` for a plain
+/// sort/filter change on the same directory). Returns the same shape as
 /// `begin_directory_session` (a fresh baseline + first page) so callers can
 /// treat "new session" and "revised view" uniformly.
 #[tauri::command]
@@ -894,11 +899,7 @@ pub async fn set_default_application(
         .latency_async_cancellable_with_deadline(
             "app-picker-launch-services".into(),
             crate::ipc::executor::Cancellation::default(),
-            // LaunchServices may keep its OS-owned confirmation UI open for
-            // longer than the normal short IPC deadline. The macOS adapter
-            // still has its own 10-second completion safeguard, so this is a
-            // margin for scheduling/serialization rather than unbounded work.
-            Duration::from_secs(15),
+            SET_DEFAULT_APPLICATION_DEADLINE,
             move |cancellation| async move {
                 Ok(app_picker::set_default_application_cancellable(payload, cancellation).await)
             },
@@ -1149,7 +1150,7 @@ pub fn request_folder_sizes(
             return recorded.clone();
         }
         drop(recorded);
-        std::thread::sleep(Duration::from_millis(10));
+        std::thread::sleep(SIZE_UPDATE_POLL_INTERVAL);
     }
 
     let recorded = updates.lock().expect("size updates lock").clone();
@@ -1390,9 +1391,7 @@ pub fn cancel_sizes(
 
 /// Folds a legacy [`crate::watch::DirPatch`] into the v2
 /// `DirectorySessionService`, if the reporting tab has an active v2 session
-/// for the corresponding pane (Phase 5: closes the gap where watch-driven
-/// mutations previously left `PaneEntryCollection` stale until the next full
-/// reload — see the Phase 4 stopgap notes). Reuses `WatchService`'s
+/// for the corresponding pane. Reuses `WatchService`'s
 /// already-tested long-lived per-tab watch as the mutation source rather than
 /// standing up a second independent long-lived watcher; the v2 session only
 /// consumes the *result*, computing its own Rust-authoritative

@@ -23,7 +23,28 @@
 //!   4-byte data type (e.g. `"ustr"`), then a type-specific value.
 
 use std::collections::HashMap;
+use std::ops::RangeInclusive;
 use std::path::Path;
+
+const U32_BYTES: usize = 4;
+const FOUR_CHAR_CODE_BYTES: usize = 4;
+const UTF16_UNIT_BYTES: usize = 2;
+const HEADER_VERSION: u32 = 1;
+const HEADER_MAGIC: &[u8] = b"Bud1";
+const HEADER_MAGIC_OFFSET: usize = 4;
+const HEADER_ROOT_OFFSET_POSITION: usize = 8;
+/// Block offsets in the header and address table are relative to byte 4.
+const BLOCK_OFFSET_BASE: usize = 4;
+/// `count` plus the zeroed `u32` that precede the address table.
+const ADDRESS_TABLE_PREAMBLE_BYTES: usize = 8;
+/// The low five bits of an address-table entry encode the block size.
+const BLOCK_SIZE_BITS_MASK: u32 = 0x1F;
+/// `mode` plus `count` at the start of every B-tree node.
+const NODE_HEADER_BYTES: usize = 8;
+const LEAF_NODE_MODE: u32 = 0;
+const BOOL_VALUE_BYTES: usize = 1;
+const TIMESTAMP_VALUE_BYTES: usize = 8;
+const PRINTABLE_ASCII: RangeInclusive<u8> = 0x20..=0x7e;
 
 /// A recovered put-back record: the original parent directory (volume
 /// relative, no leading slash) and the original file name.
@@ -65,23 +86,23 @@ struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
-    fn u32(&self, pos: usize) -> Option<u32> {
-        let slice = self.bytes.get(pos..pos.checked_add(4)?)?;
+    fn u32(&self, position: usize) -> Option<u32> {
+        let slice = self.slice(position, U32_BYTES)?;
         Some(u32::from_be_bytes(slice.try_into().ok()?))
     }
 
-    fn slice(&self, pos: usize, len: usize) -> Option<&'a [u8]> {
-        self.bytes.get(pos..pos.checked_add(len)?)
+    fn slice(&self, position: usize, length: usize) -> Option<&'a [u8]> {
+        self.bytes.get(position..position.checked_add(length)?)
     }
 
-    fn ascii4(&self, pos: usize) -> Option<&'a str> {
-        std::str::from_utf8(self.slice(pos, 4)?).ok()
+    fn four_char_code(&self, position: usize) -> Option<&'a str> {
+        std::str::from_utf8(self.slice(position, FOUR_CHAR_CODE_BYTES)?).ok()
     }
 
-    fn utf16be(&self, pos: usize, code_units: usize) -> Option<String> {
-        let raw = self.slice(pos, code_units.checked_mul(2)?)?;
+    fn utf16be(&self, position: usize, code_units: usize) -> Option<String> {
+        let raw = self.slice(position, code_units.checked_mul(UTF16_UNIT_BYTES)?)?;
         let units: Vec<u16> = raw
-            .chunks_exact(2)
+            .chunks_exact(UTF16_UNIT_BYTES)
             .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
             .collect();
         String::from_utf16(&units).ok()
@@ -106,47 +127,47 @@ const ADDRESS_TABLE_SLOTS: usize = 256;
 fn parse(bytes: &[u8]) -> Option<HashMap<String, PutBack>> {
     let reader = Reader { bytes };
 
-    let magic1 = reader.u32(0)?;
-    let magic2 = reader.slice(4, 4)?;
-    if magic1 != 1 || magic2 != b"Bud1" {
+    let version = reader.u32(0)?;
+    let magic = reader.slice(HEADER_MAGIC_OFFSET, HEADER_MAGIC.len())?;
+    if version != HEADER_VERSION || magic != HEADER_MAGIC {
         return None;
     }
 
-    let root_offset = reader.u32(8)? as usize;
-    let root_pos = root_offset.checked_add(4)?;
+    let root_offset = reader.u32(HEADER_ROOT_OFFSET_POSITION)? as usize;
+    let root_position = root_offset.checked_add(BLOCK_OFFSET_BASE)?;
 
-    let addr_count = reader.u32(root_pos)? as usize;
-    let addr_table_start = root_pos.checked_add(8)?;
-    if addr_count > ADDRESS_TABLE_SLOTS {
+    let address_count = reader.u32(root_position)? as usize;
+    let address_table_start = root_position.checked_add(ADDRESS_TABLE_PREAMBLE_BYTES)?;
+    if address_count > ADDRESS_TABLE_SLOTS {
         return None;
     }
 
-    let mut blocks: HashMap<u32, usize> = HashMap::with_capacity(addr_count);
-    for index in 0..addr_count {
-        let value = reader.u32(addr_table_start + index * 4)?;
-        let offset = (value & !0x1F) as usize;
-        let block_pos = offset.checked_add(4)?;
-        blocks.insert(index as u32, block_pos);
+    let mut blocks: HashMap<u32, usize> = HashMap::with_capacity(address_count);
+    for index in 0..address_count {
+        let value = reader.u32(address_table_start + index * U32_BYTES)?;
+        let offset = (value & !BLOCK_SIZE_BITS_MASK) as usize;
+        let block_position = offset.checked_add(BLOCK_OFFSET_BASE)?;
+        blocks.insert(index as u32, block_position);
     }
 
-    let toc_pos = addr_table_start + ADDRESS_TABLE_SLOTS * 4;
-    let toc_count = reader.u32(toc_pos)?;
-    let mut cursor = toc_pos + 4;
+    let table_of_contents_position = address_table_start + ADDRESS_TABLE_SLOTS * U32_BYTES;
+    let table_of_contents_count = reader.u32(table_of_contents_position)?;
+    let mut cursor = table_of_contents_position + U32_BYTES;
     let mut dsdb_block: Option<u32> = None;
-    for _ in 0..toc_count {
-        let name_len = *bytes.get(cursor)? as usize;
+    for _ in 0..table_of_contents_count {
+        let name_length = *bytes.get(cursor)? as usize;
         cursor += 1;
-        let name = std::str::from_utf8(reader.slice(cursor, name_len)?).ok()?;
-        cursor += name_len;
+        let name = std::str::from_utf8(reader.slice(cursor, name_length)?).ok()?;
+        cursor += name_length;
         let block_id = reader.u32(cursor)?;
-        cursor += 4;
+        cursor += U32_BYTES;
         if name == "DSDB" {
             dsdb_block = Some(block_id);
         }
     }
 
-    let dsdb_pos = *blocks.get(&dsdb_block?)?;
-    let root_node_id = reader.u32(dsdb_pos)?;
+    let dsdb_position = *blocks.get(&dsdb_block?)?;
+    let root_node_id = reader.u32(dsdb_position)?;
 
     let mut records = Vec::new();
     walk(&reader, &blocks, root_node_id, &mut records)?;
@@ -188,12 +209,12 @@ fn walk(
     block_id: u32,
     out: &mut Vec<Record>,
 ) -> Option<()> {
-    let pos = *blocks.get(&block_id)?;
-    let mode = reader.u32(pos)?;
-    let count = reader.u32(pos + 4)?;
-    let mut cursor = pos + 8;
+    let position = *blocks.get(&block_id)?;
+    let mode = reader.u32(position)?;
+    let count = reader.u32(position + U32_BYTES)?;
+    let mut cursor = position + NODE_HEADER_BYTES;
 
-    if mode == 0 {
+    if mode == LEAF_NODE_MODE {
         for _ in 0..count {
             let (record, next) = parse_record(reader, cursor)?;
             out.push(record);
@@ -202,7 +223,7 @@ fn walk(
     } else {
         for _ in 0..count {
             let child = reader.u32(cursor)?;
-            cursor += 4;
+            cursor += U32_BYTES;
             walk(reader, blocks, child, out)?;
             let (record, next) = parse_record(reader, cursor)?;
             out.push(record);
@@ -213,31 +234,34 @@ fn walk(
     Some(())
 }
 
-fn parse_record(reader: &Reader<'_>, pos: usize) -> Option<(Record, usize)> {
-    let name_len = reader.u32(pos)? as usize;
-    let mut cursor = pos + 4;
-    let name = reader.utf16be(cursor, name_len)?;
-    cursor += name_len * 2;
+fn parse_record(reader: &Reader<'_>, position: usize) -> Option<(Record, usize)> {
+    let name_length = reader.u32(position)? as usize;
+    let mut cursor = position + U32_BYTES;
+    let name = reader.utf16be(cursor, name_length)?;
+    cursor += name_length * UTF16_UNIT_BYTES;
 
-    let struct_id = reader.ascii4(cursor)?.to_string();
-    cursor += 4;
-    let data_type = reader.ascii4(cursor)?;
-    cursor += 4;
+    let struct_id = reader.four_char_code(cursor)?.to_string();
+    cursor += FOUR_CHAR_CODE_BYTES;
+    let data_type = reader.four_char_code(cursor)?;
+    cursor += FOUR_CHAR_CODE_BYTES;
 
     let (value, next) = match data_type {
         "ustr" => {
-            let len = reader.u32(cursor)? as usize;
-            let text = reader.utf16be(cursor + 4, len)?;
-            (Value::Str(text), cursor + 4 + len * 2)
+            let code_units = reader.u32(cursor)? as usize;
+            let text = reader.utf16be(cursor + U32_BYTES, code_units)?;
+            (
+                Value::Str(text),
+                cursor + U32_BYTES + code_units * UTF16_UNIT_BYTES,
+            )
         }
         "blob" => {
-            let len = reader.u32(cursor)? as usize;
-            let bytes = reader.slice(cursor + 4, len)?.to_vec();
-            (Value::Blob(bytes), cursor + 4 + len)
+            let byte_count = reader.u32(cursor)? as usize;
+            let bytes = reader.slice(cursor + U32_BYTES, byte_count)?.to_vec();
+            (Value::Blob(bytes), cursor + U32_BYTES + byte_count)
         }
-        "long" | "shor" | "type" => (Value::Other, cursor + 4),
-        "bool" => (Value::Other, cursor + 1),
-        "comp" | "dutc" => (Value::Other, cursor + 8),
+        "long" | "shor" | "type" => (Value::Other, cursor + U32_BYTES),
+        "bool" => (Value::Other, cursor + BOOL_VALUE_BYTES),
+        "comp" | "dutc" => (Value::Other, cursor + TIMESTAMP_VALUE_BYTES),
         _ => return None,
     };
 
@@ -260,7 +284,7 @@ fn parse_record(reader: &Reader<'_>, pos: usize) -> Option<(Record, usize)> {
 fn extract_bookmark_path(blob: &[u8]) -> Option<String> {
     let mut best: Option<&[u8]> = None;
     let mut start = 0;
-    let is_printable = |byte: u8| (0x20..=0x7e).contains(&byte);
+    let is_printable = |byte: u8| PRINTABLE_ASCII.contains(&byte);
 
     for (index, &byte) in blob.iter().enumerate() {
         if !is_printable(byte) {

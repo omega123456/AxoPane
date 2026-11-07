@@ -57,15 +57,15 @@ impl ShellExecutor {
             }
             #[cfg(all(target_os = "windows", not(feature = "test-utils")))]
             ShellExecutorInner::Threaded { sender } => {
-                let (result_tx, result_rx) = mpsc::sync_channel::<Box<dyn Any + Send>>(0);
+                let (result_sender, result_receiver) = mpsc::sync_channel::<Box<dyn Any + Send>>(0);
                 let wrapped = Box::new(move || {
                     let result = task();
-                    result_tx
+                    result_sender
                         .send(Box::new(result))
                         .expect("shell executor result send");
                 });
                 sender.send(wrapped).expect("shell executor task send");
-                *result_rx
+                *result_receiver
                     .recv()
                     .expect("shell executor result receive")
                     .downcast::<T>()

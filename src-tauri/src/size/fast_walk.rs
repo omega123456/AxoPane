@@ -472,7 +472,7 @@ fn parse_entry(entry: &[u8]) -> Option<Entry<'_>> {
             // The name offset is relative to the `attrreference_t` itself and
             // its length includes the trailing NUL.
             let start = ENTRY_NAME.checked_add_signed(read_i32(entry, ENTRY_NAME)? as isize)?;
-            let length = read_u32(entry, ENTRY_NAME + 4)? as usize;
+            let length = read_u32(entry, ENTRY_NAME + size_of::<i32>())? as usize;
             let name = entry.get(start..start.checked_add(length)?)?;
             let name = name.strip_suffix(&[0]).unwrap_or(name);
             let unsafe_name =
@@ -511,19 +511,28 @@ fn malformed() -> ManualSizeError {
 
 fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
     Some(u32::from_ne_bytes(
-        bytes.get(offset..offset.checked_add(4)?)?.try_into().ok()?,
+        bytes
+            .get(offset..offset.checked_add(size_of::<u32>())?)?
+            .try_into()
+            .ok()?,
     ))
 }
 
 fn read_i32(bytes: &[u8], offset: usize) -> Option<i32> {
     Some(i32::from_ne_bytes(
-        bytes.get(offset..offset.checked_add(4)?)?.try_into().ok()?,
+        bytes
+            .get(offset..offset.checked_add(size_of::<i32>())?)?
+            .try_into()
+            .ok()?,
     ))
 }
 
 fn read_u64(bytes: &[u8], offset: usize) -> Option<u64> {
     Some(u64::from_ne_bytes(
-        bytes.get(offset..offset.checked_add(8)?)?.try_into().ok()?,
+        bytes
+            .get(offset..offset.checked_add(size_of::<u64>())?)?
+            .try_into()
+            .ok()?,
     ))
 }
 

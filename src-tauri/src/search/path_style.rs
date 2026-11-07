@@ -2,6 +2,13 @@
 //! paths and the macOS index POSIX ones; parsing them by an explicit style
 //! (instead of `std::path`) keeps both testable on every OS.
 
+use crate::path_text::{
+    starts_with_drive_designator, strip_verbatim_prefix, DRIVE_DESIGNATOR_LEN, UNC_PREFIX,
+};
+
+/// A UNC root splits into server, share and the remaining path.
+const UNC_ROOT_PARTS: usize = 3;
+
 /// Which path convention a backend's paths follow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathStyle {
@@ -25,10 +32,10 @@ impl PathStyle {
         }
     }
 
-    pub fn is_separator(self, c: char) -> bool {
+    pub fn is_separator(self, character: char) -> bool {
         match self {
-            Self::Windows => c == '\\' || c == '/',
-            Self::Posix => c == '/',
+            Self::Windows => character == '\\' || character == '/',
+            Self::Posix => character == '/',
         }
     }
 
@@ -37,10 +44,7 @@ impl PathStyle {
         if self == Self::Posix {
             return path.to_owned();
         }
-        if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
-            return format!(r"\\{rest}");
-        }
-        path.strip_prefix(r"\\?\").unwrap_or(path).to_owned()
+        strip_verbatim_prefix(path)
     }
 
     pub fn split<'a>(self, path: &'a str) -> PathParts<'a> {
@@ -48,7 +52,7 @@ impl PathStyle {
         PathParts {
             root,
             components: rest
-                .split(|c| self.is_separator(c))
+                .split(|character| self.is_separator(character))
                 .filter(|part| !part.is_empty())
                 .collect(),
         }
@@ -57,7 +61,7 @@ impl PathStyle {
     /// Appends `name` to `base`, adding a separator unless `base` already
     /// ends with one (as roots do).
     pub fn join(self, base: &str, name: &str) -> String {
-        if base.is_empty() || base.ends_with(|c| self.is_separator(c)) {
+        if base.is_empty() || base.ends_with(|character| self.is_separator(character)) {
             format!("{base}{name}")
         } else {
             format!("{base}{}{name}", self.separator())
@@ -99,14 +103,15 @@ impl PathStyle {
 }
 
 fn windows_root(path: &str) -> (String, &str) {
-    let bytes = path.as_bytes();
-    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
-        let rest = path[2..].trim_start_matches(['\\', '/']);
-        return (format!("{}\\", &path[..2]), rest);
+    if starts_with_drive_designator(path) {
+        let rest = path[DRIVE_DESIGNATOR_LEN..].trim_start_matches(['\\', '/']);
+        return (format!("{}\\", &path[..DRIVE_DESIGNATOR_LEN]), rest);
     }
-    let unc = path.strip_prefix(r"\\").or_else(|| path.strip_prefix("//"));
+    let unc = path
+        .strip_prefix(UNC_PREFIX)
+        .or_else(|| path.strip_prefix("//"));
     if let Some(unc) = unc {
-        let mut parts = unc.splitn(3, ['\\', '/']);
+        let mut parts = unc.splitn(UNC_ROOT_PARTS, ['\\', '/']);
         let server = parts.next().unwrap_or_default();
         let share = parts.next().unwrap_or_default();
         if !server.is_empty() && !share.is_empty() {

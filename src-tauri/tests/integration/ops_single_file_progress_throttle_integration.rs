@@ -26,7 +26,7 @@ mod tests {
         }
     }
 
-    fn op_state_with_items(status: OpStatus, items: Vec<OpItem>) -> OpState {
+    fn operation_state_with_items(status: OpStatus, items: Vec<OpItem>) -> OpState {
         let total_items = items.len() as u64;
         OpState {
             id: "op-1".to_string(),
@@ -73,11 +73,11 @@ mod tests {
         Arc<Mutex<OpState>>,
         Arc<Condvar>,
         Arc<Mutex<Vec<OpProgress>>>,
-        WorkerCtx<'static>,
+        WorkerContext<'static>,
     );
 
-    fn make_ctx_with_clock(state: OpState, instant_now: InstantNow) -> OpCtx {
-        let op_arc = Arc::new(Mutex::new(state));
+    fn make_context_with_clock(state: OpState, instant_now: InstantNow) -> OpCtx {
+        let shared_operation = Arc::new(Mutex::new(state));
         let resolver = Arc::new(Condvar::new());
         let progress_log = Arc::new(Mutex::new(Vec::<OpProgress>::new()));
         let progress_for_emitter = progress_log.clone();
@@ -89,13 +89,13 @@ mod tests {
                     .push(progress);
             }));
 
-        let op_arc_ref = Box::leak(Box::new(op_arc.clone()));
+        let shared_operation_ref = Box::leak(Box::new(shared_operation.clone()));
         let resolver_ref = Box::leak(Box::new(resolver.clone()));
         let progress_ref = Box::leak(Box::new(progress));
         let instant_now_ref = Box::leak(Box::new(instant_now));
 
-        let ctx = WorkerCtx {
-            op_arc: op_arc_ref,
+        let context = WorkerContext {
+            shared_operation: shared_operation_ref,
             resolver: resolver_ref,
             progress: progress_ref,
             start: Instant::now() - Duration::from_secs(1),
@@ -103,7 +103,7 @@ mod tests {
             instant_now: instant_now_ref,
         };
 
-        (op_arc, resolver, progress_log, ctx)
+        (shared_operation, resolver, progress_log, context)
     }
 
     /// `OpProgress.item_names` carries a bounded preview of the top-level
@@ -133,7 +133,7 @@ mod tests {
                 size_bytes: 1,
             },
         ];
-        let state = op_state_with_items(OpStatus::Active, items);
+        let state = operation_state_with_items(OpStatus::Active, items);
         let progress = state.progress();
 
         assert_eq!(
@@ -154,7 +154,7 @@ mod tests {
     /// artifact for the common case).
     #[test]
     fn op_progress_keeps_a_single_item_name_untouched() {
-        let state = op_state_with_items(
+        let state = operation_state_with_items(
             OpStatus::Active,
             vec![OpItem {
                 source_path: "/tmp/solo.txt".to_string(),
@@ -178,8 +178,8 @@ mod tests {
     fn single_file_transfer_throttle_spaces_emissions_by_the_interval() {
         let (clock, instant_now) = controllable_clock();
         let base = *clock.lock().expect("clock lock");
-        let (_op_arc, _resolver, progress_log, ctx) = make_ctx_with_clock(
-            op_state_with_items(OpStatus::Active, vec![item(Path::new("/tmp/big.bin"), 30)]),
+        let (_shared_operation, _resolver, progress_log, context) = make_context_with_clock(
+            operation_state_with_items(OpStatus::Active, vec![item(Path::new("/tmp/big.bin"), 30)]),
             instant_now,
         );
 
@@ -187,7 +187,7 @@ mod tests {
 
         // t=0: begin fires at the same instant the throttle was created, so it
         // is swallowed (0ms elapsed < 90ms interval).
-        begin_file_progress(&ctx, Path::new("/tmp/big.bin"), 30, Some(&mut throttle));
+        begin_file_progress(&context, Path::new("/tmp/big.bin"), 30, Some(&mut throttle));
         assert!(
             progress_log.lock().expect("progress log lock").is_empty(),
             "begin at t=0 should be throttled"
@@ -195,7 +195,7 @@ mod tests {
 
         // t=50ms: still under the interval, swallowed.
         *clock.lock().expect("clock lock") = base + Duration::from_millis(50);
-        report_chunk_progress(&ctx, 10, Some(&mut throttle));
+        report_chunk_progress(&context, 10, Some(&mut throttle));
         assert!(
             progress_log.lock().expect("progress log lock").is_empty(),
             "chunk at t=50ms should still be throttled"
@@ -203,7 +203,7 @@ mod tests {
 
         // t=100ms: interval elapsed (>= 90ms since last_emit at t=0), emits.
         *clock.lock().expect("clock lock") = base + Duration::from_millis(100);
-        report_chunk_progress(&ctx, 10, Some(&mut throttle));
+        report_chunk_progress(&context, 10, Some(&mut throttle));
         {
             let log = progress_log.lock().expect("progress log lock");
             assert_eq!(log.len(), 1, "chunk at t=100ms should emit exactly once");
@@ -211,7 +211,7 @@ mod tests {
 
         // t=150ms: only 50ms since the last emit (t=100ms) — throttled again.
         *clock.lock().expect("clock lock") = base + Duration::from_millis(150);
-        report_chunk_progress(&ctx, 10, Some(&mut throttle));
+        report_chunk_progress(&context, 10, Some(&mut throttle));
         assert_eq!(
             progress_log.lock().expect("progress log lock").len(),
             1,
@@ -220,7 +220,7 @@ mod tests {
 
         // t=300ms: interval elapsed again, `finish_file_progress` emits.
         *clock.lock().expect("clock lock") = base + Duration::from_millis(300);
-        finish_file_progress(&ctx, Some(&mut throttle));
+        finish_file_progress(&context, Some(&mut throttle));
         assert_eq!(
             progress_log.lock().expect("progress log lock").len(),
             2,
@@ -230,8 +230,8 @@ mod tests {
         // The operation terminal snapshot is unconditional: `advance_item`
         // always emits regardless of the throttle's internal state.
         *clock.lock().expect("clock lock") = base + Duration::from_millis(301);
-        let tracked_item = { ctx.op_arc.lock().expect("op lock").items[0].clone() };
-        advance_item(&ctx, &tracked_item);
+        let tracked_item = { context.shared_operation.lock().expect("op lock").items[0].clone() };
+        advance_item(&context, &tracked_item);
         assert_eq!(
             progress_log.lock().expect("progress log lock").len(),
             3,
@@ -260,12 +260,12 @@ mod tests {
 
         let archive_path = fixture.path().join("payload.zip");
         let source_item = item(&source_dir, 0);
-        let (_op_arc, _resolver, progress_log, ctx) = make_ctx_with_clock(
-            op_state_with_items(OpStatus::Active, vec![source_item.clone()]),
+        let (_shared_operation, _resolver, progress_log, context) = make_context_with_clock(
+            operation_state_with_items(OpStatus::Active, vec![source_item.clone()]),
             Arc::new(Instant::now),
         );
 
-        compress_item_with_progress(&source_dir, &archive_path, &source_item, &ctx)
+        compress_item_with_progress(&source_dir, &archive_path, &source_item, &context)
             .expect("compress many small members");
 
         assert!(archive_path.exists());
@@ -293,26 +293,27 @@ mod tests {
 
         let archive_path = fixture.path().join("payload.zip");
         let archive_item = item(&archive_path, 0);
-        let (_op_arc, _resolver, compress_log, compress_ctx) = make_ctx_with_clock(
-            op_state_with_items(OpStatus::Active, vec![item(&source_dir, 0)]),
-            Arc::new(Instant::now),
-        );
+        let (_shared_operation, _resolver, compress_log, compress_context) =
+            make_context_with_clock(
+                operation_state_with_items(OpStatus::Active, vec![item(&source_dir, 0)]),
+                Arc::new(Instant::now),
+            );
         compress_item_with_progress(
             &source_dir,
             &archive_path,
             &item(&source_dir, 0),
-            &compress_ctx,
+            &compress_context,
         )
         .expect("compress fixture archive");
         drop(compress_log);
 
         let extract_root = fixture.path().join("extract");
-        let (_op_arc, _resolver, progress_log, ctx) = make_ctx_with_clock(
-            op_state_with_items(OpStatus::Active, vec![archive_item.clone()]),
+        let (_shared_operation, _resolver, progress_log, context) = make_context_with_clock(
+            operation_state_with_items(OpStatus::Active, vec![archive_item.clone()]),
             Arc::new(Instant::now),
         );
 
-        extract_item_with_progress(&archive_path, &extract_root, &archive_item, &ctx)
+        extract_item_with_progress(&archive_path, &extract_root, &archive_item, &context)
             .expect("extract many small members");
 
         let intra_member_events = progress_log.lock().expect("progress log lock").len();
@@ -336,7 +337,7 @@ mod tests {
                 size_bytes: 1,
             })
             .collect();
-        let state = op_state_with_items(OpStatus::Active, items);
+        let state = operation_state_with_items(OpStatus::Active, items);
         let progress = state.progress();
         assert_eq!(progress.item_names.len(), 24);
         assert_eq!(progress.total_items, 500);

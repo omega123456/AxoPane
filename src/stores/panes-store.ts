@@ -92,7 +92,7 @@ type EntrySizeState = {
   isLowerBound?: boolean
   skippedRoots?: string[]
   skippedMore?: number
-  /** A `ready` value kept visible while a refresh recalculates it (FR8.5). */
+  /** A `ready` value kept visible while a refresh recalculates it. */
   refreshing?: boolean
 }
 
@@ -225,7 +225,7 @@ type PanesStore = {
    * Applies a batch of icon-state events (coalesced by the frontend rAF
    * batcher, or a backend batch, in one `set`). Returns the existing `panes`
    * reference unchanged when none of the buffered paths matched any entry in
-   * either pane, so a no-op icon update never triggers a re-render (FR7).
+   * either pane, so a no-op icon update never triggers a re-render.
    */
   applyIconStates: (events: IconStateEvent[]) => void
   setFolderSizeIndexStatus: (status: FolderSizeIndexStatus) => void
@@ -245,6 +245,7 @@ type PanesStore = {
 
 const filterDelayMs = 180
 const AUTO_VISIBLE_ITEM_COUNT_LIMIT = 200
+const STALE_SIZE_LOG_SAMPLE_LIMIT = 3
 // Each path has one owner while its direct children are loading. Callers share
 // that promise, preventing double expands/reveals from issuing duplicate IPC.
 const treeLoadFlights = new Map<string, Promise<void>>()
@@ -260,7 +261,7 @@ const pendingRevealPaths: Partial<Record<PaneId, string>> = {}
 let revealScrollRequestCounter = 0
 
 // ---------------------------------------------------------------------------
-// v2 directory-session integration (Phase 4 live-app wiring).
+// v2 directory-session integration.
 //
 // One `ListingSession` per pane (matching Rust, which retires the prior
 // session for a pane inside `begin_navigation` — see `ListingSession.begin`'s
@@ -271,16 +272,13 @@ let revealScrollRequestCounter = 0
 // of that call surface needs to change, since `selection-store.ts` already
 // tracks selection by entry id/path rather than array index.
 //
-// STOPGAP(phase-5): materializing the full listing eagerly (walking every v2
-// page until `loadedRowCount === totalRows`) is the pragmatic bridge until
-// Phase 5 teaches `FilePane`/marquee/drag-and-drop/keyboard navigation to
-// read directly from a sparse `PaneEntryCollection` (see
-// `ensureSessionFullyLoaded` below). This still avoids the old streamed-chunk
-// event fan-out, and Rust's v2 session model already holds the fully sorted
-// listing in memory server-side (paging only slices an already-materialized
-// vector), so eagerly walking pages here does no more enumeration/sorting
-// work than the old `start_list_dir` + chunk-stream path did — it just
-// fetches it through the range API instead of the chunk-stream API.
+// The full listing is materialized eagerly (walking every v2 page until
+// `loadedRowCount === totalRows`, see `ensureSessionFullyLoaded` below)
+// because `FilePane`, marquee, drag-and-drop and keyboard navigation read the
+// flat array rather than a sparse `PaneEntryCollection`. Rust's session
+// already holds the fully sorted listing in memory (paging only slices an
+// already-materialized vector), so walking every page does no extra
+// enumeration or sorting work.
 // ---------------------------------------------------------------------------
 // `ListingSession.onChange` fires synchronously from within `set()`-adjacent
 // IPC resolution handlers (`adoptBeginResponse`, the range-request `.then`).
@@ -343,7 +341,7 @@ function waitForSessionChange(paneId: PaneId, check: () => boolean): Promise<voi
 }
 
 /**
- * STOPGAP(phase-5): walks every page of `session`'s active collection until
+ * Walks every page of `session`'s active collection until
  * every row is loaded, pinning every page for the duration so the 12-page LRU
  * retention in `PaneEntryCollection` cannot evict an earlier page while a
  * later one is still being fetched (a real risk for directories over 6000
@@ -351,9 +349,6 @@ function waitForSessionChange(paneId: PaneId, check: () => boolean): Promise<voi
  * fully loaded, pins are reset back to just the viewport (page 0). Resolves
  * early if the session's baseline moves on (a newer navigation/view revision
  * superseded this walk) so a stale materialization request can never hang.
- * Phase 5's real sparse-rendering integration replaces this whole helper with
- * bounded, on-demand page loads driven by the visible viewport instead of
- * eagerly loading everything up front.
  */
 async function ensureSessionFullyLoaded(paneId: PaneId, session: ListingSession): Promise<void> {
   const baselineAtStart = session.currentBaseline
@@ -1523,15 +1518,10 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
 
       // v2 seekable directory session: Rust enumerates + sorts the whole
       // listing once on `begin_directory_session` and holds it server-side;
-      // the frontend walks it page-by-page via `getDirectorySessionRange`
-      // (STOPGAP(phase-5): eagerly, via `ensureSessionFullyLoaded`, until
-      // `pane.entries` is taught to read a sparse `PaneEntryCollection`
-      // directly) instead of the old `start_list_dir` + `dir://list-chunk`
-      // stream. A path change (or the pane/tab's very first listing) begins a
-      // fresh session; an unchanged path with a different sort/filter/hidden
-      // view revises the already-active session instead, per the plan's
-      // "path changes create a new session; sort/filter changes revise the
-      // current session's view".
+      // the frontend walks every page eagerly via `ensureSessionFullyLoaded`.
+      // A path change (or the pane/tab's very first listing) begins a fresh
+      // session; an unchanged path with a different sort/filter/hidden view
+      // revises the already-active session instead.
       const session = listingSessions[paneId]
       const view = currentViewParams(pane, get().showHiddenFiles)
       const isSamePathRevision =
@@ -1574,13 +1564,11 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       }
 
       const resolvedPath = session.currentPath ?? pane.path
-      // STOPGAP(phase-5): Rust is the canonical sort authority for every key
-      // the v2 `SessionViewParams` contract knows about, but folder sizes
-      // resolve asynchronously after the listing (and are not a
-      // `SessionViewParams` field), so the size key still needs the same
-      // client-side re-sort of the resident rows the v1 path used, applied
-      // here to the fully-materialized `loadedEntries` instead of a streamed
-      // chunk array. Items sort is unaffected — it already runs as a
+      // Rust is the canonical sort authority for every key the
+      // `SessionViewParams` contract knows about, but folder sizes resolve
+      // asynchronously after the listing (and are not a `SessionViewParams`
+      // field), so the size key re-sorts the fully-materialized
+      // `loadedEntries` on the client. Items sort is unaffected — it already runs as a
       // separate backend count-then-sort pass via `runActiveItemsSort` below,
       // which replaces `pane.entries` wholesale once ready.
       const loadedEntries = session.loadedEntries()
@@ -1742,7 +1730,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       to: path,
       leavingDirs: leavingDirPaths.length,
       stale: staleSizePaths.length,
-      sampleStale: staleSizePaths.slice(0, 3),
+      sampleStale: staleSizePaths.slice(0, STALE_SIZE_LOG_SAMPLE_LIMIT),
     })
     if (staleSizePaths.length > 0) {
       set((state) => {
@@ -1767,7 +1755,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
             paneId,
             requested: staleSizePaths.length,
             cancelled: response.cancelled,
-            ms: Math.round(performance.now() - cancelStartedAt),
+            elapsedMilliseconds: Math.round(performance.now() - cancelStartedAt),
           })
         })
         .catch((error) => {
@@ -2100,7 +2088,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     await listingSessions[paneId].release()
     await get().reloadPane(paneId)
 
-    // Known values stay visible until replaced (FR8.5): instead of clearing
+    // Known values stay visible until replaced: instead of clearing
     // them, re-request in `refresh` mode, bypassing the dedup that skips
     // `ready` folders. Without automatic sizing only folders that already
     // have a result are recalculated.
@@ -2201,7 +2189,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       // Report the live size set before requesting sizes, so a protected
       // folder this pane just opened counts as visited for those requests.
       // The set is sent even without automatic sizing, so manually
-      // calculated indexed sizes still update live (FR3.3).
+      // calculated indexed sizes still update live.
       const folders = directoryPaths(get().panes[paneId].entries)
       await reportSizeSubscriptions(
         paneId,
@@ -2222,21 +2210,13 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       log.error('finalizeListing failed', { paneId, path: pane.path, error })
     }
   },
-  // STOPGAP(phase-5): `dir://patch` watcher events are applied by splicing
-  // the affected rows directly into `pane.entries` in place (see
-  // `patchEntries` below), not by tearing down and re-running
-  // `beginDirectorySession`/`ListingSession.begin` for the pane on every
-  // watch tick — avoiding exactly the full-session-refetch-on-every-mutation
-  // regression the stopgap policy calls out. The v2 `ListingSession`'s
-  // `PaneEntryCollection` is intentionally left un-patched here (it has no
-  // incremental single-row patch API yet — only a full-page `installPage`
-  // replace); it is fully re-materialized from a fresh
-  // `begin_directory_session`/`reviseDirectorySessionView` call the next time
-  // `reloadPane` runs for this pane (navigation, sort/filter change, or
-  // explicit refresh), so it can only ever be transiently behind
-  // `pane.entries` between a watch patch and the pane's next reload. Phase 5
-  // should add a real incremental patch method to `PaneEntryCollection` and
-  // apply patches to both here in the same pass.
+  // `dir://patch` watcher events splice the affected rows into
+  // `pane.entries` in place (see `patchEntries` below) instead of re-running
+  // `ListingSession.begin` on every watch tick. The `ListingSession`'s
+  // `PaneEntryCollection` is left un-patched (it only supports full-page
+  // `installPage` replaces) and is re-materialized the next time `reloadPane`
+  // runs, so it can only trail `pane.entries` between a watch patch and the
+  // pane's next reload.
   applyDirPatch: (event) =>
     set((state) => {
       const paneId = paneIdFromTabId(event.tabId)
@@ -2663,7 +2643,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       for (const event of events) {
         const previous = nextSizeStates[event.path]
         // A recalculation never blanks a known value: keep it and mark it
-        // refreshing until the new result lands (FR8.5).
+        // refreshing until the new result lands.
         nextSizeStates[event.path] =
           event.state === 'calculating' && previous?.state === 'ready'
             ? { ...previous, refreshing: true }
@@ -2893,7 +2873,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       // Only allocate a new `panes` object/entries array for panes that
       // actually changed. If no buffered path matched any entry in either
       // pane, `panes` stays the exact same reference as `state.panes` so the
-      // update is a true no-op re-render-wise (FR7).
+      // update is a true no-op re-render-wise.
       let panesChanged = false
       const nextPanes = { ...state.panes }
       for (const paneId of Object.keys(nextPanes) as PaneId[]) {
@@ -3029,7 +3009,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       log.debug('size: calculateAllFolderSizes request returned', {
         paneId,
         requested: pending.length,
-        ms: Math.round(performance.now() - startedAt),
+        elapsedMilliseconds: Math.round(performance.now() - startedAt),
       })
     } catch (error) {
       set((state) => ({

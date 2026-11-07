@@ -115,7 +115,7 @@ mod watch_src {
                 .iter()
                 .any(|item| item.path == added_path && item.entry.is_some()));
             assert!(patch.changed.iter().any(|item| item.path == changed_path
-                && item.entry.as_ref().and_then(|e| e.size_bytes) == Some(2)));
+                && item.entry.as_ref().and_then(|entry| entry.size_bytes) == Some(2)));
             assert!(!patch.changed.iter().any(|item| item.path == unchanged_path));
             assert!(patch.removed.iter().any(|path| path == &removed_path));
             assert!(!patch.removed.contains(&changed_path));

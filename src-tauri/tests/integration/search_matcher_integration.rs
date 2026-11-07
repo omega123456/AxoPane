@@ -10,7 +10,7 @@ fn token(word: &str, name: &str, kind: NameKind) -> Option<Match> {
 }
 
 fn tier(word: &str, name: &str, kind: NameKind) -> Option<u8> {
-    token(word, name, kind).map(|m| m.tier)
+    token(word, name, kind).map(|found| found.tier)
 }
 
 const FILE: NameKind = NameKind::File;
@@ -101,14 +101,14 @@ fn multi_word_segments_try_the_phrase_then_every_word() {
 
     let fuzzy_word = [Token::new("q3"), Token::new("rpt")];
     assert_eq!(
-        match_words(None, &fuzzy_word, &name, FILE).map(|m| m.tier),
+        match_words(None, &fuzzy_word, &name, FILE).map(|found| found.tier),
         Some(FUZZY)
     );
     let missing = [Token::new("q3"), Token::new("zzz")];
     assert_eq!(match_words(None, &missing, &name, FILE), None);
     let single = [Token::new("report")];
     assert_eq!(
-        match_words(None, &single, &name, FILE).map(|m| m.tier),
+        match_words(None, &single, &name, FILE).map(|found| found.tier),
         Some(CONTAINS)
     );
 }

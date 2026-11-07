@@ -10,6 +10,8 @@ import { usePanesStore } from '@/stores/panes-store'
 import type { ColumnConfig, ColumnKey } from '@/lib/types/ipc'
 import { FOCUS_RING } from '@/lib/focus-ring'
 
+const COLUMN_RESIZE_KEYBOARD_STEP_PX = 8
+
 const paneColumnGapPx = 0
 /** 3px list inset + 8px row padding on each side (the header uses 11px directly). */
 const paneRowHorizontalPaddingPx = 22
@@ -118,14 +120,16 @@ export function HeaderRow({ pane }: HeaderRowProps) {
                   event.preventDefault()
                   setColumnWidth(
                     column.key,
-                    (columnWidths[column.key] ?? defaultColumnWidths[column.key]) - 8,
+                    (columnWidths[column.key] ?? defaultColumnWidths[column.key]) -
+                      COLUMN_RESIZE_KEYBOARD_STEP_PX,
                   )
                   void persistAppConfig()
                 } else if (event.key === 'ArrowRight') {
                   event.preventDefault()
                   setColumnWidth(
                     column.key,
-                    (columnWidths[column.key] ?? defaultColumnWidths[column.key]) + 8,
+                    (columnWidths[column.key] ?? defaultColumnWidths[column.key]) +
+                      COLUMN_RESIZE_KEYBOARD_STEP_PX,
                   )
                   void persistAppConfig()
                 }

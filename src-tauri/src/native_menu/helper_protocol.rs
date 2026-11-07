@@ -55,7 +55,7 @@ pub fn write_frame<W: Write, T: Serialize>(writer: &mut W, value: &T) -> io::Res
 }
 
 pub fn read_frame<R: Read, T: for<'de> Deserialize<'de>>(reader: &mut R) -> io::Result<T> {
-    let mut length = [0_u8; 4];
+    let mut length = [0_u8; size_of::<u32>()];
     reader.read_exact(&mut length)?;
     let length = u32::from_be_bytes(length) as usize;
     if length > MAX_FRAME_BYTES {

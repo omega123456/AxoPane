@@ -24,7 +24,7 @@ fn ranking_drops_duplicates_and_non_matches() {
         &query,
         PathStyle::Posix,
     );
-    let paths: Vec<&str> = hits.iter().map(|h| h.path.as_str()).collect();
+    let paths: Vec<&str> = hits.iter().map(|hit| hit.path.as_str()).collect();
     assert_eq!(paths, ["/b/invoice", "/a/invoices"]);
 }
 
@@ -33,7 +33,7 @@ fn result_sets_serve_pages_of_fifty() {
     assert_eq!((PAGE_SIZE, CANDIDATE_CAP), (50, 5_000));
     let query = parse("item", PathStyle::Posix, None).expect("query");
     let hits = rank_candidates(
-        (0..120).map(|i| folder(format!("/root/item-{i:03}"))),
+        (0..120).map(|index| folder(format!("/root/item-{index:03}"))),
         &query,
         PathStyle::Posix,
     );

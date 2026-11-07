@@ -11,6 +11,7 @@ pub mod logging;
 pub mod native_drag;
 pub mod native_menu;
 pub mod ops;
+pub mod path_text;
 pub mod persist;
 pub mod reconcile;
 pub mod resource_coordinator;
@@ -158,8 +159,7 @@ pub fn run() {
             // nothing at rest since it only runs in response to another
             // event (focus), never on a timer.
             //
-            // Phase 5 / Functional Requirement 3: this callback must only
-            // *submit* work and return — no volume discovery or filesystem
+            // This callback must only *submit* work and return — no volume discovery or filesystem
             // snapshot I/O may run synchronously on the Tauri event thread.
             // `ReconcileCoordinator::request_reconcile` bumps a generation,
             // submits a `Latency`-class coordinator job, and runs the actual
@@ -285,10 +285,9 @@ pub fn run() {
             volume_registry.start(app.handle().clone());
             app.manage(volume_registry);
 
-            // Phase 2 of the performance remediation plan: the coordinator
-            // is registered here so it lives for the app's lifetime and is
-            // available as `tauri::State<'_, Arc<ResourceCoordinator>>`.
-            // Phase 5 is the first subsystem migrated onto it: window-focus
+            // The coordinator is registered here so it lives for the app's
+            // lifetime and is available as
+            // `tauri::State<'_, Arc<ResourceCoordinator>>`. Window-focus
             // reconciliation (`ReconcileCoordinator`, below) routes its
             // background comparison work through this coordinator's
             // `Latency` lane instead of running synchronously on the

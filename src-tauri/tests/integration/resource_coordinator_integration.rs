@@ -162,7 +162,7 @@ fn assert_class_never_exceeds_cap_under_load(
     let spec_for = Arc::new(spec_for);
     let live = Arc::new(AtomicUsize::new(0));
     let max_live = Arc::new(AtomicUsize::new(0));
-    let (ack_tx, ack_rx) = unbounded::<()>();
+    let (ack_sender, ack_receiver) = unbounded::<()>();
 
     let mut workers = Vec::new();
     for index in 0..count {
@@ -170,8 +170,8 @@ fn assert_class_never_exceeds_cap_under_load(
         let spec_for = Arc::clone(&spec_for);
         let live = Arc::clone(&live);
         let max_live = Arc::clone(&max_live);
-        let ack_tx = ack_tx.clone();
-        let ack_rx = ack_rx.clone();
+        let ack_sender = ack_sender.clone();
+        let ack_receiver = ack_receiver.clone();
         let resource = format!("pool-{}", index % resource_pool_size);
 
         workers.push(std::thread::spawn(move || {
@@ -180,18 +180,18 @@ fn assert_class_never_exceeds_cap_under_load(
                 .expect("job admitted");
             let now = live.fetch_add(1, Ordering::SeqCst) + 1;
             max_live.fetch_max(now, Ordering::SeqCst);
-            let _ = ack_tx.send(());
+            let _ = ack_sender.send(());
             // Hold the grant open only long enough for every other worker
             // to reach this same point too, so the peak recorded above
             // genuinely reflects worst-case overlap rather than a lucky
             // interleaving; a bounded rendezvous receive (not a sleep)
             // gates the release.
-            let _ = ack_rx.try_iter().count();
+            let _ = ack_receiver.try_iter().count();
             live.fetch_sub(1, Ordering::SeqCst);
             drop(handle);
         }));
     }
-    drop(ack_tx);
+    drop(ack_sender);
 
     for worker in workers {
         worker.join().expect("worker thread does not panic or hang");
@@ -595,15 +595,15 @@ fn shutdown_resolves_queued_jobs_and_leaves_no_blocked_thread() {
         .expect("holder granted");
     let (_id, waiting) = coordinator.submit_cancellable(throughput(["vol-shutdown"]));
 
-    let (done_tx, done_rx) = bounded::<Result<(), SubmitError>>(1);
+    let (done_sender, done_receiver) = bounded::<Result<(), SubmitError>>(1);
     let waiter = std::thread::spawn(move || {
         let result = waiting.recv().map(|_handle| ());
-        let _ = done_tx.send(result);
+        let _ = done_sender.send(result);
     });
 
     coordinator.shutdown();
 
-    let outcome = done_rx
+    let outcome = done_receiver
         .recv_timeout(PROMPT)
         .expect("a queued caller must be released by shutdown promptly, not left hanging");
     assert_eq!(outcome, Err(SubmitError::ShuttingDown));

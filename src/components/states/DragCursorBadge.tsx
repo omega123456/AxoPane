@@ -1,6 +1,7 @@
 import { CopyIcon, CornerUpRightIcon } from 'lucide-react'
 import { useDragCursorStore } from '@/stores/drag-cursor-store'
 import { useLayoutStore } from '@/stores/layout-store'
+import { percentToFraction } from '@/lib/numbers'
 
 /**
  * Copy-vs-move feedback that follows the pointer during an OS-owned drag.
@@ -13,7 +14,7 @@ import { useLayoutStore } from '@/stores/layout-store'
  */
 export function DragCursorBadge() {
   const cursor = useDragCursorStore((state) => state.cursor)
-  const zoom = useLayoutStore((state) => Number(state.zoom) / 100)
+  const zoom = useLayoutStore((state) => percentToFraction(Number(state.zoom)))
 
   if (!cursor) {
     return null

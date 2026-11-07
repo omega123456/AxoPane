@@ -43,8 +43,13 @@ pub fn score(candidate: &Candidate, query: &ParsedQuery, style: PathStyle) -> Op
         Some(segment) => Some(segment.matches(&FoldedName::new(&name), kind)?),
         None => None,
     };
-    let ancestors: Vec<String> = raw_ancestors.iter().map(|a| nfc(a).into_owned()).collect();
-    let mut penalty = name_match.as_ref().map_or(0, |m| u32::from(m.tier));
+    let ancestors: Vec<String> = raw_ancestors
+        .iter()
+        .map(|ancestor| nfc(ancestor).into_owned())
+        .collect();
+    let mut penalty = name_match
+        .as_ref()
+        .map_or(0, |name_match| u32::from(name_match.tier));
     let mut gap = 0;
     let mut hits: Vec<(usize, Vec<(u32, u32)>)> = Vec::new();
     if let Some(anchor) = &query.anchor {
@@ -58,41 +63,47 @@ pub fn score(candidate: &Candidate, query: &ParsedQuery, style: PathStyle) -> Op
         }
     } else {
         let mut upper = ancestors.len();
-        for (j, segment) in query.folder_segs.iter().enumerate().rev() {
+        for (segment_index, segment) in query.folder_segs.iter().enumerate().rev() {
             // Listing children: the innermost folder must be the parent.
-            let lowest = if query.browse && j + 1 == query.folder_segs.len() {
+            let lowest = if query.browse && segment_index + 1 == query.folder_segs.len() {
                 upper.checked_sub(1)?
             } else {
                 0
             };
             let mut best: Option<(usize, super::matcher::Match)> = None;
-            for i in (lowest..upper).rev() {
-                let Some(found) =
-                    segment.matches(&FoldedName::new(&ancestors[i]), NameKind::Folder)
-                else {
+            for ancestor_index in (lowest..upper).rev() {
+                let Some(found) = segment.matches(
+                    &FoldedName::new(&ancestors[ancestor_index]),
+                    NameKind::Folder,
+                ) else {
                     continue;
                 };
-                if best.as_ref().is_none_or(|(_, b)| found.tier < b.tier) {
+                if best
+                    .as_ref()
+                    .is_none_or(|(_, best_match)| found.tier < best_match.tier)
+                {
                     let exact = found.tier == super::matcher::EXACT;
-                    best = Some((i, found));
+                    best = Some((ancestor_index, found));
                     if exact {
                         break;
                     }
                 }
             }
-            let (i, found) = best?;
-            gap += (upper - 1 - i) as u32;
+            let (ancestor_index, found) = best?;
+            gap += (upper - 1 - ancestor_index) as u32;
             penalty += u32::from(found.tier);
-            hits.push((i, found.ranges));
-            upper = i;
+            hits.push((ancestor_index, found.ranges));
+            upper = ancestor_index;
         }
     }
     let (parent, offsets) = display_parent(style, &parts.root, &ancestors);
     let mut parent_ranges: Vec<(u32, u32)> = hits
         .into_iter()
-        .flat_map(|(i, ranges)| {
-            let base = offsets[i];
-            ranges.into_iter().map(move |(s, e)| (s + base, e + base))
+        .flat_map(|(ancestor_index, ranges)| {
+            let base = offsets[ancestor_index];
+            ranges
+                .into_iter()
+                .map(move |(start, end)| (start + base, end + base))
         })
         .collect();
     parent_ranges.sort_unstable();
@@ -105,7 +116,9 @@ pub fn score(candidate: &Candidate, query: &ParsedQuery, style: PathStyle) -> Op
         penalty,
         gap,
         depth: parts.components.len() as u32,
-        name_ranges: name_match.map(|m| m.ranges).unwrap_or_default(),
+        name_ranges: name_match
+            .map(|name_match| name_match.ranges)
+            .unwrap_or_default(),
         parent_ranges,
     })
 }
@@ -116,7 +129,7 @@ fn display_parent(style: PathStyle, root: &str, ancestors: &[String]) -> (String
     let mut text = nfc(root).into_owned();
     let mut offsets = Vec::with_capacity(ancestors.len());
     for name in ancestors {
-        if !text.is_empty() && !text.ends_with(|c| style.is_separator(c)) {
+        if !text.is_empty() && !text.ends_with(|character| style.is_separator(character)) {
             text.push(style.separator());
         }
         offsets.push(text.encode_utf16().count() as u32);
@@ -126,18 +139,18 @@ fn display_parent(style: PathStyle, root: &str, ancestors: &[String]) -> (String
 }
 
 /// A total order over hits; a missing modified time sorts after known ones.
-pub fn compare(a: &Scored, b: &Scored) -> Ordering {
-    a.penalty
-        .cmp(&b.penalty)
-        .then(a.gap.cmp(&b.gap))
-        .then(b.is_dir.cmp(&a.is_dir))
-        .then(a.depth.cmp(&b.depth))
-        .then_with(|| match (a.modified, b.modified) {
-            (Some(x), Some(y)) => y.cmp(&x),
+pub fn compare(left: &Scored, right: &Scored) -> Ordering {
+    left.penalty
+        .cmp(&right.penalty)
+        .then(left.gap.cmp(&right.gap))
+        .then(right.is_dir.cmp(&left.is_dir))
+        .then(left.depth.cmp(&right.depth))
+        .then_with(|| match (left.modified, right.modified) {
+            (Some(left_modified), Some(right_modified)) => right_modified.cmp(&left_modified),
             (Some(_), None) => Ordering::Less,
             (None, Some(_)) => Ordering::Greater,
             (None, None) => Ordering::Equal,
         })
-        .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-        .then_with(|| a.path.cmp(&b.path))
+        .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+        .then_with(|| left.path.cmp(&right.path))
 }

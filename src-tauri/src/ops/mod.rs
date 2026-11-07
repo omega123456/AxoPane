@@ -59,6 +59,8 @@ pub const DEFAULT_RATE_WINDOW: Duration = Duration::from_millis(250);
 /// Minimum spacing between progress emissions while deleting individual files,
 /// or while copying/moving the files nested inside a directory tree.
 const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(90);
+const COPY_BUFFER_BYTES: usize = 1024 * 1024;
+const PERCENT_SCALE: f64 = 100.0;
 
 /// Top-level item names carried on every `OpProgress`. Enough for the card's
 /// expandable selection list, small enough that a 500-item selection clones a
@@ -203,23 +205,27 @@ impl TransferThrottle {
     }
 }
 
-/// Emit `op`'s progress now, or — when a [`TransferThrottle`] is supplied —
+/// Emit `operation`'s progress now, or — when a [`TransferThrottle`] is supplied —
 /// only once `interval` has elapsed since the last emission for this walk.
-fn maybe_emit_transfer(ctx: &WorkerCtx<'_>, op: &OpState, throttle: Option<&mut TransferThrottle>) {
+fn maybe_emit_transfer(
+    context: &WorkerContext<'_>,
+    operation: &OpState,
+    throttle: Option<&mut TransferThrottle>,
+) {
     match throttle {
         None => {
-            if let Some(emitter) = ctx.progress {
-                emitter(op.progress());
+            if let Some(emitter) = context.progress {
+                emitter(operation.progress());
             }
         }
         Some(throttle) => {
-            let now = (ctx.instant_now)();
+            let now = (context.instant_now)();
             if now.saturating_duration_since(throttle.last_emit) < throttle.interval {
                 return;
             }
             throttle.last_emit = now;
-            if let Some(emitter) = ctx.progress {
-                emitter(op.progress());
+            if let Some(emitter) = context.progress {
+                emitter(operation.progress());
             }
         }
     }
@@ -264,12 +270,12 @@ impl OpState {
         let visible_copied_bytes = self.visible_copied_bytes();
         let progress_percent = if self.total_bytes == 0 {
             if matches!(self.status, OpStatus::Completed) {
-                100.0
+                PERCENT_SCALE
             } else {
                 0.0
             }
         } else {
-            (visible_copied_bytes as f64 / self.total_bytes as f64) * 100.0
+            (visible_copied_bytes as f64 / self.total_bytes as f64) * PERCENT_SCALE
         };
 
         OpProgress {
@@ -350,11 +356,11 @@ impl OpState {
 
 struct Inner {
     ops: HashMap<String, Arc<Mutex<OpState>>>,
-    /// Per-operation wakeup signal. Each op owns its own `Condvar` so that a
-    /// parked worker always pairs the same `Condvar` with the same op mutex —
+    /// Per-operation wakeup signal. Each operation owns its own `Condvar` so that a
+    /// parked worker always pairs the same `Condvar` with the same operation mutex —
     /// `Condvar` panics on platforms (e.g. macOS pthread) if a single instance
     /// is waited on with two different mutexes, which happened when one shared
-    /// `Condvar` served every op's per-op `OpState` mutex.
+    /// `Condvar` served every operation's per-op `OpState` mutex.
     signals: HashMap<String, Arc<Condvar>>,
     /// Submission/scheduling order (also the reorder order for pending items).
     order: VecDeque<String>,
@@ -462,14 +468,14 @@ impl OpsService {
         schedule_auto_remove(id, &self.inner, removed, self.completed_retention);
     }
 
-    pub fn emit_progress(&self, op: &OpState) {
+    pub fn emit_progress(&self, operation: &OpState) {
         if let Some(emitter) = self
             .progress_emitter
             .lock()
             .expect("progress emitter lock")
             .clone()
         {
-            emitter(op.progress());
+            emitter(operation.progress());
         }
     }
 
@@ -497,7 +503,7 @@ impl OpsService {
             source_paths.push(destination_dir.clone());
         }
         let path_refs: Vec<&Path> = source_paths.iter().map(PathBuf::as_path).collect();
-        let op_volumes = self.volumes_for(&path_refs);
+        let operation_volumes = self.volumes_for(&path_refs);
 
         let total_bytes: u64 = request.items.iter().map(|item| item.size_bytes).sum();
         let total_items = request.items.len() as u64;
@@ -507,7 +513,7 @@ impl OpsService {
             kind: request.kind,
             destination_dir,
             items: request.items,
-            volumes: op_volumes,
+            volumes: operation_volumes,
             status: OpStatus::Pending,
             total_items,
             completed_items: 0,
@@ -534,11 +540,11 @@ impl OpsService {
 
         {
             let mut inner = self.inner.lock().expect("ops lock");
-            let op = Arc::new(Mutex::new(state));
-            inner.ops.insert(id.clone(), op.clone());
+            let operation = Arc::new(Mutex::new(state));
+            inner.ops.insert(id.clone(), operation.clone());
             inner.signals.insert(id.clone(), Arc::new(Condvar::new()));
             inner.order.push_back(id.clone());
-            self.emit_progress(&op.lock().expect("op lock"));
+            self.emit_progress(&operation.lock().expect("op lock"));
         }
 
         self.schedule();
@@ -555,22 +561,22 @@ impl OpsService {
             let order: Vec<String> = inner.order.iter().cloned().collect();
 
             for id in order {
-                let Some(op_arc) = inner.ops.get(&id).cloned() else {
+                let Some(shared_operation) = inner.ops.get(&id).cloned() else {
                     continue;
                 };
-                let op = op_arc.lock().expect("op lock");
-                if op.status != OpStatus::Pending {
+                let operation = shared_operation.lock().expect("op lock");
+                if operation.status != OpStatus::Pending {
                     continue;
                 }
-                if op
+                if operation
                     .volumes
                     .iter()
                     .any(|vol| inner.busy_volumes.contains(vol))
                 {
                     continue;
                 }
-                let volumes = op.volumes.clone();
-                drop(op);
+                let volumes = operation.volumes.clone();
+                drop(operation);
                 for vol in &volumes {
                     inner.busy_volumes.insert(vol.clone());
                 }
@@ -622,8 +628,8 @@ impl OpsService {
     }
 
     pub fn pause_op(&self, id: &str) {
-        if let Some(op) = self.op(id) {
-            let mut guard = op.lock().expect("op lock");
+        if let Some(operation) = self.operation(id) {
+            let mut guard = operation.lock().expect("op lock");
             if matches!(guard.status, OpStatus::Active) {
                 guard.pause.store(true, Ordering::Relaxed);
                 guard.status = OpStatus::Paused;
@@ -633,8 +639,8 @@ impl OpsService {
     }
 
     pub fn resume_op(&self, id: &str) {
-        let resumed = if let Some(op) = self.op(id) {
-            let mut guard = op.lock().expect("op lock");
+        let resumed = if let Some(operation) = self.operation(id) {
+            let mut guard = operation.lock().expect("op lock");
             if matches!(guard.status, OpStatus::Paused) {
                 guard.pause.store(false, Ordering::Relaxed);
                 guard.status = OpStatus::Active;
@@ -655,8 +661,8 @@ impl OpsService {
     }
 
     pub fn cancel_op(&self, id: &str) {
-        let (notify, schedule_removal) = if let Some(op) = self.op(id) {
-            let mut guard = op.lock().expect("op lock");
+        let (notify, schedule_removal) = if let Some(operation) = self.operation(id) {
+            let mut guard = operation.lock().expect("op lock");
             if guard.is_terminal() {
                 (false, false)
             } else if matches!(guard.status, OpStatus::Pending) {
@@ -689,8 +695,8 @@ impl OpsService {
 
     /// Skip one item only from a paused operation, then leave the operation paused.
     pub fn skip_op(&self, id: &str) {
-        let notify = if let Some(op) = self.op(id) {
-            let mut guard = op.lock().expect("op lock");
+        let notify = if let Some(operation) = self.operation(id) {
+            let mut guard = operation.lock().expect("op lock");
             if matches!(guard.status, OpStatus::Paused) {
                 guard.skip.store(true, Ordering::Relaxed);
                 guard.cancel.store(true, Ordering::Relaxed);
@@ -723,7 +729,7 @@ impl OpsService {
                 inner
                     .ops
                     .get(*id)
-                    .map(|op| op.lock().expect("op lock").status == OpStatus::Pending)
+                    .map(|operation| operation.lock().expect("op lock").status == OpStatus::Pending)
                     .unwrap_or(false)
             })
             .cloned()
@@ -761,8 +767,8 @@ impl OpsService {
         apply_to_all: bool,
         rename_to: Option<String>,
     ) {
-        let notify = if let Some(op) = self.op(id) {
-            let mut guard = op.lock().expect("op lock");
+        let notify = if let Some(operation) = self.operation(id) {
+            let mut guard = operation.lock().expect("op lock");
             if matches!(guard.status, OpStatus::Conflict) {
                 guard.conflict_resolution = Some(resolution);
                 guard.rename_to = rename_to;
@@ -789,8 +795,8 @@ impl OpsService {
 
     /// Retry a failed operation by re-queuing it.
     pub fn retry_op(&self, id: &str) {
-        let requeue = if let Some(op) = self.op(id) {
-            let mut guard = op.lock().expect("op lock");
+        let requeue = if let Some(operation) = self.operation(id) {
+            let mut guard = operation.lock().expect("op lock");
             if matches!(guard.status, OpStatus::Failed) {
                 guard.status = OpStatus::Pending;
                 guard.reset_runtime_state();
@@ -817,21 +823,22 @@ impl OpsService {
             .order
             .iter()
             .filter_map(|id| inner.ops.get(id))
-            .map(|op| op.lock().expect("op lock").snapshot())
+            .map(|operation| operation.lock().expect("op lock").snapshot())
             .collect()
     }
 
     /// True while work is active or a cancelled worker is still unwinding.
     pub fn has_unfinished_work(&self) -> bool {
         let inner = self.inner.lock().expect("ops lock");
-        inner.ops.values().any(|op| {
-            let op = op.lock().expect("op lock");
-            !op.is_terminal()
-                || (matches!(op.status, OpStatus::Cancelled) && op.completed_at.is_none())
+        inner.ops.values().any(|operation| {
+            let operation = operation.lock().expect("op lock");
+            !operation.is_terminal()
+                || (matches!(operation.status, OpStatus::Cancelled)
+                    && operation.completed_at.is_none())
         })
     }
 
-    fn op(&self, id: &str) -> Option<Arc<Mutex<OpState>>> {
+    fn operation(&self, id: &str) -> Option<Arc<Mutex<OpState>>> {
         self.inner.lock().expect("ops lock").ops.get(id).cloned()
     }
 
@@ -917,7 +924,7 @@ pub fn requested_pop(requested: &mut Vec<String>) -> Option<String> {
 
 /// Cloneable bundle of the emitters and timing config a worker thread needs.
 /// Bundling keeps `run_operation` / `release_and_reschedule` signatures small
-/// (no `too_many_arguments`), mirroring how [`WorkerCtx`] bundles per-item state.
+/// (no `too_many_arguments`), mirroring how [`WorkerContext`] bundles per-item state.
 #[derive(Clone)]
 struct WorkerRuntime {
     progress: Option<ProgressEmitter>,
@@ -937,34 +944,34 @@ fn run_operation(id: String, inner: &Arc<Mutex<Inner>>, runtime: &WorkerRuntime)
     let rate_window = runtime.rate_window;
     let instant_now = runtime.instant_now.clone();
 
-    let (op_arc, signal) = {
+    let (shared_operation, signal) = {
         let guard = inner.lock().expect("ops lock");
         (guard.ops.get(&id).cloned(), guard.signals.get(&id).cloned())
     };
-    let (Some(op_arc), Some(signal)) = (op_arc, signal) else {
+    let (Some(shared_operation), Some(signal)) = (shared_operation, signal) else {
         return;
     };
     let resolver = &signal;
 
     {
-        let mut op = op_arc.lock().expect("op lock");
-        op.status = OpStatus::Active;
-        op.rate_sample_at = Some(instant_now());
-        op.rate_sample_bytes = 0;
+        let mut operation = shared_operation.lock().expect("op lock");
+        operation.status = OpStatus::Active;
+        operation.rate_sample_at = Some(instant_now());
+        operation.rate_sample_bytes = 0;
         if let Some(emitter) = &progress {
-            emitter(op.progress());
+            emitter(operation.progress());
         }
     }
 
-    let items = op_arc.lock().expect("op lock").items.clone();
-    measure_totals_up_front(&items, &op_arc, &progress);
+    let items = shared_operation.lock().expect("op lock").items.clone();
+    measure_totals_up_front(&items, &shared_operation, &progress);
 
     let start = instant_now();
 
     for item in items {
-        let copied_before = op_arc.lock().expect("op lock").copied_bytes;
-        let ctx = WorkerCtx {
-            op_arc: &op_arc,
+        let copied_before = shared_operation.lock().expect("op lock").copied_bytes;
+        let context = WorkerContext {
+            shared_operation: &shared_operation,
             resolver,
             progress: &progress,
             start,
@@ -972,78 +979,83 @@ fn run_operation(id: String, inner: &Arc<Mutex<Inner>>, runtime: &WorkerRuntime)
             instant_now: &instant_now,
         };
 
-        if finish_skipped_item(&ctx, &item, copied_before) {
+        if finish_skipped_item(&context, &item, copied_before) {
             continue;
         }
 
         {
-            let op = op_arc.lock().expect("op lock");
-            if op.cancel.load(Ordering::Relaxed) || op.error_message.is_some() {
+            let operation = shared_operation.lock().expect("op lock");
+            if operation.cancel.load(Ordering::Relaxed) || operation.error_message.is_some() {
                 break;
             }
         }
 
-        process_item(&ctx, &item, &conflict);
+        process_item(&context, &item, &conflict);
 
-        if finish_skipped_item(&ctx, &item, copied_before) {
+        if finish_skipped_item(&context, &item, copied_before) {
             continue;
         }
 
         {
-            let op = op_arc.lock().expect("op lock");
-            if op.cancel.load(Ordering::Relaxed) || op.error_message.is_some() {
+            let operation = shared_operation.lock().expect("op lock");
+            if operation.cancel.load(Ordering::Relaxed) || operation.error_message.is_some() {
                 break;
             }
         }
     }
 
-    let mut op = op_arc.lock().expect("op lock");
-    if op.cancel.load(Ordering::Relaxed) {
-        op.status = OpStatus::Cancelled;
-    } else if op.error_message.is_some() {
-        op.status = OpStatus::Failed;
+    let mut operation = shared_operation.lock().expect("op lock");
+    if operation.cancel.load(Ordering::Relaxed) {
+        operation.status = OpStatus::Cancelled;
+    } else if operation.error_message.is_some() {
+        operation.status = OpStatus::Failed;
     } else {
-        op.status = OpStatus::Completed;
-        op.copied_bytes = op.total_bytes;
+        operation.status = OpStatus::Completed;
+        operation.copied_bytes = operation.total_bytes;
     }
-    op.completed_at = Some(Instant::now());
-    op.current_file_name = None;
-    op.current_file_copied = 0;
-    op.current_file_total = 0;
+    operation.completed_at = Some(Instant::now());
+    operation.current_file_name = None;
+    operation.current_file_copied = 0;
+    operation.current_file_total = 0;
     if let Some(emitter) = &progress {
-        emitter(op.progress());
+        emitter(operation.progress());
     }
 }
 
-fn finish_skipped_item(ctx: &WorkerCtx<'_>, item: &OpItem, copied_before: u64) -> bool {
-    let mut op = ctx.op_arc.lock().expect("op lock");
-    if !op.skip.swap(false, Ordering::Relaxed) {
+fn finish_skipped_item(context: &WorkerContext<'_>, item: &OpItem, copied_before: u64) -> bool {
+    let mut operation = context.shared_operation.lock().expect("op lock");
+    if !operation.skip.swap(false, Ordering::Relaxed) {
         return false;
     }
 
-    op.cancel.store(false, Ordering::Relaxed);
-    op.pause.store(true, Ordering::Relaxed);
-    op.status = OpStatus::Paused;
-    op.completed_items += 1;
+    operation.cancel.store(false, Ordering::Relaxed);
+    operation.pause.store(true, Ordering::Relaxed);
+    operation.status = OpStatus::Paused;
+    operation.completed_items += 1;
     if item.size_bytes > 0 {
-        op.copied_bytes = op
+        operation.copied_bytes = operation
             .copied_bytes
             .max(copied_before.saturating_add(item.size_bytes));
     }
-    op.current_file_name = None;
-    op.current_file_copied = 0;
-    op.current_file_total = 0;
-    refresh_rate_locked_with_now(&mut op, ctx.start, ctx.rate_window, (ctx.instant_now)());
-    if let Some(emitter) = ctx.progress {
-        emitter(op.progress());
+    operation.current_file_name = None;
+    operation.current_file_copied = 0;
+    operation.current_file_total = 0;
+    refresh_rate_locked_with_now(
+        &mut operation,
+        context.start,
+        context.rate_window,
+        (context.instant_now)(),
+    );
+    if let Some(emitter) = context.progress {
+        emitter(operation.progress());
     }
     true
 }
 
 /// Shared context threaded through the copy/move worker helpers. Bundling these
 /// fields keeps the recursive copy signatures small (no `too_many_arguments`).
-pub struct WorkerCtx<'a> {
-    pub op_arc: &'a Arc<Mutex<OpState>>,
+pub struct WorkerContext<'a> {
+    pub shared_operation: &'a Arc<Mutex<OpState>>,
     pub resolver: &'a Arc<Condvar>,
     pub progress: &'a Option<ProgressEmitter>,
     pub start: Instant,
@@ -1051,19 +1063,19 @@ pub struct WorkerCtx<'a> {
     pub instant_now: &'a InstantNow,
 }
 
-fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEmitter>) {
-    let op_arc = ctx.op_arc;
+fn process_item(context: &WorkerContext<'_>, item: &OpItem, conflict: &Option<ConflictEmitter>) {
+    let shared_operation = context.shared_operation;
     let (kind, destination_dir) = {
-        let op = op_arc.lock().expect("op lock");
-        (op.kind, op.destination_dir.clone())
+        let operation = shared_operation.lock().expect("op lock");
+        (operation.kind, operation.destination_dir.clone())
     };
 
     let source = PathBuf::from(&item.source_path);
 
     // Queue-native operations that do not use copy/move conflict handling.
     if matches!(kind, OpKind::Delete) {
-        wait_while_paused(op_arc, ctx.resolver);
-        if op_arc
+        wait_while_paused(shared_operation, context.resolver);
+        if shared_operation
             .lock()
             .expect("op lock")
             .cancel
@@ -1071,9 +1083,9 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
         {
             return;
         }
-        match delete_path_with_progress(&source, false, ctx) {
+        match delete_path_with_progress(&source, false, context) {
             Ok(()) => {
-                if op_arc
+                if shared_operation
                     .lock()
                     .expect("op lock")
                     .cancel
@@ -1081,22 +1093,22 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
                 {
                     return;
                 }
-                advance_item(ctx, item);
+                advance_item(context, item);
             }
             Err(message) => {
                 log::error!(
                     "delete operation failed: source=\"{}\", error={message}",
                     source.display()
                 );
-                op_arc.lock().expect("op lock").error_message = Some(message);
+                shared_operation.lock().expect("op lock").error_message = Some(message);
             }
         }
         return;
     }
 
     if matches!(kind, OpKind::Compress) {
-        wait_while_paused(op_arc, ctx.resolver);
-        if op_arc
+        wait_while_paused(shared_operation, context.resolver);
+        if shared_operation
             .lock()
             .expect("op lock")
             .cancel
@@ -1104,9 +1116,9 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
         {
             return;
         }
-        match compress_item_with_progress(&source, &destination_dir, item, ctx) {
+        match compress_item_with_progress(&source, &destination_dir, item, context) {
             Ok(()) => {
-                if op_arc
+                if shared_operation
                     .lock()
                     .expect("op lock")
                     .cancel
@@ -1114,18 +1126,18 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
                 {
                     return;
                 }
-                advance_item(ctx, item);
+                advance_item(context, item);
             }
             Err(message) => {
-                op_arc.lock().expect("op lock").error_message = Some(message);
+                shared_operation.lock().expect("op lock").error_message = Some(message);
             }
         }
         return;
     }
 
     if matches!(kind, OpKind::Extract) {
-        wait_while_paused(op_arc, ctx.resolver);
-        if op_arc
+        wait_while_paused(shared_operation, context.resolver);
+        if shared_operation
             .lock()
             .expect("op lock")
             .cancel
@@ -1133,9 +1145,9 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
         {
             return;
         }
-        match extract_item_with_progress(&source, &destination_dir, item, ctx) {
+        match extract_item_with_progress(&source, &destination_dir, item, context) {
             Ok(()) => {
-                if op_arc
+                if shared_operation
                     .lock()
                     .expect("op lock")
                     .cancel
@@ -1143,10 +1155,10 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
                 {
                     return;
                 }
-                advance_item(ctx, item);
+                advance_item(context, item);
             }
             Err(message) => {
-                op_arc.lock().expect("op lock").error_message = Some(message);
+                shared_operation.lock().expect("op lock").error_message = Some(message);
             }
         }
         return;
@@ -1166,8 +1178,8 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
             OpKind::Compress => "compress",
             OpKind::Extract => "extract",
         };
-        let mut op = op_arc.lock().expect("op lock");
-        op.error_message = Some(format!(
+        let mut operation = shared_operation.lock().expect("op lock");
+        operation.error_message = Some(format!(
             "Cannot {action} \"{}\" into one of its own descendants.",
             source.display()
         ));
@@ -1178,18 +1190,18 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
     // misses dangling symlinks, so inspect the directory entry as well.
     let mut merge_directories = false;
     if target.exists() || fs::symlink_metadata(&target).is_ok() {
-        let resolution = resolve_or_park(ctx, item, &target, conflict);
+        let resolution = resolve_or_park(context, item, &target, conflict);
         match resolution {
             Some((ConflictResolution::Skip, _)) => {
-                count_skipped_bytes(ctx, item.size_bytes);
-                advance_item(ctx, item);
+                count_skipped_bytes(context, item.size_bytes);
+                advance_item(context, item);
                 return;
             }
             Some((ConflictResolution::Replace, _)) => {
                 // Replacing an item with itself would delete the source.
                 if normalized_components(&source) == normalized_components(&target) {
-                    count_skipped_bytes(ctx, item.size_bytes);
-                    advance_item(ctx, item);
+                    count_skipped_bytes(context, item.size_bytes);
+                    advance_item(context, item);
                     return;
                 }
                 // Folder onto folder merges (Explorer semantics); the copy/move
@@ -1200,7 +1212,7 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
                 merge_directories = source_is_real_directory && target_is_real_directory;
                 if !merge_directories {
                     if let Err(error) = remove_target(&target) {
-                        record_transfer_failure(op_arc, kind, &source, &target, &error);
+                        record_transfer_failure(shared_operation, kind, &source, &target, &error);
                         return;
                     }
                 }
@@ -1218,8 +1230,8 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
     }
 
     // Wait out any pause before doing IO.
-    wait_while_paused(op_arc, ctx.resolver);
-    if op_arc
+    wait_while_paused(shared_operation, context.resolver);
+    if shared_operation
         .lock()
         .expect("op lock")
         .cancel
@@ -1232,16 +1244,16 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
     // `measure_totals_up_front`, so the walk below never needs to grow the
     // denominator mid-flight — only `copied_bytes` moves.
     let result = if matches!(kind, OpKind::Move) && merge_directories {
-        move_merge_dir(&source, &target, ctx)
+        move_merge_dir(&source, &target, context)
     } else if matches!(kind, OpKind::Move) {
-        move_path_with_total_discovery(&source, &target, false, ctx)
+        move_path_with_total_discovery(&source, &target, false, context)
     } else {
-        copy_path_with_total_discovery(&source, &target, false, ctx, None)
+        copy_path_with_total_discovery(&source, &target, false, context, None)
     };
 
     match result {
         Ok(()) => {
-            if op_arc
+            if shared_operation
                 .lock()
                 .expect("op lock")
                 .cancel
@@ -1249,9 +1261,9 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
             {
                 return;
             }
-            advance_item(ctx, item)
+            advance_item(context, item)
         }
-        Err(message) => record_transfer_failure(op_arc, kind, &source, &target, &message),
+        Err(message) => record_transfer_failure(shared_operation, kind, &source, &target, &message),
     }
 }
 
@@ -1259,7 +1271,7 @@ fn process_item(ctx: &WorkerCtx<'_>, item: &OpItem, conflict: &Option<ConflictEm
 /// into an actionable log entry. The queue keeps a concise version for the UI,
 /// while the error log retains the operation id and both filesystem paths.
 fn record_transfer_failure(
-    op_arc: &Arc<Mutex<OpState>>,
+    shared_operation: &Arc<Mutex<OpState>>,
     kind: OpKind,
     source: &Path,
     target: &Path,
@@ -1270,15 +1282,15 @@ fn record_transfer_failure(
         OpKind::Move => "move",
         OpKind::Delete | OpKind::Compress | OpKind::Extract => return,
     };
-    let mut op = op_arc.lock().expect("op lock");
+    let mut operation = shared_operation.lock().expect("op lock");
     let message = format!(
         "{action} operation {} failed: source=\"{}\", destination=\"{}\", error={error}",
-        op.id,
+        operation.id,
         source.display(),
         target.display(),
     );
     log::error!("{message}");
-    op.error_message = Some(format!(
+    operation.error_message = Some(format!(
         "Failed to {action} \"{}\" to \"{}\": {error}",
         source.display(),
         target.display(),
@@ -1287,12 +1299,12 @@ fn record_transfer_failure(
 
 #[cfg(feature = "test-utils")]
 pub fn process_item_for_tests(
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
     item: &OpItem,
     conflict: Option<Arc<dyn Fn(ConflictInfo) + Send + Sync>>,
 ) {
     let conflict: Option<ConflictEmitter> = conflict;
-    process_item(ctx, item, &conflict);
+    process_item(context, item, &conflict);
 }
 
 #[cfg(feature = "test-utils")]
@@ -1306,8 +1318,8 @@ pub fn archive_root_name_for_tests(source: &Path) -> PathBuf {
 }
 
 #[cfg(feature = "test-utils")]
-pub fn begin_file_progress_for_tests(ctx: &WorkerCtx<'_>, source: &Path, total_bytes: u64) {
-    begin_file_progress(ctx, source, total_bytes, None);
+pub fn begin_file_progress_for_tests(context: &WorkerContext<'_>, source: &Path, total_bytes: u64) {
+    begin_file_progress(context, source, total_bytes, None);
 }
 
 /// Pre-measure the real byte total for items whose size arrived as 0 (folders,
@@ -1318,12 +1330,12 @@ pub fn begin_file_progress_for_tests(ctx: &WorkerCtx<'_>, source: &Path, total_b
 /// the first progress emission for all transfer-shaped kinds.
 fn measure_totals_up_front(
     items: &[OpItem],
-    op_arc: &Arc<Mutex<OpState>>,
+    shared_operation: &Arc<Mutex<OpState>>,
     progress: &Option<ProgressEmitter>,
 ) {
     let (kind, cancel) = {
-        let op = op_arc.lock().expect("op lock");
-        (op.kind, op.cancel.clone())
+        let operation = shared_operation.lock().expect("op lock");
+        (operation.kind, operation.cancel.clone())
     };
     if !matches!(kind, OpKind::Delete | OpKind::Copy) {
         return;
@@ -1349,49 +1361,49 @@ fn measure_totals_up_front(
         return;
     }
 
-    let mut op = op_arc.lock().expect("op lock");
-    op.total_bytes = op.total_bytes.saturating_add(discovered_bytes);
+    let mut operation = shared_operation.lock().expect("op lock");
+    operation.total_bytes = operation.total_bytes.saturating_add(discovered_bytes);
     if let Some(emitter) = progress {
-        emitter(op.progress());
+        emitter(operation.progress());
     }
 }
 
 /// Surface a conflict and block until the user resolves it (or it is cancelled).
 fn resolve_or_park(
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
     item: &OpItem,
     target: &Path,
     conflict: &Option<ConflictEmitter>,
 ) -> Option<(ConflictResolution, Option<String>)> {
-    let op_arc = ctx.op_arc;
+    let shared_operation = context.shared_operation;
     {
-        let op = op_arc.lock().expect("op lock");
-        if let Some(blanket) = op.apply_to_all {
+        let operation = shared_operation.lock().expect("op lock");
+        if let Some(blanket) = operation.apply_to_all {
             return Some((blanket, None));
         }
     }
 
     let info = ConflictInfo {
-        operation_id: op_arc.lock().expect("op lock").id.clone(),
+        operation_id: shared_operation.lock().expect("op lock").id.clone(),
         source_path: item.source_path.clone(),
         destination_path: target.to_string_lossy().into_owned(),
         name: item.name.clone(),
     };
 
     {
-        let mut op = op_arc.lock().expect("op lock");
-        op.status = OpStatus::Conflict;
-        op.conflict = Some(info.clone());
-        op.conflict_resolution = None;
-        if let Some(emitter) = ctx.progress {
-            emitter(op.progress());
+        let mut operation = shared_operation.lock().expect("op lock");
+        operation.status = OpStatus::Conflict;
+        operation.conflict = Some(info.clone());
+        operation.conflict_resolution = None;
+        if let Some(emitter) = context.progress {
+            emitter(operation.progress());
         }
     }
     if let Some(emitter) = conflict {
         emitter(info);
     }
 
-    let mut guard = op_arc.lock().expect("op lock");
+    let mut guard = shared_operation.lock().expect("op lock");
     loop {
         if guard.cancel.load(Ordering::Relaxed) {
             return None;
@@ -1400,119 +1412,136 @@ fn resolve_or_park(
             let rename = guard.rename_to.take();
             return Some((resolution, rename));
         }
-        guard = ctx.resolver.wait(guard).expect("conflict wait");
+        guard = context.resolver.wait(guard).expect("conflict wait");
     }
 }
 
-fn wait_while_paused(op_arc: &Arc<Mutex<OpState>>, resolver: &Arc<Condvar>) {
-    let mut guard = op_arc.lock().expect("op lock");
+fn wait_while_paused(shared_operation: &Arc<Mutex<OpState>>, resolver: &Arc<Condvar>) {
+    let mut guard = shared_operation.lock().expect("op lock");
     while guard.pause.load(Ordering::Relaxed) && !guard.cancel.load(Ordering::Relaxed) {
         guard = resolver.wait(guard).expect("pause wait");
     }
 }
 
-fn advance_item(ctx: &WorkerCtx<'_>, _item: &OpItem) {
-    let mut op = ctx.op_arc.lock().expect("op lock");
-    op.completed_items += 1;
-    op.current_file_name = None;
-    op.current_file_copied = 0;
-    op.current_file_total = 0;
-    refresh_rate_locked_with_now(&mut op, ctx.start, ctx.rate_window, (ctx.instant_now)());
+fn advance_item(context: &WorkerContext<'_>, _item: &OpItem) {
+    let mut operation = context.shared_operation.lock().expect("op lock");
+    operation.completed_items += 1;
+    operation.current_file_name = None;
+    operation.current_file_copied = 0;
+    operation.current_file_total = 0;
+    refresh_rate_locked_with_now(
+        &mut operation,
+        context.start,
+        context.rate_window,
+        (context.instant_now)(),
+    );
 
-    if let Some(emitter) = ctx.progress {
-        emitter(op.progress());
+    if let Some(emitter) = context.progress {
+        emitter(operation.progress());
     }
 }
 
-fn count_skipped_bytes(ctx: &WorkerCtx<'_>, skipped_bytes: u64) {
+fn count_skipped_bytes(context: &WorkerContext<'_>, skipped_bytes: u64) {
     if skipped_bytes == 0 {
         return;
     }
-    let mut op = ctx.op_arc.lock().expect("op lock");
-    op.copied_bytes = op.copied_bytes.saturating_add(skipped_bytes);
-    if let Some(emitter) = ctx.progress {
-        emitter(op.progress());
+    let mut operation = context.shared_operation.lock().expect("op lock");
+    operation.copied_bytes = operation.copied_bytes.saturating_add(skipped_bytes);
+    if let Some(emitter) = context.progress {
+        emitter(operation.progress());
     }
 }
 
 fn report_chunk_progress(
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
     copied_delta: u64,
     throttle: Option<&mut TransferThrottle>,
 ) {
-    let mut op = ctx.op_arc.lock().expect("op lock");
-    op.current_file_copied = op.current_file_copied.saturating_add(copied_delta);
-    refresh_rate_locked_with_now(&mut op, ctx.start, ctx.rate_window, (ctx.instant_now)());
-    maybe_emit_transfer(ctx, &op, throttle);
+    let mut operation = context.shared_operation.lock().expect("op lock");
+    operation.current_file_copied = operation.current_file_copied.saturating_add(copied_delta);
+    refresh_rate_locked_with_now(
+        &mut operation,
+        context.start,
+        context.rate_window,
+        (context.instant_now)(),
+    );
+    maybe_emit_transfer(context, &operation, throttle);
 }
 
 fn add_discovered_total(
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
     discovered_bytes: u64,
     throttle: Option<&mut TransferThrottle>,
 ) {
     if discovered_bytes == 0 {
         return;
     }
-    let mut op = ctx.op_arc.lock().expect("op lock");
-    op.total_bytes = op.total_bytes.saturating_add(discovered_bytes);
-    maybe_emit_transfer(ctx, &op, throttle);
+    let mut operation = context.shared_operation.lock().expect("op lock");
+    operation.total_bytes = operation.total_bytes.saturating_add(discovered_bytes);
+    maybe_emit_transfer(context, &operation, throttle);
 }
 
 fn begin_file_progress(
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
     source: &Path,
     total_bytes: u64,
     throttle: Option<&mut TransferThrottle>,
 ) {
-    let mut op = ctx.op_arc.lock().expect("op lock");
-    op.current_file_name = source
+    let mut operation = context.shared_operation.lock().expect("op lock");
+    operation.current_file_name = source
         .file_name()
         .and_then(|name| name.to_str())
         .map(ToOwned::to_owned)
         .or_else(|| Some(source.to_string_lossy().into_owned()));
-    op.current_file_copied = 0;
-    op.current_file_total = total_bytes;
-    maybe_emit_transfer(ctx, &op, throttle);
+    operation.current_file_copied = 0;
+    operation.current_file_total = total_bytes;
+    maybe_emit_transfer(context, &operation, throttle);
 }
 
-fn finish_file_progress(ctx: &WorkerCtx<'_>, throttle: Option<&mut TransferThrottle>) {
-    let mut op = ctx.op_arc.lock().expect("op lock");
-    op.copied_bytes = op.copied_bytes.saturating_add(op.current_file_copied);
-    op.current_file_name = None;
-    op.current_file_copied = 0;
-    op.current_file_total = 0;
-    refresh_rate_locked_with_now(&mut op, ctx.start, ctx.rate_window, (ctx.instant_now)());
-    maybe_emit_transfer(ctx, &op, throttle);
+fn finish_file_progress(context: &WorkerContext<'_>, throttle: Option<&mut TransferThrottle>) {
+    let mut operation = context.shared_operation.lock().expect("op lock");
+    operation.copied_bytes = operation
+        .copied_bytes
+        .saturating_add(operation.current_file_copied);
+    operation.current_file_name = None;
+    operation.current_file_copied = 0;
+    operation.current_file_total = 0;
+    refresh_rate_locked_with_now(
+        &mut operation,
+        context.start,
+        context.rate_window,
+        (context.instant_now)(),
+    );
+    maybe_emit_transfer(context, &operation, throttle);
 }
 
 fn refresh_rate_locked_with_now(
-    op: &mut OpState,
+    operation: &mut OpState,
     start: Instant,
     rate_window: Duration,
     now: Instant,
 ) {
-    op.sample_count += 1;
-    let visible_copied = op.visible_copied_bytes();
-    let last_sample_at = op.rate_sample_at.unwrap_or(start);
-    let last_sample_bytes = op.rate_sample_bytes;
+    operation.sample_count += 1;
+    let visible_copied = operation.visible_copied_bytes();
+    let last_sample_at = operation.rate_sample_at.unwrap_or(start);
+    let last_sample_bytes = operation.rate_sample_bytes;
     let should_recompute = rate_window.is_zero()
-        || op.bytes_per_second == 0
+        || operation.bytes_per_second == 0
         || now.duration_since(last_sample_at) >= rate_window;
 
     if should_recompute {
         let sample_elapsed = now.duration_since(last_sample_at).as_secs_f64().max(0.001);
         let sample_bytes = visible_copied.saturating_sub(last_sample_bytes);
-        op.bytes_per_second = (sample_bytes as f64 / sample_elapsed) as u64;
-        op.rate_sample_at = Some(now);
-        op.rate_sample_bytes = visible_copied;
+        operation.bytes_per_second = (sample_bytes as f64 / sample_elapsed) as u64;
+        operation.rate_sample_at = Some(now);
+        operation.rate_sample_bytes = visible_copied;
     }
 
     let stable_elapsed = start.elapsed().as_secs_f64().max(0.001);
     let stable_rate = (visible_copied as f64 / stable_elapsed) as u64;
-    if op.sample_count >= ETA_STABILIZATION_SAMPLES && stable_rate > 0 {
-        let remaining = op.total_bytes.saturating_sub(visible_copied);
-        op.eta_seconds = Some(remaining / stable_rate.max(1));
+    if operation.sample_count >= ETA_STABILIZATION_SAMPLES && stable_rate > 0 {
+        let remaining = operation.total_bytes.saturating_sub(visible_copied);
+        operation.eta_seconds = Some(remaining / stable_rate.max(1));
     }
 }
 
@@ -1528,11 +1557,11 @@ fn refresh_rate_locked_with_now(
 fn admit_and_run_operation(id: String, inner: &Arc<Mutex<Inner>>, runtime: &WorkerRuntime) {
     let Some((resources, archive_cpu)) = ({
         let guard = inner.lock().expect("ops lock");
-        guard.ops.get(&id).map(|op_arc| {
-            let op = op_arc.lock().expect("op lock");
+        guard.ops.get(&id).map(|shared_operation| {
+            let operation = shared_operation.lock().expect("op lock");
             (
-                op.volumes.iter().cloned().collect::<Vec<_>>(),
-                archive::needs_cpu_admission(op.kind),
+                operation.volumes.iter().cloned().collect::<Vec<_>>(),
+                archive::needs_cpu_admission(operation.kind),
             )
         })
     }) else {
@@ -1544,10 +1573,11 @@ fn admit_and_run_operation(id: String, inner: &Arc<Mutex<Inner>>, runtime: &Work
         .submit(worker::transfer_admission(resources, archive_cpu));
     if admission.is_ok() {
         run_operation(id, inner, runtime);
-    } else if let Some(op) = inner.lock().expect("ops lock").ops.get(&id).cloned() {
-        let mut op = op.lock().expect("op lock");
-        op.status = OpStatus::Cancelled;
-        op.error_message = Some("Transfer admission was cancelled or shut down.".to_string());
+    } else if let Some(operation) = inner.lock().expect("ops lock").ops.get(&id).cloned() {
+        let mut operation = operation.lock().expect("op lock");
+        operation.status = OpStatus::Cancelled;
+        operation.error_message =
+            Some("Transfer admission was cancelled or shut down.".to_string());
     }
 }
 
@@ -1558,7 +1588,7 @@ fn release_and_reschedule(id: &str, inner: &Arc<Mutex<Inner>>, runtime: &WorkerR
         guard
             .ops
             .get(id)
-            .map(|op| op.lock().expect("op lock").volumes.clone())
+            .map(|operation| operation.lock().expect("op lock").volumes.clone())
             .unwrap_or_default()
     };
 
@@ -1592,22 +1622,22 @@ fn collect_startable(inner: &Arc<Mutex<Inner>>) -> Vec<String> {
     let mut to_start = Vec::new();
 
     for id in order {
-        let Some(op_arc) = guard.ops.get(&id).cloned() else {
+        let Some(shared_operation) = guard.ops.get(&id).cloned() else {
             continue;
         };
-        let op = op_arc.lock().expect("op lock");
-        if op.status != OpStatus::Pending {
+        let operation = shared_operation.lock().expect("op lock");
+        if operation.status != OpStatus::Pending {
             continue;
         }
-        if op
+        if operation
             .volumes
             .iter()
             .any(|vol| guard.busy_volumes.contains(vol))
         {
             continue;
         }
-        let volumes = op.volumes.clone();
-        drop(op);
+        let volumes = operation.volumes.clone();
+        drop(operation);
         for vol in &volumes {
             guard.busy_volumes.insert(vol.clone());
         }
@@ -1628,9 +1658,9 @@ fn schedule_auto_remove(
         .expect("ops lock")
         .ops
         .get(id)
-        .map(|op| {
+        .map(|operation| {
             matches!(
-                op.lock().expect("op lock").status,
+                operation.lock().expect("op lock").status,
                 OpStatus::Completed | OpStatus::Cancelled
             )
         })
@@ -1648,9 +1678,9 @@ fn schedule_auto_remove(
         let still_terminal = guard
             .ops
             .get(&id)
-            .map(|op| {
+            .map(|operation| {
                 matches!(
-                    op.lock().expect("op lock").status,
+                    operation.lock().expect("op lock").status,
                     OpStatus::Completed | OpStatus::Cancelled
                 )
             })
@@ -1660,7 +1690,7 @@ fn schedule_auto_remove(
             guard.signals.remove(&id);
             guard.order.retain(|entry| entry != &id);
             drop(guard);
-            // Tell the UI to prune the card now that the backend forgot the op.
+            // Tell the UI to prune the card now that the backend forgot the operation.
             if let Some(emitter) = &removed {
                 emitter(id);
             }
@@ -1672,7 +1702,7 @@ fn compress_item_with_progress(
     source: &Path,
     archive_path: &Path,
     item: &OpItem,
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
 ) -> Result<(), String> {
     if !is_zip_archive_path(archive_path) {
         return Err("Archive output must end in .zip.".to_string());
@@ -1685,8 +1715,8 @@ fn compress_item_with_progress(
     }
     // A multi-item compress builds one archive: the first item creates it and
     // every later item appends to it.
-    let is_later_item = ctx
-        .op_arc
+    let is_later_item = context
+        .shared_operation
         .lock()
         .expect("op lock")
         .items
@@ -1719,13 +1749,13 @@ fn compress_item_with_progress(
     let root_name = archive_root_name(source);
     // One throttle shared across every member appended below (mirrors how
     // `copy_dir_recursive` shares a single throttle through its recursion).
-    let mut throttle = TransferThrottle::new((ctx.instant_now)(), PROGRESS_EMIT_INTERVAL);
+    let mut throttle = TransferThrottle::new((context.instant_now)(), PROGRESS_EMIT_INTERVAL);
     append_archive_path(
         &mut writer,
         source,
         &root_name,
         add_discovered_totals,
-        ctx,
+        context,
         Some(&mut throttle),
     )?;
     writer.finish().map_err(|error| error.to_string())?;
@@ -1736,7 +1766,7 @@ fn extract_item_with_progress(
     source: &Path,
     destination_dir: &Path,
     item: &OpItem,
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
 ) -> Result<(), String> {
     if destination_dir.exists() {
         if !destination_dir.is_dir() {
@@ -1756,7 +1786,7 @@ fn extract_item_with_progress(
         unique_archive_directory_path(destination_dir, &archive_stem_for_item(source));
     let discovered_total = zip_uncompressed_size(source)?;
     if item.size_bytes == 0 {
-        add_discovered_total(ctx, discovered_total, None);
+        add_discovered_total(context, discovered_total, None);
     }
 
     fs::create_dir_all(&output_root).map_err(|error| error.to_string())?;
@@ -1766,15 +1796,15 @@ fn extract_item_with_progress(
 
     // One throttle shared across every archive member extracted below (mirrors
     // how `copy_dir_recursive` shares a single throttle through its recursion).
-    let mut throttle = TransferThrottle::new((ctx.instant_now)(), PROGRESS_EMIT_INTERVAL);
+    let mut throttle = TransferThrottle::new((context.instant_now)(), PROGRESS_EMIT_INTERVAL);
     // Directory modes are applied after every member is written so a
     // read-only folder cannot block extraction of its own contents.
     let mut directory_modes = Vec::new();
 
     for index in 0..archive.len() {
-        wait_while_paused(ctx.op_arc, ctx.resolver);
-        if ctx
-            .op_arc
+        wait_while_paused(context.shared_operation, context.resolver);
+        if context
+            .shared_operation
             .lock()
             .expect("op lock")
             .cancel
@@ -1802,7 +1832,7 @@ fn extract_item_with_progress(
         }
 
         let entry_size = entry.size();
-        begin_file_progress(ctx, &output_path, entry_size, Some(&mut throttle));
+        begin_file_progress(context, &output_path, entry_size, Some(&mut throttle));
         #[cfg(unix)]
         if entry.is_symlink() {
             // ZIP stores a link's target as its payload. `safe_destination`
@@ -1812,16 +1842,16 @@ fn extract_item_with_progress(
                 .read_to_string(&mut target)
                 .map_err(|error| error.to_string())?;
             std::os::unix::fs::symlink(&target, &output_path).map_err(|error| error.to_string())?;
-            report_chunk_progress(ctx, entry_size, Some(&mut throttle));
-            finish_file_progress(ctx, Some(&mut throttle));
+            report_chunk_progress(context, entry_size, Some(&mut throttle));
+            finish_file_progress(context, Some(&mut throttle));
             continue;
         }
         let mut output_file = fs::File::create(&output_path).map_err(|error| error.to_string())?;
-        copy_reader_with_progress(&mut entry, &mut output_file, ctx, Some(&mut throttle))?;
+        copy_reader_with_progress(&mut entry, &mut output_file, context, Some(&mut throttle))?;
         output_file.flush().map_err(|error| error.to_string())?;
         drop(output_file);
         apply_extracted_mode(&output_path, entry.unix_mode())?;
-        finish_file_progress(ctx, Some(&mut throttle));
+        finish_file_progress(context, Some(&mut throttle));
     }
 
     // Deepest first: chmod on a child needs search permission on its parent.
@@ -1870,11 +1900,11 @@ fn append_archive_path(
     source: &Path,
     archive_path: &Path,
     add_discovered_totals: bool,
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
     mut throttle: Option<&mut TransferThrottle>,
 ) -> Result<(), String> {
-    wait_while_paused(ctx.op_arc, ctx.resolver);
-    if is_op_cancelled(ctx) {
+    wait_while_paused(context.shared_operation, context.resolver);
+    if is_operation_cancelled(context) {
         return Ok(());
     }
 
@@ -1888,7 +1918,7 @@ fn append_archive_path(
             source,
             archive_path,
             add_discovered_totals,
-            ctx,
+            context,
             throttle,
         );
     }
@@ -1906,7 +1936,7 @@ fn append_archive_path(
         // walk below avoids materializing/sorting an unbounded wide
         // directory solely for a cosmetic order (same rationale as the
         // former per-directory `fs::read_dir` loop it replaces).
-        let cancel = Arc::clone(&ctx.op_arc.lock().expect("op lock").cancel);
+        let cancel = Arc::clone(&context.shared_operation.lock().expect("op lock").cancel);
         let entries = crate::traversal::walk(
             source,
             crate::traversal::TraversalOptions::default(),
@@ -1914,8 +1944,8 @@ fn append_archive_path(
         )
         .map_err(|error| error.to_string())?;
         for entry in entries {
-            wait_while_paused(ctx.op_arc, ctx.resolver);
-            if is_op_cancelled(ctx) {
+            wait_while_paused(context.shared_operation, context.resolver);
+            if is_operation_cancelled(context) {
                 return Ok(());
             }
             let entry = match entry {
@@ -1935,7 +1965,7 @@ fn append_archive_path(
                     &entry.path,
                     &member_archive_path,
                     add_discovered_totals,
-                    ctx,
+                    context,
                     throttle.as_deref_mut(),
                 )?;
             } else if entry.file_type.is_dir() {
@@ -1954,7 +1984,7 @@ fn append_archive_path(
                     &entry.path,
                     &member_archive_path,
                     add_discovered_totals,
-                    ctx,
+                    context,
                     throttle.as_deref_mut(),
                 )?;
             }
@@ -1967,16 +1997,17 @@ fn append_archive_path(
         source,
         archive_path,
         add_discovered_totals,
-        ctx,
+        context,
         throttle,
     )
 }
 
-/// `true` when the operation backing `ctx` has been cancelled. Small helper
+/// `true` when the operation backing `context` has been cancelled. Small helper
 /// so both the top-of-function check and the per-entry check inside the
 /// directory walk loop stay in sync.
-fn is_op_cancelled(ctx: &WorkerCtx<'_>) -> bool {
-    ctx.op_arc
+fn is_operation_cancelled(context: &WorkerContext<'_>) -> bool {
+    context
+        .shared_operation
         .lock()
         .expect("op lock")
         .cancel
@@ -1991,17 +2022,17 @@ fn append_archive_symlink(
     source: &Path,
     archive_path: &Path,
     add_discovered_totals: bool,
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
     mut throttle: Option<&mut TransferThrottle>,
 ) -> Result<(), String> {
     let target = fs::read_link(source).map_err(|error| error.to_string())?;
     let target = target.to_string_lossy();
     let target_bytes = target.as_bytes();
     if add_discovered_totals {
-        add_discovered_total(ctx, target_bytes.len() as u64, throttle.as_deref_mut());
+        add_discovered_total(context, target_bytes.len() as u64, throttle.as_deref_mut());
     }
     begin_file_progress(
-        ctx,
+        context,
         source,
         target_bytes.len() as u64,
         throttle.as_deref_mut(),
@@ -2014,8 +2045,8 @@ fn append_archive_symlink(
             SimpleFileOptions::default(),
         )
         .map_err(|error| error.to_string())?;
-    report_chunk_progress(ctx, target_bytes.len() as u64, throttle.as_deref_mut());
-    finish_file_progress(ctx, throttle);
+    report_chunk_progress(context, target_bytes.len() as u64, throttle.as_deref_mut());
+    finish_file_progress(context, throttle);
     Ok(())
 }
 
@@ -2026,39 +2057,39 @@ fn append_archive_file(
     source: &Path,
     archive_path: &Path,
     add_discovered_totals: bool,
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
     mut throttle: Option<&mut TransferThrottle>,
 ) -> Result<(), String> {
     let metadata = fs::metadata(source).map_err(|error| error.to_string())?;
     let file_size = metadata.len();
     if add_discovered_totals {
-        add_discovered_total(ctx, file_size, throttle.as_deref_mut());
+        add_discovered_total(context, file_size, throttle.as_deref_mut());
     }
-    begin_file_progress(ctx, source, file_size, throttle.as_deref_mut());
+    begin_file_progress(context, source, file_size, throttle.as_deref_mut());
     writer
         .start_file(to_zip_path(archive_path)?, zip_file_options(&metadata))
         .map_err(|error| error.to_string())?;
     let mut input_file = fs::File::open(source).map_err(|error| error.to_string())?;
-    copy_reader_with_progress(&mut input_file, writer, ctx, throttle.as_deref_mut())?;
-    finish_file_progress(ctx, throttle);
+    copy_reader_with_progress(&mut input_file, writer, context, throttle.as_deref_mut())?;
+    finish_file_progress(context, throttle);
     Ok(())
 }
 
 fn copy_reader_with_progress<R, W>(
     reader: &mut R,
     writer: &mut W,
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
     mut throttle: Option<&mut TransferThrottle>,
 ) -> Result<(), String>
 where
     R: Read,
     W: Write,
 {
-    let mut buffer = [0_u8; 1024 * 1024];
+    let mut buffer = [0_u8; COPY_BUFFER_BYTES];
     loop {
-        wait_while_paused(ctx.op_arc, ctx.resolver);
-        if ctx
-            .op_arc
+        wait_while_paused(context.shared_operation, context.resolver);
+        if context
+            .shared_operation
             .lock()
             .expect("op lock")
             .cancel
@@ -2076,7 +2107,7 @@ where
         writer
             .write_all(&buffer[..read])
             .map_err(|error| error.to_string())?;
-        report_chunk_progress(ctx, read as u64, throttle.as_deref_mut());
+        report_chunk_progress(context, read as u64, throttle.as_deref_mut());
     }
     Ok(())
 }
@@ -2374,25 +2405,25 @@ fn measure_path_size(path: &Path, cancel: &Arc<AtomicBool>, follow_symlinks: boo
     link_metadata.len()
 }
 
-pub fn copy_path(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(), String> {
-    copy_path_with_total_discovery(source, target, false, ctx, None)
+pub fn copy_path(source: &Path, target: &Path, context: &WorkerContext<'_>) -> Result<(), String> {
+    copy_path_with_total_discovery(source, target, false, context, None)
 }
 
 fn copy_path_with_total_discovery(
     source: &Path,
     target: &Path,
     add_discovered_totals: bool,
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
     manifest: Option<&mut ProgressiveManifest>,
 ) -> Result<(), String> {
     let source_metadata = fs::symlink_metadata(source).map_err(|error| error.to_string())?;
     if source_metadata.file_type().is_symlink() {
-        let mut throttle = TransferThrottle::new((ctx.instant_now)(), PROGRESS_EMIT_INTERVAL);
+        let mut throttle = TransferThrottle::new((context.instant_now)(), PROGRESS_EMIT_INTERVAL);
         copy_symlink_with_total_discovery(
             source,
             target,
             add_discovered_totals,
-            ctx,
+            context,
             Some(&mut throttle),
         )
     } else if source_metadata.is_dir() {
@@ -2400,14 +2431,14 @@ fn copy_path_with_total_discovery(
         let mut visited = HashSet::from([root.clone()]);
         // The directory walk shares one throttle across the whole recursive
         // tree so a many-small-file tree does not flood the frontend.
-        let mut throttle = TransferThrottle::new((ctx.instant_now)(), PROGRESS_EMIT_INTERVAL);
+        let mut throttle = TransferThrottle::new((context.instant_now)(), PROGRESS_EMIT_INTERVAL);
         copy_dir_recursive(
             source,
             target,
             &root,
             &mut visited,
             add_discovered_totals,
-            ctx,
+            context,
             Some(&mut throttle),
             manifest,
         )
@@ -2415,12 +2446,12 @@ fn copy_path_with_total_discovery(
         // A single top-level file transfer gets its own throttle: a large
         // file (e.g. a multi-GB video) emits one progress event per 1 MiB
         // chunk, which floods exactly the same way a directory walk does.
-        let mut throttle = TransferThrottle::new((ctx.instant_now)(), PROGRESS_EMIT_INTERVAL);
+        let mut throttle = TransferThrottle::new((context.instant_now)(), PROGRESS_EMIT_INTERVAL);
         copy_file_with_total_discovery(
             source,
             target,
             add_discovered_totals,
-            ctx,
+            context,
             Some(&mut throttle),
         )
     }
@@ -2433,15 +2464,15 @@ pub fn copy_dir_recursive(
     root: &Path,
     visited: &mut HashSet<PathBuf>,
     add_discovered_totals: bool,
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
     mut throttle: Option<&mut TransferThrottle>,
     mut manifest: Option<&mut ProgressiveManifest>,
 ) -> Result<(), String> {
     clear_merge_target(target, true)?;
     fs::create_dir_all(target).map_err(|error| error.to_string())?;
     for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
-        if ctx
-            .op_arc
+        if context
+            .shared_operation
             .lock()
             .expect("op lock")
             .cancel
@@ -2464,7 +2495,7 @@ pub fn copy_dir_recursive(
                 &child_source,
                 &child_target,
                 add_discovered_totals,
-                ctx,
+                context,
                 throttle.as_deref_mut(),
             )?;
         } else if file_type.is_dir() {
@@ -2490,7 +2521,7 @@ pub fn copy_dir_recursive(
                 root,
                 visited,
                 add_discovered_totals,
-                ctx,
+                context,
                 throttle.as_deref_mut(),
                 manifest.as_deref_mut(),
             )?;
@@ -2506,7 +2537,7 @@ pub fn copy_dir_recursive(
                 &child_source,
                 &child_target,
                 add_discovered_totals,
-                ctx,
+                context,
                 throttle.as_deref_mut(),
             )?;
         }
@@ -2521,7 +2552,7 @@ fn copy_symlink_with_total_discovery(
     source: &Path,
     target: &Path,
     add_discovered_total_bytes: bool,
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
     mut throttle: Option<&mut TransferThrottle>,
 ) -> Result<(), String> {
     if let Some(parent) = target.parent() {
@@ -2533,15 +2564,15 @@ fn copy_symlink_with_total_discovery(
     let link_metadata = fs::symlink_metadata(source).map_err(|error| error.to_string())?;
     let link_size = link_metadata.len();
     if add_discovered_total_bytes {
-        add_discovered_total(ctx, link_size, throttle.as_deref_mut());
+        add_discovered_total(context, link_size, throttle.as_deref_mut());
     }
-    begin_file_progress(ctx, source, link_size, throttle.as_deref_mut());
+    begin_file_progress(context, source, link_size, throttle.as_deref_mut());
 
     let link_target = fs::read_link(source).map_err(|error| error.to_string())?;
     create_symlink(source, &link_target, target).map_err(|error| error.to_string())?;
 
-    report_chunk_progress(ctx, link_size, throttle.as_deref_mut());
-    finish_file_progress(ctx, throttle);
+    report_chunk_progress(context, link_size, throttle.as_deref_mut());
+    finish_file_progress(context, throttle);
     Ok(())
 }
 
@@ -2577,35 +2608,35 @@ fn create_symlink(_source: &Path, _link_target: &Path, _target: &Path) -> io::Re
 pub fn delete_path_with_progress(
     source: &Path,
     add_discovered_totals: bool,
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
 ) -> Result<(), String> {
-    let mut throttle = DeleteThrottle::new((ctx.instant_now)(), PROGRESS_EMIT_INTERVAL);
-    delete_path_with_progress_throttled(source, add_discovered_totals, ctx, &mut throttle)
+    let mut throttle = DeleteThrottle::new((context.instant_now)(), PROGRESS_EMIT_INTERVAL);
+    delete_path_with_progress_throttled(source, add_discovered_totals, context, &mut throttle)
 }
 
 fn delete_path_with_progress_throttled(
     source: &Path,
     add_discovered_totals: bool,
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
     throttle: &mut DeleteThrottle,
 ) -> Result<(), String> {
     let metadata = fs::symlink_metadata(source).map_err(|error| error.to_string())?;
     if metadata.is_dir() && !metadata.file_type().is_symlink() {
-        delete_dir_recursive(source, add_discovered_totals, ctx, throttle)
+        delete_dir_recursive(source, add_discovered_totals, context, throttle)
     } else {
-        delete_file_with_progress(source, add_discovered_totals, ctx, throttle)
+        delete_file_with_progress(source, add_discovered_totals, context, throttle)
     }
 }
 
 fn delete_dir_recursive(
     source: &Path,
     add_discovered_totals: bool,
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
     throttle: &mut DeleteThrottle,
 ) -> Result<(), String> {
     for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
-        if ctx
-            .op_arc
+        if context
+            .shared_operation
             .lock()
             .expect("op lock")
             .cancel
@@ -2617,14 +2648,14 @@ fn delete_dir_recursive(
         let entry = entry.map_err(|error| error.to_string())?;
         let file_type = entry.file_type().map_err(|error| error.to_string())?;
         if file_type.is_dir() && !file_type.is_symlink() {
-            delete_dir_recursive(&entry.path(), add_discovered_totals, ctx, throttle)?;
+            delete_dir_recursive(&entry.path(), add_discovered_totals, context, throttle)?;
         } else {
-            delete_file_with_progress(&entry.path(), add_discovered_totals, ctx, throttle)?;
+            delete_file_with_progress(&entry.path(), add_discovered_totals, context, throttle)?;
         }
     }
 
-    if ctx
-        .op_arc
+    if context
+        .shared_operation
         .lock()
         .expect("op lock")
         .cancel
@@ -2712,12 +2743,12 @@ fn remove_file_or_symlink(path: &Path, _link_metadata: &fs::Metadata) -> io::Res
 fn delete_file_with_progress(
     source: &Path,
     add_discovered_totals: bool,
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
     throttle: &mut DeleteThrottle,
 ) -> Result<(), String> {
-    wait_while_paused(ctx.op_arc, ctx.resolver);
-    if ctx
-        .op_arc
+    wait_while_paused(context.shared_operation, context.resolver);
+    if context
+        .shared_operation
         .lock()
         .expect("op lock")
         .cancel
@@ -2732,42 +2763,47 @@ fn delete_file_with_progress(
         .map_err(|error| format!("{}: {error}", source.display()))?;
 
     {
-        let mut op = ctx.op_arc.lock().expect("op lock");
+        let mut operation = context.shared_operation.lock().expect("op lock");
         if add_discovered_totals {
-            op.total_bytes = op.total_bytes.saturating_add(file_size);
+            operation.total_bytes = operation.total_bytes.saturating_add(file_size);
         }
-        op.copied_bytes = op.copied_bytes.saturating_add(file_size);
-        op.current_file_name = None;
-        op.current_file_copied = 0;
-        op.current_file_total = 0;
-        refresh_rate_locked_with_now(&mut op, ctx.start, ctx.rate_window, (ctx.instant_now)());
+        operation.copied_bytes = operation.copied_bytes.saturating_add(file_size);
+        operation.current_file_name = None;
+        operation.current_file_copied = 0;
+        operation.current_file_total = 0;
+        refresh_rate_locked_with_now(
+            &mut operation,
+            context.start,
+            context.rate_window,
+            (context.instant_now)(),
+        );
     }
-    maybe_emit_delete(ctx, throttle);
+    maybe_emit_delete(context, throttle);
     Ok(())
 }
 
-fn maybe_emit_delete(ctx: &WorkerCtx<'_>, throttle: &mut DeleteThrottle) {
-    let now = (ctx.instant_now)();
+fn maybe_emit_delete(context: &WorkerContext<'_>, throttle: &mut DeleteThrottle) {
+    let now = (context.instant_now)();
     if now.saturating_duration_since(throttle.last_emit) < throttle.interval {
         return;
     }
 
     throttle.last_emit = now;
-    let op = ctx.op_arc.lock().expect("op lock");
-    if let Some(emitter) = ctx.progress {
-        emitter(op.progress());
+    let operation = context.shared_operation.lock().expect("op lock");
+    if let Some(emitter) = context.progress {
+        emitter(operation.progress());
     }
 }
 
-pub fn move_path(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(), String> {
-    move_path_with_total_discovery(source, target, false, ctx)
+pub fn move_path(source: &Path, target: &Path, context: &WorkerContext<'_>) -> Result<(), String> {
+    move_path_with_total_discovery(source, target, false, context)
 }
 
 fn move_path_with_total_discovery(
     source: &Path,
     target: &Path,
     add_discovered_totals: bool,
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
 ) -> Result<(), String> {
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -2789,11 +2825,11 @@ fn move_path_with_total_discovery(
         source,
         target,
         add_discovered_totals,
-        ctx,
+        context,
         Some(&mut manifest),
     )?;
-    if ctx
-        .op_arc
+    if context
+        .shared_operation
         .lock()
         .expect("op lock")
         .cancel
@@ -2807,9 +2843,9 @@ fn move_path_with_total_discovery(
 /// Move-merge `source` into the existing real directory `target`: children
 /// that collide as directories recurse, anything else replaces whatever is in
 /// the way and moves by rename (with the per-child cross-device fallback).
-fn move_merge_dir(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(), String> {
+fn move_merge_dir(source: &Path, target: &Path, context: &WorkerContext<'_>) -> Result<(), String> {
     for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
-        if is_op_cancelled(ctx) {
+        if is_operation_cancelled(context) {
             return Ok(());
         }
         let entry = entry.map_err(|error| error.to_string())?;
@@ -2820,13 +2856,13 @@ fn move_merge_dir(source: &Path, target: &Path, ctx: &WorkerCtx<'_>) -> Result<(
             .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
             .unwrap_or(false);
         if file_type.is_dir() && !file_type.is_symlink() && target_is_real_directory {
-            move_merge_dir(&child_source, &child_target, ctx)?;
+            move_merge_dir(&child_source, &child_target, context)?;
         } else {
             clear_merge_target(&child_target, false)?;
-            move_path_with_total_discovery(&child_source, &child_target, false, ctx)?;
+            move_path_with_total_discovery(&child_source, &child_target, false, context)?;
         }
     }
-    if is_op_cancelled(ctx) {
+    if is_operation_cancelled(context) {
         return Ok(());
     }
     remove_clearing_readonly(source, |path| fs::remove_dir(path)).map_err(|error| error.to_string())
@@ -2850,9 +2886,9 @@ fn clear_merge_target(target: &Path, keep_real_dir: bool) -> Result<(), String> 
 pub fn copy_file_with_progress(
     source: &Path,
     target: &Path,
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
 ) -> Result<(), String> {
-    copy_file_with_total_discovery(source, target, false, ctx, None)
+    copy_file_with_total_discovery(source, target, false, context, None)
 }
 
 /// Runs the capability-adapter selection decision for a single file transfer
@@ -2907,7 +2943,7 @@ fn copy_file_with_total_discovery(
     source: &Path,
     target: &Path,
     add_discovered_total_bytes: bool,
-    ctx: &WorkerCtx<'_>,
+    context: &WorkerContext<'_>,
     mut throttle: Option<&mut TransferThrottle>,
 ) -> Result<(), String> {
     if let Some(parent) = target.parent() {
@@ -2921,24 +2957,24 @@ fn copy_file_with_total_discovery(
         .map(|metadata| metadata.len())
         .unwrap_or(0);
     if add_discovered_total_bytes {
-        add_discovered_total(ctx, file_size, throttle.as_deref_mut());
+        add_discovered_total(context, file_size, throttle.as_deref_mut());
     }
-    begin_file_progress(ctx, source, file_size, throttle.as_deref_mut());
+    begin_file_progress(context, source, file_size, throttle.as_deref_mut());
 
     let mut reader = fs::File::open(source).map_err(|error| error.to_string())?;
     let mut writer = fs::File::create(target).map_err(|error| error.to_string())?;
-    let mut buffer = [0_u8; 1024 * 1024];
+    let mut buffer = [0_u8; COPY_BUFFER_BYTES];
 
     loop {
-        wait_while_paused(ctx.op_arc, ctx.resolver);
-        if ctx
-            .op_arc
+        wait_while_paused(context.shared_operation, context.resolver);
+        if context
+            .shared_operation
             .lock()
             .expect("op lock")
             .cancel
             .load(Ordering::Relaxed)
         {
-            finish_file_progress(ctx, throttle.as_deref_mut());
+            finish_file_progress(context, throttle.as_deref_mut());
             return Ok(());
         }
 
@@ -2952,11 +2988,11 @@ fn copy_file_with_total_discovery(
         writer
             .write_all(&buffer[..read])
             .map_err(|error| error.to_string())?;
-        report_chunk_progress(ctx, read as u64, throttle.as_deref_mut());
+        report_chunk_progress(context, read as u64, throttle.as_deref_mut());
     }
 
     writer.flush().map_err(|error| error.to_string())?;
-    finish_file_progress(ctx, throttle);
+    finish_file_progress(context, throttle);
     Ok(())
 }
 

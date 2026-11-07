@@ -1,4 +1,5 @@
 import { capacityLevel } from '@/lib/volumes'
+import { fractionToPercent, PERCENT_SCALE } from '@/lib/numbers'
 
 const FILL_CLASS_NAME = {
   normal: 'bg-light-accent dark:bg-dark-accent',
@@ -14,15 +15,15 @@ export function CapacityBar({ usedFraction }: { usedFraction: number }) {
       role="meter"
       aria-label="Used space"
       aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={Math.round(usedFraction * 100)}
+      aria-valuemax={PERCENT_SCALE}
+      aria-valuenow={Math.round(fractionToPercent(usedFraction))}
       data-capacity-level={level}
       className="block h-0.75 w-capbar overflow-hidden rounded-full bg-light-divider dark:bg-dark-divider"
     >
       <span
         className={`block h-full rounded-full ${FILL_CLASS_NAME[level]}`}
         // Styling-constraint exception: runtime geometry only (the used share).
-        style={{ width: `${usedFraction * 100}%` }}
+        style={{ width: `${fractionToPercent(usedFraction)}%` }}
       />
     </span>
   )

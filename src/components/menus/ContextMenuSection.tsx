@@ -5,6 +5,11 @@ import {
   type ContextMenuSubmenuRowItem,
   type ContextMenuSection as ContextMenuSectionModel,
 } from '@/lib/types/context-menu'
+import {
+  MENU_VIEWPORT_MARGIN_PX,
+  menuAvailableHeight,
+  SUBMENU_GAP_PX,
+} from '@/components/menus/menu-geometry'
 
 export function ContextMenuSection({
   section,
@@ -56,11 +61,11 @@ export function ContextMenuSection({
     submenuRef.current.style.maxHeight = ''
 
     const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1
-    const margin = 8
-    const gap = 8
+    const margin = MENU_VIEWPORT_MARGIN_PX
+    const gap = SUBMENU_GAP_PX
     const anchorRect = openSubmenuAnchor.getBoundingClientRect()
     const submenuRect = submenuRef.current.getBoundingClientRect()
-    const availableHeight = Math.max(window.innerHeight - margin * 2, 0)
+    const availableHeight = menuAvailableHeight()
     const clampedHeight = Math.min(submenuRect.height, availableHeight)
     const maxLeft = window.innerWidth - margin - submenuRect.width
     let left = anchorRect.right + gap

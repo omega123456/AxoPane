@@ -16,6 +16,8 @@ use crate::size::index::tree::FolderSizeTree;
 
 /// Arena slots examined per read-lock hold.
 pub const SLOTS_PER_READ: usize = 32_768;
+/// Matches accumulate to twice the cap before being pruned to the best.
+const FOUND_PRUNE_THRESHOLD: usize = 2 * CANDIDATE_CAP;
 
 pub fn candidates(
     source: &dyn FolderTreeSource,
@@ -98,7 +100,7 @@ fn scan(
                 }
             }
         })?;
-        if found.len() > 2 * CANDIDATE_CAP {
+        if found.len() > FOUND_PRUNE_THRESHOLD {
             keep_best(&mut found);
             truncated = true;
         }

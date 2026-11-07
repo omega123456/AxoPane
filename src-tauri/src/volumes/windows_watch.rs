@@ -51,14 +51,14 @@ impl Watcher {
     /// volume registry on shell change notifications. `bridge` is kept
     /// alive for the watcher's lifetime by this thread's `ThreadContext`.
     pub fn start_for_registry(bridge: Arc<RegistryReconcileBridge>) -> Result<Self, String> {
-        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<u32, String>>();
+        let (ready_sender, ready_receiver) = std::sync::mpsc::channel::<Result<u32, String>>();
 
         let handle = thread::Builder::new()
             .name("volume-registry".to_string())
-            .spawn(move || run(bridge, ready_tx))
+            .spawn(move || run(bridge, ready_sender))
             .map_err(|error| error.to_string())?;
 
-        let thread_id = ready_rx
+        let thread_id = ready_receiver
             .recv()
             .map_err(|_| "volume monitor thread exited before signaling readiness".to_string())??;
 
@@ -100,18 +100,18 @@ fn run(bridge: Arc<RegistryReconcileBridge>, ready: Sender<Result<u32, String>>)
     let thread_id = unsafe { GetCurrentThreadId() };
     let _ = ready.send(Ok(thread_id));
 
-    let mut msg = MSG::default();
+    let mut window_message = MSG::default();
     loop {
-        // SAFETY: `msg` is exclusively owned by this thread; blocks until a
+        // SAFETY: `window_message` is exclusively owned by this thread; blocks until a
         // message (including our shell notification, or `WM_QUIT` from
         // `Watcher::drop`) arrives.
-        let has_message = unsafe { GetMessageW(&mut msg, None, 0, 0) };
+        let has_message = unsafe { GetMessageW(&mut window_message, None, 0, 0) };
         if has_message.0 <= 0 {
             break;
         }
         unsafe {
-            let _ = TranslateMessage(&msg);
-            DispatchMessageW(&msg);
+            let _ = TranslateMessage(&window_message);
+            DispatchMessageW(&window_message);
         }
     }
 
@@ -204,18 +204,18 @@ unsafe fn setup_window_and_registration(
 
 unsafe extern "system" fn wnd_proc(
     hwnd: HWND,
-    msg: u32,
+    window_message: u32,
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
     let context_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const ThreadContext;
     if !context_ptr.is_null() {
         let context = &*context_ptr;
-        if msg == context.change_message {
+        if window_message == context.change_message {
             context.bridge.reconcile();
             return LRESULT(0);
         }
     }
 
-    DefWindowProcW(hwnd, msg, wparam, lparam)
+    DefWindowProcW(hwnd, window_message, wparam, lparam)
 }

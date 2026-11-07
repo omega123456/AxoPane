@@ -77,8 +77,8 @@ fn entry(name: &str, facts: TrashFacts) -> TrashSnapshotEntry {
 fn batch_uses_two_snapshots_one_transaction_and_identity_correlation() {
     let a_path = "/source/a.txt".to_string();
     let b_path = "/source/b.txt".to_string();
-    let a = facts(&a_path, Some((1, 10)), 4);
-    let b = facts(&b_path, Some((1, 11)), 5);
+    let first_facts = facts(&a_path, Some((1, 10)), 4);
+    let second_facts = facts(&b_path, Some((1, 11)), 5);
     let mut fake = FakeTrash {
         root: Some(PathBuf::from("/fake/.Trash")),
         before: vec![entry(
@@ -87,10 +87,13 @@ fn batch_uses_two_snapshots_one_transaction_and_identity_correlation() {
         )],
         after: vec![
             entry("finder.txt", facts("/ignored/finder.txt", Some((1, 9)), 1)),
-            entry("a.txt", a.clone()),
-            entry("b.txt", b.clone()),
+            entry("a.txt", first_facts.clone()),
+            entry("b.txt", second_facts.clone()),
         ],
-        sources: HashMap::from([(a_path.clone(), a), (b_path.clone(), b)]),
+        sources: HashMap::from([
+            (a_path.clone(), first_facts),
+            (b_path.clone(), second_facts),
+        ]),
         ..Default::default()
     };
     let result = delete_batch_with_adapter_for_tests(&mut fake, &[a_path, b_path]);

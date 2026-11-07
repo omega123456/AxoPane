@@ -18,6 +18,7 @@ import {
   type ActionDialog as ActionDialogState,
 } from '@/stores/action-dialog-store'
 import { usePanesStore } from '@/stores/panes-store'
+import { WINDOWS_DRIVE_PREFIX_LENGTH } from '@/lib/path-compare'
 
 export function ActionDialog() {
   const dialog = useActionDialogStore((state) => state.dialog)
@@ -68,7 +69,7 @@ function pathSeparatorFor(path: string) {
 function joinPath(basePath: string, name: string) {
   const separator = pathSeparatorFor(basePath)
   const trimmedBase = /^[A-Za-z]:[\\/]+$/.test(basePath)
-    ? `${basePath.slice(0, 2)}${separator}`
+    ? `${basePath.slice(0, WINDOWS_DRIVE_PREFIX_LENGTH)}${separator}`
     : basePath.replace(/[\\/]+$/, '')
   if (trimmedBase === '') {
     return name
@@ -79,14 +80,17 @@ function joinPath(basePath: string, name: string) {
   return `${trimmedBase}${separator}${name}`
 }
 
+const SUMMARY_TARGET_LIMIT = 3
+
 /** Up to three "name · size" lines, then "and N more". */
 function targetSummary(targets: Array<{ name: string; sizeBytes?: number | null }>) {
   const shown = targets
-    .slice(0, 3)
+    .slice(0, SUMMARY_TARGET_LIMIT)
     .map((target) =>
       target.sizeBytes == null ? target.name : `${target.name} · ${formatBytes(target.sizeBytes)}`,
     )
-  return targets.length > 3 ? [...shown, `and ${targets.length - 3} more`] : shown
+  const hiddenCount = targets.length - SUMMARY_TARGET_LIMIT
+  return hiddenCount > 0 ? [...shown, `and ${hiddenCount} more`] : shown
 }
 
 function archiveStem(targets: Array<{ name: string }>) {

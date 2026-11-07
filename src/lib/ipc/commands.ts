@@ -71,8 +71,7 @@ export function listDir(payload: ListDirRequest) {
 }
 
 /**
- * v2 seekable directory-session commands (Phase 3 backend, Phase 4
- * frontend). `getDirectorySessionRange` and `reviseDirectorySessionView`
+ * v2 seekable directory-session commands. `getDirectorySessionRange` and `reviseDirectorySessionView`
  * reject with the typed `SessionRejection` shape (see `lib/types/ipc.ts`),
  * not a plain string — callers should branch on `error.kind` rather than
  * string-matching.

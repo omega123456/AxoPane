@@ -1,6 +1,8 @@
 const EXTENDED_UNC_PREFIX = '\\\\?\\UNC\\'
 const EXTENDED_PATH_PREFIX = '\\\\?\\'
-const UNC_PREFIX = '\\\\'
+export const UNC_PREFIX = '\\\\'
+/** Length of a Windows drive designator such as `C:`. */
+export const WINDOWS_DRIVE_PREFIX_LENGTH = 2
 const extendedDrivePathPattern = /^\\\\\?\\[A-Za-z]:[\\/]/
 
 export function normalizeWindowsCompatibilityPath(path: string) {

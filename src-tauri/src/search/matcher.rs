@@ -26,11 +26,11 @@ pub fn nfc(text: &str) -> Cow<'_, str> {
 
 /// Lowercases one char, keeping it as-is when lowercasing would change the
 /// char count (`İ`), so folded and display indices stay one-to-one.
-fn fold_char(c: char) -> char {
-    let mut lower = c.to_lowercase();
+fn fold_char(character: char) -> char {
+    let mut lower = character.to_lowercase();
     match (lower.next(), lower.next()) {
         (Some(folded), None) => folded,
-        _ => c,
+        _ => character,
     }
 }
 
@@ -48,10 +48,10 @@ impl FoldedName {
         let mut chars = Vec::with_capacity(display.len());
         let mut utf16 = Vec::with_capacity(display.len() + 1);
         let mut offset = 0u32;
-        for c in display.chars() {
-            chars.push(fold_char(c));
+        for character in display.chars() {
+            chars.push(fold_char(character));
             utf16.push(offset);
-            offset += c.len_utf16() as u32;
+            offset += character.len_utf16() as u32;
         }
         utf16.push(offset);
         Self { chars, utf16 }
@@ -63,8 +63,8 @@ impl FoldedName {
 
     fn ranges(&self, positions: &[usize]) -> Vec<(u32, u32)> {
         let mut out: Vec<(u32, u32)> = Vec::new();
-        for &pos in positions {
-            let (start, end) = self.range(pos, pos + 1);
+        for &position in positions {
+            let (start, end) = self.range(position, position + 1);
             match out.last_mut() {
                 Some(last) if last.1 == start => last.1 = end,
                 _ => out.push((start, end)),
@@ -102,12 +102,17 @@ impl Pattern {
     /// Whether these chars (wildcards skipped) appear in order in an ASCII
     /// `name`, case-insensitively. Allocation-free pre-check for scans.
     pub fn ascii_subsequence_of(&self, name: &str) -> bool {
-        let mut wanted = self.chars.iter().filter(|c| !matches!(c, '*' | '?'));
+        let mut wanted = self
+            .chars
+            .iter()
+            .filter(|character| !matches!(character, '*' | '?'));
         let mut next = wanted.next();
         for byte in name.bytes() {
             match next {
                 None => break,
-                Some(&c) if c == char::from(byte.to_ascii_lowercase()) => next = wanted.next(),
+                Some(&character) if character == char::from(byte.to_ascii_lowercase()) => {
+                    next = wanted.next()
+                }
                 Some(_) => {}
             }
         }
@@ -179,7 +184,9 @@ pub fn match_words(
     if let [token] = tokens {
         return match_token(token, name, kind);
     }
-    if let Some(found) = phrase.and_then(|p| match_literal(&p.chars, name, kind, CONTAINS)) {
+    if let Some(found) =
+        phrase.and_then(|phrase| match_literal(&phrase.chars, name, kind, CONTAINS))
+    {
         return Some(found);
     }
     let mut tier = CONTAINS;
@@ -212,7 +219,10 @@ fn match_literal(pattern: &[char], name: &FoldedName, kind: NameKind, worst: u8)
     if chars.starts_with(pattern) {
         return whole(PREFIX);
     }
-    if let Some(start) = chars.windows(pattern.len()).position(|w| w == pattern) {
+    if let Some(start) = chars
+        .windows(pattern.len())
+        .position(|window| window == pattern)
+    {
         return Some(Match {
             tier: CONTAINS,
             ranges: vec![name.range(start, start + pattern.len())],
@@ -233,8 +243,11 @@ fn stem(chars: &[char], kind: NameKind) -> Option<&[char]> {
     if kind == NameKind::Folder {
         return None;
     }
-    let dot = chars.iter().rposition(|&c| c == '.').filter(|&i| i > 0)?;
-    Some(&chars[..dot])
+    let extension_dot = chars
+        .iter()
+        .rposition(|&character| character == '.')
+        .filter(|&position| position > 0)?;
+    Some(&chars[..extension_dot])
 }
 
 /// Positions of `pattern`'s chars in order within `text`, using the
@@ -242,11 +255,11 @@ fn stem(chars: &[char], kind: NameKind) -> Option<&[char]> {
 fn subsequence(pattern: &[char], text: &[char]) -> Option<Vec<usize>> {
     let mut next = 0;
     let mut end = 0;
-    for (i, &c) in text.iter().enumerate() {
-        if c == pattern[next] {
+    for (position, &character) in text.iter().enumerate() {
+        if character == pattern[next] {
             next += 1;
             if next == pattern.len() {
-                end = i;
+                end = position;
                 break;
             }
         }
@@ -256,20 +269,20 @@ fn subsequence(pattern: &[char], text: &[char]) -> Option<Vec<usize>> {
     }
     let mut start = end;
     let mut remaining = pattern.len();
-    for i in (0..=end).rev() {
-        if text[i] == pattern[remaining - 1] {
+    for position in (0..=end).rev() {
+        if text[position] == pattern[remaining - 1] {
             remaining -= 1;
             if remaining == 0 {
-                start = i;
+                start = position;
                 break;
             }
         }
     }
     let mut positions = Vec::with_capacity(pattern.len());
     let mut next = 0;
-    for (i, &c) in text.iter().enumerate().take(end + 1).skip(start) {
-        if next < pattern.len() && c == pattern[next] {
-            positions.push(i);
+    for (position, &character) in text.iter().enumerate().take(end + 1).skip(start) {
+        if next < pattern.len() && character == pattern[next] {
+            positions.push(position);
             next += 1;
         }
     }
@@ -278,34 +291,35 @@ fn subsequence(pattern: &[char], text: &[char]) -> Option<Vec<usize>> {
 
 /// Whole-name glob match; returns the positions of the literal chars.
 fn glob(pattern: &[char], text: &[char]) -> Option<Vec<usize>> {
-    let (mut p, mut t) = (0, 0);
+    let (mut pattern_index, mut text_index) = (0, 0);
     let mut positions = Vec::new();
     // After a `*`: the pattern index past it, the text index it has consumed
     // up to, and how many positions were recorded before it.
     let mut star: Option<(usize, usize, usize)> = None;
-    while t < text.len() {
-        if p < pattern.len() && (pattern[p] == '?' || pattern[p] == text[t]) {
-            if pattern[p] != '?' {
-                positions.push(t);
+    while text_index < text.len() {
+        let wanted = pattern.get(pattern_index).copied();
+        if wanted == Some('?') || wanted == Some(text[text_index]) {
+            if wanted != Some('?') {
+                positions.push(text_index);
             }
-            p += 1;
-            t += 1;
-        } else if p < pattern.len() && pattern[p] == '*' {
-            star = Some((p + 1, t, positions.len()));
-            p += 1;
+            pattern_index += 1;
+            text_index += 1;
+        } else if wanted == Some('*') {
+            star = Some((pattern_index + 1, text_index, positions.len()));
+            pattern_index += 1;
         } else if let Some((after, consumed, recorded)) = star {
-            p = after;
-            t = consumed + 1;
+            pattern_index = after;
+            text_index = consumed + 1;
             positions.truncate(recorded);
-            star = Some((after, t, recorded));
+            star = Some((after, text_index, recorded));
         } else {
             return None;
         }
     }
-    while p < pattern.len() && pattern[p] == '*' {
-        p += 1;
+    while pattern.get(pattern_index) == Some(&'*') {
+        pattern_index += 1;
     }
-    (p == pattern.len()).then_some(positions)
+    (pattern_index == pattern.len()).then_some(positions)
 }
 
 pub fn merge_ranges(mut ranges: Vec<(u32, u32)>) -> Vec<(u32, u32)> {

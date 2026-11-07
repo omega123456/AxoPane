@@ -196,9 +196,9 @@ fn notify_callback_recovers_a_mutation_after_tabs_lock_contention() {
     let fixture = tempdir().expect("temp dir");
     let root = fixture.path();
     let watch_target = target("left-1", root);
-    let (patch_tx, patch_rx) = mpsc::channel();
+    let (patch_sender, patch_receiver) = mpsc::channel();
     let mut runtime = create_runtime(
-        Arc::new(move |patch| patch_tx.send(patch).expect("patch receiver")),
+        Arc::new(move |patch| patch_sender.send(patch).expect("patch receiver")),
         Arc::new(|_, error| panic!("unexpected watch error: {error}")),
     )
     .expect("watch runtime");
@@ -208,35 +208,37 @@ fn notify_callback_recovers_a_mutation_after_tabs_lock_contention() {
 
     let added = root.join("arrived.txt");
     fs::write(&added, "arrived").expect("added file");
-    let (before_lock_tx, before_lock_rx) = mpsc::channel();
-    let (completed_tx, completed_rx) = mpsc::channel();
-    let (handle_tx, handle_rx) = mpsc::channel();
+    let (before_lock_sender, before_lock_receiver) = mpsc::channel();
+    let (completed_sender, completed_receiver) = mpsc::channel();
+    let (handle_sender, handle_receiver) = mpsc::channel();
     while_tabs_locked_for_tests(&runtime, || {
         let callback_runtime = Arc::clone(&runtime);
         let callback = thread::spawn(move || {
             forward_notify_result_with_before_lock_for_tests(
                 &callback_runtime,
                 Ok(Event::new(EventKind::Create(CreateKind::File)).add_path(added)),
-                || before_lock_tx.send(()).expect("before-lock receiver"),
+                || before_lock_sender.send(()).expect("before-lock receiver"),
             );
-            completed_tx.send(()).expect("completion receiver");
+            completed_sender.send(()).expect("completion receiver");
         });
-        handle_tx.send(callback).expect("callback handle receiver");
-        before_lock_rx
+        handle_sender
+            .send(callback)
+            .expect("callback handle receiver");
+        before_lock_receiver
             .recv_timeout(Duration::from_secs(1))
             .expect("callback reached its registration snapshot");
         assert!(
-            completed_rx.try_recv().is_err(),
+            completed_receiver.try_recv().is_err(),
             "callback must wait rather than silently discard its event"
         );
     });
-    completed_rx
+    completed_receiver
         .recv_timeout(Duration::from_secs(1))
         .expect("callback completed after lock release");
-    let callback = handle_rx.recv().expect("callback handle");
+    let callback = handle_receiver.recv().expect("callback handle");
     callback.join().expect("callback thread");
 
-    let patch = patch_rx
+    let patch = patch_receiver
         .recv_timeout(Duration::from_secs(1))
         .expect("callback event must not be dropped while tab state is busy");
     assert_eq!(patch.path, watch_target.path);

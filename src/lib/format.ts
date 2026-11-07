@@ -1,3 +1,6 @@
+import { minutesInHour, secondsInMinute } from 'date-fns/constants'
+import { BYTES_PER_KIBIBYTE } from '@/lib/numbers'
+
 /** Human-readable byte size, e.g. `18.4 GB`. */
 export function formatBytes(value: number): string {
   if (value <= 0) {
@@ -6,8 +9,8 @@ export function formatBytes(value: number): string {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   let current = value
   let unitIndex = 0
-  while (current >= 1024 && unitIndex < units.length - 1) {
-    current /= 1024
+  while (current >= BYTES_PER_KIBIBYTE && unitIndex < units.length - 1) {
+    current /= BYTES_PER_KIBIBYTE
     unitIndex += 1
   }
   return `${current.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`
@@ -20,14 +23,14 @@ export function formatRate(bytesPerSecond: number): string {
 
 /** Coarse duration, e.g. `3 min` / `12 sec` / `2 hr`. */
 export function formatDuration(seconds: number): string {
-  if (seconds < 60) {
+  if (seconds < secondsInMinute) {
     return `${Math.max(1, Math.round(seconds))} sec`
   }
-  const minutes = Math.round(seconds / 60)
-  if (minutes < 60) {
+  const minutes = Math.round(seconds / secondsInMinute)
+  if (minutes < minutesInHour) {
     return `${minutes} min`
   }
-  return `${Math.round(minutes / 60)} hr`
+  return `${Math.round(minutes / minutesInHour)} hr`
 }
 
 /** Coarse "about N min left" / "about N sec left" ETA phrasing. */

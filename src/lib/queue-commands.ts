@@ -25,8 +25,8 @@ export function retryOp(id: string) {
   return invokeCommand({ command: 'retry_op', payload: { id } }) as Promise<void>
 }
 
-export function reorderOps(ids: string[]) {
-  return invokeCommand({ command: 'reorder_ops', payload: { ids } }) as Promise<void>
+export function reorderOps(operationIds: string[]) {
+  return invokeCommand({ command: 'reorder_ops', payload: { ids: operationIds } }) as Promise<void>
 }
 
 export function resolveConflict(

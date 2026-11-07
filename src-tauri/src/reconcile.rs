@@ -1,4 +1,4 @@
-//! Non-blocking focus reconciliation (Phase 5 / Functional Requirement 3).
+//! Non-blocking focus reconciliation.
 //!
 //! [`ReconcileCoordinator::request_reconcile`] is the only thing the
 //! window-focus callback (`lib.rs`'s `on_window_event`) is allowed to call

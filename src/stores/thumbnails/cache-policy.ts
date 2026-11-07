@@ -1,7 +1,13 @@
+import { millisecondsInMinute, millisecondsInSecond } from 'date-fns/constants'
+import { BYTES_PER_MEBIBYTE, utf16ByteWeight } from '@/lib/numbers'
+
 export const MAX_THUMBNAIL_CACHE_ENTRIES = 256
-export const MAX_THUMBNAIL_CACHE_BYTES = 32 * 1024 * 1024
-export const THUMBNAIL_NEGATIVE_TTL_MS = 5 * 60 * 1000
-export const THUMBNAIL_FAILED_TTL_MS = 30 * 1000
+const MAX_THUMBNAIL_CACHE_MEBIBYTES = 32
+export const MAX_THUMBNAIL_CACHE_BYTES = MAX_THUMBNAIL_CACHE_MEBIBYTES * BYTES_PER_MEBIBYTE
+const THUMBNAIL_NEGATIVE_TTL_MINUTES = 5
+export const THUMBNAIL_NEGATIVE_TTL_MS = THUMBNAIL_NEGATIVE_TTL_MINUTES * millisecondsInMinute
+const THUMBNAIL_FAILED_TTL_SECONDS = 30
+export const THUMBNAIL_FAILED_TTL_MS = THUMBNAIL_FAILED_TTL_SECONDS * millisecondsInSecond
 
 export type ThumbnailCacheState = 'ready' | 'unavailable' | 'failed'
 
@@ -13,9 +19,8 @@ export type ThumbnailCacheRecord = {
   weight: number
 }
 
-/** JavaScript stores strings as UTF-16, so this is a conservative cache estimate. */
 export function thumbnailWeight(dataUrl: string | null): number {
-  return dataUrl == null ? 1 : dataUrl.length * 2
+  return utf16ByteWeight(dataUrl)
 }
 
 export function thumbnailCacheNow(): number {

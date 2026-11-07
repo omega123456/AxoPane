@@ -68,7 +68,7 @@ pub fn normalize(path: &Path) -> PathBuf {
     }
 }
 
-/// Folders background work never reads until visited (FR5.1).
+/// Folders background work never reads until visited.
 pub fn protected_roots(home: &Path) -> Vec<PathBuf> {
     [
         "Desktop",
@@ -85,7 +85,7 @@ pub fn protected_roots(home: &Path) -> Vec<PathBuf> {
 }
 
 /// Paths left out of the stream over `/`: other volumes and devfs, then the
-/// high-churn locations (FR2.3). `/System/Volumes` stays in, because
+/// high-churn locations. `/System/Volumes` stays in, because
 /// Data-volume changes may be reported under [`DATA_VOLUME_PREFIX`]; the
 /// index drops the rest of it after [`normalize`]. FSEvents takes at most
 /// eight exclusions.
@@ -276,6 +276,8 @@ mod mac {
     const LATENCY_SECS: f64 = 1.0;
     /// `FSEventStreamSetExclusionPaths` accepts at most eight paths.
     const MAX_EXCLUSIONS: usize = 8;
+    /// Room for a volume UUID or an OS build string plus its NUL.
+    const SHORT_STRING_BUFFER_LEN: usize = 64;
 
     extern "C" {
         /// Declared in `<CoreServices/FSEvents.h>`; `fsevent-sys` omits it.
@@ -313,7 +315,7 @@ mod mac {
                 if string.is_null() {
                     return None;
                 }
-                let mut buffer = [0 as c_char; 64];
+                let mut buffer = [0 as c_char; SHORT_STRING_BUFFER_LEN];
                 let copied = core_foundation_sys::string::CFStringGetCString(
                     string,
                     buffer.as_mut_ptr(),
@@ -330,7 +332,7 @@ mod mac {
         }
 
         fn os_build(&self) -> Option<String> {
-            let mut buffer = [0 as c_char; 64];
+            let mut buffer = [0 as c_char; SHORT_STRING_BUFFER_LEN];
             let mut length = buffer.len();
             // SAFETY: a read-only query into a live buffer of `length` bytes;
             // the kernel NUL-terminates the string it writes.
@@ -364,16 +366,23 @@ mod mac {
                 .take(MAX_EXCLUSIONS)
                 .cloned()
                 .collect::<Vec<_>>();
-            let (started_tx, started_rx) = mpsc::channel();
+            let (started_sender, started_receiver) = mpsc::channel();
             let stopped = Arc::new(AtomicBool::new(false));
             let thread_stopped = Arc::clone(&stopped);
             let thread = thread::Builder::new()
                 .name("size-index-fsevents".to_string())
                 .spawn(move || {
-                    run_stream(&roots, &excluded, since, sink, &thread_stopped, started_tx)
+                    run_stream(
+                        &roots,
+                        &excluded,
+                        since,
+                        sink,
+                        &thread_stopped,
+                        started_sender,
+                    )
                 })
                 .ok()?;
-            match started_rx.recv() {
+            match started_receiver.recv() {
                 Ok(Some(run_loop)) => Some(Box::new(Stream {
                     run_loop,
                     stopped,

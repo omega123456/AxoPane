@@ -11,12 +11,12 @@ use file_explorer_lib::watch::patch::{
     classify_patch, ClassifyPatchInput, MetadataDelta, RowDelta, SessionPatch,
 };
 
-fn baseline(n: u64) -> SessionBaseline {
+fn baseline(revision: u64) -> SessionBaseline {
     SessionBaseline {
-        session_id: SessionId(n),
-        navigation_revision: NavigationRevision(n),
-        watch_revision: WatchRevision(n),
-        view_revision: ViewRevision(n),
+        session_id: SessionId(revision),
+        navigation_revision: NavigationRevision(revision),
+        watch_revision: WatchRevision(revision),
+        view_revision: ViewRevision(revision),
     }
 }
 
@@ -65,7 +65,10 @@ fn session_patch_serializes_struct_variant_fields_as_camel_case() {
     let json = serde_json::to_value(&patch).expect("serialize session patch");
     let object = json.as_object().expect("patch serializes to a JSON object");
 
-    assert_eq!(object.get("mode").and_then(|v| v.as_str()), Some("delta"));
+    assert_eq!(
+        object.get("mode").and_then(|value| value.as_str()),
+        Some("delta")
+    );
     for key in [
         "paneId",
         "tabId",
@@ -94,12 +97,12 @@ fn session_patch_serializes_struct_variant_fields_as_camel_case() {
 
     let first_delta = object
         .get("deltas")
-        .and_then(|v| v.as_array())
+        .and_then(|value| value.as_array())
         .and_then(|deltas| deltas.first())
         .and_then(|delta| delta.as_object())
         .expect("delta row present");
     assert_eq!(
-        first_delta.get("kind").and_then(|v| v.as_str()),
+        first_delta.get("kind").and_then(|value| value.as_str()),
         Some("inserted")
     );
     assert!(

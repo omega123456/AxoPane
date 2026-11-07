@@ -65,6 +65,9 @@ import type { GridMovement } from '@/lib/pane-grid'
 import type { ThumbnailCandidateRequest } from '@/lib/types/ipc'
 import type { PaneId } from '@/types/pane'
 
+const SKELETON_DELAY_MS = 1000
+const DOUBLE_CLICK_COUNT = 2
+
 function isPermissionError(message: string | null) {
   if (!message) {
     return false
@@ -219,12 +222,11 @@ export function FilePane({ paneId }: FilePaneProps) {
   const [dropTargetEntryId, setDropTargetEntryId] = useState<string | null>(null)
   const [isPaneDropTarget, setIsPaneDropTarget] = useState(false)
   const isActivePane = activePaneId === paneId
-  const os = detectPlatformOs()
-  const usesDetachedMacScrollbars = os === 'macos'
-  // Suppress the loading skeleton on fast loads: it only appears once loading
-  // has lasted longer than a second, avoiding a jarring flash-and-replace when
-  // a folder resolves in a few milliseconds.
-  const showSkeleton = useDelayedFlag(pane.loading, 1000)
+  const platform = detectPlatformOs()
+  const usesDetachedMacScrollbars = platform === 'macos'
+  // Suppress the loading skeleton on fast loads, avoiding a jarring
+  // flash-and-replace when a folder resolves in a few milliseconds.
+  const showSkeleton = useDelayedFlag(pane.loading, SKELETON_DELAY_MS)
 
   const hasParent = getParentPath(pane.path) !== null
   const parentOffset = hasParent ? 1 : 0
@@ -518,7 +520,7 @@ export function FilePane({ paneId }: FilePaneProps) {
     if (clickCount !== undefined) {
       const lastActivationAt = lastPointerActivationAtRef.current
       if (
-        clickCount > 2 &&
+        clickCount > DOUBLE_CLICK_COUNT &&
         lastActivationAt !== null &&
         eventTimeStamp !== undefined &&
         eventTimeStamp - lastActivationAt < macroContinuationWindowMs
@@ -728,7 +730,7 @@ export function FilePane({ paneId }: FilePaneProps) {
       chip,
       x: event.clientX,
       y: event.clientY,
-      ...buildContextMenuContent(paneId, target, os),
+      ...buildContextMenuContent(paneId, target, platform),
       targetId: entryId,
     })
   }
@@ -738,7 +740,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   // Cmd forces move. `resolveDropKind` reads these as generic force-copy /
   // force-move flags so its logic stays OS-agnostic.
   function dropModifiers(event: React.DragEvent) {
-    if (os === 'macos') {
+    if (platform === 'macos') {
       return { ctrlKey: event.altKey, shiftKey: event.metaKey }
     }
     return { ctrlKey: event.ctrlKey, shiftKey: event.shiftKey }
@@ -806,7 +808,7 @@ export function FilePane({ paneId }: FilePaneProps) {
       return
     }
     const drag = useDragStore.getState().drag
-    if (drag?.kind !== 'file-transfer' || !canDropInto(drag, entry.path, os)) {
+    if (drag?.kind !== 'file-transfer' || !canDropInto(drag, entry.path, platform)) {
       return
     }
     // preventDefault marks this a valid drop target; stopPropagation keeps the
@@ -815,7 +817,7 @@ export function FilePane({ paneId }: FilePaneProps) {
     event.stopPropagation()
     setDropEffect(
       event.dataTransfer,
-      resolveDropKind(dropModifiers(event), drag.sourceDir, entry.path, os),
+      resolveDropKind(dropModifiers(event), drag.sourceDir, entry.path, platform),
     )
     setDropTargetEntryId(entry.id)
   }
@@ -834,18 +836,18 @@ export function FilePane({ paneId }: FilePaneProps) {
     const drag = useDragStore.getState().drag
     const modifiers = dropModifiers(event)
     clearDragState()
-    await performDrop(drag, entry.path, modifiers, os)
+    await performDrop(drag, entry.path, modifiers, platform)
   }
 
   function handlePaneDragOver(event: React.DragEvent<HTMLDivElement>) {
     const drag = useDragStore.getState().drag
-    if (drag?.kind !== 'file-transfer' || !canDropInto(drag, pane.path, os)) {
+    if (drag?.kind !== 'file-transfer' || !canDropInto(drag, pane.path, platform)) {
       return
     }
     event.preventDefault()
     setDropEffect(
       event.dataTransfer,
-      resolveDropKind(dropModifiers(event), drag.sourceDir, pane.path, os),
+      resolveDropKind(dropModifiers(event), drag.sourceDir, pane.path, platform),
     )
     setIsPaneDropTarget(true)
   }
@@ -863,7 +865,7 @@ export function FilePane({ paneId }: FilePaneProps) {
     const drag = useDragStore.getState().drag
     const modifiers = dropModifiers(event)
     clearDragState()
-    await performDrop(drag, pane.path, modifiers, os)
+    await performDrop(drag, pane.path, modifiers, platform)
   }
 
   function renameCancel() {

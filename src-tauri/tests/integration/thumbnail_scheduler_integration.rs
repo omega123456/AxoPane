@@ -83,12 +83,12 @@ fn shares_work_and_preserves_live_subscriber_context() {
 fn verifies_metadata_once_per_generated_miss() {
     let checks = Arc::new(AtomicUsize::new(0));
     let checks_for_verifier = Arc::clone(&checks);
-    let (completed_tx, completed_rx) = mpsc::channel();
+    let (completed_sender, completed_receiver) = mpsc::channel();
     let scheduler = ThumbnailScheduler::new_with_metadata_verifier(
         file_explorer_lib::thumbnails::platform_provider().into(),
         Arc::new(ResourceCoordinator::new()),
         Arc::new(move |_, _, _| {
-            let _ = completed_tx.send(());
+            let _ = completed_sender.send(());
         }),
         Arc::new(move |_| {
             checks_for_verifier.fetch_add(1, Ordering::Relaxed);
@@ -96,7 +96,7 @@ fn verifies_metadata_once_per_generated_miss() {
         }),
     );
     scheduler.submit(subscriber("metadata", 1), candidate("metadata.png"));
-    completed_rx
+    completed_receiver
         .recv_timeout(Duration::from_millis(200))
         .expect("thumbnail completed");
     assert_eq!(checks.load(Ordering::Relaxed), 1);
@@ -120,13 +120,13 @@ fn limits_are_fixed_and_scope_cancellation_is_safe() {
 
 #[test]
 fn replacement_retains_ranges_larger_than_the_old_queue_limit() {
-    let (started_tx, started_rx) = mpsc::channel();
-    let (release_tx, release_rx) = mpsc::channel();
+    let (started_sender, started_receiver) = mpsc::channel();
+    let (release_sender, release_receiver) = mpsc::channel();
     let scheduler = ThumbnailScheduler::new(
         Arc::new(GateProvider {
-            started: started_tx,
-            unblock: release_tx.clone(),
-            release: Mutex::new(release_rx),
+            started: started_sender,
+            unblock: release_sender.clone(),
+            release: Mutex::new(release_receiver),
         }),
         Arc::new(ResourceCoordinator::new()),
         Arc::new(|_, _, _| {}),
@@ -134,7 +134,7 @@ fn replacement_retains_ranges_larger_than_the_old_queue_limit() {
     scheduler.submit(subscriber("block-a", 1), candidate("block-a.png"));
     scheduler.submit(subscriber("block-b", 1), candidate("block-b.png"));
     for _ in 0..2 {
-        started_rx
+        started_receiver
             .recv_timeout(Duration::from_millis(200))
             .expect("blocker started");
     }
@@ -155,20 +155,20 @@ fn replacement_retains_ranges_larger_than_the_old_queue_limit() {
     assert_eq!(scheduler.counts(), (2, 144));
 
     scheduler.cancel_scope("left", "range", "/folder", 1);
-    release_tx.send(()).expect("release first");
-    release_tx.send(()).expect("release second");
+    release_sender.send(()).expect("release first");
+    release_sender.send(()).expect("release second");
     scheduler.shutdown();
 }
 
 #[test]
 fn visible_work_precedes_directional_and_behind_prefetch() {
-    let (started_tx, started_rx) = mpsc::channel();
-    let (release_tx, release_rx) = mpsc::channel();
+    let (started_sender, started_receiver) = mpsc::channel();
+    let (release_sender, release_receiver) = mpsc::channel();
     let scheduler = ThumbnailScheduler::new(
         Arc::new(GateProvider {
-            started: started_tx,
-            unblock: release_tx.clone(),
-            release: Mutex::new(release_rx),
+            started: started_sender,
+            unblock: release_sender.clone(),
+            release: Mutex::new(release_receiver),
         }),
         Arc::new(ResourceCoordinator::new()),
         Arc::new(|_, _, _| {}),
@@ -184,7 +184,7 @@ fn visible_work_precedes_directional_and_behind_prefetch() {
     );
     let started = (0..MAX_ACTIVE_JOBS)
         .map(|_| {
-            started_rx
+            started_receiver
                 .recv_timeout(Duration::from_millis(200))
                 .expect("priority work started")
         })
@@ -192,7 +192,7 @@ fn visible_work_precedes_directional_and_behind_prefetch() {
     assert!(started.iter().any(|path| path.ends_with("visible.png")));
     assert!(started.iter().any(|path| path.ends_with("ahead.png")));
     scheduler.cancel_scope("left", "priority", "/folder", 1);
-    release_tx.send(()).expect("release first");
-    release_tx.send(()).expect("release second");
+    release_sender.send(()).expect("release first");
+    release_sender.send(()).expect("release second");
     scheduler.shutdown();
 }
