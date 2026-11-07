@@ -11,6 +11,35 @@ export type InlineRenameState = {
   error: string | null
 }
 
+export type EntryRenameProps = {
+  isRenaming: boolean
+  renameValue: string
+  renameBusy: boolean
+  renameError: string | null
+}
+
+const NOT_RENAMING: EntryRenameProps = {
+  isRenaming: false,
+  renameValue: '',
+  renameBusy: false,
+  renameError: null,
+}
+
+export function entryRenameProps(
+  rename: InlineRenameState | null,
+  entryId: string,
+): EntryRenameProps {
+  if (rename?.entryId !== entryId) {
+    return NOT_RENAMING
+  }
+  return {
+    isRenaming: true,
+    renameValue: rename.value,
+    renameBusy: rename.busy,
+    renameError: rename.error,
+  }
+}
+
 type BeginRenamePayload = {
   paneId: PaneId
   entryId: string

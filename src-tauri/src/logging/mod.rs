@@ -37,72 +37,97 @@ pub enum LogLevel {
     Trace,
 }
 
+struct LevelMetadata {
+    level: LogLevel,
+    name: &'static str,
+    token: &'static str,
+    filter: log::LevelFilter,
+    log_level: log::Level,
+}
+
+const LEVEL_METADATA_BY_DISCRIMINANT: [LevelMetadata; 5] = [
+    LevelMetadata {
+        level: LogLevel::Error,
+        name: "error",
+        token: "ERROR",
+        filter: log::LevelFilter::Error,
+        log_level: log::Level::Error,
+    },
+    LevelMetadata {
+        level: LogLevel::Warn,
+        name: "warn",
+        token: "WARN",
+        filter: log::LevelFilter::Warn,
+        log_level: log::Level::Warn,
+    },
+    LevelMetadata {
+        level: LogLevel::Info,
+        name: "info",
+        token: "INFO",
+        filter: log::LevelFilter::Info,
+        log_level: log::Level::Info,
+    },
+    LevelMetadata {
+        level: LogLevel::Debug,
+        name: "debug",
+        token: "DEBUG",
+        filter: log::LevelFilter::Debug,
+        log_level: log::Level::Debug,
+    },
+    LevelMetadata {
+        level: LogLevel::Trace,
+        name: "trace",
+        token: "TRACE",
+        filter: log::LevelFilter::Trace,
+        log_level: log::Level::Trace,
+    },
+];
+
+const FALLBACK_LEVEL: LogLevel = LogLevel::Info;
+
 impl LogLevel {
+    fn metadata(self) -> &'static LevelMetadata {
+        &LEVEL_METADATA_BY_DISCRIMINANT[self as usize]
+    }
+
+    fn find(predicate: impl Fn(&LevelMetadata) -> bool) -> Option<Self> {
+        LEVEL_METADATA_BY_DISCRIMINANT
+            .iter()
+            .find(|metadata| predicate(metadata))
+            .map(|metadata| metadata.level)
+    }
+
     /// Parse a case-insensitive level name. Returns `None` for unknown values.
     pub fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "error" => Some(Self::Error),
-            "warn" => Some(Self::Warn),
-            "info" => Some(Self::Info),
-            "debug" => Some(Self::Debug),
-            "trace" => Some(Self::Trace),
-            _ => None,
-        }
+        let name = value.trim().to_ascii_lowercase();
+        Self::find(|metadata| metadata.name == name)
     }
 
     /// Lowercase wire name (matches the frontend `LogLevel` union).
     pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Error => "error",
-            Self::Warn => "warn",
-            Self::Info => "info",
-            Self::Debug => "debug",
-            Self::Trace => "trace",
-        }
+        self.metadata().name
     }
 
     /// Uppercase token written into the log line (`[INFO]`).
     pub fn token(self) -> &'static str {
-        match self {
-            Self::Error => "ERROR",
-            Self::Warn => "WARN",
-            Self::Info => "INFO",
-            Self::Debug => "DEBUG",
-            Self::Trace => "TRACE",
-        }
+        self.metadata().token
     }
 
     /// The global `log` filter that admits this level and everything more severe.
     pub fn to_level_filter(self) -> log::LevelFilter {
-        match self {
-            Self::Error => log::LevelFilter::Error,
-            Self::Warn => log::LevelFilter::Warn,
-            Self::Info => log::LevelFilter::Info,
-            Self::Debug => log::LevelFilter::Debug,
-            Self::Trace => log::LevelFilter::Trace,
-        }
+        self.metadata().filter
     }
 
     /// Map a `log::Level` onto our level enum.
     pub fn from_log_level(level: log::Level) -> Self {
-        match level {
-            log::Level::Error => Self::Error,
-            log::Level::Warn => Self::Warn,
-            log::Level::Info => Self::Info,
-            log::Level::Debug => Self::Debug,
-            log::Level::Trace => Self::Trace,
-        }
+        Self::find(|metadata| metadata.log_level == level).unwrap_or(FALLBACK_LEVEL)
     }
 
     /// Round-trip through the `u8` discriminant stored in the logger's atomic.
     pub fn from_index(index: u8) -> Self {
-        match index {
-            0 => Self::Error,
-            1 => Self::Warn,
-            3 => Self::Debug,
-            4 => Self::Trace,
-            _ => Self::Info,
-        }
+        LEVEL_METADATA_BY_DISCRIMINANT
+            .get(usize::from(index))
+            .map_or(FALLBACK_LEVEL, |metadata| metadata.level)
     }
 }
 

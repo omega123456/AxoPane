@@ -1,9 +1,11 @@
 import { memo, useEffect, useMemo, useRef } from 'react'
 import { getUnixTime, parseISO } from 'date-fns'
-import type { DragEvent, KeyboardEvent, MouseEvent } from 'react'
+import type { DragEvent, MouseEvent } from 'react'
 import { EntryIcon } from '@/components/icons/EntryIcon'
 import { focusRenameInput, type FileRowActions } from './FileRow'
 import { SizeValue } from './SizeValue'
+import { InlineRenameInput } from './InlineRenameInput'
+import { cardHighlightClass, cutFadeClass, itemCountLabel } from './entry-classes'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import { thumbnailFingerprintKey, useThumbnailStore } from '@/stores/thumbnail-store'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
@@ -63,6 +65,33 @@ function ThumbnailPreview({
   )
 }
 
+const minimumCellClassNames: Record<EntryCardProps['mode'], string> = {
+  icons: 'min-w-icon-cell',
+  thumbnails: 'min-w-thumbnail-cell',
+}
+
+function CardLabels({ entry }: { entry: DirectoryEntry }) {
+  return (
+    <>
+      <span className="truncate text-row text-light-text dark:text-dark-text">{entry.name}</span>
+      <span className={`-mt-1 truncate text-caption ${TEXT_SECONDARY}`}>
+        {entry.isDir ? itemCountLabel(entry.itemCount) : <SizeValue entry={entry} />}
+      </span>
+    </>
+  )
+}
+
+function CardRenameError({ message }: { message: string | null }) {
+  if (!message) {
+    return null
+  }
+  return (
+    <span className="block truncate pt-1 text-caption text-light-warning dark:text-dark-warning">
+      {message}
+    </span>
+  )
+}
+
 type EntryCardProps = {
   entry: DirectoryEntry
   mode: 'icons' | 'thumbnails'
@@ -107,37 +136,9 @@ function EntryCardImpl({
     }
   }, [entry.isDir, isRenaming])
 
-  const selectedClassName = isActivePane
-    ? 'border-light-accent bg-light-tint dark:border-dark-accent dark:bg-dark-tint'
-    : 'border-transparent bg-light-neutral-selection dark:bg-dark-neutral-selection'
-  const stateClassName = `rounded-overlay border ${
-    isSelected || isDropTarget
-      ? selectedClassName
-      : 'border-transparent hover:bg-light-hover dark:hover:bg-dark-hover'
-  } ${
-    // A selected card's accent border already marks it; the cursor ring would double it.
-    isFocused && isActivePane && !isSelected
-      ? 'ring-1 ring-inset ring-light-accent dark:ring-dark-accent'
-      : ''
-  }`
-  // Cut items fade their contents, not the selection fill behind them.
-  const contentClassName = isCut ? 'opacity-50' : ''
-  const meta = entry.isDir ? (
-    entry.itemCount === null ? (
-      '—'
-    ) : (
-      `${entry.itemCount} ${entry.itemCount === 1 ? 'item' : 'items'}`
-    )
-  ) : (
-    <SizeValue entry={entry} />
-  )
-  const labels = (
-    <>
-      <span className="truncate text-row text-light-text dark:text-dark-text">{entry.name}</span>
-      <span className={`-mt-1 truncate text-caption ${TEXT_SECONDARY}`}>{meta}</span>
-    </>
-  )
-  const minimumCellClassName = mode === 'icons' ? 'min-w-icon-cell' : 'min-w-thumbnail-cell'
+  const stateClassName = cardHighlightClass({ isActivePane, isSelected, isFocused, isDropTarget })
+  const contentClassName = cutFadeClass(isCut)
+  const minimumCellClassName = minimumCellClassNames[mode]
   const sharedProps = {
     'data-entry-id': entry.id,
     draggable,
@@ -166,38 +167,21 @@ function EntryCardImpl({
     title: entry.name,
   }
 
-  function onRenameKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    event.stopPropagation()
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      actions.onRenameSubmit()
-    } else if (event.key === 'Escape') {
-      event.preventDefault()
-      actions.onRenameCancel()
-    }
-  }
-
-  const renameControl = isRenaming ? (
+  const caption = isRenaming ? (
     <div className="min-w-0">
-      <input
-        ref={renameInputRef}
-        autoComplete="off"
-        aria-label={`Rename ${entry.name}`}
+      <InlineRenameInput
+        inputRef={renameInputRef}
+        entryName={entry.name}
         value={renameValue}
-        disabled={renameBusy}
-        onMouseDown={(event) => event.stopPropagation()}
-        onBlur={actions.onRenameBlur}
-        onChange={(event) => actions.onRenameChange(event.target.value)}
-        onKeyDown={onRenameKeyDown}
-        className={`w-full min-w-0 select-text rounded-control border border-light-accent dark:border-dark-accent bg-light-base px-2 py-1 font-mono text-caption text-light-text outline-none dark:bg-dark-base dark:text-dark-text`}
+        busy={renameBusy}
+        actions={actions}
+        className="w-full"
       />
-      {renameError ? (
-        <span className="block truncate pt-1 text-caption text-light-warning dark:text-dark-warning">
-          {renameError}
-        </span>
-      ) : null}
+      <CardRenameError message={renameError} />
     </div>
-  ) : null
+  ) : (
+    <CardLabels entry={entry} />
+  )
 
   if (mode === 'icons') {
     return (
@@ -206,9 +190,7 @@ function EntryCardImpl({
         className={`flex h-icon-tile ${minimumCellClassName} cursor-pointer items-center gap-2 p-1.5 ${FOCUS_RING_INSET} ${stateClassName}`}
       >
         <EntryIcon entry={entry} className={`size-entry-icon shrink-0 ${contentClassName}`} />
-        <div className={`flex min-w-0 flex-1 flex-col gap-1.5 ${contentClassName}`}>
-          {renameControl ?? labels}
-        </div>
+        <div className={`flex min-w-0 flex-1 flex-col gap-1.5 ${contentClassName}`}>{caption}</div>
       </div>
     )
   }
@@ -220,7 +202,7 @@ function EntryCardImpl({
     >
       <div className={`flex min-h-0 flex-col gap-1.5 ${contentClassName}`}>
         <ThumbnailPreview entry={entry} override={thumbnail} />
-        {renameControl ?? labels}
+        {caption}
       </div>
     </div>
   )

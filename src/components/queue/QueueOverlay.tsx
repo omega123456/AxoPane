@@ -6,6 +6,44 @@ import { queueSnapshot } from '@/lib/queue-commands'
 import { openAdminRestartDialog } from '@/stores/action-dialog-store'
 import { useConfigStore } from '@/stores/config-store'
 import { isTerminal, orderedOperations, useQueueStore } from '@/stores/queue-store'
+import { caseInsensitiveLetterKeys, handleKeyByTable, type KeyHandlerTable } from '@/lib/key-table'
+import type { OpProgress, OpStatus } from '@/lib/types/ipc'
+
+type QueueKeyActions = {
+  collapse: () => void
+  pause: (operationId: string) => void
+  resume: (operationId: string) => void
+  cancel: (operationId: string) => void
+  retry: (operationId: string) => void
+}
+
+function togglePauseHandler(target: OpProgress, actions: QueueKeyActions) {
+  const togglePause: Partial<Record<OpStatus, () => void>> = {
+    paused: () => actions.resume(target.operationId),
+    active: () => actions.pause(target.operationId),
+  }
+  return togglePause[target.status] ?? (() => undefined)
+}
+
+function retryKeys(target: OpProgress, actions: QueueKeyActions): KeyHandlerTable {
+  if (target.status !== 'failed') {
+    return {}
+  }
+  return caseInsensitiveLetterKeys({ r: () => actions.retry(target.operationId) })
+}
+
+function queueKeyTable(target: OpProgress | undefined, actions: QueueKeyActions): KeyHandlerTable {
+  const collapseKey: KeyHandlerTable = { Escape: actions.collapse }
+  if (!target) {
+    return collapseKey
+  }
+  return {
+    ...collapseKey,
+    ' ': togglePauseHandler(target, actions),
+    Delete: () => actions.cancel(target.operationId),
+    ...retryKeys(target, actions),
+  }
+}
 
 /**
  * Bottom-right job queue surface: a collapsed toast that expands into the
@@ -77,38 +115,15 @@ export function QueueOverlay() {
         return
       }
 
-      const target = orderedOperations(useQueueStore.getState())[0]
-      switch (event.key) {
-        case 'Escape':
-          event.preventDefault()
-          setExpanded(false)
-          break
-        case ' ':
-          if (target) {
-            event.preventDefault()
-            if (target.status === 'paused') {
-              resume(target.operationId)
-            } else if (target.status === 'active') {
-              pause(target.operationId)
-            }
-          }
-          break
-        case 'Delete':
-          if (target) {
-            event.preventDefault()
-            cancel(target.operationId)
-          }
-          break
-        case 'r':
-        case 'R':
-          if (target && target.status === 'failed') {
-            event.preventDefault()
-            retry(target.operationId)
-          }
-          break
-        default:
-          break
-      }
+      const target = orderedOperations(useQueueStore.getState())[0] as OpProgress | undefined
+      const keyTable = queueKeyTable(target, {
+        collapse: () => setExpanded(false),
+        pause,
+        resume,
+        cancel,
+        retry,
+      })
+      handleKeyByTable(event, keyTable)
     },
     [cancel, conflict, expanded, pause, resume, retry, setExpanded],
   )

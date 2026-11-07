@@ -312,3 +312,155 @@ fn move_path_same_filesystem_uses_rename_first() {
         b"move-payload"
     );
 }
+
+const EVERY_REQUIREMENT: TransferRequirements = TransferRequirements {
+    sparse: true,
+    offload: true,
+    clone: true,
+    preserve_metadata: true,
+    preserve_link: true,
+    progress: true,
+    cancellation: true,
+};
+
+#[test]
+fn windows_reports_the_first_missing_capability_in_precedence_order() {
+    let capable = WindowsCapabilities {
+        api_available: true,
+        supported_build: true,
+        local_filesystem: true,
+        server_supports_copyfile2: true,
+        sparse: true,
+        offload: true,
+        metadata: true,
+        reparse_links: true,
+        progress: true,
+        cancellation: true,
+    };
+    let cases = [
+        (
+            WindowsCapabilities {
+                api_available: false,
+                supported_build: false,
+                ..capable
+            },
+            PortableReason::ApiUnavailable,
+        ),
+        (
+            WindowsCapabilities {
+                supported_build: false,
+                ..capable
+            },
+            PortableReason::UnsupportedBuild,
+        ),
+        (
+            WindowsCapabilities {
+                offload: false,
+                metadata: false,
+                ..capable
+            },
+            PortableReason::OffloadUnsupported,
+        ),
+        (
+            WindowsCapabilities {
+                metadata: false,
+                ..capable
+            },
+            PortableReason::MetadataUnsupported,
+        ),
+        (
+            WindowsCapabilities {
+                reparse_links: false,
+                ..capable
+            },
+            PortableReason::LinkUnsupported,
+        ),
+        (
+            WindowsCapabilities {
+                progress: false,
+                ..capable
+            },
+            PortableReason::ProgressUnsupported,
+        ),
+    ];
+    for (capabilities, reason) in cases {
+        assert_eq!(
+            capabilities.select(EVERY_REQUIREMENT),
+            AdapterSelection::Portable(reason)
+        );
+    }
+    let remote_with_copyfile2 = WindowsCapabilities {
+        local_filesystem: false,
+        ..capable
+    };
+    assert_eq!(
+        remote_with_copyfile2.select(EVERY_REQUIREMENT),
+        AdapterSelection::WindowsCopyFile2
+    );
+}
+
+#[test]
+fn macos_reports_the_first_missing_capability_in_precedence_order() {
+    let capable = MacosCapabilities {
+        api_available: true,
+        filesystem_supports_copyfile: true,
+        clone: true,
+        sparse: true,
+        metadata: true,
+        links: true,
+        progress: true,
+        cancellation: true,
+    };
+    let cases = [
+        (
+            MacosCapabilities {
+                api_available: false,
+                filesystem_supports_copyfile: false,
+                ..capable
+            },
+            PortableReason::ApiUnavailable,
+        ),
+        (
+            MacosCapabilities {
+                filesystem_supports_copyfile: false,
+                ..capable
+            },
+            PortableReason::UnsupportedFilesystem,
+        ),
+        (
+            MacosCapabilities {
+                sparse: false,
+                links: false,
+                ..capable
+            },
+            PortableReason::SparseUnsupported,
+        ),
+        (
+            MacosCapabilities {
+                links: false,
+                ..capable
+            },
+            PortableReason::LinkUnsupported,
+        ),
+        (
+            MacosCapabilities {
+                progress: false,
+                ..capable
+            },
+            PortableReason::ProgressUnsupported,
+        ),
+        (
+            MacosCapabilities {
+                cancellation: false,
+                ..capable
+            },
+            PortableReason::CancellationUnsupported,
+        ),
+    ];
+    for (capabilities, reason) in cases {
+        assert_eq!(
+            capabilities.select(EVERY_REQUIREMENT),
+            AdapterSelection::Portable(reason)
+        );
+    }
+}

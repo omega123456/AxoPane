@@ -187,6 +187,67 @@ function pruneOperationState(state: QueueStore, id: string): Partial<QueueStore>
   }
 }
 
+function freshThroughput(progress: OpProgress): FoldedThroughput {
+  return {
+    history: seedThroughputHistory(progress),
+    lastRaw: progress.bytesPerSecond,
+    smoothed: progress.bytesPerSecond,
+  }
+}
+
+function latestRate(history: ThroughputSample[]) {
+  return history.at(-1)?.rate ?? 0
+}
+
+/** Preserve an in-flight EMA gate/value; seed fresh ones from the snapshot. */
+function hydratedThroughput(state: QueueStore, progress: OpProgress) {
+  const id = progress.operationId
+  const existingHistory = state.throughputHistory[id]
+  const folded: FoldedThroughput = existingHistory
+    ? {
+        history: existingHistory,
+        lastRaw: state.throughputLastRaw[id] ?? 0,
+        smoothed: state.throughputSmoothed[id] ?? 0,
+      }
+    : freshThroughput(progress)
+  return { ...folded, peak: Math.max(state.throughputPeak[id] ?? 0, latestRate(folded.history)) }
+}
+
+function progressedThroughput(
+  state: QueueStore,
+  progress: OpProgress,
+  resetHistory: boolean,
+): FoldedThroughput {
+  if (resetHistory) {
+    return freshThroughput(progress)
+  }
+  const id = progress.operationId
+  return foldThroughputSample(
+    state.throughputHistory[id],
+    state.throughputLastRaw[id] ?? 0,
+    state.throughputSmoothed[id] ?? 0,
+    progress.progressPercent,
+    progress.bytesPerSecond,
+  )
+}
+
+/**
+ * A completed/auto-removed op stops emitting; it stays until a later progress
+ * event or a hydrate prunes it. Clearing the conflict once the op leaves the
+ * conflict state keeps the modal in sync.
+ */
+function conflictsAfterProgress(conflicts: Record<string, ConflictInfo>, progress: OpProgress) {
+  const next = { ...conflicts }
+  if (progress.status !== 'conflict') {
+    delete next[progress.operationId]
+  }
+  return next
+}
+
+function withOperationId(order: string[], operationId: string) {
+  return order.includes(operationId) ? order : [...order, operationId]
+}
+
 export const useQueueStore = create<QueueStore>((set) => ({
   ...defaultState(),
   setExpanded: (expanded) => set({ expanded }),
@@ -204,20 +265,11 @@ export const useQueueStore = create<QueueStore>((set) => ({
       for (const snapshot of snapshots) {
         const id = snapshot.progress.operationId
         operations[id] = snapshot.progress
-        const existingHistory = state.throughputHistory[id]
-        const seededHistory = existingHistory ?? seedThroughputHistory(snapshot.progress)
-        throughputHistory[id] = seededHistory
-        // Preserve an in-flight EMA gate/value; seed fresh ones from the snapshot.
-        throughputLastRaw[id] = existingHistory
-          ? (state.throughputLastRaw[id] ?? 0)
-          : snapshot.progress.bytesPerSecond
-        throughputSmoothed[id] = existingHistory
-          ? (state.throughputSmoothed[id] ?? 0)
-          : snapshot.progress.bytesPerSecond
-        throughputPeak[id] = Math.max(
-          state.throughputPeak[id] ?? 0,
-          seededHistory[seededHistory.length - 1]?.rate ?? 0,
-        )
+        const throughput = hydratedThroughput(state, snapshot.progress)
+        throughputHistory[id] = throughput.history
+        throughputLastRaw[id] = throughput.lastRaw
+        throughputSmoothed[id] = throughput.smoothed
+        throughputPeak[id] = throughput.peak
         order.push(id)
         if (snapshot.conflict) {
           conflicts[id] = snapshot.conflict
@@ -239,19 +291,7 @@ export const useQueueStore = create<QueueStore>((set) => ({
       const previousProgress = state.operations[progress.operationId]
       const resetHistory = shouldResetThroughputHistory(previousProgress, progress)
       const operations = { ...state.operations, [progress.operationId]: progress }
-      const folded = resetHistory
-        ? {
-            history: seedThroughputHistory(progress),
-            lastRaw: progress.bytesPerSecond,
-            smoothed: progress.bytesPerSecond,
-          }
-        : foldThroughputSample(
-            state.throughputHistory[progress.operationId],
-            state.throughputLastRaw[progress.operationId] ?? 0,
-            state.throughputSmoothed[progress.operationId] ?? 0,
-            progress.progressPercent,
-            progress.bytesPerSecond,
-          )
+      const folded = progressedThroughput(state, progress, resetHistory)
       const throughputHistory = {
         ...state.throughputHistory,
         [progress.operationId]: folded.history,
@@ -267,29 +307,18 @@ export const useQueueStore = create<QueueStore>((set) => ({
       // Frozen Y ceiling: the non-decreasing max of the displayed (averaged)
       // rate. It ratchets up when the curve reaches a new high and never drops,
       // so the scale holds still as speed falls. Reset on rewind/restart.
-      const latestRate = folded.history[folded.history.length - 1]?.rate ?? 0
       const throughputPeak = {
         ...state.throughputPeak,
         [progress.operationId]: Math.max(
           resetHistory ? 0 : (state.throughputPeak[progress.operationId] ?? 0),
-          latestRate,
+          latestRate(folded.history),
         ),
       }
-      const order = state.order.includes(progress.operationId)
-        ? state.order
-        : [...state.order, progress.operationId]
-      const conflicts = { ...state.conflicts }
-
-      // A completed/auto-removed op stops emitting; we keep it until a later
-      // progress event or a hydrate prunes it. Clearing the conflict once the
-      // op leaves the conflict state keeps the modal in sync.
-      if (progress.status !== 'conflict' && conflicts[progress.operationId]) {
-        delete conflicts[progress.operationId]
-      }
+      const conflicts = conflictsAfterProgress(state.conflicts, progress)
 
       return {
         operations,
-        order,
+        order: withOperationId(state.order, progress.operationId),
         throughputHistory,
         throughputPeak,
         throughputLastRaw,

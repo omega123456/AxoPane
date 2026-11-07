@@ -1,3 +1,4 @@
+import { lookupOwnProperty } from '@/lib/collections'
 import type { CommandId, Shortcut } from '@/lib/types/ipc'
 
 export type PlatformOs = 'windows' | 'macos'
@@ -79,8 +80,6 @@ export const defaultKeymap: Record<CommandId, Shortcut[]> = {
 // default keeps them off the conflict checker (they previously surfaced spurious
 // "Conflict" badges when a stale persisted override shadowed them) and stops the
 // Settings UI from offering a rebind that would fight the platform.
-const ARROW_KEY_PREFIX = 'arrow'
-
 export const reservedCommands: ReadonlySet<CommandId> = new Set(['copy', 'cut', 'paste'])
 
 export function isReservedCommand(commandId: CommandId) {
@@ -104,7 +103,9 @@ const legacyKeymapMigrations: KeymapMigration[] = [
 ]
 
 const modifierOrder = ['Ctrl', 'Meta', 'Alt', 'Shift'] as const
-const modifierLabels: Record<PlatformOs, Record<'Ctrl' | 'Meta' | 'Alt' | 'Shift', string>> = {
+type Modifier = (typeof modifierOrder)[number]
+
+const modifierLabels: Record<PlatformOs, Record<Modifier, string>> = {
   windows: {
     Ctrl: 'Ctrl',
     Meta: 'Win',
@@ -130,6 +131,52 @@ export function detectPlatformOs(): PlatformOs {
   return /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? 'macos' : 'windows'
 }
 
+const platformCommandModifier: Record<PlatformOs, Modifier> = {
+  macos: 'Ctrl',
+  windows: 'Meta',
+}
+
+const fixedModifierAliases: Readonly<Record<string, Modifier>> = {
+  control: 'Ctrl',
+  ctrl: 'Ctrl',
+  meta: 'Meta',
+  option: 'Alt',
+  alt: 'Alt',
+  shift: 'Shift',
+}
+
+const commandModifierAliases: ReadonlySet<string> = new Set(['cmd', 'command'])
+
+const keyNameAliases: Readonly<Record<string, string>> = {
+  ' ': 'Space',
+  escape: 'Escape',
+  esc: 'Escape',
+  arrowup: 'ArrowUp',
+  arrowdown: 'ArrowDown',
+  arrowleft: 'ArrowLeft',
+  arrowright: 'ArrowRight',
+}
+
+function shortcutModifierFor(lowerPart: string, platform: PlatformOs): Modifier | undefined {
+  if (commandModifierAliases.has(lowerPart)) {
+    return platformCommandModifier[platform]
+  }
+  return lookupOwnProperty(fixedModifierAliases, lowerPart)
+}
+
+function capitalize(text: string) {
+  return text[0].toUpperCase() + text.slice(1)
+}
+
+function normalizeKeyName(part: string) {
+  const lowerPart = part.toLowerCase()
+  const alias = lookupOwnProperty(keyNameAliases, lowerPart)
+  if (alias) {
+    return alias
+  }
+  return lowerPart.length === 1 ? lowerPart.toUpperCase() : capitalize(part)
+}
+
 export function normalizeShortcut(value: string): Shortcut {
   const platform = detectPlatformOs()
   const parts = value
@@ -141,74 +188,37 @@ export function normalizeShortcut(value: string): Shortcut {
     return ''
   }
 
-  const modifiers = new Set<string>()
+  const modifiers = new Set<Modifier>()
   let key = ''
 
   for (const part of parts) {
-    const lower = part.toLowerCase()
-    if (lower === 'control' || lower === 'ctrl') {
-      modifiers.add('Ctrl')
-    } else if (lower === 'cmd' || lower === 'command') {
-      modifiers.add(platform === 'macos' ? 'Ctrl' : 'Meta')
-    } else if (lower === 'meta') {
-      modifiers.add('Meta')
-    } else if (lower === 'option' || lower === 'alt') {
-      modifiers.add('Alt')
-    } else if (lower === 'shift') {
-      modifiers.add('Shift')
-    } else if (lower === ' ') {
-      key = 'Space'
-    } else if (lower === 'escape' || lower === 'esc') {
-      key = 'Escape'
-    } else if (
-      lower === 'arrowup' ||
-      lower === 'arrowdown' ||
-      lower === 'arrowleft' ||
-      lower === 'arrowright'
-    ) {
-      const direction = lower.slice(ARROW_KEY_PREFIX.length)
-      key = `Arrow${direction[0].toUpperCase()}${direction.slice(1)}`
-    } else if (lower.length === 1) {
-      key = lower.toUpperCase()
-    } else {
-      key = part[0].toUpperCase() + part.slice(1)
+    const modifier = shortcutModifierFor(part.toLowerCase(), platform)
+    if (modifier) {
+      modifiers.add(modifier)
+      continue
     }
+    key = normalizeKeyName(part)
   }
 
   const ordered = modifierOrder.filter((modifier) => modifiers.has(modifier))
   return [...ordered, key].filter(Boolean).join('+')
 }
 
-function isModifierOnly(value: string) {
-  return value === 'Ctrl' || value === 'Meta' || value === 'Alt' || value === 'Shift'
+function isModifierOnly(value: string): value is Modifier {
+  return (modifierOrder as readonly string[]).includes(value)
+}
+
+const eventKeyAliases: Record<PlatformOs, Readonly<Record<string, string>>> = {
+  macos: { ' ': 'Space', Esc: 'Escape', Control: 'Meta', Meta: 'Ctrl', OS: 'Ctrl' },
+  windows: { ' ': 'Space', Esc: 'Escape', Control: 'Ctrl', Meta: 'Meta', OS: 'Meta' },
 }
 
 function normalizeEventKey(value: string, platform: PlatformOs) {
-  if (value === ' ') {
-    return 'Space'
+  const alias = lookupOwnProperty(eventKeyAliases[platform], value)
+  if (alias) {
+    return alias
   }
-  if (value === 'Esc') {
-    return 'Escape'
-  }
-  if (value === 'Control') {
-    return platform === 'macos' ? 'Meta' : 'Ctrl'
-  }
-  if (value === 'Meta') {
-    return platform === 'macos' ? 'Ctrl' : 'Meta'
-  }
-  if (value === 'Alt') {
-    return 'Alt'
-  }
-  if (value === 'Shift') {
-    return 'Shift'
-  }
-  if (value === 'OS') {
-    return platform === 'macos' ? 'Ctrl' : 'Meta'
-  }
-  if (value.length === 1) {
-    return value.toUpperCase()
-  }
-  return value
+  return value.length === 1 ? value.toUpperCase() : value
 }
 
 function eventModifierParts(event: KeyboardEvent, platform: PlatformOs) {
@@ -262,8 +272,7 @@ export function captureShortcut(event: KeyboardEvent): Shortcut | null {
 export function parseShortcut(shortcut: Shortcut): ShortcutParts {
   const normalized = normalizeShortcut(shortcut)
   const parts = normalized.split('+').filter(Boolean)
-  const key =
-    parts.find((part) => !modifierOrder.includes(part as (typeof modifierOrder)[number])) ?? ''
+  const key = parts.find((part) => !isModifierOnly(part)) ?? ''
 
   return {
     ctrl: parts.includes('Ctrl'),
@@ -281,12 +290,7 @@ export function eventMatchesShortcut(event: KeyboardEvent, shortcut: Shortcut) {
 export function formatShortcutLabel(shortcut: Shortcut, platform: PlatformOs) {
   const parts = normalizeShortcut(shortcut).split('+').filter(Boolean)
   return parts
-    .map((part) => {
-      if (part === 'Ctrl' || part === 'Meta' || part === 'Alt' || part === 'Shift') {
-        return modifierLabels[platform][part]
-      }
-      return part === 'Space' ? 'Space' : part
-    })
+    .map((part) => (isModifierOnly(part) ? modifierLabels[platform][part] : part))
     .join(platform === 'macos' ? '' : '+')
 }
 

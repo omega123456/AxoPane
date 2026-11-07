@@ -114,6 +114,23 @@ export function setDropEffect(dataTransfer: DataTransfer, kind: DropKind) {
   dataTransfer.dropEffect = dataTransfer.effectAllowed === 'copy' ? 'copy' : kind
 }
 
+type ModifierKeyState = { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }
+
+const platformDropModifiers: Record<PlatformOs, (event: ModifierKeyState) => DropModifiers> = {
+  macos: (event) => ({ ctrlKey: event.altKey, shiftKey: event.metaKey }),
+  windows: (event) => ({ ctrlKey: event.ctrlKey, shiftKey: event.shiftKey }),
+}
+
+/**
+ * Copy-vs-move follows platform convention: on Windows Ctrl forces copy and
+ * Shift forces move; on macOS Option forces copy and Cmd forces move. The result
+ * is read by `resolveDropKind` as generic force-copy / force-move flags so its
+ * logic stays OS-agnostic.
+ */
+export function dropModifiers(event: ModifierKeyState, platform: PlatformOs): DropModifiers {
+  return platformDropModifiers[platform](event)
+}
+
 /** Resolve copy vs move: Ctrl forces copy, Shift forces move, else volume-based. */
 export function resolveDropKind(
   modifiers: DropModifiers,

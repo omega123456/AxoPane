@@ -54,6 +54,7 @@ export default tseslint.config(
     ignores: ['src/tests/**'],
     rules: {
       'id-length': ['error', { min: 2, properties: 'never', exceptions: ['_'] }],
+      complexity: ['error', 10],
       'no-magic-numbers': 'off',
       '@typescript-eslint/no-magic-numbers': [
         'error',

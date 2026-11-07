@@ -65,6 +65,7 @@ pub mod logging_writer_integration;
 pub mod main_entry_integration;
 pub mod native_drag_integration;
 pub mod native_menu_cache_integration;
+pub mod native_menu_canonical_integration;
 pub mod native_menu_contract_integration;
 pub mod native_menu_helper_integration;
 pub mod native_menu_modern_integration;

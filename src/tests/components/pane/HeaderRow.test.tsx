@@ -4,6 +4,7 @@ import { beforeEach, vi } from 'vitest'
 import { HeaderRow } from '@/components/pane/HeaderRow'
 import { ipc } from '@/tests/ipc-mock'
 import { usePanesStore } from '@/stores/panes-store'
+import { defaultColumnWidths, useLayoutStore } from '@/stores/layout-store'
 
 beforeEach(() => {
   ipc.install()
@@ -33,5 +34,20 @@ describe('HeaderRow items sort pending state', () => {
 
     await user.click(header)
     expect(setSort).toHaveBeenCalledWith('left', 'items')
+  })
+})
+
+describe('HeaderRow keyboard column resize', () => {
+  it('narrows and widens a column with the arrow keys on its separator', async () => {
+    const user = userEvent.setup()
+    render(<HeaderRow pane={usePanesStore.getState().panes.left} />)
+
+    const separator = screen.getByRole('separator', { name: 'Resize Type column' })
+    separator.focus()
+    await user.keyboard('{ArrowRight}')
+    const widened = useLayoutStore.getState().columnWidths.type
+    expect(widened).toBeGreaterThan(defaultColumnWidths.type)
+    await user.keyboard('{ArrowLeft}')
+    expect(useLayoutStore.getState().columnWidths.type).toBe(defaultColumnWidths.type)
   })
 })

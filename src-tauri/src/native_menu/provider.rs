@@ -1,3 +1,4 @@
+use super::canonical::normalize_verb;
 use super::helper_supervisor::HelperRole;
 use super::shell_executor::ShellExecutor;
 use super::types::{LoadNativeMenuRequest, NativeMenuCanonicalActionKind, NativeMenuIcon};
@@ -168,14 +169,6 @@ fn is_app_owned_duplicate(item: &ProviderNativeMenuItem) -> bool {
             })
         || is_open_with_variant(&normalized_verb)
         || APP_OWNED_NORMALIZED_VERBS.contains(&normalized_verb.as_str())
-}
-
-fn normalize_verb(value: &str) -> String {
-    value
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect()
 }
 
 fn dedupe_key(item: &ProviderNativeMenuItem) -> String {

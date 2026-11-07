@@ -13,6 +13,7 @@ import { usePanesStore } from '@/stores/panes-store'
 import { useConfigStore } from '@/stores/config-store'
 import type { PaneId } from '@/types/pane'
 import { otherPane } from '@/lib/pane-id'
+import { dispatchByKind, type KindHandlers } from '@/lib/kind-table'
 
 export type ContextMenuAction =
   | {
@@ -205,127 +206,107 @@ function pathName(path: string) {
   return normalized.split('/').filter(Boolean).pop() ?? path
 }
 
-export function dispatchContextMenuAction(paneId: PaneId, action: ContextMenuAction) {
-  switch (action.kind) {
-    case 'command':
-      executeCommand(action.commandId, paneId, action.targetEntryId)
-      return
-    case 'navigate': {
-      if (action.destination === 'other-pane') {
-        const destinationPaneId = otherPane(paneId)
-        void usePanesStore.getState().openTabFromPath(destinationPaneId, action.path)
-        return
-      }
-      void usePanesStore.getState().navigatePane(paneId, action.path)
-      return
-    }
-    case 'open-path-in-new-tab':
-      void usePanesStore.getState().openTabFromPath(paneId, action.path)
-      return
-    case 'open-path-in-explicit-pane':
-      void usePanesStore.getState().openTabFromPath(action.paneId, action.path)
-      return
-    case 'close-tab':
-      void usePanesStore.getState().closeTab(paneId, action.tabId)
-      return
-    case 'close-tabs-beside':
-      void usePanesStore.getState().closeTabsBeside(paneId, action.tabId, action.side)
-      return
-    case 'set-tab-locked':
-      usePanesStore.getState().setTabLocked(paneId, action.tabId, action.locked)
-      return
-    case 'move-tab':
-      void usePanesStore
-        .getState()
-        .moveTab(paneId, action.tabId, action.destinationPaneId, action.destinationIndex)
-      return
-    case 'add-favourite':
-      void useConfigStore.getState().addFavourite(action.path)
-      return
-    case 'remove-favourite':
-      void useConfigStore.getState().removeFavourite(action.path)
-      return
-    case 'rename-favourite':
-      useConfigStore.getState().setRenamingFavourite(action.path)
-      return
-    case 'copy-paths':
-      void copyPathsToClipboard(action.paths)
-      return
-    case 'request-folder-size':
-      void requestFolderSize({ path: action.path })
-      return
-    case 'open-with':
-      void showNativeOpenWith({ path: action.path })
-        .then((response) => {
-          if (!response.handled) {
-            log.warn('open_with unavailable', {
-              path: action.path,
-              message: response.message ?? null,
-            })
-          }
-        })
-        .catch((error) => {
-          log.warn('open_with IPC failed', { path: action.path, error })
-        })
-      return
-    case 'properties':
-      void showPropertiesDialog(action.items)
-      return
-    case 'compress':
-      useActionDialogStore.getState().open({
-        kind: 'archiveConfirm',
-        paneId,
-        operation: 'compress',
-        destinationDir: action.destinationDir,
-        targets: action.paths.map((path) => ({
-          id: path,
-          name: pathName(path),
-          path,
-        })),
-      })
-      return
-    case 'extract':
-      useActionDialogStore.getState().open({
-        kind: 'archiveConfirm',
-        paneId,
-        operation: 'extract',
-        destinationDir: action.destinationDir,
-        targets: action.paths.map((path) => ({
-          id: path,
-          name: pathName(path),
-          path,
-          sizeBytes: 0,
-        })),
-      })
-      return
-    case 'share':
-      log.info('share command unavailable', {
-        path: action.paths.length === 1 ? action.paths[0] : undefined,
-        paths: action.paths.length > 1 ? action.paths : undefined,
-      })
-      return
-    case 'eject-volume':
-      void runEjectVolume({ mountRoot: action.mountRoot }).then((response) => {
-        if (!response.handled) {
-          useErrorToastStore.getState().show(response.message ?? 'Could not eject the drive.')
-        }
-      })
-      return
-    case 'invoke-native':
-      void invokeNativeMenu({ token: action.token })
-        .then((response) => {
-          if (!response.handled) {
-            log.info('native menu command unavailable', {
-              token: action.token,
-              message: response.message ?? null,
-            })
-          }
-        })
-        .catch((error) => {
-          log.warn('invoke_native_menu_action IPC failed', { token: action.token, error })
-        })
-      return
-    case 'noop':
-      return
+type ContextMenuActionOfKind<Kind extends ContextMenuAction['kind']> = Extract<
+  ContextMenuAction,
+  { kind: Kind }
+>
+
+function archiveTargets(paths: string[]) {
+  return paths.map((path) => ({ id: path, name: pathName(path), path }))
+}
+
+function navigate(action: ContextMenuActionOfKind<'navigate'>, paneId: PaneId) {
+  if (action.destination === 'other-pane') {
+    void usePanesStore.getState().openTabFromPath(otherPane(paneId), action.path)
+    return
   }
+  void usePanesStore.getState().navigatePane(paneId, action.path)
+}
+
+function openWith(path: string) {
+  void showNativeOpenWith({ path })
+    .then((response) => {
+      if (!response.handled) {
+        log.warn('open_with unavailable', { path, message: response.message ?? null })
+      }
+    })
+    .catch((error) => {
+      log.warn('open_with IPC failed', { path, error })
+    })
+}
+
+function logShareUnavailable(paths: string[]) {
+  log.info('share command unavailable', {
+    path: paths.length === 1 ? paths[0] : undefined,
+    paths: paths.length > 1 ? paths : undefined,
+  })
+}
+
+function ejectVolume(mountRoot: string) {
+  void runEjectVolume({ mountRoot }).then((response) => {
+    if (!response.handled) {
+      useErrorToastStore.getState().show(response.message ?? 'Could not eject the drive.')
+    }
+  })
+}
+
+function invokeNative(token: string) {
+  void invokeNativeMenu({ token })
+    .then((response) => {
+      if (!response.handled) {
+        log.info('native menu command unavailable', { token, message: response.message ?? null })
+      }
+    })
+    .catch((error) => {
+      log.warn('invoke_native_menu_action IPC failed', { token, error })
+    })
+}
+
+const contextMenuActionHandlers: KindHandlers<ContextMenuAction, [paneId: PaneId], void> = {
+  command: (action, paneId) => executeCommand(action.commandId, paneId, action.targetEntryId),
+  navigate,
+  'open-path-in-new-tab': (action, paneId) =>
+    void usePanesStore.getState().openTabFromPath(paneId, action.path),
+  'open-path-in-explicit-pane': (action) =>
+    void usePanesStore.getState().openTabFromPath(action.paneId, action.path),
+  'close-tab': (action, paneId) => void usePanesStore.getState().closeTab(paneId, action.tabId),
+  'close-tabs-beside': (action, paneId) =>
+    void usePanesStore.getState().closeTabsBeside(paneId, action.tabId, action.side),
+  'set-tab-locked': (action, paneId) =>
+    usePanesStore.getState().setTabLocked(paneId, action.tabId, action.locked),
+  'move-tab': (action, paneId) =>
+    void usePanesStore
+      .getState()
+      .moveTab(paneId, action.tabId, action.destinationPaneId, action.destinationIndex),
+  'add-favourite': (action) => void useConfigStore.getState().addFavourite(action.path),
+  'remove-favourite': (action) => void useConfigStore.getState().removeFavourite(action.path),
+  'rename-favourite': (action) => useConfigStore.getState().setRenamingFavourite(action.path),
+  'copy-paths': (action) => void copyPathsToClipboard(action.paths),
+  'request-folder-size': (action) => void requestFolderSize({ path: action.path }),
+  'open-with': (action) => openWith(action.path),
+  properties: (action) => void showPropertiesDialog(action.items),
+  compress: (action, paneId) =>
+    useActionDialogStore.getState().open({
+      kind: 'archiveConfirm',
+      paneId,
+      operation: 'compress',
+      destinationDir: action.destinationDir,
+      targets: archiveTargets(action.paths),
+    }),
+  extract: (action, paneId) =>
+    useActionDialogStore.getState().open({
+      kind: 'archiveConfirm',
+      paneId,
+      operation: 'extract',
+      destinationDir: action.destinationDir,
+      targets: archiveTargets(action.paths).map((target) => ({ ...target, sizeBytes: 0 })),
+    }),
+  share: (action) => logShareUnavailable(action.paths),
+  'eject-volume': (action) => ejectVolume(action.mountRoot),
+  'invoke-native': (action) => invokeNative(action.token),
+  noop: () => undefined,
+}
+
+export function dispatchContextMenuAction(paneId: PaneId, action: ContextMenuAction) {
+  dispatchByKind(contextMenuActionHandlers, action, paneId)
 }

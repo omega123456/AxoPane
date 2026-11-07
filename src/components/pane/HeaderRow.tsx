@@ -7,7 +7,8 @@ import { ChevronDownIcon } from '@/components/icons'
 import { isTrashPath } from '@/lib/trash'
 import { defaultColumnWidths, useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
-import type { ColumnConfig, ColumnKey } from '@/lib/types/ipc'
+import type { ColumnConfig, ColumnKey, SortDirection } from '@/lib/types/ipc'
+import { handleKeyByTable, type KeyHandlerTable } from '@/lib/key-table'
 import { FOCUS_RING } from '@/lib/focus-ring'
 import { TEXT_SECONDARY } from '@/lib/class-names'
 
@@ -16,6 +17,20 @@ const COLUMN_RESIZE_KEYBOARD_STEP_PX = 8
 const paneColumnGapPx = 0
 /** 3px list inset + 8px row padding on each side (the header uses 11px directly). */
 const paneRowHorizontalPaddingPx = 22
+
+const ariaSortByDirection: Record<SortDirection, 'ascending' | 'descending'> = {
+  asc: 'ascending',
+  desc: 'descending',
+}
+
+function SortChevron({ active, direction }: { active: boolean; direction: SortDirection }) {
+  if (!active) {
+    return null
+  }
+  return (
+    <ChevronDownIcon className={`h-3 w-3 shrink-0 ${direction === 'asc' ? 'rotate-180' : ''}`} />
+  )
+}
 
 type HeaderRowProps = {
   pane: PaneState
@@ -34,6 +49,18 @@ export function HeaderRow({ pane }: HeaderRowProps) {
   const contentWidth = paneContentWidth(columns, columnWidths)
   const isTrash = isTrashPath(pane.path)
   const itemsSortPending = pane.sortKey === 'items' && pane.itemsSortStatus === 'counting'
+
+  function nudgeColumnWidth(key: ColumnKey, deltaPx: number) {
+    setColumnWidth(key, (columnWidths[key] ?? defaultColumnWidths[key]) + deltaPx)
+    void persistAppConfig()
+  }
+
+  function resizeKeyTable(key: ColumnKey): KeyHandlerTable {
+    return {
+      ArrowLeft: () => nudgeColumnWidth(key, -COLUMN_RESIZE_KEYBOARD_STEP_PX),
+      ArrowRight: () => nudgeColumnWidth(key, COLUMN_RESIZE_KEYBOARD_STEP_PX),
+    }
+  }
 
   function startResize(event: ReactPointerEvent<HTMLDivElement>, key: ColumnKey) {
     event.preventDefault()
@@ -74,6 +101,7 @@ export function HeaderRow({ pane }: HeaderRowProps) {
         const active = pane.sortKey === column.key
         const definition = columnDefinitions[column.key]
         const label = isTrash && column.key === 'modified' ? 'Deleted' : definition.label
+        const showItemsSortStatus = column.key === 'items' && itemsSortPending
         return (
           <div
             key={column.key}
@@ -81,28 +109,18 @@ export function HeaderRow({ pane }: HeaderRowProps) {
             role="columnheader"
             aria-label={label}
             className={`${definition.className} ${column.key === 'name' ? 'pl-6' : ''} group relative flex h-full items-center`}
-            aria-sort={
-              active ? (pane.sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'
-            }
+            aria-sort={active ? ariaSortByDirection[pane.sortDirection] : 'none'}
           >
             <button
               type="button"
               onClick={() => void setSort(pane.id, column.key)}
-              aria-describedby={
-                column.key === 'items' && itemsSortPending
-                  ? `${pane.id}-items-sort-status`
-                  : undefined
-              }
+              aria-describedby={showItemsSortStatus ? `${pane.id}-items-sort-status` : undefined}
               className={`flex h-full w-full min-w-0 cursor-pointer items-center gap-2 rounded-control ${definition.align === 'right' ? 'justify-end' : ''} ${FOCUS_RING}`}
             >
               <span className="truncate">{label}</span>
-              {active ? (
-                <ChevronDownIcon
-                  className={`h-3 w-3 shrink-0 ${pane.sortDirection === 'asc' ? 'rotate-180' : ''}`}
-                />
-              ) : null}
+              <SortChevron active={active} direction={pane.sortDirection} />
             </button>
-            {column.key === 'items' && itemsSortPending ? (
+            {showItemsSortStatus ? (
               <span id={`${pane.id}-items-sort-status`} className="sr-only">
                 Counting items. Current row order will update when counting finishes.
               </span>
@@ -116,25 +134,7 @@ export function HeaderRow({ pane }: HeaderRowProps) {
               onPointerMove={resizeColumn}
               onPointerUp={endResize}
               onPointerCancel={endResize}
-              onKeyDown={(event) => {
-                if (event.key === 'ArrowLeft') {
-                  event.preventDefault()
-                  setColumnWidth(
-                    column.key,
-                    (columnWidths[column.key] ?? defaultColumnWidths[column.key]) -
-                      COLUMN_RESIZE_KEYBOARD_STEP_PX,
-                  )
-                  void persistAppConfig()
-                } else if (event.key === 'ArrowRight') {
-                  event.preventDefault()
-                  setColumnWidth(
-                    column.key,
-                    (columnWidths[column.key] ?? defaultColumnWidths[column.key]) +
-                      COLUMN_RESIZE_KEYBOARD_STEP_PX,
-                  )
-                  void persistAppConfig()
-                }
-              }}
+              onKeyDown={(event) => handleKeyByTable(event, resizeKeyTable(column.key))}
               className={`absolute -right-1 top-0 h-full w-2 cursor-col-resize touch-none ${FOCUS_RING}`}
             >
               {/* Column dividers appear while the header is hovered, as in Explorer. */}

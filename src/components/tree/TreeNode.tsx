@@ -7,7 +7,13 @@ import { CapacityBar } from './CapacityBar'
 import { volumeUsedFraction } from '@/lib/volumes'
 import { treeIndentPx } from '@/lib/tree-flat'
 import { detectPlatformOs } from '@/lib/keymap'
-import { canDropInto, performDrop, resolveDropKind, setDropEffect } from '@/lib/drag-drop'
+import {
+  canDropInto,
+  dropModifiers,
+  performDrop,
+  resolveDropKind,
+  setDropEffect,
+} from '@/lib/drag-drop'
 import type { VolumeInfo } from '@/lib/types/ipc'
 import type { TreeNodeState } from '@/stores/panes-store'
 import { useDragStore } from '@/stores/drag-store'
@@ -46,6 +52,47 @@ type TreeNodeProps = {
   actions: TreeRowActions
 }
 
+const INLINE_HOVER = 'hover:bg-light-hover dark:hover:bg-dark-hover'
+const INLINE_CURRENT_FILL = `${INLINE_HOVER} bg-light-hover dark:bg-dark-hover`
+const PINNED_CURRENT_FILL =
+  'hover:bg-light-tree-current-hover dark:hover:bg-dark-tree-current-hover bg-light-tree-current dark:bg-dark-tree-current'
+const PINNED_FILL =
+  'hover:bg-light-tree-hover dark:hover:bg-dark-tree-hover bg-light-base dark:bg-dark-base'
+
+// The current folder gets the subtle fill plus an accent pill. That fill is
+// translucent; on a pinned row it would let scrolled-under rows show through,
+// so pinned rows use the opaque *-tree-* stand-ins instead.
+function treeRowFillClass(isCurrent: boolean, isPinned: boolean) {
+  if (isPinned) {
+    return isCurrent ? PINNED_CURRENT_FILL : PINNED_FILL
+  }
+  return isCurrent ? INLINE_CURRENT_FILL : INLINE_HOVER
+}
+
+function TreeNodeLabel({
+  name,
+  volume,
+  usedFraction,
+}: {
+  name: string
+  volume: TreeNodeProps['volume']
+  usedFraction: number | null
+}) {
+  return (
+    <>
+      {volume ? <VolumeIcon volume={volume} /> : <EntryIcon entry={{ name, isDir: true }} />}
+      {usedFraction === null ? (
+        <span className="truncate">{name}</span>
+      ) : (
+        <span className="flex min-w-0 flex-1 flex-col gap-1.25">
+          <span className="truncate">{name}</span>
+          <CapacityBar usedFraction={usedFraction} />
+        </span>
+      )}
+    </>
+  )
+}
+
 function TreeNodeImpl({
   node,
   depth,
@@ -63,31 +110,9 @@ function TreeNodeImpl({
     paddingLeft: `${treeIndentPx(depth)}px`,
   }
 
-  // The current folder gets the subtle fill plus an accent pill. That fill is
-  // translucent; on a pinned row it would let scrolled-under rows show
-  // through, so pinned rows use the opaque *-tree-* stand-ins instead.
-  const rowBackgroundClassName = isCurrent
-    ? isPinned
-      ? 'bg-light-tree-current dark:bg-dark-tree-current'
-      : 'bg-light-hover dark:bg-dark-hover'
-    : isPinned
-      ? 'bg-light-base dark:bg-dark-base'
-      : ''
   const usedFraction = volume ? volumeUsedFraction(volume) : null
-  const rowHoverClassName = isPinned
-    ? isCurrent
-      ? 'hover:bg-light-tree-current-hover dark:hover:bg-dark-tree-current-hover'
-      : 'hover:bg-light-tree-hover dark:hover:bg-dark-tree-hover'
-    : 'hover:bg-light-hover dark:hover:bg-dark-hover'
 
   const platform = detectPlatformOs()
-  function dropModifiers(event: DragEvent) {
-    if (platform === 'macos') {
-      return { ctrlKey: event.altKey, shiftKey: event.metaKey }
-    }
-    return { ctrlKey: event.ctrlKey, shiftKey: event.shiftKey }
-  }
-
   function handleDragOver(event: DragEvent<HTMLDivElement>) {
     const drag = useDragStore.getState().drag
     if (drag?.kind !== 'file-transfer' || !canDropInto(drag, node.path, platform)) {
@@ -96,7 +121,7 @@ function TreeNodeImpl({
     event.preventDefault()
     setDropEffect(
       event.dataTransfer,
-      resolveDropKind(dropModifiers(event), drag.sourceDir, node.path, platform),
+      resolveDropKind(dropModifiers(event, platform), drag.sourceDir, node.path, platform),
     )
     setIsDropTarget(true)
   }
@@ -111,7 +136,7 @@ function TreeNodeImpl({
   async function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault()
     const drag = useDragStore.getState().drag
-    const modifiers = dropModifiers(event)
+    const modifiers = dropModifiers(event, platform)
     setIsDropTarget(false)
     useDragStore.getState().end()
     await performDrop(drag, node.path, modifiers, platform)
@@ -126,7 +151,7 @@ function TreeNodeImpl({
       onDragLeave={handleDragLeave}
       onDrop={(event) => void handleDrop(event)}
       onContextMenu={(event) => actions.onContextMenu(node, event)}
-      className={`relative flex ${usedFraction === null ? 'h-tree-row' : 'h-tree-drive-row'} items-center gap-2 rounded-control pr-2 text-row text-light-text dark:text-dark-text ${rowHoverClassName} ${rowBackgroundClassName} ${
+      className={`relative flex ${usedFraction === null ? 'h-tree-row' : 'h-tree-drive-row'} items-center gap-2 rounded-control pr-2 text-row text-light-text dark:text-dark-text ${treeRowFillClass(isCurrent, isPinned)} ${
         isDropTarget ? 'ring-2 ring-inset ring-light-accent dark:ring-dark-accent' : ''
       }`}
       style={rowStyle}
@@ -162,19 +187,7 @@ function TreeNodeImpl({
         }}
         className={`flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-control text-left ${FOCUS_RING_INSET}`}
       >
-        {volume ? (
-          <VolumeIcon volume={volume} />
-        ) : (
-          <EntryIcon entry={{ name: node.name, isDir: true }} />
-        )}
-        {usedFraction === null ? (
-          <span className="truncate">{node.name}</span>
-        ) : (
-          <span className="flex min-w-0 flex-1 flex-col gap-1.25">
-            <span className="truncate">{node.name}</span>
-            <CapacityBar usedFraction={usedFraction} />
-          </span>
-        )}
+        <TreeNodeLabel name={node.name} volume={volume} usedFraction={usedFraction} />
       </button>
     </div>
   )

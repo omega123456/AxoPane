@@ -1,3 +1,4 @@
+pub mod canonical;
 pub mod fake_provider;
 pub mod helper_entry;
 pub mod helper_protocol;

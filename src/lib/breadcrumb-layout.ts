@@ -39,6 +39,95 @@ const BREADCRUMB_CURRENT_SEGMENT_CHROME_PX = BREADCRUMB_BUTTON_PADDING_PX
 const BREADCRUMB_COLLAPSE_MARKER_CHROME_PX =
   BREADCRUMB_BUTTON_PADDING_PX + BREADCRUMB_CHEVRON_WIDTH_PX
 
+type FittedLabels = string[] | null | 'invalid'
+type LayoutAttempt = BreadcrumbLayout | null | 'invalid'
+
+type FitContext = {
+  segments: BreadcrumbSourceSegment[]
+  floorLengths: number[]
+  availableWidth: number
+  collapseMarkerWidth: number
+  segmentMeasure: (label: string) => number
+  currentSegmentMeasure: (label: string) => number
+}
+
+function layoutAttempt(
+  segments: BreadcrumbSourceSegment[],
+  labels: FittedLabels,
+  collapsed: boolean,
+): LayoutAttempt {
+  if (!Array.isArray(labels)) {
+    return labels
+  }
+  return createLayout(segments, labels, collapsed)
+}
+
+function fitWithCollapsedPrefix(context: FitContext): LayoutAttempt {
+  const { segments, floorLengths, collapseMarkerWidth } = context
+  for (let dropped = 1; dropped < segments.length; dropped += 1) {
+    const keptSegments = segments.slice(dropped)
+    const keptLabels = findShortestFittingLabels({
+      segments: keptSegments,
+      floorLengths: floorLengths.slice(dropped),
+      availableWidth: context.availableWidth - collapseMarkerWidth,
+      segmentMeasure: context.segmentMeasure,
+      currentSegmentMeasure: context.currentSegmentMeasure,
+      keepLastFull: true,
+    })
+    if (keptLabels !== null) {
+      return layoutAttempt(keptSegments, keptLabels, true)
+    }
+  }
+  return null
+}
+
+function fitCurrentFolderOnly(context: FitContext): LayoutAttempt {
+  const finalSegment = context.segments[context.segments.length - 1]!
+  const labels = findShortestFittingLabels({
+    segments: [finalSegment],
+    floorLengths: [context.floorLengths[context.floorLengths.length - 1]!],
+    availableWidth: context.availableWidth - context.collapseMarkerWidth,
+    segmentMeasure: context.segmentMeasure,
+    currentSegmentMeasure: context.currentSegmentMeasure,
+  })
+  return layoutAttempt([finalSegment], labels, true)
+}
+
+function fitAllShortened(context: FitContext): LayoutAttempt {
+  const labels = findShortestFittingLabels({
+    segments: context.segments,
+    floorLengths: context.floorLengths,
+    availableWidth: context.availableWidth,
+    segmentMeasure: context.segmentMeasure,
+    currentSegmentMeasure: context.currentSegmentMeasure,
+  })
+  return layoutAttempt(context.segments, labels, false)
+}
+
+const shorteningStrategies: ((context: FitContext) => LayoutAttempt)[] = [
+  fitWithCollapsedPrefix,
+  fitCurrentFolderOnly,
+  fitAllShortened,
+]
+
+function shortenedLayout(context: FitContext): BreadcrumbLayout {
+  for (const strategy of shorteningStrategies) {
+    const attempt = strategy(context)
+    if (attempt === 'invalid') {
+      return createFullLayout(context.segments)
+    }
+    if (attempt) {
+      return attempt
+    }
+  }
+  const finalSegment = context.segments[context.segments.length - 1]!
+  return createLayout([finalSegment], [finalSegment.label], false)
+}
+
+function hasMeasurableWidth(availableWidth: number) {
+  return availableWidth > 0 && Number.isFinite(availableWidth)
+}
+
 export function computeBreadcrumbLayout({
   segments,
   availableWidth,
@@ -48,14 +137,11 @@ export function computeBreadcrumbLayout({
   if (segments.length === 0) {
     return { items: [], collapsed: false }
   }
-
-  if (availableWidth <= 0 || !Number.isFinite(availableWidth)) {
+  if (!hasMeasurableWidth(availableWidth)) {
     return createFullLayout(segments)
   }
 
   const currentSegmentMeasure = measure.currentSegment ?? measure.segment
-  const collapseMarkerMeasure =
-    measure.collapseMarker ?? (() => measure.segment(COLLAPSE_MARKER_LABEL))
   const fullLabels = segments.map((segment) => segment.label)
   const fullWidth = sumLayoutWidths(fullLabels, measure.segment, currentSegmentMeasure)
   if (!Number.isFinite(fullWidth)) {
@@ -65,60 +151,21 @@ export function computeBreadcrumbLayout({
     return createLayout(segments, fullLabels, false)
   }
 
-  const floorLengths = segments.map((segment) => Math.min(minChars, segment.label.length))
-  const collapseMarkerWidth = collapseMarkerMeasure()
+  const collapseMarkerWidth = (
+    measure.collapseMarker ?? (() => measure.segment(COLLAPSE_MARKER_LABEL))
+  )()
   if (!Number.isFinite(collapseMarkerWidth)) {
     return createFullLayout(segments)
   }
 
-  for (let dropped = 1; dropped < segments.length; dropped += 1) {
-    const keptSegments = segments.slice(dropped)
-    const keptLayout = findShortestFittingLabels({
-      segments: keptSegments,
-      floorLengths: floorLengths.slice(dropped),
-      availableWidth: availableWidth - collapseMarkerWidth,
-      segmentMeasure: measure.segment,
-      currentSegmentMeasure,
-      keepLastFull: true,
-    })
-    if (keptLayout === 'invalid') {
-      return createFullLayout(segments)
-    }
-    if (keptLayout) {
-      return createLayout(keptSegments, keptLayout, true)
-    }
-  }
-
-  const finalSegment = segments[segments.length - 1]!
-  const collapsedLastOnlyLayout = findShortestFittingLabels({
-    segments: [finalSegment],
-    floorLengths: [floorLengths[floorLengths.length - 1]!],
-    availableWidth: availableWidth - collapseMarkerWidth,
-    segmentMeasure: measure.segment,
-    currentSegmentMeasure,
-  })
-  if (collapsedLastOnlyLayout === 'invalid') {
-    return createFullLayout(segments)
-  }
-  if (collapsedLastOnlyLayout) {
-    return createLayout([finalSegment], collapsedLastOnlyLayout, true)
-  }
-
-  const shortenedFullLayout = findShortestFittingLabels({
+  return shortenedLayout({
     segments,
-    floorLengths,
+    floorLengths: segments.map((segment) => Math.min(minChars, segment.label.length)),
     availableWidth,
+    collapseMarkerWidth,
     segmentMeasure: measure.segment,
     currentSegmentMeasure,
   })
-  if (shortenedFullLayout === 'invalid') {
-    return createFullLayout(segments)
-  }
-  if (shortenedFullLayout) {
-    return createLayout(segments, shortenedFullLayout, false)
-  }
-
-  return createLayout([finalSegment], [finalSegment.label], false)
 }
 
 export function createBreadcrumbMeasurer(navElement: HTMLElement | null): BreadcrumbLayoutMeasure {

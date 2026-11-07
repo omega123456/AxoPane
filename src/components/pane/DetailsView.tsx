@@ -13,15 +13,18 @@ import { HeaderRow, paneContentWidth } from './HeaderRow'
 import { ParentRow } from './ParentRow'
 import { useElementVirtualizer } from '@/lib/use-element-virtualizer'
 import { pathKey } from '@/lib/path-compare'
-import type { InlineRenameState } from '@/stores/inline-rename-store'
+import { entryRenameProps, type InlineRenameState } from '@/stores/inline-rename-store'
 import type { PaneState } from '@/types/pane'
 import { useLayoutStore } from '@/stores/layout-store'
 import { BOTH_SIDES } from '@/lib/numbers'
 import { documentZoom } from '@/components/menus/menu-geometry'
-import { SCROLLBAR_THIN } from '@/lib/class-names'
+import { dropTargetOutline, SCROLLBAR_THIN } from '@/lib/class-names'
+import { virtualListHeight, virtualRowsOrFallback } from '@/lib/virtual-rows'
+import { MarqueeSelection, type MarqueeRect } from './MarqueeSelection'
 
 /** Rows rendered before the virtualizer has measured its scroll element. */
 const UNMEASURED_FALLBACK_ROWS = 30
+const FALLBACK_ROW_KEY_PREFIX = 'row'
 
 const PARENT_ROW_ID = '..'
 export const DETAILS_ROW_HEIGHT_PX = 28
@@ -35,7 +38,11 @@ export type DetailsViewHandle = {
   contentPoint: (clientX: number, clientY: number) => { x: number; y: number } | null
 }
 
-type MarqueeRect = { left: number; top: number; width: number; height: number }
+function scrollOverflowClass(usesDetachedMacScrollbars: boolean) {
+  return usesDetachedMacScrollbars
+    ? 'overflow-x-hidden overflow-y-auto pb-2'
+    : 'overflow-x-auto overflow-y-auto'
+}
 
 type DetailsViewProps = {
   pane: PaneState
@@ -107,19 +114,18 @@ export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(funct
     overscan: 10,
     padding: DETAILS_LIST_INSET_PX,
   })
-  const virtualItems = rowVirtualizer.getVirtualItems()
-  const itemsToRender =
-    virtualItems.length > 0 || rowCount === 0
-      ? virtualItems
-      : Array.from({ length: Math.min(rowCount, UNMEASURED_FALLBACK_ROWS) }, (_, index) => ({
-          key: `row-${index}`,
-          index,
-          start: DETAILS_LIST_INSET_PX + index * rowHeightPx,
-        }))
-  const totalHeight =
-    rowCount === 0
-      ? 0
-      : rowVirtualizer.getTotalSize() || rowCount * rowHeightPx + BOTH_SIDES * DETAILS_LIST_INSET_PX
+  const itemsToRender = virtualRowsOrFallback({
+    measuredRows: rowVirtualizer.getVirtualItems(),
+    rowCount,
+    fallbackRowLimit: UNMEASURED_FALLBACK_ROWS,
+    rowStart: (index) => DETAILS_LIST_INSET_PX + index * rowHeightPx,
+    keyPrefix: FALLBACK_ROW_KEY_PREFIX,
+  })
+  const totalHeight = virtualListHeight({
+    measuredHeight: rowVirtualizer.getTotalSize(),
+    rowCount,
+    estimated: rowCount * rowHeightPx + BOTH_SIDES * DETAILS_LIST_INSET_PX,
+  })
   const configuredColumns = useLayoutStore((state) => state.columns)
   const columnWidths = useLayoutStore((state) => state.columnWidths)
   const contentWidth = useMemo(
@@ -221,7 +227,7 @@ export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(funct
           <div
             ref={parentRef}
             data-testid={`file-pane-scroll-${pane.id}`}
-            className={`h-full min-h-0 overscroll-contain ${SCROLLBAR_THIN} ${usesDetachedMacScrollbars ? 'overflow-x-hidden overflow-y-auto pb-2' : 'overflow-x-auto overflow-y-auto'} ${isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-light-accent dark:outline-dark-accent' : ''}`}
+            className={`h-full min-h-0 overscroll-contain ${SCROLLBAR_THIN} ${scrollOverflowClass(usesDetachedMacScrollbars)} ${dropTargetOutline(isPaneDropTarget)}`}
             onMouseDown={onContainerMouseDown}
             onWheel={handleBodyWheel}
             onScroll={(event: UIEvent<HTMLDivElement>) => {
@@ -268,27 +274,13 @@ export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(funct
                       isCut={cutEntryPaths.has(pathKey(entry.path))}
                       isDropTarget={dropTargetEntryId === entry.id}
                       draggable={!entry.trashId}
-                      isRenaming={rename?.entryId === entry.id}
-                      renameValue={rename?.entryId === entry.id ? rename.value : ''}
-                      renameBusy={rename?.entryId === entry.id ? rename.busy : false}
-                      renameError={rename?.entryId === entry.id ? rename.error : null}
+                      {...entryRenameProps(rename, entry.id)}
                       actions={actions}
                     />
                   </div>
                 ) : null
               })}
-              {marqueeRect ? (
-                <div
-                  data-testid="marquee-selection"
-                  className="pointer-events-none absolute border border-light-accent dark:border-dark-accent bg-light-tint dark:bg-dark-tint"
-                  style={{
-                    left: `${marqueeRect.left}px`,
-                    top: `${marqueeRect.top}px`,
-                    width: `${marqueeRect.width}px`,
-                    height: `${marqueeRect.height}px`,
-                  }}
-                />
-              ) : null}
+              <MarqueeSelection rect={marqueeRect} />
             </div>
           </div>
           {usesDetachedMacScrollbars ? (

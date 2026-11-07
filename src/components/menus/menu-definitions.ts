@@ -10,6 +10,7 @@ import { isTrashPath } from '@/lib/trash'
 import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import type { PaneId } from '@/types/pane'
+import { dispatchByKind, type KindHandlers } from '@/lib/kind-table'
 
 const NATIVE_SECTION_ID = 'native-extras'
 const MAX_FILE_CHIP_LENGTH = 4
@@ -20,17 +21,22 @@ function fileChip(entry: DirectoryEntry): string {
   return extension && extension.length <= MAX_FILE_CHIP_LENGTH ? extension : 'FILE'
 }
 
-export function describeMenuTarget(target: ContextMenuTarget): { title: string; chip?: string } {
-  switch (target.kind) {
-    case 'file':
-      return { title: target.entry.name, chip: fileChip(target.entry) }
-    case 'folder':
-      return { title: target.entry.name, chip: 'DIR' }
-    case 'multi':
-      return { title: 'Multiple items' }
-    default:
-      return { title: 'This folder' }
-  }
+type MenuTargetDescription = { title: string; chip?: string }
+
+const THIS_FOLDER_DESCRIPTION: MenuTargetDescription = { title: 'This folder' }
+
+const menuTargetDescriptions: KindHandlers<ContextMenuTarget, [], MenuTargetDescription> = {
+  file: (target) => ({ title: target.entry.name, chip: fileChip(target.entry) }),
+  folder: (target) => ({ title: target.entry.name, chip: 'DIR' }),
+  multi: () => ({ title: 'Multiple items' }),
+  empty: () => THIS_FOLDER_DESCRIPTION,
+  tab: () => THIS_FOLDER_DESCRIPTION,
+  tree: () => THIS_FOLDER_DESCRIPTION,
+  favourite: () => THIS_FOLDER_DESCRIPTION,
+}
+
+export function describeMenuTarget(target: ContextMenuTarget): MenuTargetDescription {
+  return dispatchByKind(menuTargetDescriptions, target)
 }
 
 export function buildContextMenuContent(
@@ -72,73 +78,80 @@ export function resolveMenuTarget(paneId: PaneId, entry?: DirectoryEntry): Conte
   return { kind: 'file', entry }
 }
 
+type PaneSnapshot = ReturnType<typeof usePanesStore.getState>['panes'][PaneId]
+
+function singleEntryRequest(
+  targetKind: 'file' | 'folder',
+  entry: DirectoryEntry,
+  pane: PaneSnapshot,
+): ContextMenuNativeRequest {
+  return { targetKind, targetPath: entry.path, folderPath: pane.path, selectedPaths: [entry.path] }
+}
+
+function folderPathRequest(
+  targetKind: 'tree' | 'driveRoot',
+  path: string,
+): ContextMenuNativeRequest {
+  return { targetKind, targetPath: path, folderPath: path, selectedPaths: [path] }
+}
+
+function multiSelectionRequest(paneId: PaneId, pane: PaneSnapshot): ContextMenuNativeRequest {
+  const selectedIdSet = new Set(useSelectionStore.getState().selections[paneId].selectedIds)
+  const selectedEntries = pane.entries.filter((item) => selectedIdSet.has(item.id))
+  const hasDirs = selectedEntries.some((item) => item.isDir)
+  const hasFiles = selectedEntries.some((item) => !item.isDir)
+  const mixesFoldersAndFiles = hasDirs && hasFiles
+  return {
+    targetKind: mixesFoldersAndFiles ? 'mixed' : 'multi',
+    targetPath: null,
+    folderPath: pane.path,
+    selectedPaths: selectedEntries.map((item) => item.path),
+  }
+}
+
+function isDriveRoot(path: string) {
+  const lowerPath = path.toLowerCase()
+  return usePanesStore
+    .getState()
+    .volumes.some((volume) => volume.mountRoot.toLowerCase() === lowerPath)
+}
+
+const nativeMenuRequests: KindHandlers<
+  ContextMenuTarget,
+  [paneId: PaneId, pane: PaneSnapshot],
+  ContextMenuNativeRequest | null
+> = {
+  file: (target, _paneId, pane) => singleEntryRequest('file', target.entry, pane),
+  folder: (target, _paneId, pane) => singleEntryRequest('folder', target.entry, pane),
+  multi: (_target, paneId, pane) => multiSelectionRequest(paneId, pane),
+  empty: (_target, _paneId, pane) => ({
+    targetKind: 'background',
+    targetPath: null,
+    folderPath: pane.path,
+    selectedPaths: [],
+  }),
+  tree: (target) => folderPathRequest(isDriveRoot(target.path) ? 'driveRoot' : 'tree', target.path),
+  favourite: (target) => folderPathRequest('tree', target.path),
+  tab: () => null,
+}
+
+// Trash entries have no real filesystem path (their `path` is an opaque
+// trash id), and the trash pane's own path isn't a real folder either, so
+// the native OS shell menu has nothing valid to operate on here.
+function targetsTrash(pane: PaneSnapshot, target: ContextMenuTarget) {
+  if (isTrashPath(pane.path)) {
+    return true
+  }
+  return target.kind === 'tree' && isTrashPath(target.path)
+}
+
 function buildNativeMenuRequest(
   paneId: PaneId,
   target: ContextMenuTarget,
 ): ContextMenuNativeRequest | null {
   const pane = usePanesStore.getState().panes[paneId]
-  const selection = useSelectionStore.getState().selections[paneId]
-
-  // Trash entries have no real filesystem path (their `path` is an opaque
-  // trash id), and the trash pane's own path isn't a real folder either, so
-  // the native OS shell menu has nothing valid to operate on here.
-  if (isTrashPath(pane.path) || (target.kind === 'tree' && isTrashPath(target.path))) {
+  if (targetsTrash(pane, target)) {
     return null
   }
-
-  switch (target.kind) {
-    case 'file':
-      return {
-        targetKind: 'file',
-        targetPath: target.entry.path,
-        folderPath: pane.path,
-        selectedPaths: [target.entry.path],
-      }
-    case 'folder':
-      return {
-        targetKind: 'folder',
-        targetPath: target.entry.path,
-        folderPath: pane.path,
-        selectedPaths: [target.entry.path],
-      }
-    case 'multi': {
-      const selectedIdSet = new Set(selection.selectedIds)
-      const selectedEntries = pane.entries.filter((item) => selectedIdSet.has(item.id))
-      const hasDirs = selectedEntries.some((item) => item.isDir)
-      const hasFiles = selectedEntries.some((item) => !item.isDir)
-      return {
-        targetKind: hasDirs && hasFiles ? 'mixed' : 'multi',
-        targetPath: null,
-        folderPath: pane.path,
-        selectedPaths: selectedEntries.map((item) => item.path),
-      }
-    }
-    case 'empty':
-      return {
-        targetKind: 'background',
-        targetPath: null,
-        folderPath: pane.path,
-        selectedPaths: [],
-      }
-    case 'tree': {
-      const isDriveRoot = usePanesStore
-        .getState()
-        .volumes.some((volume) => volume.mountRoot.toLowerCase() === target.path.toLowerCase())
-      return {
-        targetKind: isDriveRoot ? 'driveRoot' : 'tree',
-        targetPath: target.path,
-        folderPath: target.path,
-        selectedPaths: [target.path],
-      }
-    }
-    case 'favourite':
-      return {
-        targetKind: 'tree',
-        targetPath: target.path,
-        folderPath: target.path,
-        selectedPaths: [target.path],
-      }
-    case 'tab':
-      return null
-  }
+  return dispatchByKind(nativeMenuRequests, target, paneId, pane)
 }

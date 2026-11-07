@@ -138,4 +138,34 @@ describe('keymap', () => {
       ),
     ).toBe('deletePermanent')
   })
+
+  it('normalizes modifier and key aliases through the lookup tables', () => {
+    setPlatform('Win32')
+    expect(normalizeShortcut('control+option+shift+esc')).toBe('Ctrl+Alt+Shift+Escape')
+    expect(normalizeShortcut('cmd+arrowleft')).toBe('Meta+ArrowLeft')
+    expect(normalizeShortcut('ctrl+pagedown')).toBe('Ctrl+Pagedown')
+    expect(normalizeShortcut('shift+x')).toBe('Shift+X')
+    expect(normalizeShortcut(' + ')).toBe('')
+    setPlatform('MacIntel')
+    expect(normalizeShortcut('command+arrowup')).toBe('Ctrl+ArrowUp')
+  })
+
+  it('maps platform modifier keys when capturing a shortcut', () => {
+    setPlatform('MacIntel')
+    expect(captureShortcut(new KeyboardEvent('keydown', { key: 'Control' }))).toBeNull()
+    expect(captureShortcut(new KeyboardEvent('keydown', { key: 'Esc' }))).toBe('Escape')
+    expect(captureShortcut(new KeyboardEvent('keydown', { key: ' ', metaKey: true }))).toBe(
+      'Ctrl+Space',
+    )
+    setPlatform('Win32')
+    expect(captureShortcut(new KeyboardEvent('keydown', { key: 'OS' }))).toBeNull()
+    expect(captureShortcut(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }))).toBe(
+      'Ctrl+K',
+    )
+  })
+
+  it('labels modifiers per platform', () => {
+    expect(formatShortcutLabel('Ctrl+Shift+F', 'macos')).toBe('⌘⇧F')
+    expect(formatShortcutLabel('Meta+Space', 'windows')).toBe('Win+Space')
+  })
 })

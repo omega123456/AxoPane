@@ -3,6 +3,7 @@ import { waitFor } from '@testing-library/react'
 import { ipc } from '@/tests/ipc-mock'
 import {
   canDropInto,
+  dropModifiers,
   isSameOrDescendant,
   performDrop,
   resolveDropKind,
@@ -186,6 +187,22 @@ describe('performDrop', () => {
       expect(startOp).toHaveBeenCalledWith(
         expect.objectContaining({ items: [expect.objectContaining({ sizeBytes: 0 })] }),
       )
+    })
+  })
+})
+
+describe('dropModifiers', () => {
+  const keys = { altKey: true, ctrlKey: false, metaKey: true, shiftKey: false }
+
+  it('reads Option as force-copy and Cmd as force-move on macOS', () => {
+    expect(dropModifiers(keys, 'macos')).toEqual({ ctrlKey: true, shiftKey: true })
+  })
+
+  it('reads Ctrl as force-copy and Shift as force-move on Windows', () => {
+    expect(dropModifiers(keys, 'windows')).toEqual({ ctrlKey: false, shiftKey: false })
+    expect(dropModifiers({ ...keys, ctrlKey: true, shiftKey: true }, 'windows')).toEqual({
+      ctrlKey: true,
+      shiftKey: true,
     })
   })
 })

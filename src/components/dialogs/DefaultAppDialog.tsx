@@ -115,9 +115,6 @@ export function DefaultAppDialog() {
       }
     >
       <DialogText>Choose the app to always open “{dialog.fileName}” files with.</DialogText>
-      {loadState === 'error' ? (
-        <p className={`text-body ${TEXT_SECONDARY}`}>No applications were found.</p>
-      ) : null}
       {loadState === 'loaded' ? (
         <ul
           role="listbox"
@@ -148,7 +145,9 @@ export function DefaultAppDialog() {
             )
           })}
         </ul>
-      ) : null}
+      ) : (
+        <p className={`text-body ${TEXT_SECONDARY}`}>No applications were found.</p>
+      )}
       {errorMessage ? <InfoBar severity="error">{errorMessage}</InfoBar> : null}
     </DialogShell>
   )

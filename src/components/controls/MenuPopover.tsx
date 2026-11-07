@@ -11,6 +11,7 @@ import {
 import { createPortal } from 'react-dom'
 import { CheckIcon } from '@/components/icons'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
+import { handleKeyByTable } from '@/lib/key-table'
 import {
   applyMenuGeometry,
   documentZoom,
@@ -100,25 +101,22 @@ export function MenuPopover({ ariaLabel, trigger, items, radio = false }: MenuPo
   }, [open])
 
   function onMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key === 'Tab') {
+      closeAndRestoreFocus()
+      return
+    }
     const currentIndex = itemRefs.current.findIndex((item) => item === document.activeElement)
     const indexes = enabledIndexes()
     const currentPosition = indexes.indexOf(currentIndex)
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      closeAndRestoreFocus()
-    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault()
-      const next = event.key === 'ArrowDown' ? currentPosition + 1 : currentPosition - 1
-      focusItem(indexes[(next + indexes.length) % indexes.length] ?? 0)
-    } else if (event.key === 'Home') {
-      event.preventDefault()
-      focusItem(indexes[0] ?? 0)
-    } else if (event.key === 'End') {
-      event.preventDefault()
-      focusItem(indexes.at(-1) ?? 0)
-    } else if (event.key === 'Tab') {
-      closeAndRestoreFocus()
-    }
+    const focusEnabledAt = (position: number) =>
+      focusItem(indexes[(position + indexes.length) % indexes.length] ?? 0)
+    handleKeyByTable(event, {
+      Escape: () => closeAndRestoreFocus(),
+      ArrowDown: () => focusEnabledAt(currentPosition + 1),
+      ArrowUp: () => focusEnabledAt(currentPosition - 1),
+      Home: () => focusEnabledAt(0),
+      End: () => focusEnabledAt(-1),
+    })
   }
 
   function onTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {

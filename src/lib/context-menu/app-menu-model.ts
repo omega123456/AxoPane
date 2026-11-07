@@ -41,7 +41,8 @@ import { useClipboardStore } from '@/stores/clipboard-store'
 import { useKeymapStore } from '@/stores/keymap-store'
 import { useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
-import { useTabsStore } from '@/stores/tabs-store'
+import { useTabsStore, type TabState } from '@/stores/tabs-store'
+import { dispatchByKind, type KindHandlers } from '@/lib/kind-table'
 import { useConfigStore } from '@/stores/config-store'
 import type { CommandId, DirectoryEntry } from '@/lib/types/ipc'
 import type { PaneId } from '@/types/pane'
@@ -608,6 +609,21 @@ function buildTreeContent(
   }
 }
 
+function hasUnlockedTab(tabList: TabState[]) {
+  return tabList.some((item) => !item.locked)
+}
+
+function tabPositionFlags(tabList: TabState[], tabIndex: number) {
+  const tabMissing = tabIndex === -1
+  return {
+    cannotMoveLeft: tabIndex <= 0,
+    cannotMoveRight: tabMissing || tabIndex >= tabList.length - 1,
+    cannotMoveToOtherPane: tabMissing || tabList.length <= 1,
+    nothingToCloseLeft: !hasUnlockedTab(tabList.slice(0, Math.max(tabIndex, 0))),
+    nothingToCloseRight: tabMissing || !hasUnlockedTab(tabList.slice(tabIndex + 1)),
+  }
+}
+
 function buildTabContent(
   paneId: PaneId,
   target: Extract<ContextMenuTarget, { kind: 'tab' }>,
@@ -618,6 +634,9 @@ function buildTabContent(
   const destinationPaneId = otherPane(paneId)
   const destination = useTabsStore.getState().panes[destinationPaneId]
   const path = tab?.path ?? usePanesStore.getState().panes[paneId].path
+  const locked = tab?.locked
+  const flags = tabPositionFlags(tabs.tabs, tabIndex)
+  const cannotClose = tabs.tabs.length <= 1 || locked
 
   return {
     topStrip: [],
@@ -635,14 +654,14 @@ function buildTabContent(
           `move-tab-within-left-${target.tabId}`,
           'Move tab left',
           moveTabContextAction(target.tabId, paneId, tabIndex - 1),
-          { disabled: tabIndex <= 0, icon: { kind: 'app', name: 'arrow-left' } },
+          { disabled: flags.cannotMoveLeft, icon: { kind: 'app', name: 'arrow-left' } },
         ),
         customRow(
           `move-tab-within-right-${target.tabId}`,
           'Move tab right',
           moveTabContextAction(target.tabId, paneId, tabIndex + 1),
           {
-            disabled: tabIndex === -1 || tabIndex >= tabs.tabs.length - 1,
+            disabled: flags.cannotMoveRight,
             icon: { kind: 'app', name: 'arrow-right' },
           },
         ),
@@ -651,7 +670,7 @@ function buildTabContent(
           `Move tab to ${destinationPaneId} pane`,
           moveTabContextAction(target.tabId, destinationPaneId, destination.tabs.length),
           {
-            disabled: tabIndex === -1 || tabs.tabs.length <= 1,
+            disabled: flags.cannotMoveToOtherPane,
             hidden: useLayoutStore.getState().defaultPaneMode === 'single',
             icon: { kind: 'app', name: `panel-${destinationPaneId}` },
           },
@@ -664,11 +683,11 @@ function buildTabContent(
         ),
         customRow(
           `lock-tab-${target.tabId}`,
-          tab?.locked ? 'Unlock tab' : 'Lock tab',
-          setTabLockedContextAction(target.tabId, !tab?.locked),
+          locked ? 'Unlock tab' : 'Lock tab',
+          setTabLockedContextAction(target.tabId, !locked),
         ),
         customRow(`close-tab-${target.tabId}`, 'Close tab', closeTabContextAction(target.tabId), {
-          disabled: tabs.tabs.length <= 1 || tab?.locked,
+          disabled: cannotClose,
           danger: true,
           icon: { kind: 'app', name: 'close-tab' },
         }),
@@ -677,7 +696,7 @@ function buildTabContent(
           'Close tabs to the left',
           closeTabsBesideContextAction(target.tabId, 'left'),
           {
-            disabled: !tabs.tabs.slice(0, Math.max(tabIndex, 0)).some((item) => !item.locked),
+            disabled: flags.nothingToCloseLeft,
             danger: true,
           },
         ),
@@ -686,8 +705,7 @@ function buildTabContent(
           'Close tabs to the right',
           closeTabsBesideContextAction(target.tabId, 'right'),
           {
-            disabled:
-              tabIndex === -1 || !tabs.tabs.slice(tabIndex + 1).some((item) => !item.locked),
+            disabled: flags.nothingToCloseRight,
             danger: true,
           },
         ),
@@ -696,24 +714,24 @@ function buildTabContent(
   }
 }
 
+const appMenuContentBuilders: KindHandlers<
+  ContextMenuTarget,
+  [paneId: PaneId, platform: PlatformOs],
+  ContextMenuContent
+> = {
+  file: (target, paneId, platform) => buildFileOrFolderContent(paneId, target, platform),
+  folder: (target, paneId, platform) => buildFileOrFolderContent(paneId, target, platform),
+  multi: (_target, paneId, platform) => buildMultiContent(paneId, platform),
+  empty: (_target, paneId, platform) => buildEmptyContent(paneId, platform),
+  tree: (target, _paneId, platform) => buildTreeContent(target, platform),
+  favourite: (target, _paneId, platform) => buildTreeContent(target, platform),
+  tab: (target, paneId) => buildTabContent(paneId, target),
+}
+
 export function buildAppContextMenuContent(
   paneId: PaneId,
   target: ContextMenuTarget,
   platform: PlatformOs,
 ): ContextMenuContent {
-  switch (target.kind) {
-    case 'file':
-    case 'folder':
-      return buildFileOrFolderContent(paneId, target, platform)
-    case 'multi':
-      return buildMultiContent(paneId, platform)
-    case 'empty':
-      return buildEmptyContent(paneId, platform)
-    case 'tree':
-      return buildTreeContent(target, platform)
-    case 'favourite':
-      return buildTreeContent(target, platform)
-    case 'tab':
-      return buildTabContent(paneId, target)
-  }
+  return dispatchByKind(appMenuContentBuilders, target, paneId, platform)
 }

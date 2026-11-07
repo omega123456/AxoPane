@@ -81,6 +81,138 @@ function nextGeneration(previous?: ActiveThumbnailScope) {
   return (previous?.generation ?? 0) + 1
 }
 
+function sameScopeContext(
+  previous: ActiveThumbnailScope | undefined,
+  scope: Omit<ThumbnailScope, 'generation'>,
+): previous is ActiveThumbnailScope {
+  return (
+    previous !== undefined && previous.mode === scope.mode && pathsMatch(previous.path, scope.path)
+  )
+}
+
+function nextScopeVersion(
+  previous: ActiveThumbnailScope | undefined,
+  scope: Omit<ThumbnailScope, 'generation'>,
+) {
+  if (sameScopeContext(previous, scope)) {
+    return { generation: previous.generation, revision: previous.revision + 1 }
+  }
+  return { generation: nextGeneration(previous), revision: 1 }
+}
+
+function uniqueFileCandidates(candidates: ThumbnailCandidateRequest[]) {
+  return Object.values(
+    Object.fromEntries(
+      candidates
+        .filter((candidate) => !candidate.isDirectory)
+        .map((candidate) => [thumbnailFingerprintKey(candidate), candidate]),
+    ),
+  )
+}
+
+function touchCacheRecords(
+  cache: Record<string, ThumbnailCacheRecord>,
+  fingerprints: string[],
+  now: number,
+) {
+  const touched = { ...cache }
+  for (const fingerprint of fingerprints) {
+    const record = touched[fingerprint]
+    if (record) touched[fingerprint] = { ...record, touched: now }
+  }
+  return touched
+}
+
+function needsThumbnail(record: ThumbnailCacheRecord | undefined, now: number) {
+  if (!record) {
+    return true
+  }
+  if (!isThumbnailCacheRecordUsable(record, now)) {
+    return true
+  }
+  const isLowQualityPreview = record.state === 'ready' && record.quality !== 'high'
+  return isLowQualityPreview
+}
+
+type FailedThumbnailRequest = {
+  key: string
+  generation: number
+  revision: number
+  missing: ThumbnailCandidateRequest[]
+  failedAt: number
+}
+
+function isCurrentRequest(
+  scope: ActiveThumbnailScope | undefined,
+  generation: number,
+  revision: number,
+) {
+  if (!scope) {
+    return false
+  }
+  const sameGeneration = scope.generation === generation
+  return sameGeneration && scope.revision === revision
+}
+
+function markRequestFailed(
+  state: ThumbnailStore,
+  { key, generation, revision, missing, failedAt }: FailedThumbnailRequest,
+) {
+  if (!isCurrentRequest(state.scopes[key], generation, revision)) {
+    return state
+  }
+  const nextCache = { ...state.cache }
+  for (const candidate of missing) {
+    nextCache[thumbnailFingerprintKey(candidate)] = {
+      state: 'failed',
+      quality: null,
+      dataUrl: null,
+      touched: failedAt,
+      weight: 1,
+    }
+  }
+  return { cache: pruneThumbnailCache(nextCache, visibleProtection(state.scopes), failedAt) }
+}
+
+function resultFingerprint(event: ThumbnailResultEvent) {
+  return thumbnailFingerprintKey({
+    path: event.fingerprintPath,
+    modifiedUnixSeconds: event.modifiedUnixSeconds,
+    sizeBytes: event.sizeBytes,
+  })
+}
+
+function scopeAcceptsResult(
+  scope: ActiveThumbnailScope | undefined,
+  event: ThumbnailResultEvent,
+  fingerprint: string,
+) {
+  if (!scope) {
+    return false
+  }
+  if (scope.mode !== 'thumbnails') {
+    return false
+  }
+  if (scope.generation !== event.generation) {
+    return false
+  }
+  if (!pathsMatch(scope.path, event.path)) {
+    return false
+  }
+  return Boolean(scope.candidates[fingerprint])
+}
+
+function resultCacheRecord(event: ThumbnailResultEvent, now: number): ThumbnailCacheRecord {
+  const ready = event.state === 'ready'
+  return {
+    state: event.state,
+    quality: ready ? event.quality : null,
+    dataUrl: ready ? event.dataUrl : null,
+    touched: now,
+    weight: utf16ByteWeight(ready ? event.dataUrl : null),
+  }
+}
+
 export const useThumbnailStore = create<ThumbnailStore>((set, get) => ({
   scopes: {},
   cache: {},
@@ -88,21 +220,14 @@ export const useThumbnailStore = create<ThumbnailStore>((set, get) => ({
     const key = scopeKey(scope.paneId, scope.tabId)
     const signature = candidateSignature(candidates)
     const previous = get().scopes[key]
-    const contextMatches =
-      previous && previous.mode === scope.mode && pathsMatch(previous.path, scope.path)
-    if (contextMatches && previous.candidateSignature === signature) return
+    const contextMatches = sameScopeContext(previous, scope)
+    const candidatesUnchanged = contextMatches && previous.candidateSignature === signature
+    if (candidatesUnchanged) return
 
-    const cancelPrevious = previous && !contextMatches ? cancelThumbnails(previous) : undefined
-
-    const generation = contextMatches ? previous.generation : nextGeneration(previous)
-    const revision = contextMatches ? previous.revision + 1 : 1
-    const visibleCandidates = Object.values(
-      Object.fromEntries(
-        candidates
-          .filter((candidate) => !candidate.isDirectory)
-          .map((candidate) => [thumbnailFingerprintKey(candidate), candidate]),
-      ),
-    )
+    const contextChanged = previous !== undefined && !contextMatches
+    const cancelPrevious = contextChanged ? cancelThumbnails(previous) : undefined
+    const { generation, revision } = nextScopeVersion(previous, scope)
+    const visibleCandidates = uniqueFileCandidates(candidates)
     const candidatesByFingerprint = Object.fromEntries(
       visibleCandidates.map((candidate) => [thumbnailFingerprintKey(candidate), candidate]),
     )
@@ -115,11 +240,7 @@ export const useThumbnailStore = create<ThumbnailStore>((set, get) => ({
     }
     const scopes = { ...get().scopes, [key]: nextScope }
     const now = cacheNow()
-    const touchedCache = { ...get().cache }
-    for (const fingerprint of Object.keys(candidatesByFingerprint)) {
-      const record = touchedCache[fingerprint]
-      if (record) touchedCache[fingerprint] = { ...record, touched: now }
-    }
+    const touchedCache = touchCacheRecords(get().cache, Object.keys(candidatesByFingerprint), now)
     const cache = pruneThumbnailCache(touchedCache, visibleProtection(scopes), now)
     set({ scopes, cache })
 
@@ -127,14 +248,9 @@ export const useThumbnailStore = create<ThumbnailStore>((set, get) => ({
       await cancelPrevious
       return
     }
-    const missing = visibleCandidates.filter((candidate) => {
-      const record = cache[thumbnailFingerprintKey(candidate)]
-      return (
-        !record ||
-        !isThumbnailCacheRecordUsable(record, now) ||
-        (record.state === 'ready' && record.quality !== 'high')
-      )
-    })
+    const missing = visibleCandidates.filter((candidate) =>
+      needsThumbnail(cache[thumbnailFingerprintKey(candidate)], now),
+    )
 
     try {
       await cancelPrevious
@@ -149,23 +265,7 @@ export const useThumbnailStore = create<ThumbnailStore>((set, get) => ({
       }
     } catch (error) {
       const failedAt = cacheNow()
-      set((state) => {
-        const current = state.scopes[key]
-        if (!current || current.generation !== generation || current.revision !== revision)
-          return state
-        const nextCache = { ...state.cache }
-        for (const candidate of missing) {
-          const fingerprint = thumbnailFingerprintKey(candidate)
-          nextCache[fingerprint] = {
-            state: 'failed',
-            quality: null,
-            dataUrl: null,
-            touched: failedAt,
-            weight: 1,
-          }
-        }
-        return { cache: pruneThumbnailCache(nextCache, visibleProtection(state.scopes), failedAt) }
-      })
+      set((state) => markRequestFailed(state, { key, generation, revision, missing, failedAt }))
       throw error
     }
   },
@@ -191,27 +291,11 @@ export const useThumbnailStore = create<ThumbnailStore>((set, get) => ({
       let changed = false
       for (const event of events) {
         const scope = state.scopes[scopeKey(event.paneId, event.tabId)]
-        const fingerprint = thumbnailFingerprintKey({
-          path: event.fingerprintPath,
-          modifiedUnixSeconds: event.modifiedUnixSeconds,
-          sizeBytes: event.sizeBytes,
-        })
-        if (
-          !scope ||
-          scope.mode !== 'thumbnails' ||
-          scope.generation !== event.generation ||
-          !pathsMatch(scope.path, event.path) ||
-          !scope.candidates[fingerprint]
-        ) {
+        const fingerprint = resultFingerprint(event)
+        if (!scopeAcceptsResult(scope, event, fingerprint)) {
           continue
         }
-        cache[fingerprint] = {
-          state: event.state,
-          quality: event.state === 'ready' ? event.quality : null,
-          dataUrl: event.state === 'ready' ? event.dataUrl : null,
-          touched: now,
-          weight: utf16ByteWeight(event.state === 'ready' ? event.dataUrl : null),
-        }
+        cache[fingerprint] = resultCacheRecord(event, now)
         changed = true
       }
       if (!changed) return state

@@ -15,11 +15,8 @@ import {
 import { BreadcrumbBar } from './BreadcrumbBar'
 import { type FileRowActions } from './FileRow'
 import { DETAILS_LIST_INSET_PX, DETAILS_ROW_HEIGHT_PX, DetailsView } from './DetailsView'
-import {
-  GraphicalView,
-  type GraphicalThumbnailRange,
-  type GraphicalViewHandle,
-} from './GraphicalView'
+import { GraphicalView, type GraphicalViewHandle } from './GraphicalView'
+import { paneBodyState, type PaneBodyState } from './pane-body-state'
 import { GraphicalSortBar } from './GraphicalSortBar'
 import { executeCommand } from '@/lib/commands'
 import { detectPlatformOs, resolveCommandForEvent } from '@/lib/keymap'
@@ -39,15 +36,10 @@ import { startNativeDrag } from '@/lib/ipc/commands'
 import { beginNativeDragBridge, endNativeDragBridge } from '@/lib/native-drag-bridge'
 import { useInlineRenameStore } from '@/stores/inline-rename-store'
 import { usePanesStore } from '@/stores/panes-store'
-import { activeConflict, useQueueStore } from '@/stores/queue-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
 import { useClipboardStore } from '@/stores/clipboard-store'
 import { useKeymapStore } from '@/stores/keymap-store'
-import { useDefaultAppDialogStore } from '@/stores/default-app-dialog-store'
-import { useSearchPaletteStore } from '@/stores/search-palette-store'
-import { useSettingsStore } from '@/stores/settings-store'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
-import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useDragStore } from '@/stores/drag-store'
 import { useNativeMenuWarmStore } from '@/stores/native-menu-warm-store'
@@ -55,31 +47,30 @@ import { useThumbnailStore } from '@/stores/thumbnail-store'
 import { useTabsStore } from '@/stores/tabs-store'
 import {
   canDropInto,
+  dropModifiers,
   performDrop,
   resolveDropKind,
   setDropEffect,
   type DragItem,
 } from '@/lib/drag-drop'
-import { getUnixTime, parseISO } from 'date-fns'
-import type { GridMovement } from '@/lib/pane-grid'
-import type { ThumbnailCandidateRequest } from '@/lib/types/ipc'
+import { arrowGridMovements, type GridMovement } from '@/lib/pane-grid'
+import {
+  thumbnailCandidatesInRange,
+  type GraphicalThumbnailRange,
+} from '@/lib/thumbnail-candidates'
+import { handleKeyByTable, type KeyHandlerTable } from '@/lib/key-table'
+import { isEditableTarget } from '@/lib/editable-target'
+import { useModalOpen } from '@/lib/use-modal-open'
 import type { PaneId } from '@/types/pane'
 import { clamp } from '@/lib/numbers'
 import { documentZoom } from '@/components/menus/menu-geometry'
-import { SCROLLBAR_THIN } from '@/lib/class-names'
+import { dropTargetOutline, SCROLLBAR_THIN } from '@/lib/class-names'
 
 const SKELETON_DELAY_MS = 1000
 const DOUBLE_CLICK_COUNT = 2
 
-function isPermissionError(message: string | null) {
-  if (!message) {
-    return false
-  }
-
-  return /permission|denied|forbidden|access is denied/i.test(message)
-}
-
 const PARENT_ROW_ID = '..'
+const ENTER_KEY = 'Enter'
 // ponytail: 100 ms separates generated click bursts; tune only for measured slower macros.
 const macroContinuationWindowMs = 100
 // Parent-row activation pairs raw clicks itself instead of trusting dblclick:
@@ -90,12 +81,23 @@ const parentClickPairWindowMs = 500
 const marqueeDragThresholdPx = 4
 const visibleIconRequestDebounceMs = 100
 
-const arrowGridMovements: Partial<Record<string, GridMovement>> = {
-  ArrowLeft: 'left',
-  ArrowRight: 'right',
-  ArrowUp: 'up',
-  ArrowDown: 'down',
+function gridMovementKeyTable(onMove: (movement: GridMovement) => void): KeyHandlerTable {
+  const table: KeyHandlerTable = {}
+  for (const [key, movement] of Object.entries(arrowGridMovements)) {
+    table[key] = () => onMove(movement)
+  }
+  return table
 }
+
+// Space is a bound command (Calculate size), not a typeahead-to-filter
+// character, so it falls through to the command resolver.
+function isTypeaheadKey(event: ReactKeyboardEvent<HTMLElement>) {
+  return (
+    event.key.length === 1 && event.key !== ' ' && !event.ctrlKey && !event.metaKey && !event.altKey
+  )
+}
+
+type PaneBodyRenderers = Record<PaneBodyState, () => React.ReactNode>
 
 type MarqueeRect = { left: number; top: number; width: number; height: number }
 type MarqueeDragState = {
@@ -105,36 +107,8 @@ type MarqueeDragState = {
   baseSelectedIds: string[]
 }
 
-function isEditableTarget(target: EventTarget | null) {
-  return (
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    (target instanceof HTMLElement && target.isContentEditable)
-  )
-}
-
 type FilePaneProps = {
   paneId: PaneId
-}
-
-function useModalOpen() {
-  const settingsOpen = useSettingsStore((state) => state.isOpen)
-  const actionDialog = useActionDialogStore((state) => state.dialog)
-  const propertiesDialog = usePropertiesDialogStore((state) => state.dialog)
-  const contextMenu = useContextMenuStore((state) => state.menu)
-  const defaultAppDialog = useDefaultAppDialogStore((state) => state.dialog)
-  const searchPaletteOpen = useSearchPaletteStore((state) => state.isOpen)
-  const conflict = useQueueStore(activeConflict)
-
-  return (
-    settingsOpen ||
-    actionDialog !== null ||
-    propertiesDialog !== null ||
-    contextMenu !== null ||
-    defaultAppDialog !== null ||
-    searchPaletteOpen ||
-    conflict !== undefined
-  )
 }
 
 export function FilePane({ paneId }: FilePaneProps) {
@@ -180,6 +154,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   const detailsViewRef = useRef<React.ElementRef<typeof DetailsView>>(null)
   const graphicalViewRef = useRef<GraphicalViewHandle>(null)
   const scrollPathRef = useRef(pane.path)
+  const savedScrollTop = pane.scrollPositions[pane.path] ?? 0
   // Tracks the live scrollTop for the currently-mounted path without writing
   // to the store on every scroll event (that would re-render the whole app on
   // every frame of scrolling). Kept in sync with the DOM on every scroll and
@@ -192,7 +167,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   // no path switch in flight), so a same-path re-run triggered by something
   // else entirely (e.g. a fs-watch patch changing the entry count) never
   // clobbers the user's current live scroll position.
-  const pendingRestoreRef = useRef<number | null>(pane.scrollPositions[pane.path] ?? 0)
+  const pendingRestoreRef = useRef<number | null>(savedScrollTop)
   // True for exactly the first evaluation of a given `pendingRestoreRef` arm
   // (right after mount or a path switch). While true, the layout effect below
   // gives the restore the benefit of the doubt even if it looks unreachable
@@ -245,7 +220,6 @@ export function FilePane({ paneId }: FilePaneProps) {
   // (O(selection size)) on every row on every render.
   const selectedIdSet = useMemo(() => new Set(selection.selectedIds), [selection.selectedIds])
 
-  const savedScrollTop = pane.scrollPositions[pane.path] ?? 0
   const viewMode = activeTab.viewMode
 
   useEffect(() => {
@@ -345,35 +319,7 @@ export function FilePane({ paneId }: FilePaneProps) {
         thumbnailRequestFrameRef.current = undefined
         const latest = pendingThumbnailRangeRef.current
         if (!latest || latest.mode !== 'thumbnails') return
-        const { range: latestRange } = latest
-        const candidates: ThumbnailCandidateRequest[] = latest.entries
-          .slice(latestRange.prefetchStart, latestRange.prefetchEnd + 1)
-          .flatMap((entry, offset) => {
-            if (entry.isDir || entry.sizeBytes === null || entry.modifiedAt === null) return []
-            const modifiedUnixSeconds = getUnixTime(parseISO(entry.modifiedAt))
-            if (!Number.isFinite(modifiedUnixSeconds)) return []
-            const index = latestRange.prefetchStart + offset
-            const visible = index >= latestRange.visibleStart && index <= latestRange.visibleEnd
-            const ahead =
-              latestRange.direction === 'up'
-                ? index < latestRange.visibleStart
-                : index > latestRange.visibleEnd
-            const order = visible
-              ? index - latestRange.visibleStart
-              : index < latestRange.visibleStart
-                ? latestRange.visibleStart - index
-                : index - latestRange.visibleEnd
-            return [
-              {
-                path: entry.path,
-                modifiedUnixSeconds,
-                sizeBytes: entry.sizeBytes,
-                isDirectory: false,
-                priority: visible ? 'visible' : ahead ? 'ahead' : 'behind',
-                order,
-              } satisfies ThumbnailCandidateRequest,
-            ]
-          })
+        const candidates = thumbnailCandidatesInRange(latest.entries, latest.range)
         void setThumbnailCandidates(
           {
             paneId: latest.paneId,
@@ -701,11 +647,12 @@ export function FilePane({ paneId }: FilePaneProps) {
 
   useEffect(() => () => detachMarqueeListenersRef.current?.(), [])
 
-  const permissionDenied = isPermissionError(pane.error)
-  // An empty folder still shows the synthetic ".." row when a parent exists, so
-  // the dedicated EmptyState only takes over when there is genuinely nothing to
-  // render (empty folder at a filesystem root).
-  const showEmpty = !pane.loading && !pane.error && rowCount === 0
+  const bodyState = paneBodyState({
+    showSkeleton,
+    loading: pane.loading,
+    error: pane.error,
+    rowCount,
+  })
   const newFolderAction = isTrashPath(pane.path)
     ? undefined
     : () => useActionDialogStore.getState().open({ kind: 'newFolder', paneId })
@@ -736,17 +683,6 @@ export function FilePane({ paneId }: FilePaneProps) {
       ...buildContextMenuContent(paneId, target, platform),
       targetId: entryId,
     })
-  }
-
-  // Internal drag-and-drop. Copy-vs-move follows platform convention: on Windows
-  // Ctrl forces copy and Shift forces move; on macOS Option forces copy and
-  // Cmd forces move. `resolveDropKind` reads these as generic force-copy /
-  // force-move flags so its logic stays OS-agnostic.
-  function dropModifiers(event: React.DragEvent) {
-    if (platform === 'macos') {
-      return { ctrlKey: event.altKey, shiftKey: event.metaKey }
-    }
-    return { ctrlKey: event.ctrlKey, shiftKey: event.shiftKey }
   }
 
   function handleRowDragStart(entryId: string, event: React.DragEvent<HTMLDivElement>) {
@@ -820,7 +756,7 @@ export function FilePane({ paneId }: FilePaneProps) {
     event.stopPropagation()
     setDropEffect(
       event.dataTransfer,
-      resolveDropKind(dropModifiers(event), drag.sourceDir, entry.path, platform),
+      resolveDropKind(dropModifiers(event, platform), drag.sourceDir, entry.path, platform),
     )
     setDropTargetEntryId(entry.id)
   }
@@ -837,7 +773,7 @@ export function FilePane({ paneId }: FilePaneProps) {
     event.preventDefault()
     event.stopPropagation()
     const drag = useDragStore.getState().drag
-    const modifiers = dropModifiers(event)
+    const modifiers = dropModifiers(event, platform)
     clearDragState()
     await performDrop(drag, entry.path, modifiers, platform)
   }
@@ -850,7 +786,7 @@ export function FilePane({ paneId }: FilePaneProps) {
     event.preventDefault()
     setDropEffect(
       event.dataTransfer,
-      resolveDropKind(dropModifiers(event), drag.sourceDir, pane.path, platform),
+      resolveDropKind(dropModifiers(event, platform), drag.sourceDir, pane.path, platform),
     )
     setIsPaneDropTarget(true)
   }
@@ -866,7 +802,7 @@ export function FilePane({ paneId }: FilePaneProps) {
   async function handlePaneDrop(event: React.DragEvent<HTMLDivElement>) {
     event.preventDefault()
     const drag = useDragStore.getState().drag
-    const modifiers = dropModifiers(event)
+    const modifiers = dropModifiers(event, platform)
     clearDragState()
     await performDrop(drag, pane.path, modifiers, platform)
   }
@@ -947,93 +883,123 @@ export function FilePane({ paneId }: FilePaneProps) {
     [],
   )
 
+  // Child views handle their own navigation (marking the event handled), and
+  // every editable target except the shared filter (e.g. an inline rename)
+  // keeps swallowing keys.
+  function shouldIgnorePaneKey(event: ReactKeyboardEvent<HTMLElement>, fromFilter: boolean) {
+    return (
+      !isActivePane ||
+      event.defaultPrevented ||
+      modalOpen ||
+      (isEditableTarget(event.target) && !fromFilter)
+    )
+  }
+
+  function navigationKeyTable(): KeyHandlerTable {
+    const rowNavigation: KeyHandlerTable = {
+      ArrowDown: () => focusByRowIndex(focusedRowIndex + 1),
+      ArrowUp: () => focusByRowIndex(focusedRowIndex - 1),
+      PageDown: () => focusByRowIndex(focusedRowIndex + visibleRowCount()),
+      PageUp: () => focusByRowIndex(focusedRowIndex - visibleRowCount()),
+      Home: () => focusByRowIndex(0),
+      End: () => focusByRowIndex(rowCount - 1),
+    }
+    if (viewMode === 'details') {
+      return rowNavigation
+    }
+    return {
+      ...rowNavigation,
+      ...gridMovementKeyTable((movement) => graphicalViewRef.current?.moveFocus(movement)),
+    }
+  }
+
+  // Keys typed into the shared filter still open the focused entry on Enter;
+  // every other key reaches the input so typing into the filter is unaffected.
+  // Focus returns to the pane shell so the opened folder resumes arrow-key
+  // control. Search everywhere is the one command that also works here.
+  function handleFilterKey(event: ReactKeyboardEvent<HTMLElement>) {
+    const entryToOpen = event.key === ENTER_KEY ? pane.focusedEntryId : null
+    if (entryToOpen) {
+      event.preventDefault()
+      focusPaneShell()
+      void activateEntry(entryToOpen)
+      return
+    }
+    if (resolveCommandForEvent(event.nativeEvent, keymap) === 'searchEverywhere') {
+      event.preventDefault()
+      executeCommand('searchEverywhere', paneId)
+    }
+  }
+
+  // The focused pane owns its commands. Stopping the event keeps the global
+  // fallback handler on `window` (App.tsx) from dispatching it a second time —
+  // a double paste would otherwise enqueue two transfers.
+  function runBoundCommand(event: ReactKeyboardEvent<HTMLElement>) {
+    const commandId = resolveCommandForEvent(event.nativeEvent, keymap)
+    if (!commandId) {
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    executeCommand(commandId, paneId)
+  }
+
   function handlePaneKeyDown(event: ReactKeyboardEvent<HTMLElement>, fromFilter: boolean) {
-    if (!isActivePane) {
+    if (shouldIgnorePaneKey(event, fromFilter)) {
       return
     }
-
-    // Child views handle their own navigation; everything else still belongs
-    // to the pane (including type-to-filter and configured shortcuts).
-    if (event.defaultPrevented) {
+    if (handleKeyByTable(event, navigationKeyTable())) {
       return
     }
-
-    if (modalOpen) {
+    if (fromFilter) {
+      handleFilterKey(event)
       return
     }
-
-    // Keys typed into the shared filter still drive list navigation: pressing
-    // arrows/Enter moves through the filtered list (and opens the focused
-    // entry) while the cursor stays in the filter so the user can keep refining
-    // it. Every other editable target (e.g. an inline rename) keeps swallowing
-    // keys as before.
-    const targetIsFilter = fromFilter
-
-    if (isEditableTarget(event.target) && !targetIsFilter) {
-      return
-    }
-
-    const graphicalMovement = viewMode === 'details' ? undefined : arrowGridMovements[event.key]
-    if (graphicalMovement) {
-      event.preventDefault()
-      graphicalViewRef.current?.moveFocus(graphicalMovement)
-      return
-    }
-
-    if (event.key === 'ArrowDown') {
-      event.preventDefault()
-      focusByRowIndex(focusedRowIndex + 1)
-    } else if (event.key === 'ArrowUp') {
-      event.preventDefault()
-      focusByRowIndex(focusedRowIndex - 1)
-    } else if (event.key === 'PageDown') {
-      event.preventDefault()
-      focusByRowIndex(focusedRowIndex + visibleRowCount())
-    } else if (event.key === 'PageUp') {
-      event.preventDefault()
-      focusByRowIndex(focusedRowIndex - visibleRowCount())
-    } else if (event.key === 'Home') {
-      event.preventDefault()
-      focusByRowIndex(0)
-    } else if (event.key === 'End') {
-      event.preventDefault()
-      focusByRowIndex(rowCount - 1)
-    } else if (targetIsFilter) {
-      // Open the focused entry on Enter; let every other key reach the input
-      // so typing into the filter is unaffected.
-      if (event.key === 'Enter' && pane.focusedEntryId) {
-        event.preventDefault()
-        // Hand focus back to the pane shell so navigating into the new folder
-        // resumes arrow-key control instead of leaving the cursor trapped in
-        // the filter input.
-        focusPaneShell()
-        void activateEntry(pane.focusedEntryId)
-      } else if (resolveCommandForEvent(event.nativeEvent, keymap) === 'searchEverywhere') {
-        // The one command that also works while typing in the filter.
-        event.preventDefault()
-        executeCommand('searchEverywhere', paneId)
-      }
-    } else if (
-      event.key.length === 1 &&
-      // Space is a bound command (Calculate size), not a typeahead-to-filter
-      // character — let it fall through to the command resolver below.
-      event.key !== ' ' &&
-      !event.ctrlKey &&
-      !event.metaKey &&
-      !event.altKey
-    ) {
+    if (isTypeaheadKey(event)) {
       focusFilterInput()
-    } else {
-      const commandId = resolveCommandForEvent(event.nativeEvent, keymap)
-      if (commandId) {
-        event.preventDefault()
-        // The focused pane owns this command. Stop the event here so the
-        // global fallback handler on `window` (App.tsx) doesn't dispatch it a
-        // second time — a double paste would otherwise enqueue two transfers.
-        event.stopPropagation()
-        executeCommand(commandId, paneId)
-      }
+      return
     }
+    runBoundCommand(event)
+  }
+
+  const retryListing = () => void reloadPane(paneId)
+  const sharedBodyRenderers = {
+    permissionDenied: () => <PermissionDenied />,
+    error: () => <ErrorState path={pane.path} message={pane.error ?? ''} onRetry={retryListing} />,
+    listing: () => undefined,
+  }
+  const detailsBodyRenderers: PaneBodyRenderers = {
+    ...sharedBodyRenderers,
+    skeleton: () => (
+      <div
+        className={`min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain ${SCROLLBAR_THIN}`}
+      >
+        <LoadingSkeleton />
+      </div>
+    ),
+    empty: () => (
+      <div
+        className={`flex min-h-0 flex-1 flex-col ${dropTargetOutline(isPaneDropTarget)}`}
+        onDragOver={handlePaneDragOver}
+        onDragLeave={handlePaneDragLeave}
+        onDrop={(event) => void handlePaneDrop(event)}
+      >
+        <EmptyState onNewFolder={newFolderAction} />
+      </div>
+    ),
+  }
+  const graphicalBodyRenderers: PaneBodyRenderers = {
+    ...sharedBodyRenderers,
+    skeleton: () => (
+      <div className="min-h-0 flex-1 overflow-auto">
+        <LoadingSkeleton />
+      </div>
+    ),
+    empty: () => (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <EmptyState onNewFolder={newFolderAction} />
+      </div>
+    ),
   }
 
   // The shared filter forwards the keys typed into it while this pane is active.
@@ -1088,32 +1054,7 @@ export function FilePane({ paneId }: FilePaneProps) {
           onParentFocus={() => focusByRowIndex(0)}
           onParentActivate={activateParentFromPointer}
           scrollContainerRef={parentRef}
-          body={
-            showSkeleton ? (
-              <div
-                className={`min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain ${SCROLLBAR_THIN}`}
-              >
-                <LoadingSkeleton />
-              </div>
-            ) : permissionDenied ? (
-              <PermissionDenied />
-            ) : pane.error ? (
-              <ErrorState
-                path={pane.path}
-                message={pane.error}
-                onRetry={() => void reloadPane(paneId)}
-              />
-            ) : showEmpty ? (
-              <div
-                className={`flex min-h-0 flex-1 flex-col ${isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-light-accent dark:outline-dark-accent' : ''}`}
-                onDragOver={handlePaneDragOver}
-                onDragLeave={handlePaneDragLeave}
-                onDrop={(event) => void handlePaneDrop(event)}
-              >
-                <EmptyState onNewFolder={newFolderAction} />
-              </div>
-            ) : undefined
-          }
+          body={detailsBodyRenderers[bodyState]()}
         />
       ) : (
         <>
@@ -1145,25 +1086,7 @@ export function FilePane({ paneId }: FilePaneProps) {
             onPaneDragLeave={handlePaneDragLeave}
             onPaneDrop={(event) => void handlePaneDrop(event)}
             scrollContainerRef={parentRef}
-            body={
-              showSkeleton ? (
-                <div className="min-h-0 flex-1 overflow-auto">
-                  <LoadingSkeleton />
-                </div>
-              ) : permissionDenied ? (
-                <PermissionDenied />
-              ) : pane.error ? (
-                <ErrorState
-                  path={pane.path}
-                  message={pane.error}
-                  onRetry={() => void reloadPane(paneId)}
-                />
-              ) : showEmpty ? (
-                <div className="flex min-h-0 flex-1 flex-col">
-                  <EmptyState onNewFolder={newFolderAction} />
-                </div>
-              ) : undefined
-            }
+            body={graphicalBodyRenderers[bodyState]()}
           />
         </>
       )}

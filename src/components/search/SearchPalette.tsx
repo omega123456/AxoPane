@@ -4,27 +4,47 @@ import { SearchNoResults, SearchUnavailableState } from '@/components/search/Sea
 import { SearchResultRow, searchOptionId } from '@/components/search/SearchResultRow'
 import { favouriteLabel } from '@/components/tree/FavouriteTreeRow'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
+import { DETAIL_SEPARATOR } from '@/lib/format'
 import { compactCount, folderSizeStatusLabel } from '@/lib/folder-size-status'
-import { detectPlatformOs, formatShortcutLabel, resolveCommandForEvent } from '@/lib/keymap'
+import {
+  detectPlatformOs,
+  formatShortcutLabel,
+  resolveCommandForEvent,
+  type PlatformOs,
+} from '@/lib/keymap'
+import { handleKeyByTable, type KeyHandlerTable } from '@/lib/key-table'
 import {
   activateSearchHit,
   completeSearchQuery,
   searchActivationForEvent,
   type SearchActivation,
 } from '@/lib/search-actions'
-import type { FolderSizeIndexStatus, SearchHit, SearchScope } from '@/lib/types/ipc'
+import type {
+  FolderSizeIndexStatus,
+  SearchCapabilities,
+  SearchHit,
+  SearchRejection,
+  SearchScope,
+  Shortcut,
+} from '@/lib/types/ipc'
 import { useElementVirtualizer } from '@/lib/use-element-virtualizer'
+import { virtualRowsOrFallback } from '@/lib/virtual-rows'
 import { useConfigStore } from '@/stores/config-store'
 import { useKeymapStore } from '@/stores/keymap-store'
 import { getParentPath, usePanesStore } from '@/stores/panes-store'
 import { useRecentFoldersStore } from '@/stores/recent-folders-store'
-import { isSearchable, useSearchPaletteStore } from '@/stores/search-palette-store'
+import {
+  isSearchable,
+  useSearchPaletteStore,
+  type SearchStatus,
+} from '@/stores/search-palette-store'
 import { TEXT_SECONDARY } from '@/lib/class-names'
 
 const ROW_HEIGHT = 44
 const PAGE_ROWS = 8
 const UNMEASURED_FALLBACK_ROWS = PAGE_ROWS + PAGE_ROWS
 const MAX_RECENTS = 6
+const FALLBACK_ROW_KEY_PREFIX = 'search-row'
 const LISTBOX_ID = 'search-everywhere-results'
 const SCOPES: { scope: SearchScope; label: string }[] = [
   { scope: 'all', label: 'All' },
@@ -49,33 +69,152 @@ function withTrailingSeparator(path: string) {
   return /[\\/]$/.test(path) ? path : `${path}${path.includes('\\') ? '\\' : '/'}`
 }
 
+type SearchBackend = SearchCapabilities['backend']
+
+function resultCountText(loaded: number, total: number) {
+  if (loaded < total) {
+    return `Showing ${loaded} of ${total}`
+  }
+  return `${total} ${total === 1 ? 'result' : 'results'}`
+}
+
+function resultsSuffix(searching: boolean, loaded: number, total: number, truncated: boolean) {
+  if (!searching) {
+    return ''
+  }
+  const refineHint = truncated ? `${DETAIL_SEPARATOR}refine your search` : ''
+  return `${DETAIL_SEPARATOR}${resultCountText(loaded, total)}${refineHint}`
+}
+
+function indexingFooter(status: FolderSizeIndexStatus) {
+  const scanned =
+    status.itemsScanned === undefined ? '' : ` ${compactCount.format(status.itemsScanned)} folders`
+  return `Indexing…${scanned}${DETAIL_SEPARATOR}results may be incomplete`
+}
+
+const macIndexStateFooters: Partial<
+  Record<FolderSizeIndexStatus['state'], (status: FolderSizeIndexStatus) => string>
+> = {
+  indexing: indexingFooter,
+  paused: folderSizeStatusLabel,
+}
+
+function macIndexFooter(status: FolderSizeIndexStatus | null, results: string) {
+  const foldersFooter = `Folders on this Mac${results}`
+  if (!status) {
+    return foldersFooter
+  }
+  const stateFooter = macIndexStateFooters[status.state]
+  return stateFooter ? stateFooter(status) : foldersFooter
+}
+
 function footerText(
-  backend: 'everything' | 'macIndex' | 'none',
+  backend: SearchBackend,
   status: FolderSizeIndexStatus | null,
   searching: boolean,
   loaded: number,
   total: number,
   truncated: boolean,
 ) {
-  const count =
-    loaded < total
-      ? `Showing ${loaded} of ${total}`
-      : `${total} ${total === 1 ? 'result' : 'results'}`
-  const results = searching ? ` · ${count}${truncated ? ' · refine your search' : ''}` : ''
+  const results = resultsSuffix(searching, loaded, total, truncated)
   if (backend !== 'macIndex') {
     return `Everything${results}`
   }
-  if (status?.state === 'indexing') {
-    const scanned =
-      status.itemsScanned === undefined
-        ? ''
-        : ` ${compactCount.format(status.itemsScanned)} folders`
-    return `Indexing…${scanned} · results may be incomplete`
+  return macIndexFooter(status, results)
+}
+
+function searchBackendInfo(
+  capabilities: SearchCapabilities | null,
+  indexStatus: FolderSizeIndexStatus | null,
+): SearchCapabilities {
+  const backend = capabilities?.backend ?? indexStatus?.backend ?? 'none'
+  return { backend, foldersOnly: capabilities?.foldersOnly ?? backend === 'macIndex' }
+}
+
+function lastRenderedIndex(virtualRows: { index: number }[]) {
+  return virtualRows.at(-1)?.index ?? -1
+}
+
+function scopeNoteFor(searching: boolean, query: string, foldersOnly: boolean) {
+  const shortQuery = !searching && query.trim().length > 0 && !isSearchable(query)
+  if (shortQuery) {
+    return 'Keep typing. Search starts at 3 characters'
   }
-  if (status?.state === 'paused') {
-    return folderSizeStatusLabel(status)
+  return foldersOnly ? 'Folder names only on this Mac' : ''
+}
+
+function resultAnnouncement(status: SearchStatus, total: number) {
+  if (status !== 'ready') {
+    return ''
   }
-  return `Folders on this Mac${results}`
+  return total === 0 ? 'No results' : `${total} results`
+}
+
+function inputPlaceholder(foldersOnly: boolean) {
+  return foldersOnly
+    ? 'Search folders, or type a path like alex/'
+    : 'Search files and folders, or type a path like alex/'
+}
+
+function paletteRows(
+  searching: boolean,
+  items: SearchHit[],
+  favouriteRows: SearchHit[],
+  recentRows: SearchHit[],
+) {
+  return searching ? items : [...favouriteRows, ...recentRows]
+}
+
+function SearchListMessage({
+  status,
+  error,
+  backend,
+  total,
+  query,
+  foldersOnly,
+}: {
+  status: SearchStatus
+  error: SearchRejection | null
+  backend: SearchBackend
+  total: number
+  query: string
+  foldersOnly: boolean
+}) {
+  const rejection = status === 'error' ? error : null
+  if (rejection) {
+    return <SearchUnavailableState backend={backend} rejection={rejection} />
+  }
+  const foundNothing = status === 'ready' && total === 0
+  if (foundNothing) {
+    return <SearchNoResults query={query} foldersOnly={foldersOnly} />
+  }
+  return null
+}
+
+function SearchInputAdornments({
+  shortcut,
+  platform,
+  loading,
+}: {
+  shortcut: Shortcut | undefined
+  platform: PlatformOs
+  loading: boolean
+}) {
+  return (
+    <>
+      {shortcut ? (
+        <kbd className="shrink-0 rounded-control border border-light-divider px-1.5 font-ui text-caption text-light-text-tertiary dark:border-dark-divider dark:text-dark-text-tertiary">
+          {formatShortcutLabel(shortcut, platform)}
+        </kbd>
+      ) : null}
+      {loading ? (
+        <span
+          aria-hidden="true"
+          className="absolute inset-x-0 -bottom-0.5 h-0.5 animate-pulse bg-light-accent dark:bg-dark-accent"
+        />
+      ) : null}
+    </>
+  )
 }
 
 export function SearchPalette() {
@@ -106,8 +245,7 @@ function SearchPaletteFlyout() {
   const panelRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
-  const backend = capabilities?.backend ?? indexStatus?.backend ?? 'none'
-  const foldersOnly = capabilities?.foldersOnly ?? backend === 'macIndex'
+  const { backend, foldersOnly } = searchBackendInfo(capabilities, indexStatus)
   const searching = status !== 'idle'
   const shortcut = keymap.searchEverywhere[0]
   const platform = detectPlatformOs()
@@ -124,7 +262,7 @@ function SearchPaletteFlyout() {
         .map((path) => folderRow(path, favouriteLabel(path))),
     [favourites, recentFolders],
   )
-  const rows = searching ? items : [...favouriteRows, ...recentRows]
+  const rows = paletteRows(searching, items, favouriteRows, recentRows)
   const hasMore = searching && items.length < total
   const activeRow = rows[activeIndex]
 
@@ -135,17 +273,14 @@ function SearchPaletteFlyout() {
     getScrollElement: () => listRef.current,
     overscan: PAGE_ROWS,
   })
-  const measuredRows = virtualizer.getVirtualItems()
-  // Before the list is measured, render a bounded first screen (as the
-  // details view does) instead of an empty frame.
-  const virtualRows =
-    measuredRows.length > 0 || rowCount === 0
-      ? measuredRows
-      : Array.from({ length: Math.min(rowCount, UNMEASURED_FALLBACK_ROWS) }, (_, index) => ({
-          index,
-          start: index * ROW_HEIGHT,
-        }))
-  const lastRendered = virtualRows.at(-1)?.index ?? -1
+  const virtualRows = virtualRowsOrFallback({
+    measuredRows: virtualizer.getVirtualItems(),
+    rowCount,
+    fallbackRowLimit: UNMEASURED_FALLBACK_ROWS,
+    rowStart: (index) => index * ROW_HEIGHT,
+    keyPrefix: FALLBACK_ROW_KEY_PREFIX,
+  })
+  const lastRendered = lastRenderedIndex(virtualRows)
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -195,6 +330,53 @@ function SearchPaletteFlyout() {
     }
   }
 
+  function clearQueryOrDismiss() {
+    if (query) {
+      setQuery('')
+      return
+    }
+    dismiss()
+  }
+
+  function jumpToLastRow() {
+    setActiveIndex(rows.length - 1)
+    void loadMore()
+  }
+
+  function jumpKeys(event: KeyboardEvent<HTMLInputElement>): KeyHandlerTable {
+    const withPrimaryModifier = event.ctrlKey || event.metaKey
+    if (!withPrimaryModifier) {
+      return {}
+    }
+    const endKey: KeyHandlerTable = rows.length > 0 ? { End: jumpToLastRow } : {}
+    return { Home: () => setActiveIndex(0), ...endKey }
+  }
+
+  function completionKeys(event: KeyboardEvent<HTMLInputElement>): KeyHandlerTable {
+    if (event.shiftKey) {
+      return {}
+    }
+    if (!activeRow?.isDir) {
+      return {}
+    }
+    const completed = searching
+      ? completeSearchQuery(query, activeRow)
+      : withTrailingSeparator(activeRow.path)
+    return { Tab: () => setQuery(completed) }
+  }
+
+  function paletteKeyTable(event: KeyboardEvent<HTMLInputElement>): KeyHandlerTable {
+    return {
+      ArrowDown: () => move(1),
+      ArrowUp: () => move(-1),
+      PageDown: () => move(PAGE_ROWS),
+      PageUp: () => move(-PAGE_ROWS),
+      Escape: clearQueryOrDismiss,
+      ...jumpKeys(event),
+      ...completionKeys(event),
+    }
+  }
+
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     const how = searchActivationForEvent(event.nativeEvent, keymap)
     if (how && activeRow) {
@@ -202,71 +384,15 @@ function SearchPaletteFlyout() {
       activate(activeRow, how)
       return
     }
-    const command = resolveCommandForEvent(event.nativeEvent, keymap)
-    if (command === 'searchEverywhere') {
+    if (resolveCommandForEvent(event.nativeEvent, keymap) === 'searchEverywhere') {
       event.preventDefault()
       inputRef.current?.select()
       return
     }
-    const ctrl = event.ctrlKey || event.metaKey
-    switch (event.key) {
-      case 'ArrowDown':
-        event.preventDefault()
-        move(1)
-        break
-      case 'ArrowUp':
-        event.preventDefault()
-        move(-1)
-        break
-      case 'PageDown':
-        event.preventDefault()
-        move(PAGE_ROWS)
-        break
-      case 'PageUp':
-        event.preventDefault()
-        move(-PAGE_ROWS)
-        break
-      case 'Home':
-        if (ctrl) {
-          event.preventDefault()
-          setActiveIndex(0)
-        }
-        break
-      case 'End':
-        if (ctrl && rows.length > 0) {
-          event.preventDefault()
-          setActiveIndex(rows.length - 1)
-          void loadMore()
-        }
-        break
-      case 'Tab':
-        if (!event.shiftKey && activeRow?.isDir) {
-          event.preventDefault()
-          setQuery(
-            searching
-              ? completeSearchQuery(query, activeRow)
-              : withTrailingSeparator(activeRow.path),
-          )
-        }
-        break
-      case 'Escape':
-        event.preventDefault()
-        if (query) {
-          setQuery('')
-        } else {
-          dismiss()
-        }
-        break
-    }
+    handleKeyByTable(event, paletteKeyTable(event))
   }
 
-  const shortQuery = !searching && query.trim().length > 0 && !isSearchable(query)
-  const scopeNote = shortQuery
-    ? 'Keep typing. Search starts at 3 characters'
-    : foldersOnly
-      ? 'Folder names only on this Mac'
-      : ''
-  const announcement = status === 'ready' ? (total === 0 ? 'No results' : `${total} results`) : ''
+  const scopeNote = scopeNoteFor(searching, query, foldersOnly)
   const showList = rows.length > 0 && status !== 'error'
 
   return (
@@ -292,24 +418,14 @@ function SearchPaletteFlyout() {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={onKeyDown}
-            placeholder={
-              foldersOnly
-                ? 'Search folders, or type a path like alex/'
-                : 'Search files and folders, or type a path like alex/'
-            }
+            placeholder={inputPlaceholder(foldersOnly)}
             className="min-w-0 flex-1 select-text bg-transparent text-body outline-none placeholder:text-light-text-tertiary dark:placeholder:text-dark-text-tertiary"
           />
-          {shortcut ? (
-            <kbd className="shrink-0 rounded-control border border-light-divider px-1.5 font-ui text-caption text-light-text-tertiary dark:border-dark-divider dark:text-dark-text-tertiary">
-              {formatShortcutLabel(shortcut, platform)}
-            </kbd>
-          ) : null}
-          {status === 'loading' ? (
-            <span
-              aria-hidden="true"
-              className="absolute inset-x-0 -bottom-0.5 h-0.5 animate-pulse bg-light-accent dark:bg-dark-accent"
-            />
-          ) : null}
+          <SearchInputAdornments
+            shortcut={shortcut}
+            platform={platform}
+            loading={status === 'loading'}
+          />
         </label>
 
         <div className="flex flex-wrap items-center gap-2.5 px-2.5 pb-1.5 pt-2">
@@ -346,11 +462,14 @@ function SearchPaletteFlyout() {
         </div>
 
         <div ref={listRef} className="max-h-palette-list min-h-0 overflow-y-auto px-1 pb-1">
-          {status === 'error' && error ? (
-            <SearchUnavailableState backend={backend} rejection={error} />
-          ) : status === 'ready' && total === 0 ? (
-            <SearchNoResults query={query} foldersOnly={foldersOnly} />
-          ) : null}
+          <SearchListMessage
+            status={status}
+            error={error}
+            backend={backend}
+            total={total}
+            query={query}
+            foldersOnly={foldersOnly}
+          />
           {showList ? (
             <div
               role="listbox"
@@ -409,7 +528,7 @@ function SearchPaletteFlyout() {
           </span>
         </div>
         <span role="status" aria-live="polite" className="sr-only">
-          {announcement}
+          {resultAnnouncement(status, total)}
         </span>
       </div>
     </div>

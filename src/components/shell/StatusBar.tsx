@@ -7,12 +7,57 @@ import { usePanesStore } from '@/stores/panes-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { LoaderCircleIcon } from '@/components/icons'
 import { TEXT_SECONDARY } from '@/lib/class-names'
+import type { DirectoryEntry, VolumeInfo } from '@/lib/types/ipc'
 
 function Dot() {
   return (
     <span aria-hidden="true" className="text-light-text-tertiary dark:text-dark-text-tertiary">
       ·
     </span>
+  )
+}
+
+function SelectedBytes({ bytes }: { bytes: number | null }) {
+  if (bytes === null) {
+    return null
+  }
+  return (
+    <>
+      <Dot />
+      <span>{formatBytes(bytes)}</span>
+    </>
+  )
+}
+
+function FocusedEntryLabel({ entry }: { entry: DirectoryEntry | undefined }) {
+  if (!entry) {
+    return null
+  }
+  return (
+    <span className="truncate">
+      {entry.name}
+      {entry.isDir ? ' · folder' : ` · ${entry.typeLabel}`}
+    </span>
+  )
+}
+
+function VolumeSpace({
+  volume,
+  separated,
+}: {
+  volume: VolumeInfo | undefined
+  separated: boolean
+}) {
+  if (!volume) {
+    return null
+  }
+  return (
+    <>
+      {separated ? <Dot /> : null}
+      <span>
+        {formatBytes(volume.freeBytes)} free of {formatBytes(volume.totalBytes)}
+      </span>
+    </>
   )
 }
 
@@ -65,9 +110,7 @@ export function StatusBar() {
     }
     return total
   }, [entries, selectedIds, sizeStates])
-  const volume = volumes.find((candidate) => isPathInsideVolume(path ?? '', candidate.mountRoot))
-  const freeLabel = volume ? formatBytes(volume.freeBytes) : 'Unknown'
-  const totalLabel = volume ? formatBytes(volume.totalBytes) : 'Unknown'
+  const volume = volumes.find((candidate) => isPathInsideVolume(path, candidate.mountRoot))
   const countingItems = sortKey === 'items' && itemsSortStatus === 'counting'
   const sizesUpdating = usePanesStore((state) =>
     state.panes[state.activePaneId].entries.some((entry) => {
@@ -83,12 +126,7 @@ export function StatusBar() {
       <span>{itemCount} items</span>
       <Dot />
       <span>{selectionCount} selected</span>
-      {selectedBytes !== null ? (
-        <>
-          <Dot />
-          <span>{formatBytes(selectedBytes)}</span>
-        </>
-      ) : null}
+      <SelectedBytes bytes={selectedBytes} />
       {countingItems ? (
         <>
           <Dot />
@@ -100,26 +138,14 @@ export function StatusBar() {
       <Dot />
       <span className="truncate">{typing ? 'Filtering…' : path}</span>
       <div className="flex-1" />
-      {shownEntry ? (
-        <span className="truncate">
-          {shownEntry.name}
-          {shownEntry.isDir ? ' · folder' : ` · ${shownEntry.typeLabel}`}
-        </span>
-      ) : null}
+      <FocusedEntryLabel entry={shownEntry} />
       {sizesUpdating ? (
         <span className="inline-flex items-center">
           <LoaderCircleIcon className="size-3.5 animate-spin" />
           <span className="sr-only">Updating folder sizes</span>
         </span>
       ) : null}
-      {volume ? (
-        <>
-          {shownEntry ? <Dot /> : null}
-          <span>
-            {freeLabel} free of {totalLabel}
-          </span>
-        </>
-      ) : null}
+      <VolumeSpace volume={volume} separated={shownEntry !== undefined} />
     </footer>
   )
 }

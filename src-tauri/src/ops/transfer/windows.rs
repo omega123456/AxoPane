@@ -14,30 +14,50 @@ pub struct WindowsCapabilities {
     pub cancellation: bool,
 }
 
+impl WindowsCapabilities {
+    fn missing_capability(&self, requirements: TransferRequirements) -> Option<PortableReason> {
+        if !self.api_available {
+            return Some(PortableReason::ApiUnavailable);
+        }
+        if !self.supported_build {
+            return Some(PortableReason::UnsupportedBuild);
+        }
+        let remote_server_lacks_copyfile2 =
+            !self.local_filesystem && !self.server_supports_copyfile2;
+        if remote_server_lacks_copyfile2 {
+            return Some(PortableReason::NetworkServerUnsupported);
+        }
+        let sparse_missing = requirements.sparse && !self.sparse;
+        if sparse_missing {
+            return Some(PortableReason::SparseUnsupported);
+        }
+        let offload_missing = requirements.offload && !self.offload;
+        if offload_missing {
+            return Some(PortableReason::OffloadUnsupported);
+        }
+        let metadata_missing = requirements.preserve_metadata && !self.metadata;
+        if metadata_missing {
+            return Some(PortableReason::MetadataUnsupported);
+        }
+        let links_missing = requirements.preserve_link && !self.reparse_links;
+        if links_missing {
+            return Some(PortableReason::LinkUnsupported);
+        }
+        let progress_missing = requirements.progress && !self.progress;
+        if progress_missing {
+            return Some(PortableReason::ProgressUnsupported);
+        }
+        let cancellation_missing = requirements.cancellation && !self.cancellation;
+        if cancellation_missing {
+            return Some(PortableReason::CancellationUnsupported);
+        }
+        None
+    }
+}
+
 impl TransferAdapter for WindowsCapabilities {
     fn select(&self, requirements: TransferRequirements) -> AdapterSelection {
-        let reason = if !self.api_available {
-            Some(PortableReason::ApiUnavailable)
-        } else if !self.supported_build {
-            Some(PortableReason::UnsupportedBuild)
-        } else if !self.local_filesystem && !self.server_supports_copyfile2 {
-            Some(PortableReason::NetworkServerUnsupported)
-        } else if requirements.sparse && !self.sparse {
-            Some(PortableReason::SparseUnsupported)
-        } else if requirements.offload && !self.offload {
-            Some(PortableReason::OffloadUnsupported)
-        } else if requirements.preserve_metadata && !self.metadata {
-            Some(PortableReason::MetadataUnsupported)
-        } else if requirements.preserve_link && !self.reparse_links {
-            Some(PortableReason::LinkUnsupported)
-        } else if requirements.progress && !self.progress {
-            Some(PortableReason::ProgressUnsupported)
-        } else if requirements.cancellation && !self.cancellation {
-            Some(PortableReason::CancellationUnsupported)
-        } else {
-            None
-        };
-        reason
+        self.missing_capability(requirements)
             .map(AdapterSelection::Portable)
             .unwrap_or(AdapterSelection::WindowsCopyFile2)
     }

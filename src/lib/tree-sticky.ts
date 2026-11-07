@@ -108,12 +108,37 @@ export function flattenVisibleTree(
     walk(resume, depth + hidden.length)
   }
 
+  const nextOnChain = (path: string) => {
+    const index = chainIndex.get(path)
+    return index === undefined ? undefined : fold.chain[index + 1]
+  }
+
+  const isExcludedRoot = (path: string, depth: number) =>
+    depth > 0 && excludedRootPaths.has(path.toLowerCase())
+
+  const isFoldableChild = (node: TreeNodeState, next: string | undefined): next is string =>
+    next !== undefined && node.children.includes(next) && !excludedRootPaths.has(next.toLowerCase())
+
+  const walkChildren = (node: TreeNodeState, next: string | undefined, depth: number) => {
+    for (const childPath of node.children) {
+      const visit = childPath === next ? walkPath : walk
+      visit(childPath, depth + 1)
+    }
+  }
+
+  const walkFolded = (path: string, node: TreeNodeState, next: string, depth: number) => {
+    walkPath(next, depth + 1)
+    const others = node.children.length - 1
+    if (others > 0) {
+      rows.push({ kind: 'fold-siblings', parentPath: path, count: others, depth: depth + 1 })
+    }
+  }
+
   const walk = (path: string, depth: number): void => {
-    if (depth > 0 && excludedRootPaths.has(path.toLowerCase())) {
+    const node = treeNodes[path]
+    if (isExcludedRoot(path, depth)) {
       return
     }
-
-    const node = treeNodes[path]
     if (!node) {
       return
     }
@@ -122,28 +147,16 @@ export function flattenVisibleTree(
       return
     }
 
-    const index = chainIndex.get(path)
-    const next = index === undefined ? undefined : fold.chain[index + 1]
-    const foldable =
-      next !== undefined &&
-      node.children.includes(next) &&
-      !excludedRootPaths.has(next.toLowerCase())
-    if (!foldable || fold.revealedSiblings.has(path)) {
-      for (const childPath of node.children) {
-        if (childPath === next) {
-          walkPath(childPath, depth + 1)
-        } else {
-          walk(childPath, depth + 1)
-        }
-      }
+    const next = nextOnChain(path)
+    if (fold.revealedSiblings.has(path)) {
+      walkChildren(node, next, depth)
       return
     }
-
-    walkPath(next, depth + 1)
-    const others = node.children.length - 1
-    if (others > 0) {
-      rows.push({ kind: 'fold-siblings', parentPath: path, count: others, depth: depth + 1 })
+    if (!isFoldableChild(node, next)) {
+      walkChildren(node, next, depth)
+      return
     }
+    walkFolded(path, node, next, depth)
   }
   walk(rootPath, 0)
   return rows

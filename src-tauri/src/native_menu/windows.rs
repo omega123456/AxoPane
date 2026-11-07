@@ -152,12 +152,13 @@ mod real {
     use std::ptr::null_mut;
 
     use super::*;
+    use crate::native_menu::canonical::{classify_canonical_action, normalize_verb};
     use crate::native_menu::types::{
         NativeMenuCanonicalActionKind, NativeMenuIcon, NativeMenuIconKind,
     };
     use crate::native_menu::windows_shell::{
-        classify_canonical_action, is_background_target, normalize_verb, parent_directory,
-        sanitize_menu_label, selected_target_paths, OwnedPidl,
+        is_background_target, parent_directory, sanitize_menu_label, selected_target_paths,
+        OwnedPidl,
     };
     use crate::win32::gdi::bitmap_to_data_url;
     use crate::win32::shell::ShellExecuteRequest;

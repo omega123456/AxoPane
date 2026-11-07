@@ -11,11 +11,12 @@ import {
   XCircleIcon,
 } from '@/components/icons'
 import { Button, ProgressBar } from '@/components/controls'
-import { formatCount, formatDuration } from '@/lib/format'
+import { DETAIL_SEPARATOR, formatCount, formatDuration } from '@/lib/format'
 import type { OpKind, OpProgress } from '@/lib/types/ipc'
 import { isTerminal, useQueueStore } from '@/stores/queue-store'
 import { FOCUS_RING } from '@/lib/focus-ring'
 import { fractionToPercent } from '@/lib/numbers'
+import { operationVerbs } from '@/lib/queue-format'
 import { TEXT_SECONDARY } from '@/lib/class-names'
 
 const kindIcons: Record<OpKind, typeof CopyIcon> = {
@@ -26,77 +27,83 @@ const kindIcons: Record<OpKind, typeof CopyIcon> = {
   extract: PackageOpenIcon,
 }
 
-const kindVerbs: Record<OpKind, string> = {
-  copy: 'Copying',
-  move: 'Moving',
-  delete: 'Deleting',
-  compress: 'Compressing',
-  extract: 'Extracting',
+function countLabel(count: number, noun: string) {
+  return `${formatCount(count)} ${noun}${count === 1 ? '' : 's'}`
 }
 
-function summarize(operations: OpProgress[]) {
-  const active = operations.filter((operation) => !isTerminal(operation.status))
+function finishedSummary(active: OpProgress[], operations: OpProgress[]) {
   const failed = operations.filter((operation) => operation.status === 'failed')
   const cancelled = operations.filter((operation) => operation.status === 'cancelled')
-  const allDone = active.length === 0 && failed.length === 0
-
   if (failed.length > 0) {
     return {
       icon: 'failed' as const,
-      label: `${formatCount(failed.length)} job${failed.length === 1 ? '' : 's'} failed`,
+      label: `${countLabel(failed.length, 'job')} failed`,
       percent: 100,
       detail: null,
       dismissible: active.length === 0,
     }
   }
-  if (cancelled.length > 0 && active.length === 0) {
+  if (active.length > 0) {
+    return null
+  }
+  if (cancelled.length > 0) {
     return {
       icon: 'cancelled' as const,
-      label: `${formatCount(cancelled.length)} job${cancelled.length === 1 ? '' : 's'} cancelled`,
+      label: `${countLabel(cancelled.length, 'job')} cancelled`,
       percent: 100,
       detail: null,
       dismissible: true,
     }
   }
-  if (allDone) {
-    return {
-      icon: 'done' as const,
-      label: 'Jobs complete',
-      percent: 100,
-      detail: null,
-      dismissible: true,
-    }
+  return {
+    icon: 'done' as const,
+    label: 'Jobs complete',
+    percent: 100,
+    detail: null,
+    dismissible: true,
   }
+}
 
-  const totalBytes = active.reduce((sum, operation) => sum + operation.totalBytes, 0)
-  const copiedBytes = active.reduce((sum, operation) => sum + operation.copiedBytes, 0)
-  const percent = totalBytes > 0 ? fractionToPercent(copiedBytes / totalBytes) : 0
-  const etas = active.flatMap((operation) =>
-    operation.etaSeconds === null ? [] : [operation.etaSeconds],
-  )
-  // One kind names the whole queue, by precedence; the icon and verb follow it.
-  const kind: OpKind =
+/** One kind names the whole queue, by precedence; the icon and verb follow it. */
+function dominantKind(active: OpProgress[]): OpKind {
+  return (
     (['delete', 'extract', 'compress', 'move'] as const).find((candidate) =>
       active.some((operation) => operation.kind === candidate),
     ) ?? 'copy'
-  const verb = kindVerbs[kind]
-  const totalItems = active[0].totalItems
+  )
+}
+
+function longestEta(active: OpProgress[]) {
+  const etas = active.flatMap((operation) =>
+    operation.etaSeconds === null ? [] : [operation.etaSeconds],
+  )
+  return etas.length > 0 ? [formatDuration(Math.max(...etas))] : []
+}
+
+function activeSummary(active: OpProgress[]) {
+  const totalBytes = active.reduce((sum, operation) => sum + operation.totalBytes, 0)
+  const copiedBytes = active.reduce((sum, operation) => sum + operation.copiedBytes, 0)
+  const percent = totalBytes > 0 ? fractionToPercent(copiedBytes / totalBytes) : 0
+  const kind = dominantKind(active)
+  const verb = operationVerbs[kind]
 
   return {
     icon: 'active' as const,
     kind,
     label:
       active.length === 1
-        ? `${verb} ${formatCount(totalItems)} item${totalItems === 1 ? '' : 's'}`
+        ? `${verb} ${countLabel(active[0].totalItems, 'item')}`
         : `${verb} ${formatCount(active.length)} jobs`,
     // Percent and time left answer "how much is left" without expanding.
-    detail: [
-      `${Math.round(percent)}%`,
-      ...(etas.length > 0 ? [formatDuration(Math.max(...etas))] : []),
-    ].join(' · '),
+    detail: [`${Math.round(percent)}%`, ...longestEta(active)].join(DETAIL_SEPARATOR),
     percent,
     dismissible: false,
   }
+}
+
+function summarize(operations: OpProgress[]) {
+  const active = operations.filter((operation) => !isTerminal(operation.status))
+  return finishedSummary(active, operations) ?? activeSummary(active)
 }
 
 /** The collapsed queue: one line with a progress bar along its bottom edge. */

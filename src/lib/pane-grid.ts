@@ -1,5 +1,6 @@
 import type { PaneViewMode } from './pane-view'
 import { clamp } from '@/lib/numbers'
+import { lookupOwnProperty } from '@/lib/collections'
 
 export const PANE_GRID_GAP = 4
 export const PANE_GRID_MAX_COLUMNS = 12
@@ -124,30 +125,49 @@ export function moveGridIndex({
   const rowEnd = Math.min(lastIndex, rowStart + safeColumns - 1)
   const rowsPerPage = Math.max(1, visibleRows)
 
-  switch (movement) {
-    case 'left':
-      return Math.max(0, current - 1)
-    case 'right':
-      return Math.min(lastIndex, current + 1)
-    case 'up':
-      return Math.max(0, current - safeColumns)
-    case 'down':
-      return Math.min(lastIndex, current + safeColumns)
-    case 'home':
-      return rowStart
-    case 'end':
-      return rowEnd
-    case 'first':
-      return 0
-    case 'last':
-      return lastIndex
-    case 'pageUp': {
-      const targetRow = Math.max(0, currentRow - rowsPerPage)
-      return Math.min(lastIndex, targetRow * safeColumns + currentColumn)
-    }
-    case 'pageDown': {
-      const targetRow = Math.min(lastRow, currentRow + rowsPerPage)
-      return Math.min(lastIndex, targetRow * safeColumns + currentColumn)
-    }
+  const indexInRow = (targetRow: number) =>
+    Math.min(lastIndex, targetRow * safeColumns + currentColumn)
+  const movementTargets: Record<GridMovement, () => number> = {
+    left: () => Math.max(0, current - 1),
+    right: () => Math.min(lastIndex, current + 1),
+    up: () => Math.max(0, current - safeColumns),
+    down: () => Math.min(lastIndex, current + safeColumns),
+    home: () => rowStart,
+    end: () => rowEnd,
+    first: () => 0,
+    last: () => lastIndex,
+    pageUp: () => indexInRow(Math.max(0, currentRow - rowsPerPage)),
+    pageDown: () => indexInRow(Math.min(lastRow, currentRow + rowsPerPage)),
   }
+  return movementTargets[movement]()
+}
+
+export const arrowGridMovements: Readonly<Record<string, GridMovement>> = {
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
+  ArrowUp: 'up',
+  ArrowDown: 'down',
+}
+
+const gridKeyMovements: Readonly<Record<string, GridMovement>> = {
+  ...arrowGridMovements,
+  Home: 'home',
+  End: 'end',
+  PageUp: 'pageUp',
+  PageDown: 'pageDown',
+}
+
+const modifiedGridKeyMovements: Readonly<Record<string, GridMovement>> = {
+  Home: 'first',
+  End: 'last',
+}
+
+type GridKeyEvent = { key: string; ctrlKey: boolean; metaKey: boolean }
+
+export function gridKeyMovement(event: GridKeyEvent): GridMovement | undefined {
+  const withPrimaryModifier = event.ctrlKey || event.metaKey
+  const modified = withPrimaryModifier
+    ? lookupOwnProperty(modifiedGridKeyMovements, event.key)
+    : undefined
+  return modified ?? lookupOwnProperty(gridKeyMovements, event.key)
 }

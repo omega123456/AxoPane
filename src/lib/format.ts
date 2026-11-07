@@ -38,6 +38,8 @@ export function formatEta(seconds: number): string {
   return `about ${formatDuration(seconds)} left`
 }
 
+export const DETAIL_SEPARATOR = ' · '
+
 /** Integer with thousands separators, e.g. `1,248`. */
 export function formatCount(value: number): string {
   return value.toLocaleString('en-US')

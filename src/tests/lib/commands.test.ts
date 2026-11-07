@@ -528,4 +528,84 @@ describe('trash pane commands', () => {
     expect(canExecuteCommand('delete', 'left', 'orphan.txt')).toBe(true)
     expect(canExecuteCommand('deletePermanent', 'left', 'orphan.txt')).toBe(true)
   })
+
+  it('confirms emptying a trash that has entries and ignores an empty one', () => {
+    executeCommand('emptyTrash', 'left')
+    expect(useActionDialogStore.getState().dialog).toMatchObject({
+      kind: 'emptyTrash',
+      paneId: 'left',
+      count: 2,
+    })
+
+    useActionDialogStore.getState().close()
+    usePanesStore.setState((state) => ({
+      panes: { ...state.panes, left: { ...state.panes.left, entries: [] } },
+    }))
+    executeCommand('emptyTrash', 'left')
+    expect(useActionDialogStore.getState().dialog).toBeNull()
+  })
+})
+
+describe('command failure logging', () => {
+  it('logs a command id the dispatch table does not know instead of throwing', () => {
+    const frontendLog = vi.fn(() => undefined)
+    ipc.override('log_frontend', frontendLog)
+
+    executeCommand('notACommand' as never, 'left')
+
+    expect(frontendLog).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'command not implemented' }),
+    )
+  })
+
+  it('logs a failed launch of the focused file', async () => {
+    const frontendLog = vi.fn(() => undefined)
+    ipc.override('log_frontend', frontendLog)
+    ipc.override('open_path', () => Promise.reject(new Error('no handler')) as never)
+
+    executeCommand('open', 'left', 'Beta')
+
+    await waitFor(() =>
+      expect(frontendLog).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'open command failed' }),
+      ),
+    )
+  })
+
+  it('keeps the in-app clipboard when the OS clipboard write fails', async () => {
+    const frontendLog = vi.fn(() => undefined)
+    ipc.override('log_frontend', frontendLog)
+    ipc.override('write_file_clipboard', () => Promise.reject(new Error('busy')) as never)
+
+    executeCommand('copy', 'left', 'Alpha')
+
+    expect(useClipboardStore.getState().mode).toBe('copy')
+    await waitFor(() =>
+      expect(frontendLog).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'write file clipboard failed' }),
+      ),
+    )
+  })
+
+  it('logs when clearing the OS clipboard after a move paste fails', async () => {
+    const frontendLog = vi.fn(() => undefined)
+    ipc.override('log_frontend', frontendLog)
+    ipc.override('start_op', () => 'op-move-1')
+    ipc.override('clear_file_clipboard', () => Promise.reject(new Error('busy')) as never)
+    useClipboardStore.getState().setClipboard('move', 'left', [entry('Alpha')])
+
+    executeCommand('paste', 'right')
+
+    await waitFor(() =>
+      expect(frontendLog).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'clear file clipboard failed' }),
+      ),
+    )
+    expect(useClipboardStore.getState().mode).toBeNull()
+  })
+
+  it('does nothing for rename without a single target', () => {
+    executeCommand('rename', 'left')
+    expect(useInlineRenameStore.getState().rename).toBeNull()
+  })
 })

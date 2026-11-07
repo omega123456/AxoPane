@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Button } from '@/components/controls'
 import { DialogShell } from '@/components/dialogs/DialogShell'
 import { EntryIcon } from '@/components/icons/EntryIcon'
@@ -14,6 +14,7 @@ import { useConfigStore } from '@/stores/config-store'
 import { useDefaultAppDialogStore } from '@/stores/default-app-dialog-store'
 import {
   usePropertiesDialogStore,
+  type PropertiesDialogItem,
   type PropertiesDialogState,
 } from '@/stores/properties-dialog-store'
 import type { MacApp } from '@/lib/types/ipc'
@@ -183,47 +184,13 @@ export function PropertiesDialog() {
     >
       <p className={`-mt-2 text-caption ${TEXT_SECONDARY}`}>{summary.itemCountLabel}</p>
       {summary.singleItem ? (
-        <dl className="grid gap-1.5">
-          <PropertyRow label="Type" value={summary.singleItem.typeLabel} />
-          {canSetDefault ? <DefaultAppRow loaded={defaultAppLoaded} app={defaultApp} /> : null}
-          <PropertyRow label="Path" value={summary.singleItem.path} monospace />
-          <PropertyRow
-            label="Size"
-            value={formatItemSize(
-              summary.singleItem.sizeBytes,
-              summary.singleItem.itemCount,
-              summary.singleItem.isDir,
-            )}
-          />
-          <PropertyRow
-            label="Contains"
-            value={formatContains(summary.singleItem.itemCount, summary.singleItem.isDir)}
-          />
-          <DatePropertyRow
-            label="Modified"
-            value={summary.singleItem.modifiedAt}
-            dateFormat={dateFormat}
-            showTime={showTime}
-            showSeconds={showSeconds}
-          />
-          <DatePropertyRow
-            label="Created"
-            value={summary.singleItem.createdAt}
-            dateFormat={dateFormat}
-            showTime={showTime}
-            showSeconds={showSeconds}
-          />
-          <PropertyRow
-            label="Attributes"
-            value={
-              summary.singleItem.attributes.length > 0
-                ? summary.singleItem.attributes.join(', ')
-                : '—'
-            }
-          />
-          <PropertyRow label="Hidden" value={summary.singleItem.isHidden ? 'Yes' : 'No'} />
-          <PropertyRow label="System" value={summary.singleItem.isSystem ? 'Yes' : 'No'} />
-        </dl>
+        <SingleItemProperties
+          item={summary.singleItem}
+          defaultAppRow={
+            canSetDefault ? <DefaultAppRow loaded={defaultAppLoaded} app={defaultApp} /> : null
+          }
+          dateDisplay={{ dateFormat, showTime, showSeconds }}
+        />
       ) : (
         <div className="grid gap-1">
           <div className={`text-caption ${TEXT_SECONDARY}`}>Selected paths</div>
@@ -239,6 +206,44 @@ export function PropertiesDialog() {
         </div>
       )}
     </DialogShell>
+  )
+}
+
+type DateDisplay = { dateFormat: DateFormat; showTime: boolean; showSeconds: boolean }
+
+function yesOrNo(flag: boolean) {
+  return flag ? 'Yes' : 'No'
+}
+
+function formatAttributes(attributes: string[]) {
+  return attributes.length > 0 ? attributes.join(', ') : '—'
+}
+
+function SingleItemProperties({
+  item,
+  defaultAppRow,
+  dateDisplay,
+}: {
+  item: PropertiesDialogItem
+  defaultAppRow: ReactNode
+  dateDisplay: DateDisplay
+}) {
+  return (
+    <dl className="grid gap-1.5">
+      <PropertyRow label="Type" value={item.typeLabel} />
+      {defaultAppRow}
+      <PropertyRow label="Path" value={item.path} monospace />
+      <PropertyRow
+        label="Size"
+        value={formatItemSize(item.sizeBytes, item.itemCount, item.isDir)}
+      />
+      <PropertyRow label="Contains" value={formatContains(item.itemCount, item.isDir)} />
+      <DatePropertyRow label="Modified" value={item.modifiedAt} {...dateDisplay} />
+      <DatePropertyRow label="Created" value={item.createdAt} {...dateDisplay} />
+      <PropertyRow label="Attributes" value={formatAttributes(item.attributes)} />
+      <PropertyRow label="Hidden" value={yesOrNo(item.isHidden)} />
+      <PropertyRow label="System" value={yesOrNo(item.isSystem)} />
+    </dl>
   )
 }
 

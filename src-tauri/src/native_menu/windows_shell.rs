@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 use std::ptr::null_mut;
 
-use crate::native_menu::types::{LoadNativeMenuRequest, NativeMenuCanonicalActionKind};
+use crate::native_menu::types::LoadNativeMenuRequest;
 
 use windows::core::PCWSTR;
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
@@ -64,60 +64,6 @@ pub(crate) fn sanitize_menu_label(raw: String) -> String {
         label.push(character);
     }
     label.trim().to_string()
-}
-
-/// Lower-cased, alphanumeric-only form of a verb/label used for canonical
-/// classification and de-duplication.
-pub(crate) fn normalize_verb(value: &str) -> String {
-    value
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect()
-}
-
-/// Maps a shell verb (and, as a fallback, the label) to an app-owned canonical
-/// action so the existing dedupe can drop duplicates of our own rows.
-pub(crate) fn classify_canonical_action(
-    normalized_verb: Option<&str>,
-    label: &str,
-) -> Option<NativeMenuCanonicalActionKind> {
-    let verb = normalized_verb.unwrap_or_default();
-    match verb {
-        "open" => Some(NativeMenuCanonicalActionKind::Open),
-        "openwith" => Some(NativeMenuCanonicalActionKind::OpenWith),
-        "copy" => Some(NativeMenuCanonicalActionKind::Copy),
-        "copyaspath" => Some(NativeMenuCanonicalActionKind::CopyAsPath),
-        "cut" => Some(NativeMenuCanonicalActionKind::Cut),
-        "paste" => Some(NativeMenuCanonicalActionKind::Paste),
-        "rename" => Some(NativeMenuCanonicalActionKind::Rename),
-        "delete" => Some(NativeMenuCanonicalActionKind::Delete),
-        "properties" => Some(NativeMenuCanonicalActionKind::Properties),
-        "share" => Some(NativeMenuCanonicalActionKind::Share),
-        "compress" | "windowscompresszipfile" => Some(NativeMenuCanonicalActionKind::Compress),
-        "extract" => Some(NativeMenuCanonicalActionKind::Extract),
-        "refresh" => Some(NativeMenuCanonicalActionKind::Refresh),
-        "new" | "newfolder" => Some(NativeMenuCanonicalActionKind::NewFolder),
-        "selectall" => Some(NativeMenuCanonicalActionKind::SelectAll),
-        _ => {
-            let normalized_label = normalize_verb(label);
-            match normalized_label.as_str() {
-                value if value.starts_with("openwith") => {
-                    Some(NativeMenuCanonicalActionKind::OpenWith)
-                }
-                "delete" => Some(NativeMenuCanonicalActionKind::Delete),
-                "properties" => Some(NativeMenuCanonicalActionKind::Properties),
-                "copy" => Some(NativeMenuCanonicalActionKind::Copy),
-                "copyaspath" => Some(NativeMenuCanonicalActionKind::CopyAsPath),
-                "cut" => Some(NativeMenuCanonicalActionKind::Cut),
-                "paste" => Some(NativeMenuCanonicalActionKind::Paste),
-                "rename" => Some(NativeMenuCanonicalActionKind::Rename),
-                "refresh" => Some(NativeMenuCanonicalActionKind::Refresh),
-                "selectall" => Some(NativeMenuCanonicalActionKind::SelectAll),
-                _ => None,
-            }
-        }
-    }
 }
 
 /// An absolute PIDL parsed from a filesystem path, freed on drop.

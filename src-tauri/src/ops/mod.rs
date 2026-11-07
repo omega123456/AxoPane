@@ -82,6 +82,22 @@ pub enum OpKind {
     Extract,
 }
 
+impl OpKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Copy => "copy",
+            Self::Move => "move",
+            Self::Delete => "delete",
+            Self::Compress => "compress",
+            Self::Extract => "extract",
+        }
+    }
+
+    pub fn is_transfer(self) -> bool {
+        matches!(self, Self::Copy | Self::Move)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum OpStatus {
@@ -1033,89 +1049,8 @@ fn process_item(context: &WorkerContext<'_>, item: &OpItem, conflict: &Option<Co
 
     let source = PathBuf::from(&item.source_path);
 
-    // Queue-native operations that do not use copy/move conflict handling.
-    if matches!(kind, OpKind::Delete) {
-        wait_while_paused(shared_operation, context.resolver);
-        if shared_operation
-            .lock_operation()
-            .cancel
-            .load(Ordering::Relaxed)
-        {
-            return;
-        }
-        match delete_path_with_progress(&source, false, context) {
-            Ok(()) => {
-                if shared_operation
-                    .lock_operation()
-                    .cancel
-                    .load(Ordering::Relaxed)
-                {
-                    return;
-                }
-                advance_item(context, item);
-            }
-            Err(message) => {
-                log::error!(
-                    "delete operation failed: source=\"{}\", error={message}",
-                    source.display()
-                );
-                shared_operation.lock_operation().error_message = Some(message);
-            }
-        }
-        return;
-    }
-
-    if matches!(kind, OpKind::Compress) {
-        wait_while_paused(shared_operation, context.resolver);
-        if shared_operation
-            .lock_operation()
-            .cancel
-            .load(Ordering::Relaxed)
-        {
-            return;
-        }
-        match compress_item_with_progress(&source, &destination_dir, item, context) {
-            Ok(()) => {
-                if shared_operation
-                    .lock_operation()
-                    .cancel
-                    .load(Ordering::Relaxed)
-                {
-                    return;
-                }
-                advance_item(context, item);
-            }
-            Err(message) => {
-                shared_operation.lock_operation().error_message = Some(message);
-            }
-        }
-        return;
-    }
-
-    if matches!(kind, OpKind::Extract) {
-        wait_while_paused(shared_operation, context.resolver);
-        if shared_operation
-            .lock_operation()
-            .cancel
-            .load(Ordering::Relaxed)
-        {
-            return;
-        }
-        match extract_item_with_progress(&source, &destination_dir, item, context) {
-            Ok(()) => {
-                if shared_operation
-                    .lock_operation()
-                    .cancel
-                    .load(Ordering::Relaxed)
-                {
-                    return;
-                }
-                advance_item(context, item);
-            }
-            Err(message) => {
-                shared_operation.lock_operation().error_message = Some(message);
-            }
-        }
+    if let Some(work) = queue_native_item_work(kind) {
+        run_queue_native_item(context, item, &source, &destination_dir, work);
         return;
     }
 
@@ -1125,14 +1060,7 @@ fn process_item(context: &WorkerContext<'_>, item: &OpItem, conflict: &Option<Co
         .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
         .unwrap_or(false);
     if source_is_real_directory && is_nested_copy_target(&source, &target) {
-        let action = match kind {
-            OpKind::Copy => "copy",
-            OpKind::Move => "move",
-            // Unreachable: non-transfer kinds return earlier.
-            OpKind::Delete => "delete",
-            OpKind::Compress => "compress",
-            OpKind::Extract => "extract",
-        };
+        let action = kind.label();
         let mut operation = shared_operation.lock_operation();
         operation.error_message = Some(format!(
             "Cannot {action} \"{}\" into one of its own descendants.",
@@ -1206,17 +1134,56 @@ fn process_item(context: &WorkerContext<'_>, item: &OpItem, conflict: &Option<Co
     };
 
     match result {
-        Ok(()) => {
-            if shared_operation
-                .lock_operation()
-                .cancel
-                .load(Ordering::Relaxed)
-            {
-                return;
-            }
-            advance_item(context, item)
-        }
+        Ok(()) => advance_unless_cancelled(context, item),
         Err(message) => record_transfer_failure(shared_operation, kind, &source, &target, &message),
+    }
+}
+
+type QueueNativeItemWork = fn(&Path, &Path, &OpItem, &WorkerContext<'_>) -> Result<(), String>;
+
+fn queue_native_item_work(kind: OpKind) -> Option<QueueNativeItemWork> {
+    match kind {
+        OpKind::Delete => Some(delete_item),
+        OpKind::Compress => Some(compress_item_with_progress),
+        OpKind::Extract => Some(extract_item_with_progress),
+        OpKind::Copy | OpKind::Move => None,
+    }
+}
+
+fn delete_item(
+    source: &Path,
+    _destination_dir: &Path,
+    _item: &OpItem,
+    context: &WorkerContext<'_>,
+) -> Result<(), String> {
+    delete_path_with_progress(source, false, context).inspect_err(|message| {
+        log::error!(
+            "delete operation failed: source=\"{}\", error={message}",
+            source.display()
+        );
+    })
+}
+
+fn run_queue_native_item(
+    context: &WorkerContext<'_>,
+    item: &OpItem,
+    source: &Path,
+    destination_dir: &Path,
+    work: QueueNativeItemWork,
+) {
+    wait_while_paused(context.shared_operation, context.resolver);
+    if is_operation_cancelled(context) {
+        return;
+    }
+    match work(source, destination_dir, item, context) {
+        Ok(()) => advance_unless_cancelled(context, item),
+        Err(message) => context.shared_operation.lock_operation().error_message = Some(message),
+    }
+}
+
+fn advance_unless_cancelled(context: &WorkerContext<'_>, item: &OpItem) {
+    if !is_operation_cancelled(context) {
+        advance_item(context, item);
     }
 }
 
@@ -1230,11 +1197,10 @@ fn record_transfer_failure(
     target: &Path,
     error: &str,
 ) {
-    let action = match kind {
-        OpKind::Copy => "copy",
-        OpKind::Move => "move",
-        OpKind::Delete | OpKind::Compress | OpKind::Extract => return,
-    };
+    if !kind.is_transfer() {
+        return;
+    }
+    let action = kind.label();
     let mut operation = shared_operation.lock_operation();
     let message = format!(
         "{action} operation {} failed: source=\"{}\", destination=\"{}\", error={error}",

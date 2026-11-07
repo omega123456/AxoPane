@@ -34,6 +34,7 @@ use std::path::{Path, PathBuf};
 use std::ptr::null_mut;
 use std::sync::OnceLock;
 
+use crate::native_menu::canonical::{classify_canonical_action, normalize_verb};
 use crate::native_menu::modern_match::{
     format_guid_braced, handler_matches, parse_guid_u128, path_key, selected_paths,
     selection_type_tokens,
@@ -43,8 +44,7 @@ use crate::native_menu::types::{
     LoadNativeMenuRequest, NativeMenuIcon, NativeMenuIconKind, NativeMenuTargetKind,
 };
 use crate::native_menu::windows_shell::{
-    classify_canonical_action, icon_resource_to_data_url, normalize_verb, sanitize_menu_label,
-    OwnedPidl,
+    icon_resource_to_data_url, sanitize_menu_label, OwnedPidl,
 };
 use crate::win32::wide_nul;
 

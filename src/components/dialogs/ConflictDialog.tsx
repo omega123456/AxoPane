@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button, CheckboxFlag, TextField } from '@/components/controls'
 import { DialogList, DialogShell, DialogText } from '@/components/dialogs/DialogShell'
 import type { ConflictInfo } from '@/lib/types/ipc'
+import { caseInsensitiveLetterKeys, handleKeyByTable, type KeyHandlerTable } from '@/lib/key-table'
 
 type ConflictDialogProps = {
   conflict: ConflictInfo
@@ -40,45 +41,23 @@ export function ConflictDialog({ conflict, onResolve }: ConflictDialogProps) {
     onResolve(resolution, applyToAll, null)
   }
 
-  function onKeyDown(event: React.KeyboardEvent) {
+  function conflictKeyTable(): KeyHandlerTable {
     if (renaming) {
-      if (event.key === 'Enter') {
-        event.preventDefault()
-        resolve('rename')
-      } else if (event.key === 'Escape') {
-        event.preventDefault()
-        setRenaming(false)
-      }
-      return
+      return { Enter: () => resolve('rename'), Escape: () => setRenaming(false) }
     }
+    return {
+      Enter: () => resolve('skip'),
+      Escape: () => resolve('skip'),
+      ...caseInsensitiveLetterKeys({
+        r: () => resolve('replace'),
+        n: () => setRenaming(true),
+        a: () => setApplyToAll((value) => !value),
+      }),
+    }
+  }
 
-    switch (event.key) {
-      case 'Enter':
-        event.preventDefault()
-        resolve('skip')
-        break
-      case 'Escape':
-        event.preventDefault()
-        resolve('skip')
-        break
-      case 'r':
-      case 'R':
-        event.preventDefault()
-        resolve('replace')
-        break
-      case 'n':
-      case 'N':
-        event.preventDefault()
-        setRenaming(true)
-        break
-      case 'a':
-      case 'A':
-        event.preventDefault()
-        setApplyToAll((value) => !value)
-        break
-      default:
-        break
-    }
+  function onKeyDown(event: React.KeyboardEvent) {
+    handleKeyByTable(event, conflictKeyTable())
   }
 
   return (

@@ -57,7 +57,7 @@ import { expandabilityOf, pruneTreeCache, type LazyTreeNode } from '@/stores/pan
 import { pruneIconCache, pruneSizeCache } from '@/stores/panes/cache-policy'
 import type { PaneId } from '@/types/pane'
 import { otherPane } from '@/lib/pane-id'
-import { withKeyFlags } from '@/lib/collections'
+import { lookupOwnProperty, withKeyFlags } from '@/lib/collections'
 import { cacheNow } from '@/stores/weighted-cache'
 import { utf16ByteWeight } from '@/lib/numbers'
 
@@ -513,32 +513,27 @@ function basenameFromPath(path: string): string {
   return stripped.slice(lastSep + 1)
 }
 
+type EntrySortValue = (
+  entry: DirectoryEntry,
+  sizeState: EntrySizeState | undefined,
+) => string | number
+
+const entrySortValues: Record<SortKey, EntrySortValue> = {
+  name: (entry) => entry.name.toLowerCase(),
+  size: (entry, sizeState) => sizeState?.sizeBytes ?? entry.sizeBytes ?? -1,
+  items: (entry) => entry.itemCount ?? -1,
+  type: (entry) => entry.typeLabel.toLowerCase(),
+  modified: (entry) => entry.modifiedAt ?? '',
+  created: (entry) => entry.createdAt ?? '',
+}
+
 function entrySortValue(
   entry: DirectoryEntry,
   sizeState: EntrySizeState | undefined,
   sortKey: SortKey,
 ) {
-  if (sortKey === 'size') {
-    return sizeState?.sizeBytes ?? entry.sizeBytes ?? -1
-  }
-
-  if (sortKey === 'items') {
-    return entry.itemCount ?? -1
-  }
-
-  if (sortKey === 'type') {
-    return entry.typeLabel.toLowerCase()
-  }
-
-  if (sortKey === 'modified') {
-    return entry.modifiedAt ?? ''
-  }
-
-  if (sortKey === 'created') {
-    return entry.createdAt ?? ''
-  }
-
-  return entry.name.toLowerCase()
+  const sortValue = lookupOwnProperty(entrySortValues, sortKey) ?? entrySortValues.name
+  return sortValue(entry, sizeState)
 }
 
 function isKnownSize(entry: DirectoryEntry, sizeState: EntrySizeState | undefined) {
@@ -582,33 +577,38 @@ function compareEntries(
     return left.isDir ? -1 : 1
   }
 
+  const sizeOrder = sortKey === 'size' ? compareSizeKnowledge(left, right, sizeStates) : null
+  if (sizeOrder !== null) {
+    return sizeOrder
+  }
+
   const direction = sortDirection === 'asc' ? 1 : -1
+  const valueOrder = compareSortValues(
+    entrySortValue(left, sizeStates[left.path], sortKey),
+    entrySortValue(right, sizeStates[right.path], sortKey),
+  )
+  const order = valueOrder || compareEntryNames(left, right)
+  return order * direction
+}
 
-  if (sortKey === 'size') {
-    const leftHasKnownSize = isKnownSize(left, sizeStates[left.path])
-    const rightHasKnownSize = isKnownSize(right, sizeStates[right.path])
-
-    if (leftHasKnownSize !== rightHasKnownSize) {
-      return leftHasKnownSize ? -1 : 1
-    }
-
-    if (!leftHasKnownSize && !rightHasKnownSize) {
-      return compareEntryNames(left, right)
-    }
+function compareSizeKnowledge(
+  left: DirectoryEntry,
+  right: DirectoryEntry,
+  sizeStates: Record<string, EntrySizeState>,
+): number | null {
+  const leftHasKnownSize = isKnownSize(left, sizeStates[left.path])
+  const rightHasKnownSize = isKnownSize(right, sizeStates[right.path])
+  if (leftHasKnownSize !== rightHasKnownSize) {
+    return leftHasKnownSize ? -1 : 1
   }
+  return leftHasKnownSize ? null : compareEntryNames(left, right)
+}
 
-  const leftValue = entrySortValue(left, sizeStates[left.path], sortKey)
-  const rightValue = entrySortValue(right, sizeStates[right.path], sortKey)
-
-  if (leftValue < rightValue) {
-    return -1 * direction
+function compareSortValues(left: string | number, right: string | number) {
+  if (left < right) {
+    return -1
   }
-
-  if (leftValue > rightValue) {
-    return 1 * direction
-  }
-
-  return compareEntryNames(left, right) * direction
+  return left > right ? 1 : 0
 }
 
 /**
@@ -757,12 +757,14 @@ function hasResolvedIconPath(resolvedIconPaths: ResolvedIconPaths, path: string)
   return Object.prototype.hasOwnProperty.call(resolvedIconPaths, path)
 }
 
+const ITEM_COUNT_KEY_SEPARATOR = '::'
+
 function itemCountContextKey(context: ItemCountRequestContext) {
-  return `${context.paneId}::${context.tabId}::${context.requestId}`
+  return [context.paneId, context.tabId, context.requestId].join(ITEM_COUNT_KEY_SEPARATOR)
 }
 
 function itemCountRequestKey(context: ItemCountRequestContext, path: string) {
-  return `${itemCountContextKey(context)}::${pathKey(path)}`
+  return `${itemCountContextKey(context)}${ITEM_COUNT_KEY_SEPARATOR}${pathKey(path)}`
 }
 
 function clearPassiveItemCountRequestsForPane(
@@ -1008,21 +1010,39 @@ function buildRootTreeState(
   ) as Record<string, TreeNodeState>
 
   for (const volume of sortedVolumes) {
-    const existing = currentNodes[volume.mountRoot]
-    nextTreeNodes[volume.mountRoot] = {
-      id: volume.mountRoot,
-      name: formatVolumeTreeName(volume),
-      path: volume.mountRoot,
-      parentPath: null,
-      children: existing?.children ?? [],
-      expanded: existing?.expanded ?? false,
-      loaded: existing?.loaded ?? false,
-      expandability: existing?.expandability ?? 'unknown',
-      lastAccess: existing?.lastAccess ?? Date.now(),
-    }
+    nextTreeNodes[volume.mountRoot] = volumeRootNode(volume, currentNodes[volume.mountRoot])
   }
 
   return { treeRoots, treeNodes: nextTreeNodes }
+}
+
+function volumeRootNode(volume: VolumeInfo, existing: TreeNodeState | undefined): TreeNodeState {
+  return {
+    id: volume.mountRoot,
+    name: formatVolumeTreeName(volume),
+    path: volume.mountRoot,
+    parentPath: null,
+    ...retainedRootNodeState(existing),
+  }
+}
+
+function retainedRootNodeState(existing: TreeNodeState | undefined) {
+  if (!existing) {
+    return {
+      children: [],
+      expanded: false,
+      loaded: false,
+      expandability: 'unknown' as const,
+      lastAccess: Date.now(),
+    }
+  }
+  return {
+    children: existing.children,
+    expanded: existing.expanded,
+    loaded: existing.loaded,
+    expandability: existing.expandability ?? 'unknown',
+    lastAccess: existing.lastAccess ?? Date.now(),
+  }
 }
 
 function treeRootForPath(treeRoots: string[], path: string) {
@@ -1075,6 +1095,59 @@ export function schedulePersistSession(activePaneId: PaneId) {
  * their cached native icon re-applied (untouched rows keep their existing
  * objects, and therefore their icons).
  */
+function affectedPatchPaths(event: DirPatchEvent) {
+  const affected = [...event.removed]
+  for (const change of event.changed) {
+    if (!affected.some((path) => pathsMatch(path, change.path))) {
+      affected.push(change.path)
+    }
+  }
+  return affected
+}
+
+/**
+ * Reconcile the changed set by path (last write wins, matching the previous
+ * map-based behaviour); a change whose entry is missing or no longer matches
+ * the pane's filter/hidden rules stays dropped rather than re-inserted.
+ */
+function patchInserts(event: DirPatchEvent, pane: PaneState, showHiddenFiles: boolean) {
+  const inserts = new Map<string, DirectoryEntry>()
+  for (const change of event.changed) {
+    const matchingKey = Array.from(inserts.keys()).find((path) => pathsMatch(path, change.path))
+    if (matchingKey) inserts.delete(matchingKey)
+    if (change.entry && entryMatchesPane(change.entry, pane, showHiddenFiles)) {
+      inserts.set(change.entry.path, change.entry)
+    }
+  }
+  return Array.from(inserts.values())
+}
+
+type PatchMerge = (
+  kept: DirectoryEntry[],
+  inserted: DirectoryEntry[],
+  pane: PaneState,
+  sizeStates: Record<string, EntrySizeState>,
+) => DirectoryEntry[]
+
+const insertIntoSortedEntries: PatchMerge = (kept, inserted, pane, sizeStates) => {
+  for (const entry of inserted) {
+    insertSorted(kept, entry, pane.sortKey, pane.sortDirection, sizeStates)
+  }
+  return kept
+}
+
+// Size ordering depends on folder sizes that resolve asynchronously and are not
+// continuously re-sorted into the listing, so the array can't be assumed sorted
+// against the current sizeStates — fall back to a full re-sort for that one key.
+// Active items sorting also waits for the backend-owned count-then-sort pass, so
+// watcher patches preserve the current local order plus changed rows rather than
+// finalizing a client-side items order.
+const patchMergeBySortKey: Partial<Record<SortKey, PatchMerge>> = {
+  size: (kept, inserted, pane, sizeStates) =>
+    sortEntries([...kept, ...inserted], pane.sortKey, pane.sortDirection, sizeStates),
+  items: (kept, inserted) => [...kept, ...inserted],
+}
+
 function patchEntries(
   pane: PaneState,
   event: DirPatchEvent,
@@ -1086,53 +1159,16 @@ function patchEntries(
     return null
   }
 
-  const affected = [...event.removed]
-  for (const change of event.changed) {
-    if (!affected.some((path) => pathsMatch(path, change.path))) {
-      affected.push(change.path)
-    }
-  }
-
-  const next =
+  const affected = affectedPatchPaths(event)
+  const kept =
     affected.length > 0
       ? pane.entries.filter((entry) => !affected.some((path) => pathsMatch(path, entry.path)))
       : [...pane.entries]
-
-  // Reconcile the changed set by path (last write wins, matching the previous
-  // map-based behaviour); a change whose entry is missing or no longer matches
-  // the pane's filter/hidden rules stays dropped rather than re-inserted.
-  const inserts = new Map<string, DirectoryEntry>()
-  for (const change of event.changed) {
-    const matchingKey = Array.from(inserts.keys()).find((path) => pathsMatch(path, change.path))
-    if (matchingKey) inserts.delete(matchingKey)
-    if (change.entry && entryMatchesPane(change.entry, pane, showHiddenFiles)) {
-      inserts.set(change.entry.path, change.entry)
-    }
-  }
-
-  const hydrated = Array.from(inserts.values(), (entry) =>
+  const inserted = patchInserts(event, pane, showHiddenFiles).map((entry) =>
     hydrateEntryIcon(entry, resolvedIconPaths),
   )
-
-  // Size ordering depends on folder sizes that resolve asynchronously and are
-  // not continuously re-sorted into the listing, so the array can't be assumed
-  // sorted against the current sizeStates — fall back to a full re-sort for
-  // that one key. Active items sorting also waits for the backend-owned
-  // count-then-sort pass, so watcher patches preserve the current local order
-  // plus changed rows rather than finalizing a client-side items order.
-  if (pane.sortKey === 'size') {
-    return sortEntries([...next, ...hydrated], pane.sortKey, pane.sortDirection, sizeStates)
-  }
-
-  if (pane.sortKey === 'items') {
-    return [...next, ...hydrated]
-  }
-
-  for (const entry of hydrated) {
-    insertSorted(next, entry, pane.sortKey, pane.sortDirection, sizeStates)
-  }
-
-  return next
+  const merge = patchMergeBySortKey[pane.sortKey] ?? insertIntoSortedEntries
+  return merge(kept, inserted, pane, sizeStates)
 }
 
 function entryMatchesPane(entry: DirectoryEntry, pane: PaneState, showHiddenFiles: boolean) {
@@ -1202,6 +1238,39 @@ function compareTreeChildPaths(
   })
 }
 
+function treeNodeAtPath(treeNodes: Record<string, TreeNodeState>, path: string) {
+  const nodeKey = treeNodeKeyForPath(treeNodes, path)
+  return nodeKey ? treeNodes[nodeKey] : undefined
+}
+
+function visibleDirectory(entry: DirectoryEntry | null, showHiddenFiles: boolean) {
+  if (!entry?.isDir) {
+    return null
+  }
+  const hiddenFromTree = !showHiddenFiles && (entry.isHidden || entry.isSystem)
+  return hiddenFromTree ? null : entry
+}
+
+function inheritedExpandability(
+  previous: TreeNodeState | undefined,
+  existing: TreeNodeState | undefined,
+) {
+  return previous?.expandability ?? existing?.expandability ?? 'unknown'
+}
+
+function inheritedTreeNodeState(
+  previous: TreeNodeState | undefined,
+  existing: TreeNodeState | undefined,
+) {
+  const source = previous ?? existing
+  return {
+    children: source?.children ?? [],
+    expanded: source?.expanded ?? false,
+    loaded: source?.loaded ?? false,
+    expandability: inheritedExpandability(previous, existing),
+  }
+}
+
 function applyTreeDirPatch(state: PanesStore, event: DirPatchEvent) {
   const parentKey = treeNodeKeyForPath(state.treeNodes, event.path)
   if (!parentKey) {
@@ -1263,19 +1332,7 @@ function applyTreeDirPatch(state: PanesStore, event: DirPatchEvent) {
     removeChild(path)
   }
 
-  for (const change of event.changed) {
-    const entry = change.entry
-    const keepDirectory =
-      entry?.isDir === true && (state.showHiddenFiles || (!entry.isHidden && !entry.isSystem))
-    const existingKeyBeforeRemove = treeNodeKeyForPath(nextTreeNodes, change.path)
-    const existingBeforeRemove =
-      keepDirectory && existingKeyBeforeRemove ? nextTreeNodes[existingKeyBeforeRemove] : undefined
-    removeChild(change.path, !keepDirectory)
-
-    if (!keepDirectory) {
-      continue
-    }
-
+  const upsertDirectory = (entry: DirectoryEntry, previous: TreeNodeState | undefined) => {
     const existingKey = treeNodeKeyForPath(nextTreeNodes, entry.path)
     const existing = existingKey ? nextTreeNodes[existingKey] : undefined
     const treeNodes = mutableTreeNodes()
@@ -1287,15 +1344,21 @@ function applyTreeDirPatch(state: PanesStore, event: DirPatchEvent) {
       name: entry.name,
       path: entry.path,
       parentPath: parent.path,
-      children: existingBeforeRemove?.children ?? existing?.children ?? [],
-      expanded: existingBeforeRemove?.expanded ?? existing?.expanded ?? false,
-      loaded: existingBeforeRemove?.loaded ?? existing?.loaded ?? false,
-      expandability: existingBeforeRemove?.expandability ?? existing?.expandability ?? 'unknown',
+      ...inheritedTreeNodeState(previous, existing),
       lastAccess: Date.now(),
     }
 
     if (!childPathInList(nextChildren, entry.path)) {
       mutableChildren().push(entry.path)
+    }
+  }
+
+  for (const change of event.changed) {
+    const directory = visibleDirectory(change.entry, state.showHiddenFiles)
+    const previous = treeNodeAtPath(nextTreeNodes, change.path)
+    removeChild(change.path, directory === null)
+    if (directory) {
+      upsertDirectory(directory, previous)
     }
   }
 
@@ -1309,6 +1372,580 @@ function applyTreeDirPatch(state: PanesStore, event: DirPatchEvent) {
   }
 
   return nextTreeNodes === state.treeNodes ? null : nextTreeNodes
+}
+
+type ListingRequestContext = Parameters<typeof matchesListingContext>[1]
+
+type ListingAttempt = {
+  paneId: PaneId
+  tabId: string
+  listingGeneration: number
+  requestContext: ListingRequestContext
+}
+
+function isListingAttemptStale(attempt: ListingAttempt) {
+  const currentPane = usePanesStore.getState().panes[attempt.paneId]
+  return (
+    activeTab(attempt.paneId).id !== attempt.tabId ||
+    currentPane.listingGeneration !== attempt.listingGeneration ||
+    !matchesListingContext(currentPane, attempt.requestContext)
+  )
+}
+
+/**
+ * A path change (or the pane/tab's very first listing) begins a fresh session;
+ * an unchanged path with a different sort/filter/hidden view revises the
+ * already-active session instead.
+ */
+function revisesActiveSession(
+  session: ListingSession,
+  paneId: PaneId,
+  tabId: string,
+  path: string,
+) {
+  const sessionPath = session.currentPath
+  if (session.currentBaseline == null) {
+    return false
+  }
+  if (sessionPath == null) {
+    return false
+  }
+  const sameTab = activeTab(paneId).id === tabId
+  return sameTab && pathsMatch(sessionPath, path)
+}
+
+function isMaterializedListingStale(attempt: ListingAttempt, session: ListingSession) {
+  return isListingAttemptStale(attempt) || session.currentBaseline == null
+}
+
+/**
+ * Navigating up one level should land with the folder we came from selected
+ * and focused, matching Explorer/xplorer2; an explicit reveal (a search hit)
+ * always wins.
+ */
+function revealTargetAfterNavigation(
+  leavingPath: string,
+  destinationPath: string,
+  revealPath: string | undefined,
+) {
+  if (revealPath) {
+    return revealPath
+  }
+  const leavingParentPath = getParentPath(leavingPath)
+  const navigatingUp = leavingParentPath !== null && pathsMatch(leavingParentPath, destinationPath)
+  return navigatingUp ? leavingPath : undefined
+}
+
+/** Parks the reveal target for `reloadPane` to resolve against the fresh listing. */
+function parkRevealPath(paneId: PaneId, revealTarget: string | undefined) {
+  if (revealTarget) {
+    pendingRevealPaths[paneId] = revealTarget
+    return
+  }
+  delete pendingRevealPaths[paneId]
+}
+
+function throwIfSessionFailed(session: ListingSession) {
+  if (session.currentStatus === 'error') {
+    throw new Error(session.currentError ?? 'Failed to load directory')
+  }
+}
+
+/**
+ * Rust is the canonical sort authority for every key the `SessionViewParams`
+ * contract knows about, but folder sizes resolve asynchronously after the
+ * listing (and are not a `SessionViewParams` field), so the size key re-sorts
+ * the fully-materialized entries on the client. Items sort is unaffected — it
+ * already runs as a separate backend count-then-sort pass via
+ * `runActiveItemsSort`, which replaces `pane.entries` wholesale once ready.
+ */
+function clientSortedEntries(
+  loadedEntries: DirectoryEntry[],
+  pane: PaneState,
+  sizeStates: Record<string, EntrySizeState>,
+) {
+  if (pane.sortKey !== 'size') {
+    return loadedEntries
+  }
+  return sortEntries(loadedEntries, pane.sortKey, pane.sortDirection, sizeStates)
+}
+
+function findRevealEntry(entries: DirectoryEntry[], revealPath: string | undefined) {
+  if (!revealPath) {
+    return undefined
+  }
+  return entries.find((entry) => pathsMatch(entry.path, revealPath))
+}
+
+/**
+ * The trash browser is a virtual location backed by list_trash, not a real
+ * directory: no fs watcher, tree-children lookup, or size requests apply to it.
+ */
+async function reloadTrashPane(
+  paneId: PaneId,
+  pane: PaneState,
+  selection: ReturnType<typeof useSelectionStore.getState>['selections'][PaneId],
+) {
+  const response = await listTrash()
+  const sortedEntries = sortEntries(
+    response.entries.map(trashEntryToDirectoryEntry),
+    pane.sortKey,
+    pane.sortDirection,
+    usePanesStore.getState().sizeStates,
+  )
+
+  usePanesStore.setState((state) => {
+    const previous = state.panes[paneId]
+    const entries = withResolvedIcons(sortedEntries, state.resolvedIconPaths)
+    const restoredFocusId = findMatchingEntryId(sortedEntries, [
+      selection.focusedId,
+      previous.focusedEntryId,
+      ...selection.selectedIds,
+    ])
+    const seeded =
+      previous.historyIndex === -1
+        ? { history: [pane.path], historyIndex: 0 }
+        : { history: previous.history, historyIndex: previous.historyIndex }
+
+    return {
+      panes: {
+        ...state.panes,
+        [paneId]: {
+          ...previous,
+          path: pane.path,
+          entries,
+          focusedEntryId: restoredFocusId ?? sortedEntries[0]?.id ?? null,
+          loading: false,
+          itemsSortStatus: 'idle',
+          ...seeded,
+        },
+      },
+    }
+  })
+
+  const nextTrashPane = usePanesStore.getState().panes[paneId]
+  useTabsStore.getState().patchActiveTab(paneId, {
+    path: nextTrashPane.path,
+    sortKey: nextTrashPane.sortKey,
+    sortDirection: nextTrashPane.sortDirection,
+    filter: nextTrashPane.filterApplied,
+  })
+  schedulePersistSession(usePanesStore.getState().activePaneId)
+  // Trash shows no folder sizes, so the pane's live size set is dropped.
+  await reportSizeSubscriptions(paneId, null, [])
+}
+
+function logDirPatchPathMismatch(paneId: PaneId, pane: PaneState, event: DirPatchEvent) {
+  log.debug('applyDirPatch skipped (path mismatch)', {
+    paneId,
+    panePath: pane.path,
+    eventPath: event.path,
+  })
+}
+
+function treeNodesUpdate(treeNodes: Record<string, TreeNodeState> | null) {
+  return treeNodes ? { treeNodes } : {}
+}
+
+function retainedFocusId(entries: DirectoryEntry[], focusedEntryId: string | null) {
+  if (entries.some((entry) => entry.id === focusedEntryId)) {
+    return focusedEntryId
+  }
+  return entries[0]?.id ?? null
+}
+
+function withoutPatchedItemCountRequests(
+  state: PanesStore,
+  paneId: PaneId,
+  pane: PaneState,
+  event: DirPatchEvent,
+) {
+  const context = currentItemCountContext(paneId, pane)
+  const invalidatedPaths = new Set(
+    event.changed
+      .filter(invalidatesItemCount)
+      .map((change) => itemCountRequestKey(context, change.path)),
+  )
+  if (invalidatedPaths.size === 0) {
+    return state.passiveItemCountRequests
+  }
+  return Object.fromEntries(
+    Object.entries(state.passiveItemCountRequests).filter(([key]) => !invalidatedPaths.has(key)),
+  ) as PassiveItemCountRequests
+}
+
+function invalidatesItemCount(change: DirPatchEvent['changed'][number]) {
+  const entry = change.entry
+  if (!entry?.isDir) {
+    return false
+  }
+  return entry.itemCount == null
+}
+
+/**
+ * Items sorting is backend-owned count-then-sort. Preserve the accepted rows
+ * verbatim until that replacement arrives; locally removing or inserting patch
+ * rows would show an untrustworthy transient order.
+ */
+function applyItemsSortedDirPatch(state: PanesStore, paneId: PaneId, event: DirPatchEvent) {
+  const pane = state.panes[paneId]
+  if (!pathsMatch(pane.path, event.path)) {
+    logDirPatchPathMismatch(paneId, pane, event)
+    return state
+  }
+  const treeNodes = applyTreeDirPatch(state, event)
+  queueMicrotask(() => {
+    const currentPane = usePanesStore.getState().panes[paneId]
+    void runActiveItemsSort(paneId, currentItemCountContext(paneId, currentPane), {
+      filterApplied: currentPane.filterApplied,
+      sortDirection: currentPane.sortDirection,
+    })
+  })
+  return {
+    panes: { ...state.panes, [paneId]: { ...pane, itemsSortStatus: 'counting' as const } },
+    ...treeNodesUpdate(treeNodes),
+  }
+}
+
+/** A recalculation never blanks a known value: keep it and mark it refreshing until the new result lands. */
+function nextEntrySizeState(
+  previous: EntrySizeState | undefined,
+  event: SizeStateEvent,
+): EntrySizeState {
+  if (event.state !== 'calculating') {
+    return freshEntrySizeState(event)
+  }
+  if (previous?.state !== 'ready') {
+    return freshEntrySizeState(event)
+  }
+  return { ...previous, refreshing: true }
+}
+
+function freshEntrySizeState(event: SizeStateEvent): EntrySizeState {
+  return {
+    state: event.state,
+    sizeBytes: event.sizeBytes,
+    source: event.source,
+    naReason: event.naReason,
+    isLowerBound: event.isLowerBound,
+    skippedRoots: event.skippedRoots,
+    skippedMore: event.skippedMore,
+  }
+}
+
+type SizeEventBatchSummary = { batchSize: number; calculatingCount: number; terminalCount: number }
+
+function logSizeEventProgress({
+  batchSize,
+  calculatingCount,
+  terminalCount,
+}: SizeEventBatchSummary) {
+  const previousBucket = Math.floor(sizeEventsProcessed / SIZE_EVENT_LOG_INTERVAL)
+  sizeEventsProcessed += batchSize
+  if (Math.floor(sizeEventsProcessed / SIZE_EVENT_LOG_INTERVAL) > previousBucket) {
+    log.debug('size: events applied', {
+      totalProcessed: sizeEventsProcessed,
+      lastBatch: batchSize,
+      calculatingInBatch: calculatingCount,
+      terminalInBatch: terminalCount,
+    })
+  }
+}
+
+function focusedEntryPath(pane: PaneState) {
+  return pane.entries.find((entry) => entry.id === pane.focusedEntryId)?.path
+}
+
+function focusedEntryPaths(panes: Record<PaneId, PaneState>) {
+  const paths = new Set<string>()
+  for (const pane of Object.values(panes)) {
+    const path = focusedEntryPath(pane)
+    if (path !== undefined) {
+      paths.add(path)
+    }
+  }
+  return paths
+}
+
+function allEntryPaths(panes: Record<PaneId, PaneState>) {
+  return new Set(Object.values(panes).flatMap((pane) => pane.entries.map((entry) => entry.path)))
+}
+
+function canCountVisibleItems(pane: PaneState) {
+  if (pane.loading) {
+    return false
+  }
+  if (isTrashPath(pane.path)) {
+    return false
+  }
+  if (pane.itemsSortStatus === 'counting') {
+    return false
+  }
+  if (pane.listRequestId === 0) {
+    return false
+  }
+  return pane.entries.length > 0
+}
+
+function needsVisibleItemCount(entry: DirectoryEntry) {
+  return entry.isDir && entry.itemCount == null
+}
+
+function visibleItemCountPaths({
+  pane,
+  context,
+  startIndex,
+  endIndex,
+  passiveItemCountRequests,
+}: {
+  pane: PaneState
+  context: ItemCountRequestContext
+  startIndex: number
+  endIndex: number
+  passiveItemCountRequests: PassiveItemCountRequests
+}) {
+  const contextPrefix = `${itemCountContextKey(context)}${ITEM_COUNT_KEY_SEPARATOR}`
+  const alreadyRequested = Object.keys(passiveItemCountRequests).filter((key) =>
+    key.startsWith(contextPrefix),
+  ).length
+  const remaining = Math.max(0, AUTO_VISIBLE_ITEM_COUNT_LIMIT - alreadyRequested)
+  const visibleEntries = pane.entries.slice(startIndex, endIndex + 1)
+  const uncountedFolders = firstByPathKey(visibleEntries.filter(needsVisibleItemCount))
+  const notYetRequested = uncountedFolders.filter(
+    (entry) => !passiveItemCountRequests[itemCountRequestKey(context, entry.path)],
+  )
+  const withinBudget = notYetRequested.slice(0, remaining)
+  return withinBudget.map((entry) => entry.path)
+}
+
+function firstByPathKey(entries: DirectoryEntry[]) {
+  const seen = new Set<string>()
+  return entries.filter((entry) => {
+    const key = pathKey(entry.path)
+    if (seen.has(key)) {
+      return false
+    }
+    seen.add(key)
+    return true
+  })
+}
+
+function updateEntries<Update>(
+  entries: DirectoryEntry[],
+  updates: Update[],
+  locate: (update: Update) => number,
+  apply: (entry: DirectoryEntry, update: Update) => DirectoryEntry | null,
+): DirectoryEntry[] | null {
+  let nextEntries: DirectoryEntry[] | null = null
+  for (const update of updates) {
+    const index = locate(update)
+    const updated = index < 0 ? null : apply((nextEntries ?? entries)[index], update)
+    if (!updated) {
+      continue
+    }
+    nextEntries ??= [...entries]
+    nextEntries[index] = updated
+  }
+  return nextEntries
+}
+
+/**
+ * Only allocates a new `panes` object for panes whose entries changed; `null`
+ * keeps `state.panes` the exact same reference so the update is a true no-op
+ * re-render-wise.
+ */
+function patchPaneEntries(
+  panes: Record<PaneId, PaneState>,
+  patchPane: (paneId: PaneId, pane: PaneState) => DirectoryEntry[] | null,
+): Record<PaneId, PaneState> | null {
+  let changed = false
+  const nextPanes = { ...panes }
+  for (const paneId of Object.keys(panes) as PaneId[]) {
+    const entries = patchPane(paneId, panes[paneId])
+    if (entries) {
+      nextPanes[paneId] = { ...panes[paneId], entries }
+      changed = true
+    }
+  }
+  return changed ? nextPanes : null
+}
+
+function isDirectoryAtPath(entry: DirectoryEntry, path: string) {
+  if (!entry.isDir) {
+    return false
+  }
+  return pathsMatch(entry.path, path)
+}
+
+function entriesWithItemCounts(paneId: PaneId, pane: PaneState, events: ItemCountEvent[]) {
+  const results = events
+    .filter((event) => itemCountContextMatches(paneId, pane, event.context))
+    .flatMap((event) => event.results)
+  return updateEntries(
+    pane.entries,
+    results,
+    (result) => pane.entries.findIndex((entry) => isDirectoryAtPath(entry, result.path)),
+    (entry, result) =>
+      entry.itemCount === result.itemCount ? null : { ...entry, itemCount: result.itemCount },
+  )
+}
+
+function entriesWithIcons(pane: PaneState, events: IconStateEvent[]) {
+  return updateEntries(
+    pane.entries,
+    events,
+    (event) => pane.entries.findIndex((entry) => entry.path === event.path),
+    (entry, event) =>
+      entry.iconDataUrl === event.iconDataUrl ? null : { ...entry, iconDataUrl: event.iconDataUrl },
+  )
+}
+
+function isWindowsNavigator() {
+  return typeof navigator !== 'undefined' && navigator.platform.startsWith('Win')
+}
+
+function boundedIconCache(
+  resolvedIconPaths: ResolvedIconPaths,
+  iconCacheTouched: Record<string, number>,
+  protectedIconPaths: Set<string>,
+  now: number,
+) {
+  const iconRecords = Object.fromEntries(
+    Object.entries(resolvedIconPaths).map(([path, value]) => [
+      path,
+      { value, touched: iconCacheTouched[path] ?? now, weight: utf16ByteWeight(value) },
+    ]),
+  )
+  const retainedIcons = pruneIconCache(iconRecords, protectedIconPaths, now, isWindowsNavigator())
+  return {
+    resolvedIconPaths: Object.fromEntries(
+      Object.entries(retainedIcons).map(([path, record]) => [path, record.value]),
+    ) as ResolvedIconPaths,
+    iconCacheTouched: Object.fromEntries(
+      Object.keys(retainedIcons).map((path) => [path, iconCacheTouched[path] ?? now]),
+    ) as Record<string, number>,
+  }
+}
+
+type TreeChildren = Awaited<ReturnType<typeof listTreeChildren>>['children']
+
+/** A reset/volume replacement superseded the request; a late IPC response must not revive a retired subtree. */
+function isTreeLoadSuperseded(requestGeneration: number) {
+  return requestGeneration !== treeLoadGeneration
+}
+
+function loadedNodeIdentity(
+  path: string,
+  currentNode: TreeNodeState | undefined,
+  treeRoots: string[],
+) {
+  const isRoot = Boolean(treeRootForPath(treeRoots, path))
+  return {
+    id: path,
+    name: currentNode?.name ?? basenameFromPath(path),
+    path,
+    parentPath: isRoot ? null : (currentNode?.parentPath ?? getParentPath(path)),
+  }
+}
+
+/**
+ * Newly-seen volume roots open on first hydration just like the initial roots.
+ * Once a root has loaded, the user's explicit expanded/collapsed choice holds.
+ */
+function expandedAfterLoad(currentNode: TreeNodeState | undefined, expandNewNode: boolean) {
+  if (currentNode == null) {
+    return expandNewNode
+  }
+  const unloadedRoot = currentNode.parentPath === null && !currentNode.loaded
+  return currentNode.expanded || unloadedRoot
+}
+
+/**
+ * Always refresh name/parentPath from the fresh listing (the source of truth)
+ * rather than trusting an existing node, which may be a placeholder created
+ * before its parent was ever listed (e.g. a pane navigated straight to it) and
+ * so was named from its raw path.
+ */
+type ListedChildNode = { nodePath: string; node: TreeNodeState }
+
+function listedChildNode(
+  state: PanesStore,
+  parentPath: string,
+  entry: TreeChildren[number],
+): ListedChildNode {
+  const volumeRoot = treeRootForPath(state.treeRoots, entry.path)
+  const nodePath = volumeRoot ?? entry.path
+  const existing = state.treeNodes[nodePath] ?? state.treeNodes[entry.path]
+  const listedParentPath = volumeRoot ? null : parentPath
+  if (existing) {
+    const name = volumeRoot ? existing.name : entry.name
+    return { nodePath, node: { ...existing, name, parentPath: listedParentPath } }
+  }
+  return {
+    nodePath,
+    node: {
+      id: nodePath,
+      name: entry.name,
+      path: nodePath,
+      parentPath: listedParentPath,
+      children: [],
+      expanded: false,
+      loaded: false,
+      expandability: expandabilityOf(entry),
+      lastAccess: Date.now(),
+    },
+  }
+}
+
+function listedChildNodes(state: PanesStore, parentPath: string, directoryChildren: TreeChildren) {
+  const nodes: Record<string, TreeNodeState> = {}
+  for (const entry of directoryChildren) {
+    const listed = listedChildNode(state, parentPath, entry)
+    nodes[listed.nodePath] = listed.node
+  }
+  return nodes
+}
+
+function loadedTreeNodes(
+  state: PanesStore,
+  path: string,
+  currentNode: TreeNodeState | undefined,
+  directoryChildren: TreeChildren,
+): Record<string, TreeNodeState> {
+  return {
+    ...state.treeNodes,
+    [path]: {
+      ...loadedNodeIdentity(path, currentNode, state.treeRoots),
+      children: directoryChildren.map(
+        (entry) => treeRootForPath(state.treeRoots, entry.path) ?? entry.path,
+      ),
+      expanded: expandedAfterLoad(currentNode, true),
+      loaded: true,
+      // This request is the only evidence needed for the node itself: no
+      // child directory has been probed.
+      expandability: directoryChildren.length === 0 ? 'empty' : 'nonEmpty',
+      lastAccess: Date.now(),
+    },
+    ...listedChildNodes(state, path, directoryChildren),
+  }
+}
+
+function failedTreeNodes(
+  state: PanesStore,
+  path: string,
+  currentNode: TreeNodeState | undefined,
+): Record<string, TreeNodeState> {
+  return {
+    ...state.treeNodes,
+    [path]: {
+      ...loadedNodeIdentity(path, currentNode, state.treeRoots),
+      children: [],
+      expanded: expandedAfterLoad(currentNode, false),
+      loaded: true,
+      expandability: currentNode?.expandability ?? 'empty',
+      lastAccess: Date.now(),
+    },
+  }
 }
 
 export const usePanesStore = create<PanesStore>((set, get) => ({
@@ -1418,123 +2055,46 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         },
       },
     }))
-    const listingGeneration = get().panes[paneId].listingGeneration
+    const attempt: ListingAttempt = {
+      paneId,
+      tabId,
+      listingGeneration: get().panes[paneId].listingGeneration,
+      requestContext,
+    }
 
     try {
-      // The trash browser is a virtual location backed by list_trash, not a
-      // real directory: no fs watcher, tree-children lookup, or size requests
-      // apply to it.
       if (isTrashPath(pane.path)) {
-        const response = await listTrash()
-        const sortedEntries = sortEntries(
-          response.entries.map(trashEntryToDirectoryEntry),
-          pane.sortKey,
-          pane.sortDirection,
-          get().sizeStates,
-        )
-
-        set((state) => {
-          const previous = state.panes[paneId]
-          const entries = withResolvedIcons(sortedEntries, state.resolvedIconPaths)
-          const restoredFocusId = findMatchingEntryId(sortedEntries, [
-            selection.focusedId,
-            previous.focusedEntryId,
-            ...selection.selectedIds,
-          ])
-          const seeded =
-            previous.historyIndex === -1
-              ? { history: [pane.path], historyIndex: 0 }
-              : { history: previous.history, historyIndex: previous.historyIndex }
-
-          return {
-            panes: {
-              ...state.panes,
-              [paneId]: {
-                ...previous,
-                path: pane.path,
-                entries,
-                focusedEntryId: restoredFocusId ?? sortedEntries[0]?.id ?? null,
-                loading: false,
-                itemsSortStatus: 'idle',
-                ...seeded,
-              },
-            },
-          }
-        })
-
-        const nextTrashPane = get().panes[paneId]
-        useTabsStore.getState().patchActiveTab(paneId, {
-          path: nextTrashPane.path,
-          sortKey: nextTrashPane.sortKey,
-          sortDirection: nextTrashPane.sortDirection,
-          filter: nextTrashPane.filterApplied,
-        })
-        schedulePersistSession(get().activePaneId)
-        // Trash shows no folder sizes, so the pane's live size set is dropped.
-        await reportSizeSubscriptions(paneId, null, [])
+        await reloadTrashPane(paneId, pane, selection)
         return
       }
 
       // v2 seekable directory session: Rust enumerates + sorts the whole
       // listing once on `begin_directory_session` and holds it server-side;
       // the frontend walks every page eagerly via `ensureSessionFullyLoaded`.
-      // A path change (or the pane/tab's very first listing) begins a fresh
-      // session; an unchanged path with a different sort/filter/hidden view
-      // revises the already-active session instead.
       const session = listingSessions[paneId]
       const view = currentViewParams(pane, get().showHiddenFiles)
-      const isSamePathRevision =
-        session.currentBaseline != null &&
-        session.currentPath != null &&
-        pathsMatch(session.currentPath, pane.path) &&
-        activeTab(paneId).id === tabId
-      if (isSamePathRevision) {
+      if (revisesActiveSession(session, paneId, tabId, pane.path)) {
         await session.reviseView(view)
       } else {
         await session.begin(tabId, pane.path, view)
       }
 
-      const currentTabId = activeTab(paneId).id
-      const currentPane = get().panes[paneId]
-      if (
-        currentTabId !== tabId ||
-        currentPane.listingGeneration !== listingGeneration ||
-        !matchesListingContext(currentPane, requestContext)
-      ) {
+      if (isListingAttemptStale(attempt)) {
         return
       }
-
-      if (session.currentStatus === 'error') {
-        throw new Error(session.currentError ?? 'Failed to load directory')
-      }
+      throwIfSessionFailed(session)
 
       await ensureSessionFullyLoaded(paneId, session)
 
       // Re-check staleness after the (possibly multi-page) materialization
       // walk: a newer navigation/sort/filter may have superseded this one
       // while pages were still loading.
-      if (
-        activeTab(paneId).id !== tabId ||
-        get().panes[paneId].listingGeneration !== listingGeneration ||
-        !matchesListingContext(get().panes[paneId], requestContext) ||
-        session.currentBaseline == null
-      ) {
+      if (isMaterializedListingStale(attempt, session)) {
         return
       }
 
       const resolvedPath = session.currentPath ?? pane.path
-      // Rust is the canonical sort authority for every key the
-      // `SessionViewParams` contract knows about, but folder sizes resolve
-      // asynchronously after the listing (and are not a `SessionViewParams`
-      // field), so the size key re-sorts the fully-materialized
-      // `loadedEntries` on the client. Items sort is unaffected — it already runs as a
-      // separate backend count-then-sort pass via `runActiveItemsSort` below,
-      // which replaces `pane.entries` wholesale once ready.
-      const loadedEntries = session.loadedEntries()
-      const sortedEntries =
-        pane.sortKey === 'size'
-          ? sortEntries(loadedEntries, pane.sortKey, pane.sortDirection, get().sizeStates)
-          : loadedEntries
+      const sortedEntries = clientSortedEntries(session.loadedEntries(), pane, get().sizeStates)
 
       // A monotonic identity for this successful listing, matching the old
       // `head.requestId` semantics: `finalizeListing`/`requestVisibleItemCounts`
@@ -1545,9 +2105,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       // The reveal target (the folder we came up from, or a search hit) wins
       // over the generic focus restore below, and also becomes the selection
       // so the row is visibly highlighted, not just focused.
-      const revealEntry = revealChildPath
-        ? sortedEntries.find((entry) => pathsMatch(entry.path, revealChildPath))
-        : undefined
+      const revealEntry = findRevealEntry(sortedEntries, revealChildPath)
       if (revealEntry) {
         revealScrollRequestCounter += 1
       }
@@ -1616,13 +2174,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       })
       await get().finalizeListing(paneId)
     } catch (error) {
-      const currentTabId = activeTab(paneId).id
-      const currentPane = get().panes[paneId]
-      if (
-        currentTabId !== tabId ||
-        currentPane.listingGeneration !== listingGeneration ||
-        !matchesListingContext(currentPane, requestContext)
-      ) {
+      if (isListingAttemptStale(attempt)) {
         return
       }
 
@@ -1661,17 +2213,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
     // other pane (same directory open in both) are left untouched.
     const leaving = get().panes[paneId]
 
-    // Navigating up one level should land with the folder we came from
-    // selected and focused, matching Explorer/xplorer2. Park the leaving path
-    // for `reloadPane` to resolve against the parent's fresh listing.
-    const leavingParentPath = getParentPath(leaving.path)
-    if (options.revealPath) {
-      pendingRevealPaths[paneId] = options.revealPath
-    } else if (leavingParentPath && pathsMatch(leavingParentPath, path)) {
-      pendingRevealPaths[paneId] = leaving.path
-    } else {
-      delete pendingRevealPaths[paneId]
-    }
+    parkRevealPath(paneId, revealTargetAfterNavigation(leaving.path, path, options.revealPath))
 
     const otherPaneId = otherPane(paneId)
     const otherDirPaths = new Set(directoryPaths(get().panes[otherPaneId].entries))
@@ -2196,30 +2738,8 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         return state
       }
 
-      // Items sorting is backend-owned count-then-sort. Preserve the accepted
-      // rows verbatim until that replacement arrives; locally removing or
-      // inserting patch rows would show an untrustworthy transient order.
       if (pane.sortKey === 'items') {
-        if (!pathsMatch(pane.path, event.path)) {
-          log.debug('applyDirPatch skipped (path mismatch)', {
-            paneId,
-            panePath: pane.path,
-            eventPath: event.path,
-          })
-          return state
-        }
-        const treeNodes = applyTreeDirPatch(state, event)
-        queueMicrotask(() => {
-          const currentPane = usePanesStore.getState().panes[paneId]
-          void runActiveItemsSort(paneId, currentItemCountContext(paneId, currentPane), {
-            filterApplied: currentPane.filterApplied,
-            sortDirection: currentPane.sortDirection,
-          })
-        })
-        return {
-          panes: { ...state.panes, [paneId]: { ...pane, itemsSortStatus: 'counting' } },
-          ...(treeNodes ? { treeNodes } : {}),
-        }
+        return applyItemsSortedDirPatch(state, paneId, event)
       }
 
       const entries = patchEntries(
@@ -2230,11 +2750,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         state.resolvedIconPaths,
       )
       if (!entries) {
-        log.debug('applyDirPatch skipped (path mismatch)', {
-          paneId,
-          panePath: pane.path,
-          eventPath: event.path,
-        })
+        logDirPatchPathMismatch(paneId, pane, event)
         return state
       }
 
@@ -2246,37 +2762,18 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         removed: event.removed.length,
       })
 
-      const focusedStillPresent = entries.some((entry) => entry.id === pane.focusedEntryId)
-      const treeNodes = applyTreeDirPatch(state, event)
-
       return {
-        passiveItemCountRequests: (() => {
-          const invalidatedPaths = new Set(
-            event.changed
-              .filter((change) => change.entry?.isDir && change.entry.itemCount == null)
-              .map((change) =>
-                itemCountRequestKey(currentItemCountContext(paneId, pane), change.path),
-              ),
-          )
-          if (invalidatedPaths.size === 0) {
-            return state.passiveItemCountRequests
-          }
-          return Object.fromEntries(
-            Object.entries(state.passiveItemCountRequests).filter(
-              ([key]) => !invalidatedPaths.has(key),
-            ),
-          ) as PassiveItemCountRequests
-        })(),
+        passiveItemCountRequests: withoutPatchedItemCountRequests(state, paneId, pane, event),
         panes: {
           ...state.panes,
           [paneId]: {
             ...pane,
             entries,
             itemsSortStatus: pane.itemsSortStatus,
-            focusedEntryId: focusedStillPresent ? pane.focusedEntryId : (entries[0]?.id ?? null),
+            focusedEntryId: retainedFocusId(entries, pane.focusedEntryId),
           },
         },
-        ...(treeNodes ? { treeNodes } : {}),
+        ...treeNodesUpdate(applyTreeDirPatch(state, event)),
       }
     }),
   applySessionPatch: (event) => {
@@ -2600,21 +3097,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       const terminalPaths: string[] = []
       let calculatingCount = 0
       for (const event of events) {
-        const previous = nextSizeStates[event.path]
-        // A recalculation never blanks a known value: keep it and mark it
-        // refreshing until the new result lands.
-        nextSizeStates[event.path] =
-          event.state === 'calculating' && previous?.state === 'ready'
-            ? { ...previous, refreshing: true }
-            : {
-                state: event.state,
-                sizeBytes: event.sizeBytes,
-                source: event.source,
-                naReason: event.naReason,
-                isLowerBound: event.isLowerBound,
-                skippedRoots: event.skippedRoots,
-                skippedMore: event.skippedMore,
-              }
+        nextSizeStates[event.path] = nextEntrySizeState(nextSizeStates[event.path], event)
         if (event.state === 'calculating') {
           calculatingCount += 1
         }
@@ -2622,42 +3105,23 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
           terminalPaths.push(event.path)
         }
       }
-
-      const previousBucket = Math.floor(sizeEventsProcessed / SIZE_EVENT_LOG_INTERVAL)
-      sizeEventsProcessed += events.length
-      if (Math.floor(sizeEventsProcessed / SIZE_EVENT_LOG_INTERVAL) > previousBucket) {
-        log.debug('size: events applied', {
-          totalProcessed: sizeEventsProcessed,
-          lastBatch: events.length,
-          calculatingInBatch: calculatingCount,
-          terminalInBatch: terminalPaths.length,
-        })
-      }
-
-      const protectedSizePaths = new Set<string>()
-      for (const pane of Object.values(state.panes)) {
-        for (const entry of pane.entries) {
-          if (entry.id === pane.focusedEntryId) protectedSizePaths.add(entry.path)
-        }
-      }
+      logSizeEventProgress({
+        batchSize: events.length,
+        calculatingCount,
+        terminalCount: terminalPaths.length,
+      })
 
       return {
         pendingSizeRequests:
           terminalPaths.length > 0
             ? withKeyFlags(state.pendingSizeRequests, terminalPaths, false)
             : state.pendingSizeRequests,
-        sizeStates: pruneSizeCache(nextSizeStates, protectedSizePaths),
+        sizeStates: pruneSizeCache(nextSizeStates, focusedEntryPaths(state.panes)),
       }
     }),
   requestVisibleItemCounts: async (paneId, visibleStartIndex, visibleEndIndex, viewportCount) => {
     const pane = get().panes[paneId]
-    if (
-      pane.loading ||
-      isTrashPath(pane.path) ||
-      pane.itemsSortStatus === 'counting' ||
-      pane.listRequestId === 0 ||
-      pane.entries.length === 0
-    ) {
+    if (!canCountVisibleItems(pane)) {
       return
     }
 
@@ -2669,46 +3133,13 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       return
     }
 
-    const pending = (() => {
-      const nextPaths: string[] = []
-      const seen = new Set<string>()
-      const passiveItemCountRequests = get().passiveItemCountRequests
-      let remaining = AUTO_VISIBLE_ITEM_COUNT_LIMIT
-      for (const key of Object.keys(passiveItemCountRequests)) {
-        if (key.startsWith(`${itemCountContextKey(context)}::`)) {
-          remaining -= 1
-        }
-      }
-
-      if (remaining <= 0) {
-        return nextPaths
-      }
-
-      for (let index = startIndex; index <= endIndex; index += 1) {
-        const entry = pane.entries[index]
-        if (!entry?.isDir || entry.itemCount != null) {
-          continue
-        }
-
-        const normalizedPath = pathKey(entry.path)
-        if (seen.has(normalizedPath)) {
-          continue
-        }
-        seen.add(normalizedPath)
-
-        const requestKey = itemCountRequestKey(context, entry.path)
-        if (passiveItemCountRequests[requestKey]) {
-          continue
-        }
-
-        nextPaths.push(entry.path)
-        if (nextPaths.length >= remaining) {
-          break
-        }
-      }
-
-      return nextPaths
-    })()
+    const pending = visibleItemCountPaths({
+      pane,
+      context,
+      startIndex,
+      endIndex,
+      passiveItemCountRequests: get().passiveItemCountRequests,
+    })
 
     if (pending.length === 0) {
       return
@@ -2725,7 +3156,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       // scroll can remain marked pending forever with a null count.
       const nextPassiveItemCountRequests = Object.fromEntries(
         Object.entries(state.passiveItemCountRequests).filter(
-          ([key]) => !key.startsWith(`${itemCountContextKey(context)}::`),
+          ([key]) => !key.startsWith(`${itemCountContextKey(context)}${ITEM_COUNT_KEY_SEPARATOR}`),
         ),
       ) as PassiveItemCountRequests
       for (const path of pending) {
@@ -2753,49 +3184,10 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       if (events.length === 0) {
         return state
       }
-
-      let panesChanged = false
-      const nextPanes = { ...state.panes }
-      for (const paneId of Object.keys(nextPanes) as PaneId[]) {
-        const pane = nextPanes[paneId]
-        let nextEntries: DirectoryEntry[] | undefined
-
-        for (const event of events) {
-          if (!itemCountContextMatches(paneId, pane, event.context)) {
-            continue
-          }
-
-          for (const result of event.results) {
-            const entryIndex = pane.entries.findIndex(
-              (entry) => entry.isDir && pathsMatch(entry.path, result.path),
-            )
-            if (entryIndex < 0) {
-              continue
-            }
-
-            const currentEntries = nextEntries ?? pane.entries
-            if (currentEntries[entryIndex].itemCount === result.itemCount) {
-              continue
-            }
-
-            if (!nextEntries) {
-              nextEntries = [...pane.entries]
-            }
-
-            nextEntries[entryIndex] = {
-              ...nextEntries[entryIndex],
-              itemCount: result.itemCount,
-            }
-          }
-        }
-
-        if (nextEntries) {
-          nextPanes[paneId] = { ...pane, entries: nextEntries }
-          panesChanged = true
-        }
-      }
-
-      return panesChanged ? { panes: nextPanes } : state
+      const panes = patchPaneEntries(state.panes, (paneId, pane) =>
+        entriesWithItemCounts(paneId, pane, events),
+      )
+      return panes ? { panes } : state
     }),
   requestVisibleIcons: async (paneId, paths) => {
     const pane = get().panes[paneId]
@@ -2829,41 +3221,7 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         return {}
       }
 
-      // Only allocate a new `panes` object/entries array for panes that
-      // actually changed. If no buffered path matched any entry in either
-      // pane, `panes` stays the exact same reference as `state.panes` so the
-      // update is a true no-op re-render-wise.
-      let panesChanged = false
-      const nextPanes = { ...state.panes }
-      for (const paneId of Object.keys(nextPanes) as PaneId[]) {
-        const pane = nextPanes[paneId]
-        let nextEntries: DirectoryEntry[] | undefined
-
-        for (const event of events) {
-          const entryIndex = pane.entries.findIndex((entry) => entry.path === event.path)
-          if (entryIndex < 0) {
-            continue
-          }
-
-          const currentEntries = nextEntries ?? pane.entries
-          if (currentEntries[entryIndex].iconDataUrl === event.iconDataUrl) {
-            continue
-          }
-
-          if (!nextEntries) {
-            nextEntries = [...pane.entries]
-          }
-          nextEntries[entryIndex] = {
-            ...nextEntries[entryIndex],
-            iconDataUrl: event.iconDataUrl,
-          }
-        }
-
-        if (nextEntries) {
-          nextPanes[paneId] = { ...pane, entries: nextEntries }
-          panesChanged = true
-        }
-      }
+      const panes = patchPaneEntries(state.panes, (_paneId, pane) => entriesWithIcons(pane, events))
 
       const resolvedIconPaths = { ...state.resolvedIconPaths }
       const iconCacheTouched = { ...state.iconCacheTouched }
@@ -2877,34 +3235,10 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
         iconCacheTouched[event.path] = now
       }
 
-      const protectedIconPaths = new Set<string>()
-      for (const pane of Object.values(state.panes)) {
-        for (const entry of pane.entries) protectedIconPaths.add(entry.path)
-      }
-      const iconRecords = Object.fromEntries(
-        Object.entries(resolvedIconPaths).map(([path, value]) => [
-          path,
-          { value, touched: iconCacheTouched[path] ?? now, weight: utf16ByteWeight(value) },
-        ]),
-      )
-      const retainedIcons = pruneIconCache(
-        iconRecords,
-        protectedIconPaths,
-        now,
-        typeof navigator !== 'undefined' && navigator.platform.startsWith('Win'),
-      )
-      const boundedResolvedIconPaths = Object.fromEntries(
-        Object.entries(retainedIcons).map(([path, record]) => [path, record.value]),
-      ) as ResolvedIconPaths
-      const boundedIconCacheTouched = Object.fromEntries(
-        Object.keys(retainedIcons).map((path) => [path, iconCacheTouched[path] ?? now]),
-      ) as Record<string, number>
-
       return {
-        panes: panesChanged ? nextPanes : state.panes,
+        panes: panes ?? state.panes,
         pendingIconRequests: withKeyFlags(state.pendingIconRequests, paths, false),
-        resolvedIconPaths: boundedResolvedIconPaths,
-        iconCacheTouched: boundedIconCacheTouched,
+        ...boundedIconCache(resolvedIconPaths, iconCacheTouched, allEntryPaths(state.panes), now),
       }
     }),
   setFolderSizeIndexStatus: (folderSizeIndexStatus) => set({ folderSizeIndexStatus }),
@@ -3006,99 +3340,17 @@ export const usePanesStore = create<PanesStore>((set, get) => ({
       })
 
       const directoryChildren = response.children
-      set((state) => ({
-        // A reset/volume replacement superseded this request. Do not revive a
-        // retired subtree from a late IPC response.
-        ...(requestGeneration !== treeLoadGeneration
+      set((state) =>
+        isTreeLoadSuperseded(requestGeneration)
           ? {}
-          : {
-              treeNodes: {
-                ...state.treeNodes,
-                [path]: {
-                  id: path,
-                  name: currentNode?.name ?? basenameFromPath(path),
-                  path,
-                  parentPath: treeRootForPath(state.treeRoots, path)
-                    ? null
-                    : (currentNode?.parentPath ?? getParentPath(path)),
-                  children: directoryChildren.map(
-                    (entry) => treeRootForPath(state.treeRoots, entry.path) ?? entry.path,
-                  ),
-                  // Newly-seen volume roots should open on first hydration just like
-                  // the initial roots. Once a root has loaded, preserve the user's
-                  // explicit expanded/collapsed choice on later refreshes.
-                  expanded:
-                    currentNode == null
-                      ? true
-                      : currentNode.expanded ||
-                        (currentNode.parentPath === null && !currentNode.loaded),
-                  loaded: true,
-                  // This request is the only evidence needed for the node
-                  // itself: no child directory has been probed.
-                  expandability: directoryChildren.length === 0 ? 'empty' : 'nonEmpty',
-                  lastAccess: Date.now(),
-                },
-                // Always refresh name/parentPath from this fresh listing (the source
-                // of truth) rather than trusting an existing node, which may be a
-                // placeholder created before its parent was ever listed (e.g. a pane
-                // navigated straight to it) and so was named from its raw path.
-                ...Object.fromEntries(
-                  directoryChildren.map((entry) => {
-                    const volumeRoot = treeRootForPath(state.treeRoots, entry.path)
-                    const nodePath = volumeRoot ?? entry.path
-                    const existing = state.treeNodes[nodePath] ?? state.treeNodes[entry.path]
-                    return [
-                      nodePath,
-                      existing
-                        ? {
-                            ...existing,
-                            name: volumeRoot ? existing.name : entry.name,
-                            parentPath: volumeRoot ? null : path,
-                          }
-                        : {
-                            id: nodePath,
-                            name: entry.name,
-                            path: nodePath,
-                            parentPath: volumeRoot ? null : path,
-                            children: [],
-                            expanded: false,
-                            loaded: false,
-                            expandability: expandabilityOf(entry),
-                            lastAccess: Date.now(),
-                          },
-                    ]
-                  }),
-                ),
-              },
-            }),
-      }))
+          : { treeNodes: loadedTreeNodes(state, path, currentNode, directoryChildren) },
+      )
     } catch {
-      set((state) => ({
-        ...(requestGeneration !== treeLoadGeneration
+      set((state) =>
+        isTreeLoadSuperseded(requestGeneration)
           ? {}
-          : {
-              treeNodes: {
-                ...state.treeNodes,
-                [path]: {
-                  id: path,
-                  name: currentNode?.name ?? basenameFromPath(path),
-                  path,
-                  parentPath: treeRootForPath(state.treeRoots, path)
-                    ? null
-                    : (currentNode?.parentPath ?? getParentPath(path)),
-                  children: [],
-                  expanded:
-                    currentNode == null
-                      ? false
-                      : currentNode.expanded ||
-                        (currentNode.parentPath === null && !currentNode.loaded),
-                  loaded: true,
-                  expandability: currentNode?.expandability ?? 'empty',
-                  lastAccess: Date.now(),
-                },
-              },
-            }),
-      }))
+          : { treeNodes: failedTreeNodes(state, path, currentNode) },
+      )
     } finally {
       // Retention is enforced after every completed direct-child load, not
       // only when volume topology changes. Active pane paths and roots are

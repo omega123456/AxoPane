@@ -12,6 +12,7 @@ import {
   toZoomedGeometry,
 } from '@/components/menus/menu-geometry'
 import { SCROLLBAR_THIN } from '@/lib/class-names'
+import { handleKeyByTable, type KeyHandlerTable } from '@/lib/key-table'
 
 export function ContextMenu() {
   const menu = useContextMenuStore((state) => state.menu)
@@ -99,6 +100,22 @@ export function ContextMenu() {
     return null
   }
 
+  function menuKeyTable(): KeyHandlerTable {
+    const submenuKeys: KeyHandlerTable = openSubmenuId
+      ? { ArrowLeft: () => closeSubmenu(), Escape: () => closeSubmenu() }
+      : { Escape: () => closeMenu() }
+    return {
+      ArrowDown: () => moveActive(1),
+      ArrowUp: () => moveActive(-1),
+      Home: () => moveActiveToEdge('start'),
+      End: () => moveActiveToEdge('end'),
+      Enter: () => activateCurrent(),
+      ' ': () => activateCurrent(),
+      ArrowRight: () => openSubmenu(),
+      ...submenuKeys,
+    }
+  }
+
   const nativeSectionId = menu.nativeSectionId ?? null
   const nativeSectionIndex = nativeSectionId
     ? menu.sections.findIndex((section) => section.id === nativeSectionId)
@@ -123,39 +140,7 @@ export function ContextMenu() {
         // (color/spacing/typography/radii) above remain pure Tailwind utilities.
         style={{ left: `${menu.x}px`, top: `${menu.y}px` }}
         onMouseDown={(event) => event.stopPropagation()}
-        onKeyDown={(event) => {
-          if (event.key === 'ArrowDown') {
-            event.preventDefault()
-            moveActive(1)
-          } else if (event.key === 'ArrowUp') {
-            event.preventDefault()
-            moveActive(-1)
-          } else if (event.key === 'Home') {
-            event.preventDefault()
-            moveActiveToEdge('start')
-          } else if (event.key === 'End') {
-            event.preventDefault()
-            moveActiveToEdge('end')
-          } else if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault()
-            activateCurrent()
-          } else if (event.key === 'ArrowRight') {
-            event.preventDefault()
-            openSubmenu()
-          } else if (event.key === 'ArrowLeft') {
-            if (openSubmenuId) {
-              event.preventDefault()
-              closeSubmenu()
-            }
-          } else if (event.key === 'Escape') {
-            event.preventDefault()
-            if (openSubmenuId) {
-              closeSubmenu()
-            } else {
-              closeMenu()
-            }
-          }
-        }}
+        onKeyDown={(event) => handleKeyByTable(event, menuKeyTable())}
       >
         <ContextMenuTopStrip
           items={menu.topStrip}

@@ -1,19 +1,18 @@
 import { useMemo } from 'react'
 import { Button } from '@/components/controls'
 import {
-  CheckCircleIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   PauseIcon,
   PlayIcon,
   RotateCcwIcon,
-  XCircleIcon,
   XIcon,
 } from '@/components/icons'
 import { JobCard } from '@/components/queue/JobCard'
 import { reorderOps } from '@/lib/queue-commands'
-import { formatCount } from '@/lib/format'
-import { formatItemPreview, verb } from '@/lib/queue-format'
+import { DETAIL_SEPARATOR, formatCount } from '@/lib/format'
+import { formatItemPreview, formatJobTitle, jobFlags, type JobFlags } from '@/lib/queue-format'
+import { JobStatusIcon } from '@/components/queue/JobStatusIcon'
 import type { OpProgress, ThroughputSample } from '@/lib/types/ipc'
 import { useQueueStore } from '@/stores/queue-store'
 import { clampPercent } from '@/lib/numbers'
@@ -62,17 +61,94 @@ function itemSummary(operation: OpProgress) {
   return operation.destinationDir ? operation.destinationDir : operation.sourceDir
 }
 
-function title(operation: OpProgress) {
-  if (operation.status === 'completed') {
-    return `${verb(operation)} complete`
+function compactSummary(operation: OpProgress, flags: JobFlags, percent: number) {
+  const summary = itemSummary(operation)
+  const text = flags.isPending ? `Waiting${DETAIL_SEPARATOR}${summary}` : summary
+  const showsPercent = !flags.isPending && !flags.isCompleted && !flags.isCancelled
+  return showsPercent ? `${text}${DETAIL_SEPARATOR}${percent}%` : text
+}
+
+type CompactActionHandlers = Pick<
+  CompactJobRowProps,
+  'onPause' | 'onResume' | 'onDismiss' | 'onRetry' | 'onResolve'
+>
+
+function CompactPrimaryAction({
+  flags,
+  handlers,
+}: {
+  flags: JobFlags
+  handlers: CompactActionHandlers
+}) {
+  if (flags.isConflict) {
+    return (
+      <Button
+        variant="subtle"
+        aria-label="Resolve conflict"
+        onClick={handlers.onResolve}
+        size="icon"
+      >
+        <PlayIcon className="size-4" />
+      </Button>
+    )
   }
-  if (operation.status === 'failed') {
-    return `${verb(operation)} failed`
+  if (flags.isFailed) {
+    return (
+      <Button variant="subtle" aria-label="Retry job" onClick={handlers.onRetry} size="icon">
+        <RotateCcwIcon className="size-4" />
+      </Button>
+    )
   }
-  if (operation.status === 'cancelled') {
-    return `${verb(operation)} cancelled`
+  if (flags.isFinished) {
+    return (
+      <Button variant="subtle" aria-label="Dismiss job" onClick={handlers.onDismiss} size="icon">
+        <XIcon className="size-4" />
+      </Button>
+    )
   }
-  return `${verb(operation)} ${formatCount(operation.totalItems)} items`
+  if (flags.isPending) {
+    return null
+  }
+  return flags.isPaused ? (
+    <Button variant="subtle" aria-label="Resume job" onClick={handlers.onResume} size="icon">
+      <PlayIcon className="size-4" />
+    </Button>
+  ) : (
+    <Button variant="subtle" aria-label="Pause job" onClick={handlers.onPause} size="icon">
+      <PauseIcon className="size-4" />
+    </Button>
+  )
+}
+
+function ReorderButtons({
+  onMoveUp,
+  onMoveDown,
+}: {
+  onMoveUp: (() => void) | undefined
+  onMoveDown: (() => void) | undefined
+}) {
+  return (
+    <>
+      <Button
+        variant="subtle"
+        aria-label="Move job up"
+        onClick={onMoveUp}
+        disabled={!onMoveUp}
+        size="icon"
+      >
+        <ChevronUpIcon className="size-4" />
+      </Button>
+      <Button
+        variant="subtle"
+        aria-label="Move job down"
+        onClick={onMoveDown}
+        disabled={!onMoveDown}
+        size="icon"
+      >
+        <ChevronDownIcon className="size-4" />
+      </Button>
+    </>
+  )
 }
 
 type CompactJobRowProps = {
@@ -93,94 +169,35 @@ function CompactJobRow({
   operation,
   hasConflict,
   reorderable,
-  onPause,
-  onResume,
   onCancel,
-  onDismiss,
-  onRetry,
-  onResolve,
   onMoveUp,
   onMoveDown,
+  ...handlers
 }: CompactJobRowProps) {
   const percent = Math.round(clampPercent(operation.progressPercent))
-  const failed = operation.status === 'failed'
-  const completed = operation.status === 'completed'
-  const cancelled = operation.status === 'cancelled'
-  const paused = operation.status === 'paused'
-  const pending = operation.status === 'pending'
-  const conflict = hasConflict || operation.status === 'conflict'
-
-  const summaryText = pending ? `Waiting · ${itemSummary(operation)}` : itemSummary(operation)
+  const flags = jobFlags(operation, hasConflict)
 
   return (
     <div className="flex items-center gap-3 border-t border-light-divider pb-3 pl-4 pr-2 pt-2.5 dark:border-dark-divider">
       <div className="grid min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
-          {completed ? (
-            <CheckCircleIcon className="size-4 shrink-0 text-light-success dark:text-dark-success" />
-          ) : null}
-          {failed ? (
-            <XCircleIcon className="size-4 shrink-0 text-light-danger dark:text-dark-danger" />
-          ) : null}
-          {cancelled ? <XCircleIcon className={`size-4 shrink-0 ${TEXT_SECONDARY}`} /> : null}
+          <JobStatusIcon status={operation.status} />
           <span className="truncate text-body font-semibold text-light-text dark:text-dark-text">
-            {title(operation)}
+            {formatJobTitle(operation)}
           </span>
         </div>
         <span className={`truncate text-caption ${TEXT_SECONDARY}`}>
-          {summaryText}
-          {!pending && !completed && !cancelled ? ` · ${percent}%` : ''}
+          {compactSummary(operation, flags, percent)}
         </span>
       </div>
       <div className="flex shrink-0 items-center">
-        {reorderable ? (
-          <>
-            <Button
-              variant="subtle"
-              aria-label="Move job up"
-              onClick={onMoveUp}
-              disabled={!onMoveUp}
-              size="icon"
-            >
-              <ChevronUpIcon className="size-4" />
-            </Button>
-            <Button
-              variant="subtle"
-              aria-label="Move job down"
-              onClick={onMoveDown}
-              disabled={!onMoveDown}
-              size="icon"
-            >
-              <ChevronDownIcon className="size-4" />
-            </Button>
-          </>
-        ) : null}
-        {conflict ? (
-          <Button variant="subtle" aria-label="Resolve conflict" onClick={onResolve} size="icon">
-            <PlayIcon className="size-4" />
-          </Button>
-        ) : failed ? (
-          <Button variant="subtle" aria-label="Retry job" onClick={onRetry} size="icon">
-            <RotateCcwIcon className="size-4" />
-          </Button>
-        ) : completed || cancelled ? (
-          <Button variant="subtle" aria-label="Dismiss job" onClick={onDismiss} size="icon">
-            <XIcon className="size-4" />
-          </Button>
-        ) : pending ? null : paused ? (
-          <Button variant="subtle" aria-label="Resume job" onClick={onResume} size="icon">
-            <PlayIcon className="size-4" />
-          </Button>
-        ) : (
-          <Button variant="subtle" aria-label="Pause job" onClick={onPause} size="icon">
-            <PauseIcon className="size-4" />
-          </Button>
-        )}
-        {!completed && !failed && !cancelled ? (
+        {reorderable ? <ReorderButtons onMoveUp={onMoveUp} onMoveDown={onMoveDown} /> : null}
+        <CompactPrimaryAction flags={flags} handlers={handlers} />
+        {!flags.isFinished ? (
           <Button
             variant="subtle"
             aria-label="Cancel job"
-            title={pending ? 'Remove from queue' : 'Cancel'}
+            title={flags.isPending ? 'Remove from queue' : 'Cancel'}
             onClick={onCancel}
             size="icon"
           >

@@ -229,6 +229,62 @@ function moveWithin(items: FocusableItem[], activeItemId: string | null, directi
   return enabled[nextIndex]?.id ?? activeItemId
 }
 
+const edgeEnabledId: Record<'start' | 'end', (items: FocusableItem[]) => string | null> = {
+  start: firstEnabledId,
+  end: lastEnabledId,
+}
+
+function activeParentId(menu: ContextMenuDocument, activeItemId: string | null) {
+  const lookup = activeItemId ? findItem(menu, activeItemId) : null
+  return lookup?.parentId ?? null
+}
+
+function focusSubmenuItem(parentId: string, activeSubmenuItemId: string | null) {
+  return { activeItemId: activeSubmenuItemId, openSubmenuId: parentId, activeSubmenuItemId }
+}
+
+function openedSubmenuOf(menu: ContextMenuDocument, activeItemId: string | null) {
+  const item = activeItemId ? findItem(menu, activeItemId)?.item : undefined
+  if (!item) {
+    return null
+  }
+  return isSubmenuParent(item) ? item : null
+}
+
+function focusTopLevelItem(menu: ContextMenuDocument, activeItemId: string | null) {
+  const submenu = openedSubmenuOf(menu, activeItemId)
+  return {
+    activeItemId,
+    openSubmenuId: submenu ? activeItemId : null,
+    activeSubmenuItemId: submenu ? firstEnabledId(submenu.children.rows) : null,
+  }
+}
+
+function openableSubmenu(menu: ContextMenuDocument, itemId: string) {
+  const lookup = findItem(menu, itemId)
+  if (!lookup) {
+    return null
+  }
+  if (lookup.parentId) {
+    return null
+  }
+  if (!isSubmenuParent(lookup.item)) {
+    return null
+  }
+  return lookup.item.disabled ? null : lookup.item
+}
+
+function submenuChildToFocus(
+  state: Pick<Store, 'openSubmenuId' | 'activeSubmenuItemId'>,
+  submenu: ContextMenuSubmenuRowItem,
+) {
+  const firstChildId = firstEnabledId(submenu.children.rows)
+  if (state.openSubmenuId !== submenu.id) {
+    return firstChildId
+  }
+  return state.activeSubmenuItemId || firstChildId
+}
+
 function mapNativeIcon(icon: NativeMenuIcon | null): ContextMenuIcon | undefined {
   if (!icon) {
     return undefined
@@ -440,30 +496,14 @@ export const useContextMenuStore = create<Store>((set, get) => ({
         return state
       }
 
-      const lookup = state.activeItemId ? findItem(state.menu, state.activeItemId) : null
-      if (lookup?.parentId) {
-        const activeSubmenuItemId = moveWithin(
-          getSubmenuChildren(state.menu, lookup.parentId),
-          state.activeItemId,
-          direction,
-        )
-        return {
-          activeItemId: activeSubmenuItemId,
-          openSubmenuId: lookup.parentId,
-          activeSubmenuItemId,
-        }
+      const parentId = activeParentId(state.menu, state.activeItemId)
+      if (parentId) {
+        const children = getSubmenuChildren(state.menu, parentId)
+        return focusSubmenuItem(parentId, moveWithin(children, state.activeItemId, direction))
       }
 
-      const activeItemId = moveWithin(getTopLevelItems(state.menu), state.activeItemId, direction)
-      const nextItem = activeItemId ? findItem(state.menu, activeItemId)?.item : null
-      return {
-        activeItemId,
-        openSubmenuId: activeItemId && nextItem && isSubmenuParent(nextItem) ? activeItemId : null,
-        activeSubmenuItemId:
-          activeItemId && nextItem && isSubmenuParent(nextItem)
-            ? firstEnabledId(nextItem.children.rows)
-            : null,
-      }
+      const topLevelItems = getTopLevelItems(state.menu)
+      return focusTopLevelItem(state.menu, moveWithin(topLevelItems, state.activeItemId, direction))
     }),
   moveActiveToEdge: (edge) =>
     set((state) => {
@@ -471,23 +511,14 @@ export const useContextMenuStore = create<Store>((set, get) => ({
         return state
       }
 
-      const lookup = state.activeItemId ? findItem(state.menu, state.activeItemId) : null
-      if (lookup?.parentId) {
-        const children = getSubmenuChildren(state.menu, lookup.parentId)
-        const activeSubmenuItemId =
-          edge === 'start' ? firstEnabledId(children) : lastEnabledId(children)
-        return {
-          activeItemId: activeSubmenuItemId,
-          openSubmenuId: lookup.parentId,
-          activeSubmenuItemId,
-        }
+      const parentId = activeParentId(state.menu, state.activeItemId)
+      if (parentId) {
+        const children = getSubmenuChildren(state.menu, parentId)
+        return focusSubmenuItem(parentId, edgeEnabledId[edge](children))
       }
 
       return {
-        activeItemId:
-          edge === 'start'
-            ? firstEnabledId(getTopLevelItems(state.menu))
-            : lastEnabledId(getTopLevelItems(state.menu)),
+        activeItemId: edgeEnabledId[edge](getTopLevelItems(state.menu)),
         openSubmenuId: null,
         activeSubmenuItemId: null,
       }
@@ -503,19 +534,15 @@ export const useContextMenuStore = create<Store>((set, get) => ({
         return state
       }
 
-      const lookup = findItem(state.menu, targetId)
-      if (!lookup || lookup.parentId || !isSubmenuParent(lookup.item) || lookup.item.disabled) {
+      const submenu = openableSubmenu(state.menu, targetId)
+      if (!submenu) {
         return state
       }
 
-      const childId =
-        state.openSubmenuId === lookup.item.id && state.activeSubmenuItemId
-          ? state.activeSubmenuItemId
-          : firstEnabledId(lookup.item.children.rows)
-
+      const childId = submenuChildToFocus(state, submenu)
       return {
-        activeItemId: childId ?? lookup.item.id,
-        openSubmenuId: lookup.item.id,
+        activeItemId: childId ?? submenu.id,
+        openSubmenuId: submenu.id,
         activeSubmenuItemId: childId,
       }
     }),

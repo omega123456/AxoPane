@@ -1,21 +1,64 @@
 import { formatBytes, formatCount, formatEta } from '@/lib/format'
-import type { OpProgress } from '@/lib/types/ipc'
+import type { OpKind, OpProgress, OpStatus } from '@/lib/types/ipc'
+import { isTerminal } from '@/stores/queue-store'
 
 /** Top-level item names shown before the "+K more" affordance takes over. */
 export const ITEM_PREVIEW_LIMIT = 2
 
+export const operationVerbs: Record<OpKind, string> = {
+  copy: 'Copying',
+  move: 'Moving',
+  delete: 'Deleting',
+  compress: 'Compressing',
+  extract: 'Extracting',
+}
+
 /** Present-participle verb for an operation's kind, e.g. `Copying` / `Deleting`. */
 export function verb(operation: OpProgress) {
-  if (operation.kind === 'delete') {
-    return 'Deleting'
+  return operationVerbs[operation.kind]
+}
+
+const finishedTitleSuffixes: Partial<Record<OpStatus, string>> = {
+  completed: 'complete',
+  failed: 'failed',
+  cancelled: 'cancelled',
+}
+
+export function formatJobTitle(operation: OpProgress) {
+  const suffix =
+    finishedTitleSuffixes[operation.status] ?? `${formatCount(operation.totalItems)} items`
+  return `${verb(operation)} ${suffix}`
+}
+
+export type JobFlags = {
+  isCompleted: boolean
+  isFailed: boolean
+  isPaused: boolean
+  isCancelled: boolean
+  isConflict: boolean
+  isPending: boolean
+  isFinished: boolean
+  isUnderway: boolean
+  /** A delete is measured in items, so a transfer rate and curve do not apply. */
+  showsTransferRate: boolean
+}
+
+export function jobFlags(operation: OpProgress, hasConflict: boolean): JobFlags {
+  const status = operation.status
+  const isFinished = isTerminal(status)
+  const isPending = status === 'pending'
+  const isUnderway = !isPending && !isFinished
+  return {
+    isCompleted: status === 'completed',
+    isFailed: status === 'failed',
+    isPaused: status === 'paused',
+    isCancelled: status === 'cancelled',
+    isConflict: status === 'conflict' || hasConflict,
+    isPending,
+    isFinished,
+    isUnderway,
+    showsTransferRate: isUnderway && operation.kind !== 'delete',
   }
-  if (operation.kind === 'compress') {
-    return 'Compressing'
-  }
-  if (operation.kind === 'extract') {
-    return 'Extracting'
-  }
-  return operation.kind === 'move' ? 'Moving' : 'Copying'
 }
 
 /**

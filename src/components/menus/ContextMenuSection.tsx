@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { ContextMenuRow } from '@/components/menus/ContextMenuRow'
 import {
   isContextMenuSubmenuRow,
@@ -11,6 +11,142 @@ import {
   toZoomedGeometry,
 } from '@/components/menus/menu-geometry'
 import { SCROLLBAR_THIN } from '@/lib/class-names'
+
+type NativeSectionState = {
+  loading: boolean
+  failed: boolean
+  placeholderVisible: boolean
+  locked: boolean
+}
+
+type SubmenuPosition = { left: number; top: number; height: number; maxHeight: number }
+
+type NativePlaceholder = 'none' | 'hidden' | 'loading' | 'locked'
+
+function nativePlaceholderFor(
+  nativeState: NativeSectionState | undefined,
+  hasRows: boolean,
+): NativePlaceholder {
+  if (!nativeState) {
+    return 'none'
+  }
+  if (hasRows) {
+    return 'none'
+  }
+  if (nativeState.loading) {
+    return 'loading'
+  }
+  return nativeState.locked ? 'locked' : 'hidden'
+}
+
+function NativeLoadingPlaceholder({ visible }: { visible: boolean }) {
+  return (
+    <div
+      aria-hidden={!visible}
+      role={visible ? 'status' : undefined}
+      aria-label={visible ? 'Loading native menu items' : undefined}
+      className={`flex flex-col ${visible ? '' : 'opacity-0'}`}
+    >
+      {/* Same 32px height as the rows that replace them, so nothing jumps. */}
+      {['w-3/5', 'w-4/5', 'w-1/2'].map((width) => (
+        <div key={width} className="flex h-8 items-center gap-3 px-3">
+          <div className="size-4 rounded-control bg-light-skeleton dark:bg-dark-skeleton" />
+          <div
+            className={`h-2.5 ${width} rounded-control bg-light-skeleton dark:bg-dark-skeleton`}
+          />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+const nativePlaceholders: Record<NativePlaceholder, (visible: boolean) => ReactNode> = {
+  none: () => null,
+  hidden: () => null,
+  loading: (visible) => <NativeLoadingPlaceholder visible={visible} />,
+  locked: () => <div aria-hidden="true" className="min-h-24 px-2" />,
+}
+
+function sameSubmenuPosition(current: SubmenuPosition | null, next: SubmenuPosition) {
+  return (
+    current !== null &&
+    current.left === next.left &&
+    current.top === next.top &&
+    current.height === next.height &&
+    current.maxHeight === next.maxHeight
+  )
+}
+
+function measureSubmenuPosition(anchor: HTMLElement, submenu: HTMLElement): SubmenuPosition {
+  submenu.style.height = ''
+  submenu.style.maxHeight = ''
+  const geometry = placeSubmenuBesideAnchor(
+    anchor.getBoundingClientRect(),
+    submenu.getBoundingClientRect(),
+  )
+  const zoomed = toZoomedGeometry(geometry, documentZoom())
+  return {
+    left: zoomed.left,
+    top: zoomed.top,
+    height: zoomed.height ?? 0,
+    maxHeight: zoomed.maxHeight ?? 0,
+  }
+}
+
+// Runtime submenu geometry uses viewport coordinates so nested panels are not
+// clipped by the scrolling body of the parent menu.
+function submenuStyle(position: SubmenuPosition | null) {
+  if (!position) {
+    return { visibility: 'hidden' as const }
+  }
+  return {
+    left: `${position.left}px`,
+    top: `${position.top}px`,
+    height: `${position.height}px`,
+    maxHeight: `${position.maxHeight}px`,
+  }
+}
+
+function ContextSubmenu({
+  item,
+  position,
+  submenuRef,
+  activeItemId,
+  onHoverItem,
+  onActivateItem,
+}: {
+  item: ContextMenuSubmenuRowItem
+  position: SubmenuPosition | null
+  submenuRef: RefObject<HTMLDivElement | null>
+  activeItemId: string | null
+  onHoverItem: (itemId: string) => void
+  onActivateItem: (itemId: string) => void
+}) {
+  return (
+    <div
+      ref={submenuRef}
+      role="menu"
+      aria-label={item.label}
+      className="fixed z-10 flex w-menu flex-col overflow-hidden rounded-overlay border border-light-flyout-stroke bg-light-card p-1 shadow-light-flyout dark:border-dark-flyout-stroke dark:bg-dark-card dark:shadow-dark-flyout"
+      style={submenuStyle(position)}
+    >
+      <div
+        data-testid="context-submenu-scroll-body"
+        className={`min-h-0 flex-1 overflow-y-auto overscroll-contain ${SCROLLBAR_THIN}`}
+      >
+        {item.children.rows.map((child) => (
+          <ContextMenuRow
+            key={child.id}
+            item={child}
+            active={child.id === activeItemId}
+            onPointerEnter={() => onHoverItem(child.id)}
+            onActivate={() => onActivateItem(child.id)}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
 
 export function ContextMenuSection({
   section,
@@ -27,25 +163,12 @@ export function ContextMenuSection({
   openSubmenuId: string | null
   onHoverItem: (itemId: string) => void
   onActivateItem: (itemId: string) => void
-  nativeState?: {
-    loading: boolean
-    failed: boolean
-    placeholderVisible: boolean
-    locked: boolean
-  }
+  nativeState?: NativeSectionState
 }) {
-  const showNativePlaceholder = Boolean(nativeState?.placeholderVisible)
-  const isNativeSection = nativeState !== undefined
-  const hasNativeRows = section.rows.length > 0
   const submenuRef = useRef<HTMLDivElement | null>(null)
   const [openSubmenuAnchor, setOpenSubmenuAnchor] = useState<HTMLButtonElement | null>(null)
-  const [openSubmenuPosition, setOpenSubmenuPosition] = useState<{
-    left: number
-    top: number
-    height: number
-    maxHeight: number
-  } | null>(null)
-  const keepNativeSection = hasNativeRows || nativeState?.loading || nativeState?.locked
+  const [openSubmenuPosition, setOpenSubmenuPosition] = useState<SubmenuPosition | null>(null)
+  const nativePlaceholder = nativePlaceholderFor(nativeState, section.rows.length > 0)
 
   const openSubmenuItem = section.rows.find(
     (item): item is ContextMenuSubmenuRowItem =>
@@ -53,41 +176,17 @@ export function ContextMenuSection({
   )
 
   useLayoutEffect(() => {
-    if (!openSubmenuAnchor || !submenuRef.current || !openSubmenuItem) {
+    const submenu = submenuRef.current
+    if (!openSubmenuAnchor || !submenu || !openSubmenuItem) {
       setOpenSubmenuPosition(null)
       return
     }
 
-    submenuRef.current.style.height = ''
-    submenuRef.current.style.maxHeight = ''
-
-    const geometry = placeSubmenuBesideAnchor(
-      openSubmenuAnchor.getBoundingClientRect(),
-      submenuRef.current.getBoundingClientRect(),
-    )
-    const zoomed = toZoomedGeometry(geometry, documentZoom())
-
-    setOpenSubmenuPosition((current) => {
-      const next = {
-        left: zoomed.left,
-        top: zoomed.top,
-        height: zoomed.height ?? 0,
-        maxHeight: zoomed.maxHeight ?? 0,
-      }
-      if (
-        current &&
-        current.left === next.left &&
-        current.top === next.top &&
-        current.height === next.height &&
-        current.maxHeight === next.maxHeight
-      ) {
-        return current
-      }
-      return next
-    })
+    const next = measureSubmenuPosition(openSubmenuAnchor, submenu)
+    setOpenSubmenuPosition((current) => (sameSubmenuPosition(current, next) ? current : next))
   }, [openSubmenuAnchor, openSubmenuItem])
 
-  if (isNativeSection && !keepNativeSection) {
+  if (nativePlaceholder === 'hidden') {
     return null
   }
 
@@ -96,30 +195,9 @@ export function ContextMenuSection({
       {showDivider ? <div className="my-1 h-px bg-light-divider dark:bg-dark-divider" /> : null}
       {/* The menu's 4px side padding lives here so dividers can span edge to edge. */}
       <div className="px-1">
-        {isNativeSection && !hasNativeRows && nativeState?.loading ? (
-          <div
-            aria-hidden={!showNativePlaceholder}
-            role={showNativePlaceholder ? 'status' : undefined}
-            aria-label={showNativePlaceholder ? 'Loading native menu items' : undefined}
-            className={`flex flex-col ${showNativePlaceholder ? '' : 'opacity-0'}`}
-          >
-            {/* Same 32px height as the rows that replace them, so nothing jumps. */}
-            {['w-3/5', 'w-4/5', 'w-1/2'].map((width) => (
-              <div key={width} className="flex h-8 items-center gap-3 px-3">
-                <div className="size-4 rounded-control bg-light-skeleton dark:bg-dark-skeleton" />
-                <div
-                  className={`h-2.5 ${width} rounded-control bg-light-skeleton dark:bg-dark-skeleton`}
-                />
-              </div>
-            ))}
-          </div>
-        ) : null}
-        {isNativeSection && !hasNativeRows && !nativeState?.loading && nativeState?.locked ? (
-          <div aria-hidden="true" className="min-h-24 px-2" />
-        ) : null}
+        {nativePlaceholders[nativePlaceholder](Boolean(nativeState?.placeholderVisible))}
         {section.rows.map((item) => {
-          const isSubmenu = isContextMenuSubmenuRow(item)
-          const submenuOpen = isSubmenu && item.id === openSubmenuId
+          const submenuOpen = isContextMenuSubmenuRow(item) && item.id === openSubmenuId
 
           return (
             <ContextMenuRow
@@ -135,39 +213,14 @@ export function ContextMenuSection({
         })}
       </div>
       {openSubmenuItem ? (
-        <div
-          ref={submenuRef}
-          role="menu"
-          aria-label={openSubmenuItem.label}
-          className="fixed z-10 flex w-menu flex-col overflow-hidden rounded-overlay border border-light-flyout-stroke bg-light-card p-1 shadow-light-flyout dark:border-dark-flyout-stroke dark:bg-dark-card dark:shadow-dark-flyout"
-          // Runtime submenu geometry uses viewport coordinates so nested panels
-          // are not clipped by the scrolling body of the parent menu.
-          style={
-            openSubmenuPosition
-              ? {
-                  left: `${openSubmenuPosition.left}px`,
-                  top: `${openSubmenuPosition.top}px`,
-                  height: `${openSubmenuPosition.height}px`,
-                  maxHeight: `${openSubmenuPosition.maxHeight}px`,
-                }
-              : { visibility: 'hidden' }
-          }
-        >
-          <div
-            data-testid="context-submenu-scroll-body"
-            className={`min-h-0 flex-1 overflow-y-auto overscroll-contain ${SCROLLBAR_THIN}`}
-          >
-            {openSubmenuItem.children.rows.map((child) => (
-              <ContextMenuRow
-                key={child.id}
-                item={child}
-                active={child.id === activeItemId}
-                onPointerEnter={() => onHoverItem(child.id)}
-                onActivate={() => onActivateItem(child.id)}
-              />
-            ))}
-          </div>
-        </div>
+        <ContextSubmenu
+          item={openSubmenuItem}
+          position={openSubmenuPosition}
+          submenuRef={submenuRef}
+          activeItemId={activeItemId}
+          onHoverItem={onHoverItem}
+          onActivateItem={onActivateItem}
+        />
       ) : null}
     </div>
   )

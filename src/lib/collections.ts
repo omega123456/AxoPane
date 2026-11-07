@@ -22,3 +22,10 @@ export function moveItem<Item>(items: readonly Item[], fromIndex: number, toInde
   next.splice(toIndex, 0, moved)
   return next
 }
+
+export function lookupOwnProperty<Value>(
+  table: Readonly<Partial<Record<string, Value>>>,
+  key: string,
+): Value | undefined {
+  return Object.hasOwn(table, key) ? table[key] : undefined
+}

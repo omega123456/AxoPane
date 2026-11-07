@@ -1,4 +1,4 @@
-import { moveItem, withKeyFlags } from '@/lib/collections'
+import { lookupOwnProperty, moveItem, withKeyFlags } from '@/lib/collections'
 
 describe('withKeyFlags', () => {
   it('adds flagged keys and removes unflagged ones without mutating the input', () => {
@@ -19,5 +19,14 @@ describe('moveItem', () => {
     expect(moveItem(items, 0, 2)).toEqual(['b', 'c', 'a', 'd'])
     expect(moveItem(items, 3, 0)).toEqual(['d', 'a', 'b', 'c'])
     expect(items).toEqual(['a', 'b', 'c', 'd'])
+  })
+})
+
+describe('lookupOwnProperty', () => {
+  it('reads own entries and ignores inherited properties', () => {
+    const table: Partial<Record<string, number>> = { answer: 42 }
+    expect(lookupOwnProperty(table, 'answer')).toBe(42)
+    expect(lookupOwnProperty(table, 'missing')).toBeUndefined()
+    expect(lookupOwnProperty(table, 'constructor')).toBeUndefined()
   })
 })

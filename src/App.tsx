@@ -38,32 +38,34 @@ import type {
 import { UpdateBanner } from '@/components/states/UpdateBanner'
 import { EverythingBanner } from '@/components/states/EverythingBanner'
 import { useUpdaterStore } from '@/stores/updater-store'
-import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useClipboardStore } from '@/stores/clipboard-store'
-import { useContextMenuStore } from '@/stores/context-menu-store'
 import { useConfigStore } from '@/stores/config-store'
 import { useLayoutStore } from '@/stores/layout-store'
 import { useKeymapStore } from '@/stores/keymap-store'
 import { initializePanes, usePanesStore } from '@/stores/panes-store'
 import { activeConflict, useQueueStore } from '@/stores/queue-store'
-import { useSearchPaletteStore } from '@/stores/search-palette-store'
-import { useSettingsStore } from '@/stores/settings-store'
-import { usePropertiesDialogStore } from '@/stores/properties-dialog-store'
-import { useDefaultAppDialogStore } from '@/stores/default-app-dialog-store'
 import { initializeTheme, useThemeStore } from '@/stores/theme-store'
 import { applyWindowBackdrop } from '@/lib/window-commands'
 import { useThumbnailStore } from '@/stores/thumbnail-store'
 import { otherPane } from '@/lib/pane-id'
+import { isEditableTarget } from '@/lib/editable-target'
+import { useModalOpen } from '@/lib/use-modal-open'
+import type { PaneId } from '@/types/pane'
 
 const MOUSE_BUTTON_BACK = 3
 const MOUSE_BUTTON_FORWARD = 4
 
-function isEditableTarget(target: EventTarget | null) {
-  return (
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    (target instanceof HTMLElement && target.isContentEditable)
-  )
+type HistoryNavigation = (paneId: PaneId) => Promise<void>
+
+const historyNavigationByMouseButton: Partial<Record<number, HistoryNavigation>> = {
+  [MOUSE_BUTTON_BACK]: (paneId) => usePanesStore.getState().goBack(paneId),
+  [MOUSE_BUTTON_FORWARD]: (paneId) => usePanesStore.getState().goForward(paneId),
+}
+
+function focusOtherPane() {
+  const nextPaneId = otherPane(usePanesStore.getState().activePaneId)
+  usePanesStore.getState().setActivePane(nextPaneId)
+  document.querySelector<HTMLElement>(`[data-pane-id="${nextPaneId}"]`)?.focus()
 }
 
 function App() {
@@ -83,12 +85,7 @@ function App() {
   const persistThemePreference = useConfigStore((state) => state.setThemePreference)
   const defaultPaneMode = useLayoutStore((state) => state.defaultPaneMode)
   const keymap = useKeymapStore((state) => state.bindings)
-  const settingsOpen = useSettingsStore((state) => state.isOpen)
-  const menuOpen = useContextMenuStore((state) => state.menu !== null)
-  const actionDialogOpen = useActionDialogStore((state) => state.dialog !== null)
-  const propertiesDialogOpen = usePropertiesDialogStore((state) => state.dialog !== null)
-  const defaultAppDialogOpen = useDefaultAppDialogStore((state) => state.dialog !== null)
-  const searchPaletteOpen = useSearchPaletteStore((state) => state.isOpen)
+  const modalOpen = useModalOpen()
   const updateCheckInterval = useConfigStore((state) => state.updateCheckInterval)
   const conflict = useQueueStore(activeConflict)
   const resolveConflict = useQueueStore((state) => state.resolve)
@@ -156,27 +153,14 @@ function App() {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (
-        settingsOpen ||
-        menuOpen ||
-        actionDialogOpen ||
-        propertiesDialogOpen ||
-        defaultAppDialogOpen ||
-        searchPaletteOpen ||
-        conflict !== undefined
-      ) {
-        return
-      }
-
-      if (isEditableTarget(event.target)) {
+      const keyBelongsElsewhere = modalOpen || isEditableTarget(event.target)
+      if (keyBelongsElsewhere) {
         return
       }
 
       if (event.key === 'Tab' && defaultPaneMode === 'dual') {
         event.preventDefault()
-        const nextPaneId = otherPane(usePanesStore.getState().activePaneId)
-        usePanesStore.getState().setActivePane(nextPaneId)
-        document.querySelector<HTMLElement>(`[data-pane-id="${nextPaneId}"]`)?.focus()
+        focusOtherPane()
         return
       }
 
@@ -191,59 +175,28 @@ function App() {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [
-    actionDialogOpen,
-    conflict,
-    defaultAppDialogOpen,
-    defaultPaneMode,
-    keymap,
-    menuOpen,
-    propertiesDialogOpen,
-    searchPaletteOpen,
-    settingsOpen,
-  ])
+  }, [defaultPaneMode, keymap, modalOpen])
 
   useEffect(() => {
     // The back/forward mouse buttons drive history navigation on the active
     // pane. A mousedown over a pane already sets it active, so by the time we
     // read `activePaneId` here it reflects the pane under the cursor.
     function onMouseUp(event: MouseEvent) {
-      if (event.button !== MOUSE_BUTTON_BACK && event.button !== MOUSE_BUTTON_FORWARD) {
+      const navigateHistory = historyNavigationByMouseButton[event.button]
+      if (!navigateHistory) {
         return
       }
-
-      if (
-        settingsOpen ||
-        menuOpen ||
-        actionDialogOpen ||
-        propertiesDialogOpen ||
-        defaultAppDialogOpen ||
-        searchPaletteOpen ||
-        conflict !== undefined
-      ) {
+      if (modalOpen) {
         return
       }
 
       event.preventDefault()
-      const paneId = usePanesStore.getState().activePaneId
-      if (event.button === MOUSE_BUTTON_BACK) {
-        void usePanesStore.getState().goBack(paneId)
-      } else {
-        void usePanesStore.getState().goForward(paneId)
-      }
+      void navigateHistory(usePanesStore.getState().activePaneId)
     }
 
     window.addEventListener('mouseup', onMouseUp)
     return () => window.removeEventListener('mouseup', onMouseUp)
-  }, [
-    actionDialogOpen,
-    conflict,
-    defaultAppDialogOpen,
-    menuOpen,
-    propertiesDialogOpen,
-    searchPaletteOpen,
-    settingsOpen,
-  ])
+  }, [modalOpen])
 
   useEffect(() => {
     // Another application can only copy files while it holds the focus, so

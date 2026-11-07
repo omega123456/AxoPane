@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { formatItemPreview, formatJobProgress, verb } from '@/lib/queue-format'
+import {
+  formatItemPreview,
+  formatJobProgress,
+  formatJobTitle,
+  jobFlags,
+  verb,
+} from '@/lib/queue-format'
 import type { OpKind, OpProgress, OpStatus } from '@/lib/types/ipc'
 
 function operationWithKind(kind: OpKind): OpProgress {
@@ -88,5 +94,47 @@ describe('formatJobProgress', () => {
   it('never counts more deleted items than the job has', () => {
     const deleting = jobProgress({ kind: 'delete', totalItems: 3, completedItems: 4 })
     expect(formatJobProgress(deleting, { scanning: false })[0]).toBe('3 of 3 items deleted')
+  })
+})
+
+describe('formatJobTitle', () => {
+  it('names how a finished job ended and how many items an unfinished one moves', () => {
+    expect(formatJobTitle(jobProgress({ status: 'completed' }))).toBe('Copying complete')
+    expect(formatJobTitle(jobProgress({ status: 'failed', kind: 'move' }))).toBe('Moving failed')
+    expect(formatJobTitle(jobProgress({ status: 'cancelled', kind: 'delete' }))).toBe(
+      'Deleting cancelled',
+    )
+    expect(formatJobTitle(jobProgress({ status: 'active', totalItems: 1200 }))).toBe(
+      'Copying 1,200 items',
+    )
+  })
+})
+
+describe('jobFlags', () => {
+  it('marks a running transfer as underway with a transfer rate', () => {
+    expect(jobFlags(jobProgress({ status: 'active' }), false)).toMatchObject({
+      isUnderway: true,
+      isFinished: false,
+      showsTransferRate: true,
+      isConflict: false,
+    })
+  })
+
+  it('reports no transfer rate for deletes and nothing underway once finished or pending', () => {
+    expect(jobFlags(jobProgress({ kind: 'delete' }), false).showsTransferRate).toBe(false)
+    expect(jobFlags(jobProgress({ status: 'pending' }), false)).toMatchObject({
+      isPending: true,
+      isUnderway: false,
+    })
+    expect(jobFlags(jobProgress({ status: 'failed' }), false)).toMatchObject({
+      isFailed: true,
+      isFinished: true,
+      isUnderway: false,
+    })
+  })
+
+  it('treats a queued conflict as a conflict even before the status changes', () => {
+    expect(jobFlags(jobProgress({ status: 'active' }), true).isConflict).toBe(true)
+    expect(jobFlags(jobProgress({ status: 'conflict' }), false).isConflict).toBe(true)
   })
 })

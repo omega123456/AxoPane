@@ -28,6 +28,12 @@ export async function activateSearchHit(hit: SearchHit, how: SearchActivation) {
   await panes.openTabFromPath(targetPaneId, folder, { revealPath })
 }
 
+const activationByCommand: Partial<Record<CommandId, SearchActivation>> = {
+  open: 'default',
+  openInNewTab: 'newTab',
+  openInOtherPane: 'otherPane',
+}
+
 /**
  * Enter opens or reveals, Shift+Enter launches a file, and the remappable
  * "Open in new tab" / "Open in other pane" bindings choose those targets.
@@ -39,16 +45,8 @@ export function searchActivationForEvent(
   if (event.key === 'Enter' && event.shiftKey && !event.ctrlKey && !event.metaKey) {
     return 'open'
   }
-  switch (resolveCommandForEvent(event, keymap)) {
-    case 'open':
-      return 'default'
-    case 'openInNewTab':
-      return 'newTab'
-    case 'openInOtherPane':
-      return 'otherPane'
-    default:
-      return null
-  }
+  const commandId = resolveCommandForEvent(event, keymap)
+  return commandId ? (activationByCommand[commandId] ?? null) : null
 }
 
 /** Tab completion: the folder's name replaces the last segment, plus a separator to list its children. */

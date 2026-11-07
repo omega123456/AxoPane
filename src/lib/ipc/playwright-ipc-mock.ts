@@ -130,133 +130,167 @@ function withLiveNativeRequestId<CommandName extends keyof IpcCommandMap>(
   } as IpcCommandMap[CommandName]['response']
 }
 
-export async function invokePlaywrightCommand<CommandName extends keyof IpcCommandMap>(
-  command: CommandName,
-  payload: IpcCommandMap[CommandName]['request'],
-) {
-  // The live directory-session entrypoint inherits any scenario delay/error configured for `list_dir`
-  // (loading, error, and permission-denied fixtures still target `list_dir`).
-  const inheritsListDirTiming = command === 'begin_directory_session'
-  const delayMs = readDelay(command) || (inheritsListDirTiming ? readDelay('list_dir') : 0)
-  if (delayMs > 0) {
-    await new Promise((resolve) => window.setTimeout(resolve, delayMs))
-  }
+type CommandRequest<CommandName extends keyof IpcCommandMap> = IpcCommandMap[CommandName]['request']
+type CommandResponse<CommandName extends keyof IpcCommandMap> =
+  IpcCommandMap[CommandName]['response']
+type CommandRoutes = Partial<{
+  [CommandName in keyof IpcCommandMap]: (
+    payload: CommandRequest<CommandName>,
+  ) => CommandResponse<CommandName>
+}>
+type CommandRoute<CommandName extends keyof IpcCommandMap> =
+  | ((payload: CommandRequest<CommandName>) => CommandResponse<CommandName>)
+  | undefined
 
-  const failure =
-    readCommandError(command) ?? (inheritsListDirTiming ? readCommandError('list_dir') : undefined)
+function isDefaultTreeRoot(path: string) {
+  const defaultTreeTarget = defaultTreeFixtureTarget()
+  if (!defaultTreeTarget) {
+    return false
+  }
+  if (!isVolumeRoot(path)) {
+    return false
+  }
+  const root = defaultTreeTarget.root.toLowerCase()
+  const isTargetRoot = root === path.toLowerCase()
+  const targetLiesBelowRoot = defaultTreeTarget.path.toLowerCase() !== root
+  return isTargetRoot && targetLiesBelowRoot
+}
+
+function treeChildrenResponse({ path }: CommandRequest<'list_tree_children'>) {
+  const scenarioChildren = readScenario()?.treeChildrenByPath
+  const override = scenarioChildren ? readTreeChildrenOverride(path, scenarioChildren) : undefined
+  if (override) {
+    return override
+  }
+  const children = isDefaultTreeRoot(path) ? getFixtureResponse('list_tree_children').children : []
+  return { path, children }
+}
+
+// The v2 session commands derive their response from whatever `list_dir` a
+// scenario provides, mirroring the normal listing fixture, so the live app's v2
+// navigation path is driven by the same per-spec fixtures without a separate v2
+// fixture to maintain.
+function directorySessionResponse(
+  payload: Pick<CommandRequest<'begin_directory_session'>, 'paneId' | 'tabId'>,
+): CommandResponse<'begin_directory_session'> {
+  const listOverride = readCommandOverride('list_dir')
+  const listing = listOverride.found ? listOverride.value : getFixtureResponse('list_dir')
+  v2SessionIdCounter += 1
+  return {
+    paneId: payload.paneId,
+    tabId: payload.tabId,
+    path: listing.path,
+    baseline: {
+      sessionId: v2SessionIdCounter,
+      navigationRevision: v2SessionIdCounter,
+      watchRevision: 0,
+      viewRevision: 0,
+    },
+    totalRows: listing.entries.length,
+    pageSize: SESSION_PAGE_SIZE,
+    firstPage: { pageIndex: 0, entries: listing.entries.slice(0, SESSION_PAGE_SIZE) },
+  }
+}
+
+// An unmocked page defaults to an empty page at whatever baseline the caller
+// already has; every e2e fixture listing resolves fully from `firstPage`.
+function emptySessionRange(request: CommandRequest<'get_directory_session_range'>) {
+  return {
+    baseline: request.baseline,
+    totalRows: 0,
+    page: { pageIndex: request.pageIndex, entries: [] },
+  }
+}
+
+function requestThumbnails(request: CommandRequest<'request_thumbnails'>) {
+  const fixture = readScenario()?.thumbnailFixture
+  const scopeKey = thumbnailScopeKey(request)
+  cancelledThumbnailScopes.delete(scopeKey)
+  if (fixture) {
+    const batch = resolveThumbnailFixtureBatch(request, fixture)
+    window.setTimeout(() => {
+      if (!cancelledThumbnailScopes.has(scopeKey)) {
+        emitPlaywrightEvent('thumbnail://state', batch)
+      }
+    }, 0)
+  }
+  return { revision: request.revision, acceptedCount: request.candidates.length }
+}
+
+const responsesIgnoringOverrides: CommandRoutes = {
+  list_tree_children: treeChildrenResponse,
+  cancel_thumbnails: (request) => {
+    cancelledThumbnailScopes.add(thumbnailScopeKey(request))
+  },
+  request_thumbnails: requestThumbnails,
+}
+
+const responsesWhenNotOverridden: CommandRoutes = {
+  begin_directory_session: directorySessionResponse,
+  revise_directory_session_view: directorySessionResponse,
+  get_directory_session_range: emptySessionRange,
+  // Explicit Items sorting reuses the shared fixture registry so a scenario can
+  // exercise the pending visual state with only a delay override.
+  sort_active_items: () => getFixtureResponse('sort_active_items'),
+}
+
+// The live directory-session entrypoint inherits any scenario delay/error
+// configured for `list_dir` (loading, error, and permission-denied fixtures
+// still target `list_dir`).
+function inheritsListDirTiming(command: keyof IpcCommandMap) {
+  return command === 'begin_directory_session'
+}
+
+function scenarioDelayMs(command: keyof IpcCommandMap) {
+  const fallback = inheritsListDirTiming(command) ? readDelay('list_dir') : 0
+  return readDelay(command) || fallback
+}
+
+function scenarioFailure(command: keyof IpcCommandMap) {
+  const fallback = inheritsListDirTiming(command) ? readCommandError('list_dir') : undefined
+  return readCommandError(command) ?? fallback
+}
+
+// A typed rejection (e.g. `{ kind: 'notReady' }`) reaches the caller as-is,
+// like a Rust command returning a serialized error enum.
+function throwScenarioFailure(command: keyof IpcCommandMap) {
+  const failure = scenarioFailure(command)
   if (typeof failure === 'string') {
     throw new Error(failure)
   }
   if (failure) {
-    // A typed rejection (e.g. `{ kind: 'notReady' }`) reaches the caller as-is,
-    // like a Rust command returning a serialized error enum.
     throw structuredClone(failure)
   }
+}
 
-  if (command === 'list_tree_children') {
-    const path = (payload as IpcCommandMap['list_tree_children']['request']).path
-    const treeChildrenByPath = readScenario()?.treeChildrenByPath
-    if (treeChildrenByPath) {
-      const response = readTreeChildrenOverride(path, treeChildrenByPath)
-      if (response) {
-        return response as IpcCommandMap[CommandName]['response']
-      }
-    }
+function lookupRoute<CommandName extends keyof IpcCommandMap>(
+  routes: CommandRoutes,
+  command: CommandName,
+) {
+  return routes[command] as CommandRoute<CommandName>
+}
 
-    const defaultTreeTarget = defaultTreeFixtureTarget()
-    if (
-      isVolumeRoot(path) &&
-      defaultTreeTarget?.root.toLowerCase() === path.toLowerCase() &&
-      defaultTreeTarget.path.toLowerCase() !== defaultTreeTarget.root.toLowerCase()
-    ) {
-      const fixture = getFixtureResponse('list_tree_children')
-      return {
-        path,
-        children: fixture.children,
-      } as IpcCommandMap[CommandName]['response']
-    }
-
-    return {
-      path,
-      children: [],
-    } as IpcCommandMap[CommandName]['response']
+export async function invokePlaywrightCommand<CommandName extends keyof IpcCommandMap>(
+  command: CommandName,
+  payload: CommandRequest<CommandName>,
+): Promise<CommandResponse<CommandName>> {
+  const delayMs = scenarioDelayMs(command)
+  if (delayMs > 0) {
+    await new Promise((resolve) => window.setTimeout(resolve, delayMs))
   }
+  throwScenarioFailure(command)
 
-  // `begin_directory_session` / `revise_directory_session_view` derive a v2
-  // response from whatever `list_dir` a scenario provides, mirroring
-  // the normal listing fixture, so the live app's v2 navigation path is driven by
-  // the same per-spec fixtures without a separate v2 fixture to maintain. An
-  // explicit scenario override for either v2 command still wins below.
-  if (
-    (command === 'begin_directory_session' || command === 'revise_directory_session_view') &&
-    !readCommandOverride(command).found
-  ) {
-    const listOverride = readCommandOverride('list_dir')
-    const listing = listOverride.found ? listOverride.value : getFixtureResponse('list_dir')
-    const beginPayload = payload as IpcCommandMap['begin_directory_session']['request']
-    v2SessionIdCounter += 1
-    return {
-      paneId: beginPayload.paneId,
-      tabId: beginPayload.tabId,
-      path: listing.path,
-      baseline: {
-        sessionId: v2SessionIdCounter,
-        navigationRevision: v2SessionIdCounter,
-        watchRevision: 0,
-        viewRevision: 0,
-      },
-      totalRows: listing.entries.length,
-      pageSize: SESSION_PAGE_SIZE,
-      firstPage: { pageIndex: 0, entries: listing.entries.slice(0, SESSION_PAGE_SIZE) },
-    } as IpcCommandMap[CommandName]['response']
+  const routed = lookupRoute(responsesIgnoringOverrides, command)
+  if (routed) {
+    return routed(payload)
   }
-
-  // `get_directory_session_range` for an unmocked page defaults to an empty
-  // page at whatever baseline the caller already has; every e2e fixture
-  // listing is small enough to resolve fully from `firstPage` above.
-  if (command === 'get_directory_session_range' && !readCommandOverride(command).found) {
-    const request = payload as IpcCommandMap['get_directory_session_range']['request']
-    return {
-      baseline: request.baseline,
-      totalRows: 0,
-      page: { pageIndex: request.pageIndex, entries: [] },
-    } as IpcCommandMap[CommandName]['response']
-  }
-
-  if (command === 'cancel_thumbnails') {
-    const request = payload as IpcCommandMap['cancel_thumbnails']['request']
-    cancelledThumbnailScopes.add(thumbnailScopeKey(request))
-    return undefined as IpcCommandMap[CommandName]['response']
-  }
-
-  if (command === 'request_thumbnails') {
-    const request = payload as IpcCommandMap['request_thumbnails']['request']
-    const fixture = readScenario()?.thumbnailFixture
-    const scopeKey = thumbnailScopeKey(request)
-    cancelledThumbnailScopes.delete(scopeKey)
-    if (fixture) {
-      const batch = resolveThumbnailFixtureBatch(request, fixture)
-      window.setTimeout(() => {
-        if (!cancelledThumbnailScopes.has(scopeKey)) {
-          emitPlaywrightEvent('thumbnail://state', batch)
-        }
-      }, 0)
-    }
-    return {
-      revision: request.revision,
-      acceptedCount: request.candidates.length,
-    } as IpcCommandMap[CommandName]['response']
-  }
-
-  // Explicit Items sorting reuses the shared fixture registry by default so a
-  // scenario can exercise the pending visual state with only a delay override.
-  if (command === 'sort_active_items' && !readCommandOverride('sort_active_items').found) {
-    return getFixtureResponse('sort_active_items') as IpcCommandMap[CommandName]['response']
-  }
-
   const override = readCommandOverride(command)
   if (override.found) {
     return withLiveNativeRequestId(command, payload, override.value)
+  }
+  const unmockedDefault = lookupRoute(responsesWhenNotOverridden, command)
+  if (unmockedDefault) {
+    return unmockedDefault(payload)
   }
   return withLiveNativeRequestId(command, payload, getFixtureResponse(command))
 }

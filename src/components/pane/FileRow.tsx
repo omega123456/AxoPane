@@ -7,8 +7,10 @@ import { useConfigStore } from '@/stores/config-store'
 import { useLayoutStore } from '@/stores/layout-store'
 import { columnFlexStyle } from './HeaderRow'
 import { SizeValue } from './SizeValue'
+import { InlineRenameInput } from './InlineRenameInput'
+import { cutFadeClass, rowDropTargetClass, rowHighlightClass } from './entry-classes'
 
-import type { DragEvent, KeyboardEvent, MouseEvent } from 'react'
+import type { DragEvent, MouseEvent } from 'react'
 import { memo, useEffect, useMemo, useRef } from 'react'
 import { TEXT_SECONDARY } from '@/lib/class-names'
 
@@ -100,27 +102,8 @@ function FileRowImpl({
     focusRenameInput(renameInputRef.current, entry.isDir)
   }, [entry.isDir, isRenaming])
 
-  const rowClassName = `group flex h-row w-full items-center rounded-control px-2 text-row text-left focus-visible:outline-none ${
-    isSelected
-      ? isActivePane
-        ? 'bg-light-tint dark:bg-dark-tint'
-        : 'bg-light-neutral-selection dark:bg-dark-neutral-selection'
-      : 'hover:bg-light-hover dark:hover:bg-dark-hover'
-  } ${isFocused && isActivePane ? 'ring-1 ring-inset ring-light-accent dark:ring-dark-accent' : ''}`
-  // Cut items fade their contents, not the selection fill behind them.
-  const cellClassName = (key: ColumnKey) =>
-    `${columnCellClassName(key)}${isCut ? ' opacity-50' : ''}`
-
-  function onRenameKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    event.stopPropagation()
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      actions.onRenameSubmit()
-    } else if (event.key === 'Escape') {
-      event.preventDefault()
-      actions.onRenameCancel()
-    }
-  }
+  const rowClassName = `group flex h-row w-full items-center rounded-control px-2 text-row text-left focus-visible:outline-none ${rowHighlightClass({ isActivePane, isSelected, isFocused })}`
+  const cellClassName = (key: ColumnKey) => `${columnCellClassName(key)} ${cutFadeClass(isCut)}`
 
   if (isRenaming) {
     return (
@@ -135,17 +118,13 @@ function FileRowImpl({
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <EntryIcon entry={entry} />
-                  <input
-                    ref={renameInputRef}
-                    autoComplete="off"
-                    aria-label={`Rename ${entry.name}`}
+                  <InlineRenameInput
+                    inputRef={renameInputRef}
+                    entryName={entry.name}
                     value={renameValue}
-                    disabled={renameBusy}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onBlur={actions.onRenameBlur}
-                    onChange={(event) => actions.onRenameChange(event.target.value)}
-                    onKeyDown={onRenameKeyDown}
-                    className={`min-w-0 flex-1 select-text rounded-control border border-light-accent dark:border-dark-accent bg-light-base px-2 py-1 font-mono text-caption text-light-text outline-none dark:bg-dark-base dark:text-dark-text`}
+                    busy={renameBusy}
+                    actions={actions}
+                    className="flex-1"
                   />
                 </span>
               </span>
@@ -246,11 +225,7 @@ function FileRowImpl({
           actions.onMiddleClick(entry.id)
         }
       }}
-      className={`${rowClassName} cursor-pointer select-none ${
-        isDropTarget
-          ? 'ring-2 ring-inset ring-light-accent dark:ring-dark-accent bg-light-tint dark:bg-dark-tint'
-          : ''
-      }`}
+      className={`${rowClassName} cursor-pointer select-none ${rowDropTargetClass(isDropTarget)}`}
     >
       {visibleColumns.map((column) => {
         if (column.key === 'name') {

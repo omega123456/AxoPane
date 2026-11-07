@@ -160,11 +160,19 @@ function isDropKind(effect: string): effect is DropKind {
  * and tree nodes are stable nodes).
  */
 function sameRegion(previous: Element | null, next: Element | null) {
-  const previousRow = previous?.closest('[data-entry-id]')?.getAttribute('data-entry-id') ?? null
-  const nextRow = next?.closest('[data-entry-id]')?.getAttribute('data-entry-id') ?? null
+  const previousRow = entryRowId(previous)
+  const nextRow = entryRowId(next)
   if (previousRow !== null || nextRow !== null) {
     return previousRow === nextRow
   }
+  return sameOrNested(previous, next)
+}
+
+function entryRowId(element: Element | null) {
+  return element?.closest('[data-entry-id]')?.getAttribute('data-entry-id') ?? null
+}
+
+function sameOrNested(previous: Element | null, next: Element | null) {
   if (previous === null || next === null) {
     return previous === next
   }

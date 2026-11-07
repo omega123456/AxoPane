@@ -1,5 +1,7 @@
 import {
+  arrowGridMovements,
   columnsForPaneWidth,
+  gridKeyMovement,
   entryIndexForPosition,
   moveGridIndex,
   paneGridClassNames,
@@ -49,5 +51,34 @@ describe('pane grid geometry', () => {
     expect(moveGridIndex({ ...input, movement: 'last' })).toBe(9)
     expect(moveGridIndex({ ...input, movement: 'pageUp' })).toBe(2)
     expect(moveGridIndex({ ...input, movement: 'pageDown' })).toBe(9)
+  })
+})
+
+describe('gridKeyMovement', () => {
+  const plainKey = (key: string) => ({ key, ctrlKey: false, metaKey: false })
+
+  it('maps navigation keys to grid movements', () => {
+    expect(gridKeyMovement(plainKey('ArrowLeft'))).toBe('left')
+    expect(gridKeyMovement(plainKey('ArrowDown'))).toBe('down')
+    expect(gridKeyMovement(plainKey('Home'))).toBe('home')
+    expect(gridKeyMovement(plainKey('End'))).toBe('end')
+    expect(gridKeyMovement(plainKey('PageUp'))).toBe('pageUp')
+    expect(gridKeyMovement(plainKey('PageDown'))).toBe('pageDown')
+    expect(gridKeyMovement(plainKey('a'))).toBeUndefined()
+  })
+
+  it('jumps to the first and last entry with Ctrl or Cmd', () => {
+    expect(gridKeyMovement({ key: 'Home', ctrlKey: true, metaKey: false })).toBe('first')
+    expect(gridKeyMovement({ key: 'End', ctrlKey: false, metaKey: true })).toBe('last')
+    expect(gridKeyMovement({ key: 'ArrowUp', ctrlKey: true, metaKey: false })).toBe('up')
+  })
+
+  it('shares the arrow movements with the pane keyboard handler', () => {
+    expect(arrowGridMovements).toEqual({
+      ArrowLeft: 'left',
+      ArrowRight: 'right',
+      ArrowUp: 'up',
+      ArrowDown: 'down',
+    })
   })
 })

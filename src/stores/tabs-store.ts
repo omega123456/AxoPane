@@ -108,6 +108,109 @@ function clampIndex(index: number, length: number) {
   return clamp(index, 0, length - 1)
 }
 
+type TabMoveRequest = {
+  sourcePaneId: PaneId
+  tabId: string
+  destinationPaneId: PaneId
+  destinationIndex: number
+}
+
+type PlannedTabMove = { panes: Partial<Record<PaneId, PaneTabs>>; result: TabMoveResult }
+
+function reorderTab(
+  source: PaneTabs,
+  sourceIndex: number,
+  { sourcePaneId, tabId, destinationIndex }: TabMoveRequest,
+): PlannedTabMove | null {
+  const outsidePane = destinationIndex < 0 || destinationIndex > source.tabs.length
+  if (outsidePane) {
+    return null
+  }
+  const insertionIndex = Math.min(destinationIndex, source.tabs.length - 1)
+  const tabs = moveItem(source.tabs, sourceIndex, insertionIndex)
+  if (tabs.every((item, index) => item.id === source.tabs[index]?.id)) {
+    return null
+  }
+  const activeTabId = source.tabs[source.activeTabIndex]?.id
+  const activeTabIndex = tabs.findIndex((item) => item.id === activeTabId)
+  return {
+    panes: { [sourcePaneId]: { ...source, tabs, activeTabIndex } },
+    result: { kind: 'reorder', paneId: sourcePaneId, tabId },
+  }
+}
+
+function sourceActiveIndexAfterRemoval(
+  source: PaneTabs,
+  sourceIndex: number,
+  remaining: TabState[],
+) {
+  if (sourceIndex === source.activeTabIndex) {
+    return Math.min(sourceIndex, remaining.length - 1)
+  }
+  const sourceActiveTabId = source.tabs[source.activeTabIndex]?.id
+  return remaining.findIndex((tab) => tab.id === sourceActiveTabId)
+}
+
+function canTransferTab(source: PaneTabs, destination: PaneTabs, destinationIndex: number) {
+  return (
+    source.tabs.length > 1 && destinationIndex >= 0 && destinationIndex <= destination.tabs.length
+  )
+}
+
+function transferTab(
+  source: PaneTabs,
+  destination: PaneTabs,
+  sourceIndex: number,
+  { sourcePaneId, tabId, destinationPaneId, destinationIndex }: TabMoveRequest,
+): PlannedTabMove | null {
+  if (!canTransferTab(source, destination, destinationIndex)) {
+    return null
+  }
+  const sourceTabs = source.tabs.filter((tab) => tab.id !== tabId)
+  const destinationTabId = createTabId(destinationPaneId)
+  const destinationTabs = [...destination.tabs]
+  destinationTabs.splice(destinationIndex, 0, { ...source.tabs[sourceIndex], id: destinationTabId })
+  return {
+    panes: {
+      [sourcePaneId]: {
+        ...source,
+        tabs: sourceTabs,
+        activeTabIndex: sourceActiveIndexAfterRemoval(source, sourceIndex, sourceTabs),
+      },
+      [destinationPaneId]: {
+        ...destination,
+        tabs: destinationTabs,
+        activeTabIndex: destinationIndex,
+      },
+    },
+    result: {
+      kind: 'transfer',
+      sourcePaneId,
+      destinationPaneId,
+      sourceActiveChanged: sourceIndex === source.activeTabIndex,
+      destinationTabId,
+    },
+  }
+}
+
+function planTabMove(
+  panes: Record<PaneId, PaneTabs>,
+  request: TabMoveRequest,
+): PlannedTabMove | null {
+  const source = panes[request.sourcePaneId]
+  const sourceIndex = source.tabs.findIndex((tab) => tab.id === request.tabId)
+  if (sourceIndex === -1) {
+    return null
+  }
+  if (!Number.isInteger(request.destinationIndex)) {
+    return null
+  }
+  if (request.sourcePaneId === request.destinationPaneId) {
+    return reorderTab(source, sourceIndex, request)
+  }
+  return transferTab(source, panes[request.destinationPaneId], sourceIndex, request)
+}
+
 export const useTabsStore = create<TabsStore>((set) => ({
   ...defaultState(),
   hydrate: (paneId, pane) =>
@@ -213,76 +316,17 @@ export const useTabsStore = create<TabsStore>((set) => ({
   moveTab: (sourcePaneId, tabId, destinationPaneId, destinationIndex) => {
     let result: TabMoveResult = { kind: 'none' }
     set((state) => {
-      const source = state.panes[sourcePaneId]
-      const sourceIndex = source.tabs.findIndex((tab) => tab.id === tabId)
-      if (sourceIndex === -1 || !Number.isInteger(destinationIndex)) {
-        return state
-      }
-
-      if (sourcePaneId === destinationPaneId) {
-        if (destinationIndex < 0 || destinationIndex > source.tabs.length) {
-          return state
-        }
-
-        const insertionIndex = Math.min(destinationIndex, source.tabs.length - 1)
-        const tabs = moveItem(source.tabs, sourceIndex, insertionIndex)
-        if (tabs.every((item, index) => item.id === source.tabs[index]?.id)) {
-          return state
-        }
-        const activeTabId = source.tabs[source.activeTabIndex]?.id
-        const activeTabIndex = tabs.findIndex((item) => item.id === activeTabId)
-        result = { kind: 'reorder', paneId: sourcePaneId, tabId }
-        return {
-          panes: {
-            ...state.panes,
-            [sourcePaneId]: { ...source, tabs, activeTabIndex },
-          },
-        }
-      }
-
-      const destination = state.panes[destinationPaneId]
-      if (
-        source.tabs.length <= 1 ||
-        destinationIndex < 0 ||
-        destinationIndex > destination.tabs.length
-      ) {
-        return state
-      }
-
-      const sourceActiveChanged = sourceIndex === source.activeTabIndex
-      const sourceTabs = source.tabs.filter((tab) => tab.id !== tabId)
-      const sourceActiveTabId = source.tabs[source.activeTabIndex]?.id
-      const sourceActiveTabIndex = sourceActiveChanged
-        ? Math.min(sourceIndex, sourceTabs.length - 1)
-        : sourceTabs.findIndex((tab) => tab.id === sourceActiveTabId)
-      const destinationTabId = createTabId(destinationPaneId)
-      const destinationTabs = [...destination.tabs]
-      destinationTabs.splice(destinationIndex, 0, {
-        ...source.tabs[sourceIndex],
-        id: destinationTabId,
-      })
-      result = {
-        kind: 'transfer',
+      const move = planTabMove(state.panes, {
         sourcePaneId,
+        tabId,
         destinationPaneId,
-        sourceActiveChanged,
-        destinationTabId,
+        destinationIndex,
+      })
+      if (!move) {
+        return state
       }
-      return {
-        panes: {
-          ...state.panes,
-          [sourcePaneId]: {
-            ...source,
-            tabs: sourceTabs,
-            activeTabIndex: sourceActiveTabIndex,
-          },
-          [destinationPaneId]: {
-            ...destination,
-            tabs: destinationTabs,
-            activeTabIndex: destinationIndex,
-          },
-        },
-      }
+      result = move.result
+      return { panes: { ...state.panes, ...move.panes } }
     })
     return result
   },

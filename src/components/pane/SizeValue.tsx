@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import { LoaderCircleIcon } from '@/components/icons'
 import { usePanesStore } from '@/stores/panes-store'
@@ -9,35 +10,57 @@ type SizeValueProps = {
 
 const DENIED_TITLE = 'macOS blocked access. Grant Full Disk Access to include this folder.'
 
+type DirectorySizeState = ReturnType<typeof usePanesStore.getState>['sizeStates'][string]
+
+const NO_SIZE = <span>—</span>
+
+function CalculatingSize() {
+  return (
+    <span className="inline-flex items-center justify-end gap-1 text-light-accent dark:text-dark-accent">
+      <LoaderCircleIcon className="h-3.5 w-3.5 animate-spin" />
+      <span className="sr-only">Calculating size</span>
+    </span>
+  )
+}
+
+function readySize(sizeState: DirectorySizeState) {
+  if (sizeState.sizeBytes === null) {
+    return NO_SIZE
+  }
+  if (!sizeState.isLowerBound) {
+    return <span>{formatBytes(sizeState.sizeBytes)}</span>
+  }
+  return (
+    <span title={lowerBoundTitle(sizeState.skippedRoots ?? [], sizeState.skippedMore ?? 0)}>
+      ≥ {formatBytes(sizeState.sizeBytes)}
+    </span>
+  )
+}
+
+function unavailableSize(sizeState: DirectorySizeState) {
+  return <span title={sizeState.naReason === 'denied' ? DENIED_TITLE : undefined}>N/A</span>
+}
+
+const directorySizeRenderers: Record<
+  DirectorySizeState['state'],
+  (sizeState: DirectorySizeState) => ReactNode
+> = {
+  unknown: () => NO_SIZE,
+  calculating: () => <CalculatingSize />,
+  ready: readySize,
+  na: unavailableSize,
+  error: unavailableSize,
+}
+
+function DirectorySize({ sizeState }: { sizeState: DirectorySizeState | undefined }) {
+  return sizeState ? directorySizeRenderers[sizeState.state](sizeState) : NO_SIZE
+}
+
 export function SizeValue({ entry }: SizeValueProps) {
   const sizeState = usePanesStore((state) => state.sizeStates[entry.path])
 
   if (entry.isDir) {
-    if (sizeState?.state === 'calculating') {
-      return (
-        <span className="inline-flex items-center justify-end gap-1 text-light-accent dark:text-dark-accent">
-          <LoaderCircleIcon className="h-3.5 w-3.5 animate-spin" />
-          <span className="sr-only">Calculating size</span>
-        </span>
-      )
-    }
-
-    if (sizeState?.state === 'ready' && sizeState.sizeBytes !== null) {
-      if (sizeState.isLowerBound) {
-        return (
-          <span title={lowerBoundTitle(sizeState.skippedRoots ?? [], sizeState.skippedMore ?? 0)}>
-            ≥ {formatBytes(sizeState.sizeBytes)}
-          </span>
-        )
-      }
-      return <span>{formatBytes(sizeState.sizeBytes)}</span>
-    }
-
-    if (sizeState?.state === 'na' || sizeState?.state === 'error') {
-      return <span title={sizeState.naReason === 'denied' ? DENIED_TITLE : undefined}>N/A</span>
-    }
-
-    return <span>—</span>
+    return <DirectorySize sizeState={sizeState} />
   }
 
   return <span>{entry.sizeBytes === null ? '—' : formatBytes(entry.sizeBytes)}</span>

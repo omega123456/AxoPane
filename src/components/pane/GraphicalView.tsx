@@ -9,8 +9,10 @@ import {
 } from 'react'
 import type { KeyboardEvent, ReactNode, RefObject, UIEvent } from 'react'
 import { EntryCard } from './EntryCard'
+import { MarqueeSelection } from './MarqueeSelection'
 import type { FileRowActions } from './FileRow'
 import {
+  gridKeyMovement,
   moveGridIndex,
   PANE_GRID_GAP,
   paneGridLayout,
@@ -21,18 +23,31 @@ import { pathKey } from '@/lib/path-compare'
 import { useElementVirtualizer } from '@/lib/use-element-virtualizer'
 import { useElementWidth } from '@/lib/use-element-width'
 import type { PaneViewMode } from '@/lib/pane-view'
-import type { InlineRenameState } from '@/stores/inline-rename-store'
+import { entryRenameProps, type InlineRenameState } from '@/stores/inline-rename-store'
 import type { PaneState } from '@/types/pane'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
 import { BOTH_SIDES } from '@/lib/numbers'
-import { SCROLLBAR_THIN } from '@/lib/class-names'
+import { dropTargetOutline, SCROLLBAR_THIN } from '@/lib/class-names'
+import { virtualListHeight, virtualRowsOrFallback } from '@/lib/virtual-rows'
+import type { GraphicalThumbnailRange } from '@/lib/thumbnail-candidates'
 
 const THUMBNAIL_OVERSCAN_ROWS = 2
 const ICON_OVERSCAN_ROWS = 4
 /** Rows rendered before the virtualizer has measured its scroll element. */
 const UNMEASURED_FALLBACK_ROWS = 8
+const FALLBACK_ROW_KEY_PREFIX = 'visual-row'
 const FALLBACK_VIEWPORT_HEIGHT_PX = 480
 const THUMBNAIL_PREFETCH_ROWS = 2
+
+function scrollDirection(
+  previousTop: number,
+  nextTop: number,
+): GraphicalThumbnailRange['direction'] {
+  if (nextTop > previousTop) {
+    return 'down'
+  }
+  return nextTop < previousTop ? 'up' : 'stationary'
+}
 
 export type GraphicalViewHandle = {
   scrollToEntry: (index: number) => void
@@ -43,13 +58,7 @@ export type GraphicalViewHandle = {
 
 export type GraphicalMarqueeRect = { left: number; top: number; width: number; height: number }
 
-export type GraphicalThumbnailRange = {
-  visibleStart: number
-  visibleEnd: number
-  prefetchStart: number
-  prefetchEnd: number
-  direction: 'up' | 'down' | 'stationary'
-}
+export type { GraphicalThumbnailRange }
 
 type GraphicalViewProps = {
   pane: PaneState
@@ -119,20 +128,20 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
       overscan: mode === 'thumbnails' ? THUMBNAIL_OVERSCAN_ROWS : ICON_OVERSCAN_ROWS,
       measurementKey: grid.rowPitch,
     })
-    const virtualRows = rowVirtualizer.getVirtualItems()
-    const rowsToRender =
-      virtualRows.length > 0 || rowCount === 0
-        ? virtualRows
-        : Array.from({ length: Math.min(rowCount, UNMEASURED_FALLBACK_ROWS) }, (_, index) => ({
-            key: `visual-row-${index}`,
-            index,
-            start: index * grid.rowPitch,
-          }))
+    const rowsToRender = virtualRowsOrFallback({
+      measuredRows: rowVirtualizer.getVirtualItems(),
+      rowCount,
+      fallbackRowLimit: UNMEASURED_FALLBACK_ROWS,
+      rowStart: (index) => index * grid.rowPitch,
+      keyPrefix: FALLBACK_ROW_KEY_PREFIX,
+    })
     // The extra gap below the last row mirrors each row's `pt-1`.
-    const totalHeight =
-      rowCount === 0
-        ? 0
-        : (rowVirtualizer.getTotalSize() || rowCount * grid.rowPitch) + PANE_GRID_GAP
+    const totalHeight = virtualListHeight({
+      measuredHeight: rowVirtualizer.getTotalSize(),
+      rowCount,
+      estimated: rowCount * grid.rowPitch,
+      trailing: PANE_GRID_GAP,
+    })
 
     const setScrollElement = useCallback(
       (element: HTMLDivElement | null) => {
@@ -270,24 +279,8 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
       scrollRef,
     ])
 
-    function keyboardMovement(event: KeyboardEvent<HTMLDivElement>): GridMovement | null {
-      if (event.ctrlKey || event.metaKey) {
-        if (event.key === 'Home') return 'first'
-        if (event.key === 'End') return 'last'
-      }
-      if (event.key === 'ArrowLeft') return 'left'
-      if (event.key === 'ArrowRight') return 'right'
-      if (event.key === 'ArrowUp') return 'up'
-      if (event.key === 'ArrowDown') return 'down'
-      if (event.key === 'Home') return 'home'
-      if (event.key === 'End') return 'end'
-      if (event.key === 'PageUp') return 'pageUp'
-      if (event.key === 'PageDown') return 'pageDown'
-      return null
-    }
-
     function onGridKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-      const movement = keyboardMovement(event)
+      const movement = gridKeyMovement(event)
       if (!movement || pane.entries.length === 0) return
       event.preventDefault()
       moveFocus(movement)
@@ -297,7 +290,7 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
       return (
         <div
           ref={setScrollElement}
-          className={`relative min-h-0 flex-1 ${isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-light-accent dark:outline-dark-accent' : ''}`}
+          className={`relative min-h-0 flex-1 ${dropTargetOutline(isPaneDropTarget)}`}
           onMouseDown={onContainerMouseDown}
           onContextMenu={onContainerContextMenu}
           onDragOver={onPaneDragOver}
@@ -318,17 +311,12 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
           aria-rowcount={rowCount}
           aria-colcount={grid.columns}
           tabIndex={0}
-          className={`h-full min-h-0 overflow-auto overscroll-contain ${SCROLLBAR_THIN} ${FOCUS_RING_INSET} ${isPaneDropTarget ? 'outline outline-2 -outline-offset-2 outline-light-accent dark:outline-dark-accent' : ''}`}
+          className={`h-full min-h-0 overflow-auto overscroll-contain ${SCROLLBAR_THIN} ${FOCUS_RING_INSET} ${dropTargetOutline(isPaneDropTarget)}`}
           onKeyDown={onGridKeyDown}
           onMouseDown={onContainerMouseDown}
           onScroll={(event: UIEvent<HTMLDivElement>) => {
             const next = event.currentTarget.scrollTop
-            scrollDirectionRef.current =
-              next > lastScrollTopRef.current
-                ? 'down'
-                : next < lastScrollTopRef.current
-                  ? 'up'
-                  : 'stationary'
+            scrollDirectionRef.current = scrollDirection(lastScrollTopRef.current, next)
             lastScrollTopRef.current = next
             onScroll?.(next)
           }}
@@ -359,10 +347,7 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
                       isSelected={selectedIds.has(entry.id)}
                       isCut={cutEntryPaths.has(pathKey(entry.path))}
                       isDropTarget={dropTargetEntryId === entry.id}
-                      isRenaming={rename?.entryId === entry.id}
-                      renameValue={rename?.entryId === entry.id ? rename.value : ''}
-                      renameBusy={rename?.entryId === entry.id ? rename.busy : false}
-                      renameError={rename?.entryId === entry.id ? rename.error : null}
+                      {...entryRenameProps(rename, entry.id)}
                       draggable={!entry.trashId}
                       rowIndex={virtualRow.index + 1}
                       columnIndex={column + 1}
@@ -372,18 +357,7 @@ export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>
                 </div>
               )
             })}
-            {marqueeRect ? (
-              <div
-                data-testid="marquee-selection"
-                className="pointer-events-none absolute border border-light-accent dark:border-dark-accent bg-light-tint dark:bg-dark-tint"
-                style={{
-                  left: `${marqueeRect.left}px`,
-                  top: `${marqueeRect.top}px`,
-                  width: `${marqueeRect.width}px`,
-                  height: `${marqueeRect.height}px`,
-                }}
-              />
-            ) : null}
+            <MarqueeSelection rect={marqueeRect} />
           </div>
         </div>
       </div>

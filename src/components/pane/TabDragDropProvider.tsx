@@ -1,9 +1,17 @@
-import { createContext, type ReactNode, useContext, useMemo, useRef, useState } from 'react'
+import {
+  createContext,
+  type ComponentProps,
+  type ReactNode,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { move } from '@dnd-kit/helpers'
 import { DragDropProvider, PointerSensor, useDroppable } from '@dnd-kit/react'
 import { useSortable } from '@dnd-kit/react/sortable'
 import { usePanesStore } from '@/stores/panes-store'
-import { useTabsStore } from '@/stores/tabs-store'
+import { useTabsStore, type TabMoveResult } from '@/stores/tabs-store'
 import type { PaneId } from '@/types/pane'
 
 const TAB_DRAG_ACTIVATION_DISTANCE_PX = 5
@@ -117,6 +125,68 @@ function validDestination(sourcePaneId: PaneId, destinationPaneId: PaneId) {
   )
 }
 
+type TabDragEndEvent = Parameters<
+  NonNullable<ComponentProps<typeof DragDropProvider>['onDragEnd']>
+>[0]
+
+type TabIdsByPane = Record<PaneId, string[]>
+
+type TabDrop = {
+  sourcePaneId: PaneId
+  sourceTabId: string
+  destinationPaneId: PaneId
+  destinationIndex: number
+}
+
+function focusTabLabel(tabId: string) {
+  document.querySelector<HTMLElement>(`[data-tab-label-id="${CSS.escape(tabId)}"]`)?.focus()
+}
+
+function isStripTarget(target: TabDragEndEvent['operation']['target']) {
+  return Boolean((target?.data as { isStrip?: boolean } | undefined)?.isStrip)
+}
+
+function tabDropDestination(
+  event: TabDragEndEvent,
+  sourceTabId: string,
+  targetPaneId: PaneId,
+  tabIds: TabIdsByPane,
+): Pick<TabDrop, 'destinationPaneId' | 'destinationIndex'> {
+  if (isStripTarget(event.operation.target)) {
+    return { destinationPaneId: targetPaneId, destinationIndex: tabIds[targetPaneId].length }
+  }
+  const projected = move(tabIds, event)
+  const destinationPaneId =
+    (Object.keys(projected) as PaneId[]).find((paneId) =>
+      projected[paneId].includes(sourceTabId),
+    ) ?? targetPaneId
+  return { destinationPaneId, destinationIndex: projected[destinationPaneId].indexOf(sourceTabId) }
+}
+
+function resolveTabDrop(event: TabDragEndEvent, tabIds: TabIdsByPane): TabDrop | null {
+  const { source, target } = event.operation
+  const sourcePaneId = paneIdFromEntity(source)
+  const targetPaneId = paneIdFromEntity(target)
+  const sourceTabId = source?.id
+  if (event.canceled) {
+    return null
+  }
+  if (!sourcePaneId || !targetPaneId) {
+    return null
+  }
+  if (typeof sourceTabId !== 'string') {
+    return null
+  }
+  if (!validDestination(sourcePaneId, targetPaneId)) {
+    return null
+  }
+  const destination = tabDropDestination(event, sourceTabId, targetPaneId, tabIds)
+  if (destination.destinationIndex < 0) {
+    return null
+  }
+  return { sourcePaneId, sourceTabId, ...destination }
+}
+
 export function useTabDragState() {
   return useContext(TabDragContext)
 }
@@ -198,8 +268,34 @@ export function TabDragDropProvider({ children }: TabDragDropProviderProps) {
   const restoreSourceLabelFocus = () => {
     const tabId = sourceTabId.current
     if (tabId) {
-      document.querySelector<HTMLElement>(`[data-tab-label-id="${CSS.escape(tabId)}"]`)?.focus()
+      focusTabLabel(tabId)
     }
+  }
+
+  const handleMoveResult = (result: TabMoveResult) => {
+    if (result.kind === 'transfer') {
+      requestAnimationFrame(() => focusTabLabel(result.destinationTabId))
+      return
+    }
+    if (result.kind === 'none') {
+      restoreSourceLabelFocus()
+    }
+  }
+
+  const finishTabDrop = (drop: TabDrop | null) => {
+    if (!drop) {
+      restoreSourceLabelFocus()
+      return
+    }
+    if (drop.sourcePaneId !== drop.destinationPaneId) {
+      restoreSourceDomPosition()
+    }
+    void moveTab(
+      drop.sourcePaneId,
+      drop.sourceTabId,
+      drop.destinationPaneId,
+      drop.destinationIndex,
+    ).then(handleMoveResult)
   }
 
   return (
@@ -261,57 +357,7 @@ export function TabDragDropProvider({ children }: TabDragDropProviderProps) {
         }
       }}
       onDragEnd={(event) => {
-        const source = event.operation.source
-        const target = event.operation.target
-        const sourcePaneId = paneIdFromEntity(source)
-        const targetPaneId = paneIdFromEntity(target)
-        const sourceTabId = source?.id
-
-        if (
-          !event.canceled &&
-          sourcePaneId &&
-          targetPaneId &&
-          typeof sourceTabId === 'string' &&
-          validDestination(sourcePaneId, targetPaneId)
-        ) {
-          const projected = move(tabIds, event)
-          const projectedPaneId = (Object.keys(projected) as PaneId[]).find((paneId) =>
-            projected[paneId].includes(sourceTabId),
-          )
-          const targetData = target?.data as { isStrip?: boolean } | undefined
-          const destinationPaneId = targetData?.isStrip
-            ? targetPaneId
-            : (projectedPaneId ?? targetPaneId)
-          const destinationIndex = targetData?.isStrip
-            ? tabs[destinationPaneId].tabs.length
-            : projected[destinationPaneId].indexOf(sourceTabId)
-
-          if (destinationIndex >= 0) {
-            if (sourcePaneId !== destinationPaneId) {
-              restoreSourceDomPosition()
-            }
-            void moveTab(sourcePaneId, sourceTabId, destinationPaneId, destinationIndex).then(
-              (result) => {
-                if (result.kind === 'transfer') {
-                  requestAnimationFrame(() => {
-                    document
-                      .querySelector<HTMLElement>(
-                        `[data-tab-label-id="${CSS.escape(result.destinationTabId)}"]`,
-                      )
-                      ?.focus()
-                  })
-                } else if (result.kind === 'none') {
-                  restoreSourceLabelFocus()
-                }
-              },
-            )
-          } else {
-            restoreSourceLabelFocus()
-          }
-        } else {
-          restoreSourceLabelFocus()
-        }
-
+        finishTabDrop(resolveTabDrop(event, tabIds))
         reset()
       }}
     >

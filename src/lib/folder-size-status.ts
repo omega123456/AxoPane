@@ -5,20 +5,30 @@ export const compactCount = new Intl.NumberFormat('en', {
   maximumFractionDigits: 1,
 })
 
+const PREPARING_LABEL = 'Preparing…'
+
+function pausedLabel(status: FolderSizeIndexStatus) {
+  return status.pauseReason === 'thermal'
+    ? 'Paused to keep your Mac cool'
+    : 'Paused in Low Power Mode'
+}
+
+const statusLabels: Record<
+  FolderSizeIndexStatus['state'],
+  (status: FolderSizeIndexStatus) => string
+> = {
+  upToDate: () => 'Up to date',
+  paused: pausedLabel,
+  indexing: () => 'Indexing…',
+  updating: () => 'Updating…',
+  unavailable: () => PREPARING_LABEL,
+  notReady: () => PREPARING_LABEL,
+}
+
 /** The macOS index's state in words (Settings and Search everywhere). */
 export function folderSizeStatusLabel(status: FolderSizeIndexStatus) {
-  switch (status.state) {
-    case 'upToDate':
-      return 'Up to date'
-    case 'paused':
-      return status.pauseReason === 'thermal'
-        ? 'Paused to keep your Mac cool'
-        : 'Paused in Low Power Mode'
-    case 'indexing':
-      return 'Indexing…'
-    case 'updating':
-      return 'Updating…'
-    default:
-      return 'Preparing…'
-  }
+  const label = statusLabels[status.state] as
+    | ((status: FolderSizeIndexStatus) => string)
+    | undefined
+  return label ? label(status) : PREPARING_LABEL
 }
