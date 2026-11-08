@@ -69,11 +69,9 @@ function useSettingsDraft() {
   const [draft, setDraft] = useState<DraftState>(() => cloneDraft())
 
   const updateDraft: DraftUpdater = (updater) => {
-    setDraft((current) => {
-      const next = updater(current)
-      void commitDraft(next)
-      return next
-    })
+    const next = updater(draft)
+    setDraft(next)
+    void commitDraft(next)
   }
 
   function updateLayout<K extends keyof LayoutConfig>(key: K, value: LayoutConfig[K]) {

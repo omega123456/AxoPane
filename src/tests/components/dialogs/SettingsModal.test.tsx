@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -108,6 +109,30 @@ describe('SettingsModal', () => {
     expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Columns' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Columns' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('persists each settings change exactly once under StrictMode', async () => {
+    const user = userEvent.setup()
+    const saveConfig = vi.fn((payload) => payload.config)
+    ipc.override('save_config', saveConfig)
+    useSettingsStore.getState().open('dates')
+
+    render(
+      <StrictMode>
+        <SettingsModal />
+      </StrictMode>,
+    )
+    await screen.findByText('AxoPane 0.1.0')
+
+    const showTimeSwitch = screen.getByRole('switch', { name: 'Show time' })
+
+    await user.click(showTimeSwitch)
+    await waitFor(() => expect(saveConfig).toHaveBeenCalledTimes(1))
+    expect(useConfigStore.getState().showTime).toBe(true)
+
+    await user.click(showTimeSwitch)
+    await waitFor(() => expect(saveConfig).toHaveBeenCalledTimes(2))
+    expect(useConfigStore.getState().showTime).toBe(false)
   })
 
   it('auto-saves the active queue toast expansion toggle', async () => {

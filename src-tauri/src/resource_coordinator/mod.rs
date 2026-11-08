@@ -231,7 +231,7 @@ struct Inner {
     /// queue depth without sending a round-trip message through the
     /// dispatcher; the dispatcher thread is still the only mutator. Only
     /// read outside production builds.
-    #[cfg_attr(not(feature = "test-utils"), allow(dead_code))]
+    #[cfg(feature = "test-utils")]
     state_for_introspection: Arc<Mutex<SchedulerState>>,
 }
 
@@ -273,6 +273,7 @@ impl ResourceCoordinator {
             inner: Arc::new(Inner {
                 sender,
                 next_id: AtomicU64::new(1),
+                #[cfg(feature = "test-utils")]
                 state_for_introspection: state,
             }),
             dispatcher: Mutex::new(Some(dispatcher)),

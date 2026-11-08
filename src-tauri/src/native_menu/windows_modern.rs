@@ -131,7 +131,7 @@ pub fn enumerate_modern_items(request: &LoadNativeMenuRequest) -> Vec<ProviderNa
         };
         if let Some(item) = build_item_for_command(
             &command,
-            &array.0,
+            &array.items,
             handler.clsid,
             handler.packaged,
             request,
@@ -156,8 +156,8 @@ pub fn invoke_modern(
     let array = build_item_array(request).ok_or_else(windows::core::Error::empty)?;
     let command = create_command(clsid).ok_or_else(windows::core::Error::empty)?;
 
-    let target = resolve_subcommand(&command, &array.0, command_path)?;
-    unsafe { target.Invoke(&array.0, None) }
+    let target = resolve_subcommand(&command, &array.items, command_path)?;
+    unsafe { target.Invoke(&array.items, None) }
 }
 
 /// Walks `command_path` (subcommand indices below the top-level handler) to the
@@ -320,7 +320,10 @@ fn is_hidden(command: &IExplorerCommand, array: &IShellItemArray) -> bool {
 
 /// Holds the `IShellItemArray` for a selection together with the PIDLs that
 /// back it (kept alive for the duration of the array's use).
-struct ShellItemArray(IShellItemArray, #[allow(dead_code)] Vec<OwnedPidl>);
+struct ShellItemArray {
+    items: IShellItemArray,
+    _pidls: Vec<OwnedPidl>,
+}
 
 fn build_item_array(request: &LoadNativeMenuRequest) -> Option<ShellItemArray> {
     let paths = if matches!(request.target_kind, NativeMenuTargetKind::Background) {
@@ -350,7 +353,10 @@ fn build_item_array(request: &LoadNativeMenuRequest) -> Option<ShellItemArray> {
 
     let pointers: Vec<*const ITEMIDLIST> = pidls.iter().map(OwnedPidl::as_ptr).collect();
     let array = unsafe { SHCreateShellItemArrayFromIDLists(&pointers) }.ok()?;
-    Some(ShellItemArray(array, pidls))
+    Some(ShellItemArray {
+        items: array,
+        _pidls: pidls,
+    })
 }
 
 /// Activates an `IExplorerCommand` handler via the COM SCM.

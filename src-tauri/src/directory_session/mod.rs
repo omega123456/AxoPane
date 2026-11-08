@@ -635,7 +635,6 @@ fn display_path(path: &Path) -> String {
 }
 
 #[cfg(feature = "test-utils")]
-#[allow(dead_code)]
 pub fn enumerate_snapshot_for_tests(
     path: &Path,
     view: &ViewParams,
@@ -650,7 +649,6 @@ pub fn enumerate_snapshot_for_tests(
 /// non-atomicity race window a real `CaptureHandle` cannot deterministically
 /// reproduce in a test.
 #[cfg(feature = "test-utils")]
-#[allow(dead_code)]
 pub fn resolve_reconciliation_for_tests(
     path: &Path,
     view: &ViewParams,

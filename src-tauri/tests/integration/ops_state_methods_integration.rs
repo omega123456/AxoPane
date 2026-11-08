@@ -9,7 +9,7 @@ use file_explorer_lib::ops::{
     archive_root_name_for_tests, archive_stem_for_item_for_tests, begin_file_progress_for_tests,
     copy_dir_recursive, copy_file_with_progress, copy_path, delete_path_with_progress, move_path,
     process_item_for_tests, ConflictInfo, ConflictResolution, OpItem, OpKind, OpState, OpStatus,
-    OpsService, WorkerContext,
+    OpsService, TreeCopy, WorkerContext,
 };
 use file_explorer_lib::volumes::VolumeInfo;
 
@@ -534,17 +534,16 @@ fn file_operation_helpers_surface_io_errors_directly() {
 
     let missing_dir = root.join("missing-dir");
     let mut visited = HashSet::from([root.to_path_buf()]);
-    let copy_dir_error = copy_dir_recursive(
-        &missing_dir,
-        &dest_dir.join("tree"),
+    let tree = TreeCopy {
         root,
-        &mut visited,
-        false,
-        &context,
-        None,
-        None,
-    )
-    .expect_err("copy missing dir");
+        visited: &mut visited,
+        add_discovered_totals: false,
+        context: &context,
+        throttle: None,
+        manifest: None,
+    };
+    let copy_dir_error = copy_dir_recursive(tree, &missing_dir, &dest_dir.join("tree"))
+        .expect_err("copy missing dir");
     assert!(!copy_dir_error.is_empty());
 }
 
@@ -577,17 +576,16 @@ fn copy_dir_recursive_surfaces_create_dir_all_errors_for_the_target() {
     };
 
     let mut visited = HashSet::from([source_dir.clone()]);
-    let error = copy_dir_recursive(
-        &source_dir,
-        &target,
-        &source_dir,
-        &mut visited,
-        false,
-        &context,
-        None,
-        None,
-    )
-    .expect_err("target parent is a file");
+    let tree = TreeCopy {
+        root: &source_dir,
+        visited: &mut visited,
+        add_discovered_totals: false,
+        context: &context,
+        throttle: None,
+        manifest: None,
+    };
+    let error =
+        copy_dir_recursive(tree, &source_dir, &target).expect_err("target parent is a file");
     assert!(!error.is_empty());
 }
 
@@ -1079,17 +1077,15 @@ fn copy_dir_recursive_populates_a_progressive_manifest_during_discovery() {
     let mut visited = HashSet::from([canonical_root.clone()]);
     let mut manifest = ProgressiveManifest::default();
 
-    copy_dir_recursive(
-        &canonical_root,
-        &target,
-        &canonical_root,
-        &mut visited,
-        false,
-        &context,
-        None,
-        Some(&mut manifest),
-    )
-    .expect("copy dir recursive");
+    let tree = TreeCopy {
+        root: &canonical_root,
+        visited: &mut visited,
+        add_discovered_totals: false,
+        context: &context,
+        throttle: None,
+        manifest: Some(&mut manifest),
+    };
+    copy_dir_recursive(tree, &canonical_root, &target).expect("copy dir recursive");
 
     let expected_files = if cfg!(unix) { 3 } else { 2 };
     assert_eq!(manifest.entries().len(), expected_files);

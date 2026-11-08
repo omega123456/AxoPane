@@ -104,7 +104,6 @@ impl ReconcileCoordinator {
 }
 
 #[cfg(feature = "test-utils")]
-#[allow(dead_code)]
 pub fn generation_for_tests(coordinator: &ReconcileCoordinator) -> u64 {
     coordinator.target("test").generation.load(Ordering::SeqCst)
 }

@@ -81,3 +81,4 @@ debug = false
 min_ident_chars = "warn"
 excessive_nesting = "warn"
 too_many_lines = "warn"
+allow_attributes = "deny"

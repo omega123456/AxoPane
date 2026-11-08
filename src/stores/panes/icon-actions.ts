@@ -1,4 +1,5 @@
 import { requestIcons } from '@/lib/ipc/commands'
+import { detectPlatformOs } from '@/lib/keymap'
 import type { IconStateEvent } from '@/lib/types/ipc'
 import { panesStore } from '@/stores/panes/store-handle'
 import {
@@ -8,12 +9,6 @@ import {
 } from '@/stores/panes/icon-requests'
 import { cacheNow } from '@/stores/weighted-cache'
 import type { PaneId } from '@/types/pane'
-
-const WINDOWS_PLATFORM_PREFIX = 'Win'
-
-function isWindowsNavigator() {
-  return typeof navigator !== 'undefined' && navigator.platform.startsWith(WINDOWS_PLATFORM_PREFIX)
-}
 
 export async function requestVisibleIcons(paneId: PaneId, paths: string[]) {
   const pending = collectPendingIconRequests(
@@ -35,6 +30,7 @@ export async function requestVisibleIcons(paneId: PaneId, paths: string[]) {
 }
 
 export function applyIconStates(events: IconStateEvent[]) {
-  const input = { events, now: cacheNow(), windowsPlatform: isWindowsNavigator() }
+  const windowsPlatform = detectPlatformOs() === 'windows'
+  const input = { events, now: cacheNow(), windowsPlatform }
   panesStore().setState((state) => appliedIconStates(state, input))
 }

@@ -34,7 +34,7 @@ pub mod worker;
 
 #[cfg(feature = "test-utils")]
 pub use copy::adapter_selection_calls_for_tests;
-pub use copy::{copy_dir_recursive, copy_file_with_progress, copy_path, move_path};
+pub use copy::{copy_dir_recursive, copy_file_with_progress, copy_path, move_path, TreeCopy};
 pub use delete::{delete_path_with_progress, remove_source, remove_target};
 pub use execution::WorkerContext;
 #[cfg(feature = "test-utils")]

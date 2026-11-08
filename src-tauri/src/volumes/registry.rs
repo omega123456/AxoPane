@@ -287,27 +287,21 @@ fn now_ms() -> u64 {
     crate::epoch::now_since_epoch().as_millis() as u64
 }
 
-/// Platform-specific native registration session owned by the registry. In
-/// production this holds the macOS Disk Arbitration session or the Windows
-/// shell-notification watcher thread; both are constructed once and live
-/// for the process lifetime instead of being recreated per `list_volumes`
-/// call. Under `test-utils` no native registration exists.
-#[cfg(not(feature = "test-utils"))]
-#[allow(dead_code)] // Held only for its `Drop` impl (unregisters native callbacks); never read.
-enum NativeSession {
-    #[cfg(target_os = "macos")]
-    Macos(super::disk_arbitration::Session),
-    #[cfg(windows)]
-    Windows(super::windows_watch::Watcher),
-    None,
-}
+#[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
+type NativeSession = super::disk_arbitration::Session;
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+type NativeSession = super::windows_watch::Watcher;
+
+#[cfg(all(not(feature = "test-utils"), not(any(target_os = "macos", windows))))]
+type NativeSession = ();
 
 struct RegistryInner {
     snapshot: RegistrySnapshot,
     #[cfg(not(feature = "test-utils"))]
     app: Option<AppHandle>,
     #[cfg(not(feature = "test-utils"))]
-    native: Option<NativeSession>,
+    _native_session: Option<NativeSession>,
 }
 
 impl Default for RegistryInner {
@@ -317,7 +311,7 @@ impl Default for RegistryInner {
             #[cfg(not(feature = "test-utils"))]
             app: None,
             #[cfg(not(feature = "test-utils"))]
-            native: None,
+            _native_session: None,
         }
     }
 }
@@ -391,7 +385,7 @@ impl VolumeRegistry {
         let registration = start_native_session(self);
         let mut inner = self.inner.lock().expect("volume registry inner lock");
         match registration {
-            Ok(session) => inner.native = Some(session),
+            Ok(session) => inner._native_session = Some(session),
             Err(error) => log::error!("failed to start volume registry native session: {error}"),
         }
     }
@@ -679,7 +673,7 @@ fn start_native_session(registry: &Arc<VolumeRegistry>) -> Result<NativeSession,
     let bridge = Arc::new(RegistryReconcileBridge {
         registry: Arc::clone(registry),
     });
-    super::disk_arbitration::Session::start_for_registry(bridge).map(NativeSession::Macos)
+    super::disk_arbitration::Session::start_for_registry(bridge)
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]
@@ -687,12 +681,12 @@ fn start_native_session(registry: &Arc<VolumeRegistry>) -> Result<NativeSession,
     let bridge = Arc::new(RegistryReconcileBridge {
         registry: Arc::clone(registry),
     });
-    super::windows_watch::Watcher::start_for_registry(bridge).map(NativeSession::Windows)
+    super::windows_watch::Watcher::start_for_registry(bridge)
 }
 
 #[cfg(all(not(feature = "test-utils"), not(any(target_os = "macos", windows))))]
 fn start_native_session(_registry: &Arc<VolumeRegistry>) -> Result<NativeSession, String> {
-    Ok(NativeSession::None)
+    Ok(())
 }
 
 /// Adapter implementing the native-callback-facing trait the platform

@@ -63,16 +63,15 @@ pub(super) fn copy_path_with_total_discovery(
     if source_metadata.is_dir() {
         let root = source.canonicalize().stringify_err()?;
         let mut visited = HashSet::from([root.clone()]);
-        return copy_dir_recursive(
-            source,
-            target,
-            &root,
-            &mut visited,
+        let tree = TreeCopy {
+            root: &root,
+            visited: &mut visited,
             add_discovered_totals,
             context,
-            Some(&mut whole_transfer_throttle),
+            throttle: Some(&mut whole_transfer_throttle),
             manifest,
-        );
+        };
+        return copy_dir_recursive(tree, source, target);
     }
     copy_file_with_total_discovery(
         source,
@@ -83,35 +82,21 @@ pub(super) fn copy_path_with_total_discovery(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn copy_dir_recursive(
+    mut tree: TreeCopy<'_, '_>,
     source: &Path,
     target: &Path,
-    root: &Path,
-    visited: &mut HashSet<PathBuf>,
-    add_discovered_totals: bool,
-    context: &WorkerContext<'_>,
-    throttle: Option<&mut TransferThrottle>,
-    manifest: Option<&mut ProgressiveManifest>,
 ) -> Result<(), String> {
-    let mut tree = TreeCopy {
-        root,
-        visited,
-        add_discovered_totals,
-        context,
-        throttle,
-        manifest,
-    };
     tree.copy_directory(source, target)
 }
 
-struct TreeCopy<'walk, 'context> {
-    root: &'walk Path,
-    visited: &'walk mut HashSet<PathBuf>,
-    add_discovered_totals: bool,
-    context: &'walk WorkerContext<'context>,
-    throttle: Option<&'walk mut TransferThrottle>,
-    manifest: Option<&'walk mut ProgressiveManifest>,
+pub struct TreeCopy<'walk, 'context> {
+    pub root: &'walk Path,
+    pub visited: &'walk mut HashSet<PathBuf>,
+    pub add_discovered_totals: bool,
+    pub context: &'walk WorkerContext<'context>,
+    pub throttle: Option<&'walk mut TransferThrottle>,
+    pub manifest: Option<&'walk mut ProgressiveManifest>,
 }
 
 impl TreeCopy<'_, '_> {
