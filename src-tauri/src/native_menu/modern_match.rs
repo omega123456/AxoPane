@@ -64,11 +64,12 @@ pub fn path_type_tokens(path: &str) -> HashSet<String> {
     if Path::new(path).is_dir() {
         tokens.insert("directory".to_string());
         tokens.insert("folder".to_string());
-    } else {
-        tokens.insert("*".to_string());
-        if let Some(extension) = Path::new(path).extension().and_then(|value| value.to_str()) {
-            tokens.insert(format!(".{}", extension.to_lowercase()));
-        }
+        return tokens;
+    }
+
+    tokens.insert("*".to_string());
+    if let Some(extension) = Path::new(path).extension().and_then(|value| value.to_str()) {
+        tokens.insert(format!(".{}", extension.to_lowercase()));
     }
     tokens
 }

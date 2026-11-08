@@ -10,7 +10,7 @@ import {
   type DefaultAppDialogState,
 } from '@/stores/default-app-dialog-store'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
-import { SCROLLBAR_THIN } from '@/lib/class-names'
+import { HOVER_ON_POINTER, SCROLLBAR_THIN } from '@/lib/class-names'
 import { TEXT_SECONDARY } from '@/lib/class-names'
 import { handleKeyByTable } from '@/lib/key-table'
 
@@ -49,6 +49,12 @@ function AppListbox({ apps, selectedBundlePath, onSelect }: AppListboxProps) {
   )
 }
 
+const SELECTED_OPTION_CLASS = 'bg-light-tint dark:bg-dark-tint'
+
+function appOptionStateClass(selected: boolean) {
+  return selected ? SELECTED_OPTION_CLASS : HOVER_ON_POINTER
+}
+
 function AppOption({
   app,
   selected,
@@ -65,11 +71,7 @@ function AppOption({
         role="option"
         aria-selected={selected}
         onClick={() => onSelect(app.bundlePath)}
-        className={`flex h-8 w-full items-center gap-2 rounded-control px-2 text-left text-row text-light-text dark:text-dark-text ${FOCUS_RING_INSET} ${
-          selected
-            ? 'bg-light-tint dark:bg-dark-tint'
-            : 'hover:bg-light-hover dark:hover:bg-dark-hover'
-        }`}
+        className={`flex h-8 w-full items-center gap-2 rounded-control px-2 text-left text-row text-light-text dark:text-dark-text ${FOCUS_RING_INSET} ${appOptionStateClass(selected)}`}
       >
         <EntryIcon entry={{ name: app.name, isDir: false, iconDataUrl: app.iconDataUrl }} />
         <span className="truncate">{app.name}</span>

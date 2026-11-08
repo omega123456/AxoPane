@@ -19,15 +19,18 @@ pub(super) fn path_entry_exists(path: &Path) -> bool {
     path.exists() || fs::symlink_metadata(path).is_ok()
 }
 
+fn numbered_file_name(stem: &str, ext: &str, counter: u32) -> String {
+    if ext.is_empty() {
+        return format!("{stem} ({counter})");
+    }
+    format!("{stem} ({counter}).{ext}")
+}
+
 pub fn unique_name(dir: &Path, name: &str) -> String {
     let (stem, ext) = split_name(name);
     let mut counter = 1;
     loop {
-        let candidate = if ext.is_empty() {
-            format!("{stem} ({counter})")
-        } else {
-            format!("{stem} ({counter}).{ext}")
-        };
+        let candidate = numbered_file_name(&stem, &ext, counter);
         if !dir.join(&candidate).exists() {
             return candidate;
         }

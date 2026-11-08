@@ -19,7 +19,23 @@ pub(crate) const PERSISTED_FLAGS: u8 = SCANNED | DENIED | SKIPPED;
 /// Totals changed since the last [`FolderSizeTree::drain_changed`].
 const DIRTY: u8 = 8;
 
+const NO_FLAGS: u8 = 0;
+
 const MAX_SKIPPED_NAMES: usize = 3;
+
+fn denied_flag(denied: bool) -> u8 {
+    if denied {
+        return DENIED;
+    }
+    NO_FLAGS
+}
+
+fn with_skipped_flag(flags: u8, skipped: bool) -> u8 {
+    if skipped {
+        return flags | SKIPPED;
+    }
+    flags & !SKIPPED
+}
 
 /// 80 bytes inline; with the name allocation and the parent's 4-byte child
 /// slot, about 100 bytes per folder.
@@ -186,7 +202,7 @@ impl FolderSizeTree {
         subdirs: &[S],
         denied: bool,
     ) -> Vec<PathBuf> {
-        let flags = (self.node(id).flags & SKIPPED) | SCANNED | if denied { DENIED } else { 0 };
+        let flags = (self.node(id).flags & SKIPPED) | SCANNED | denied_flag(denied);
         self.set_own(id, direct_bytes, flags);
 
         let mut listed: Vec<Box<str>> = subdirs
@@ -259,23 +275,21 @@ impl FolderSizeTree {
         true
     }
 
+    fn skip_target(&mut self, path: &Path, skipped: bool) -> Option<NodeId> {
+        if skipped {
+            return self.ensure(path);
+        }
+        self.find(path)
+    }
+
     /// Marks or clears an unvisited protected root. Marking creates the node
     /// (and missing ancestors); clearing leaves it waiting for a scan.
     pub fn set_skipped(&mut self, path: &Path, skipped: bool) -> bool {
-        let id = if skipped {
-            self.ensure(path)
-        } else {
-            self.find(path)
-        };
-        let Some(id) = id else {
+        let Some(id) = self.skip_target(path, skipped) else {
             return false;
         };
         let node = self.node(id);
-        let flags = if skipped {
-            node.flags | SKIPPED
-        } else {
-            node.flags & !SKIPPED
-        };
+        let flags = with_skipped_flag(node.flags, skipped);
         self.set_own(id, node.direct, flags);
         true
     }
@@ -677,15 +691,7 @@ impl FolderSizeTree {
             return None;
         }
         let id = self.nodes.len() as NodeId;
-        if parent == NONE {
-            self.roots.push(id);
-        } else {
-            let siblings = &self.nodes.get(parent as usize)?.children;
-            let slot = siblings
-                .binary_search_by(|&child| (*self.node(child).name).cmp(&name))
-                .err()?;
-            self.nodes[parent as usize].children.insert(slot, id);
-        }
+        self.attach_imported(parent, id, &name)?;
         self.nodes.push(Node {
             parent,
             name,
@@ -693,6 +699,19 @@ impl FolderSizeTree {
             flags,
             ..Node::default()
         });
+        Some(())
+    }
+
+    fn attach_imported(&mut self, parent: u32, id: NodeId, name: &str) -> Option<()> {
+        if parent == NONE {
+            self.roots.push(id);
+            return Some(());
+        }
+        let siblings = &self.nodes.get(parent as usize)?.children;
+        let slot = siblings
+            .binary_search_by(|&child| (*self.node(child).name).cmp(name))
+            .err()?;
+        self.nodes[parent as usize].children.insert(slot, id);
         Some(())
     }
 

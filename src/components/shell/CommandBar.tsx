@@ -211,6 +211,12 @@ function CreateCommands({ paneId, pane }: ActivePaneProps) {
   )
 }
 
+function hiddenFilesToggleClass(showHiddenFiles: boolean) {
+  return showHiddenFiles
+    ? 'bg-light-hover text-light-accent dark:bg-dark-hover dark:text-dark-accent'
+    : 'text-light-text dark:text-dark-text'
+}
+
 function DisplayCommands({ theme, setTheme }: CommandBarProps) {
   const showHiddenFiles = usePanesStore((state) => state.showHiddenFiles)
   const setShowHiddenFiles = usePanesStore((state) => state.setShowHiddenFiles)
@@ -223,11 +229,7 @@ function DisplayCommands({ theme, setTheme }: CommandBarProps) {
         title={showHiddenFiles ? 'Hidden files (on)' : 'Hidden files (off)'}
         pressed={showHiddenFiles}
         onClick={() => void setShowHiddenFiles(!showHiddenFiles)}
-        className={
-          showHiddenFiles
-            ? 'bg-light-hover text-light-accent dark:bg-dark-hover dark:text-dark-accent'
-            : 'text-light-text dark:text-dark-text'
-        }
+        className={hiddenFilesToggleClass(showHiddenFiles)}
       >
         <EyeOffIcon className="size-4" />
       </CommandButton>

@@ -3,7 +3,7 @@ import { Trash2Icon } from '@/components/icons'
 import { detectPlatformOs } from '@/lib/keymap'
 import { SelectionPill } from '@/components/controls/SelectionPill'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
-import { TEXT_SECONDARY } from '@/lib/class-names'
+import { activeFillClass, TEXT_SECONDARY } from '@/lib/class-names'
 
 type TrashTreeRowProps = {
   isCurrent: boolean
@@ -20,9 +20,7 @@ function TrashTreeRowImpl({ isCurrent, onNavigate, onOpenTab, onContextMenu }: T
       role="treeitem"
       data-tree-row="trash"
       onContextMenu={onContextMenu}
-      className={`relative flex h-tree-row items-center gap-2 rounded-control pl-2 pr-2 text-row text-light-text hover:bg-light-hover dark:text-dark-text dark:hover:bg-dark-hover ${
-        isCurrent ? 'bg-light-hover dark:bg-dark-hover' : ''
-      }`}
+      className={`relative flex h-tree-row items-center gap-2 rounded-control pl-2 pr-2 text-row text-light-text hover:bg-light-hover dark:text-dark-text dark:hover:bg-dark-hover ${activeFillClass(isCurrent)}`}
     >
       {isCurrent ? <SelectionPill /> : null}
       <span className="w-3 flex-none" aria-hidden="true" />

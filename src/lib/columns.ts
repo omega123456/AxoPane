@@ -1,8 +1,10 @@
 import type { ColumnKey } from '@/lib/types/ipc'
 
+export type ColumnAlign = 'left' | 'right'
+
 export const columnDefinitions: Record<
   ColumnKey,
-  { label: string; className: string; align?: 'left' | 'right' }
+  { label: string; className: string; align?: ColumnAlign }
 > = {
   name: { label: 'Name', className: 'min-w-0' },
   size: { label: 'Size', className: 'shrink-0 pr-3 text-right', align: 'right' },

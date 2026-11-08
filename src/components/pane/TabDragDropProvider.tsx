@@ -1,13 +1,12 @@
+import { createContext, type ReactNode, useContext, useMemo, useRef, useState } from 'react'
 import {
-  createContext,
-  type ComponentProps,
-  type ReactNode,
-  useContext,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
-import { DragDropProvider, PointerSensor, useDroppable } from '@dnd-kit/react'
+  DragDropProvider,
+  PointerSensor,
+  useDroppable,
+  type DragMoveEvent,
+  type DragOverEvent,
+  type DragStartEvent,
+} from '@dnd-kit/react'
 import { useSortable } from '@dnd-kit/react/sortable'
 import { usePanesStore } from '@/stores/panes-store'
 import { useTabsStore, type TabMoveResult } from '@/stores/tabs-store'
@@ -77,9 +76,19 @@ class MouseDistanceConstraint {
   }
 }
 
+type PointerSensorOptions = Parameters<typeof PointerSensor.configure>[0]
+type PointerActivationConstraintsFactory = NonNullable<
+  PointerSensorOptions['activationConstraints']
+>
+
+// dnd-kit's ActivationConstraint base class carries a #private brand and is not exported, so a duck-typed constraint needs a cast.
+const mouseDistanceActivation = (() => [
+  new MouseDistanceConstraint(),
+]) as unknown as PointerActivationConstraintsFactory
+
 const mouseSensor = PointerSensor.configure({
   preventActivation: (event) => event.pointerType !== 'mouse' || event.button !== 0,
-  activationConstraints: (() => [new MouseDistanceConstraint()]) as never,
+  activationConstraints: mouseDistanceActivation,
 })
 
 function compensateDragZoom(element: HTMLElement) {
@@ -137,18 +146,13 @@ type TabDragDropProviderProps = {
   children: ReactNode
 }
 
-type DragProviderProps = ComponentProps<typeof DragDropProvider>
-type TabDragStartEvent = Parameters<NonNullable<DragProviderProps['onDragStart']>>[0]
-type TabDragMoveEvent = Parameters<NonNullable<DragProviderProps['onDragMove']>>[0]
-type TabDragOverEvent = Parameters<NonNullable<DragProviderProps['onDragOver']>>[0]
-
 const IDLE_DRAG_STATE: TabDragState = {
   sourcePaneId: null,
   destinationPaneId: null,
   isInvalid: false,
 }
 
-function sourceTabIdOf(event: TabDragStartEvent) {
+function sourceTabIdOf(event: DragStartEvent) {
   const id = event.operation.source?.id
   return typeof id === 'string' ? id : null
 }
@@ -172,7 +176,7 @@ function restoreDomPosition(position: SourceDomPosition | null) {
   }
 }
 
-function invalidMoveState(event: TabDragMoveEvent): TabDragState | null {
+function invalidMoveState(event: DragMoveEvent): TabDragState | null {
   const sourcePaneId = paneIdFromEntity(event.operation.source)
   const destinationPaneId = event.to && paneIdAtPoint(event.to.x, event.to.y)
   const unresolved = !sourcePaneId || !destinationPaneId
@@ -182,7 +186,7 @@ function invalidMoveState(event: TabDragMoveEvent): TabDragState | null {
   return { sourcePaneId, destinationPaneId: null, isInvalid: true }
 }
 
-function dragOverState(event: TabDragOverEvent): TabDragState {
+function dragOverState(event: DragOverEvent): TabDragState {
   const sourcePaneId = paneIdFromEntity(event.operation.source)
   const destinationPaneId = paneIdFromEntity(event.operation.target)
   const isInvalid =
@@ -220,7 +224,7 @@ function useTabDragSession() {
   return {
     dragState,
     setDragState,
-    start: (event: TabDragStartEvent) => {
+    start: (event: DragStartEvent) => {
       const sourcePaneId = paneIdFromEntity(event.operation.source)
       sourceTabId.current = sourceTabIdOf(event)
       const sourceElement = sourceTabId.current

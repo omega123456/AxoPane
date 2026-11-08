@@ -44,9 +44,9 @@ function emit(level: LogLevel, message: string, context?: LogContext) {
     const prefix = `[app:${level}] ${message}`
     if (context === undefined) {
       console[level](prefix, error)
-    } else {
-      console[level](prefix, context, error)
+      return
     }
+    console[level](prefix, context, error)
   })
 }
 

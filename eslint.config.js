@@ -58,6 +58,14 @@ export default tseslint.config(
       'max-depth': ['error', 2],
       'max-lines-per-function': ['error', { max: 60, skipBlankLines: true, skipComments: true }],
       'max-lines': ['error', { max: 400, skipBlankLines: true, skipComments: true }],
+      'no-nested-ternary': 'error',
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'IfStatement[alternate]',
+          message: 'Use guard clauses, a lookup table, or a named function instead of else',
+        },
+      ],
       'no-magic-numbers': 'off',
       '@typescript-eslint/no-magic-numbers': [
         'error',

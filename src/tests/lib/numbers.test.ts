@@ -4,6 +4,7 @@ import {
   fractionToPercent,
   percentToFraction,
   utf16ByteWeight,
+  wrapIndex,
 } from '@/lib/numbers'
 
 describe('numbers', () => {
@@ -27,5 +28,13 @@ describe('numbers', () => {
   it('weighs UTF-16 strings at two bytes per code unit and null at one', () => {
     expect(utf16ByteWeight(null)).toBe(1)
     expect(utf16ByteWeight('abcd')).toBe(8)
+  })
+
+  it('wraps indexes past either end back into range', () => {
+    expect(wrapIndex(2, 5)).toBe(2)
+    expect(wrapIndex(5, 5)).toBe(0)
+    expect(wrapIndex(-1, 5)).toBe(4)
+    expect(wrapIndex(-6, 5)).toBe(4)
+    expect(wrapIndex(12, 5)).toBe(2)
   })
 })

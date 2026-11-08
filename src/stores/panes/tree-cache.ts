@@ -43,12 +43,12 @@ export function pruneTreeCache<T extends LazyTreeNode>(
       protectedPaths.some((protectedPath) => pathsMatch(path, protectedPath)),
     ),
   )
-  const candidates = Object.entries(nodes)
-    .filter(([path]) => !protectedKeys.has(path))
-    .sort(([, left], [, right]) => left.lastAccess - right.lastAccess)
+  const leastRecentlyAccessedFirst = Object.keys(nodes)
+    .filter((path) => !protectedKeys.has(path))
+    .sort((leftPath, rightPath) => nodes[leftPath].lastAccess - nodes[rightPath].lastAccess)
   const next = { ...nodes }
   let remaining = Object.keys(next).length
-  for (const [path] of candidates) {
+  for (const path of leastRecentlyAccessedFirst) {
     if (remaining <= maxNodes) break
     delete next[path]
     remaining -= 1

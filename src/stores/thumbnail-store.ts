@@ -50,31 +50,30 @@ export function thumbnailFingerprintKey(
   return `${candidate.path}\u0000${candidate.modifiedUnixSeconds}\u0000${candidate.sizeBytes}`
 }
 
+function fileCandidates(candidates: ThumbnailCandidateRequest[]) {
+  return candidates.filter((candidate) => !candidate.isDirectory)
+}
+
+function candidateSignatureEntry(candidate: ThumbnailCandidateRequest) {
+  return `${thumbnailFingerprintKey(candidate)}\u0000${candidate.priority}\u0000${candidate.order}`
+}
+
 function candidateSignature(candidates: ThumbnailCandidateRequest[]) {
-  return Array.from(
-    new Set(
-      candidates
-        .filter((candidate) => !candidate.isDirectory)
-        .map(
-          (candidate) =>
-            `${thumbnailFingerprintKey(candidate)}\u0000${candidate.priority}\u0000${candidate.order}`,
-        ),
-    ),
-  )
-    .sort()
-    .join('\u0001')
+  const signatureEntries = fileCandidates(candidates).map(candidateSignatureEntry)
+  const uniqueSignatureEntries = Array.from(new Set(signatureEntries))
+  return uniqueSignatureEntries.sort().join('\u0001')
+}
+
+function visibleCandidateKeys(scope: ActiveThumbnailScope) {
+  if (scope.mode !== 'thumbnails') {
+    return []
+  }
+  return Object.keys(scope.candidates).filter((key) => scope.candidates[key].priority === 'visible')
 }
 
 function visibleProtection(scopes: Record<string, ActiveThumbnailScope>) {
-  return new Set(
-    Object.values(scopes).flatMap((scope) =>
-      scope.mode === 'thumbnails'
-        ? Object.entries(scope.candidates).flatMap(([key, candidate]) =>
-            candidate.priority === 'visible' ? [key] : [],
-          )
-        : [],
-    ),
-  )
+  const visibleKeys = Object.values(scopes).flatMap(visibleCandidateKeys)
+  return new Set(visibleKeys)
 }
 
 function nextGeneration(previous?: ActiveThumbnailScope) {
@@ -101,13 +100,11 @@ function nextScopeVersion(
 }
 
 function uniqueFileCandidates(candidates: ThumbnailCandidateRequest[]) {
-  return Object.values(
-    Object.fromEntries(
-      candidates
-        .filter((candidate) => !candidate.isDirectory)
-        .map((candidate) => [thumbnailFingerprintKey(candidate), candidate]),
-    ),
-  )
+  const candidatesByFingerprint = new Map<string, ThumbnailCandidateRequest>()
+  for (const candidate of fileCandidates(candidates)) {
+    candidatesByFingerprint.set(thumbnailFingerprintKey(candidate), candidate)
+  }
+  return Array.from(candidatesByFingerprint.values())
 }
 
 function touchCacheRecords(

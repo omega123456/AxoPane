@@ -18,6 +18,7 @@ import type { VolumeInfo } from '@/lib/types/ipc'
 import type { TreeNodeState } from '@/stores/panes-store'
 import { useDragStore } from '@/stores/drag-store'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
+import { disclosureChevronClass, dropTargetRing } from '@/lib/class-names'
 
 /**
  * Stable, path-keyed handler dispatcher for the tree's rows.
@@ -67,6 +68,10 @@ function treeRowFillClass(isCurrent: boolean, isPinned: boolean) {
     return isCurrent ? PINNED_CURRENT_FILL : PINNED_FILL
   }
   return isCurrent ? INLINE_CURRENT_FILL : INLINE_HOVER
+}
+
+function treeRowHeightClass(usedFraction: number | null) {
+  return usedFraction === null ? 'h-tree-row' : 'h-tree-drive-row'
 }
 
 function TreeNodeLabel({
@@ -144,7 +149,7 @@ function TreeToggleButton({ node, actions }: TreeNodeButtonProps) {
       onClick={() => actions.onToggle(node.path)}
       className={`-mx-1 inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-control text-light-text-tertiary hover:bg-light-hover dark:text-dark-text-tertiary dark:hover:bg-dark-hover ${FOCUS_RING_INSET}`}
     >
-      <ChevronRightIcon className={`size-3 ${node.expanded ? 'rotate-90' : ''}`} />
+      <ChevronRightIcon className={`size-3 ${disclosureChevronClass(node.expanded)}`} />
     </button>
   )
 }
@@ -202,9 +207,7 @@ function TreeNodeImpl({
       onDragLeave={handleDragLeave}
       onDrop={(event) => void handleDrop(event)}
       onContextMenu={(event) => actions.onContextMenu(node, event)}
-      className={`relative flex ${usedFraction === null ? 'h-tree-row' : 'h-tree-drive-row'} items-center gap-2 rounded-control pr-2 text-row text-light-text dark:text-dark-text ${treeRowFillClass(isCurrent, isPinned)} ${
-        isDropTarget ? 'ring-2 ring-inset ring-light-accent dark:ring-dark-accent' : ''
-      }`}
+      className={`relative flex ${treeRowHeightClass(usedFraction)} items-center gap-2 rounded-control pr-2 text-row text-light-text dark:text-dark-text ${treeRowFillClass(isCurrent, isPinned)} ${dropTargetRing(isDropTarget)}`}
       // Indentation is a function of the tree depth, so it cannot be a static token.
       style={{ paddingLeft: `${treeIndentPx(depth)}px` }}
     >

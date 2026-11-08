@@ -4,7 +4,6 @@ A fast, lightweight **dual-pane file explorer** for **Windows and macOS**, inspi
 
 [feature-tour.webm](https://github.com/user-attachments/assets/8b8db964-8d03-44bc-b7f0-0beb31e6275b)
 
-
 ## Contents
 
 - [Installation](#installation)

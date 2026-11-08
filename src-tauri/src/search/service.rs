@@ -135,10 +135,9 @@ impl SearchRejection {
     /// Maps an IPC executor failure: cancellation means superseded.
     pub fn from_executor(message: String) -> Self {
         if message.contains("cancelled") {
-            Self::Stale
-        } else {
-            Self::Failed { message }
+            return Self::Stale;
         }
+        Self::Failed { message }
     }
 }
 

@@ -152,14 +152,16 @@ fn default_application_write_status(
             log::debug!(
                 "set_default_application: NSWorkspace setDefaultApplication failed {write_context} reason={reason}"
             );
-            let rejection = if dynamic {
-                "default-application-rejected-dynamic-type"
-            } else {
-                "default-application-write-failed"
-            };
-            MenuActionStatus::unsupported(rejection)
+            MenuActionStatus::unsupported(write_rejection_reason(dynamic))
         }
     }
+}
+
+fn write_rejection_reason(dynamic: bool) -> &'static str {
+    if dynamic {
+        return "default-application-rejected-dynamic-type";
+    }
+    "default-application-write-failed"
 }
 
 /// Looks up the app currently registered as the default handler for the

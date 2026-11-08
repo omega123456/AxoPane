@@ -34,16 +34,15 @@ impl EverythingHandle {
     /// unavailable, so no test path can ever observe a real Everything
     /// result; elsewhere Everything does not exist.
     pub fn load() -> Result<Self, EverythingError> {
-        if cfg!(windows) {
-            Ok(Self {
-                availability: EverythingAvailability::Unavailable,
-                results: HashMap::new(),
-                fail_queries: false,
-                search: FakeSearch::default(),
-            })
-        } else {
-            Err(EverythingError::Unsupported)
+        if !cfg!(windows) {
+            return Err(EverythingError::Unsupported);
         }
+        Ok(Self {
+            availability: EverythingAvailability::Unavailable,
+            results: HashMap::new(),
+            fail_queries: false,
+            search: FakeSearch::default(),
+        })
     }
 
     pub fn test_available(results: HashMap<String, Option<u64>>) -> Self {

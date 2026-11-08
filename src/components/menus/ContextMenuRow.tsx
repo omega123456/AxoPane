@@ -31,6 +31,7 @@ import type {
   ContextMenuSubmenuRow,
 } from '@/lib/types/context-menu'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
+import { menuItemStateClass, NO_CLASS } from '@/lib/class-names'
 
 type IconComponent = ComponentType<SVGProps<SVGSVGElement>>
 
@@ -77,6 +78,10 @@ function itemTextClass(
   }
 
   return 'text-light-text dark:text-dark-text'
+}
+
+function itemWeightClass(item: Pick<ContextMenuRowItem | ContextMenuSubmenuRow, 'strong'>) {
+  return item.strong ? 'font-semibold' : NO_CLASS
 }
 
 export function ContextMenuIconGlyph({
@@ -155,11 +160,7 @@ export function ContextMenuRow({
         aria-haspopup={hasSubmenu ? 'menu' : undefined}
         aria-expanded={hasSubmenu ? submenuOpen : undefined}
         disabled={item.disabled}
-        className={`flex h-8 w-full items-center gap-3 rounded-control px-3 text-left text-row ${FOCUS_RING_INSET} ${
-          active
-            ? 'bg-light-hover dark:bg-dark-hover'
-            : 'hover:bg-light-hover dark:hover:bg-dark-hover'
-        } ${itemTextClass(item)} ${item.strong ? 'font-semibold' : ''}`}
+        className={`flex h-8 w-full items-center gap-3 rounded-control px-3 text-left text-row ${FOCUS_RING_INSET} ${menuItemStateClass(active)} ${itemTextClass(item)} ${itemWeightClass(item)}`}
         onMouseEnter={unlessDisabled(item, onPointerEnter)}
         onClick={unlessDisabled(item, onActivate)}
       >

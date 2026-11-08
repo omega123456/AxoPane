@@ -14,12 +14,32 @@ import { tabLabel, useTabsStore, type TabState } from '@/stores/tabs-store'
 import { MIDDLE_MOUSE_BUTTON } from '@/lib/mouse-buttons'
 import type { PaneId } from '@/types/pane'
 import { FOCUS_RING } from '@/lib/focus-ring'
-import { TEXT_SECONDARY } from '@/lib/class-names'
+import { NO_CLASS, TEXT_SECONDARY } from '@/lib/class-names'
 
 type TabBarProps = {
   paneId: PaneId
   title: string
   currentPath: string
+}
+
+function invalidDropCursorClass(isInvalid: boolean) {
+  return isInvalid ? 'cursor-not-allowed' : NO_CLASS
+}
+
+function tabStateClass(isActive: boolean) {
+  return isActive
+    ? 'z-10 border-light-stroke bg-light-layer font-semibold text-light-text dark:border-dark-stroke dark:bg-dark-layer dark:text-dark-text'
+    : `border-transparent ${TEXT_SECONDARY} hover:bg-light-hover dark:hover:bg-dark-hover`
+}
+
+function closeButtonVisibilityClass(isActive: boolean) {
+  return isActive ? NO_CLASS : 'opacity-0 group-hover:opacity-100'
+}
+
+function dragSourceClass(isDragSource: boolean) {
+  return isDragSource
+    ? 'cursor-grabbing opacity-80 shadow-light-flyout dark:shadow-dark-flyout'
+    : NO_CLASS
 }
 
 export function TabBar({ paneId, title, currentPath }: TabBarProps) {
@@ -35,7 +55,7 @@ export function TabBar({ paneId, title, currentPath }: TabBarProps) {
       role="group"
       aria-label={`${title} tabs`}
       data-tab-strip={paneId}
-      className={`flex h-tabs min-w-0 items-end gap-0.5 overflow-x-auto overflow-y-hidden scrollbar-none ${dragState.isInvalid ? 'cursor-not-allowed' : ''}`}
+      className={`flex h-tabs min-w-0 items-end gap-0.5 overflow-x-auto overflow-y-hidden scrollbar-none ${invalidDropCursorClass(dragState.isInvalid)}`}
     >
       {paneTabs.tabs.map((tab, index) => (
         <PaneTab
@@ -101,11 +121,7 @@ function PaneTab({ paneId, title, tab, index, isActive, canClose }: PaneTabProps
       onContextMenu={(event) => openTabContextMenu(event, paneId, tab)}
       // The selected tab shares the command bar's layer colour and covers the
       // strip's bottom line, so tab and bar read as one shape.
-      className={`group relative inline-flex h-8 w-tab min-w-0 shrink items-center gap-2 rounded-t-control border-x border-t pl-2.75 pr-1.5 text-caption ${
-        isActive
-          ? 'z-10 border-light-stroke bg-light-layer font-semibold text-light-text dark:border-dark-stroke dark:bg-dark-layer dark:text-dark-text'
-          : `border-transparent ${TEXT_SECONDARY} hover:bg-light-hover dark:hover:bg-dark-hover`
-      }`}
+      className={`group relative inline-flex h-8 w-tab min-w-0 shrink items-center gap-2 rounded-t-control border-x border-t pl-2.75 pr-1.5 text-caption ${tabStateClass(isActive)}`}
     >
       {(handleRef) => (
         <>
@@ -175,9 +191,7 @@ function TabTrailingControl({
         onClose()
       }}
       // Close shows on the selected tab and on hover, as Windows tabs do.
-      className={`relative z-10 inline-flex size-5.5 shrink-0 cursor-pointer items-center justify-center rounded-control font-normal ${TEXT_SECONDARY} hover:bg-light-hover hover:text-light-text focus-visible:opacity-100 dark:hover:bg-dark-hover dark:hover:text-dark-text ${
-        isActive ? '' : 'opacity-0 group-hover:opacity-100'
-      } ${FOCUS_RING}`}
+      className={`relative z-10 inline-flex size-5.5 shrink-0 cursor-pointer items-center justify-center rounded-control font-normal ${TEXT_SECONDARY} hover:bg-light-hover hover:text-light-text focus-visible:opacity-100 dark:hover:bg-dark-hover dark:hover:text-dark-text ${closeButtonVisibilityClass(isActive)} ${FOCUS_RING}`}
     >
       <XIcon className="size-3.5" />
     </button>
@@ -211,7 +225,7 @@ function SortableTab({
       data-tab-id={tabId}
       onAuxClick={onAuxClick}
       onContextMenu={onContextMenu}
-      className={`${className} ${isDragSource ? 'cursor-grabbing opacity-80 shadow-light-flyout dark:shadow-dark-flyout' : ''}`}
+      className={`${className} ${dragSourceClass(isDragSource)}`}
     >
       {children(handleRef)}
     </div>

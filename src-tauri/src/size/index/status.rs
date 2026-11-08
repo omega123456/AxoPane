@@ -21,6 +21,16 @@ impl Machine {
         self.shared.wake.notify_all();
     }
 
+    fn pause_reason(&self) -> Option<PauseReason> {
+        if self.low_power {
+            return Some(PauseReason::LowPowerMode);
+        }
+        if self.thermal_pressure {
+            return Some(PauseReason::Thermal);
+        }
+        None
+    }
+
     pub(super) fn compute_status(&self) -> FolderSizeIndexStatus {
         if self.stream.is_none() && !matches!(self.phase, Phase::Booting) {
             return FolderSizeIndexStatus::new(
@@ -32,14 +42,7 @@ impl Machine {
         let mut status =
             FolderSizeIndexStatus::new(IndexBackend::MacIndex, true, IndexState::NotReady);
         let background = self.full.is_some() || self.background_inflight > 0;
-        let pause_reason = if self.low_power {
-            Some(PauseReason::LowPowerMode)
-        } else if self.thermal_pressure {
-            Some(PauseReason::Thermal)
-        } else {
-            None
-        };
-        status.state = match (&self.phase, pause_reason) {
+        status.state = match (&self.phase, self.pause_reason()) {
             (Phase::Booting, _) => IndexState::NotReady,
             (_, Some(reason)) if background => {
                 status.pause_reason = Some(reason);

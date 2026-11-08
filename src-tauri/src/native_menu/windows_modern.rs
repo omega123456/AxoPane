@@ -226,38 +226,21 @@ fn build_item_for_command(
             alt: None,
         });
 
-    let has_subcommands = unsafe { command.GetFlags() }
-        .map(|flags| flags & ECF_HASSUBCOMMANDS.0 as u32 != 0)
-        .unwrap_or(false);
-
-    let children = if has_subcommands && depth < MAX_SUBMENU_DEPTH {
-        enumerate_subcommands(
-            command,
-            array,
-            clsid,
-            packaged,
-            request,
-            &command_path,
-            depth,
-        )
-    } else {
-        Vec::new()
-    };
+    let children = enumerate_subcommands(
+        command,
+        array,
+        clsid,
+        packaged,
+        request,
+        &command_path,
+        depth,
+    );
 
     let normalized_verb = normalize_verb(&label);
     let canonical_action_kind = classify_canonical_action(Some(&normalized_verb), &label);
     let id = format!("windows-modern-{clsid:032x}-{}", path_key(&command_path));
 
-    let invocation = if children.is_empty() {
-        Some(ProviderInvocation::WindowsModern {
-            clsid,
-            packaged,
-            request: request.clone(),
-            command_path,
-        })
-    } else {
-        None
-    };
+    let invocation = modern_leaf_invocation(&children, clsid, packaged, request, command_path);
 
     Some(ProviderNativeMenuItem {
         id,
@@ -272,6 +255,30 @@ fn build_item_for_command(
     })
 }
 
+fn modern_leaf_invocation(
+    children: &[ProviderNativeMenuItem],
+    clsid: u128,
+    packaged: bool,
+    request: &LoadNativeMenuRequest,
+    command_path: Vec<u32>,
+) -> Option<ProviderInvocation> {
+    if !children.is_empty() {
+        return None;
+    }
+    Some(ProviderInvocation::WindowsModern {
+        clsid,
+        packaged,
+        request: request.clone(),
+        command_path,
+    })
+}
+
+fn has_subcommands(command: &IExplorerCommand) -> bool {
+    unsafe { command.GetFlags() }
+        .map(|flags| flags & ECF_HASSUBCOMMANDS.0 as u32 != 0)
+        .unwrap_or(false)
+}
+
 fn enumerate_subcommands(
     command: &IExplorerCommand,
     array: &IShellItemArray,
@@ -281,6 +288,10 @@ fn enumerate_subcommands(
     parent_path: &[u32],
     depth: usize,
 ) -> Vec<ProviderNativeMenuItem> {
+    let descends_into_subcommands = has_subcommands(command) && depth < MAX_SUBMENU_DEPTH;
+    if !descends_into_subcommands {
+        return Vec::new();
+    }
     let Ok(enumerator) = (unsafe { command.EnumSubCommands() }) else {
         return Vec::new();
     };
@@ -325,19 +336,20 @@ struct ShellItemArray {
     _pidls: Vec<OwnedPidl>,
 }
 
+fn menu_target_paths(request: &LoadNativeMenuRequest) -> Option<Vec<String>> {
+    let is_background = matches!(request.target_kind, NativeMenuTargetKind::Background);
+    if !is_background {
+        return Some(selected_paths(request));
+    }
+    let folder = request
+        .folder_path
+        .as_deref()
+        .or(request.target_path.as_deref())?;
+    Some(vec![folder.to_string()])
+}
+
 fn build_item_array(request: &LoadNativeMenuRequest) -> Option<ShellItemArray> {
-    let paths = if matches!(request.target_kind, NativeMenuTargetKind::Background) {
-        match request
-            .folder_path
-            .as_deref()
-            .or(request.target_path.as_deref())
-        {
-            Some(folder) => vec![folder.to_string()],
-            None => return None,
-        }
-    } else {
-        selected_paths(request)
-    };
+    let paths = menu_target_paths(request)?;
 
     if paths.is_empty() {
         return None;
@@ -635,30 +647,14 @@ impl RegKey {
         let mut handle = HKEY(null_mut());
         let result =
             unsafe { RegOpenKeyExW(root, PCWSTR(wide.as_ptr()), Some(0), KEY_READ, &mut handle) };
-        if result == ERROR_SUCCESS {
-            Some(Self(handle))
-        } else {
-            None
+        if result != ERROR_SUCCESS {
+            return None;
         }
+        Some(Self(handle))
     }
 
     fn open_sub(&self, sub: &str) -> Option<Self> {
-        let wide = wide_nul(sub);
-        let mut handle = HKEY(null_mut());
-        let result = unsafe {
-            RegOpenKeyExW(
-                self.0,
-                PCWSTR(wide.as_ptr()),
-                Some(0),
-                KEY_READ,
-                &mut handle,
-            )
-        };
-        if result == ERROR_SUCCESS {
-            Some(Self(handle))
-        } else {
-            None
-        }
+        Self::open(self.0, sub)
     }
 
     fn subkeys(&self) -> Vec<String> {

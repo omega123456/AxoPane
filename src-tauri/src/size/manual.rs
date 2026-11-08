@@ -51,11 +51,10 @@ pub fn calculate(
     #[cfg(target_os = "macos")]
     if metadata.file_type().is_symlink() {
         let target = std::fs::canonicalize(path)?;
-        return if target.is_dir() {
-            subtree_total(&target, cancel, started_at, timeout)
-        } else {
-            Ok(0)
-        };
+        if !target.is_dir() {
+            return Ok(0);
+        }
+        return subtree_total(&target, cancel, started_at, timeout);
     }
 
     if !metadata.is_dir() || metadata.file_type().is_symlink() {

@@ -11,6 +11,11 @@ export function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(value, maximum))
 }
 
+export function wrapIndex(index: number, length: number) {
+  const remainder = index % length
+  return (remainder + length) % length
+}
+
 export function clampPercent(percent: number) {
   return clamp(percent, 0, PERCENT_SCALE)
 }

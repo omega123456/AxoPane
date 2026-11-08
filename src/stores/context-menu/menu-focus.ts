@@ -8,6 +8,7 @@ import {
   type ContextMenuSubmenuRow,
   type ContextMenuSubmenuRowItem,
 } from '@/lib/types/context-menu'
+import { wrapIndex } from '@/lib/numbers'
 import type { PaneId } from '@/types/pane'
 
 type FocusableItem = ContextMenuStripItem | ContextMenuRowItem | ContextMenuSubmenuRow
@@ -104,7 +105,7 @@ function moveWithin(
   if (currentIndex < 0) {
     return enabled[entryIndexForDirection(direction, enabled.length)]?.id ?? activeItemId
   }
-  const nextIndex = (currentIndex + direction + enabled.length) % enabled.length
+  const nextIndex = wrapIndex(currentIndex + direction, enabled.length)
   return enabled[nextIndex]?.id ?? activeItemId
 }
 

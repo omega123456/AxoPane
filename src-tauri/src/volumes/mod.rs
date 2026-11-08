@@ -296,10 +296,9 @@ pub fn add_network_mount_if_missing(
 fn normalize_supplemental_mount_root(mount_root: &str) -> String {
     let trimmed = mount_root.trim();
     if trimmed == "/" {
-        trimmed.to_string()
-    } else {
-        trimmed.trim_end_matches(['\\', '/']).to_string()
+        return trimmed.to_string();
     }
+    trimmed.trim_end_matches(['\\', '/']).to_string()
 }
 
 fn mount_roots_match(left: &str, right: &str) -> bool {
@@ -610,28 +609,30 @@ fn push_network_volume(
         .map(|value| value.trim().to_string())
         .unwrap_or_else(|| label_for_unc_root(&mount_root));
 
-    let (total_bytes, free_bytes, label) = if query_space {
-        let space_root = crate::win32::wide_nul(space_query_root(&mount_root));
-        let (total_bytes, free_bytes) = disk_space_for_root(&space_root);
-        let volume_label = read_volume_label(&space_root);
-        let label = if volume_label.is_empty() {
-            fallback_label
-        } else {
-            volume_label
-        };
-        (total_bytes, free_bytes, label)
-    } else {
-        (0, 0, fallback_label)
-    };
-
-    volumes.push(VolumeInfo {
+    let mut volume = VolumeInfo {
         mount_root,
-        label,
-        total_bytes,
-        free_bytes,
+        label: fallback_label,
+        total_bytes: 0,
+        free_bytes: 0,
         is_network: true,
         is_removable: false,
-    });
+    };
+    if query_space {
+        fill_network_volume_space(&mut volume);
+    }
+    volumes.push(volume);
+}
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+fn fill_network_volume_space(volume: &mut VolumeInfo) {
+    let space_root = crate::win32::wide_nul(space_query_root(&volume.mount_root));
+    let (total_bytes, free_bytes) = disk_space_for_root(&space_root);
+    volume.total_bytes = total_bytes;
+    volume.free_bytes = free_bytes;
+    let volume_label = read_volume_label(&space_root);
+    if !volume_label.is_empty() {
+        volume.label = volume_label;
+    }
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]
@@ -660,10 +661,9 @@ fn resolve_shell_link_target(path: &Path) -> Option<String> {
     let value = String::from_utf16_lossy(&target[..end]).trim().to_string();
 
     if value.is_empty() {
-        None
-    } else {
-        Some(value)
+        return None;
     }
+    Some(value)
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]
@@ -697,20 +697,21 @@ fn normalize_drive_root(value: &str) -> Option<String> {
     let drive = chars.next()?;
     let colon = chars.next()?;
 
-    if chars.next().is_none() && drive.is_ascii_alphabetic() && colon == ':' {
-        Some(format!("{}:\\", drive.to_ascii_uppercase()))
-    } else {
-        None
+    let is_drive_designator = chars.next().is_none() && drive.is_ascii_alphabetic() && colon == ':';
+    if !is_drive_designator {
+        return None;
     }
+    Some(format!("{}:\\", drive.to_ascii_uppercase()))
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]
 fn space_query_root(mount_root: &str) -> String {
-    if mount_root.starts_with("\\\\") && !mount_root.ends_with('\\') {
-        format!("{mount_root}\\")
-    } else {
-        mount_root.to_string()
+    let is_unc_root_without_separator =
+        mount_root.starts_with("\\\\") && !mount_root.ends_with('\\');
+    if is_unc_root_without_separator {
+        return format!("{mount_root}\\");
     }
+    mount_root.to_string()
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]

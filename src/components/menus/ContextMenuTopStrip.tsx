@@ -1,6 +1,7 @@
 import { ContextMenuIconGlyph } from '@/components/menus/ContextMenuRow'
 import type { ContextMenuStripItem } from '@/lib/types/context-menu'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
+import { menuItemStateClass } from '@/lib/class-names'
 import { PRIMARY_MOUSE_BUTTON } from '@/lib/mouse-buttons'
 
 const KEYBOARD_CLICK_DETAIL = 0
@@ -59,11 +60,7 @@ function StripButton({
       aria-label={item.label}
       title={item.label}
       disabled={item.disabled}
-      className={`inline-flex h-9 w-10 flex-none items-center justify-center rounded-control ${FOCUS_RING_INSET} ${
-        active
-          ? 'bg-light-hover dark:bg-dark-hover'
-          : 'hover:bg-light-hover dark:hover:bg-dark-hover'
-      } ${stripTextClass(item)}`}
+      className={`inline-flex h-9 w-10 flex-none items-center justify-center rounded-control ${FOCUS_RING_INSET} ${menuItemStateClass(active)} ${stripTextClass(item)}`}
       onMouseEnter={() => {
         if (!item.disabled) {
           onHoverItem(item.id)

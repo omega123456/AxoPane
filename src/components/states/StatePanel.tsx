@@ -2,6 +2,10 @@ import type { ReactNode } from 'react'
 import { Button } from '@/components/controls'
 import { TEXT_SECONDARY } from '@/lib/class-names'
 
+function stateIconToneClass(danger: boolean) {
+  return danger ? 'text-light-danger dark:text-dark-danger' : TEXT_SECONDARY
+}
+
 /**
  * The one template for empty, error and permission states: a 48px icon tile,
  * a 20px title, one line of explanation and one action.
@@ -31,9 +35,7 @@ export function StatePanel({
     >
       <div className="grid w-state justify-items-center gap-2.5 text-center">
         <span
-          className={`flex size-state-tile items-center justify-center rounded-overlay bg-light-hover dark:bg-dark-hover ${
-            danger ? 'text-light-danger dark:text-dark-danger' : TEXT_SECONDARY
-          }`}
+          className={`flex size-state-tile items-center justify-center rounded-overlay bg-light-hover dark:bg-dark-hover ${stateIconToneClass(danger)}`}
         >
           {icon}
         </span>

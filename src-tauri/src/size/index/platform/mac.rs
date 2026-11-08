@@ -295,23 +295,30 @@ fn run_stream(
             fse::FSEventStreamSetExclusionPaths(stream, exclusions);
             cf::CFRelease(exclusions);
         }
-        let run_loop = cf::CFRunLoopGetCurrent();
-        fse::FSEventStreamScheduleWithRunLoop(stream, run_loop, cf::kCFRunLoopDefaultMode);
-        if fse::FSEventStreamStart(stream) == 0 {
-            let _ = started.send(None);
-        } else {
-            let _ = started.send(Some(run_loop as usize));
-            // A stop that lands before the loop runs leaves the loop's
-            // stop flag set, so `CFRunLoopRun` returns at once.
-            while !stopped.load(Ordering::SeqCst) {
-                cf::CFRunLoopRun();
-            }
-            fse::FSEventStreamStop(stream);
-        }
+        schedule_and_pump_stream(stream, stopped, &started);
         fse::FSEventStreamInvalidate(stream);
         fse::FSEventStreamRelease(stream);
         drop(Box::from_raw(sink));
     }
+}
+
+unsafe fn schedule_and_pump_stream(
+    stream: fse::FSEventStreamRef,
+    stopped: &AtomicBool,
+    started: &mpsc::Sender<Option<usize>>,
+) {
+    let run_loop = cf::CFRunLoopGetCurrent();
+    fse::FSEventStreamScheduleWithRunLoop(stream, run_loop, cf::kCFRunLoopDefaultMode);
+    if fse::FSEventStreamStart(stream) == 0 {
+        let _ = started.send(None);
+        return;
+    }
+    let _ = started.send(Some(run_loop as usize));
+    // A stop that lands before the loop runs leaves the loop's stop flag set, so `CFRunLoopRun` returns at once.
+    while !stopped.load(Ordering::SeqCst) {
+        cf::CFRunLoopRun();
+    }
+    fse::FSEventStreamStop(stream);
 }
 
 extern "C" fn on_events(

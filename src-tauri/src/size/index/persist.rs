@@ -218,11 +218,11 @@ pub fn plan_batch(events: &[ChangeEvent]) -> ReplayOutcome {
     reread.sort();
     reread.dedup();
     reread.retain(|path| !rescan.iter().any(|rescanned| path.starts_with(rescanned)));
-    if reread.is_empty() && rescan.is_empty() {
-        ReplayOutcome::UpToDate
-    } else {
-        ReplayOutcome::Apply { reread, rescan }
+    let nothing_to_apply = reread.is_empty() && rescan.is_empty();
+    if nothing_to_apply {
+        return ReplayOutcome::UpToDate;
     }
+    ReplayOutcome::Apply { reread, rescan }
 }
 
 fn forces_full_rescan(flags: ChangeFlags) -> bool {

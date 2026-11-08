@@ -112,10 +112,9 @@ pub(super) fn snapshot_from_entries_for_watch(
 
 fn baseline_sort_key(target: &WatchTarget) -> SortKey {
     if target.sort_key == SortKey::Items {
-        SortKey::Name
-    } else {
-        target.sort_key
+        return SortKey::Name;
     }
+    target.sort_key
 }
 
 fn baseline_include_item_counts(target: &WatchTarget) -> bool {

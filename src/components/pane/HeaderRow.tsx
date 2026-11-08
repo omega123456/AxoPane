@@ -1,6 +1,6 @@
 import { useMemo, useRef } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
-import { columnDefinitions } from '@/lib/columns'
+import { columnDefinitions, type ColumnAlign } from '@/lib/columns'
 import { persistAppConfig } from '@/lib/app-config'
 import type { PaneState } from '@/types/pane'
 import { ChevronDownIcon } from '@/components/icons'
@@ -10,7 +10,7 @@ import { usePanesStore } from '@/stores/panes-store'
 import type { ColumnConfig, ColumnKey, SortDirection } from '@/lib/types/ipc'
 import { handleKeyByTable, type KeyHandlerTable } from '@/lib/key-table'
 import { FOCUS_RING } from '@/lib/focus-ring'
-import { TEXT_SECONDARY } from '@/lib/class-names'
+import { flippedChevronClass, NO_CLASS, TEXT_SECONDARY } from '@/lib/class-names'
 
 const COLUMN_RESIZE_KEYBOARD_STEP_PX = 8
 
@@ -23,12 +23,20 @@ const ariaSortByDirection: Record<SortDirection, 'ascending' | 'descending'> = {
   desc: 'descending',
 }
 
+function nameColumnIndentClass(columnKey: ColumnKey) {
+  return columnKey === 'name' ? 'pl-6' : NO_CLASS
+}
+
+function columnAlignClass(align: ColumnAlign | undefined) {
+  return align === 'right' ? 'justify-end' : NO_CLASS
+}
+
 function SortChevron({ active, direction }: { active: boolean; direction: SortDirection }) {
   if (!active) {
     return null
   }
   return (
-    <ChevronDownIcon className={`h-3 w-3 shrink-0 ${direction === 'asc' ? 'rotate-180' : ''}`} />
+    <ChevronDownIcon className={`h-3 w-3 shrink-0 ${flippedChevronClass(direction === 'asc')}`} />
   )
 }
 
@@ -143,14 +151,14 @@ function ColumnHeader({
       style={columnFlexStyle(columnKey, columnWidths)}
       role="columnheader"
       aria-label={label}
-      className={`${definition.className} ${columnKey === 'name' ? 'pl-6' : ''} group relative flex h-full items-center`}
+      className={`${definition.className} ${nameColumnIndentClass(columnKey)} group relative flex h-full items-center`}
       aria-sort={active ? ariaSortByDirection[pane.sortDirection] : 'none'}
     >
       <button
         type="button"
         onClick={() => void setSort(pane.id, columnKey)}
         aria-describedby={showItemsSortStatus ? statusId : undefined}
-        className={`flex h-full w-full min-w-0 cursor-pointer items-center gap-2 rounded-control ${definition.align === 'right' ? 'justify-end' : ''} ${FOCUS_RING}`}
+        className={`flex h-full w-full min-w-0 cursor-pointer items-center gap-2 rounded-control ${columnAlignClass(definition.align)} ${FOCUS_RING}`}
       >
         <span className="truncate">{label}</span>
         <SortChevron active={active} direction={pane.sortDirection} />

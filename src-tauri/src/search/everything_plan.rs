@@ -158,21 +158,19 @@ fn filters(options: &SearchOptions) -> Vec<String> {
 fn parent_terms(parent: &str) -> Vec<String> {
     let trimmed = parent.trim_end_matches('\\');
     if is_drive_designator(trimmed) {
-        vec![
+        return vec![
             format!("parent:{}", quote(trimmed)),
             format!("parent:{}", quote(&format!("{trimmed}\\"))),
-        ]
-    } else {
-        vec![format!("parent:{}", quote(trimmed))]
+        ];
     }
+    vec![format!("parent:{}", quote(trimmed))]
 }
 
 fn with_trailing_separator(path: &str) -> String {
     if path.ends_with('\\') {
-        path.to_owned()
-    } else {
-        format!("{path}\\")
+        return path.to_owned();
     }
+    format!("{path}\\")
 }
 
 /// Windows names cannot contain `"`, so dropping it is lossless.

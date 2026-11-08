@@ -34,11 +34,7 @@ pub fn score(candidate: &Candidate, query: &ParsedQuery, style: PathStyle) -> Op
     let clean = style.strip_verbatim(&candidate.path);
     let parts = style.split(&clean);
     let (raw_name, raw_ancestors) = parts.components.split_last()?;
-    let kind = if candidate.is_dir {
-        NameKind::Folder
-    } else {
-        NameKind::File
-    };
+    let kind = NameKind::of_entry(candidate.is_dir);
     let name = nfc(raw_name).into_owned();
     let name_match = match &query.name_seg {
         Some(segment) => Some(segment.matches(&FoldedName::new(&name), kind)?),
@@ -101,6 +97,13 @@ fn match_anchor(
     })
 }
 
+fn lowest_searchable_ancestor(lists_parent: bool, upper: usize) -> Option<usize> {
+    if lists_parent {
+        return upper.checked_sub(1);
+    }
+    Some(0)
+}
+
 /// Matches folder segments innermost first, each against ancestors above the
 /// previous match.
 fn match_folder_segments(query: &ParsedQuery, ancestors: &[String]) -> Option<FolderMatch> {
@@ -109,11 +112,7 @@ fn match_folder_segments(query: &ParsedQuery, ancestors: &[String]) -> Option<Fo
     for (segment_index, segment) in query.folder_segs.iter().enumerate().rev() {
         // Listing children: the innermost folder must be the parent.
         let lists_parent = query.browse && segment_index + 1 == query.folder_segs.len();
-        let lowest = if lists_parent {
-            upper.checked_sub(1)?
-        } else {
-            0
-        };
+        let lowest = lowest_searchable_ancestor(lists_parent, upper)?;
         let (ancestor_index, found) = best_ancestor_match(segment, ancestors, lowest..upper)?;
         folders.gap += (upper - 1 - ancestor_index) as u32;
         folders.penalty += u32::from(found.tier);

@@ -6,7 +6,7 @@ import { ParentRow } from './ParentRow'
 import { pathKey } from '@/lib/path-compare'
 import { entryRenameProps, type InlineRenameState } from '@/stores/inline-rename-store'
 import type { PaneState } from '@/types/pane'
-import { dropTargetOutline, SCROLLBAR_THIN } from '@/lib/class-names'
+import { dropTargetOutline, NO_CLASS, SCROLLBAR_THIN } from '@/lib/class-names'
 import { MarqueeSelection, type MarqueeRect } from './MarqueeSelection'
 import {
   useDetachedHorizontalScroll,
@@ -29,6 +29,10 @@ function scrollOverflowClass(usesDetachedMacScrollbars: boolean) {
   return usesDetachedMacScrollbars
     ? 'overflow-x-hidden overflow-y-auto pb-2'
     : 'overflow-x-auto overflow-y-auto'
+}
+
+function contentLayerCompositingClass(usesDetachedMacScrollbars: boolean) {
+  return usesDetachedMacScrollbars ? 'will-change-transform' : NO_CLASS
 }
 
 type DetailsViewProps = {
@@ -193,7 +197,7 @@ function DetailsScrollArea({
           minWidth: `${contentWidth}px`,
           position: 'relative',
         }}
-        className={`min-h-full w-full ${usesDetachedMacScrollbars ? 'will-change-transform' : ''}`}
+        className={`min-h-full w-full ${contentLayerCompositingClass(usesDetachedMacScrollbars)}`}
       >
         {itemsToRender.map((virtualRow) => (
           <DetailsRow

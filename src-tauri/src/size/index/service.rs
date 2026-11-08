@@ -204,11 +204,7 @@ impl FolderSizeIndex {
         if !view.available {
             return Err(TreeUnavailable::Unavailable);
         }
-        let blocked: Vec<PathBuf> = if view.full_disk_access {
-            Vec::new()
-        } else {
-            self.shared.unvisited_protected(&view)
-        };
+        let blocked = self.shared.privacy_blocked_paths(&view);
         Ok(read(&view.tree, &blocked))
     }
 
@@ -388,6 +384,13 @@ impl Shared {
 
     pub(super) fn protected_root_of(&self, path: &Path) -> Option<&PathBuf> {
         self.protected.iter().find(|root| within(path, root))
+    }
+
+    fn privacy_blocked_paths(&self, view: &View) -> Vec<PathBuf> {
+        if view.full_disk_access {
+            return Vec::new();
+        }
+        self.unvisited_protected(view)
     }
 
     pub(super) fn unvisited_protected(&self, view: &View) -> Vec<PathBuf> {

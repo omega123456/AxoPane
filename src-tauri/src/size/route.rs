@@ -37,6 +37,14 @@ pub(crate) fn route_of(path: &Path) -> Route {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn request_route(requested: &Path, volumes: &[VolumeInfo]) -> Route {
+    if volumes::path_is_network(requested, volumes) {
+        return Route::AsIs;
+    }
+    route_of(requested)
+}
+
 /// The path a request is sized by, plus (on macOS) how it was routed.
 struct RequestTarget {
     sized: PathBuf,
@@ -49,11 +57,7 @@ impl RequestTarget {
     #[cfg(target_os = "macos")]
     fn resolve(path: &str, volumes: &[VolumeInfo]) -> Self {
         let requested = Path::new(path);
-        let route = if volumes::path_is_network(requested, volumes) {
-            Route::AsIs
-        } else {
-            route_of(requested)
-        };
+        let route = request_route(requested, volumes);
         let sized = match &route {
             Route::Target(target) => target.clone(),
             Route::AsIs | Route::NotDir => PathBuf::from(path),

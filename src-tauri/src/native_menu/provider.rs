@@ -183,12 +183,15 @@ fn dedupe_key(item: &ProviderNativeMenuItem) -> String {
             .map(canonical_action_key)
             .unwrap_or_default(),
         normalize_verb(&item.label),
-        if item.children.is_empty() {
-            "leaf"
-        } else {
-            "submenu"
-        }
+        menu_shape_key(item)
     )
+}
+
+fn menu_shape_key(item: &ProviderNativeMenuItem) -> &'static str {
+    if item.children.is_empty() {
+        return "leaf";
+    }
+    "submenu"
 }
 
 fn is_open_with_variant(value: &str) -> bool {

@@ -58,6 +58,15 @@ impl std::fmt::Display for EverythingError {
 
 impl std::error::Error for EverythingError {}
 
+impl EverythingError {
+    fn from_code(code: u32) -> Self {
+        if code == EVERYTHING_ERROR_IPC {
+            return Self::NotReady;
+        }
+        Self::QueryFailed(code)
+    }
+}
+
 pub struct EverythingHandle {
     _library: Arc<Library>,
     query_lock: Mutex<()>,
@@ -131,11 +140,11 @@ impl EverythingHandle {
     }
 
     pub fn availability(&self) -> EverythingAvailability {
-        if unsafe { (self.is_db_loaded)() } {
-            EverythingAvailability::Available
-        } else {
-            EverythingAvailability::NotReady
+        let database_loaded = unsafe { (self.is_db_loaded)() };
+        if database_loaded {
+            return EverythingAvailability::Available;
         }
+        EverythingAvailability::NotReady
     }
 
     pub fn query_folder_size(&self, path: &Path) -> Result<Option<u64>, EverythingError> {
@@ -242,12 +251,7 @@ impl EverythingHandle {
             (self.set_request_flags)(flags);
 
             if !(self.query_w)(true) {
-                let code = (self.get_last_error)();
-                return if code == EVERYTHING_ERROR_IPC {
-                    Err(EverythingError::NotReady)
-                } else {
-                    Err(EverythingError::QueryFailed(code))
-                };
+                return Err(EverythingError::from_code((self.get_last_error)()));
             }
 
             let result_count = (self.get_num_results)();

@@ -17,11 +17,11 @@ pub const FUZZY_MIN_CHARS: usize = 3;
 
 /// `text` in NFC, borrowed when it already is (the common case).
 pub fn nfc(text: &str) -> Cow<'_, str> {
-    if text.is_ascii() || is_nfc_quick(text.chars()) == IsNormalized::Yes {
-        Cow::Borrowed(text)
-    } else {
-        Cow::Owned(text.nfc().collect())
+    let already_normalized = text.is_ascii() || is_nfc_quick(text.chars()) == IsNormalized::Yes;
+    if already_normalized {
+        return Cow::Borrowed(text);
     }
+    Cow::Owned(text.nfc().collect())
 }
 
 /// Lowercases one char, keeping it as-is when lowercasing would change the
@@ -117,6 +117,8 @@ impl Pattern {
     }
 }
 
+const GLOB_WILDCARDS: [char; 2] = ['*', '?'];
+
 /// One space-separated word of a query segment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
@@ -127,11 +129,10 @@ pub enum Token {
 
 impl Token {
     pub fn new(word: &str) -> Self {
-        if word.contains(['*', '?']) {
-            Self::Glob(Pattern::new(word))
-        } else {
-            Self::Literal(Pattern::new(word))
+        if word.contains(GLOB_WILDCARDS) {
+            return Self::Glob(Pattern::new(word));
         }
+        Self::Literal(Pattern::new(word))
     }
 
     pub fn pattern(&self) -> &Pattern {
@@ -145,6 +146,15 @@ impl Token {
 pub enum NameKind {
     File,
     Folder,
+}
+
+impl NameKind {
+    pub fn of_entry(is_dir: bool) -> Self {
+        if is_dir {
+            return Self::Folder;
+        }
+        Self::File
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

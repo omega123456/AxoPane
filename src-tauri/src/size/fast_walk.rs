@@ -225,26 +225,29 @@ struct Walk<'a> {
     wake: Condvar,
 }
 
+fn allowed_devices(
+    options: &WalkOptions,
+    root: &Path,
+) -> Result<Option<Vec<u64>>, ManualSizeError> {
+    if !options.stay_on_device {
+        return Ok(None);
+    }
+    let root_device = std::fs::symlink_metadata(root)?.dev();
+    let mut devices = vec![device_of(options, root, root_device)];
+    let data_volume = Path::new(DATA_VOLUME_PREFIX);
+    if let Ok(data_metadata) = std::fs::metadata(data_volume) {
+        devices.push(device_of(options, data_volume, data_metadata.dev()));
+    }
+    Ok(Some(devices))
+}
+
 fn walk(
     root: &Path,
     options: &WalkOptions,
     fail_on_denied: bool,
     on_record: &(dyn Fn(DirRecord) + Sync),
 ) -> Result<(), ManualSizeError> {
-    let allowed_devs = if options.stay_on_device {
-        let mut devs = vec![device_of(
-            options,
-            root,
-            std::fs::symlink_metadata(root)?.dev(),
-        )];
-        let data = Path::new(DATA_VOLUME_PREFIX);
-        if let Ok(meta) = std::fs::metadata(data) {
-            devs.push(device_of(options, data, meta.dev()));
-        }
-        Some(devs)
-    } else {
-        None
-    };
+    let allowed_devs = allowed_devices(options, root)?;
     let walk = Walk {
         options,
         allowed_devs,
@@ -351,15 +354,26 @@ struct Claim<'a> {
     failure: Option<ManualSizeError>,
 }
 
+impl Claim<'_> {
+    fn take_failure(&mut self) -> Option<ManualSizeError> {
+        if let Some(failure) = self.failure.take() {
+            return Some(failure);
+        }
+        if thread::panicking() {
+            return Some(ManualSizeError::Cancelled);
+        }
+        None
+    }
+}
+
 impl Drop for Claim<'_> {
     fn drop(&mut self) {
+        let failure = self.take_failure();
         let mut queue = self.walk.queue.lock().expect("fast walk queue");
         queue.busy -= 1;
         queue.pending.append(&mut self.subdirs);
-        if let Some(failure) = self.failure.take() {
+        if let Some(failure) = failure {
             queue.failure.get_or_insert(failure);
-        } else if thread::panicking() {
-            queue.failure.get_or_insert(ManualSizeError::Cancelled);
         }
         self.walk.wake.notify_all();
     }

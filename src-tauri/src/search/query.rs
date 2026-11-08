@@ -137,11 +137,7 @@ pub fn parse(raw: &str, style: PathStyle, home: Option<&str>) -> Result<ParsedQu
         .map(|part| part.trim())
         .filter(|part| !part.is_empty())
         .collect();
-    let name_seg = if browse {
-        None
-    } else {
-        segs.pop().map(Segment::new)
-    };
+    let name_seg = take_name_segment(&mut segs, browse);
     if anchored {
         return Ok(ParsedQuery {
             anchor: Some(Anchor {
@@ -163,6 +159,13 @@ pub fn parse(raw: &str, style: PathStyle, home: Option<&str>) -> Result<ParsedQu
         name_seg,
         browse,
     })
+}
+
+fn take_name_segment(segments: &mut Vec<&str>, browse: bool) -> Option<Segment> {
+    if browse {
+        return None;
+    }
+    segments.pop().map(Segment::new)
 }
 
 fn expand_home(text: &str, style: PathStyle, home: Option<&str>) -> String {

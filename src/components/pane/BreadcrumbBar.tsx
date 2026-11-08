@@ -214,6 +214,12 @@ function BreadcrumbTrail({ pane, onStartEdit }: { pane: PaneState; onStartEdit: 
   )
 }
 
+function crumbStateClass(isCurrent: boolean) {
+  return isCurrent
+    ? 'cursor-default font-semibold text-light-text dark:text-dark-text'
+    : `cursor-pointer ${TEXT_SECONDARY} hover:bg-light-hover active:bg-light-press dark:hover:bg-dark-hover dark:active:bg-dark-press`
+}
+
 function Crumb({
   paneId,
   segment,
@@ -231,11 +237,7 @@ function Crumb({
         aria-current={isCurrent ? 'location' : undefined}
         onClick={() => void navigatePane(paneId, segment.path)}
         title={segment.truncated ? segment.fullLabel : undefined}
-        className={`inline-flex shrink-0 items-center rounded-control px-1.5 py-1 text-row ${FOCUS_RING} ${
-          isCurrent
-            ? 'cursor-default font-semibold text-light-text dark:text-dark-text'
-            : `cursor-pointer ${TEXT_SECONDARY} hover:bg-light-hover active:bg-light-press dark:hover:bg-dark-hover dark:active:bg-dark-press`
-        }`}
+        className={`inline-flex shrink-0 items-center rounded-control px-1.5 py-1 text-row ${FOCUS_RING} ${crumbStateClass(isCurrent)}`}
       >
         <span className="truncate">{segment.label}</span>
       </button>

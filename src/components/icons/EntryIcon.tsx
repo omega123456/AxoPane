@@ -1,4 +1,4 @@
-import { useState, type ComponentType, type ReactNode } from 'react'
+import { useState, type ComponentType } from 'react'
 import type { LucideProps } from 'lucide-react'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import type { FileCategory } from '@/lib/file-type'
@@ -74,6 +74,28 @@ function SymlinkBadge() {
   )
 }
 
+type CategoryGlyphProps = {
+  category: FileCategory
+  className: string
+  colorClassName?: string
+}
+
+function CategoryGlyph({ category, className, colorClassName }: CategoryGlyphProps) {
+  if (category === 'folder') {
+    return <FolderGlyph data-file-category="folder" className={className} />
+  }
+  const { Glyph, colorClassName: defaultColor } = CATEGORY_STYLES[category]
+  const color = colorClassName ?? defaultColor
+  return <Glyph data-file-category={category} className={`${className} ${color}`.trim()} />
+}
+
+function usableNativeIconUrl(entry: EntryIconProps['entry'], nativeIconFailed: boolean) {
+  if (entry.isDir || nativeIconFailed) {
+    return null
+  }
+  return entry.iconDataUrl || null
+}
+
 /**
  * File-type-aware icon: distinct lucide glyph + token color per category, plus
  * the filled two-tone folder glyph for every folder.
@@ -87,28 +109,19 @@ export function EntryIcon({
   const [nativeIconFailed, setNativeIconFailed] = useState(false)
   const category = getFileCategory(entry)
   const isSymlink = entry.attributes?.includes('symlink') ?? false
+  const nativeIconUrl = usableNativeIconUrl(entry, nativeIconFailed)
 
-  let glyph: ReactNode
-
-  if (!entry.isDir && entry.iconDataUrl && !nativeIconFailed) {
-    glyph = (
-      <img
-        src={entry.iconDataUrl}
-        alt=""
-        aria-hidden="true"
-        className={className}
-        onError={() => {
-          setNativeIconFailed(true)
-        }}
-      />
-    )
-  } else if (category === 'folder') {
-    glyph = <FolderGlyph data-file-category="folder" className={className} />
-  } else {
-    const { Glyph, colorClassName: defaultColor } = CATEGORY_STYLES[category]
-    const color = colorClassName ?? defaultColor
-    glyph = <Glyph data-file-category={category} className={`${className} ${color}`.trim()} />
-  }
+  const glyph = nativeIconUrl ? (
+    <img
+      src={nativeIconUrl}
+      alt=""
+      aria-hidden="true"
+      className={className}
+      onError={() => setNativeIconFailed(true)}
+    />
+  ) : (
+    <CategoryGlyph category={category} className={className} colorClassName={colorClassName} />
+  )
 
   if (!isSymlink) {
     return glyph

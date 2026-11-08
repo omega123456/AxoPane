@@ -21,6 +21,10 @@ const SELECTED_SCOPE_CLASS =
   'bg-light-card font-semibold text-light-text shadow-thumb dark:bg-dark-card dark:text-dark-text'
 const UNSELECTED_SCOPE_CLASS = `${TEXT_SECONDARY} hover:bg-light-hover dark:hover:bg-dark-hover`
 
+function scopeOptionStateClass(isSelected: boolean) {
+  return isSelected ? SELECTED_SCOPE_CLASS : UNSELECTED_SCOPE_CLASS
+}
+
 export function SearchListMessage({
   status,
   error,
@@ -145,9 +149,7 @@ export function SearchScopeBar({
             aria-pressed={scope === option.scope}
             disabled={option.scope === 'files' && foldersOnly}
             onClick={() => onSelectScope(option.scope)}
-            className={`h-6 rounded-control px-2.5 text-caption disabled:cursor-not-allowed disabled:text-light-text-disabled dark:disabled:text-dark-text-disabled ${
-              scope === option.scope ? SELECTED_SCOPE_CLASS : UNSELECTED_SCOPE_CLASS
-            } ${FOCUS_RING_INSET}`}
+            className={`h-6 rounded-control px-2.5 text-caption disabled:cursor-not-allowed disabled:text-light-text-disabled dark:disabled:text-dark-text-disabled ${scopeOptionStateClass(scope === option.scope)} ${FOCUS_RING_INSET}`}
           >
             {option.label}
           </button>

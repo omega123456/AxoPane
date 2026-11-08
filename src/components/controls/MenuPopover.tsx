@@ -13,6 +13,7 @@ import { createPortal } from 'react-dom'
 import { CheckIcon } from '@/components/icons'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
 import { handleKeyByTable } from '@/lib/key-table'
+import { wrapIndex } from '@/lib/numbers'
 import {
   applyMenuGeometry,
   documentZoom,
@@ -89,7 +90,7 @@ function handleMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>, controls: 
   const indexes = controls.enabledIndexes()
   const currentPosition = indexes.indexOf(currentIndex)
   const focusEnabledAt = (position: number) =>
-    controls.focusItem(indexes[(position + indexes.length) % indexes.length] ?? 0)
+    controls.focusItem(indexes[wrapIndex(position, indexes.length)] ?? 0)
   handleKeyByTable(event, {
     Escape: () => controls.closeAndRestoreFocus(),
     ArrowDown: () => focusEnabledAt(currentPosition + 1),

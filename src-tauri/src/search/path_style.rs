@@ -61,11 +61,12 @@ impl PathStyle {
     /// Appends `name` to `base`, adding a separator unless `base` already
     /// ends with one (as roots do).
     pub fn join(self, base: &str, name: &str) -> String {
-        if base.is_empty() || base.ends_with(|character| self.is_separator(character)) {
-            format!("{base}{name}")
-        } else {
-            format!("{base}{}{name}", self.separator())
+        let base_needs_no_separator =
+            base.is_empty() || base.ends_with(|character| self.is_separator(character));
+        if base_needs_no_separator {
+            return format!("{base}{name}");
         }
+        format!("{base}{}{name}", self.separator())
     }
 
     /// Rebuilds a path from a root and components with this style's

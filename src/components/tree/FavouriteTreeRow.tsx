@@ -2,6 +2,7 @@ import { memo, useRef, useState, type DragEvent, type MouseEvent } from 'react'
 import { EntryIcon } from '@/components/icons/EntryIcon'
 import { useDragStore } from '@/stores/drag-store'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
+import { activeFillClass, dropTargetRing } from '@/lib/class-names'
 import { SelectionPill } from '@/components/controls/SelectionPill'
 import { canDropOnFavourite, dropOntoFavourite } from './favourite-drop'
 
@@ -125,9 +126,7 @@ function FavouriteTreeRowImpl({ path, name, index, isCurrent, isRenaming, action
       onDragLeave={() => setIsDropTarget(false)}
       onDrop={(event) => void handleDrop(event)}
       onContextMenu={(event) => actions.onContextMenu(path, event)}
-      className={`relative flex h-tree-row items-center gap-2 rounded-control pl-2 pr-2 text-row text-light-text hover:bg-light-hover dark:text-dark-text dark:hover:bg-dark-hover ${
-        isCurrent ? 'bg-light-hover dark:bg-dark-hover' : ''
-      } ${isDropTarget ? 'ring-2 ring-inset ring-light-accent dark:ring-dark-accent' : ''}`}
+      className={`relative flex h-tree-row items-center gap-2 rounded-control pl-2 pr-2 text-row text-light-text hover:bg-light-hover dark:text-dark-text dark:hover:bg-dark-hover ${activeFillClass(isCurrent)} ${dropTargetRing(isDropTarget)}`}
     >
       {isCurrent ? <SelectionPill /> : null}
       <span className="w-3 flex-none" aria-hidden="true" />

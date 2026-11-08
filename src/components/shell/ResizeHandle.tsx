@@ -4,12 +4,40 @@ import { FOCUS_RING } from '@/lib/focus-ring'
 import { handleKeyByTable } from '@/lib/key-table'
 import { PRIMARY_MOUSE_BUTTON } from '@/lib/mouse-buttons'
 
+type ResizeOrientation = 'vertical' | 'horizontal'
+
+type OrientationClasses = {
+  handle: string
+  line: string
+  grabZone: string
+}
+
+const ORIENTATION_CLASSES: Record<ResizeOrientation, OrientationClasses> = {
+  horizontal: {
+    handle: 'h-0 w-full cursor-row-resize',
+    line: 'inset-x-0 top-0 h-px',
+    grabZone: 'inset-x-0 -top-1 -bottom-1',
+  },
+  vertical: {
+    handle: 'h-full w-0 cursor-col-resize',
+    line: 'inset-y-0 left-0 w-px',
+    grabZone: 'inset-y-0 -left-1 -right-1',
+  },
+}
+
+function dividerLineClass(isDragging: boolean, showRestLine: boolean) {
+  if (isDragging) {
+    return 'bg-light-accent dark:bg-dark-accent'
+  }
+  return showRestLine ? 'bg-light-divider dark:bg-dark-divider' : 'bg-transparent'
+}
+
 type ResizeHandleProps = {
   /**
    * `vertical` (default) is a column divider dragged left/right; `horizontal` is
    * a row divider dragged up/down.
    */
-  orientation?: 'vertical' | 'horizontal'
+  orientation?: ResizeOrientation
   /** Accessible label describing what the divider resizes. */
   ariaLabel: string
   /** Current value, exposed via `aria-valuenow` for assistive tech. */
@@ -107,7 +135,7 @@ export function ResizeHandle({
 }: ResizeHandleProps) {
   const horizontal = orientation === 'horizontal'
   const drag = usePointerDrag(horizontal, { onDragStart, onResize, onCommit })
-  const restLine = showRestLine ? 'bg-light-divider dark:bg-dark-divider' : 'bg-transparent'
+  const orientationClasses = ORIENTATION_CLASSES[orientation]
 
   return (
     <div
@@ -125,21 +153,13 @@ export function ResizeHandle({
       onKeyDown={(event) => handleKeyByTable(event, stepKeyTable(horizontal, onStep, onCommit))}
       // Zero layout width keeps the fixed pane geometry pixel-exact; the line and
       // grab zone are painted as absolute overlays around it.
-      className={`group relative z-10 shrink-0 touch-none select-none ${
-        horizontal ? 'h-0 w-full cursor-row-resize' : 'h-full w-0 cursor-col-resize'
-      } ${FOCUS_RING}`}
+      className={`group relative z-10 shrink-0 touch-none select-none ${orientationClasses.handle} ${FOCUS_RING}`}
     >
       <span
-        className={`pointer-events-none absolute ${
-          horizontal ? 'inset-x-0 top-0 h-px' : 'inset-y-0 left-0 w-px'
-        } group-hover:bg-light-accent dark:group-hover:bg-dark-accent ${
-          drag.dragging ? 'bg-light-accent dark:bg-dark-accent' : restLine
-        }`}
+        className={`pointer-events-none absolute ${orientationClasses.line} group-hover:bg-light-accent dark:group-hover:bg-dark-accent ${dividerLineClass(drag.dragging, showRestLine)}`}
       />
       {/* Invisible grab zone that overhangs the line on both sides. */}
-      <span
-        className={`absolute ${horizontal ? 'inset-x-0 -top-1 -bottom-1' : 'inset-y-0 -left-1 -right-1'}`}
-      />
+      <span className={`absolute ${orientationClasses.grabZone}`} />
     </div>
   )
 }

@@ -42,6 +42,18 @@ struct BatchState {
     last_flush_millis: u64,
 }
 
+impl BatchState {
+    fn take_if_due(&mut self, now_millis: u64) -> Option<Vec<ThumbnailResultEvent>> {
+        let waited_millis = now_millis.saturating_sub(self.last_flush_millis);
+        let not_due = self.events.is_empty() || waited_millis < PARTIAL_BATCH_FLUSH_MILLIS;
+        if not_due {
+            return None;
+        }
+        self.last_flush_millis = now_millis;
+        Some(std::mem::take(&mut self.events))
+    }
+}
+
 /// Application-owned thumbnail service. The scheduler never knows about
 /// Tauri; this boundary owns cache admission and result batching.
 pub struct ThumbnailService {
@@ -324,18 +336,22 @@ fn result_publisher(
             .into_iter()
             .map(|subscriber| result_event(subscriber, candidate.clone(), state.clone()))
             .collect();
-        if matches!(
-            state,
-            ThumbnailState::Ready {
-                quality: crate::ipc::types::ThumbnailQuality::Low,
-                ..
-            }
-        ) {
+        if is_low_quality_ready(&state) {
             emit_batches(&emitter, split_result_events(events));
-        } else {
-            enqueue_batch(&batches, &emitter, events, clock(), &batch_wake);
+            return;
         }
+        enqueue_batch(&batches, &emitter, events, clock(), &batch_wake);
     })
+}
+
+fn is_low_quality_ready(state: &ThumbnailState) -> bool {
+    matches!(
+        state,
+        ThumbnailState::Ready {
+            quality: crate::ipc::types::ThumbnailQuality::Low,
+            ..
+        }
+    )
 }
 
 impl Drop for ThumbnailService {
@@ -405,17 +421,10 @@ fn flush_due_batch(
     emitter: &Arc<Mutex<Option<ResultEmitter>>>,
     now_millis: u64,
 ) {
-    let batch = {
-        let mut state = batches.lock().expect("thumbnail batches lock");
-        if state.events.is_empty()
-            || now_millis.saturating_sub(state.last_flush_millis) < PARTIAL_BATCH_FLUSH_MILLIS
-        {
-            None
-        } else {
-            state.last_flush_millis = now_millis;
-            Some(std::mem::take(&mut state.events))
-        }
-    };
+    let batch = batches
+        .lock()
+        .expect("thumbnail batches lock")
+        .take_if_due(now_millis);
     emit_batches(emitter, batch.into_iter().collect());
 }
 

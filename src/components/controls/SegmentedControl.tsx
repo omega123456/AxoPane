@@ -1,6 +1,15 @@
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
 export type SegmentedOption<T extends string> = { value: T; label: string }
 
+const ACTIVE_SEGMENT_CLASS =
+  'bg-light-accent text-light-on-accent dark:bg-dark-accent dark:text-dark-on-accent'
+const INACTIVE_SEGMENT_CLASS =
+  'text-light-text hover:bg-light-hover dark:text-dark-text dark:hover:bg-dark-hover'
+
+function segmentStateClass(active: boolean) {
+  return active ? ACTIVE_SEGMENT_CLASS : INACTIVE_SEGMENT_CLASS
+}
+
 /** Fluent segmented control: 26px items in a 2px-padded control well; selection is solid accent. */
 export function SegmentedControl<T extends string>({
   value,
@@ -28,11 +37,7 @@ export function SegmentedControl<T extends string>({
             role="radio"
             aria-checked={active}
             onClick={() => onChange(option.value)}
-            className={`flex h-6.5 cursor-pointer items-center rounded-control px-3 text-row ${FOCUS_RING_INSET} ${
-              active
-                ? 'bg-light-accent text-light-on-accent dark:bg-dark-accent dark:text-dark-on-accent'
-                : 'text-light-text hover:bg-light-hover dark:text-dark-text dark:hover:bg-dark-hover'
-            }`}
+            className={`flex h-6.5 cursor-pointer items-center rounded-control px-3 text-row ${FOCUS_RING_INSET} ${segmentStateClass(active)}`}
           >
             {option.label}
           </button>

@@ -4,6 +4,12 @@ import { FOCUS_RING } from '@/lib/focus-ring'
 import type { SearchRejection } from '@/lib/types/ipc'
 import { TEXT_SECONDARY } from '@/lib/class-names'
 
+function stateTileToneClass(warning: boolean) {
+  return warning
+    ? 'bg-light-warning-bg text-light-warning dark:bg-dark-warning-bg dark:text-dark-warning'
+    : `bg-light-hover ${TEXT_SECONDARY} dark:bg-dark-hover`
+}
+
 /** The StatePanel layout, sized for the palette and allowing a link action. */
 function PaletteState({
   icon,
@@ -21,11 +27,7 @@ function PaletteState({
   return (
     <div role="status" className="grid justify-items-center gap-2 px-6 py-8 text-center">
       <span
-        className={`flex size-state-tile items-center justify-center rounded-overlay ${
-          warning
-            ? 'bg-light-warning-bg text-light-warning dark:bg-dark-warning-bg dark:text-dark-warning'
-            : `bg-light-hover ${TEXT_SECONDARY} dark:bg-dark-hover`
-        }`}
+        className={`flex size-state-tile items-center justify-center rounded-overlay ${stateTileToneClass(warning)}`}
       >
         {icon}
       </span>

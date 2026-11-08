@@ -26,8 +26,7 @@ import {
   type PropertiesDialogState,
 } from '@/stores/properties-dialog-store'
 import type { MacApp } from '@/lib/types/ipc'
-import { SCROLLBAR_THIN } from '@/lib/class-names'
-import { TEXT_SECONDARY } from '@/lib/class-names'
+import { NO_CLASS, SCROLLBAR_THIN, TEXT_SECONDARY } from '@/lib/class-names'
 import { handleKeyByTable } from '@/lib/key-table'
 
 function formatItemSize(sizeBytes: number | null, itemCount: number | null, isDir: boolean) {
@@ -228,7 +227,7 @@ function PropertiesFooter({
           )}
         </Button>
       ) : null}
-      <Button ref={closeRef} onClick={onClose} className={canSetDefault ? '' : 'col-start-2'}>
+      <Button ref={closeRef} onClick={onClose} className={closeButtonColumnClass(canSetDefault)}>
         Close
       </Button>
     </>
@@ -290,6 +289,19 @@ function SingleItemProperties({
   )
 }
 
+const LONE_BUTTON_COLUMN_CLASS = 'col-start-2'
+
+function closeButtonColumnClass(canSetDefault: boolean) {
+  return canSetDefault ? NO_CLASS : LONE_BUTTON_COLUMN_CLASS
+}
+
+const MONOSPACE_VALUE_CLASS = 'break-all font-mono text-caption'
+const PROPORTIONAL_VALUE_CLASS = 'text-row'
+
+function propertyValueFontClass(monospace: boolean) {
+  return monospace ? MONOSPACE_VALUE_CLASS : PROPORTIONAL_VALUE_CLASS
+}
+
 function PropertyRow({
   label,
   value,
@@ -305,13 +317,29 @@ function PropertyRow({
     <div className="flex items-baseline gap-4">
       <dt className={`w-24 shrink-0 text-caption ${TEXT_SECONDARY}`}>{label}</dt>
       <dd
-        className={`min-w-0 flex-1 break-words ${valueClassName ?? ''} ${
-          monospace ? 'break-all font-mono text-caption' : 'text-row'
-        }`}
+        className={`min-w-0 flex-1 break-words ${valueClassName ?? ''} ${propertyValueFontClass(monospace)}`}
       >
         {value}
       </dd>
     </div>
+  )
+}
+
+function defaultAppLabel(loaded: boolean, app: MacApp | null): ReactNode {
+  if (!loaded) {
+    return 'Loading…'
+  }
+  if (!app) {
+    return 'Not set'
+  }
+  return (
+    <>
+      <EntryIcon
+        entry={{ name: app.name, isDir: false, iconDataUrl: app.iconDataUrl }}
+        className="h-4 w-4 shrink-0"
+      />
+      <span className="truncate">{app.name}</span>
+    </>
   )
 }
 
@@ -320,19 +348,7 @@ function DefaultAppRow({ loaded, app }: { loaded: boolean; app: MacApp | null })
     <div className="flex items-baseline gap-4">
       <dt className={`w-24 shrink-0 text-caption ${TEXT_SECONDARY}`}>Default App</dt>
       <dd className="flex min-w-0 flex-1 items-center gap-2 text-row">
-        {!loaded ? (
-          'Loading…'
-        ) : app ? (
-          <>
-            <EntryIcon
-              entry={{ name: app.name, isDir: false, iconDataUrl: app.iconDataUrl }}
-              className="h-4 w-4 shrink-0"
-            />
-            <span className="truncate">{app.name}</span>
-          </>
-        ) : (
-          'Not set'
-        )}
+        {defaultAppLabel(loaded, app)}
       </dd>
     </div>
   )

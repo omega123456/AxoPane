@@ -184,12 +184,16 @@ pub fn default_start_dir() -> PathBuf {
     platform_root()
 }
 
+const HIDDEN_ATTRIBUTE: &str = "hidden";
+const SYSTEM_ATTRIBUTE: &str = "system";
+
+#[cfg(windows)]
+const PLATFORM_ROOT: &str = "C:\\";
+#[cfg(not(windows))]
+const PLATFORM_ROOT: &str = "/";
+
 pub fn platform_root() -> PathBuf {
-    if cfg!(windows) {
-        PathBuf::from("C:\\")
-    } else {
-        PathBuf::from("/")
-    }
+    PathBuf::from(PLATFORM_ROOT)
 }
 
 pub fn home_dir() -> Option<PathBuf> {
@@ -259,10 +263,9 @@ pub fn expand_home_path_with(path: &str, home: Option<&Path>) -> PathBuf {
 
     let rest = rest.trim_start_matches(['/', '\\']);
     if rest.is_empty() {
-        home.to_path_buf()
-    } else {
-        home.join(rest)
+        return home.to_path_buf();
     }
+    home.join(rest)
 }
 
 /// Test-only call counter for [`list_dir_with_cancellation`]. Lets
@@ -386,7 +389,7 @@ pub fn list_tree_children(
         if !options.show_hidden
             && attributes
                 .iter()
-                .any(|attribute| attribute == "hidden" || attribute == "system")
+                .any(|attribute| attribute == HIDDEN_ATTRIBUTE || attribute == SYSTEM_ATTRIBUTE)
         {
             continue;
         }
@@ -494,6 +497,18 @@ fn build_entry_from_path(path: &Path) -> Result<DirectoryEntry, FsError> {
     build_entry_from_path_with_options(path, true)
 }
 
+fn has_attribute(attributes: &[String], wanted: &str) -> bool {
+    attributes.iter().any(|attribute| attribute == wanted)
+}
+
+fn requested_item_count(path: &Path, is_dir: bool, include_item_count: bool) -> Option<u64> {
+    let wants_item_count = is_dir && include_item_count;
+    if !wants_item_count {
+        return None;
+    }
+    read_item_count(path)
+}
+
 fn build_entry_from_path_with_options(
     path: &Path,
     include_item_count: bool,
@@ -508,15 +523,8 @@ fn build_entry_from_path_with_options(
     let name = name.to_string();
     let is_dir = metadata.is_dir();
     let attributes = collect_attributes(path, &metadata);
-    let mut is_hidden = false;
-    let mut is_system = false;
-    for attribute in &attributes {
-        if attribute == "hidden" {
-            is_hidden = true;
-        } else if attribute == "system" {
-            is_system = true;
-        }
-    }
+    let is_hidden = has_attribute(&attributes, HIDDEN_ATTRIBUTE);
+    let is_system = has_attribute(&attributes, SYSTEM_ATTRIBUTE);
 
     Ok(DirectoryEntry {
         id: display_path_from_path(path),
@@ -525,11 +533,7 @@ fn build_entry_from_path_with_options(
         is_dir,
         icon_data_url: None,
         size_bytes: (!is_dir).then_some(metadata.len()),
-        item_count: if is_dir && include_item_count {
-            read_item_count(path)
-        } else {
-            None
-        },
+        item_count: requested_item_count(path, is_dir, include_item_count),
         type_label: infer_type_label(&name, is_dir),
         modified_at: system_time_to_rfc3339(metadata.modified().ok()),
         created_at: system_time_to_rfc3339(metadata.created().ok()),
@@ -558,15 +562,8 @@ fn build_entry(entry: &DirEntry) -> Result<DirectoryEntry, FsError> {
     };
     let is_dir = resolve_is_dir(&path, &metadata);
     let attributes = collect_attributes(&path, &metadata);
-    let mut is_hidden = false;
-    let mut is_system = false;
-    for attribute in &attributes {
-        if attribute == "hidden" {
-            is_hidden = true;
-        } else if attribute == "system" {
-            is_system = true;
-        }
-    }
+    let is_hidden = has_attribute(&attributes, HIDDEN_ATTRIBUTE);
+    let is_system = has_attribute(&attributes, SYSTEM_ATTRIBUTE);
 
     Ok(DirectoryEntry {
         id: display_path_from_path(&path),
@@ -787,11 +784,11 @@ pub fn collect_attributes(path: &Path, metadata: &Metadata) -> Vec<String> {
     }
 
     if is_hidden(path, metadata) {
-        attributes.push("hidden".to_string());
+        attributes.push(HIDDEN_ATTRIBUTE.to_string());
     }
 
     if is_system(metadata) {
-        attributes.push("system".to_string());
+        attributes.push(SYSTEM_ATTRIBUTE.to_string());
     }
 
     attributes

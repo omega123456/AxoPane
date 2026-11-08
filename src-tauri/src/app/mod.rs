@@ -137,20 +137,23 @@ fn use_fresh_webview2_profile() {
     std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", data_dir);
 }
 
+fn prevent_default_flags() -> tauri_plugin_prevent_default::Flags {
+    use tauri_plugin_prevent_default::Flags;
+
+    let blocked_everywhere = Flags::all();
+    if cfg!(debug_assertions) {
+        return blocked_everywhere.difference(Flags::DEV_TOOLS);
+    }
+    blocked_everywhere
+}
+
 // Disables default browser behaviours (native right-click menu, text selection,
 // drag-and-drop of links/images, browser accelerator keys, reload/zoom, etc.) so
 // the webview behaves like a native desktop app rather than a web page. Our own
 // React `onContextMenu` handlers still fire — only the built-in webview menu is
 // suppressed.
 fn prevent_default_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
-    use tauri_plugin_prevent_default::Flags;
-
-    // Keep DevTools shortcuts working in debug builds; block everything otherwise.
-    let flags = if cfg!(debug_assertions) {
-        Flags::all().difference(Flags::DEV_TOOLS)
-    } else {
-        Flags::all()
-    };
+    let flags = prevent_default_flags();
 
     #[cfg(target_os = "windows")]
     {

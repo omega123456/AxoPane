@@ -2,6 +2,8 @@ use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+const ICNS_EXTENSION: &str = ".icns";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BundleMeta {
     pub name: String,
@@ -47,12 +49,15 @@ fn fallback_name(bundle_dir: &Path) -> String {
         .to_string()
 }
 
+fn icns_file_name(icon_file: &str) -> String {
+    if icon_file.ends_with(ICNS_EXTENSION) {
+        return icon_file.to_string();
+    }
+    format!("{icon_file}{ICNS_EXTENSION}")
+}
+
 fn resolve_icon_path(bundle_dir: &Path, icon_file: &str) -> PathBuf {
-    let file_name = if icon_file.ends_with(".icns") {
-        icon_file.to_string()
-    } else {
-        format!("{icon_file}.icns")
-    };
+    let file_name = icns_file_name(icon_file);
     bundle_dir
         .join("Contents")
         .join("Resources")

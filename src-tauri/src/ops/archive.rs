@@ -458,9 +458,12 @@ pub(super) fn detect_redundant_wrapper_root(
             return Ok(None);
         }
         candidate_root.get_or_insert_with(|| first_name.to_string());
-        if components.next().is_some() {
+        let is_nested_entry = components.next().is_some();
+        if is_nested_entry {
             saw_nested_entry = true;
-        } else if !entry.is_dir() {
+            continue;
+        }
+        if !entry.is_dir() {
             return Ok(None);
         }
     }
@@ -520,15 +523,17 @@ pub(super) fn is_zip_archive_path(path: &Path) -> bool {
         .is_some_and(|value| value.eq_ignore_ascii_case("zip"))
 }
 
+fn numbered_directory_name(stem: &str, attempt: usize) -> String {
+    if attempt == 0 {
+        return stem.to_string();
+    }
+    format!("{stem} ({attempt})")
+}
+
 pub(super) fn unique_archive_directory_path(destination_dir: &Path, stem: &str) -> PathBuf {
     let mut attempt = 0usize;
     loop {
-        let file_name = if attempt == 0 {
-            stem.to_string()
-        } else {
-            format!("{stem} ({attempt})")
-        };
-        let candidate = destination_dir.join(file_name);
+        let candidate = destination_dir.join(numbered_directory_name(stem, attempt));
         if !candidate.exists() {
             return candidate;
         }
@@ -567,9 +572,9 @@ fn source_unix_mode(metadata: &fs::Metadata, _default: u32) -> u32 {
 
 #[cfg(not(unix))]
 fn source_unix_mode(metadata: &fs::Metadata, default: u32) -> u32 {
+    const WRITE_PERMISSION_BITS: u32 = 0o222;
     if metadata.permissions().readonly() {
-        default & !0o222
-    } else {
-        default
+        return default & !WRITE_PERMISSION_BITS;
     }
+    default
 }

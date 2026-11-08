@@ -265,11 +265,7 @@ impl ItemCountService {
         // A new viewport supersedes the old plan. Carry reservations forward
         // into the replacement plan so removing its queued predecessor cannot
         // strand required unknown counts.
-        let carried = if same_context {
-            state.requested_paths.clone()
-        } else {
-            Vec::new()
-        };
+        let carried = state.requested_paths.clone();
         let remaining = AUTO_ITEM_COUNT_LIMIT.saturating_sub(carried.len());
         let selected = select_uncarried_paths(&request.paths, &carried, remaining);
 

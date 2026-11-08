@@ -43,10 +43,9 @@ impl TrashIndex for manifest::Transaction {
 
 fn remove_entry(path: &Path) -> Result<(), String> {
     if path.is_dir() {
-        fs::remove_dir_all(path).map_err(|error| error.to_string())
-    } else {
-        fs::remove_file(path).map_err(|error| error.to_string())
+        return fs::remove_dir_all(path).map_err(|error| error.to_string());
     }
+    fs::remove_file(path).map_err(|error| error.to_string())
 }
 
 fn readable_metadata(path: &Path) -> Option<fs::Metadata> {

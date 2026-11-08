@@ -60,11 +60,15 @@ pub(super) fn read_preferred_effect() -> ClipboardMode {
     };
 
     let effect = unsafe { std::ptr::read_unaligned(lock.ptr.cast::<u32>()) };
-    if effect & DROPEFFECT_MOVE != 0 {
-        ClipboardMode::Move
-    } else {
-        ClipboardMode::Copy
+    clipboard_mode_for_drop_effect(effect)
+}
+
+fn clipboard_mode_for_drop_effect(effect: u32) -> ClipboardMode {
+    let requests_move = effect & DROPEFFECT_MOVE != 0;
+    if requests_move {
+        return ClipboardMode::Move;
     }
+    ClipboardMode::Copy
 }
 
 struct ClipboardSession;

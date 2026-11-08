@@ -16,6 +16,14 @@ impl Machine {
             .collect()
     }
 
+    fn replace_pane_subscriptions(&mut self, pane: String, folders: Vec<(String, PathBuf)>) {
+        if folders.is_empty() {
+            self.subscriptions.remove(&pane);
+            return;
+        }
+        self.subscriptions.insert(pane, folders);
+    }
+
     /// Replaces a pane's set; newly subscribed folders get their current
     /// indexed totals, so a revisited folder is never stale.
     pub(super) fn subscribe(&mut self, pane: String, folders: Vec<(String, PathBuf)>) {
@@ -24,11 +32,7 @@ impl Machine {
             .into_iter()
             .map(|(path, _)| path)
             .collect();
-        if folders.is_empty() {
-            self.subscriptions.remove(&pane);
-        } else {
-            self.subscriptions.insert(pane, folders);
-        }
+        self.replace_pane_subscriptions(pane, folders);
         let view = self.shared.view();
         let updates: Vec<SizeUpdate> = self
             .subscribed()

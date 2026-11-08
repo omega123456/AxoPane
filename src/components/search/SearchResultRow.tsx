@@ -5,7 +5,14 @@ import { formatEntryDate } from '@/lib/date-format'
 import type { SearchActivation } from '@/lib/search-actions'
 import type { SearchHit } from '@/lib/types/ipc'
 import { useDateDisplay } from '@/lib/use-date-display'
-import { TEXT_SECONDARY } from '@/lib/class-names'
+import { HOVER_ON_POINTER, TEXT_SECONDARY } from '@/lib/class-names'
+
+const ACTIVE_RESULT_ROW_CLASS =
+  'bg-light-neutral-selection before:absolute before:inset-y-3 before:left-0 before:w-0.75 before:rounded-full before:bg-light-accent dark:bg-dark-neutral-selection dark:before:bg-dark-accent'
+
+function resultRowStateClass(active: boolean) {
+  return active ? ACTIVE_RESULT_ROW_CLASS : HOVER_ON_POINTER
+}
 
 export function searchOptionId(index: number) {
   return `search-option-${index}`
@@ -53,11 +60,7 @@ export function SearchResultRow({
       // Keep focus in the input: the row is chosen through the combobox.
       onMouseDown={(event) => event.preventDefault()}
       onClick={(event) => onActivate(hit, activationForClick(event))}
-      className={`absolute inset-x-0 top-0 flex h-search-row cursor-default items-center gap-2.5 rounded-control px-2.5 ${
-        active
-          ? 'bg-light-neutral-selection before:absolute before:inset-y-3 before:left-0 before:w-0.75 before:rounded-full before:bg-light-accent dark:bg-dark-neutral-selection dark:before:bg-dark-accent'
-          : 'hover:bg-light-hover dark:hover:bg-dark-hover'
-      }`}
+      className={`absolute inset-x-0 top-0 flex h-search-row cursor-default items-center gap-2.5 rounded-control px-2.5 ${resultRowStateClass(active)}`}
     >
       <span className="flex size-entry-icon shrink-0 items-center justify-center">
         <EntryIcon entry={{ name: hit.name, isDir: hit.isDir }} className="size-5 shrink-0" />

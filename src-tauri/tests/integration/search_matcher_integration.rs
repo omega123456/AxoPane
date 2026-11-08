@@ -133,3 +133,9 @@ fn merged_ranges_join_overlaps_and_neighbours() {
     );
     assert_eq!(merge_ranges(Vec::new()), Vec::<(u32, u32)>::new());
 }
+
+#[test]
+fn name_kind_of_entry_maps_directories_to_folders() {
+    assert_eq!(NameKind::of_entry(true), FOLDER);
+    assert_eq!(NameKind::of_entry(false), FILE);
+}

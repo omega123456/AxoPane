@@ -5,8 +5,7 @@ import { readLogs } from '@/lib/ipc/commands'
 import { log } from '@/lib/app-log-commands'
 import type { LogDisplayFilter, LogEntry } from '@/lib/types/ipc'
 import { formatUtcLogTimestamp } from '@/lib/date-format'
-import { SCROLLBAR_THIN } from '@/lib/class-names'
-import { TEXT_SECONDARY } from '@/lib/class-names'
+import { activeFillClass, SCROLLBAR_THIN, spinningClass, TEXT_SECONDARY } from '@/lib/class-names'
 
 const PAGE_SIZE = 20
 const AUTO_REFRESH_MS = 5000
@@ -196,6 +195,13 @@ type LogRefreshControlsProps = {
   onToggleAutoRefresh: () => void
 }
 
+const AUTO_REFRESH_ON_DOT_CLASS = 'bg-light-success dark:bg-dark-success'
+const AUTO_REFRESH_OFF_DOT_CLASS = 'bg-light-text-tertiary dark:bg-dark-text-tertiary'
+
+function autoRefreshDotClass(autoRefresh: boolean) {
+  return autoRefresh ? AUTO_REFRESH_ON_DOT_CLASS : AUTO_REFRESH_OFF_DOT_CLASS
+}
+
 function LogRefreshControls({
   isRefreshing,
   autoRefresh,
@@ -212,7 +218,7 @@ function LogRefreshControls({
         size="icon"
         data-testid="log-viewer-refresh"
       >
-        <RefreshIcon className={`size-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+        <RefreshIcon className={`size-4 ${spinningClass(isRefreshing)}`} />
       </Button>
       <Button
         variant="subtle"
@@ -220,15 +226,11 @@ function LogRefreshControls({
         aria-pressed={autoRefresh}
         onClick={onToggleAutoRefresh}
         data-testid="log-viewer-auto-refresh"
-        className={autoRefresh ? 'bg-light-hover dark:bg-dark-hover' : ''}
+        className={activeFillClass(autoRefresh)}
       >
         <span
           aria-hidden="true"
-          className={`size-2 rounded-full ${
-            autoRefresh
-              ? 'bg-light-success dark:bg-dark-success'
-              : 'bg-light-text-tertiary dark:bg-dark-text-tertiary'
-          }`}
+          className={`size-2 rounded-full ${autoRefreshDotClass(autoRefresh)}`}
         />
         {autoRefresh ? 'Auto-refresh on' : 'Auto-refresh off'}
       </Button>

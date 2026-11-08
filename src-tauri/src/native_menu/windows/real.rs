@@ -4,7 +4,7 @@ use std::ptr::null_mut;
 use super::*;
 use crate::native_menu::canonical::{classify_canonical_action, normalize_verb};
 use crate::native_menu::types::{
-    NativeMenuCanonicalActionKind, NativeMenuIcon, NativeMenuIconKind,
+    NativeMenuCanonicalActionKind, NativeMenuIcon, NativeMenuIconKind, NativeMenuTargetKind,
 };
 use crate::native_menu::windows_shell::{
     is_background_target, parent_directory, sanitize_menu_label, selected_target_paths, OwnedPidl,
@@ -370,18 +370,14 @@ fn enumerate_menu_item(
     let child_menu = info.hSubMenu;
     let has_submenu = !child_menu.0.is_null();
     let current_path = append_path(parent_path, position);
-    let children = if has_submenu && depth < MAX_SUBMENU_DEPTH {
-        initialize_submenu(context_menu, child_menu, position);
-        enumerate_popup_items(
-            request,
-            context_menu,
-            child_menu,
-            depth + 1,
-            current_path.clone(),
-        )?
-    } else {
-        Vec::new()
-    };
+    let children = enumerate_submenu_children(
+        request,
+        context_menu,
+        child_menu,
+        position,
+        depth,
+        &current_path,
+    )?;
 
     let enabled = (info.fState & (MFS_DISABLED | MFS_GRAYED)).0 == 0;
     let normalized_verb = command_verb(context_menu, info.wID);
@@ -389,14 +385,7 @@ fn enumerate_menu_item(
     let danger = canonical_action_kind == Some(NativeMenuCanonicalActionKind::Delete);
     let icon = extract_menu_icon(&info);
     let id = format!("windows-item-{}-{}", path_key(&current_path), info.wID);
-    let invocation = if has_submenu {
-        None
-    } else {
-        Some(ProviderInvocation::Windows {
-            request: request.clone(),
-            command_path: current_path,
-        })
-    };
+    let invocation = leaf_invocation(request, has_submenu, current_path);
 
     Ok(Some(ProviderNativeMenuItem {
         id,
@@ -409,6 +398,43 @@ fn enumerate_menu_item(
         invocation,
         children,
     }))
+}
+
+fn enumerate_submenu_children(
+    request: &LoadNativeMenuRequest,
+    context_menu: &IContextMenu,
+    child_menu: windows::Win32::UI::WindowsAndMessaging::HMENU,
+    position: u32,
+    depth: usize,
+    current_path: &[u32],
+) -> windows::core::Result<Vec<ProviderNativeMenuItem>> {
+    let has_submenu = !child_menu.0.is_null();
+    let descends_into_submenu = has_submenu && depth < MAX_SUBMENU_DEPTH;
+    if !descends_into_submenu {
+        return Ok(Vec::new());
+    }
+    initialize_submenu(context_menu, child_menu, position);
+    enumerate_popup_items(
+        request,
+        context_menu,
+        child_menu,
+        depth + 1,
+        current_path.to_vec(),
+    )
+}
+
+fn leaf_invocation(
+    request: &LoadNativeMenuRequest,
+    has_submenu: bool,
+    command_path: Vec<u32>,
+) -> Option<ProviderInvocation> {
+    if has_submenu {
+        return None;
+    }
+    Some(ProviderInvocation::Windows {
+        request: request.clone(),
+        command_path,
+    })
 }
 
 fn command_verb(context_menu: &IContextMenu, menu_id: u32) -> Option<String> {
@@ -435,10 +461,9 @@ fn command_verb(context_menu: &IContextMenu, menu_id: u32) -> Option<String> {
 
     let normalized = normalize_verb(&String::from_utf16_lossy(&buffer[..length]));
     if normalized.is_empty() {
-        None
-    } else {
-        Some(normalized)
+        return None;
     }
+    Some(normalized)
 }
 
 fn extract_menu_icon(info: &MENUITEMINFOW) -> Option<NativeMenuIcon> {
@@ -563,6 +588,26 @@ fn invoke_canonical_action_for_paths(
     })
 }
 
+fn target_kind_for_paths(paths: &[String], first_path: &Path) -> NativeMenuTargetKind {
+    let is_multi_selection = paths.len() > 1;
+    if is_multi_selection {
+        return multi_selection_target_kind(paths);
+    }
+    if first_path.is_dir() {
+        return NativeMenuTargetKind::Folder;
+    }
+    NativeMenuTargetKind::File
+}
+
+fn multi_selection_target_kind(paths: &[String]) -> NativeMenuTargetKind {
+    let all_dirs = paths.iter().all(|path| Path::new(path).is_dir());
+    let all_files = paths.iter().all(|path| Path::new(path).is_file());
+    if all_dirs || all_files {
+        return NativeMenuTargetKind::Multi;
+    }
+    NativeMenuTargetKind::Mixed
+}
+
 fn build_menu_request_for_paths(paths: &[String]) -> Option<LoadNativeMenuRequest> {
     let first_path = paths.first()?.trim();
     if first_path.is_empty() {
@@ -578,19 +623,7 @@ fn build_menu_request_for_paths(paths: &[String]) -> Option<LoadNativeMenuReques
     // the real COM properties dialog to the less reliable ShellExecuteW
     // fallback for every drive/share root).
     let folder_path = parent_directory(first_path);
-    let target_kind = if paths.len() > 1 {
-        let all_dirs = paths.iter().all(|path| Path::new(path).is_dir());
-        let all_files = paths.iter().all(|path| Path::new(path).is_file());
-        if all_dirs || all_files {
-            super::super::types::NativeMenuTargetKind::Multi
-        } else {
-            super::super::types::NativeMenuTargetKind::Mixed
-        }
-    } else if first_path_buf.is_dir() {
-        super::super::types::NativeMenuTargetKind::Folder
-    } else {
-        super::super::types::NativeMenuTargetKind::File
-    };
+    let target_kind = target_kind_for_paths(paths, &first_path_buf);
 
     Some(LoadNativeMenuRequest {
         request_id: "properties".to_string(),

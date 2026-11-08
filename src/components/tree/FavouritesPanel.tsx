@@ -13,7 +13,7 @@ import { useContextMenuStore } from '@/stores/context-menu-store'
 import { useDragStore } from '@/stores/drag-store'
 import { FAVOURITES_HEIGHT_MAX, FAVOURITES_HEIGHT_MIN, useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
-import { SCROLLBAR_THIN } from '@/lib/class-names'
+import { disclosureChevronClass, SCROLLBAR_THIN } from '@/lib/class-names'
 
 function canDropOnFavourites() {
   const drag = useDragStore.getState().drag
@@ -87,7 +87,7 @@ function FavouritesHeading({ collapsed, count }: { collapsed: boolean; count: nu
       >
         <ChevronRightIcon
           aria-hidden="true"
-          className={`mb-0.5 size-3 flex-none ${collapsed ? '' : 'rotate-90'}`}
+          className={`mb-0.5 size-3 flex-none ${disclosureChevronClass(!collapsed)}`}
         />
         <span>Favourites</span>
         {collapsed ? <span className="ml-auto tabular-nums">{count}</span> : null}

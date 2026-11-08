@@ -10,7 +10,7 @@ import {
   placeSubmenuBesideAnchor,
   toZoomedGeometry,
 } from '@/components/menus/menu-geometry'
-import { SCROLLBAR_THIN } from '@/lib/class-names'
+import { NO_CLASS, SCROLLBAR_THIN } from '@/lib/class-names'
 
 type NativeSectionState = {
   loading: boolean
@@ -39,13 +39,17 @@ function nativePlaceholderFor(
   return nativeState.locked ? 'locked' : 'hidden'
 }
 
+function placeholderVisibilityClass(visible: boolean) {
+  return visible ? NO_CLASS : 'opacity-0'
+}
+
 function NativeLoadingPlaceholder({ visible }: { visible: boolean }) {
   return (
     <div
       aria-hidden={!visible}
       role={visible ? 'status' : undefined}
       aria-label={visible ? 'Loading native menu items' : undefined}
-      className={`flex flex-col ${visible ? '' : 'opacity-0'}`}
+      className={`flex flex-col ${placeholderVisibilityClass(visible)}`}
     >
       {/* Same 32px height as the rows that replace them, so nothing jumps. */}
       {['w-3/5', 'w-4/5', 'w-1/2'].map((width) => (

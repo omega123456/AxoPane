@@ -3,7 +3,7 @@ import { ArrowUpIcon, FolderGlyph } from '@/components/icons'
 import { columnCellClassName } from '@/lib/columns'
 import { useLayoutStore } from '@/stores/layout-store'
 import { columnFlexStyle } from './HeaderRow'
-import { TEXT_SECONDARY } from '@/lib/class-names'
+import { NO_CLASS, TEXT_SECONDARY } from '@/lib/class-names'
 import type { ColumnConfig } from '@/lib/types/ipc'
 
 type ParentRowProps = {
@@ -12,6 +12,10 @@ type ParentRowProps = {
   onPointerDown: () => void
   onActivate: (eventTimeStamp?: number) => void
   onFocus: () => void
+}
+
+function parentRowFocusRing(showsFocusRing: boolean) {
+  return showsFocusRing ? 'ring-1 ring-inset ring-light-accent dark:ring-dark-accent' : NO_CLASS
 }
 
 function ParentRowCell({ columnKey }: { columnKey: ColumnConfig['key'] }) {
@@ -50,6 +54,7 @@ export function ParentRow({
   const columns = useLayoutStore((state) => state.columns)
   const columnWidths = useLayoutStore((state) => state.columnWidths)
   const visibleColumns = useMemo(() => columns.filter((column) => column.visible), [columns])
+  const showsFocusRing = isFocused && isActivePane
 
   return (
     <button
@@ -75,9 +80,7 @@ export function ParentRow({
           onActivate()
         }
       }}
-      className={`group flex h-row w-full cursor-pointer items-center rounded-control px-2 text-row text-left focus-visible:outline-none ${
-        isFocused && isActivePane ? 'ring-1 ring-inset ring-light-accent dark:ring-dark-accent' : ''
-      } hover:bg-light-hover dark:hover:bg-dark-hover`}
+      className={`group flex h-row w-full cursor-pointer items-center rounded-control px-2 text-row text-left focus-visible:outline-none ${parentRowFocusRing(showsFocusRing)} hover:bg-light-hover dark:hover:bg-dark-hover`}
     >
       {visibleColumns.map((column) => (
         <span

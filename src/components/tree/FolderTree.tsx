@@ -264,6 +264,10 @@ type PinnedAncestorsProps = {
   isMacOs: boolean
 }
 
+function pinnedOverlayRightInsetClass(isMacOs: boolean) {
+  return isMacOs ? 'right-3' : 'right-1'
+}
+
 /**
  * Lives outside the scroll container so it never inherits the container's
  * scroll offset: its rows sit in viewport space at a fixed `top`. The wrapper is
@@ -283,7 +287,7 @@ function PinnedAncestors({
     <div
       aria-hidden="true"
       inert
-      className={`pointer-events-none absolute left-1 top-0 ${isMacOs ? 'right-3' : 'right-1'}`}
+      className={`pointer-events-none absolute left-1 top-0 ${pinnedOverlayRightInsetClass(isMacOs)}`}
     >
       {pinnedRows.map(({ path, chainIndex, top }) => {
         const node = treeNodes[path]

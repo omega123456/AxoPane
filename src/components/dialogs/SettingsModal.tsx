@@ -16,7 +16,7 @@ import { captureShortcut, detectPlatformOs } from '@/lib/keymap'
 import type { CommandId, LayoutConfig } from '@/lib/types/ipc'
 import { useSettingsStore } from '@/stores/settings-store'
 import { FOCUS_RING, FOCUS_RING_INSET } from '@/lib/focus-ring'
-import { SCROLLBAR_THIN, TEXT_SECONDARY } from '@/lib/class-names'
+import { flippedChevronClass, HOVER_FILL, SCROLLBAR_THIN, TEXT_SECONDARY } from '@/lib/class-names'
 import { useAppVersion } from '@/lib/use-app-version'
 import { KeybindingsSection } from './settings/KeybindingsSection'
 import { LayoutSection } from './settings/LayoutSection'
@@ -182,6 +182,13 @@ function SettingsHeader({ onClose }: { onClose: () => void }) {
   )
 }
 
+const INACTIVE_NAV_ITEM_CLASS =
+  'hover:bg-light-hover active:bg-light-press dark:hover:bg-dark-hover dark:active:bg-dark-press'
+
+function navItemStateClass(active: boolean) {
+  return active ? HOVER_FILL : INACTIVE_NAV_ITEM_CLASS
+}
+
 function SettingsNav({ section }: { section: Section }) {
   const open = useSettingsStore((state) => state.open)
   const appVersion = useAppVersion()
@@ -198,11 +205,7 @@ function SettingsNav({ section }: { section: Section }) {
             type="button"
             aria-current={active ? 'page' : undefined}
             onClick={() => open(key)}
-            className={`relative flex h-8.5 flex-none cursor-pointer items-center gap-3 rounded-control px-3 text-body ${FOCUS_RING_INSET} ${
-              active
-                ? 'bg-light-hover dark:bg-dark-hover'
-                : 'hover:bg-light-hover active:bg-light-press dark:hover:bg-dark-hover dark:active:bg-dark-press'
-            }`}
+            className={`relative flex h-8.5 flex-none cursor-pointer items-center gap-3 rounded-control px-3 text-body ${FOCUS_RING_INSET} ${navItemStateClass(active)}`}
           >
             {active ? <SelectionPill /> : null}
             <Icon className={iconClass} />
@@ -238,7 +241,7 @@ function ResetExpander({ onReset }: { onReset: () => void }) {
             Restore every setting to how AxoPane ships
           </span>
         </span>
-        <ChevronDownIcon className={`size-3 ${TEXT_SECONDARY} ${expanded ? 'rotate-180' : ''}`} />
+        <ChevronDownIcon className={`size-3 ${TEXT_SECONDARY} ${flippedChevronClass(expanded)}`} />
       </button>
       {expanded ? (
         <div className="flex items-center gap-4 border-t border-light-divider py-3 pl-12 pr-4 dark:border-dark-divider">

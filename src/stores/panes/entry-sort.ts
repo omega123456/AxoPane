@@ -1,6 +1,7 @@
 import type { DirectoryEntry, SortDirection, SortKey } from '@/lib/types/ipc'
 import type { PaneId } from '@/types/pane'
 import { lookupOwnProperty } from '@/lib/collections'
+import { HALF_DIVISOR } from '@/lib/numbers'
 import {
   withPane,
   type EntrySizeState,
@@ -122,7 +123,7 @@ export function insertSorted(
   let low = 0
   let high = entries.length
   while (low < high) {
-    const middle = (low + high) >>> 1
+    const middle = Math.floor((low + high) / HALF_DIVISOR)
     if (compareEntries(entries[middle], entry, sortKey, sortDirection, sizeStates) < 0) {
       low = middle + 1
       continue

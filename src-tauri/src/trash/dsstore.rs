@@ -241,21 +241,16 @@ fn walk(
     let count = reader.u32(position + U32_BYTES)?;
     let mut cursor = position + NODE_HEADER_BYTES;
 
-    if mode == LEAF_NODE_MODE {
-        for _ in 0..count {
-            let (record, next) = parse_record(reader, cursor)?;
-            out.push(record);
-            cursor = next;
-        }
-    } else {
-        for _ in 0..count {
+    let is_internal_node = mode != LEAF_NODE_MODE;
+    for _ in 0..count {
+        if is_internal_node {
             let child = reader.u32(cursor)?;
             cursor += U32_BYTES;
             walk(reader, blocks, child, out)?;
-            let (record, next) = parse_record(reader, cursor)?;
-            out.push(record);
-            cursor = next;
         }
+        let (record, next) = parse_record(reader, cursor)?;
+        out.push(record);
+        cursor = next;
     }
 
     Some(())
