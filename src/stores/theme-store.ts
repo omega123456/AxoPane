@@ -2,8 +2,9 @@ import { create } from 'zustand'
 import type { ThemePreference } from '@/lib/types/ipc'
 import { useConfigStore } from '@/stores/config-store'
 import { syncNativeTheme } from '@/lib/window-commands'
+import { oppositeTheme, resolveTheme, type ThemeMode } from '@/stores/theme/theme-mode'
 
-export type ThemeMode = 'light' | 'dark'
+export type { ThemeMode }
 
 type ThemeStore = {
   preference: ThemePreference
@@ -24,16 +25,12 @@ function systemTheme(): ThemeMode {
   return window.matchMedia(SYSTEM_MEDIA_QUERY).matches ? 'dark' : 'light'
 }
 
-function resolveTheme(preference: ThemePreference): ThemeMode {
-  return preference === 'system' ? systemTheme() : preference
-}
-
 function applyTheme(theme: ThemeMode) {
   document.documentElement.classList.toggle(ROOT_CLASS, theme === 'dark')
 }
 
 function syncTheme(preference: ThemePreference) {
-  const theme = resolveTheme(preference)
+  const theme = resolveTheme(preference, systemTheme)
   applyTheme(theme)
   return { preference, theme }
 }
@@ -44,7 +41,7 @@ function commitTheme(preference: ThemePreference) {
   return syncTheme(preference)
 }
 
-export const useThemeStore = create<ThemeStore>((set) => ({
+export const useThemeStore = create<ThemeStore>((set, get) => ({
   // The initial state only touches the DOM; `initializeTheme` syncs the title
   // bar once IPC is available.
   ...syncTheme(useConfigStore.getState().theme),
@@ -54,7 +51,7 @@ export const useThemeStore = create<ThemeStore>((set) => ({
   setThemePreference: (preference) => {
     set(commitTheme(preference))
   },
-  toggleTheme: () => set((state) => commitTheme(state.theme === 'dark' ? 'light' : 'dark')),
+  toggleTheme: () => set(commitTheme(oppositeTheme(get().theme))),
 }))
 
 let systemListenerInstalled = false

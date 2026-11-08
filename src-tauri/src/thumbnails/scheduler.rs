@@ -67,6 +67,69 @@ struct Job {
     active: bool,
 }
 
+#[derive(Clone, Copy)]
+struct SubscriberRank {
+    priority: ThumbnailPriority,
+    order: u32,
+}
+
+enum ScopeReplacement {
+    Ignored {
+        accepted: usize,
+    },
+    Applied {
+        accepted: usize,
+        provider_cancels: Vec<ThumbnailCandidate>,
+    },
+}
+
+impl ThumbnailSubscriber {
+    fn same_scope(&self, other: &ThumbnailSubscriber) -> bool {
+        self.matches(&other.pane_id, &other.tab_id, &other.path, other.generation)
+    }
+}
+
+impl Job {
+    fn has_subscriber(&self, subscriber: &ThumbnailSubscriber) -> bool {
+        self.subscribers
+            .iter()
+            .any(|existing| existing.context.same_scope(subscriber))
+    }
+
+    fn retarget_subscriber(
+        &mut self,
+        subscriber: &ThumbnailSubscriber,
+        rank: Option<SubscriberRank>,
+    ) {
+        self.subscribers.retain_mut(|existing| {
+            if !existing.context.same_scope(subscriber) {
+                return true;
+            }
+            let Some(rank) = rank else {
+                return false;
+            };
+            existing.priority = rank.priority;
+            existing.order = rank.order;
+            true
+        });
+    }
+}
+
+fn desired_ranks(
+    candidates: &[(ThumbnailCandidate, ThumbnailPriority, u32)],
+) -> HashMap<ThumbnailCacheKey, SubscriberRank> {
+    candidates
+        .iter()
+        .map(|(candidate, priority, order)| {
+            let rank = SubscriberRank {
+                priority: *priority,
+                order: *order,
+            };
+            (ThumbnailCacheKey(candidate.fingerprint.clone()), rank)
+        })
+        .collect()
+}
+
 struct State {
     queued: VecDeque<ThumbnailCacheKey>,
     jobs: HashMap<ThumbnailCacheKey, Job>,
@@ -74,6 +137,107 @@ struct State {
     active: usize,
     last_pane: Option<String>,
     stopped: bool,
+}
+
+impl State {
+    fn replace_scope(
+        &mut self,
+        subscriber: &ThumbnailSubscriber,
+        revision: u64,
+        candidates: Vec<(ThumbnailCandidate, ThumbnailPriority, u32)>,
+    ) -> ScopeReplacement {
+        if self.stopped {
+            return ScopeReplacement::Ignored { accepted: 0 };
+        }
+        let scope = ScopeKey::from(subscriber);
+        if let Some(accepted) = self.ignored_revision(&scope, revision, candidates.len()) {
+            return ScopeReplacement::Ignored { accepted };
+        }
+        self.scope_revisions.insert(scope, revision);
+
+        let desired = desired_ranks(&candidates);
+        let provider_cancels = self.retarget_scope_jobs(subscriber, &desired);
+        self.subscribe_candidates(subscriber, candidates);
+        ScopeReplacement::Applied {
+            accepted: desired.len(),
+            provider_cancels,
+        }
+    }
+
+    fn ignored_revision(
+        &self,
+        scope: &ScopeKey,
+        revision: u64,
+        candidate_count: usize,
+    ) -> Option<usize> {
+        let current = *self.scope_revisions.get(scope)?;
+        if revision < current {
+            return Some(0);
+        }
+        if revision == current {
+            return Some(candidate_count);
+        }
+        None
+    }
+
+    fn retarget_scope_jobs(
+        &mut self,
+        subscriber: &ThumbnailSubscriber,
+        desired: &HashMap<ThumbnailCacheKey, SubscriberRank>,
+    ) -> Vec<ThumbnailCandidate> {
+        let mut provider_cancels = Vec::new();
+        let mut orphaned_queued = HashSet::new();
+        for (key, job) in &mut self.jobs {
+            job.retarget_subscriber(subscriber, desired.get(key).copied());
+            if !job.subscribers.is_empty() {
+                continue;
+            }
+            if job.active {
+                provider_cancels.push(job.candidate.clone());
+                continue;
+            }
+            orphaned_queued.insert(key.clone());
+        }
+        for key in &orphaned_queued {
+            self.jobs.remove(key);
+        }
+        self.queued.retain(|key| !orphaned_queued.contains(key));
+        provider_cancels
+    }
+
+    fn subscribe_candidates(
+        &mut self,
+        subscriber: &ThumbnailSubscriber,
+        candidates: Vec<(ThumbnailCandidate, ThumbnailPriority, u32)>,
+    ) {
+        for (candidate, priority, order) in candidates {
+            let job_subscriber = JobSubscriber {
+                context: subscriber.clone(),
+                priority,
+                order,
+            };
+            self.add_subscriber(candidate, job_subscriber);
+        }
+    }
+
+    fn add_subscriber(&mut self, candidate: ThumbnailCandidate, job_subscriber: JobSubscriber) {
+        let key = ThumbnailCacheKey(candidate.fingerprint.clone());
+        if let Some(job) = self.jobs.get_mut(&key) {
+            if !job.has_subscriber(&job_subscriber.context) {
+                job.subscribers.push(job_subscriber);
+            }
+            return;
+        }
+        self.jobs.insert(
+            key.clone(),
+            Job {
+                candidate,
+                subscribers: vec![job_subscriber],
+                active: false,
+            },
+        );
+        self.queued.push_back(key);
+    }
 }
 
 struct Shared {
@@ -160,9 +324,6 @@ impl ThumbnailScheduler {
         }
     }
 
-    /// Replaces one scope's pending set without cancelling overlapping work.
-    /// Older revisions are acknowledged as superseded and cannot overwrite a
-    /// newer scroll range.
     pub fn replace_scope(
         &self,
         subscriber: ThumbnailSubscriber,
@@ -172,105 +333,25 @@ impl ThumbnailScheduler {
         if candidates.len() > MAX_DESIRED_PER_SCOPE {
             return 0;
         }
-        let scope = ScopeKey::from(&subscriber);
-        let desired = candidates
-            .iter()
-            .map(|(candidate, priority, order)| {
-                (
-                    ThumbnailCacheKey(candidate.fingerprint.clone()),
-                    (*priority, *order),
-                )
-            })
-            .collect::<HashMap<_, _>>();
-        let mut provider_cancels = Vec::new();
-        let accepted = {
-            let mut state = self.shared.state.lock().expect("thumbnail scheduler lock");
-            if state.stopped {
-                return 0;
-            }
-            if let Some(current) = state.scope_revisions.get(&scope) {
-                if revision < *current {
-                    return 0;
+        let replacement = self
+            .shared
+            .state
+            .lock()
+            .expect("thumbnail scheduler lock")
+            .replace_scope(&subscriber, revision, candidates);
+        match replacement {
+            ScopeReplacement::Ignored { accepted } => accepted,
+            ScopeReplacement::Applied {
+                accepted,
+                provider_cancels,
+            } => {
+                for candidate in provider_cancels {
+                    self.shared.provider.cancel(&candidate);
                 }
-                if revision == *current {
-                    return candidates.len();
-                }
+                self.shared.wake.notify_all();
+                accepted
             }
-            state.scope_revisions.insert(scope, revision);
-
-            let mut remove_queued = HashSet::new();
-            for (key, job) in &mut state.jobs {
-                let priority = desired.get(key).copied();
-                job.subscribers.retain_mut(|existing| {
-                    if !existing.context.matches(
-                        &subscriber.pane_id,
-                        &subscriber.tab_id,
-                        &subscriber.path,
-                        subscriber.generation,
-                    ) {
-                        return true;
-                    }
-                    if let Some((next_priority, next_order)) = priority {
-                        existing.priority = next_priority;
-                        existing.order = next_order;
-                        true
-                    } else {
-                        false
-                    }
-                });
-                if job.subscribers.is_empty() {
-                    if job.active {
-                        provider_cancels.push(job.candidate.clone());
-                    } else {
-                        remove_queued.insert(key.clone());
-                    }
-                }
-            }
-            for key in &remove_queued {
-                state.jobs.remove(key);
-            }
-            state.queued.retain(|key| !remove_queued.contains(key));
-
-            for (candidate, priority, order) in candidates {
-                let key = ThumbnailCacheKey(candidate.fingerprint.clone());
-                if let Some(job) = state.jobs.get_mut(&key) {
-                    if !job.subscribers.iter().any(|existing| {
-                        existing.context.matches(
-                            &subscriber.pane_id,
-                            &subscriber.tab_id,
-                            &subscriber.path,
-                            subscriber.generation,
-                        )
-                    }) {
-                        job.subscribers.push(JobSubscriber {
-                            context: subscriber.clone(),
-                            priority,
-                            order,
-                        });
-                    }
-                } else {
-                    state.jobs.insert(
-                        key.clone(),
-                        Job {
-                            candidate,
-                            subscribers: vec![JobSubscriber {
-                                context: subscriber.clone(),
-                                priority,
-                                order,
-                            }],
-                            active: false,
-                        },
-                    );
-                    state.queued.push_back(key);
-                }
-            }
-            desired.len()
-        };
-        for candidate in provider_cancels {
-            self.shared.provider.cancel(&candidate);
         }
-        self.shared.wake.notify_all();
-        accepted
     }
 
     /// Compatibility helper for direct scheduler callers and focused tests.

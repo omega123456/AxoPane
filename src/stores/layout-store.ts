@@ -157,6 +157,20 @@ function normalizeColumnWidths(widths: ColumnWidths | undefined) {
   return normalized
 }
 
+function withMovedColumn(
+  columns: ColumnConfig[],
+  fromKey: ColumnConfig['key'],
+  toKey: ColumnConfig['key'],
+) {
+  const fromIndex = columns.findIndex((column) => column.key === fromKey)
+  const toIndex = columns.findIndex((column) => column.key === toKey)
+  const isNoOpMove = fromIndex === -1 || toIndex === -1 || fromIndex === toIndex
+  if (isNoOpMove) {
+    return null
+  }
+  return { columns: moveItem(columns, fromIndex, toIndex) }
+}
+
 export const useLayoutStore = create<LayoutStore>((set) => ({
   ...defaultLayout,
   columns: defaultColumns,
@@ -191,18 +205,8 @@ export const useLayoutStore = create<LayoutStore>((set) => ({
       },
     })),
   setColumns: (columns) => set({ columns: normalizeColumns(columns) }),
-  moveColumn: (fromKey, toKey) => {
-    set((state) => {
-      const { columns } = state
-      const fromIndex = columns.findIndex((column) => column.key === fromKey)
-      const toIndex = columns.findIndex((column) => column.key === toKey)
-      if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) {
-        return state
-      }
-
-      return { columns: moveItem(columns, fromIndex, toIndex) }
-    })
-  },
+  moveColumn: (fromKey, toKey) =>
+    set((state) => withMovedColumn(state.columns, fromKey, toKey) ?? state),
   toggleColumn: (key) =>
     set((state) => ({
       columns: state.columns.map((column) =>

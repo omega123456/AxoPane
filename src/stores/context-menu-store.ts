@@ -1,84 +1,63 @@
 import { create } from 'zustand'
-import {
-  nativeInvocationContextAction,
-  noopContextAction,
-} from '@/lib/context-menu/context-menu-actions'
 import { dispatchContextMenuAction } from '@/lib/context-menu/context-menu-actions'
+import type { ContextMenuDocument, ContextMenuNativeRequest } from '@/lib/types/context-menu'
+import type { NativeMenuItem } from '@/lib/types/ipc'
 import {
-  isContextMenuSubmenuRow,
-  type ContextMenuDocument,
-  type ContextMenuIcon,
-  type ContextMenuNativeRequest,
-  type ContextMenuRowItem,
-  type ContextMenuSection,
-  type ContextMenuStripItem,
-  type ContextMenuSubmenuRowItem,
-  type ContextMenuSubmenuRow,
-} from '@/lib/types/context-menu'
-import type { NativeMenuIcon, NativeMenuItem } from '@/lib/types/ipc'
+  activationFor,
+  closedSubmenuFocus,
+  CLOSED_FOCUS,
+  edgeFocus,
+  hoveredFocus,
+  initialFocus,
+  movedFocus,
+  openedSubmenuFocus,
+  type FocusDirection,
+  type FocusEdge,
+  type MenuActivation,
+  type MenuFocus,
+} from '@/stores/context-menu/menu-focus'
+import {
+  failedNativeLoad,
+  IDLE_NATIVE_LOAD,
+  isAwaitingNativePlaceholder,
+  isCurrentNativeRequest,
+  NATIVE_PLACEHOLDER_SHOWN,
+  openedMenu,
+  resolvedNativeLoad,
+  startedNativeLoad,
+  type NativeLoad,
+} from '@/stores/context-menu/native-load'
 
 const NATIVE_PLACEHOLDER_DELAY_MS = 1000
+const NATIVE_REQUEST_ID_PREFIX = 'native-request-'
 
-type FocusableItem = ContextMenuStripItem | ContextMenuRowItem | ContextMenuSubmenuRow
+type Store = MenuFocus &
+  NativeLoad & {
+    menu: ContextMenuDocument | null
+    openMenu: (menu: ContextMenuDocument) => void
+    closeMenu: () => void
+    beginNativeLoad: () => { requestId: string; request: ContextMenuNativeRequest } | null
+    resolveNativeLoad: (requestId: string, items: NativeMenuItem[]) => void
+    failNativeLoad: (requestId: string) => void
+    hoverItem: (itemId: string) => void
+    moveActive: (direction: FocusDirection) => void
+    moveActiveToEdge: (edge: FocusEdge) => void
+    openSubmenu: (itemId?: string) => void
+    activateCurrent: () => void
+    activateItem: (itemId: string) => void
+    closeSubmenu: () => void
+  }
 
-type FocusableLookup = {
-  item: FocusableItem
-  parentId: string | null
-}
+type OpenStore = Store & { menu: ContextMenuDocument }
 
-type Store = {
-  menu: ContextMenuDocument | null
-  activeItemId: string | null
-  openSubmenuId: string | null
-  activeSubmenuItemId: string | null
-  nativeRequest: ContextMenuNativeRequest | null
-  nativeRequestId: string | null
-  nativeLoading: boolean
-  nativeFailed: boolean
-  nativePlaceholderVisible: boolean
-  nativeSectionLocked: boolean
-  openMenu: (menu: ContextMenuDocument) => void
-  closeMenu: () => void
-  beginNativeLoad: () => { requestId: string; request: ContextMenuNativeRequest } | null
-  resolveNativeLoad: (requestId: string, items: NativeMenuItem[]) => void
-  failNativeLoad: (requestId: string) => void
-  hoverItem: (itemId: string) => void
-  moveActive: (direction: 1 | -1) => void
-  moveActiveToEdge: (edge: 'start' | 'end') => void
-  openSubmenu: (itemId?: string) => void
-  activateCurrent: () => void
-  activateItem: (itemId: string) => void
-  closeSubmenu: () => void
-}
-
-const EMPTY_NATIVE_ROWS: ContextMenuRowItem[] = []
 let nativeRequestSequence = 0
 let nativePlaceholderTimer: ReturnType<typeof setTimeout> | null = null
 
 const CLOSED_MENU_STATE = {
   menu: null,
-  activeItemId: null,
-  openSubmenuId: null,
-  activeSubmenuItemId: null,
-  nativeRequest: null,
-  nativeRequestId: null,
-  nativeLoading: false,
-  nativeFailed: false,
-  nativePlaceholderVisible: false,
-  nativeSectionLocked: false,
-} satisfies Pick<
-  Store,
-  | 'menu'
-  | 'activeItemId'
-  | 'openSubmenuId'
-  | 'activeSubmenuItemId'
-  | 'nativeRequest'
-  | 'nativeRequestId'
-  | 'nativeLoading'
-  | 'nativeFailed'
-  | 'nativePlaceholderVisible'
-  | 'nativeSectionLocked'
->
+  ...CLOSED_FOCUS,
+  ...IDLE_NATIVE_LOAD,
+} satisfies Partial<Store>
 
 function clearNativePlaceholderTimer() {
   if (nativePlaceholderTimer === null) {
@@ -89,512 +68,91 @@ function clearNativePlaceholderTimer() {
   nativePlaceholderTimer = null
 }
 
-function visibleStripItems(menu: ContextMenuDocument) {
-  return menu.topStrip.filter((item) => !item.hidden)
+function nextNativeRequestId() {
+  nativeRequestSequence += 1
+  return `${NATIVE_REQUEST_ID_PREFIX}${nativeRequestSequence}`
 }
 
-function visibleSectionRows(section: ContextMenuSection) {
-  return section.rows
-    .filter((item) => !item.hidden)
-    .map((item) =>
-      isContextMenuSubmenuRow(item)
-        ? {
-            ...item,
-            children: {
-              ...item.children,
-              rows: item.children.rows.filter((child) => !child.hidden),
-            },
-          }
-        : item,
-    )
-    .filter((item) => !isContextMenuSubmenuRow(item) || item.children.rows.length > 0)
-}
-
-function sanitizeMenu(menu: ContextMenuDocument): ContextMenuDocument {
-  return {
-    ...menu,
-    topStrip: visibleStripItems(menu),
-    sections: menu.sections
-      .map((section) => ({
-        ...section,
-        rows: visibleSectionRows(section),
-      }))
-      .filter((section) => section.rows.length > 0 || section.id === menu.nativeSectionId),
+function showNativePlaceholderIfStillLoading(requestId: string) {
+  if (isAwaitingNativePlaceholder(useContextMenuStore.getState(), requestId)) {
+    useContextMenuStore.setState(NATIVE_PLACEHOLDER_SHOWN)
   }
 }
 
-function injectNativeSection(menu: ContextMenuDocument): ContextMenuDocument {
-  if (!menu.nativeRequest || !menu.nativeSectionId) {
-    return menu
-  }
-
-  const existingIndex = menu.sections.findIndex((section) => section.id === menu.nativeSectionId)
-  if (existingIndex >= 0) {
-    return menu
-  }
-
-  const nativeSection: ContextMenuSection = { id: menu.nativeSectionId, rows: EMPTY_NATIVE_ROWS }
-  const insertIndex = Math.max(menu.sections.length - 1, 0)
-  const sections = [...menu.sections]
-  sections.splice(insertIndex, 0, nativeSection)
-
-  return {
-    ...menu,
-    sections,
-  }
+function canBeginNativeLoad(
+  state: Store,
+): state is Store & { nativeRequest: ContextMenuNativeRequest } {
+  return Boolean(state.menu && state.nativeRequest && !state.nativeRequestId)
 }
 
-function getTopLevelItems(menu: ContextMenuDocument): FocusableItem[] {
-  return [...menu.topStrip, ...menu.sections.flatMap((section) => section.rows)]
-}
-
-function getEnabledItems(items: FocusableItem[]) {
-  return items.filter((item) => !item.disabled)
-}
-
-function getSubmenuChildren(menu: ContextMenuDocument, parentId: string | null) {
-  if (!parentId) {
-    return []
-  }
-
-  for (const section of menu.sections) {
-    for (const item of section.rows) {
-      if (isContextMenuSubmenuRow(item) && item.id === parentId) {
-        return item.children.rows
-      }
-    }
-  }
-
-  return []
-}
-
-function findItem(menu: ContextMenuDocument, itemId: string): FocusableLookup | null {
-  for (const item of menu.topStrip) {
-    if (item.id === itemId) {
-      return { item, parentId: null }
-    }
-  }
-
-  for (const section of menu.sections) {
-    for (const item of section.rows) {
-      if (item.id === itemId) {
-        return { item, parentId: null }
-      }
-      if (isContextMenuSubmenuRow(item)) {
-        for (const child of item.children.rows) {
-          if (child.id === itemId) {
-            return { item: child, parentId: item.id }
-          }
-        }
-      }
-    }
-  }
-
-  return null
-}
-
-function isSubmenuParent(item: FocusableItem): item is ContextMenuSubmenuRowItem {
-  return 'kind' in item && item.kind === 'submenu'
-}
-
-function isSubmenuChildLookup(
-  lookup: FocusableLookup,
-): lookup is { item: ContextMenuSubmenuRow; parentId: string } {
-  return lookup.parentId !== null
-}
-
-function firstEnabledId(items: FocusableItem[]) {
-  return getEnabledItems(items)[0]?.id ?? null
-}
-
-function lastEnabledId(items: FocusableItem[]) {
-  const enabled = getEnabledItems(items)
-  return enabled[enabled.length - 1]?.id ?? null
-}
-
-function moveWithin(items: FocusableItem[], activeItemId: string | null, direction: 1 | -1) {
-  const enabled = getEnabledItems(items)
-  if (enabled.length === 0) {
-    return activeItemId
-  }
-
-  const currentIndex = enabled.findIndex((item) => item.id === activeItemId)
-  const nextIndex =
-    currentIndex < 0
-      ? direction === 1
-        ? 0
-        : enabled.length - 1
-      : (currentIndex + direction + enabled.length) % enabled.length
-
-  return enabled[nextIndex]?.id ?? activeItemId
-}
-
-const edgeEnabledId: Record<'start' | 'end', (items: FocusableItem[]) => string | null> = {
-  start: firstEnabledId,
-  end: lastEnabledId,
-}
-
-function activeParentId(menu: ContextMenuDocument, activeItemId: string | null) {
-  const lookup = activeItemId ? findItem(menu, activeItemId) : null
-  return lookup?.parentId ?? null
-}
-
-function focusSubmenuItem(parentId: string, activeSubmenuItemId: string | null) {
-  return { activeItemId: activeSubmenuItemId, openSubmenuId: parentId, activeSubmenuItemId }
-}
-
-function openedSubmenuOf(menu: ContextMenuDocument, activeItemId: string | null) {
-  const item = activeItemId ? findItem(menu, activeItemId)?.item : undefined
-  if (!item) {
-    return null
-  }
-  return isSubmenuParent(item) ? item : null
-}
-
-function focusTopLevelItem(menu: ContextMenuDocument, activeItemId: string | null) {
-  const submenu = openedSubmenuOf(menu, activeItemId)
-  return {
-    activeItemId,
-    openSubmenuId: submenu ? activeItemId : null,
-    activeSubmenuItemId: submenu ? firstEnabledId(submenu.children.rows) : null,
-  }
-}
-
-function openableSubmenu(menu: ContextMenuDocument, itemId: string) {
-  const lookup = findItem(menu, itemId)
-  if (!lookup) {
-    return null
-  }
-  if (lookup.parentId) {
-    return null
-  }
-  if (!isSubmenuParent(lookup.item)) {
-    return null
-  }
-  return lookup.item.disabled ? null : lookup.item
-}
-
-function submenuChildToFocus(
-  state: Pick<Store, 'openSubmenuId' | 'activeSubmenuItemId'>,
-  submenu: ContextMenuSubmenuRowItem,
-) {
-  const firstChildId = firstEnabledId(submenu.children.rows)
-  if (state.openSubmenuId !== submenu.id) {
-    return firstChildId
-  }
-  return state.activeSubmenuItemId || firstChildId
-}
-
-function mapNativeIcon(icon: NativeMenuIcon | null): ContextMenuIcon | undefined {
-  if (!icon) {
-    return undefined
-  }
-
-  return {
-    kind: 'native',
-    dataUrl: icon.dataUrl,
-    alt: icon.alt ?? undefined,
-  }
-}
-
-function mapNativeChildItem(item: NativeMenuItem): ContextMenuSubmenuRow | null {
-  if (!item.invokeToken) {
-    return null
-  }
-
-  return {
-    id: item.id,
-    label: item.label,
-    owner: 'native',
-    icon: mapNativeIcon(item.icon),
-    disabled: !item.enabled,
-    danger: item.danger,
-    action: nativeInvocationContextAction(item.invokeToken),
-  }
-}
-
-function mapNativeItem(item: NativeMenuItem): ContextMenuRowItem | null {
-  const childRows = item.children.map(mapNativeChildItem).filter((child) => child !== null)
-  const invokeToken =
-    typeof item.invokeToken === 'string' && item.invokeToken.length > 0 ? item.invokeToken : null
-  const canInvoke = invokeToken !== null
-  const base = {
-    id: item.id,
-    label: item.label,
-    owner: 'native' as const,
-    icon: mapNativeIcon(item.icon),
-    disabled: !item.enabled || (item.children.length === 0 && !canInvoke),
-    danger: item.danger,
-  }
-
-  if (childRows.length > 0) {
-    const submenu: ContextMenuSubmenuRowItem = {
-      ...base,
-      kind: 'submenu',
-      children: {
-        id: `${item.id}-submenu`,
-        rows: childRows,
-      },
-    }
-    return submenu
-  }
-
-  if (!canInvoke) {
-    return {
-      ...base,
-      disabled: true,
-      kind: 'action',
-      action: noopContextAction(`native-unavailable-${item.id}`),
-    }
-  }
-
-  return {
-    ...base,
-    kind: 'action',
-    action: nativeInvocationContextAction(invokeToken),
-  }
-}
-
-function replaceNativeSectionRows(
-  menu: ContextMenuDocument,
-  rows: ContextMenuRowItem[],
-): ContextMenuDocument {
-  if (!menu.nativeSectionId) {
-    return menu
-  }
-
-  return {
-    ...menu,
-    sections: menu.sections.map((section) =>
-      section.id === menu.nativeSectionId ? { ...section, rows } : section,
-    ),
-  }
-}
-
-export const useContextMenuStore = create<Store>((set, get) => ({
-  menu: null,
-  activeItemId: null,
-  openSubmenuId: null,
-  activeSubmenuItemId: null,
-  nativeRequest: null,
-  nativeRequestId: null,
-  nativeLoading: false,
-  nativeFailed: false,
-  nativePlaceholderVisible: false,
-  nativeSectionLocked: false,
-  openMenu: (menu) => {
-    clearNativePlaceholderTimer()
-    const sanitized = sanitizeMenu(injectNativeSection(menu))
-    set({
-      ...CLOSED_MENU_STATE,
-      menu: sanitized,
-      activeItemId: firstEnabledId(getTopLevelItems(sanitized)),
-      nativeRequest: sanitized.nativeRequest ?? null,
-    })
-  },
-  closeMenu: () => {
+export const useContextMenuStore = create<Store>((set, get) => {
+  const closeAndDispatch = (activation: Extract<MenuActivation, { kind: 'dispatch' }>) => {
     clearNativePlaceholderTimer()
     set(CLOSED_MENU_STATE)
-  },
-  beginNativeLoad: () => {
+    dispatchContextMenuAction(activation.paneId, activation.action)
+  }
+
+  const finishNativeLoad = (requestId: string, finish: (state: OpenStore) => Partial<Store>) => {
     const state = get()
-    if (!state.menu || !state.nativeRequest || state.nativeRequestId) {
-      return null
+    if (!isCurrentNativeRequest(state, requestId)) {
+      return
     }
-
-    const requestId = `native-request-${++nativeRequestSequence}`
     clearNativePlaceholderTimer()
-    set({
-      nativeRequestId: requestId,
-      nativeLoading: true,
-      nativeFailed: false,
-      nativePlaceholderVisible: false,
-      nativeSectionLocked: false,
-    })
-    nativePlaceholderTimer = setTimeout(() => {
-      const current = useContextMenuStore.getState()
-      if (current.nativeRequestId === requestId && current.nativeLoading) {
-        useContextMenuStore.setState({
-          nativePlaceholderVisible: true,
-          nativeSectionLocked: true,
-        })
-      }
-    }, NATIVE_PLACEHOLDER_DELAY_MS)
-    return { requestId, request: state.nativeRequest }
-  },
-  resolveNativeLoad: (requestId, items) =>
-    set((state) => {
-      if (!state.menu || state.nativeRequestId !== requestId) {
-        return state
-      }
+    set(finish(state))
+  }
 
+  return {
+    ...CLOSED_MENU_STATE,
+    openMenu: (menu) => {
       clearNativePlaceholderTimer()
-      const rows = items.map(mapNativeItem).filter((item) => item !== null)
-
-      return {
-        menu: sanitizeMenu(replaceNativeSectionRows(state.menu, rows)),
-        nativeRequest: null,
-        nativeRequestId: null,
-        nativeLoading: false,
-        nativeFailed: false,
-        nativePlaceholderVisible: false,
-        nativeSectionLocked: state.nativeSectionLocked || rows.length > 0,
-      }
-    }),
-  failNativeLoad: (requestId) =>
-    set((state) => {
-      if (!state.menu || state.nativeRequestId !== requestId) {
-        return state
-      }
-
-      clearNativePlaceholderTimer()
-      return {
-        menu: sanitizeMenu(replaceNativeSectionRows(state.menu, EMPTY_NATIVE_ROWS)),
-        nativeRequest: null,
-        nativeRequestId: null,
-        nativeLoading: false,
-        nativeFailed: true,
-        nativePlaceholderVisible: false,
-        nativeSectionLocked: state.nativeSectionLocked,
-      }
-    }),
-  hoverItem: (itemId) => {
-    const menu = get().menu
-    if (!menu) {
-      return
-    }
-
-    const lookup = findItem(menu, itemId)
-    if (!lookup || lookup.item.disabled) {
-      return
-    }
-
-    if (lookup.parentId) {
-      set({
-        activeItemId: itemId,
-        openSubmenuId: lookup.parentId,
-        activeSubmenuItemId: itemId,
-      })
-      return
-    }
-
-    if ('kind' in lookup.item && lookup.item.kind === 'submenu') {
-      const childId = firstEnabledId(lookup.item.children.rows)
-      set({
-        activeItemId: itemId,
-        openSubmenuId: itemId,
-        activeSubmenuItemId: childId,
-      })
-      return
-    }
-
-    set({ activeItemId: itemId, openSubmenuId: null, activeSubmenuItemId: null })
-  },
-  moveActive: (direction) =>
-    set((state) => {
-      if (!state.menu) {
-        return state
-      }
-
-      const parentId = activeParentId(state.menu, state.activeItemId)
-      if (parentId) {
-        const children = getSubmenuChildren(state.menu, parentId)
-        return focusSubmenuItem(parentId, moveWithin(children, state.activeItemId, direction))
-      }
-
-      const topLevelItems = getTopLevelItems(state.menu)
-      return focusTopLevelItem(state.menu, moveWithin(topLevelItems, state.activeItemId, direction))
-    }),
-  moveActiveToEdge: (edge) =>
-    set((state) => {
-      if (!state.menu) {
-        return state
-      }
-
-      const parentId = activeParentId(state.menu, state.activeItemId)
-      if (parentId) {
-        const children = getSubmenuChildren(state.menu, parentId)
-        return focusSubmenuItem(parentId, edgeEnabledId[edge](children))
-      }
-
-      return {
-        activeItemId: edgeEnabledId[edge](getTopLevelItems(state.menu)),
-        openSubmenuId: null,
-        activeSubmenuItemId: null,
-      }
-    }),
-  openSubmenu: (itemId) =>
-    set((state) => {
-      if (!state.menu) {
-        return state
-      }
-
-      const targetId = itemId ?? state.activeItemId
-      if (!targetId) {
-        return state
-      }
-
-      const submenu = openableSubmenu(state.menu, targetId)
-      if (!submenu) {
-        return state
-      }
-
-      const childId = submenuChildToFocus(state, submenu)
-      return {
-        activeItemId: childId ?? submenu.id,
-        openSubmenuId: submenu.id,
-        activeSubmenuItemId: childId,
-      }
-    }),
-  activateCurrent: () => {
-    const activeItemId = get().activeItemId
-    if (!activeItemId) {
-      return
-    }
-    get().activateItem(activeItemId)
-  },
-  activateItem: (itemId) => {
-    const menu = get().menu
-    if (!menu) {
-      return
-    }
-
-    const lookup = findItem(menu, itemId)
-    if (!lookup || lookup.item.disabled) {
-      return
-    }
-
-    if (isSubmenuChildLookup(lookup)) {
+      const opened = openedMenu(menu)
+      set({ ...CLOSED_MENU_STATE, ...opened, ...initialFocus(opened.menu) })
+    },
+    closeMenu: () => {
       clearNativePlaceholderTimer()
       set(CLOSED_MENU_STATE)
-      dispatchContextMenuAction(menu.paneId, lookup.item.action)
-      return
-    }
-
-    if ('kind' in lookup.item && lookup.item.kind === 'submenu') {
-      const childId = firstEnabledId(lookup.item.children.rows)
-      set({
-        activeItemId: childId ?? lookup.item.id,
-        openSubmenuId: lookup.item.id,
-        activeSubmenuItemId: childId,
-      })
-      return
-    }
-
-    clearNativePlaceholderTimer()
-    set(CLOSED_MENU_STATE)
-    dispatchContextMenuAction(menu.paneId, lookup.item.action)
-  },
-  closeSubmenu: () =>
-    set((state) => {
-      if (!state.menu || !state.openSubmenuId) {
-        return state
+    },
+    beginNativeLoad: () => {
+      const state = get()
+      if (!canBeginNativeLoad(state)) {
+        return null
       }
 
-      return {
-        activeItemId: state.openSubmenuId,
-        openSubmenuId: null,
-        activeSubmenuItemId: null,
+      const requestId = nextNativeRequestId()
+      clearNativePlaceholderTimer()
+      set(startedNativeLoad(requestId))
+      nativePlaceholderTimer = setTimeout(
+        () => showNativePlaceholderIfStillLoading(requestId),
+        NATIVE_PLACEHOLDER_DELAY_MS,
+      )
+      return { requestId, request: state.nativeRequest }
+    },
+    resolveNativeLoad: (requestId, items) =>
+      finishNativeLoad(requestId, (state) => resolvedNativeLoad(state, items)),
+    failNativeLoad: (requestId) => finishNativeLoad(requestId, failedNativeLoad),
+    hoverItem: (itemId) => set((state) => hoveredFocus(state, itemId) ?? state),
+    moveActive: (direction) => set((state) => movedFocus(state, direction) ?? state),
+    moveActiveToEdge: (edge) => set((state) => edgeFocus(state, edge) ?? state),
+    openSubmenu: (itemId) => set((state) => openedSubmenuFocus(state, itemId) ?? state),
+    activateCurrent: () => {
+      const activeItemId = get().activeItemId
+      if (!activeItemId) {
+        return
       }
-    }),
-}))
+      get().activateItem(activeItemId)
+    },
+    activateItem: (itemId) => {
+      const menu = get().menu
+      const activation = menu ? activationFor(menu, itemId) : null
+      if (!activation) {
+        return
+      }
+      if (activation.kind === 'focus') {
+        set(activation.focus)
+        return
+      }
+      closeAndDispatch(activation)
+    },
+    closeSubmenu: () => set((state) => closedSubmenuFocus(state) ?? state),
+  }
+})

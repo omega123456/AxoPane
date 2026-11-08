@@ -815,15 +815,46 @@ mod service {
         remaining: usize,
     }
 
+    struct CatchUp {
+        saved: SnapshotMeta,
+        current_id: u64,
+        events: Vec<ChangeEvent>,
+    }
+
     enum Phase {
         Booting,
-        /// Replaying history since the snapshot's event ID.
-        CatchUp {
-            saved: SnapshotMeta,
-            current_id: u64,
-            events: Vec<ChangeEvent>,
-        },
+        ReplayingHistory(CatchUp),
         Live,
+    }
+
+    enum AbsorbedEvents {
+        Buffered,
+        HistoryReplayed(CatchUp),
+        LiveBatch(Vec<ChangeEvent>),
+    }
+
+    impl Phase {
+        fn replaying_history(saved: SnapshotMeta, current_id: u64) -> Self {
+            Self::ReplayingHistory(CatchUp {
+                saved,
+                current_id,
+                events: Vec::new(),
+            })
+        }
+
+        fn absorb(&mut self, live: Vec<ChangeEvent>, history_done: bool) -> AbsorbedEvents {
+            let Self::ReplayingHistory(catch_up) = self else {
+                return AbsorbedEvents::LiveBatch(live);
+            };
+            catch_up.events.extend(live);
+            if !history_done {
+                return AbsorbedEvents::Buffered;
+            }
+            let Self::ReplayingHistory(replayed) = std::mem::replace(self, Self::Live) else {
+                return AbsorbedEvents::Buffered;
+            };
+            AbsorbedEvents::HistoryReplayed(replayed)
+        }
     }
 
     struct Machine {
@@ -930,11 +961,7 @@ mod service {
                     self.load_tree(snapshot.tree);
                     self.meta = snapshot.meta;
                     self.last_applied_id = saved.event_id;
-                    self.phase = Phase::CatchUp {
-                        saved,
-                        current_id,
-                        events: Vec::new(),
-                    };
+                    self.phase = Phase::replaying_history(saved, current_id);
                     Some(self.meta.event_id)
                 }
                 stale => {
@@ -1036,39 +1063,30 @@ mod service {
                     live.push(ChangeEvent { path, flags });
                 }
             }
-            match std::mem::replace(&mut self.phase, Phase::Live) {
-                Phase::CatchUp {
-                    saved,
-                    current_id,
-                    mut events,
-                } => {
-                    events.append(&mut live);
-                    if !history_done {
-                        self.phase = Phase::CatchUp {
-                            saved,
-                            current_id,
-                            events,
-                        };
-                        return;
-                    }
-                    let (volume_uuid, os_build) =
-                        (self.meta.volume_uuid.clone(), self.meta.os_build.clone());
-                    self.apply_plan(persist::plan_catch_up(
-                        &saved,
-                        &volume_uuid,
-                        &os_build,
-                        current_id,
-                        &events,
-                    ));
-                    self.last_applied_id = self.last_applied_id.max(max_id).max(current_id);
-                    self.save_snapshot();
+            match self.phase.absorb(live, history_done) {
+                AbsorbedEvents::Buffered => {}
+                AbsorbedEvents::HistoryReplayed(replayed) => {
+                    self.finish_history_replay(replayed, max_id);
                 }
-                phase => {
-                    self.phase = phase;
+                AbsorbedEvents::LiveBatch(live) => {
                     self.apply_plan(persist::plan_batch(&live));
                     self.last_applied_id = self.last_applied_id.max(max_id);
                 }
             }
+        }
+
+        fn finish_history_replay(&mut self, replayed: CatchUp, max_id: u64) {
+            let (volume_uuid, os_build) =
+                (self.meta.volume_uuid.clone(), self.meta.os_build.clone());
+            self.apply_plan(persist::plan_catch_up(
+                &replayed.saved,
+                &volume_uuid,
+                &os_build,
+                replayed.current_id,
+                &replayed.events,
+            ));
+            self.last_applied_id = self.last_applied_id.max(max_id).max(replayed.current_id);
+            self.save_snapshot();
         }
 
         fn apply_plan(&mut self, outcome: ReplayOutcome) {
@@ -1467,7 +1485,7 @@ mod service {
                     status.items_scanned = Some(self.items_scanned);
                     IndexState::Indexing
                 }
-                (Phase::CatchUp { .. }, _) => IndexState::Updating,
+                (Phase::ReplayingHistory(_), _) => IndexState::Updating,
                 _ if background => IndexState::Updating,
                 _ => IndexState::UpToDate,
             };
@@ -1513,7 +1531,7 @@ mod service {
             let event_id = match &self.full {
                 Some(full) => full.captured_id,
                 None if self.background_inflight > 0
-                    || matches!(self.phase, Phase::CatchUp { .. }) =>
+                    || matches!(self.phase, Phase::ReplayingHistory(_)) =>
                 {
                     self.meta.event_id
                 }

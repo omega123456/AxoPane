@@ -129,39 +129,7 @@ pub fn request_thumbnails(
     payload: RequestThumbnailsRequest,
     state: State<'_, Arc<crate::thumbnails::ThumbnailService>>,
 ) -> Result<RequestThumbnailsResponse, String> {
-    if payload.candidates.len() > crate::thumbnails::scheduler::MAX_DESIRED_PER_SCOPE {
-        return Err("thumbnail scope exceeds the candidate limit".into());
-    }
-    let subscriber = crate::thumbnails::scheduler::ThumbnailSubscriber {
-        pane_id: payload.pane_id,
-        tab_id: payload.tab_id,
-        path: payload.path,
-        generation: payload.generation,
-    };
-    let candidates = payload
-        .candidates
-        .into_iter()
-        .map(|candidate| {
-            let fingerprint = crate::thumbnails::types::ThumbnailFingerprint::from_metadata(
-                Path::new(&candidate.path),
-                candidate.modified_unix_seconds,
-                candidate.size_bytes,
-            );
-            (
-                crate::thumbnails::types::ThumbnailCandidate::new(
-                    fingerprint,
-                    candidate.is_directory,
-                ),
-                candidate.priority,
-                candidate.order,
-            )
-        })
-        .collect();
-    let accepted_count = state.replace_scope(subscriber, payload.revision, candidates);
-    Ok(RequestThumbnailsResponse {
-        revision: payload.revision,
-        accepted_count,
-    })
+    crate::thumbnails::request::request_thumbnails(&state, payload)
 }
 
 #[tauri::command]
@@ -188,22 +156,29 @@ pub async fn list_dir(
         .latency_cancellable(
             key,
             crate::ipc::executor::Cancellation::default(),
-            move |cancel| {
-                fs::list_dir_with_cancellation(&payload, || cancel.is_cancelled())
-                    .map_err(|error| {
-                        let message = format!("Failed to load \"{}\": {error}", payload.path);
-                        log::error!("{message}");
-                        message
-                    })
-                    .and_then(|outcome| match outcome {
-                        fs::ListDirOutcome::Complete(response) => Ok(response),
-                        fs::ListDirOutcome::Cancelled => {
-                            Err("directory listing cancelled".to_string())
-                        }
-                    })
-            },
+            move |cancel| list_dir_until_cancelled(&payload, cancel),
         )
         .await
+}
+
+#[cfg(not(feature = "test-utils"))]
+fn list_dir_until_cancelled(
+    payload: &ListDirRequest,
+    cancel: &crate::ipc::executor::Cancellation,
+) -> Result<ListDirResponse, String> {
+    let outcome = fs::list_dir_with_cancellation(payload, || cancel.is_cancelled())
+        .map_err(|error| list_dir_failure(&payload.path, error))?;
+    match outcome {
+        fs::ListDirOutcome::Complete(response) => Ok(response),
+        fs::ListDirOutcome::Cancelled => Err(LIST_DIR_CANCELLED.to_string()),
+    }
+}
+
+#[cfg(not(feature = "test-utils"))]
+const LIST_DIR_CANCELLED: &str = "directory listing cancelled";
+
+fn list_dir_failure(path: &str, error: impl std::fmt::Display) -> String {
+    logged_error(format!("Failed to load \"{path}\": {error}"))
 }
 
 #[cfg(feature = "test-utils")]
@@ -214,8 +189,7 @@ pub fn list_dir(payload: ListDirRequest) -> Result<ListDirResponse, String> {
 
 #[cfg(feature = "test-utils")]
 fn list_dir_impl(payload: ListDirRequest) -> Result<ListDirResponse, String> {
-    fs::list_dir(&payload)
-        .map_err(|error| logged_error(format!("Failed to load \"{}\": {error}", payload.path)))
+    fs::list_dir(&payload).map_err(|error| list_dir_failure(&payload.path, error))
 }
 
 /// Establishes (or replaces) the directory session for a pane.
@@ -1165,13 +1139,6 @@ pub fn size_state_event_from_update(update: crate::size::SizeUpdate) -> SizeStat
     }
 }
 
-/// Resolves and emits icons for `paths`, batching the `icon://state` event
-/// rather than emitting one event per path. This covers both the sequential
-/// fallback (used when the Windows rayon icon pool is unavailable, and on
-/// macOS) and the pooled path below; both flush via the shared
-/// [`IconBatcher`] (every [`crate::ipc::icon_batch::MAX_BATCH`] icons or
-/// [`crate::ipc::icon_batch::FLUSH_INTERVAL`], whichever comes first), plus a
-/// final flush of any remainder.
 #[cfg(not(feature = "test-utils"))]
 #[tauri::command]
 pub fn request_icons(
@@ -1179,68 +1146,80 @@ pub fn request_icons(
     app: AppHandle,
     executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
 ) {
+    resolve_and_emit_icons(payload.paths, app, Arc::clone(executor.inner()));
+}
+
+#[cfg(not(feature = "test-utils"))]
+fn resolve_and_emit_icons(
+    paths: Vec<String>,
+    app: AppHandle,
+    executor: Arc<crate::ipc::executor::IpcExecutor>,
+) {
     let Some(pool) = crate::file_icons::icon_pool() else {
-        let app_handle = app.clone();
-        let executor = Arc::clone(executor.inner());
-        // The fallback must not resolve native icons on the IPC dispatcher.
-        // It has the same event contract as the Rayon path, but is owned by
-        // the bounded latency executor when the specialized icon pool cannot
-        // be created.
-        tauri::async_runtime::spawn(async move {
-            let _ = executor
-                .latency("icons".into(), move || {
-                    emit_icons(payload.paths, &app_handle);
-                    Ok(())
-                })
-                .await;
-        });
+        emit_icons_on_executor(paths, app, executor);
         return;
     };
+    pool.spawn(move || emit_icons_in_parallel(paths, &app));
+}
 
-    let app_handle = app.clone();
-    pool.spawn(move || {
-        let batcher = Mutex::new(IconBatcher::new(Instant::now()));
-        payload.paths.into_par_iter().for_each(|path| {
-            let icon_data_url = crate::file_icons::resolve_icon(Path::new(&path), false);
-            let event = IconStateEvent {
-                path,
-                icon_data_url,
-            };
-            let flushed = batcher
-                .lock()
-                .expect("icon batcher lock")
-                .push(event, Instant::now());
-            if let Some(batch) = flushed {
-                let _ = app_handle.emit(super::events::ICON_STATE, batch);
-            }
-        });
-
-        let remainder = batcher
-            .into_inner()
-            .expect("icon batcher lock")
-            .drain_remainder();
-        if let Some(batch) = remainder {
-            let _ = app_handle.emit(super::events::ICON_STATE, batch);
-        }
+#[cfg(not(feature = "test-utils"))]
+fn emit_icons_on_executor(
+    paths: Vec<String>,
+    app: AppHandle,
+    executor: Arc<crate::ipc::executor::IpcExecutor>,
+) {
+    tauri::async_runtime::spawn(async move {
+        let _ = executor
+            .latency("icons".into(), move || {
+                emit_icons(paths, &app);
+                Ok(())
+            })
+            .await;
     });
+}
+
+#[cfg(not(feature = "test-utils"))]
+fn resolved_icon_event(path: String) -> IconStateEvent {
+    let icon_data_url = crate::file_icons::resolve_icon(Path::new(&path), false);
+    IconStateEvent {
+        path,
+        icon_data_url,
+    }
+}
+
+#[cfg(not(feature = "test-utils"))]
+fn emit_icon_batch(app: &AppHandle, batch: Option<Vec<IconStateEvent>>) {
+    if let Some(batch) = batch {
+        let _ = app.emit(super::events::ICON_STATE, batch);
+    }
+}
+
+#[cfg(not(feature = "test-utils"))]
+fn emit_icons_in_parallel(paths: Vec<String>, app: &AppHandle) {
+    let batcher = Mutex::new(IconBatcher::new(Instant::now()));
+    paths.into_par_iter().for_each(|path| {
+        let event = resolved_icon_event(path);
+        let flushed = batcher
+            .lock()
+            .expect("icon batcher lock")
+            .push(event, Instant::now());
+        emit_icon_batch(app, flushed);
+    });
+    let remainder = batcher
+        .into_inner()
+        .expect("icon batcher lock")
+        .drain_remainder();
+    emit_icon_batch(app, remainder);
 }
 
 #[cfg(not(feature = "test-utils"))]
 fn emit_icons(paths: Vec<String>, app: &AppHandle) {
     let mut batcher = IconBatcher::new(Instant::now());
     for path in paths {
-        let icon_data_url = crate::file_icons::resolve_icon(Path::new(&path), false);
-        let event = IconStateEvent {
-            path,
-            icon_data_url,
-        };
-        if let Some(batch) = batcher.push(event, Instant::now()) {
-            let _ = app.emit(super::events::ICON_STATE, batch);
-        }
+        let flushed = batcher.push(resolved_icon_event(path), Instant::now());
+        emit_icon_batch(app, flushed);
     }
-    if let Some(batch) = batcher.drain_remainder() {
-        let _ = app.emit(super::events::ICON_STATE, batch);
-    }
+    emit_icon_batch(app, batcher.drain_remainder());
 }
 
 /// `test-utils` synchronous variant: returns the same batched shape the
@@ -1250,20 +1229,20 @@ fn emit_icons(paths: Vec<String>, app: &AppHandle) {
 #[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn request_icons(payload: RequestIconsRequest) -> Vec<Vec<IconStateEvent>> {
+    fake_icon_batches(payload.paths)
+}
+
+#[cfg(feature = "test-utils")]
+fn fake_icon_batches(paths: Vec<String>) -> Vec<Vec<IconStateEvent>> {
     let mut batcher = IconBatcher::new(Instant::now());
-    let mut batches = Vec::new();
-    for path in payload.paths {
-        let event = IconStateEvent {
-            path,
-            icon_data_url: None,
-        };
-        if let Some(batch) = batcher.push(event, Instant::now()) {
-            batches.push(batch);
-        }
-    }
-    if let Some(batch) = batcher.drain_remainder() {
-        batches.push(batch);
-    }
+    let unresolved = paths.into_iter().map(|path| IconStateEvent {
+        path,
+        icon_data_url: None,
+    });
+    let mut batches: Vec<_> = unresolved
+        .filter_map(|event| batcher.push(event, Instant::now()))
+        .collect();
+    batches.extend(batcher.drain_remainder());
     batches
 }
 
@@ -1520,30 +1499,40 @@ pub fn set_tab_watch(
     state: State<'_, Arc<WatchService>>,
     session_state: State<'_, Arc<crate::directory_session::DirectorySessionService>>,
 ) -> Result<(), String> {
-    let patch_app = app.clone();
-    let error_app = app;
-    let session_state = Arc::clone(session_state.inner());
-
+    let emit_patch = session_patch_emitter(app.clone(), Arc::clone(session_state.inner()));
     state.set_tab_watch(
         payload.target,
         None,
         payload.entries,
-        Arc::new(move |patch| {
-            let item_count_state = patch_app.state::<ItemCountService>();
-            if let Some(session_patch) =
-                fold_dir_patch_into_session(&session_state, &item_count_state, &patch)
-            {
-                let _ = patch_app.emit(super::events::DIR_SESSION_PATCH, session_patch);
-            }
-        }),
-        Arc::new(move |path, message| {
-            log::warn!("watch error for {path}: {message}");
-            let _ = error_app.emit(
-                super::events::WATCH_ERROR,
-                super::types::WatchErrorEvent { path, message },
-            );
-        }),
+        emit_patch,
+        watch_error_emitter(app),
     )
+}
+
+#[cfg(not(feature = "test-utils"))]
+fn session_patch_emitter(
+    app: AppHandle,
+    session_state: Arc<crate::directory_session::DirectorySessionService>,
+) -> Arc<dyn Fn(crate::watch::DirPatch) + Send + Sync> {
+    Arc::new(move |patch| {
+        let item_count_state = app.state::<ItemCountService>();
+        if let Some(session_patch) =
+            fold_dir_patch_into_session(&session_state, &item_count_state, &patch)
+        {
+            let _ = app.emit(super::events::DIR_SESSION_PATCH, session_patch);
+        }
+    })
+}
+
+#[cfg(not(feature = "test-utils"))]
+fn watch_error_emitter(app: AppHandle) -> Arc<dyn Fn(String, String) + Send + Sync> {
+    Arc::new(move |path, message| {
+        log::warn!("watch error for {path}: {message}");
+        let _ = app.emit(
+            super::events::WATCH_ERROR,
+            super::types::WatchErrorEvent { path, message },
+        );
+    })
 }
 
 #[cfg(feature = "test-utils")]

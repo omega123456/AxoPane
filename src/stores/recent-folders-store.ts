@@ -11,19 +11,17 @@ type RecentFoldersState = {
   record: (path: string) => void
 }
 
+function withRecordedFolder(folders: string[], path: string) {
+  const alreadyMostRecent = folders[0] !== undefined && pathsMatch(folders[0], path)
+  if (alreadyMostRecent) {
+    return null
+  }
+  const otherFolders = folders.filter((folder) => !pathsMatch(folder, path))
+  return { folders: [path, ...otherFolders].slice(0, MAX_RECENT_FOLDERS) }
+}
+
 export const useRecentFoldersStore = create<RecentFoldersState>((set) => ({
   folders: [],
   hydrate: (folders) => set({ folders: folders.slice(0, MAX_RECENT_FOLDERS) }),
-  record: (path) =>
-    set((state) => {
-      if (state.folders[0] !== undefined && pathsMatch(state.folders[0], path)) {
-        return state
-      }
-      return {
-        folders: [path, ...state.folders.filter((folder) => !pathsMatch(folder, path))].slice(
-          0,
-          MAX_RECENT_FOLDERS,
-        ),
-      }
-    }),
+  record: (path) => set((state) => withRecordedFolder(state.folders, path) ?? state),
 }))

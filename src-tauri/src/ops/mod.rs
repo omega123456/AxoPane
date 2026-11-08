@@ -27,10 +27,12 @@ use crate::volumes::VolumeInfo;
 
 pub mod archive;
 pub mod manifest;
+pub mod status;
 pub mod transfer;
 pub mod worker;
 
 use manifest::ProgressiveManifest;
+use status::{Cancellation, RunOutcome};
 #[cfg(target_os = "macos")]
 use transfer::macos::MacosCapabilities;
 #[cfg(not(any(target_os = "macos", windows)))]
@@ -116,6 +118,12 @@ pub enum ConflictResolution {
     Replace,
     Skip,
     Rename,
+}
+
+struct ConflictDecision {
+    resolution: ConflictResolution,
+    apply_to_all: bool,
+    rename_to: Option<String>,
 }
 
 /// A single source item belonging to an operation.
@@ -336,10 +344,23 @@ impl OpState {
     }
 
     pub fn is_terminal(&self) -> bool {
-        matches!(
-            self.status,
-            OpStatus::Completed | OpStatus::Failed | OpStatus::Cancelled
-        )
+        self.status.is_terminal()
+    }
+
+    fn request_cancel(&mut self) {
+        self.skip.store(false, Ordering::Relaxed);
+        self.cancel.store(true, Ordering::Relaxed);
+        self.pause.store(false, Ordering::Relaxed);
+    }
+
+    fn run_outcome(&self) -> RunOutcome {
+        if self.cancel.load(Ordering::Relaxed) {
+            return RunOutcome::Cancelled;
+        }
+        if self.error_message.is_some() {
+            return RunOutcome::Failed;
+        }
+        RunOutcome::Completed
     }
 
     pub fn visible_copied_bytes(&self) -> u64 {
@@ -645,93 +666,87 @@ impl OpsService {
     }
 
     pub fn pause_op(&self, id: &str) {
-        if let Some(operation) = self.operation(id) {
-            let mut guard = operation.lock_operation();
-            if matches!(guard.status, OpStatus::Active) {
-                guard.pause.store(true, Ordering::Relaxed);
-                guard.status = OpStatus::Paused;
-                self.emit_progress(&guard);
-            }
-        }
+        let Some(operation) = self.operation(id) else {
+            return;
+        };
+        let mut guard = operation.lock_operation();
+        let Ok(next) = guard.status.pause() else {
+            return;
+        };
+        guard.pause.store(true, Ordering::Relaxed);
+        guard.status = next;
+        self.emit_progress(&guard);
     }
 
     pub fn resume_op(&self, id: &str) {
-        let resumed = if let Some(operation) = self.operation(id) {
-            let mut guard = operation.lock_operation();
-            if matches!(guard.status, OpStatus::Paused) {
-                guard.pause.store(false, Ordering::Relaxed);
-                guard.status = OpStatus::Active;
-                self.emit_progress(&guard);
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-
-        if resumed {
-            if let Some(signal) = self.signal(id) {
-                signal.notify_all();
-            }
+        if self.resume_locked(id) {
+            self.notify_waiters(id);
         }
     }
 
-    pub fn cancel_op(&self, id: &str) {
-        let (notify, schedule_removal) = if let Some(operation) = self.operation(id) {
-            let mut guard = operation.lock_operation();
-            if guard.is_terminal() {
-                (false, false)
-            } else if matches!(guard.status, OpStatus::Pending) {
-                // Never started: mark cancelled immediately.
-                guard.status = OpStatus::Cancelled;
-                guard.completed_at = Some(Instant::now());
-                self.emit_progress(&guard);
-                (false, true)
-            } else {
-                guard.skip.store(false, Ordering::Relaxed);
-                guard.cancel.store(true, Ordering::Relaxed);
-                guard.pause.store(false, Ordering::Relaxed);
-                guard.status = OpStatus::Cancelled;
-                self.emit_progress(&guard);
-                (true, false)
-            }
-        } else {
-            (false, false)
+    fn resume_locked(&self, id: &str) -> bool {
+        let Some(operation) = self.operation(id) else {
+            return false;
         };
+        let mut guard = operation.lock_operation();
+        let Ok(next) = guard.status.resume() else {
+            return false;
+        };
+        guard.pause.store(false, Ordering::Relaxed);
+        guard.status = next;
+        self.emit_progress(&guard);
+        true
+    }
 
-        if notify {
-            if let Some(signal) = self.signal(id) {
-                signal.notify_all();
-            }
+    pub fn cancel_op(&self, id: &str) {
+        let Some(cancellation) = self.cancel_locked(id) else {
+            return;
+        };
+        match cancellation {
+            Cancellation::BeforeStart => self.schedule_auto_remove_for(id),
+            Cancellation::WhileRunning => self.notify_waiters(id),
         }
-        if schedule_removal {
-            self.schedule_auto_remove_for(id);
+    }
+
+    fn cancel_locked(&self, id: &str) -> Option<Cancellation> {
+        let operation = self.operation(id)?;
+        let mut guard = operation.lock_operation();
+        let cancellation = guard.status.cancel().ok()?;
+        match cancellation {
+            Cancellation::BeforeStart => guard.completed_at = Some(Instant::now()),
+            Cancellation::WhileRunning => guard.request_cancel(),
         }
+        guard.status = cancellation.next_status();
+        self.emit_progress(&guard);
+        Some(cancellation)
     }
 
     /// Skip one item only from a paused operation, then leave the operation paused.
     pub fn skip_op(&self, id: &str) {
-        let notify = if let Some(operation) = self.operation(id) {
-            let mut guard = operation.lock_operation();
-            if matches!(guard.status, OpStatus::Paused) {
-                guard.skip.store(true, Ordering::Relaxed);
-                guard.cancel.store(true, Ordering::Relaxed);
-                guard.pause.store(false, Ordering::Relaxed);
-                guard.status = OpStatus::Active;
-                self.emit_progress(&guard);
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        };
+        if self.skip_locked(id) {
+            self.notify_waiters(id);
+        }
+    }
 
-        if notify {
-            if let Some(signal) = self.signal(id) {
-                signal.notify_all();
-            }
+    fn skip_locked(&self, id: &str) -> bool {
+        let Some(operation) = self.operation(id) else {
+            return false;
+        };
+        let mut guard = operation.lock_operation();
+        let Ok(next) = guard.status.skip() else {
+            return false;
+        };
+        guard.skip.store(true, Ordering::Relaxed);
+        guard.cancel.store(true, Ordering::Relaxed);
+        guard.pause.store(false, Ordering::Relaxed);
+        guard.status = next;
+        self.emit_progress(&guard);
+        true
+    }
+
+    fn notify_waiters(&self, id: &str) {
+        if let Some(signal) = self.signal(id) {
+            signal.notify_all();
         }
     }
 
@@ -784,54 +799,57 @@ impl OpsService {
         apply_to_all: bool,
         rename_to: Option<String>,
     ) {
-        let notify = if let Some(operation) = self.operation(id) {
-            let mut guard = operation.lock_operation();
-            if matches!(guard.status, OpStatus::Conflict) {
-                guard.conflict_resolution = Some(resolution);
-                guard.rename_to = rename_to;
-                if apply_to_all {
-                    guard.apply_to_all = Some(resolution);
-                }
-                guard.conflict = None;
-                guard.status = OpStatus::Active;
-                self.emit_progress(&guard);
-                true
-            } else {
-                false
-            }
-        } else {
-            false
+        let decision = ConflictDecision {
+            resolution,
+            apply_to_all,
+            rename_to,
         };
-
-        if notify {
-            if let Some(signal) = self.signal(id) {
-                signal.notify_all();
-            }
+        if self.resolve_conflict_locked(id, decision) {
+            self.notify_waiters(id);
         }
+    }
+
+    fn resolve_conflict_locked(&self, id: &str, decision: ConflictDecision) -> bool {
+        let Some(operation) = self.operation(id) else {
+            return false;
+        };
+        let mut guard = operation.lock_operation();
+        let Ok(next) = guard.status.resolve_conflict() else {
+            return false;
+        };
+        guard.conflict_resolution = Some(decision.resolution);
+        guard.rename_to = decision.rename_to;
+        if decision.apply_to_all {
+            guard.apply_to_all = Some(decision.resolution);
+        }
+        guard.conflict = None;
+        guard.status = next;
+        self.emit_progress(&guard);
+        true
     }
 
     /// Retry a failed operation by re-queuing it.
     pub fn retry_op(&self, id: &str) {
-        let requeue = if let Some(operation) = self.operation(id) {
-            let mut guard = operation.lock_operation();
-            if matches!(guard.status, OpStatus::Failed) {
-                guard.status = OpStatus::Pending;
-                guard.reset_runtime_state();
-                guard.cancel = Arc::new(AtomicBool::new(false));
-                guard.pause = Arc::new(AtomicBool::new(false));
-                guard.skip = Arc::new(AtomicBool::new(false));
-                self.emit_progress(&guard);
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-
-        if requeue {
+        if self.retry_locked(id) {
             self.schedule();
         }
+    }
+
+    fn retry_locked(&self, id: &str) -> bool {
+        let Some(operation) = self.operation(id) else {
+            return false;
+        };
+        let mut guard = operation.lock_operation();
+        let Ok(next) = guard.status.retry() else {
+            return false;
+        };
+        guard.status = next;
+        guard.reset_runtime_state();
+        guard.cancel = Arc::new(AtomicBool::new(false));
+        guard.pause = Arc::new(AtomicBool::new(false));
+        guard.skip = Arc::new(AtomicBool::new(false));
+        self.emit_progress(&guard);
+        true
     }
 
     pub fn snapshot(&self) -> Vec<OpSnapshot> {
@@ -982,12 +1000,9 @@ fn run_operation(id: String, inner: &Arc<Mutex<Inner>>, runtime: &WorkerRuntime)
     }
 
     let mut operation = shared_operation.lock_operation();
-    if operation.cancel.load(Ordering::Relaxed) {
-        operation.status = OpStatus::Cancelled;
-    } else if operation.error_message.is_some() {
-        operation.status = OpStatus::Failed;
-    } else {
-        operation.status = OpStatus::Completed;
+    let outcome = operation.run_outcome();
+    operation.status = OpStatus::finish(outcome);
+    if outcome == RunOutcome::Completed {
         operation.copied_bytes = operation.total_bytes;
     }
     operation.completed_at = Some(Instant::now());

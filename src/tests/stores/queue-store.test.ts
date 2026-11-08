@@ -67,8 +67,8 @@ describe('queue store', () => {
       'op-2',
     ])
     expect(activeConflict(state)?.operationId).toBe('op-2')
-    expect(state.throughputHistory['op-1']).toEqual([sample(40, 100)])
-    expect(state.throughputPeak['op-1']).toBe(100)
+    expect(state.throughput['op-1']?.history).toEqual([sample(40, 100)])
+    expect(state.throughput['op-1']?.peak).toBe(100)
   })
 
   it('opens a new smoothed bucket when progress advances into a new bucket', () => {
@@ -87,12 +87,12 @@ describe('queue store', () => {
     expect(operations[0].copiedBytes).toBe(900)
     // The new bucket opens at the EMA-smoothed rate (smoothing carries across
     // the boundary so the leading edge never jumps): 100 + (300 - 100)*0.25 = 150.
-    expect(useQueueStore.getState().throughputHistory['op-1']).toEqual([
+    expect(useQueueStore.getState().throughput['op-1']?.history).toEqual([
       sample(40, 100),
       sample(90, 150),
     ])
     // Peak tracks the displayed (smoothed) rate, non-decreasing.
-    expect(useQueueStore.getState().throughputPeak['op-1']).toBe(150)
+    expect(useQueueStore.getState().throughput['op-1']?.peak).toBe(150)
   })
 
   it('ratchets the throughput peak up only — a stall never drops it', () => {
@@ -108,7 +108,7 @@ describe('queue store', () => {
       }),
     )
     // The burst smooths to 100 + (600 - 100)*0.25 = 225.
-    expect(useQueueStore.getState().throughputPeak['op-1']).toBe(225)
+    expect(useQueueStore.getState().throughput['op-1']?.peak).toBe(225)
 
     // A non-advancing stall EMA-steps the active bucket down
     // (225 + (0 - 225)*0.25 = 168.75); the frozen peak must hold at the earlier
@@ -125,8 +125,8 @@ describe('queue store', () => {
     // never drops the peak; the drop would only ever surface as a *new* frozen
     // point once progress crosses into the next bucket.
     const state = useQueueStore.getState()
-    expect(state.throughputHistory['op-1'].at(-1)).toEqual(sample(60, 225))
-    expect(state.throughputPeak['op-1']).toBe(225)
+    expect(state.throughput['op-1']?.history.at(-1)).toEqual(sample(60, 225))
+    expect(state.throughput['op-1']?.peak).toBe(225)
   })
 
   it('holds the plotted point within a bucket and commits the carried EMA when it advances', () => {
@@ -137,14 +137,14 @@ describe('queue store', () => {
 
     // Within a bucket the EMA steps internally (100 -> 125) but the plotted point
     // is untouched — there is no provisional point that moves as it settles.
-    expect(useQueueStore.getState().throughputHistory['op-1']).toEqual([sample(40, 100)])
+    expect(useQueueStore.getState().throughput['op-1']?.history).toEqual([sample(40, 100)])
 
     // Crossing into a new bucket commits one frozen point at the carried EMA
     // value (125), gated so the repeated 200 B/s reading does not step it again.
     useQueueStore
       .getState()
       .applyProgress(progress({ operationId: 'op-1', progressPercent: 60, bytesPerSecond: 200 }))
-    expect(useQueueStore.getState().throughputHistory['op-1']).toEqual([
+    expect(useQueueStore.getState().throughput['op-1']?.history).toEqual([
       sample(40, 100),
       sample(60, 125),
     ])
@@ -172,8 +172,8 @@ describe('queue store', () => {
       }),
     )
 
-    expect(useQueueStore.getState().throughputHistory['op-1']).toEqual([sample(12, 90)])
-    expect(useQueueStore.getState().throughputPeak['op-1']).toBe(90)
+    expect(useQueueStore.getState().throughput['op-1']?.history).toEqual([sample(12, 90)])
+    expect(useQueueStore.getState().throughput['op-1']?.peak).toBe(90)
   })
 
   it('keeps delete throughput history when progress is monotonic', () => {
@@ -226,7 +226,7 @@ describe('queue store', () => {
       }),
     )
 
-    expect(useQueueStore.getState().throughputHistory['delete-1']).toEqual([
+    expect(useQueueStore.getState().throughput['delete-1']?.history).toEqual([
       sample(0, 0),
       sample(40, 100),
       sample(100, 100),
@@ -243,8 +243,8 @@ describe('queue store', () => {
       }),
     )
 
-    const existingHistory = useQueueStore.getState().throughputHistory['op-1']
-    const existingPeak = useQueueStore.getState().throughputPeak['op-1']
+    const existingHistory = useQueueStore.getState().throughput['op-1']?.history
+    const existingPeak = useQueueStore.getState().throughput['op-1']?.peak
     useQueueStore.getState().hydrate([
       {
         progress: progress({ operationId: 'op-1', progressPercent: 75, bytesPerSecond: 150 }),
@@ -252,9 +252,9 @@ describe('queue store', () => {
       },
     ])
 
-    expect(useQueueStore.getState().throughputHistory['op-1']).toEqual(existingHistory)
+    expect(useQueueStore.getState().throughput['op-1']?.history).toEqual(existingHistory)
     // Hydrate never lowers the peak (here the snapshot rate is below it).
-    expect(useQueueStore.getState().throughputPeak['op-1']).toBe(existingPeak)
+    expect(useQueueStore.getState().throughput['op-1']?.peak).toBe(existingPeak)
   })
 
   it('buckets samples by progress so history stays bounded no matter how many events arrive', () => {
@@ -270,7 +270,7 @@ describe('queue store', () => {
       )
     }
 
-    const history = useQueueStore.getState().throughputHistory['op-1']
+    const history = useQueueStore.getState().throughput['op-1']?.history
     // 1001 advancing events collapse into at most one sample per progress bucket.
     expect(history.length).toBeGreaterThan(1)
     expect(history.length).toBeLessThanOrEqual(90)
@@ -293,7 +293,7 @@ describe('queue store', () => {
 
     apply(5, 100)
     apply(10, 500) // crosses into a new bucket → commit a frozen point
-    const afterTwo = useQueueStore.getState().throughputHistory['op-1']
+    const afterTwo = useQueueStore.getState().throughput['op-1']?.history
     expect(afterTwo).toHaveLength(2)
 
     // Further events inside the same bucket as 10% neither append nor edit any
@@ -301,7 +301,7 @@ describe('queue store', () => {
     // chart never draws a point that later moves as it settles.
     apply(10.01, 999)
     apply(10.02, 999)
-    expect(useQueueStore.getState().throughputHistory['op-1']).toEqual(afterTwo)
+    expect(useQueueStore.getState().throughput['op-1']?.history).toEqual(afterTwo)
   })
 
   it('clears a conflict when the op leaves the conflict state', () => {
@@ -385,8 +385,8 @@ describe('queue store', () => {
     const operation = useQueueStore.getState().operations['op-1']
     expect(operation.status).toBe('pending')
     expect(operation.errorMessage).toBeNull()
-    expect(useQueueStore.getState().throughputHistory['op-1']).toEqual([])
-    expect(useQueueStore.getState().throughputPeak['op-1']).toBe(0)
+    expect(useQueueStore.getState().throughput['op-1']?.history).toEqual([])
+    expect(useQueueStore.getState().throughput['op-1']?.peak).toBe(0)
   })
 
   it('resolve clears the conflict locally', () => {
@@ -417,8 +417,8 @@ describe('queue store', () => {
     expect(state.order).toEqual(['op-2'])
     expect(state.operations['op-1']).toBeUndefined()
     expect(state.conflicts['op-1']).toBeUndefined()
-    expect(state.throughputHistory['op-1']).toBeUndefined()
-    expect(state.throughputPeak['op-1']).toBeUndefined()
+    expect(state.throughput['op-1']?.history).toBeUndefined()
+    expect(state.throughput['op-1']?.peak).toBeUndefined()
     expect(orderedOperations(state).map((operation) => operation.operationId)).toEqual(['op-2'])
   })
 
@@ -437,10 +437,10 @@ describe('queue store', () => {
 
     expect(useQueueStore.getState().operations['op-1']).toBeUndefined()
     expect(useQueueStore.getState().operations['op-2']).toBeDefined()
-    expect(useQueueStore.getState().throughputHistory['op-1']).toBeUndefined()
-    expect(useQueueStore.getState().throughputHistory['op-2']).toBeDefined()
-    expect(useQueueStore.getState().throughputPeak['op-1']).toBeUndefined()
-    expect(useQueueStore.getState().throughputPeak['op-2']).toBeDefined()
+    expect(useQueueStore.getState().throughput['op-1']?.history).toBeUndefined()
+    expect(useQueueStore.getState().throughput['op-2']?.history).toBeDefined()
+    expect(useQueueStore.getState().throughput['op-1']?.peak).toBeUndefined()
+    expect(useQueueStore.getState().throughput['op-2']?.peak).toBeDefined()
   })
 
   it('reports terminal status and unfinished work', () => {

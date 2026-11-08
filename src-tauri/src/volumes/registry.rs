@@ -171,13 +171,44 @@ pub struct RegistrySnapshot {
 }
 
 impl RegistrySnapshot {
-    fn empty(now_ms: u64) -> Self {
+    pub fn empty(now_ms: u64) -> Self {
         Self {
             revision: 0,
             captured_at_ms: now_ms,
             stale_since_ms: None,
             refresh_in_flight: false,
             volumes: Vec::new(),
+        }
+    }
+
+    pub fn with_refresh_in_flight(&self, refresh_in_flight: bool) -> Self {
+        Self {
+            refresh_in_flight,
+            ..self.clone()
+        }
+    }
+
+    pub fn marked_stale(&self, now_ms: u64) -> Self {
+        Self {
+            stale_since_ms: Some(self.stale_since_ms.unwrap_or(now_ms)),
+            ..self.clone()
+        }
+    }
+
+    pub fn reobserved(&self, captured_at_ms: u64) -> Self {
+        Self {
+            stale_since_ms: None,
+            captured_at_ms,
+            ..self.clone()
+        }
+    }
+
+    pub fn superseded_by(&self, candidate: RegistrySnapshot) -> Self {
+        Self {
+            revision: self.revision + 1,
+            stale_since_ms: None,
+            refresh_in_flight: self.refresh_in_flight,
+            ..candidate
         }
     }
 
@@ -439,15 +470,13 @@ impl VolumeRegistry {
 
     fn mark_refreshing(&self, refreshing: bool) {
         let mut inner = self.inner.lock().expect("volume registry inner lock");
-        inner.snapshot.refresh_in_flight = refreshing;
+        inner.snapshot = inner.snapshot.with_refresh_in_flight(refreshing);
     }
 
     #[cfg(not(feature = "test-utils"))]
     fn mark_stale(&self) {
         let mut inner = self.inner.lock().expect("volume registry inner lock");
-        if inner.snapshot.stale_since_ms.is_none() {
-            inner.snapshot.stale_since_ms = Some(now_ms());
-        }
+        inner.snapshot = inner.snapshot.marked_stale(now_ms());
     }
 
     /// Publishes `candidate` as the current snapshot only if its volume
@@ -460,24 +489,17 @@ impl VolumeRegistry {
     /// do not bump the revision or emit an event. On a real change, emits
     /// `VOLUMES_CHANGED` exactly as `VolumeMonitorState::emit_if_changed`
     /// used to.
-    fn publish_if_changed(&self, mut candidate: RegistrySnapshot) {
+    fn publish_if_changed(&self, candidate: RegistrySnapshot) {
         let mut inner = self.inner.lock().expect("volume registry inner lock");
 
         if !volumes_changed(&inner.snapshot.volumes, &candidate.volumes) {
-            // Inventory identical: still clear staleness/in-flight markers
-            // since we did just successfully observe the platform, but keep
-            // the existing revision so consumers relying on revision
-            // stability for cache validity are not disturbed.
-            inner.snapshot.stale_since_ms = None;
-            inner.snapshot.captured_at_ms = candidate.captured_at_ms;
+            inner.snapshot = inner.snapshot.reobserved(candidate.captured_at_ms);
             return;
         }
 
-        candidate.revision = inner.snapshot.revision + 1;
-        candidate.stale_since_ms = None;
-        candidate.refresh_in_flight = inner.snapshot.refresh_in_flight;
-        let previous = std::mem::replace(&mut inner.snapshot, candidate.clone());
-        drop(previous);
+        inner.snapshot = inner.snapshot.superseded_by(candidate);
+        #[cfg(not(feature = "test-utils"))]
+        let published = inner.snapshot.clone();
 
         #[cfg(not(feature = "test-utils"))]
         if let Some(app) = inner.app.clone() {
@@ -485,7 +507,7 @@ impl VolumeRegistry {
             let _ = app.emit(
                 crate::ipc::events::VOLUMES_CHANGED,
                 crate::ipc::types::VolumesChangedEvent {
-                    volumes: candidate.to_volume_infos(),
+                    volumes: published.to_volume_infos(),
                 },
             );
         }

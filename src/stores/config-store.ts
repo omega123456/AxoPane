@@ -3,10 +3,13 @@ import type { LogLevel, ThemePreference } from '@/lib/types/ipc'
 import { DEFAULT_DATE_FORMAT, type DateFormat } from '@/lib/date-format'
 import { DEFAULT_UPDATE_INTERVAL, type UpdateInterval } from '@/lib/update-intervals'
 import { persistAppConfig } from '@/lib/app-config'
-import { setLogLevel as setBackendLogLevel } from '@/lib/ipc/commands'
-import { pathsMatch } from '@/lib/path-compare'
-import { clamp } from '@/lib/numbers'
-import { moveItem } from '@/lib/collections'
+import { setLogLevel as applyAndPersistBackendLogLevel } from '@/lib/ipc/commands'
+import {
+  withAddedFavourite,
+  withoutFavourite,
+  withRenamedFavourite,
+  withReorderedFavourite,
+} from '@/stores/config/favourites'
 
 export type ConfigSnapshot = {
   theme: ThemePreference
@@ -79,107 +82,50 @@ export function pickConfigSnapshot(source: Partial<ConfigSnapshot>): ConfigSnaps
   ) as ConfigSnapshot
 }
 
-export const useConfigStore = create<ConfigStore>((set) => ({
-  ...defaultConfigSnapshot(),
-  renamingFavourite: null,
-  hydrate: (config) => set(config),
-  setThemePreference: async (theme) => {
-    set({ theme })
+export const useConfigStore = create<ConfigStore>((set, get) => {
+  const setAndPersist = async (patch: Partial<ConfigStore>) => {
+    set(patch)
     await persistAppConfig()
-  },
-  setShowHiddenFiles: async (showHiddenFiles) => {
-    set({ showHiddenFiles })
-    await persistAppConfig()
-  },
-  setUpdateCheckInterval: async (updateCheckInterval) => {
-    set({ updateCheckInterval })
-    await persistAppConfig()
-  },
-  setDateFormat: async (dateFormat) => {
-    set({ dateFormat })
-    await persistAppConfig()
-  },
-  setShowTime: async (showTime) => {
-    set({ showTime })
-    await persistAppConfig()
-  },
-  setShowSeconds: async (showSeconds) => {
-    set({ showSeconds })
-    await persistAppConfig()
-  },
-  setRelativeDates: async (relativeDates) => {
-    set({ relativeDates })
-    await persistAppConfig()
-  },
-  setAutoFolderSize: async (autoFolderSize) => {
-    set({ autoFolderSize })
-    await persistAppConfig()
-  },
-  setAutoExpandActiveQueueToasts: async (autoExpandActiveQueueToasts) => {
-    set({ autoExpandActiveQueueToasts })
-    await persistAppConfig()
-  },
-  setFavouritesCollapsed: async (favouritesCollapsed) => {
-    set({ favouritesCollapsed })
-    await persistAppConfig()
-  },
-  setLogLevel: async (logLevel) => {
-    set({ logLevel })
-    // Applies to the running backend logger immediately and persists the level
-    // into the app config (config.json), so capture survives restarts.
-    await setBackendLogLevel(logLevel)
-  },
-  dismissEverythingBanner: async () => {
-    set({ dismissedEverythingBanner: true })
-    await persistAppConfig()
-  },
-  addFavourite: async (path, index) => {
-    let changed = false
-    set((state) => {
-      if (state.favourites.some((item) => pathsMatch(item, path))) return state
-      const favourites = [...state.favourites]
-      favourites.splice(clamp(index ?? favourites.length, 0, favourites.length), 0, path)
-      changed = true
-      return { favourites }
-    })
-    if (changed) await persistAppConfig()
-  },
-  removeFavourite: async (path) => {
-    let changed = false
-    set((state) => {
-      const favourites = state.favourites.filter((item) => !pathsMatch(item, path))
-      changed = favourites.length !== state.favourites.length
-      const favouriteNames = Object.fromEntries(
-        Object.entries(state.favouriteNames).filter(([key]) => favourites.includes(key)),
-      )
-      return changed ? { favourites, favouriteNames } : state
-    })
-    if (changed) await persistAppConfig()
-  },
-  setRenamingFavourite: (renamingFavourite) => set({ renamingFavourite }),
-  renameFavourite: async (path, name) => {
-    let changed = false
-    set((state) => {
-      const trimmed = name.trim()
-      const { [path]: previous, ...rest } = state.favouriteNames
-      changed = (trimmed || undefined) !== previous
-      const favouriteNames = trimmed ? { ...rest, [path]: trimmed } : rest
-      return { renamingFavourite: null, ...(changed ? { favouriteNames } : {}) }
-    })
-    if (changed) await persistAppConfig()
-  },
-  reorderFavourite: async (path, index) => {
-    let changed = false
-    set((state) => {
-      const sourceIndex = state.favourites.findIndex((item) => pathsMatch(item, path))
-      if (sourceIndex === -1) return state
-      const adjustedIndex = sourceIndex < index ? index - 1 : index
-      const targetIndex = clamp(adjustedIndex, 0, state.favourites.length - 1)
-      const favourites = moveItem(state.favourites, sourceIndex, targetIndex)
-      changed = sourceIndex !== targetIndex
-      return changed ? { favourites } : state
-    })
-    if (changed) await persistAppConfig()
-  },
-  reset: () => set({ ...defaultConfigSnapshot(), renamingFavourite: null }),
-}))
+  }
+
+  const commitChange = async (patch: Partial<ConfigStore> | null) => {
+    if (!patch) {
+      return
+    }
+    await setAndPersist(patch)
+  }
+
+  return {
+    ...defaultConfigSnapshot(),
+    renamingFavourite: null,
+    hydrate: (config) => set(config),
+    setThemePreference: (theme) => setAndPersist({ theme }),
+    setShowHiddenFiles: (showHiddenFiles) => setAndPersist({ showHiddenFiles }),
+    setUpdateCheckInterval: (updateCheckInterval) => setAndPersist({ updateCheckInterval }),
+    setDateFormat: (dateFormat) => setAndPersist({ dateFormat }),
+    setShowTime: (showTime) => setAndPersist({ showTime }),
+    setShowSeconds: (showSeconds) => setAndPersist({ showSeconds }),
+    setRelativeDates: (relativeDates) => setAndPersist({ relativeDates }),
+    setAutoFolderSize: (autoFolderSize) => setAndPersist({ autoFolderSize }),
+    setAutoExpandActiveQueueToasts: (autoExpandActiveQueueToasts) =>
+      setAndPersist({ autoExpandActiveQueueToasts }),
+    setFavouritesCollapsed: (favouritesCollapsed) => setAndPersist({ favouritesCollapsed }),
+    setLogLevel: async (logLevel) => {
+      set({ logLevel })
+      await applyAndPersistBackendLogLevel(logLevel)
+    },
+    dismissEverythingBanner: () => setAndPersist({ dismissedEverythingBanner: true }),
+    addFavourite: (path, index) => commitChange(withAddedFavourite(get(), path, index)),
+    removeFavourite: (path) => commitChange(withoutFavourite(get(), path)),
+    setRenamingFavourite: (renamingFavourite) => set({ renamingFavourite }),
+    renameFavourite: async (path, name) => {
+      const renamed = withRenamedFavourite(get(), path, name)
+      set({ renamingFavourite: null, ...renamed })
+      if (renamed) {
+        await persistAppConfig()
+      }
+    },
+    reorderFavourite: (path, index) => commitChange(withReorderedFavourite(get(), path, index)),
+    reset: () => set({ ...defaultConfigSnapshot(), renamingFavourite: null }),
+  }
+})

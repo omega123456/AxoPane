@@ -15,6 +15,15 @@ export function withKeyFlags(
   return next
 }
 
+export function withoutKey<Value>(
+  record: Readonly<Record<string, Value>>,
+  key: string,
+): Record<string, Value> {
+  const next = { ...record }
+  delete next[key]
+  return next
+}
+
 /** A copy of `items` with the item at `fromIndex` moved to `toIndex`. */
 export function moveItem<Item>(items: readonly Item[], fromIndex: number, toIndex: number): Item[] {
   const next = [...items]

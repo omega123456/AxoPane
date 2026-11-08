@@ -13,14 +13,15 @@ import { reorderOps } from '@/lib/queue-commands'
 import { DETAIL_SEPARATOR, formatCount } from '@/lib/format'
 import { formatItemPreview, formatJobTitle, jobFlags, type JobFlags } from '@/lib/queue-format'
 import { JobStatusIcon } from '@/components/queue/JobStatusIcon'
-import type { OpProgress, ThroughputSample } from '@/lib/types/ipc'
+import type { OpProgress } from '@/lib/types/ipc'
 import { useQueueStore } from '@/stores/queue-store'
+import { withReorderedPending } from '@/stores/queue/operations'
+import { throughputTrackOf } from '@/stores/queue/throughput'
 import { clampPercent } from '@/lib/numbers'
 import { SCROLLBAR_THIN } from '@/lib/class-names'
 import { TEXT_SECONDARY } from '@/lib/class-names'
 
-/** Move a pending operation within the pending sub-list and persist the order. */
-function reorder(operations: OpProgress[], id: string, delta: number) {
+function movePendingOperation(operations: OpProgress[], id: string, delta: number) {
   const pending = operations
     .filter((operation) => operation.status === 'pending')
     .map((operation) => operation.operationId)
@@ -32,10 +33,7 @@ function reorder(operations: OpProgress[], id: string, delta: number) {
   const next = [...pending]
   ;[next[index], next[target]] = [next[target], next[index]]
   void reorderOps(next)
-  useQueueStore.setState((state) => {
-    const nonPending = state.order.filter((operationId) => !pending.includes(operationId))
-    return { order: [...nonPending, ...next] }
-  })
+  useQueueStore.setState((state) => withReorderedPending(state, pending, next))
 }
 
 function primaryOperation(operations: OpProgress[], conflicts: Record<string, unknown>) {
@@ -212,8 +210,7 @@ function CompactJobRow({
 export function QueuePanel() {
   const order = useQueueStore((state) => state.order)
   const operationsMap = useQueueStore((state) => state.operations)
-  const throughputHistory = useQueueStore((state) => state.throughputHistory)
-  const throughputPeak = useQueueStore((state) => state.throughputPeak)
+  const throughput = useQueueStore((state) => state.throughput)
   const operations = useMemo(
     () =>
       order
@@ -259,8 +256,8 @@ export function QueuePanel() {
         {primary ? (
           <JobCard
             operation={primary}
-            throughputHistory={(throughputHistory[primary.operationId] ?? []) as ThroughputSample[]}
-            throughputPeak={throughputPeak[primary.operationId] ?? 0}
+            throughputHistory={throughputTrackOf(throughput, primary.operationId).history}
+            throughputPeak={throughputTrackOf(throughput, primary.operationId).peak}
             hasConflict={Boolean(conflicts[primary.operationId])}
             reorderable={primary.status === 'pending'}
             onPause={() => pause(primary.operationId)}
@@ -272,12 +269,12 @@ export function QueuePanel() {
             onResolve={() => setExpanded(true)}
             onMoveUp={
               primary.status === 'pending'
-                ? () => reorder(operations, primary.operationId, -1)
+                ? () => movePendingOperation(operations, primary.operationId, -1)
                 : undefined
             }
             onMoveDown={
               primary.status === 'pending'
-                ? () => reorder(operations, primary.operationId, 1)
+                ? () => movePendingOperation(operations, primary.operationId, 1)
                 : undefined
             }
           />
@@ -302,10 +299,14 @@ export function QueuePanel() {
                   onRetry={() => retry(operation.operationId)}
                   onResolve={() => setExpanded(true)}
                   onMoveUp={
-                    reorderable ? () => reorder(operations, operation.operationId, -1) : undefined
+                    reorderable
+                      ? () => movePendingOperation(operations, operation.operationId, -1)
+                      : undefined
                   }
                   onMoveDown={
-                    reorderable ? () => reorder(operations, operation.operationId, 1) : undefined
+                    reorderable
+                      ? () => movePendingOperation(operations, operation.operationId, 1)
+                      : undefined
                   }
                 />
               )

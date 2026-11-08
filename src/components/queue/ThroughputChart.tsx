@@ -3,8 +3,20 @@ import { curveLinear } from '@visx/curve'
 import { scaleLinear } from '@visx/scale'
 import { AreaClosed, LinePath } from '@visx/shape'
 import type { ThroughputSample } from '@/lib/types/ipc'
-import { clamp, clampPercent, PERCENT_SCALE } from '@/lib/numbers'
+import { clampPercent, PERCENT_SCALE } from '@/lib/numbers'
 import scaleSteps from './throughput-scale-steps.json'
+import {
+  advancedTail,
+  animationProgress,
+  easeInOutCubic,
+  easeOutCubic,
+  interpolate,
+  settledTail,
+  tailForTarget,
+  tailIdentity,
+  tweenedSamples,
+  type TailTween,
+} from './throughput-tween'
 
 type ThroughputChartProps = {
   samples: ThroughputSample[]
@@ -40,9 +52,6 @@ const CEILING_HEADROOM = 1.35
 const SCALE_STEPS: readonly number[] = scaleSteps
 const DECIMAL_BASE = 10
 const COORDINATE_PRECISION_DIGITS = 3
-const CUBIC_POWER = 3
-const EASE_IN_OUT_HALVES = 2
-const EASE_IN_OUT_MIDPOINT = 1 / EASE_IN_OUT_HALVES
 const CLIP_ID_PERCENT_PRECISION = 100
 const SCALE_SETTLED_TOLERANCE = 0.5
 const SECOND_TO_LAST_INDEX = -2
@@ -74,167 +83,51 @@ function niceCeilingRate(rate: number) {
   return step * magnitude
 }
 
-function cube(value: number) {
-  return value ** CUBIC_POWER
-}
-
-function easeInOutCubic(progress: number) {
-  return progress < EASE_IN_OUT_MIDPOINT
-    ? cube(progress * EASE_IN_OUT_HALVES) / EASE_IN_OUT_HALVES
-    : 1 - cube(EASE_IN_OUT_HALVES - progress * EASE_IN_OUT_HALVES) / EASE_IN_OUT_HALVES
-}
-
-function easeOutCubic(progress: number) {
-  return 1 - cube(1 - progress)
-}
-
-function interpolate(start: number, end: number, progress: number) {
-  return start + (end - start) * progress
-}
-
 function prefersReducedMotion() {
   return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 }
 
-function sampleKey(sample: ThroughputSample) {
-  return `${sample.percent}:${sample.rate}`
+function cancelFrame(animationRef: { current: number | null }) {
+  if (animationRef.current !== null) {
+    window.cancelAnimationFrame(animationRef.current)
+    animationRef.current = null
+  }
 }
 
-type TailState = {
-  /** Identity of the committed target (length + last point), to detect changes. */
-  identity: string
-  length: number
-  /** Draw-in start point; null when nothing is easing in. */
-  start: ThroughputSample | null
-  end: ThroughputSample | null
-  endKey: string
-  progress: number
-}
-
-function tailIdentity(target: ThroughputSample[]): string {
-  const end = target.at(-1)
-  return `${target.length}|${end ? sampleKey(end) : ''}`
-}
-
-/**
- * Ease a freshly committed point into place. When the sample list grows, the new
- * tail point draws in from the previous (frozen) point over {@link
- * APPEND_ANIMATION_MS}; everything behind it is untouched. Any non-append change
- * (a held bucket, a rescale, a reset) renders straight from `target`, so the only
- * thing that ever moves is the single segment currently being drawn — and it
- * eases toward a fixed committed target, never a wandering one.
- *
- * State is seeded during render (a supported React pattern) so the first painted
- * frame of an append already sits at the start point — the segment grows in with
- * no full-length flash first. `settled` is false only while the draw-in runs, so
- * screenshot waits can hold for a stable frame.
- */
 function useAppendedTail(target: ThroughputSample[]): {
   samples: ThroughputSample[]
   settled: boolean
 } {
   const identity = tailIdentity(target)
-  const [state, setState] = useState<TailState>(() => {
-    const end = target.at(-1) ?? null
-    return {
-      identity,
-      length: target.length,
-      start: null,
-      end,
-      endKey: end ? sampleKey(end) : '',
-      progress: 1,
-    }
-  })
-  const startedAtRef = useRef(0)
+  const [tail, setTail] = useState<TailTween>(() => settledTail(target))
   const animationRef = useRef<number | null>(null)
 
-  if (state.identity !== identity) {
-    const end = target.at(-1) ?? null
-    const previousPoint = target.at(SECOND_TO_LAST_INDEX) ?? null
-    const isAppend = end !== null && target.length > state.length && previousPoint !== null
-    setState({
-      identity,
-      length: target.length,
-      start: isAppend ? previousPoint : null,
-      end,
-      endKey: end ? sampleKey(end) : '',
-      progress: isAppend ? 0 : 1,
-    })
+  if (tail.identity !== identity) {
+    setTail(tailForTarget(tail, target))
   }
 
   useEffect(() => {
-    // start is non-null only for a fresh append; it is cleared once progress hits
-    // 1, so this is equivalent to "an animation is pending".
-    if (state.start === null) {
+    if (tail.start === null) {
       return
     }
 
     const reducedMotion = prefersReducedMotion()
-    startedAtRef.current = performance.now()
-
+    const startedAt = performance.now()
     const tick = (time: number) => {
-      const progress = reducedMotion
-        ? 1
-        : clamp((time - startedAtRef.current) / APPEND_ANIMATION_MS, 0, 1)
-      setState((previous) =>
-        previous.identity === state.identity
-          ? { ...previous, progress, start: progress >= 1 ? null : previous.start }
-          : previous,
-      )
-
-      if (progress < 1) {
-        animationRef.current = window.requestAnimationFrame(tick)
-        return
-      }
-      animationRef.current = null
+      const progress = animationProgress(time - startedAt, APPEND_ANIMATION_MS, reducedMotion)
+      setTail((previous) => advancedTail(previous, tail.identity, progress))
+      animationRef.current = progress < 1 ? window.requestAnimationFrame(tick) : null
     }
 
-    if (animationRef.current !== null) {
-      window.cancelAnimationFrame(animationRef.current)
-    }
+    cancelFrame(animationRef)
     animationRef.current = window.requestAnimationFrame(tick)
+    return () => cancelFrame(animationRef)
+  }, [tail.identity, tail.start])
 
-    return () => {
-      if (animationRef.current !== null) {
-        window.cancelAnimationFrame(animationRef.current)
-        animationRef.current = null
-      }
-    }
-  }, [state.identity, state.start])
-
-  const samples = useMemo(() => {
-    if (target.length === 0) {
-      return target
-    }
-    const end = target[target.length - 1]
-    if (
-      state.start !== null &&
-      state.end !== null &&
-      state.progress < 1 &&
-      state.endKey === sampleKey(end)
-    ) {
-      const eased = easeOutCubic(state.progress)
-      return [
-        ...target.slice(0, -1),
-        {
-          percent: interpolate(state.start.percent, state.end.percent, eased),
-          rate: interpolate(state.start.rate, state.end.rate, eased),
-        },
-      ]
-    }
-    return target
-  }, [target, state.start, state.end, state.progress, state.endKey])
-
-  return { samples, settled: state.start === null }
+  const samples = useMemo(() => tweenedSamples(target, tail), [target, tail])
+  return { samples, settled: tail.start === null }
 }
 
-/**
- * Ease a single scalar toward `target`, re-aiming from wherever it currently sits
- * whenever `target` changes. Used for the Y-axis ceiling (so a rescale glides
- * instead of snapping) and for the progress edge (so a big speed/progress jump
- * sweeps the fill + leading line across smoothly rather than teleporting). The
- * sample geometry is never routed through this — committed points stay frozen.
- */
 function useEasedScalar(target: number, durationMs: number, easing: (progress: number) => number) {
   const [displayed, setDisplayed] = useState(target)
   const displayedRef = useRef(target)
@@ -246,43 +139,24 @@ function useEasedScalar(target: number, durationMs: number, easing: (progress: n
 
   useEffect(() => {
     const startValue = displayedRef.current
-    // Already there — nothing to animate.
     if (startValue === target) {
       return
     }
 
-    // Reduced-motion users snap on the first frame (progress pinned to 1); the
-    // single setState site stays inside the rAF callback, never the effect body.
     const reducedMotion = prefersReducedMotion()
     const startedAt = performance.now()
-
     const tick = (time: number) => {
-      const progress = reducedMotion ? 1 : clamp((time - startedAt) / durationMs, 0, 1)
-      const nextValue = interpolate(startValue, target, easing(progress))
+      const progress = animationProgress(time - startedAt, durationMs, reducedMotion)
+      const finished = progress >= 1
+      const nextValue = finished ? target : interpolate(startValue, target, easing(progress))
       displayedRef.current = nextValue
       setDisplayed(nextValue)
-
-      if (progress < 1) {
-        animationRef.current = window.requestAnimationFrame(tick)
-        return
-      }
-
-      animationRef.current = null
-      displayedRef.current = target
-      setDisplayed(target)
+      animationRef.current = finished ? null : window.requestAnimationFrame(tick)
     }
 
-    if (animationRef.current !== null) {
-      window.cancelAnimationFrame(animationRef.current)
-    }
+    cancelFrame(animationRef)
     animationRef.current = window.requestAnimationFrame(tick)
-
-    return () => {
-      if (animationRef.current !== null) {
-        window.cancelAnimationFrame(animationRef.current)
-        animationRef.current = null
-      }
-    }
+    return () => cancelFrame(animationRef)
   }, [target, durationMs, easing])
 
   return displayed

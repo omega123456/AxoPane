@@ -213,6 +213,37 @@ function resultCacheRecord(event: ThumbnailResultEvent, now: number): ThumbnailC
   }
 }
 
+type ThumbnailData = Pick<ThumbnailStore, 'scopes' | 'cache'>
+
+function withoutScope(state: ThumbnailData, key: string, now: number): ThumbnailData {
+  const scopes = { ...state.scopes }
+  delete scopes[key]
+  return { scopes, cache: pruneThumbnailCache(state.cache, visibleProtection(scopes), now) }
+}
+
+function acceptedResults(state: ThumbnailData, events: ThumbnailResultEvent[]) {
+  return events.filter((event) => {
+    const scope = state.scopes[scopeKey(event.paneId, event.tabId)]
+    return scopeAcceptsResult(scope, event, resultFingerprint(event))
+  })
+}
+
+function withThumbnailResults(
+  state: ThumbnailData,
+  events: ThumbnailResultEvent[],
+  now: number,
+): Pick<ThumbnailData, 'cache'> | null {
+  const accepted = acceptedResults(state, events)
+  if (accepted.length === 0) {
+    return null
+  }
+  const cache = { ...state.cache }
+  for (const event of accepted) {
+    cache[resultFingerprint(event)] = resultCacheRecord(event, now)
+  }
+  return { cache: pruneThumbnailCache(cache, visibleProtection(state.scopes), now) }
+}
+
 export const useThumbnailStore = create<ThumbnailStore>((set, get) => ({
   scopes: {},
   cache: {},
@@ -274,33 +305,13 @@ export const useThumbnailStore = create<ThumbnailStore>((set, get) => ({
     const previous = get().scopes[key]
     if (!previous) return
     await cancelThumbnails(previous)
-    set((state) => {
-      const scopes = { ...state.scopes }
-      delete scopes[key]
-      return {
-        scopes,
-        cache: pruneThumbnailCache(state.cache, visibleProtection(scopes), cacheNow()),
-      }
-    })
+    set((state) => withoutScope(state, key, cacheNow()))
   },
-  applyThumbnailResults: (events) =>
-    set((state) => {
-      if (events.length === 0) return state
-      const now = cacheNow()
-      const cache = { ...state.cache }
-      let changed = false
-      for (const event of events) {
-        const scope = state.scopes[scopeKey(event.paneId, event.tabId)]
-        const fingerprint = resultFingerprint(event)
-        if (!scopeAcceptsResult(scope, event, fingerprint)) {
-          continue
-        }
-        cache[fingerprint] = resultCacheRecord(event, now)
-        changed = true
-      }
-      if (!changed) return state
-      return { cache: pruneThumbnailCache(cache, visibleProtection(state.scopes), now) }
-    }),
+  applyThumbnailResults: (events) => {
+    if (events.length === 0) return
+    const now = cacheNow()
+    set((state) => withThumbnailResults(state, events, now) ?? state)
+  },
   getRecord: (candidate) => {
     const record = get().cache[thumbnailFingerprintKey(candidate)]
     return record && isThumbnailCacheRecordUsable(record, cacheNow()) ? record : undefined

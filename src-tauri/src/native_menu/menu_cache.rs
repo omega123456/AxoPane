@@ -27,6 +27,45 @@ struct CacheFlight {
     ready: Condvar,
 }
 
+enum Flight {
+    Leader(Arc<CacheFlight>),
+    Follower(Arc<CacheFlight>),
+}
+
+impl CacheFlight {
+    fn new() -> Self {
+        Self {
+            result: Mutex::new(None),
+            ready: Condvar::new(),
+        }
+    }
+
+    fn publish(&self, structure: Vec<ProviderNativeMenuItem>) {
+        *self.result.lock().expect("menu cache flight result lock") = Some(structure);
+        self.ready.notify_all();
+    }
+
+    fn read_when_ready<R>(&self, read: impl FnOnce(&[ProviderNativeMenuItem]) -> R) -> R {
+        let mut result = self.result.lock().expect("menu cache flight result lock");
+        while result.is_none() {
+            result = self.ready.wait(result).expect("menu cache flight wait");
+        }
+        read(result.as_ref().expect("menu cache flight result"))
+    }
+}
+
+impl Flight {
+    fn is_leader(&self) -> bool {
+        matches!(self, Self::Leader(_))
+    }
+
+    fn shared(&self) -> &CacheFlight {
+        match self {
+            Self::Leader(flight) | Self::Follower(flight) => flight,
+        }
+    }
+}
+
 impl Default for MenuCache {
     fn default() -> Self {
         Self {
@@ -53,9 +92,6 @@ impl MenuCache {
         entries.insert(key, structuralize_items(items), weight);
     }
 
-    /// Gets a path-rebound cached structure or makes exactly one caller load it.
-    /// Concurrent equivalent warm (or interactive) requests wait for the same
-    /// structural result instead of independently invoking shell extensions.
     pub fn get_or_load<F>(
         &self,
         request: &LoadNativeMenuRequest,
@@ -69,47 +105,49 @@ impl MenuCache {
         }
 
         let key = cache_key(request);
-        let (flight, leader) = {
-            let mut flights = self.in_flight.lock().expect("menu cache flights lock");
-            match flights.get(&key) {
-                Some(flight) => (Arc::clone(flight), false),
-                None => {
-                    let flight = Arc::new(CacheFlight {
-                        result: Mutex::new(None),
-                        ready: Condvar::new(),
-                    });
-                    flights.insert(key.clone(), Arc::clone(&flight));
-                    (flight, true)
-                }
-            }
-        };
-
-        if leader {
-            let fresh = load();
-            self.insert(request, &fresh);
-            let structure = self
-                .entries
-                .lock()
-                .expect("menu cache lock")
-                .get(&key)
-                .expect("fresh native menu cache entry")
-                .to_vec();
-            *flight.result.lock().expect("menu cache flight result lock") = Some(structure);
-            flight.ready.notify_all();
-            self.in_flight
-                .lock()
-                .expect("menu cache flights lock")
-                .remove(&key);
+        let flight = self.join_flight(&key);
+        if flight.is_leader() {
+            self.lead_flight(flight.shared(), &key, request, load);
         }
+        let items = flight
+            .shared()
+            .read_when_ready(|structure| rebind_items(structure, request));
+        (items, flight.is_leader())
+    }
 
-        let mut result = flight.result.lock().expect("menu cache flight result lock");
-        while result.is_none() {
-            result = flight.ready.wait(result).expect("menu cache flight wait");
+    fn join_flight(&self, key: &String) -> Flight {
+        let mut flights = self.in_flight.lock().expect("menu cache flights lock");
+        if let Some(flight) = flights.get(key) {
+            return Flight::Follower(Arc::clone(flight));
         }
-        (
-            rebind_items(result.as_ref().expect("menu cache flight result"), request),
-            leader,
-        )
+        let flight = Arc::new(CacheFlight::new());
+        flights.insert(key.clone(), Arc::clone(&flight));
+        Flight::Leader(flight)
+    }
+
+    fn lead_flight<F>(
+        &self,
+        flight: &CacheFlight,
+        key: &String,
+        request: &LoadNativeMenuRequest,
+        load: F,
+    ) where
+        F: FnOnce() -> Vec<ProviderNativeMenuItem>,
+    {
+        let fresh = load();
+        self.insert(request, &fresh);
+        let structure = self
+            .entries
+            .lock()
+            .expect("menu cache lock")
+            .get(key)
+            .expect("fresh native menu cache entry")
+            .to_vec();
+        flight.publish(structure);
+        self.in_flight
+            .lock()
+            .expect("menu cache flights lock")
+            .remove(key);
     }
 
     pub fn len(&self) -> usize {

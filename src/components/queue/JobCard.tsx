@@ -24,6 +24,11 @@ import { clampPercent } from '@/lib/numbers'
 import { SCROLLBAR_THIN } from '@/lib/class-names'
 import { TEXT_SECONDARY } from '@/lib/class-names'
 import { JobStatusIcon } from '@/components/queue/JobStatusIcon'
+import {
+  announcementToPublish,
+  isDiscoveringBytes,
+  retainedCurrentFile,
+} from '@/components/queue/job-view-state'
 
 type JobCardProps = {
   operation: OpProgress
@@ -74,20 +79,13 @@ function displayedItemNumber(operation: OpProgress, isFinished: boolean) {
   return Math.min(operation.completedItems + 1, operation.totalItems)
 }
 
-/**
- * The backend briefly clears the current-file fields between finishing one
- * file and starting the next, which would otherwise make the card's height
- * jump. Keep showing the last known file through that gap. (React's documented
- * "adjusting state during render" pattern — the guarded `setState` only fires
- * when the snapshot actually changed, so it settles in the same render pass.)
- */
 function useLastCurrentFile(currentFileName: string | null) {
   const [lastCurrentFile, setLastCurrentFile] = useState(currentFileName)
-  const fileChanged = currentFileName !== null && currentFileName !== lastCurrentFile
-  if (fileChanged) {
-    setLastCurrentFile(currentFileName)
+  const retainedFile = retainedCurrentFile(lastCurrentFile, currentFileName)
+  if (retainedFile !== lastCurrentFile) {
+    setLastCurrentFile(retainedFile)
   }
-  return lastCurrentFile
+  return retainedFile
 }
 
 type LiveJobView = {
@@ -97,11 +95,6 @@ type LiveJobView = {
   peak: number
 }
 
-/**
- * Throttles the live view (numbers + chart) to a calm, fixed cadence so they
- * update together a few times per second — like the Windows copy dialog —
- * rather than on every backend event.
- */
 function useThrottledJobView(liveView: LiveJobView) {
   const [view, setView] = useState({ ...liveView, scanning: false })
   const latestViewRef = useRef(liveView)
@@ -112,7 +105,7 @@ function useThrottledJobView(liveView: LiveJobView) {
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       const latest = latestViewRef.current
-      const scanning = latest.operation.totalBytes > lastTotalBytesRef.current
+      const scanning = isDiscoveringBytes(latest.operation.totalBytes, lastTotalBytesRef.current)
       lastTotalBytesRef.current = latest.operation.totalBytes
       setView({ ...latest, scanning })
     }, METRICS_REFRESH_MS)
@@ -148,9 +141,12 @@ function useThrottledAnnouncement(announcement: string) {
 
     liveRegionTimerRef.current = window.setTimeout(() => {
       liveRegionTimerRef.current = null
-      const nextAnnouncement = pendingLiveAnnouncementRef.current
+      const nextAnnouncement = announcementToPublish(
+        pendingLiveAnnouncementRef.current,
+        liveAnnouncementRef.current,
+      )
       pendingLiveAnnouncementRef.current = null
-      if (nextAnnouncement !== null && nextAnnouncement !== liveAnnouncementRef.current) {
+      if (nextAnnouncement !== null) {
         setLiveAnnouncement(nextAnnouncement)
         liveAnnouncementRef.current = nextAnnouncement
       }

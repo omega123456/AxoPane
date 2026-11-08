@@ -13,282 +13,30 @@ import { WorkspaceLayout } from '@/components/shell/WorkspaceLayout'
 import { QueueOverlay } from '@/components/queue/QueueOverlay'
 import { DragCursorBadge } from '@/components/states/DragCursorBadge'
 import { ErrorToast } from '@/components/states/ErrorToast'
-import { hydrateAppConfig, persistAppConfig } from '@/lib/app-config'
-import { executeCommand } from '@/lib/commands'
-import { folderSizeIndexStatus, listVolumes, loadConfig, loadSession } from '@/lib/ipc/commands'
-import { installCloseGuard } from '@/lib/close-guard'
-import {
-  onDirSessionPatch,
-  onIconState,
-  onItemCountState,
-  onSizeIndexStatus,
-  onSizeState,
-  onThumbnailState,
-  onVolumesChanged,
-} from '@/lib/ipc/events'
-import { resolveCommandForEvent } from '@/lib/keymap'
-import { subscribeNativeDragPositions } from '@/lib/native-drag-bridge'
-import { createRafBatcher } from '@/lib/raf-batcher'
-import type {
-  IconStateEvent,
-  ItemCountEvent,
-  SizeStateEvent,
-  ThumbnailResultEvent,
-} from '@/lib/types/ipc'
+import { startAppBootstrap } from '@/lib/app-bootstrap'
+import { useAppEventSubscriptions } from '@/lib/use-app-event-subscriptions'
 import { UpdateBanner } from '@/components/states/UpdateBanner'
 import { EverythingBanner } from '@/components/states/EverythingBanner'
-import { useUpdaterStore } from '@/stores/updater-store'
-import { useClipboardStore } from '@/stores/clipboard-store'
 import { useConfigStore } from '@/stores/config-store'
-import { useLayoutStore } from '@/stores/layout-store'
-import { useKeymapStore } from '@/stores/keymap-store'
 import { initializePanes, usePanesStore } from '@/stores/panes-store'
 import { activeConflict, useQueueStore } from '@/stores/queue-store'
-import { initializeTheme, useThemeStore } from '@/stores/theme-store'
-import { applyWindowBackdrop } from '@/lib/window-commands'
-import { useThumbnailStore } from '@/stores/thumbnail-store'
-import { otherPane } from '@/lib/pane-id'
-import { isEditableTarget } from '@/lib/editable-target'
-import { useModalOpen } from '@/lib/use-modal-open'
-import type { PaneId } from '@/types/pane'
-
-const MOUSE_BUTTON_BACK = 3
-const MOUSE_BUTTON_FORWARD = 4
-
-type HistoryNavigation = (paneId: PaneId) => Promise<void>
-
-const historyNavigationByMouseButton: Partial<Record<number, HistoryNavigation>> = {
-  [MOUSE_BUTTON_BACK]: (paneId) => usePanesStore.getState().goBack(paneId),
-  [MOUSE_BUTTON_FORWARD]: (paneId) => usePanesStore.getState().goForward(paneId),
-}
-
-function focusOtherPane() {
-  const nextPaneId = otherPane(usePanesStore.getState().activePaneId)
-  usePanesStore.getState().setActivePane(nextPaneId)
-  document.querySelector<HTMLElement>(`[data-pane-id="${nextPaneId}"]`)?.focus()
-}
+import { useThemeStore } from '@/stores/theme-store'
 
 function App() {
-  const initialize = usePanesStore((state) => state.initialize)
-  const setFolderSizeIndexStatus = usePanesStore((state) => state.setFolderSizeIndexStatus)
-  const setVolumes = usePanesStore((state) => state.setVolumes)
   const treeRoots = usePanesStore((state) => state.treeRoots)
-  const applySizeStates = usePanesStore((state) => state.applySizeStates)
-  const applyIconStates = usePanesStore((state) => state.applyIconStates)
-  const applyItemCountEvents = usePanesStore((state) => state.applyItemCountEvents)
-  const applySessionPatch = usePanesStore((state) => state.applySessionPatch)
-  const applyThumbnailResults = useThumbnailStore((state) => state.applyThumbnailResults)
-  const reloadPane = usePanesStore((state) => state.reloadPane)
   const theme = useThemeStore((state) => state.theme)
   const applyTheme = useThemeStore((state) => state.setTheme)
-  const syncThemePreference = useThemeStore((state) => state.setThemePreference)
   const persistThemePreference = useConfigStore((state) => state.setThemePreference)
-  const defaultPaneMode = useLayoutStore((state) => state.defaultPaneMode)
-  const keymap = useKeymapStore((state) => state.bindings)
-  const modalOpen = useModalOpen()
-  const updateCheckInterval = useConfigStore((state) => state.updateCheckInterval)
   const conflict = useQueueStore(activeConflict)
   const resolveConflict = useQueueStore((state) => state.resolve)
 
-  useEffect(() => {
-    initializeTheme()
-    void applyWindowBackdrop()
-
-    // Subscribe to folder-size status changes before the single initial
-    // fetch, so no transition between the two is missed.
-    const unlistenStatusPromise = onSizeIndexStatus(setFolderSizeIndexStatus)
-
-    void (async () => {
-      const [config, session, status, nextVolumes] = await Promise.all([
-        loadConfig(),
-        loadSession(),
-        unlistenStatusPromise.then(() => folderSizeIndexStatus()),
-        listVolumes(),
-      ])
-
-      const { config: hydratedConfig, migrated } = hydrateAppConfig(config)
-      syncThemePreference(hydratedConfig.theme)
-
-      if (migrated) {
-        await persistAppConfig()
-      }
-
-      initialize({
-        session,
-        showHiddenFiles: hydratedConfig.showHiddenFiles,
-        folderSizeIndexStatus: status,
-        volumes: nextVolumes,
-      })
-
-      await Promise.all([reloadPane('left'), reloadPane('right')])
-    })()
-
-    return () => {
-      void unlistenStatusPromise.then((unlisten) => unlisten())
-    }
-  }, [initialize, reloadPane, setFolderSizeIndexStatus, syncThemePreference])
+  useEffect(() => startAppBootstrap(), [])
 
   useEffect(() => {
     void initializePanes()
   }, [treeRoots])
 
-  useEffect(() => {
-    // Always checks once on launch, then schedules background polls at the
-    // configured cadence. Re-runs when the cadence setting changes.
-    useUpdaterStore.getState().startPeriodicCheck()
-    return () => {
-      useUpdaterStore.getState().stopPeriodicCheck()
-    }
-  }, [updateCheckInterval])
-
-  useEffect(() => {
-    let unlisten: (() => void) | undefined
-    void installCloseGuard().then((dispose) => {
-      unlisten = dispose
-    })
-    return () => {
-      unlisten?.()
-    }
-  }, [])
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      const keyBelongsElsewhere = modalOpen || isEditableTarget(event.target)
-      if (keyBelongsElsewhere) {
-        return
-      }
-
-      if (event.key === 'Tab' && defaultPaneMode === 'dual') {
-        event.preventDefault()
-        focusOtherPane()
-        return
-      }
-
-      const commandId = resolveCommandForEvent(event, keymap)
-      if (!commandId) {
-        return
-      }
-
-      event.preventDefault()
-      executeCommand(commandId, usePanesStore.getState().activePaneId)
-    }
-
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [defaultPaneMode, keymap, modalOpen])
-
-  useEffect(() => {
-    // The back/forward mouse buttons drive history navigation on the active
-    // pane. A mousedown over a pane already sets it active, so by the time we
-    // read `activePaneId` here it reflects the pane under the cursor.
-    function onMouseUp(event: MouseEvent) {
-      const navigateHistory = historyNavigationByMouseButton[event.button]
-      if (!navigateHistory) {
-        return
-      }
-      if (modalOpen) {
-        return
-      }
-
-      event.preventDefault()
-      void navigateHistory(usePanesStore.getState().activePaneId)
-    }
-
-    window.addEventListener('mouseup', onMouseUp)
-    return () => window.removeEventListener('mouseup', onMouseUp)
-  }, [modalOpen])
-
-  useEffect(() => {
-    // Another application can only copy files while it holds the focus, so
-    // regaining the focus is the one moment where the OS clipboard can differ
-    // from what this app knows. There is no clipboard change event to watch.
-    const syncClipboard = () => {
-      void useClipboardStore.getState().syncFromOs()
-    }
-
-    syncClipboard()
-    window.addEventListener('focus', syncClipboard)
-    return () => window.removeEventListener('focus', syncClipboard)
-  }, [])
-
-  useEffect(() => {
-    // Icon/size events can arrive in bursts (e.g. loading a folder full of
-    // executables/subfolders); coalesce each burst into a single batched
-    // store update per animation frame instead of one `set` per event.
-    const iconBatcher = createRafBatcher<IconStateEvent>((batch) => {
-      applyIconStates(batch)
-    })
-    const sizeBatcher = createRafBatcher<SizeStateEvent>((batch) => {
-      applySizeStates(batch)
-    })
-    const itemCountBatcher = createRafBatcher<ItemCountEvent>((batch) => {
-      applyItemCountEvents(batch)
-    })
-    const thumbnailBatcher = createRafBatcher<ThumbnailResultEvent>((batch) => {
-      applyThumbnailResults(batch)
-    })
-    const unlistenVolumesPromise = onVolumesChanged((event) => {
-      setVolumes(event.volumes)
-    })
-
-    const unlistenSizesPromise = onSizeState((events) => {
-      for (const event of events) {
-        sizeBatcher.push(event)
-      }
-    })
-
-    const unlistenIconsPromise = onIconState((events) => {
-      for (const event of events) {
-        iconBatcher.push(event)
-      }
-    })
-
-    const unlistenItemCountsPromise = onItemCountState((event) => {
-      itemCountBatcher.push(event)
-    })
-
-    const unlistenPatchesPromise = onDirSessionPatch((event) => {
-      applySessionPatch(event)
-    })
-
-    const unlistenThumbnailsPromise = onThumbnailState((events) => {
-      for (const event of events) {
-        thumbnailBatcher.push(event)
-      }
-    })
-
-    // Replays an OS-owned drag session as DOM drag events; the webview never
-    // sees one otherwise.
-    const unlistenDragPositionsPromise = subscribeNativeDragPositions()
-
-    return () => {
-      void unlistenDragPositionsPromise.then((unlisten) => unlisten())
-      void unlistenVolumesPromise.then((unlisten) => unlisten())
-      void unlistenSizesPromise.then((unlisten) => unlisten())
-      void unlistenIconsPromise.then((unlisten) => unlisten())
-      void unlistenItemCountsPromise.then((unlisten) => unlisten())
-      void unlistenPatchesPromise.then((unlisten) => unlisten())
-      void unlistenThumbnailsPromise.then((unlisten) => unlisten())
-      // Flush any buffered events before tearing down so a burst that lands
-      // right before unmount is not silently dropped, then cancel the
-      // batchers so no further frame callback fires.
-      iconBatcher.flush()
-      iconBatcher.cancel()
-      sizeBatcher.flush()
-      sizeBatcher.cancel()
-      itemCountBatcher.flush()
-      itemCountBatcher.cancel()
-      thumbnailBatcher.flush()
-      thumbnailBatcher.cancel()
-    }
-  }, [
-    applySessionPatch,
-    applyIconStates,
-    applyItemCountEvents,
-    applySizeStates,
-    applyThumbnailResults,
-    setVolumes,
-  ])
+  useAppEventSubscriptions()
 
   return (
     <main className="flex h-full select-none flex-col overflow-hidden overscroll-x-none bg-light-base font-ui text-light-text dark:bg-dark-base dark:text-dark-text mica:bg-transparent">

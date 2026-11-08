@@ -1,10 +1,9 @@
 import { memo, useRef, useState, type DragEvent, type MouseEvent } from 'react'
 import { EntryIcon } from '@/components/icons/EntryIcon'
-import { pathsMatch } from '@/lib/path-compare'
-import { useConfigStore } from '@/stores/config-store'
 import { useDragStore } from '@/stores/drag-store'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
 import { SelectionPill } from '@/components/controls/SelectionPill'
+import { canDropOnFavourite, dropOntoFavourite } from './favourite-drop'
 
 export function favouriteLabel(path: string) {
   const trimmed = path.replace(/[\\/]+$/, '')
@@ -35,13 +34,8 @@ function FavouriteTreeRowImpl({ path, name, index, isCurrent, isRenaming, action
   const renameCancelled = useRef(false)
   const label = name ?? favouriteLabel(path)
 
-  function canAcceptDrop() {
-    const drag = useDragStore.getState().drag
-    return drag?.kind === 'favourite' || drag?.items.some((item) => item.isDir) === true
-  }
-
   function handleDragOver(event: DragEvent<HTMLDivElement>) {
-    if (!canAcceptDrop()) return
+    if (!canDropOnFavourite(useDragStore.getState().drag)) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
     setIsDropTarget(true)
@@ -52,20 +46,7 @@ function FavouriteTreeRowImpl({ path, name, index, isCurrent, isRenaming, action
     const drag = useDragStore.getState().drag
     useDragStore.getState().end()
     setIsDropTarget(false)
-    if (drag?.kind === 'favourite') {
-      if (!pathsMatch(drag.path, path))
-        await useConfigStore.getState().reorderFavourite(drag.path, index)
-      return
-    }
-    if (drag?.kind === 'file-transfer') {
-      let insertAt = index
-      for (const item of drag.items) {
-        if (item.isDir) {
-          await useConfigStore.getState().addFavourite(item.path, insertAt)
-          insertAt += 1
-        }
-      }
-    }
+    await dropOntoFavourite(drag, { path, index })
   }
 
   return (
