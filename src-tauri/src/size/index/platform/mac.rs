@@ -309,7 +309,8 @@ unsafe fn schedule_and_pump_stream(
 ) {
     let run_loop = cf::CFRunLoopGetCurrent();
     fse::FSEventStreamScheduleWithRunLoop(stream, run_loop, cf::kCFRunLoopDefaultMode);
-    if fse::FSEventStreamStart(stream) == 0 {
+    let start_failed = fse::FSEventStreamStart(stream) == 0;
+    if start_failed {
         let _ = started.send(None);
         return;
     }

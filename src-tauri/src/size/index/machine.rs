@@ -396,7 +396,8 @@ impl Machine {
     }
 
     pub(super) fn prune(&mut self, dir: &Path) {
-        if !self.shared.roots.iter().any(|root| root == dir) {
+        let is_root = self.shared.roots.iter().any(|root| root == dir);
+        if !is_root {
             self.shared.view_mut().tree.prune(dir);
         }
     }
@@ -559,7 +560,8 @@ impl RawEventBatch {
             || flags.root_changed;
         // Drops other volumes, devfs and the non-Data parts of
         // `/System/Volumes`; Data-prefixed paths were normalized.
-        if forces_full_rescan || shared.indexes(&path) {
+        let should_record = forces_full_rescan || shared.indexes(&path);
+        if should_record {
             self.live.push(ChangeEvent { path, flags });
         }
     }

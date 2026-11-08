@@ -1,6 +1,7 @@
 import type { PaneViewMode } from './pane-view'
 import { clamp } from '@/lib/numbers'
 import { lookupOwnProperty } from '@/lib/collections'
+import { hasPrimaryModifier } from '@/lib/key-table'
 
 export const PANE_GRID_GAP = 4
 export const PANE_GRID_MAX_COLUMNS = 12
@@ -165,8 +166,7 @@ const modifiedGridKeyMovements: Readonly<Record<string, GridMovement>> = {
 type GridKeyEvent = { key: string; ctrlKey: boolean; metaKey: boolean }
 
 export function gridKeyMovement(event: GridKeyEvent): GridMovement | undefined {
-  const withPrimaryModifier = event.ctrlKey || event.metaKey
-  const modified = withPrimaryModifier
+  const modified = hasPrimaryModifier(event)
     ? lookupOwnProperty(modifiedGridKeyMovements, event.key)
     : undefined
   return modified ?? lookupOwnProperty(gridKeyMovements, event.key)

@@ -477,7 +477,8 @@ fn iexplorer_command_cached_clsids() -> Vec<u128> {
         else {
             continue;
         };
-        if GUID::from_u128(iid) == iexplorer_command_iid {
+        let implements_explorer_command = GUID::from_u128(iid) == iexplorer_command_iid;
+        if implements_explorer_command {
             clsids.push(clsid);
         }
     }
@@ -683,7 +684,8 @@ impl RegKey {
                 Some(&mut size),
             )
         };
-        if result != ERROR_SUCCESS || size == 0 {
+        let has_value = result == ERROR_SUCCESS && size != 0;
+        if !has_value {
             return None;
         }
 

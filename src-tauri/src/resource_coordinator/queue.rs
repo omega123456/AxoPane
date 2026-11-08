@@ -94,7 +94,8 @@ impl Occupancy {
 
     fn class_has_room(&self, class: JobClass, request: &JobRequest) -> bool {
         let current_global = *self.global.get(&class).unwrap_or(&0);
-        if current_global + 1 > Self::global_cap(class) {
+        let global_cap = Self::global_cap(class);
+        if current_global + 1 > global_cap {
             return false;
         }
         limited_resource_keys(class, request).all(|key| {

@@ -125,7 +125,8 @@ function normalizeColumns(columns: ColumnConfig[]) {
   const seen = new Set<ColumnKey>()
   const ordered: ColumnConfig[] = []
   for (const column of columns) {
-    if (columnOrder.includes(column.key) && !seen.has(column.key)) {
+    const isFirstOrderedOccurrence = columnOrder.includes(column.key) && !seen.has(column.key)
+    if (isFirstOrderedOccurrence) {
       seen.add(column.key)
       ordered.push(column)
     }
@@ -149,7 +150,10 @@ function normalizeColumnWidths(widths: ColumnWidths | undefined) {
 
   for (const key of columnOrder) {
     const value = widths[key]
-    if (typeof value === 'number' && Number.isFinite(value)) {
+    if (typeof value !== 'number') {
+      continue
+    }
+    if (Number.isFinite(value)) {
       normalized[key] = clampColumnWidth(value)
     }
   }

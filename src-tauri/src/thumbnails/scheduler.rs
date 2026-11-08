@@ -97,6 +97,12 @@ struct Job {
     active: bool,
 }
 
+impl Job {
+    fn has_subscribers(&self) -> bool {
+        !self.subscribers.is_empty()
+    }
+}
+
 #[derive(Clone, Copy)]
 struct SubscriberRank {
     priority: ThumbnailPriority,
@@ -171,7 +177,7 @@ struct UnsubscribedJobs {
 
 impl UnsubscribedJobs {
     fn record(&mut self, key: &ThumbnailCacheKey, job: &Job) {
-        if !job.subscribers.is_empty() {
+        if job.has_subscribers() {
             return;
         }
         if job.active {
@@ -564,7 +570,8 @@ impl ThumbnailScheduler {
 
 impl Drop for ThumbnailScheduler {
     fn drop(&mut self) {
-        if Arc::strong_count(&self.workers) == 1 {
+        let last_handle = Arc::strong_count(&self.workers) == 1;
+        if last_handle {
             self.shutdown();
         }
     }
@@ -604,7 +611,8 @@ fn generate_if_current(
     key: &ThumbnailCacheKey,
     candidate: &ThumbnailCandidate,
 ) -> Option<ThumbnailState> {
-    if !(shared.metadata_matches)(candidate) {
+    let still_current = (shared.metadata_matches)(candidate);
+    if !still_current {
         return None;
     }
     let permit = shared.coordinator.submit(JobSpec::new(

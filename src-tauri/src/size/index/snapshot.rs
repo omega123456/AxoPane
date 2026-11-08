@@ -5,24 +5,34 @@ use super::persist::{self};
 use super::machine::{Machine, Phase};
 
 impl Machine {
+    fn holds_saved_event_id(&self) -> bool {
+        self.background_inflight > 0 || matches!(self.phase, Phase::ReplayingHistory(_))
+    }
+
+    fn snapshot_event_id(&self) -> u64 {
+        if let Some(full) = &self.full {
+            return full.captured_id;
+        }
+        if self.holds_saved_event_id() {
+            return self.meta.event_id;
+        }
+        self.last_applied_id
+    }
+
     /// Writes the snapshot if anything changed. The saved event ID
     /// is the pre-scan one while a full scan runs, and stays put while
     /// subtree scans are in flight, so a relaunch replays what they cover.
     pub(super) fn save_snapshot(&mut self) {
-        if self.stream.is_none() || matches!(self.phase, Phase::Booting) {
+        if self.stream.is_none() {
             return;
         }
-        let event_id = match &self.full {
-            Some(full) => full.captured_id,
-            None if self.background_inflight > 0
-                || matches!(self.phase, Phase::ReplayingHistory(_)) =>
-            {
-                self.meta.event_id
-            }
-            None => self.last_applied_id,
-        };
+        if matches!(self.phase, Phase::Booting) {
+            return;
+        }
+        let event_id = self.snapshot_event_id();
         let mut view = self.shared.view_mut();
-        if !view.tree.is_dirty() && !self.meta_dirty && event_id == self.meta.event_id {
+        let unchanged = !view.tree.is_dirty() && !self.meta_dirty && event_id == self.meta.event_id;
+        if unchanged {
             return;
         }
         self.meta.event_id = event_id;

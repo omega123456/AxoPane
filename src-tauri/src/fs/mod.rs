@@ -59,6 +59,20 @@ pub struct DirectoryEntry {
     pub is_system: bool,
 }
 
+impl DirectoryEntry {
+    pub fn is_hidden_or_system(&self) -> bool {
+        self.is_hidden || self.is_system
+    }
+
+    pub fn is_visible_with(&self, show_hidden: bool) -> bool {
+        show_hidden || !self.is_hidden_or_system()
+    }
+
+    pub fn name_matches_filter(&self, normalized_filter: &str) -> bool {
+        normalized_filter.is_empty() || self.name.to_lowercase().contains(normalized_filter)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListDirResponse {
@@ -186,6 +200,8 @@ pub fn default_start_dir() -> PathBuf {
 
 const HIDDEN_ATTRIBUTE: &str = "hidden";
 const SYSTEM_ATTRIBUTE: &str = "system";
+const RESERVED_NAMES: [&str; 3] = ["", ".", ".."];
+const FORBIDDEN_NAME_CHARACTERS: [char; 3] = ['/', '\\', '\0'];
 
 #[cfg(windows)]
 const PLATFORM_ROOT: &str = "C:\\";
@@ -331,12 +347,11 @@ where
         let entry = entry?;
         let listed = build_entry(&entry)?;
 
-        if !options.show_hidden && (listed.is_hidden || listed.is_system) {
+        if !listed.is_visible_with(options.show_hidden) {
             continue;
         }
 
-        if !normalized_filter.is_empty() && !listed.name.to_lowercase().contains(&normalized_filter)
-        {
+        if !listed.name_matches_filter(&normalized_filter) {
             continue;
         }
 
@@ -386,11 +401,8 @@ pub fn list_tree_children(
         }
 
         let attributes = collect_attributes(&path, &metadata);
-        if !options.show_hidden
-            && attributes
-                .iter()
-                .any(|attribute| attribute == HIDDEN_ATTRIBUTE || attribute == SYSTEM_ATTRIBUTE)
-        {
+        let visible = options.show_hidden || !is_hidden_or_system(&attributes);
+        if !visible {
             continue;
         }
 
@@ -422,17 +434,15 @@ pub fn list_tree_children(
 /// separator or NUL (which would let a "name" escape its parent directory).
 pub fn validate_name(name: &str) -> Result<(), FsError> {
     let trimmed = name.trim();
-    if trimmed.is_empty()
-        || trimmed == "."
-        || trimmed == ".."
-        || trimmed.contains('/')
-        || trimmed.contains('\\')
-        || trimmed.contains('\0')
-    {
+    if is_invalid_name(trimmed) {
         return Err(FsError::InvalidName(name.to_string()));
     }
 
     Ok(())
+}
+
+fn is_invalid_name(trimmed: &str) -> bool {
+    RESERVED_NAMES.contains(&trimmed) || trimmed.contains(FORBIDDEN_NAME_CHARACTERS)
 }
 
 /// Creates a new directory named `name` inside `parent` and returns its entry.
@@ -481,7 +491,8 @@ pub fn rename_entry(path: &str, new_name: &str) -> Result<DirectoryEntry, FsErro
 
     // A no-op rename to the same name is allowed; otherwise refuse to clobber an
     // existing item.
-    if target != source && target.exists() {
+    let clobbers_other_item = target != source && target.exists();
+    if clobbers_other_item {
         return Err(FsError::AlreadyExists(target));
     }
 
@@ -499,6 +510,10 @@ fn build_entry_from_path(path: &Path) -> Result<DirectoryEntry, FsError> {
 
 fn has_attribute(attributes: &[String], wanted: &str) -> bool {
     attributes.iter().any(|attribute| attribute == wanted)
+}
+
+fn is_hidden_or_system(attributes: &[String]) -> bool {
+    has_attribute(attributes, HIDDEN_ATTRIBUTE) || has_attribute(attributes, SYSTEM_ATTRIBUTE)
 }
 
 fn requested_item_count(path: &Path, is_dir: bool, include_item_count: bool) -> Option<u64> {

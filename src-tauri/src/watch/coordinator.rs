@@ -187,6 +187,14 @@ impl PendingWatchState {
         self.changed.len() + self.removed.len()
     }
 
+    fn has_no_mutations(&self) -> bool {
+        self.changed.is_empty() && self.removed.is_empty()
+    }
+
+    fn needs_full_refresh(&self) -> bool {
+        self.unresolved || self.pending_count() > MAX_PENDING_MUTATIONS_PER_WATCH
+    }
+
     fn record(&mut self, mutation: &RawMutation, now: Instant) {
         self.newest_event_at = now;
         match mutation.kind {
@@ -422,11 +430,11 @@ impl Compactor {
         let Some(state) = self.pending.remove(&watch_id) else {
             return;
         };
-        if state.unresolved || state.pending_count() > MAX_PENDING_MUTATIONS_PER_WATCH {
+        if state.needs_full_refresh() {
             self.emit_dirty(watch_id);
             return;
         }
-        if state.changed.is_empty() && state.removed.is_empty() {
+        if state.has_no_mutations() {
             return;
         }
         (self.on_batch)(CompactedBatch::Targeted {

@@ -32,7 +32,8 @@ impl Machine {
     }
 
     pub(super) fn compute_status(&self) -> FolderSizeIndexStatus {
-        if self.stream.is_none() && !matches!(self.phase, Phase::Booting) {
+        let stream_lost = self.stream.is_none() && !matches!(self.phase, Phase::Booting);
+        if stream_lost {
             return FolderSizeIndexStatus::new(
                 IndexBackend::MacIndex,
                 false,
@@ -72,12 +73,11 @@ impl Machine {
             ..next.clone()
         } == *current;
         let now = (self.clock)();
-        if progress_only
-            && self.last_progress_emit.is_some_and(|last| {
-                now.duration_since(last)
-                    .map_or(true, |age| age < PROGRESS_INTERVAL)
-            })
-        {
+        let emitted_recently = self.last_progress_emit.is_some_and(|last| {
+            now.duration_since(last)
+                .map_or(true, |age| age < PROGRESS_INTERVAL)
+        });
+        if progress_only && emitted_recently {
             return;
         }
         self.last_progress_emit = Some(now);

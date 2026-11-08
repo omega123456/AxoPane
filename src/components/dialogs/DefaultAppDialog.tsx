@@ -104,7 +104,13 @@ function useDefaultAppChoice(dialog: DefaultAppDialogState | null, close: () => 
 
   async function confirm() {
     const app = dialog?.apps.find((candidate) => candidate.bundlePath === selectedBundlePath)
-    if (!app || busy || !dialog) {
+    if (!app) {
+      return
+    }
+    if (busy) {
+      return
+    }
+    if (!dialog) {
       return
     }
 

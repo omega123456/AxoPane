@@ -25,10 +25,12 @@ async function defaultAcquireWindow(): Promise<GuardableWindow | null> {
   }
 }
 
-function defaultConfirm(message: string): boolean {
+function canConfirm() {
   return typeof window !== 'undefined' && typeof window.confirm === 'function'
-    ? window.confirm(message)
-    : true
+}
+
+function defaultConfirm(message: string): boolean {
+  return canConfirm() ? window.confirm(message) : true
 }
 
 /**

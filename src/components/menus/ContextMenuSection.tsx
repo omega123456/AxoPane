@@ -159,7 +159,9 @@ function useSubmenuPosition(openSubmenuItem: ContextMenuSubmenuRowItem | undefin
 
   useLayoutEffect(() => {
     const submenu = submenuRef.current
-    if (!openSubmenuAnchor || !submenu || !openSubmenuItem) {
+    const canPlaceSubmenu =
+      openSubmenuAnchor !== null && submenu !== null && openSubmenuItem !== undefined
+    if (!canPlaceSubmenu) {
       setOpenSubmenuPosition(null)
       return
     }

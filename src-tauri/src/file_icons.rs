@@ -18,7 +18,7 @@ pub fn icon_pool() -> Option<&'static ThreadPool> {
 }
 
 pub fn icon_data_url_for_path(path: &Path, is_dir: bool) -> Option<String> {
-    if is_dir || !should_use_native_icon(path) {
+    if !has_native_icon(path, is_dir) {
         return None;
     }
 
@@ -39,7 +39,7 @@ pub fn icon_data_url_for_path(path: &Path, is_dir: bool) -> Option<String> {
 /// extension alone, without opening the file) when real extraction yields
 /// nothing.
 pub fn resolve_icon(path: &Path, is_dir: bool) -> Option<String> {
-    if is_dir || !should_use_native_icon(path) {
+    if !has_native_icon(path, is_dir) {
         return None;
     }
 
@@ -56,6 +56,10 @@ pub fn resolve_icon(path: &Path, is_dir: bool) -> Option<String> {
     {
         None
     }
+}
+
+fn has_native_icon(path: &Path, is_dir: bool) -> bool {
+    !is_dir && should_use_native_icon(path)
 }
 
 fn should_use_native_icon(path: &Path) -> bool {
@@ -119,7 +123,8 @@ mod windows_impl {
                 flags,
             )
         };
-        if result == 0 || info.hIcon.is_invalid() {
+        let icon_found = result != 0 && !info.hIcon.is_invalid();
+        if !icon_found {
             return None;
         }
 

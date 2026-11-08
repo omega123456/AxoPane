@@ -1,20 +1,26 @@
 import { InfoBar } from '@/components/shell/InfoBar'
-import { detectPlatformOs } from '@/lib/keymap'
+import { isWindowsPlatform } from '@/lib/keymap'
+import type { FolderSizeIndexStatus } from '@/lib/types/ipc'
 import { useConfigStore } from '@/stores/config-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { FOCUS_RING } from '@/lib/focus-ring'
+
+function isEverythingUnavailable(status: FolderSizeIndexStatus | null) {
+  return status?.backend === 'everything' && !status.isAvailable
+}
 
 export function EverythingBanner() {
   const status = usePanesStore((state) => state.folderSizeIndexStatus)
   const dismissed = useConfigStore((state) => state.dismissedEverythingBanner)
   const dismiss = useConfigStore((state) => state.dismissEverythingBanner)
 
-  if (
-    detectPlatformOs() !== 'windows' ||
-    dismissed ||
-    status?.backend !== 'everything' ||
-    status.isAvailable
-  ) {
+  if (!isWindowsPlatform()) {
+    return null
+  }
+  if (dismissed) {
+    return null
+  }
+  if (!isEverythingUnavailable(status)) {
     return null
   }
 

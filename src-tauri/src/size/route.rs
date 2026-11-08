@@ -120,8 +120,9 @@ impl SizeService {
         emit_non_empty(&emitter, routed.immediate);
         #[cfg(target_os = "macos")]
         self.request_from_index(routed.index, mode, &emitter);
-        if !routed.everything.is_empty() {
-            self.spawn_everything_batch(routed.everything, emitter);
+        let everything_paths = routed.everything;
+        if !everything_paths.is_empty() {
+            self.spawn_everything_batch(everything_paths, emitter);
         }
     }
 
@@ -169,7 +170,7 @@ impl SizeService {
     fn backend_for(&self, request: &RequestTarget, volumes: &[VolumeInfo]) -> SizeBackend {
         let backend = self.choose_backend_for_path(&request.sized, volumes);
         #[cfg(target_os = "macos")]
-        if backend == SizeBackend::Index && matches!(request.route, Route::NotDir) {
+        if is_indexed_non_directory(backend, request) {
             return SizeBackend::Manual;
         }
         backend
@@ -185,8 +186,9 @@ impl SizeService {
         let Some(index) = self.folder_size_index() else {
             return;
         };
-        if !requests.plain.is_empty() {
-            index.request(requests.plain, mode, Arc::clone(emitter));
+        let plain_paths = requests.plain;
+        if !plain_paths.is_empty() {
+            index.request(plain_paths, mode, Arc::clone(emitter));
         }
         for (path, target) in requests.linked {
             index.request(
@@ -243,4 +245,9 @@ fn manual_size_update(
             None,
         )),
     }
+}
+
+#[cfg(target_os = "macos")]
+fn is_indexed_non_directory(backend: SizeBackend, request: &RequestTarget) -> bool {
+    backend == SizeBackend::Index && matches!(request.route, Route::NotDir)
 }

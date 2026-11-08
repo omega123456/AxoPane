@@ -63,12 +63,22 @@ export type TreeFlatModel = {
   indexByPath: Map<string, number>
 }
 
+function hasCapacityBar(row: TreeFlatRow) {
+  if (row.kind !== 'node') {
+    return false
+  }
+  if (!row.volume) {
+    return false
+  }
+  return volumeUsedFraction(row.volume) !== null
+}
+
 /** Height in pixels of a single flat row, keyed on its kind. */
 export function treeRowHeight(row: TreeFlatRow): number {
   if (row.kind === 'header') {
     return TREE_HEADER_HEIGHT_PX
   }
-  if (row.kind === 'node' && row.volume && volumeUsedFraction(row.volume) !== null) {
+  if (hasCapacityBar(row)) {
     return TREE_DRIVE_ROW_HEIGHT_PX
   }
   return TREE_ROW_HEIGHT_PX

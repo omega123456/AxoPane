@@ -190,11 +190,15 @@ function moveEntriesToTrash({ paneId, effectiveEntries }: CommandContext) {
   })
 }
 
+function hasEffectiveEntries(context: CommandContext) {
+  return context.effectiveEntries.length > 0
+}
+
 // Items already in the trash have nowhere softer to go, and network volumes
 // have no reliable recycle bin, so both confirm a permanent delete exactly
 // like Shift+Delete. Everything else moves to the OS trash without a prompt.
 function deleteEntries(context: CommandContext) {
-  if (context.effectiveEntries.length === 0) {
+  if (!hasEffectiveEntries(context)) {
     return
   }
   const onNetworkVolume = context.effectiveEntries.some((item) =>
@@ -209,7 +213,7 @@ function deleteEntries(context: CommandContext) {
 }
 
 function deleteEntriesPermanently(context: CommandContext) {
-  if (context.effectiveEntries.length > 0) {
+  if (hasEffectiveEntries(context)) {
     confirmPermanentDelete(context)
   }
 }
@@ -230,8 +234,9 @@ function restoreEntries({ effectiveEntries, panes, paneId }: CommandContext) {
 }
 
 function confirmEmptyTrash({ pane, paneId }: CommandContext) {
-  if (pane.entries.length > 0) {
-    useActionDialogStore.getState().open({ kind: 'emptyTrash', paneId, count: pane.entries.length })
+  const count = pane.entries.length
+  if (count > 0) {
+    useActionDialogStore.getState().open({ kind: 'emptyTrash', paneId, count })
   }
 }
 
@@ -256,18 +261,17 @@ function clearClipboardAfterMove(paneId: PaneId) {
 }
 
 function pasteClipboard({ pane, paneId }: CommandContext) {
-  const clipboard = useClipboardStore.getState()
-  const mode = clipboard.mode
+  const { mode, entries } = useClipboardStore.getState()
   if (!mode) {
     return
   }
-  if (clipboard.entries.length === 0) {
+  if (entries.length === 0) {
     return
   }
   void startOp({
     kind: mode,
     destinationDir: pane.path,
-    items: clipboard.entries.map((item) => ({
+    items: entries.map((item) => ({
       sourcePath: item.path,
       name: item.name,
       sizeBytes: item.sizeBytes ?? 0,

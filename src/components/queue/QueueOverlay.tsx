@@ -74,7 +74,8 @@ function useQueueEventSubscriptions() {
       applyProgress(event)
       // A job the OS refused for lack of permissions cannot be retried in
       // place. Offer the elevated restart instead of a red line in the card.
-      if (event.status === 'failed' && event.errorMessage) {
+      if (event.status !== 'failed') return
+      if (event.errorMessage) {
         openAdminRestartDialog(event.errorMessage)
       }
     })
@@ -99,7 +100,10 @@ function useQueueKeyboard(hasConflict: boolean, expanded: boolean) {
 
   const onKeyDown = useCallback(
     (event: KeyboardEvent) => {
-      if (hasConflict || !expanded) {
+      if (hasConflict) {
+        return
+      }
+      if (!expanded) {
         return
       }
 
@@ -123,7 +127,9 @@ function useAutoExpandOnActiveWork(operations: OpProgress[], expanded: boolean) 
   const hasActiveWork = operations.some((operation) => !isTerminal(operation.status))
 
   useEffect(() => {
-    if (autoExpandActiveQueueToasts && !expanded && hasActiveWork && !hadActiveWorkRef.current) {
+    const workJustStarted = hasActiveWork && !hadActiveWorkRef.current
+    const shouldAutoExpand = autoExpandActiveQueueToasts && !expanded && workJustStarted
+    if (shouldAutoExpand) {
       setExpanded(true)
     }
     hadActiveWorkRef.current = hasActiveWork
@@ -143,7 +149,8 @@ export function QueueOverlay() {
   useQueueKeyboard(Boolean(conflict), expanded)
   useAutoExpandOnActiveWork(operations, expanded)
 
-  if (operations.length === 0 && !conflict) {
+  const isIdle = operations.length === 0 && !conflict
+  if (isIdle) {
     return null
   }
 

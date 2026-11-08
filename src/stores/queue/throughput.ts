@@ -55,7 +55,11 @@ function steppedSmoothedRate(track: ThroughputTrack, rate: number) {
 }
 
 function foldSample(track: ThroughputTrack | undefined, progress: OpProgress): FoldedSample {
-  if (!track || track.history.length === 0) {
+  if (!track) {
+    return firstSample(progress)
+  }
+  const hasHistory = track.history.length > 0
+  if (!hasHistory) {
     return firstSample(progress)
   }
 

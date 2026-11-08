@@ -1,7 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from 'react'
 import { executeCommand } from '@/lib/commands'
 import type { CommandId, Shortcut } from '@/lib/types/ipc'
-import { resolveCommandForEvent } from '@/lib/keymap'
+import {
+  isSearchEverywhereShortcut,
+  resolveCommandForEvent,
+  SEARCH_EVERYWHERE_COMMAND,
+} from '@/lib/keymap'
 import { handleKeyByTable, type KeyHandlerTable } from '@/lib/key-table'
 import { isEditableTarget } from '@/lib/editable-target'
 import { focusFilterInput, registerPaneFilterKeys } from '@/lib/pane-filter-keys'
@@ -9,7 +13,6 @@ import type { PaneId } from '@/types/pane'
 import { isTypeaheadKey } from './pane-keyboard'
 
 const ENTER_KEY = 'Enter'
-const SEARCH_EVERYWHERE_COMMAND: CommandId = 'searchEverywhere'
 
 type PaneKeyboardOptions = {
   paneId: PaneId
@@ -40,7 +43,7 @@ export function usePaneKeyboard(options: PaneKeyboardOptions) {
       options.openFromFilter(entryToOpen)
       return
     }
-    if (resolveCommandForEvent(event.nativeEvent, keymap) === SEARCH_EVERYWHERE_COMMAND) {
+    if (isSearchEverywhereShortcut(event.nativeEvent, keymap)) {
       event.preventDefault()
       executeCommand(SEARCH_EVERYWHERE_COMMAND, paneId)
     }

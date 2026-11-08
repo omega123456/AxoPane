@@ -12,8 +12,8 @@ use super::tab_patch::{patch_changed_path, remove_path, resnapshot_tab};
 use super::WatchedTab;
 #[cfg(feature = "test-utils")]
 use super::{
-    DirEntryPatch, DirPatch, ErrorEmitter, PatchEmitter, WatchRuntime, WatchTarget, WatchedTabs,
-    RENAME_EVENT_PATH_COUNT,
+    is_paired_rename, DirEntryPatch, DirPatch, ErrorEmitter, PatchEmitter, WatchRuntime,
+    WatchTarget, WatchedTabs,
 };
 use crate::fs;
 #[cfg(feature = "test-utils")]
@@ -254,7 +254,7 @@ impl PatchDraft {
         target: &WatchTarget,
         event: &notify::Event,
     ) -> Result<EventApplication, String> {
-        if event.paths.len() < RENAME_EVENT_PATH_COUNT {
+        if !is_paired_rename(event) {
             return Ok(EventApplication::NeedsResnapshot);
         }
         let watched_parent = Path::new(&target.path);

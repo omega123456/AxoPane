@@ -128,7 +128,9 @@ pub fn parse(raw: &str, style: PathStyle, home: Option<&str>) -> Result<ParsedQu
         .filter(|character| !character.is_whitespace())
         .count()
         < MIN_QUERY_CHARS;
-    if short && !(anchored && browse) {
+    let browses_anchored_folder = anchored && browse;
+    let too_short = short && !browses_anchored_folder;
+    if too_short {
         return Err(ParseError::TooShort);
     }
     let mut segs: Vec<&str> = parts

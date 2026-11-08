@@ -3,11 +3,12 @@ use std::ptr::null_mut;
 
 use super::*;
 use crate::native_menu::canonical::{classify_canonical_action, normalize_verb};
+use crate::native_menu::modern_match::selected_paths;
 use crate::native_menu::types::{
     NativeMenuCanonicalActionKind, NativeMenuIcon, NativeMenuIconKind, NativeMenuTargetKind,
 };
 use crate::native_menu::windows_shell::{
-    is_background_target, parent_directory, sanitize_menu_label, selected_target_paths, OwnedPidl,
+    is_background_target, parent_directory, sanitize_menu_label, OwnedPidl,
 };
 use crate::win32::gdi::bitmap_to_data_url;
 use crate::win32::shell::ShellExecuteRequest;
@@ -234,7 +235,7 @@ impl MenuBinding {
             });
         }
 
-        let paths = selected_target_paths(request);
+        let paths = selected_paths(request);
         if paths.is_empty() {
             return Err(windows::core::Error::empty());
         }
@@ -537,7 +538,8 @@ fn sibling_pidl(
     path: &str,
     expected_parent: Option<&std::path::Path>,
 ) -> windows::core::Result<OwnedPidl> {
-    if parent_directory(path).as_deref() != expected_parent {
+    let shares_parent = parent_directory(path).as_deref() == expected_parent;
+    if !shares_parent {
         return Err(windows::core::Error::empty());
     }
     OwnedPidl::from_path(path)
@@ -665,7 +667,8 @@ fn find_menu_id_for_canonical_action(
         let label =
             sanitize_menu_label(String::from_utf16_lossy(&text_buffer[..info.cch as usize]));
         let normalized_verb = command_verb(context_menu, info.wID);
-        if classify_canonical_action(normalized_verb.as_deref(), &label).as_ref() == Some(kind) {
+        let action = classify_canonical_action(normalized_verb.as_deref(), &label);
+        if action.as_ref() == Some(kind) {
             return Some(info.wID);
         }
 
@@ -713,7 +716,8 @@ fn menu_id_for_path(
         GetMenuItemInfoW(menu, position, true, &mut info)?;
     }
 
-    if !info.hSubMenu.0.is_null() {
+    let opens_submenu = !info.hSubMenu.0.is_null();
+    if opens_submenu {
         return Err(windows::core::Error::empty());
     }
 

@@ -297,10 +297,15 @@ impl BatchTimer {
         }
     }
 
+    fn should_keep_waiting(&self, signalled: bool) -> bool {
+        let stopping = self.stop.load(Ordering::Acquire);
+        !signalled && !stopping
+    }
+
     fn wait_for_signal(&self) -> bool {
         let (lock, ready) = &*self.wake;
         let mut signalled = lock.lock().expect("thumbnail batch wake lock");
-        while !*signalled && !self.stop.load(Ordering::Acquire) {
+        while self.should_keep_waiting(*signalled) {
             signalled = ready.wait(signalled).expect("thumbnail batch wake");
         }
         if self.stop.load(Ordering::Acquire) {
@@ -400,10 +405,10 @@ fn split_result_events(events: Vec<ThumbnailResultEvent>) -> Vec<Vec<ThumbnailRe
     let mut batch_bytes = 0;
     for event in events {
         let event_bytes = result_event_weight(&event);
-        if !batch.is_empty()
-            && (batch.len() >= MAX_RESULTS_PER_BATCH
-                || batch_bytes + event_bytes > MAX_RESULT_BYTES_PER_BATCH)
-        {
+        let batch_full = batch.len() >= MAX_RESULTS_PER_BATCH
+            || batch_bytes + event_bytes > MAX_RESULT_BYTES_PER_BATCH;
+        let starts_new_batch = !batch.is_empty() && batch_full;
+        if starts_new_batch {
             ready.push(std::mem::take(&mut batch));
             batch_bytes = 0;
         }
@@ -503,7 +508,8 @@ fn full_batch_len(events: &[ThumbnailResultEvent]) -> usize {
         let event_bytes = result_event_weight(event);
         let batch_full = count >= MAX_RESULTS_PER_BATCH
             || batch_bytes + event_bytes > MAX_RESULT_BYTES_PER_BATCH;
-        if count > 0 && batch_full {
+        let overflows_started_batch = count > 0 && batch_full;
+        if overflows_started_batch {
             break;
         }
         count += 1;

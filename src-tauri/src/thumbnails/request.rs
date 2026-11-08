@@ -30,7 +30,8 @@ pub fn request_thumbnails(
     service: &ThumbnailService,
     payload: RequestThumbnailsRequest,
 ) -> Result<RequestThumbnailsResponse, String> {
-    if payload.candidates.len() > MAX_DESIRED_PER_SCOPE {
+    let candidate_count = payload.candidates.len();
+    if candidate_count > MAX_DESIRED_PER_SCOPE {
         return Err(CANDIDATE_LIMIT_EXCEEDED.into());
     }
     let subscriber = ThumbnailSubscriber {

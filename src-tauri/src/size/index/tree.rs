@@ -132,15 +132,19 @@ pub struct FolderSizeTree {
 }
 
 impl FolderSizeTree {
+    fn has_root(&self, path: &Path) -> bool {
+        self.roots
+            .iter()
+            .any(|&root| Path::new(&*self.node(root).name) == path)
+    }
+
     /// Adds an index root such as `/Users`; returns false if it exists or
     /// is empty (an empty name marks a freed slot).
     pub fn add_root(&mut self, path: &Path) -> bool {
-        if path.as_os_str().is_empty()
-            || self
-                .roots
-                .iter()
-                .any(|&root| Path::new(&*self.node(root).name) == path)
-        {
+        if path.as_os_str().is_empty() {
+            return false;
+        }
+        if self.has_root(path) {
             return false;
         }
         let id = self.alloc(NONE, path.to_string_lossy().into());
@@ -254,7 +258,9 @@ impl FolderSizeTree {
         ) else {
             return false;
         };
-        if self.node(id).parent == NONE || self.is_within(parent, id) {
+        let is_root = self.node(id).parent == NONE;
+        let moves_into_itself = self.is_within(parent, id);
+        if is_root || moves_into_itself {
             return false;
         }
         // Exact only: a case-insensitive hit may be a distinct sibling on a
@@ -470,8 +476,11 @@ impl FolderSizeTree {
 
     fn child_matching(&self, parent: NodeId, name: &str, fold_case: bool) -> Option<NodeId> {
         let exact = self.child(parent, name);
-        if exact.is_some() || !fold_case {
+        if exact.is_some() {
             return exact;
+        }
+        if !fold_case {
+            return None;
         }
         self.node(parent)
             .children
@@ -616,7 +625,10 @@ impl FolderSizeTree {
     fn collect_skipped_names_from_child(&self, child: NodeId, names: &mut Vec<String>) {
         let node = self.node(child);
         let has_room = names.len() < MAX_SKIPPED_NAMES;
-        if !has_room || node.skipped == 0 {
+        if !has_room {
+            return;
+        }
+        if node.skipped == 0 {
             return;
         }
         if node.flags & SKIPPED != 0 {
@@ -687,7 +699,11 @@ impl FolderSizeTree {
         direct: u64,
         flags: u8,
     ) -> Option<()> {
-        if name.is_empty() || flags & !PERSISTED_FLAGS != 0 {
+        if name.is_empty() {
+            return None;
+        }
+        let has_unknown_flags = flags & !PERSISTED_FLAGS != 0;
+        if has_unknown_flags {
             return None;
         }
         let id = self.nodes.len() as NodeId;

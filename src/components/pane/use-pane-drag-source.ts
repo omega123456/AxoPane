@@ -78,8 +78,11 @@ function rowDragHandlers(context: RowDragContext) {
     },
     handleFolderDragOver: (entryId: string, event: DragEvent<HTMLDivElement>) => {
       const entry = directoryEntryById(entries, entryId)
-      const drag = entry ? acceptableFileTransfer(entry.path, platform) : null
-      if (!entry || !drag) {
+      if (!entry) {
+        return
+      }
+      const drag = acceptableFileTransfer(entry.path, platform)
+      if (!drag) {
         return
       }
       event.stopPropagation()

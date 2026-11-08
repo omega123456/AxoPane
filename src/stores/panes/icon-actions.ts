@@ -1,5 +1,5 @@
 import { requestIcons } from '@/lib/ipc/commands'
-import { detectPlatformOs } from '@/lib/keymap'
+import { isWindowsPlatform } from '@/lib/keymap'
 import type { IconStateEvent } from '@/lib/types/ipc'
 import { panesStore } from '@/stores/panes/store-handle'
 import {
@@ -30,7 +30,7 @@ export async function requestVisibleIcons(paneId: PaneId, paths: string[]) {
 }
 
 export function applyIconStates(events: IconStateEvent[]) {
-  const windowsPlatform = detectPlatformOs() === 'windows'
+  const windowsPlatform = isWindowsPlatform()
   const input = { events, now: cacheNow(), windowsPlatform }
   panesStore().setState((state) => appliedIconStates(state, input))
 }

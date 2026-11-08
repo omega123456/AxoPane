@@ -90,7 +90,10 @@ function CategoryGlyph({ category, className, colorClassName }: CategoryGlyphPro
 }
 
 function usableNativeIconUrl(entry: EntryIconProps['entry'], nativeIconFailed: boolean) {
-  if (entry.isDir || nativeIconFailed) {
+  if (entry.isDir) {
+    return null
+  }
+  if (nativeIconFailed) {
     return null
   }
   return entry.iconDataUrl || null

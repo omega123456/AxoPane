@@ -28,7 +28,7 @@ import {
   reviseDirectorySessionView,
 } from '@/lib/ipc/commands'
 import { log } from '@/lib/app-log-commands'
-import { errorMessage } from '@/lib/error-message'
+import { errorMessage, isRejectionWithKind } from '@/lib/error-message'
 import type {
   BeginNavigationResponse,
   DirectoryEntry,
@@ -46,12 +46,7 @@ export const MAX_IN_FLIGHT_REQUESTS = 2
 export type ListingSessionStatus = 'idle' | 'initializing' | 'ready' | 'error' | 'releasing'
 
 function isSessionRejection(error: unknown): error is SessionRejection {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'kind' in error &&
-    typeof (error as { kind: unknown }).kind === 'string'
-  )
+  return isRejectionWithKind(error) && typeof error.kind === 'string'
 }
 
 function baselinesMatch(left: SessionBaseline, right: SessionBaseline): boolean {
@@ -89,6 +84,10 @@ function baselineIsAtLeastAsAdvanced(
   )
 }
 
+function isPageIndexInRange(pageIndex: number, lastPageIndex: number) {
+  return pageIndex >= 0 && pageIndex <= lastPageIndex
+}
+
 /**
  * Pages to keep pinned (never evicted) for a given viewport page: the
  * viewport itself plus one page of prefetch on either side, matching the
@@ -98,7 +97,7 @@ export function prefetchPageIndexes(viewportPageIndex: number, lastPageIndex: nu
   const pages = new Set<number>()
   for (let offset = -1; offset <= 1; offset += 1) {
     const candidate = viewportPageIndex + offset
-    if (candidate >= 0 && candidate <= lastPageIndex) {
+    if (isPageIndexInRange(candidate, lastPageIndex)) {
       pages.add(candidate)
     }
   }
@@ -264,7 +263,10 @@ export class ListingSession {
    * pulling page zero is deliberately preferred to renderer-side reordering.
    */
   applyPatch(patch: SessionPatchEvent): boolean {
-    if (patch.paneId !== this.paneId || patch.tabId !== this.tabId || !this.baseline) {
+    if (!this.baseline) {
+      return false
+    }
+    if (!this.isOwnPatch(patch)) {
       return false
     }
     const required = patch.mode === 'metadataOnly' ? patch.baseline : patch.previousBaseline
@@ -292,6 +294,21 @@ export class ListingSession {
     return true
   }
 
+  private isOwnPatch(patch: SessionPatchEvent) {
+    return patch.paneId === this.paneId && patch.tabId === this.tabId
+  }
+
+  private isStillAdoptable(tabId: string, lifecycleToken: number) {
+    return this.isCurrentLifecycle(lifecycleToken) && tabId === this.tabId
+  }
+
+  private isBehindInstalledBaseline(candidate: SessionBaseline) {
+    if (!this.baseline) {
+      return false
+    }
+    return !baselineIsAtLeastAsAdvanced(this.baseline, candidate)
+  }
+
   private adoptBeginResponse(
     tabId: string,
     response: BeginNavigationResponse,
@@ -302,10 +319,10 @@ export class ListingSession {
     // overlapping `reviseView` calls for the same session whose responses
     // arrive out of order); only adopt it if this is still the tab we issued
     // the request for and it is not behind the baseline already installed.
-    if (!this.isCurrentLifecycle(lifecycleToken) || tabId !== this.tabId) {
+    if (!this.isStillAdoptable(tabId, lifecycleToken)) {
       return
     }
-    if (this.baseline && !baselineIsAtLeastAsAdvanced(this.baseline, response.baseline)) {
+    if (this.isBehindInstalledBaseline(response.baseline)) {
       return
     }
 
@@ -341,14 +358,14 @@ export class ListingSession {
    * drained as in-flight requests complete.
    */
   ensurePageLoaded(pageIndex: number): void {
-    if (!this.baseline || this.status !== 'ready') {
+    if (!this.isReadyWithBaseline()) {
       return
     }
     if (this.collection.totalRows === 0) {
       return
     }
     const lastPageIndex = pageIndexForRow(this.collection.totalRows - 1)
-    if (pageIndex < 0 || pageIndex > lastPageIndex) {
+    if (!isPageIndexInRange(pageIndex, lastPageIndex)) {
       return
     }
 
@@ -358,7 +375,7 @@ export class ListingSession {
       this.collection.markAccessed(pageIndex)
       return
     }
-    if (this.inFlightPages.has(pageIndex) || this.queuedPages.includes(pageIndex)) {
+    if (this.isPagePending(pageIndex)) {
       return
     }
 
@@ -438,8 +455,20 @@ export class ListingSession {
     this.callbacks.onChange()
   }
 
+  private isReadyWithBaseline() {
+    return this.baseline !== null && this.status === 'ready'
+  }
+
+  private isPagePending(pageIndex: number) {
+    return this.inFlightPages.has(pageIndex) || this.queuedPages.includes(pageIndex)
+  }
+
+  private canDispatchQueuedPage() {
+    return this.inFlightPages.size < MAX_IN_FLIGHT_REQUESTS && this.queuedPages.length > 0
+  }
+
   private drainQueue(): void {
-    while (this.inFlightPages.size < MAX_IN_FLIGHT_REQUESTS && this.queuedPages.length > 0) {
+    while (this.canDispatchQueuedPage()) {
       const nextPageIndex = this.queuedPages.shift()!
       if (this.collection.isPageLoaded(nextPageIndex)) {
         continue

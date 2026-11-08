@@ -47,7 +47,8 @@ export function pruneWeightedCache<CacheRecord extends WeightedCacheRecord>(
 ): Record<string, CacheRecord> {
   const next = { ...cache }
   for (const [key, record] of Object.entries(next)) {
-    if (!protectedKeys.has(key) && isExpired(record)) delete next[key]
+    const evictable = !protectedKeys.has(key) && isExpired(record)
+    if (evictable) delete next[key]
   }
 
   const remaining = Object.entries(next)

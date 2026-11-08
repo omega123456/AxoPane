@@ -74,9 +74,5 @@ fn entry_matches_view(
     params: &ViewParams,
     normalized_filter: &str,
 ) -> bool {
-    if !params.show_hidden && (entry.is_hidden || entry.is_system) {
-        return false;
-    }
-
-    normalized_filter.is_empty() || entry.name.to_lowercase().contains(normalized_filter)
+    entry.is_visible_with(params.show_hidden) && entry.name_matches_filter(normalized_filter)
 }

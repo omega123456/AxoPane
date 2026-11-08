@@ -50,7 +50,7 @@ pub fn walk(
 ) -> Result<TraversalIter, TraversalError> {
     let root_metadata = std::fs::symlink_metadata(root)
         .map_err(|error| TraversalError::Io(root.to_path_buf(), error))?;
-    if !root_metadata.is_dir() || root_metadata.file_type().is_symlink() {
+    if !super::is_real_directory(&root_metadata) {
         return Err(TraversalError::Io(
             root.to_path_buf(),
             std::io::Error::new(

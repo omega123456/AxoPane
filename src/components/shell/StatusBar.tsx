@@ -8,6 +8,7 @@ import { useSelectionStore } from '@/stores/selection-store'
 import { LoaderCircleIcon } from '@/components/icons'
 import { TEXT_SECONDARY } from '@/lib/class-names'
 import type { DirectoryEntry, VolumeInfo } from '@/lib/types/ipc'
+import type { EntrySizeState, PanesData } from '@/stores/panes/pane-state'
 
 function Dot() {
   return (
@@ -81,21 +82,34 @@ function useActivePaneSummary() {
   )
 }
 
+function indexedSizeStates(state: PanesData, autoFolderSize: boolean) {
+  if (!autoFolderSize) {
+    return undefined
+  }
+  if (!state.folderSizeIndexStatus?.isAvailable) {
+    return undefined
+  }
+  return state.sizeStates
+}
+
+function isSizeUpdating(size: EntrySizeState | undefined) {
+  return size?.state === 'calculating' || size?.refreshing === true
+}
+
 // `null` when no selected item has a known size, so an unsized folder
 // selection reads as blank rather than "0 B".
 function useSelectedBytes(entries: DirectoryEntry[], selectedIds: string[] | undefined) {
   // Folder sizes only count where an index (Everything / the macOS index)
   // keeps them current; otherwise the total is files only.
   const autoFolderSize = useConfigStore((state) => state.autoFolderSize)
-  const sizeStates = usePanesStore((state) =>
-    autoFolderSize && state.folderSizeIndexStatus?.isAvailable ? state.sizeStates : undefined,
-  )
+  const sizeStates = usePanesStore((state) => indexedSizeStates(state, autoFolderSize))
   return useMemo(() => {
     const selectedIdSet = new Set(selectedIds)
     let total: number | null = null
     for (const entry of entries) {
       const size = entry.isDir ? sizeStates?.[entry.path]?.sizeBytes : entry.sizeBytes
-      if (selectedIdSet.has(entry.id) && size != null) {
+      if (!selectedIdSet.has(entry.id)) continue
+      if (size != null) {
         total = (total ?? 0) + size
       }
     }
@@ -107,7 +121,7 @@ function useSizesUpdating() {
   return usePanesStore((state) =>
     state.panes[state.activePaneId].entries.some((entry) => {
       const size = entry.isDir ? state.sizeStates[entry.path] : undefined
-      return size?.state === 'calculating' || size?.refreshing === true
+      return isSizeUpdating(size)
     }),
   )
 }

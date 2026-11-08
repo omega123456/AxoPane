@@ -55,7 +55,9 @@ function useMenuPlacement(
   useLayoutEffect(() => {
     const menu = menuRef.current
     const trigger = triggerRef.current
-    if (!open || !menu || !trigger) return
+    if (!open) return
+    if (!menu) return
+    if (!trigger) return
 
     const geometry = placePopoverAtTrigger(
       trigger.getBoundingClientRect(),
@@ -123,8 +125,10 @@ function useMenuPopoverState(items: MenuPopoverItem[], radio: boolean) {
     if (!open) return
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node
-      if (!menuRef.current?.contains(target) && !triggerRef.current?.contains(target))
-        closeAndRestoreFocus()
+      const insideMenu = menuRef.current?.contains(target) === true
+      const insideTrigger = triggerRef.current?.contains(target) === true
+      const outside = !insideMenu && !insideTrigger
+      if (outside) closeAndRestoreFocus()
     }
     document.addEventListener('pointerdown', onPointerDown)
     return () => document.removeEventListener('pointerdown', onPointerDown)
@@ -154,7 +158,8 @@ export function MenuPopover({ ariaLabel, trigger, items, radio = false }: MenuPo
   }
 
   function onTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
-    if (!open && MENU_OPENING_KEYS.includes(event.key)) {
+    const opensMenu = !open && MENU_OPENING_KEYS.includes(event.key)
+    if (opensMenu) {
       event.preventDefault()
       openMenu()
     }
@@ -207,6 +212,7 @@ type MenuPopoverItemButtonProps = {
 
 function MenuPopoverItemButton({ item, radio, itemRef, onChosen }: MenuPopoverItemButtonProps) {
   const radioItem = item as MenuPopoverRadioItem
+  const showsCheck = radio && radioItem.checked
   return (
     <button
       ref={itemRef}
@@ -221,7 +227,7 @@ function MenuPopoverItemButton({ item, radio, itemRef, onChosen }: MenuPopoverIt
       className={`flex h-8 w-full cursor-pointer items-center gap-3 whitespace-nowrap rounded-control px-3 text-left text-row text-light-text hover:bg-light-hover active:bg-light-press disabled:cursor-not-allowed disabled:text-light-text-disabled dark:text-dark-text dark:hover:bg-dark-hover dark:active:bg-dark-press dark:disabled:text-dark-text-disabled ${FOCUS_RING_INSET}`}
     >
       <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
-        {radio && radioItem.checked ? (
+        {showsCheck ? (
           <CheckIcon className="size-3.5 text-light-accent dark:text-dark-accent" />
         ) : (
           item.icon

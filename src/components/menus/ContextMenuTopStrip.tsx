@@ -67,7 +67,10 @@ function StripButton({
         }
       }}
       onPointerDown={(event) => {
-        if (item.disabled || event.button !== PRIMARY_MOUSE_BUTTON) {
+        if (item.disabled) {
+          return
+        }
+        if (event.button !== PRIMARY_MOUSE_BUTTON) {
           return
         }
 
@@ -76,7 +79,10 @@ function StripButton({
         onActivateItem(item.id)
       }}
       onClick={(event) => {
-        if (!item.disabled && event.detail === KEYBOARD_CLICK_DETAIL) {
+        if (item.disabled) {
+          return
+        }
+        if (event.detail === KEYBOARD_CLICK_DETAIL) {
           onActivateItem(item.id)
         }
       }}

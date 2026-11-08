@@ -28,7 +28,10 @@ export function dragItemsForRow(
   entryId: string,
 ): DragItem[] {
   const grabbed = entries.find((entry) => entry.id === entryId)
-  if (!grabbed || !isTransferable(grabbed)) {
+  if (!grabbed) {
+    return []
+  }
+  if (!isTransferable(grabbed)) {
     return []
   }
   return draggedEntries(entries, selectedIds, grabbed).filter(isTransferable).map(toDragItem)

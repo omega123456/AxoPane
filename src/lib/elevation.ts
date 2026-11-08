@@ -1,4 +1,4 @@
-import { detectPlatformOs } from '@/lib/keymap'
+import { isWindowsPlatform } from '@/lib/keymap'
 
 /**
  * Windows refuses filesystem writes outside the user's own folders unless the
@@ -16,7 +16,10 @@ const ADMIN_REQUIRED = /\(os error (?:5|1314)\)|0x80070005|0x80070522|access is 
  * different fix (Full Disk Access, ownership), so this stays Windows-only.
  */
 export function needsAdminRestart(message: string | null | undefined): boolean {
-  if (!message || detectPlatformOs() !== 'windows') {
+  if (!message) {
+    return false
+  }
+  if (!isWindowsPlatform()) {
     return false
   }
 

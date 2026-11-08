@@ -52,12 +52,13 @@ pub struct EverythingQueryResult {
 /// FILETIME ticks between 1601-01-01 and the Unix epoch.
 const FILETIME_UNIX_EPOCH: u64 = 116_444_736_000_000_000;
 const NANOS_PER_FILETIME_TICK: u64 = 100;
+const UNKNOWN_FILETIMES: [u64; 2] = [0, u64::MAX];
 const EVERYTHING_SORT_NAME_ASCENDING: u32 = 1;
 const EVERYTHING_SORT_DATE_MODIFIED_DESCENDING: u32 = 14;
 
 /// Converts a FILETIME; `0` and `u64::MAX` mean "unknown".
 pub fn filetime_to_system_time(filetime: u64) -> Option<SystemTime> {
-    if filetime == 0 || filetime == u64::MAX {
+    if UNKNOWN_FILETIMES.contains(&filetime) {
         return None;
     }
     match filetime.checked_sub(FILETIME_UNIX_EPOCH) {

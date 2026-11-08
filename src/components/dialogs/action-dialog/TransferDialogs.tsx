@@ -106,7 +106,10 @@ export function ArchiveConfirmDialog({ dialog }: { dialog: ArchiveConfirm }) {
   const trimmedDestination = destinationPath.trim()
 
   function confirm() {
-    if (busy || trimmedDestination.length === 0) {
+    if (busy) {
+      return
+    }
+    if (trimmedDestination.length === 0) {
       return
     }
     const enqueueArchive = () => startOp(archiveOperation(dialog, trimmedDestination))

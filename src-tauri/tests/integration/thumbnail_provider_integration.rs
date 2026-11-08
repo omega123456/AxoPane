@@ -5,7 +5,8 @@ use std::path::Path;
 use file_explorer_lib::thumbnails::platform_provider;
 use file_explorer_lib::thumbnails::provider::ProviderCapability;
 use file_explorer_lib::thumbnails::types::{
-    ThumbnailCandidate, ThumbnailFingerprint, ThumbnailState,
+    is_within_preview_bounds, ThumbnailCandidate, ThumbnailFingerprint, ThumbnailState,
+    MAX_PREVIEW_DIMENSION,
 };
 
 fn candidate(name: &str, is_directory: bool) -> ThumbnailCandidate {
@@ -54,4 +55,19 @@ fn fake_provider_has_deterministic_terminal_outcomes_without_native_calls() {
     );
     provider.cancel(&candidate("preview.png", false));
     provider.shutdown();
+}
+
+#[test]
+fn preview_bounds_accept_only_non_empty_frames_within_the_size_cap() {
+    assert!(is_within_preview_bounds(1, 1));
+    assert!(is_within_preview_bounds(
+        MAX_PREVIEW_DIMENSION,
+        MAX_PREVIEW_DIMENSION
+    ));
+
+    assert!(!is_within_preview_bounds(0, 10));
+    assert!(!is_within_preview_bounds(10, 0));
+    assert!(!is_within_preview_bounds(MAX_PREVIEW_DIMENSION + 1, 10));
+    assert!(!is_within_preview_bounds(10, MAX_PREVIEW_DIMENSION + 1));
+    assert!(!is_within_preview_bounds(u32::MAX, u32::MAX));
 }

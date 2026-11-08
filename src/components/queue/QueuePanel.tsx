@@ -27,7 +27,11 @@ function movePendingOperation(operations: OpProgress[], id: string, delta: numbe
     .map((operation) => operation.operationId)
   const index = pending.indexOf(id)
   const target = index + delta
-  if (index < 0 || target < 0 || target >= pending.length) {
+  if (index < 0) {
+    return
+  }
+  const targetInRange = target >= 0 && target < pending.length
+  if (!targetInRange) {
     return
   }
   const next = [...pending]
@@ -50,7 +54,8 @@ function primaryOperation(operations: OpProgress[], conflicts: Record<string, un
 }
 
 function itemSummary(operation: OpProgress) {
-  if (operation.status === 'pending' && operation.itemNames.length > 0) {
+  const previewsPendingItems = operation.status === 'pending' && operation.itemNames.length > 0
+  if (previewsPendingItems) {
     return formatItemPreview(operation.itemNames, operation.totalItems)
   }
   if (operation.currentFileName) {

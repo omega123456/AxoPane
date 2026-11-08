@@ -55,8 +55,9 @@ export const useClipboardStore = create<ClipboardStore>((set, get) => ({
       return
     }
 
+    const hasItems = clipboard.items.length > 0
     set({
-      mode: clipboard.items.length > 0 ? clipboard.mode : null,
+      mode: hasItems ? clipboard.mode : null,
       sourcePaneId: null,
       entries: clipboard.items.map((item) => ({
         path: item.path,

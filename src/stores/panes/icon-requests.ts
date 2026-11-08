@@ -58,7 +58,10 @@ export function hydrateEntryIcon(
   entry: DirectoryEntry,
   resolvedIconPaths: ResolvedIconPaths,
 ): DirectoryEntry {
-  if (entry.isDir || !hasResolvedIconPath(resolvedIconPaths, entry.path)) {
+  if (entry.isDir) {
+    return entry
+  }
+  if (!hasResolvedIconPath(resolvedIconPaths, entry.path)) {
     return entry
   }
 

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, type KeyboardEvent, type RefObject } from 'react'
 import { favouriteLabel } from '@/components/tree/FavouriteTreeRow'
-import { resolveCommandForEvent } from '@/lib/keymap'
-import { handleKeyByTable, type KeyHandlerTable } from '@/lib/key-table'
+import { isSearchEverywhereShortcut } from '@/lib/keymap'
+import { handleKeyByTable, hasPrimaryModifier, type KeyHandlerTable } from '@/lib/key-table'
 import {
   activateSearchHit,
   completeSearchQuery,
@@ -25,7 +25,6 @@ const UNMEASURED_FALLBACK_ROWS = SEARCH_PAGE_ROWS + SEARCH_PAGE_ROWS
 const MAX_RECENTS = 6
 const FALLBACK_ROW_KEY_PREFIX = 'search-row'
 const SEARCH_TRIGGER_SELECTOR = '[data-search-trigger]'
-const SEARCH_EVERYWHERE_COMMAND: CommandId = 'searchEverywhere'
 
 type KeyBindings = Record<CommandId, Shortcut[]>
 
@@ -129,10 +128,11 @@ function movePaletteSelection(navigation: PaletteNavigation, delta: number) {
     moveActive(delta)
     return
   }
-  if (navigation.rows.length === 0) {
+  const rowCount = navigation.rows.length
+  if (rowCount === 0) {
     return
   }
-  setActiveIndex(clamp(navigation.activeIndex + delta, 0, navigation.rows.length - 1))
+  setActiveIndex(clamp(navigation.activeIndex + delta, 0, rowCount - 1))
 }
 
 function clearQueryOrDismiss(navigation: PaletteNavigation) {
@@ -150,12 +150,11 @@ function jumpToLastRow(navigation: PaletteNavigation) {
 }
 
 function jumpKeys(navigation: PaletteNavigation, event: KeyboardEvent<HTMLInputElement>) {
-  const withPrimaryModifier = event.ctrlKey || event.metaKey
-  if (!withPrimaryModifier) {
+  if (!hasPrimaryModifier(event)) {
     return {}
   }
-  const endKey: KeyHandlerTable =
-    navigation.rows.length > 0 ? { End: () => jumpToLastRow(navigation) } : {}
+  const hasRows = navigation.rows.length > 0
+  const endKey: KeyHandlerTable = hasRows ? { End: () => jumpToLastRow(navigation) } : {}
   return { Home: () => useSearchPaletteStore.getState().setActiveIndex(0), ...endKey }
 }
 
@@ -171,7 +170,10 @@ function completionKeys(
   event: KeyboardEvent<HTMLInputElement>,
 ): KeyHandlerTable {
   const activeRow = navigation.activeRow
-  if (event.shiftKey || !activeRow?.isDir) {
+  if (event.shiftKey) {
+    return {}
+  }
+  if (!activeRow?.isDir) {
     return {}
   }
   const completed = completedQuery(navigation, activeRow)
@@ -199,12 +201,14 @@ export function handlePaletteKeyDown(
   event: KeyboardEvent<HTMLInputElement>,
 ) {
   const how = searchActivationForEvent(event.nativeEvent, navigation.keymap)
-  if (how && navigation.activeRow) {
+  const activeRow = navigation.activeRow
+  const activatesRow = how !== null && activeRow !== undefined
+  if (activatesRow) {
     event.preventDefault()
-    activatePaletteHit(navigation.activeRow, how)
+    activatePaletteHit(activeRow, how)
     return
   }
-  if (resolveCommandForEvent(event.nativeEvent, navigation.keymap) === SEARCH_EVERYWHERE_COMMAND) {
+  if (isSearchEverywhereShortcut(event.nativeEvent, navigation.keymap)) {
     event.preventDefault()
     navigation.inputRef.current?.select()
     return

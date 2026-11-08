@@ -86,7 +86,8 @@ function usePathEdit(pane: PaneState) {
     submit: () => {
       const trimmed = pathDraft.trim()
       setEditingPath(false)
-      if (trimmed && trimmed !== pane.path) {
+      const changedPath = trimmed !== '' && trimmed !== pane.path
+      if (changedPath) {
         void navigatePane(pane.id, trimmed)
       }
     },
@@ -109,7 +110,8 @@ export function BreadcrumbBar({ pane }: BreadcrumbBarProps) {
     <div
       className="flex h-address shrink-0 items-center border-b border-light-divider px-0.75 dark:border-dark-divider"
       onBlur={(event) => {
-        if (pathEdit.editingPath && !isFocusMovingInside(event)) {
+        const leavesEditor = pathEdit.editingPath && !isFocusMovingInside(event)
+        if (leavesEditor) {
           pathEdit.submit()
         }
       }}

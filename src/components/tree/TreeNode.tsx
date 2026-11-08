@@ -105,7 +105,10 @@ function useTreeDropTarget(path: string) {
 
   function handleDragOver(event: DragEvent<HTMLDivElement>) {
     const drag = useDragStore.getState().drag
-    if (drag?.kind !== 'file-transfer' || !canDropInto(drag, path, platform)) {
+    if (drag?.kind !== 'file-transfer') {
+      return
+    }
+    if (!canDropInto(drag, path, platform)) {
       return
     }
     event.preventDefault()

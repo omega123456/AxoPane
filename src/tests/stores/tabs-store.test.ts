@@ -2,6 +2,7 @@ import { beforeEach } from 'vitest'
 import {
   activeTab,
   fromSessionPane,
+  isActiveTabShowingPath,
   tabLabel,
   toSessionPane,
   useTabsStore,
@@ -320,5 +321,26 @@ describe('tabs-store', () => {
     useTabsStore.getState().hydrate('left', { activeTabIndex: 5, tabs: [] })
     expect(useTabsStore.getState().panes.left.tabs).toHaveLength(1)
     expect(useTabsStore.getState().panes.left.activeTabIndex).toBe(0)
+  })
+})
+
+describe('isActiveTabShowingPath', () => {
+  it('matches the active tab id and an equivalent path', () => {
+    const activeTabId = activeTab('left').id
+
+    expect(
+      isActiveTabShowingPath('left', 'C:\\Data', { tabId: activeTabId, path: 'c:\\data' }),
+    ).toBe(true)
+  })
+
+  it('rejects another tab or a different path', () => {
+    const activeTabId = activeTab('left').id
+
+    expect(
+      isActiveTabShowingPath('left', 'C:\\Data', { tabId: 'other-tab', path: 'C:\\Data' }),
+    ).toBe(false)
+    expect(
+      isActiveTabShowingPath('left', 'C:\\Data', { tabId: activeTabId, path: 'C:\\Other' }),
+    ).toBe(false)
   })
 })

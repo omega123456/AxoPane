@@ -29,6 +29,10 @@ impl Lanes {
         self.power_paused || !self.boosts.is_empty() || self.running_boost.is_some()
     }
 
+    fn background_parked(&self) -> bool {
+        self.background_must_wait() && !self.shutdown
+    }
+
     fn claim_background(&mut self) -> Option<ClaimedJob<ScanJob>> {
         if self.background_must_wait() {
             return None;
@@ -277,7 +281,8 @@ impl Gentle {
     ) {
         self.since_admitted += 1;
         let must_wait = shared.lanes().background_must_wait();
-        if self.since_admitted < READMIT_EVERY_DIRS && !must_wait {
+        let turn_due = self.since_admitted >= READMIT_EVERY_DIRS || must_wait;
+        if !turn_due {
             return;
         }
         flush();
@@ -289,7 +294,7 @@ impl Gentle {
 
 fn wait_for_background_turn(shared: &Shared) {
     let mut lanes = shared.lanes();
-    while lanes.background_must_wait() && !lanes.shutdown {
+    while lanes.background_parked() {
         #[cfg(feature = "test-utils")]
         (shared.on_background_parked)();
         lanes = shared.wake.wait(lanes).expect("index lanes lock");

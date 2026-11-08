@@ -86,7 +86,10 @@ function PromptDialog({ dialog }: { dialog: PromptDialogState }) {
 
   function submit() {
     const trimmed = value.trim()
-    if (!trimmed || busy) {
+    if (!trimmed) {
+      return
+    }
+    if (busy) {
       return
     }
     const failure = { message: 'file action failed', context: { kind: dialog.kind } }

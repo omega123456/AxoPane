@@ -7,7 +7,7 @@ use notify::event::{EventKind, ModifyKind, RenameMode};
 use notify::{RecursiveMode, Watcher};
 
 use super::classification::is_direct_child;
-use super::{coordinator, RENAME_EVENT_PATH_COUNT};
+use super::{coordinator, is_paired_rename};
 use crate::error_text::StringifyError;
 
 /// A short-lived native watch used only to capture direct-child mutation
@@ -105,7 +105,7 @@ fn captured_event_paths(event: &notify::Event, watched_path: &Path) -> Option<Ve
 }
 
 fn renamed_paths(event: &notify::Event) -> Option<Vec<PathBuf>> {
-    if event.paths.len() < RENAME_EVENT_PATH_COUNT {
+    if !is_paired_rename(event) {
         return None;
     }
     Some(vec![event.paths[0].clone(), event.paths[1].clone()])

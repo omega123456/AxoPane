@@ -81,7 +81,10 @@ export function resolveTabDrop(event: TabDragEndEvent, tabIds: TabIdsByPane): Ta
   if (event.canceled) {
     return null
   }
-  if (!sourcePaneId || !targetPaneId) {
+  if (!sourcePaneId) {
+    return null
+  }
+  if (!targetPaneId) {
     return null
   }
   if (typeof sourceTabId !== 'string') {

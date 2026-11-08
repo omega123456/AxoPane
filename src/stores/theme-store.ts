@@ -17,8 +17,12 @@ type ThemeStore = {
 const ROOT_CLASS = 'dark'
 const SYSTEM_MEDIA_QUERY = '(prefers-color-scheme: dark)'
 
+function canQueryMedia() {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+}
+
 function systemTheme(): ThemeMode {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+  if (!canQueryMedia()) {
     return 'dark'
   }
 
@@ -58,7 +62,10 @@ let systemListenerInstalled = false
 
 /** Re-resolves `system` when the OS switches between light and dark. */
 function followSystemTheme() {
-  if (systemListenerInstalled || typeof window.matchMedia !== 'function') {
+  if (systemListenerInstalled) {
+    return
+  }
+  if (!canQueryMedia()) {
     return
   }
   systemListenerInstalled = true

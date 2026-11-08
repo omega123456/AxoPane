@@ -145,7 +145,8 @@ fn run_if_current(
     let Ok(_permit) = coordinator.submit(spec) else {
         return;
     };
-    if target.generation.load(Ordering::SeqCst) == requested_generation {
+    let still_requested = target.generation.load(Ordering::SeqCst) == requested_generation;
+    if still_requested {
         work(requested_generation);
     }
 }
@@ -160,7 +161,11 @@ fn next_requested_generation(target: &ReconcileTarget, requested_generation: u64
     }
     target.scheduled.store(false, Ordering::SeqCst);
     let unchanged = target.generation.load(Ordering::SeqCst) == latest;
-    if unchanged || target.scheduled.swap(true, Ordering::SeqCst) {
+    if unchanged {
+        return None;
+    }
+    let already_scheduled = target.scheduled.swap(true, Ordering::SeqCst);
+    if already_scheduled {
         return None;
     }
     Some(target.generation.load(Ordering::SeqCst))

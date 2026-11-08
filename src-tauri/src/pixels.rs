@@ -18,7 +18,8 @@ pub fn unpremultiply(channel: u8, alpha: u8) -> u8 {
 /// Converts premultiplied BGRA (as `GetDIBits` returns for 32bpp) to
 /// straight-alpha RGBA, or `None` when `pixels` is not whole pixels.
 pub fn premultiplied_bgra_to_rgba(pixels: &[u8]) -> Option<Vec<u8>> {
-    if !pixels.len().is_multiple_of(RGBA_BYTES_PER_PIXEL) {
+    let whole_pixels = pixels.len().is_multiple_of(RGBA_BYTES_PER_PIXEL);
+    if !whole_pixels {
         return None;
     }
     let mut rgba = Vec::with_capacity(pixels.len());

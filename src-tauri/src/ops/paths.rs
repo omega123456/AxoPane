@@ -31,7 +31,8 @@ pub fn unique_name(dir: &Path, name: &str) -> String {
     let mut counter = 1;
     loop {
         let candidate = numbered_file_name(&stem, &ext, counter);
-        if !dir.join(&candidate).exists() {
+        let taken = dir.join(&candidate).exists();
+        if !taken {
             return candidate;
         }
         counter += 1;

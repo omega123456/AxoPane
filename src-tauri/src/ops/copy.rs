@@ -333,11 +333,14 @@ pub(super) fn move_merge_dir(
 /// directory is kept when `keep_real_dir` (merge into it); anything else is
 /// removed so the walk never writes through a link or trips on a type clash.
 fn clear_merge_target(target: &Path, keep_real_dir: bool) -> Result<(), String> {
-    match fs::symlink_metadata(target) {
-        Err(_) => Ok(()),
-        Ok(metadata) if keep_real_dir && is_real_directory_type(metadata.file_type()) => Ok(()),
-        Ok(_) => remove_target(target),
+    let Ok(metadata) = fs::symlink_metadata(target) else {
+        return Ok(());
+    };
+    let merges_into_directory = keep_real_dir && is_real_directory_type(metadata.file_type());
+    if merges_into_directory {
+        return Ok(());
     }
+    remove_target(target)
 }
 
 pub fn copy_file_with_progress(

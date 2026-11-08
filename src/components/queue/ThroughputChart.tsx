@@ -204,12 +204,18 @@ function buildChartSamples(
   const normalized = anchorChartSamples(normalizeSamples(samples, currentPercent))
   const lastSample = normalized.at(-1)
 
-  if (!lastSample || lastSample.rate > 0) {
+  if (!lastSample) {
+    return normalized
+  }
+  if (lastSample.rate > 0) {
     return normalized
   }
 
   const previous = normalized.at(SECOND_TO_LAST_INDEX)
-  if (!previous || previous.percent === lastSample.percent) {
+  if (!previous) {
+    return normalized
+  }
+  if (previous.percent === lastSample.percent) {
     return normalized
   }
 

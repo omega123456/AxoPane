@@ -62,8 +62,9 @@ function getTopLevelItems(menu: ContextMenuDocument): FocusableItem[] {
 function getSubmenuChildren(menu: ContextMenuDocument, parentId: string) {
   const parent = menu.sections
     .flatMap((section) => section.rows)
-    .find((row) => isContextMenuSubmenuRow(row) && row.id === parentId)
-  return parent && isContextMenuSubmenuRow(parent) ? parent.children.rows : []
+    .filter(isContextMenuSubmenuRow)
+    .find((row) => row.id === parentId)
+  return parent?.children.rows ?? []
 }
 
 function isSubmenuParent(item: FocusableItem): item is ContextMenuSubmenuRowItem {
@@ -173,7 +174,10 @@ function submenuChildToFocus(state: MenuFocus, submenu: ContextMenuSubmenuRowIte
 
 function enabledLookup(menu: ContextMenuDocument, itemId: string) {
   const lookup = findItem(menu, itemId)
-  if (!lookup || lookup.item.disabled) {
+  if (!lookup) {
+    return null
+  }
+  if (lookup.item.disabled) {
     return null
   }
   return lookup
@@ -233,7 +237,10 @@ export function edgeFocus(state: MenuFocusState, edge: FocusEdge): MenuFocus | n
 
 export function openedSubmenuFocus(state: MenuFocusState, itemId?: string): MenuFocus | null {
   const targetId = itemId ?? state.activeItemId
-  if (!state.menu || !targetId) {
+  if (!state.menu) {
+    return null
+  }
+  if (!targetId) {
     return null
   }
 
@@ -245,7 +252,10 @@ export function openedSubmenuFocus(state: MenuFocusState, itemId?: string): Menu
 }
 
 export function closedSubmenuFocus(state: MenuFocusState): MenuFocus | null {
-  if (!state.menu || !state.openSubmenuId) {
+  if (!state.menu) {
+    return null
+  }
+  if (!state.openSubmenuId) {
     return null
   }
   return { activeItemId: state.openSubmenuId, ...NO_SUBMENU }

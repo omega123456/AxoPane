@@ -74,6 +74,10 @@ export class PaneEntryCollection {
     return this.pages.has(pageIndex)
   }
 
+  private isRowInRange(rowIndex: number) {
+    return rowIndex >= 0 && rowIndex < this.total
+  }
+
   /**
    * Sets the total-row geometry for the current view. Rows beyond `total`
    * that were previously loaded (e.g. after a shrinking view revision) are
@@ -137,7 +141,7 @@ export class PaneEntryCollection {
    * `totalRows`, which callers should check separately via `totalRows`).
    */
   entryAt(rowIndex: number): DirectoryEntry | undefined {
-    if (rowIndex < 0 || rowIndex >= this.total) {
+    if (!this.isRowInRange(rowIndex)) {
       return undefined
     }
     const page = this.pages.get(pageIndexForRow(rowIndex))
@@ -178,7 +182,8 @@ export class PaneEntryCollection {
     const previous = page.entries[offset]
     if (!previous) return false
     page.entries[offset] = entry
-    if (pathKey(previous.path) !== pathKey(entry.path)) {
+    const pathChanged = pathKey(previous.path) !== pathKey(entry.path)
+    if (pathChanged) {
       this.byPath.delete(pathKey(previous.path))
       this.byPath.set(pathKey(entry.path), rowIndex)
     }
@@ -230,10 +235,13 @@ export class PaneEntryCollection {
     const startRow = pageStartRow(pageIndex)
     existing.entries.forEach((entry, offset) => {
       const rowIndex = startRow + offset
-      if (this.byPath.get(pathKey(entry.path)) === rowIndex) {
-        this.byPath.delete(pathKey(entry.path))
+      const entryPathKey = pathKey(entry.path)
+      const pathIndexedHere = this.byPath.get(entryPathKey) === rowIndex
+      if (pathIndexedHere) {
+        this.byPath.delete(entryPathKey)
       }
-      if (this.byId.get(entry.id) === rowIndex) {
+      const idIndexedHere = this.byId.get(entry.id) === rowIndex
+      if (idIndexedHere) {
         this.byId.delete(entry.id)
       }
     })

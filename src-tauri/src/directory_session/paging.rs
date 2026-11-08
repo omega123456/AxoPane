@@ -20,7 +20,9 @@ pub fn materialize_range(
     expected: SessionBaseline,
     view: &SessionView,
 ) -> Result<SessionRangeResponse, SessionRejection> {
-    if request.pane_id != *expected_pane_id || request.tab_id != expected_tab_id {
+    let targets_expected_tab =
+        request.pane_id == *expected_pane_id && request.tab_id == expected_tab_id;
+    if !targets_expected_tab {
         // Wrong pane/tab entirely: treat as "no active session" from the
         // caller's point of view rather than leaking cross-pane state.
         return Err(SessionRejection::NoActiveSession);

@@ -270,7 +270,10 @@ pub fn add_network_mount_if_missing(
     free_bytes: u64,
 ) -> bool {
     let mount_root = normalize_supplemental_mount_root(mount_root);
-    if mount_root.is_empty() || !is_network_file_system(file_system) {
+    if mount_root.is_empty() {
+        return false;
+    }
+    if !is_network_file_system(file_system) {
         return false;
     }
 
@@ -470,7 +473,8 @@ fn extend_network_resources_for_scope(volumes: &mut Vec<VolumeInfo>, scope: u32)
             break;
         }
 
-        if status == ERROR_MORE_DATA && buffer_size as usize > buffer.len() {
+        let needs_larger_buffer = status == ERROR_MORE_DATA && buffer_size as usize > buffer.len();
+        if needs_larger_buffer {
             buffer.resize(buffer_size as usize, 0);
             continue;
         }

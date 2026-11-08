@@ -97,12 +97,17 @@ impl EverythingHandle {
             .map(|sizes| sizes.values().next().copied().flatten())
     }
 
+    fn accepts_queries(&self) -> bool {
+        let available = self.availability == EverythingAvailability::Available;
+        available && !self.fail_queries
+    }
+
     pub fn query_folder_sizes(
         &self,
         paths: &[String],
         should_cancel: &dyn Fn() -> bool,
     ) -> Result<HashMap<String, Option<u64>>, EverythingError> {
-        if self.availability != EverythingAvailability::Available || self.fail_queries {
+        if !self.accepts_queries() {
             return Err(EverythingError::Unsupported);
         }
 
@@ -124,7 +129,7 @@ impl EverythingHandle {
         &self,
         query: &EverythingQuery,
     ) -> Result<EverythingQueryResult, EverythingError> {
-        if self.availability != EverythingAvailability::Available || self.fail_queries {
+        if !self.accepts_queries() {
             return Err(EverythingError::Unsupported);
         }
         self.search.run(query).ok_or(EverythingError::Unsupported)

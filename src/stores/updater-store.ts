@@ -74,15 +74,20 @@ type UpdaterStore = {
 type UpdaterSet = (partial: Partial<UpdaterStore>) => void
 type UpdaterGet = () => UpdaterStore
 
+function isUpdaterBusy(status: UpdaterStatus) {
+  return status === 'checking' || status === 'installing'
+}
+
 async function checkForUpdate(set: UpdaterSet, get: UpdaterGet, manual: boolean) {
   const { status, update: currentUpdate } = get()
-  if (status === 'checking' || status === 'installing') {
+  if (isUpdaterBusy(status)) {
     return
   }
 
   clearUpToDateTimer()
 
-  if (manual || !currentUpdate) {
+  const showsChecking = manual || !currentUpdate
+  if (showsChecking) {
     set({ status: 'checking', error: null })
   }
 
@@ -110,7 +115,10 @@ async function checkForUpdate(set: UpdaterSet, get: UpdaterGet, manual: boolean)
 
 async function downloadAndInstall(set: UpdaterSet, get: UpdaterGet) {
   const { update, status } = get()
-  if (!update || status === 'checking' || status === 'installing') {
+  if (!update) {
+    return
+  }
+  if (isUpdaterBusy(status)) {
     return
   }
 

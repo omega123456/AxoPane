@@ -26,7 +26,9 @@ type PaneThumbnailOptions = ThumbnailScope & {
 }
 
 function requestPendingThumbnails(pending: PendingThumbnailRange | null) {
-  if (!pending || pending.scope.mode !== 'thumbnails') return
+  if (!pending) return
+  const showsThumbnails = pending.scope.mode === 'thumbnails'
+  if (!showsThumbnails) return
   const candidates = thumbnailCandidatesInRange(pending.entries, pending.range)
   void useThumbnailStore
     .getState()

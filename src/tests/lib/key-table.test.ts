@@ -1,4 +1,4 @@
-import { caseInsensitiveLetterKeys, handleKeyByTable } from '@/lib/key-table'
+import { caseInsensitiveLetterKeys, handleKeyByTable, hasPrimaryModifier } from '@/lib/key-table'
 
 function keyEvent(key: string) {
   return { key, preventDefault: vi.fn() }
@@ -33,5 +33,16 @@ describe('caseInsensitiveLetterKeys', () => {
     expect(Object.keys(table).sort()).toEqual(['R', 'r'])
     expect(handleKeyByTable(keyEvent('R'), table)).toBe(true)
     expect(onReplace).toHaveBeenCalledOnce()
+  })
+})
+
+describe('hasPrimaryModifier', () => {
+  it('is true when Ctrl or Meta is held', () => {
+    expect(hasPrimaryModifier({ ctrlKey: true, metaKey: false })).toBe(true)
+    expect(hasPrimaryModifier({ ctrlKey: false, metaKey: true })).toBe(true)
+  })
+
+  it('is false without either modifier', () => {
+    expect(hasPrimaryModifier({ ctrlKey: false, metaKey: false })).toBe(false)
   })
 })

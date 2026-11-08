@@ -54,7 +54,8 @@ export const useActionDialogStore = create<ActionDialogStore>((set) => ({
   // A permission failure has one useful answer, and it is not an inline note
   // under the form: replace the dialog with the administrator-restart prompt.
   setError: (error) => {
-    if (error !== null && needsAdminRestart(error)) {
+    const requiresAdministrator = error !== null && needsAdminRestart(error)
+    if (requiresAdministrator) {
       set({ dialog: { kind: 'adminRequired', message: error }, busy: false, error: null })
       return
     }

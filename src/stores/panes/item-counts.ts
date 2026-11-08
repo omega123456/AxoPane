@@ -10,6 +10,7 @@ import { isTrashPath } from '@/lib/trash'
 import { pathKey, pathsMatch, samePathOrWindowsCaseFold } from '@/lib/path-compare'
 import { withResolvedIcons } from '@/stores/panes/icon-requests'
 import {
+  isListingSettled,
   patchPaneEntries,
   retainedFocusId,
   updateEntries,
@@ -121,8 +122,7 @@ function itemsSortContextMatches(
 }
 
 export function canStartItemsSort(pane: PaneState, scope: ItemsSortScope) {
-  const listingSettled = !pane.loading && pane.listingComplete
-  return listingSettled && itemsSortContextMatches(pane, scope)
+  return isListingSettled(pane) && itemsSortContextMatches(pane, scope)
 }
 
 function isSameItemsSortOperation(

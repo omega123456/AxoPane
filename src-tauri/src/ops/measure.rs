@@ -78,9 +78,6 @@ fn measure_entry_size(
     let Ok(file_type) = entry.file_type() else {
         return 0;
     };
-    if file_type.is_symlink() && !follow_symlinks {
-        return 0;
-    }
     if file_type.is_symlink() {
         return measure_symlink_target_size(&entry.path(), cancel, follow_symlinks, visited);
     }
@@ -101,6 +98,9 @@ fn measure_symlink_target_size(
     follow_symlinks: bool,
     visited: &mut HashSet<PathBuf>,
 ) -> u64 {
+    if !follow_symlinks {
+        return 0;
+    }
     let Ok(target_metadata) = fs::metadata(link) else {
         return 0;
     };

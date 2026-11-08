@@ -93,12 +93,13 @@ export function withoutStaleSizes(state: SizeRequestState, stalePaths: string[])
   const sizeStates: SizeStates = { ...state.sizeStates }
   for (const stalePath of stalePaths) {
     delete pendingSizeRequests[stalePath]
-    if (sizeStates[stalePath]?.state === 'calculating') {
+    const staleSize = sizeStates[stalePath]
+    if (staleSize?.state === 'calculating') {
       delete sizeStates[stalePath]
       continue
     }
-    if (sizeStates[stalePath]?.refreshing) {
-      sizeStates[stalePath] = { ...sizeStates[stalePath], refreshing: false }
+    if (staleSize?.refreshing) {
+      sizeStates[stalePath] = { ...staleSize, refreshing: false }
     }
   }
   return { pendingSizeRequests, sizeStates }

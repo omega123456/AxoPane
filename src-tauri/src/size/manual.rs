@@ -3,7 +3,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::traversal::TraversalError;
+use crate::traversal::{is_real_directory, TraversalError};
 
 #[derive(Debug)]
 pub enum ManualSizeError {
@@ -57,7 +57,7 @@ pub fn calculate(
         return subtree_total(&target, cancel, started_at, timeout);
     }
 
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+    if !is_real_directory(&metadata) {
         return Ok(0);
     }
 
@@ -106,7 +106,8 @@ fn subtree_total(
         let entry = entry?;
         let metadata = std::fs::symlink_metadata(&entry.path)?;
 
-        if metadata.file_type().is_symlink() || metadata.is_dir() {
+        let is_plain_file = !metadata.file_type().is_symlink() && !metadata.is_dir();
+        if !is_plain_file {
             continue;
         }
 

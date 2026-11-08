@@ -130,7 +130,8 @@ unsafe fn create_message_window(class_name: PCWSTR) -> Result<HWND, String> {
         lpszClassName: class_name,
         ..Default::default()
     };
-    if RegisterClassExW(&class) == 0 {
+    let registration_failed = RegisterClassExW(&class) == 0;
+    if registration_failed {
         return Err("RegisterClassExW failed".to_string());
     }
 

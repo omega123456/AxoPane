@@ -39,7 +39,8 @@ export function LocationIcon({
   }
 
   const volume = findVolumeForPath(path, volumes)
-  if (volume && isVolumeRoot(path, volume)) {
+  const isRootOfVolume = volume !== null && isVolumeRoot(path, volume)
+  if (isRootOfVolume) {
     return <VolumeIcon volume={volume} className={className} />
   }
 

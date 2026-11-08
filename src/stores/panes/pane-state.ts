@@ -154,12 +154,23 @@ export function withPane(state: PanesPatch, paneId: PaneId, patch: Partial<PaneS
   return { panes: { ...state.panes, [paneId]: { ...state.panes[paneId], ...patch } } }
 }
 
+export function isListingSettled(pane: PaneState) {
+  return !pane.loading && pane.listingComplete
+}
+
+function hasEntryWithId(entries: DirectoryEntry[], entryId: string) {
+  return entries.some((entry) => entry.id === entryId)
+}
+
 export function findMatchingEntryId(
   entries: DirectoryEntry[],
   candidates: Array<string | null | undefined>,
 ) {
   for (const candidate of candidates) {
-    if (candidate && entries.some((entry) => entry.id === candidate)) {
+    if (!candidate) {
+      continue
+    }
+    if (hasEntryWithId(entries, candidate)) {
       return candidate
     }
   }

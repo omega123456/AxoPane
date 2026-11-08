@@ -95,7 +95,8 @@ class TreePatchDraft {
     const existingKey = treeNodeKeyForPath(this.treeNodes, entry.path)
     const existing = existingKey ? this.treeNodes[existingKey] : undefined
     const treeNodes = this.writableNodes()
-    if (existingKey && existingKey !== entry.path) {
+    const isRekeyed = existingKey !== null && existingKey !== entry.path
+    if (isRekeyed) {
       delete treeNodes[existingKey]
     }
     treeNodes[entry.path] = {
@@ -134,7 +135,8 @@ class TreePatchDraft {
     }
     const node = this.treeNodes[nodeKey]
     const belongsToParent = pathsMatch(node.parentPath ?? '', this.parent.path)
-    if (!belongsToParent && !wasListedChild) {
+    const isParentChild = belongsToParent || wasListedChild
+    if (!isParentChild) {
       return
     }
     const doomed = new Set<string>()

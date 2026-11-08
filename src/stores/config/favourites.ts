@@ -22,7 +22,8 @@ export function withAddedFavourite(
 
 export function withoutFavourite(state: FavouritesState, path: string): FavouritesState | null {
   const favourites = state.favourites.filter((item) => !pathsMatch(item, path))
-  if (favourites.length === state.favourites.length) {
+  const nothingRemoved = favourites.length === state.favourites.length
+  if (nothingRemoved) {
     return null
   }
   const favouriteNames = Object.fromEntries(

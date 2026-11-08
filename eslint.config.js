@@ -2,6 +2,7 @@ import js from '@eslint/js'
 import globals from 'globals'
 import tseslint from 'typescript-eslint'
 import reactHooks from 'eslint-plugin-react-hooks'
+import { localRulesPlugin } from './scripts/eslint-named-conditions.mjs'
 
 export default tseslint.config(
   {
@@ -52,7 +53,11 @@ export default tseslint.config(
   {
     files: ['src/**/*.{ts,tsx}'],
     ignores: ['src/tests/**'],
+    plugins: {
+      local: localRulesPlugin,
+    },
     rules: {
+      'local/named-conditions': 'error',
       'id-length': ['error', { min: 2, properties: 'never', exceptions: ['_'] }],
       complexity: ['error', 10],
       'max-depth': ['error', 2],

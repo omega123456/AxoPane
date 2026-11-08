@@ -10,7 +10,10 @@ export function buildStickyChain(
   treeNodes: Record<string, TreeNodeState>,
   activePath: string | null,
 ): string[] {
-  if (!activePath || !treeNodes[activePath]) {
+  if (!activePath) {
+    return []
+  }
+  if (!treeNodes[activePath]) {
     return []
   }
 
@@ -57,6 +60,10 @@ export type FlatTreeRow =
   | { kind: 'fold-siblings'; parentPath: string; count: number; depth: number }
   | { kind: 'fold-levels'; hiddenPaths: string[]; depth: number }
 
+function isExpandedTowards(node: TreeNodeState | undefined, childPath: string) {
+  return node?.expanded === true && node.children.includes(childPath)
+}
+
 /**
  * Middle levels of a long active path that fold into one "N levels hidden"
  * row. Only folds when every hidden level is expanded down the chain, so the
@@ -67,14 +74,17 @@ function hiddenChainLevels(
   fold: TreeFoldState,
 ): string[] {
   const below = fold.chain.slice(1)
-  if (fold.showHiddenLevels || below.length <= FOLD_MAX_LEVELS) {
+  if (fold.showHiddenLevels) {
+    return []
+  }
+  if (below.length <= FOLD_MAX_LEVELS) {
     return []
   }
   const hidden = below.slice(FOLD_KEEP_HEAD, below.length - (FOLD_MAX_LEVELS - FOLD_KEEP_HEAD))
   const chainIsOpen = hidden.every((path) => {
     const node = treeNodes[path]
     const next = fold.chain[fold.chain.indexOf(path) + 1]
-    return node?.expanded === true && node.children.includes(next)
+    return isExpandedTowards(node, next)
   })
   return chainIsOpen ? hidden : []
 }

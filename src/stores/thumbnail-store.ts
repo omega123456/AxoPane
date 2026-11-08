@@ -317,7 +317,9 @@ async function requestMissingThumbnails(set: ThumbnailSet, request: MissingThumb
       revision,
       candidates: missing,
     })
-    if (response.revision !== revision || response.acceptedCount !== missing.length) {
+    const fullyAccepted =
+      response.revision === revision && response.acceptedCount === missing.length
+    if (!fullyAccepted) {
       throw new Error('thumbnail request was not fully accepted')
     }
   } catch (error) {
@@ -345,7 +347,10 @@ export const useThumbnailStore = create<ThumbnailStore>((set, get) => ({
   },
   getRecord: (candidate) => {
     const record = get().cache[thumbnailFingerprintKey(candidate)]
-    return record && isThumbnailCacheRecordUsable(record, cacheNow()) ? record : undefined
+    if (!record) {
+      return undefined
+    }
+    return isThumbnailCacheRecordUsable(record, cacheNow()) ? record : undefined
   },
   reset: () => set({ scopes: {}, cache: {} }),
 }))

@@ -198,7 +198,8 @@ fn push_visible_children(
     batch: &mut CandidateBatch,
 ) -> bool {
     for &child in tree.child_ids(parent_id) {
-        if batch.candidates.len() == CANDIDATE_CAP {
+        let batch_full = batch.candidates.len() == CANDIDATE_CAP;
+        if batch_full {
             batch.truncated = true;
             return false;
         }
@@ -227,7 +228,9 @@ fn visible_path(
     // Leaf first; the last entry is the root, which holds a full path.
     let (root, rest) = names.split_last()?;
     let components: Vec<&str> = rest.iter().rev().copied().collect();
-    if !include_hidden && components.iter().any(|name| name.starts_with('.')) {
+    let has_hidden_component = components.iter().any(|name| name.starts_with('.'));
+    let hidden_excluded = has_hidden_component && !include_hidden;
+    if hidden_excluded {
         return None;
     }
     let path = PathStyle::Posix.compose(root, &components);

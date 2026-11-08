@@ -45,7 +45,8 @@ export function dedupeNativeMenuItems(items: NativeMenuItem[]): NativeMenuItem[]
     const nextItem = { ...item, children }
     const key = dedupeKey(nextItem)
 
-    if (isAppOwnedDuplicate(nextItem) || seen.has(key)) {
+    const isDuplicate = isAppOwnedDuplicate(nextItem) || seen.has(key)
+    if (isDuplicate) {
       return []
     }
     seen.add(key)
@@ -56,18 +57,28 @@ export function dedupeNativeMenuItems(items: NativeMenuItem[]): NativeMenuItem[]
 
 function isAppOwnedDuplicate(item: NativeMenuItem): boolean {
   const normalizedVerb = normalizeVerb(item.normalizedVerb ?? item.label)
-  if (
-    item.children.length > 0 &&
-    !isAlwaysAppOwnedSubmenu(item.canonicalActionKind, normalizedVerb)
-  ) {
+  const isShellOwnedSubmenu =
+    hasChildren(item) && !isAlwaysAppOwnedSubmenu(item.canonicalActionKind, normalizedVerb)
+  if (isShellOwnedSubmenu) {
     return false
   }
 
-  if (item.canonicalActionKind && APP_OWNED_CANONICAL_ACTION_KINDS.has(item.canonicalActionKind)) {
+  if (isAppOwnedCanonicalKind(item.canonicalActionKind)) {
     return true
   }
 
   return isOpenWithVariant(normalizedVerb) || APP_OWNED_NORMALIZED_VERBS.has(normalizedVerb)
+}
+
+function hasChildren(item: NativeMenuItem) {
+  return item.children.length > 0
+}
+
+function isAppOwnedCanonicalKind(canonicalActionKind: NativeMenuItem['canonicalActionKind']) {
+  if (!canonicalActionKind) {
+    return false
+  }
+  return APP_OWNED_CANONICAL_ACTION_KINDS.has(canonicalActionKind)
 }
 
 function isAlwaysAppOwnedSubmenu(
@@ -93,6 +104,6 @@ function dedupeKey(item: NativeMenuItem): string {
   return [
     item.canonicalActionKind ?? '',
     normalizeVerb(item.label),
-    item.children.length > 0 ? 'submenu' : 'leaf',
+    hasChildren(item) ? 'submenu' : 'leaf',
   ].join(':')
 }

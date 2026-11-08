@@ -11,7 +11,7 @@ import {
 import { useContextMenuStore } from '@/stores/context-menu-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { tabLabel, useTabsStore, type TabState } from '@/stores/tabs-store'
-import { MIDDLE_MOUSE_BUTTON } from '@/lib/mouse-buttons'
+import { isMiddleButton } from '@/lib/mouse-buttons'
 import type { PaneId } from '@/types/pane'
 import { FOCUS_RING } from '@/lib/focus-ring'
 import { NO_CLASS, TEXT_SECONDARY } from '@/lib/class-names'
@@ -107,7 +107,8 @@ function PaneTab({ paneId, title, tab, index, isActive, canClose }: PaneTabProps
   const closeTab = usePanesStore((state) => state.closeTab)
 
   function onTabAuxClick(event: MouseEvent<HTMLDivElement>) {
-    if (event.button !== MIDDLE_MOUSE_BUTTON || !canClose) return
+    if (!isMiddleButton(event)) return
+    if (!canClose) return
     event.preventDefault()
     void closeTab(paneId, tab.id)
   }

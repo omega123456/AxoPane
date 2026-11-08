@@ -243,7 +243,10 @@ fn single_row_delta(
         // The row must actually be gone from `next_view` at that same index
         // (or the list is now shorter than that index), otherwise something
         // more than a simple removal happened.
-        if row_index < next_view.len() && next_view[row_index].path == *removed_path {
+        let still_present = next_view
+            .get(row_index)
+            .is_some_and(|entry| entry.path == *removed_path);
+        if still_present {
             return None;
         }
         return Some(RowDelta::Removed {
@@ -280,7 +283,9 @@ fn single_row_delta(
         Some(previous_index) => {
             // An in-place update only if the row count is unchanged and the
             // touched row stayed at the exact same index (no reordering).
-            if previous_view.len() != next_view.len() || previous_index != next_index {
+            let stayed_in_place =
+                previous_view.len() == next_view.len() && previous_index == next_index;
+            if !stayed_in_place {
                 return None;
             }
             Some(RowDelta::Updated {

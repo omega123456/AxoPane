@@ -88,7 +88,8 @@ fn match_anchor(
         return None;
     }
     let gap = (ancestors.len() - anchor.components.len()) as u32;
-    if browse && gap != 0 {
+    let skips_levels = browse && gap != 0;
+    if skips_levels {
         return None;
     }
     Some(FolderMatch {
@@ -172,7 +173,9 @@ fn display_parent(style: PathStyle, root: &str, ancestors: &[String]) -> (String
     let mut text = nfc(root).into_owned();
     let mut offsets = Vec::with_capacity(ancestors.len());
     for name in ancestors {
-        if !text.is_empty() && !text.ends_with(|character| style.is_separator(character)) {
+        let needs_separator =
+            !text.is_empty() && !text.ends_with(|character| style.is_separator(character));
+        if needs_separator {
             text.push(style.separator());
         }
         offsets.push(text.encode_utf16().count() as u32);

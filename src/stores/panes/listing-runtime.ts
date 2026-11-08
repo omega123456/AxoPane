@@ -81,7 +81,10 @@ export async function ensureSessionFullyLoaded(
 ): Promise<void> {
   const baselineAtStart = session.currentBaseline
   const { collection } = session
-  if (collection.totalRows === 0 || !baselineAtStart) {
+  if (collection.totalRows === 0) {
+    return
+  }
+  if (!baselineAtStart) {
     return
   }
 

@@ -108,8 +108,9 @@ pub fn delete_batch<A: SystemTrashAdapter>(
             .filter(|source| !known.contains(source.path.as_str()))
             .map(|source| source.path.clone()),
     );
+    let has_correlations = !correlations.is_empty();
     result.correlated = correlations;
-    if !result.correlated.is_empty() {
+    if has_correlations {
         let deleted_at = adapter.now_seconds();
         if let Err(error) = adapter.record_manifest(&root, &result.correlated, deleted_at) {
             // Deletions remain successful; making their origin unknown is

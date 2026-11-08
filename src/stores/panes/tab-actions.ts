@@ -113,7 +113,8 @@ export async function moveTab(
 
 export async function switchTab(paneId: PaneId, tabId: string) {
   const before = useTabsStore.getState().panes[paneId]
-  if (before.tabs[before.activeTabIndex]?.id === tabId) {
+  const activeTabBefore = before.tabs[before.activeTabIndex]
+  if (activeTabBefore?.id === tabId) {
     panesStore().setState({ activePaneId: paneId })
     return
   }

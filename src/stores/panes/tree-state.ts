@@ -224,10 +224,10 @@ export function revealedTree(
 ): Pick<PanesData, 'treeNodes' | 'treeFold'> {
   const ancestors = new Set(chain.slice(0, -1).map((entry) => pathKey(entry)))
   const leaf = pathKey(path)
-  const treeFold =
-    state.treeFold.leaf === leaf
-      ? state.treeFold
-      : { leaf, revealedSiblings: [], showHiddenLevels: false }
+  const isSameLeaf = state.treeFold.leaf === leaf
+  const treeFold = isSameLeaf
+    ? state.treeFold
+    : { leaf, revealedSiblings: [], showHiddenLevels: false }
   const treeNodes = { ...state.treeNodes }
   for (const [nodePath, node] of Object.entries(state.treeNodes)) {
     const expanded = expandedForReveal(nodePath, ancestors, leaf, node.expanded)

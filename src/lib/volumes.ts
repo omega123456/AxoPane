@@ -17,9 +17,24 @@ export function isPathInsideVolume(path: string, mountRoot: string) {
     return false
   }
 
-  return normalizedRoot.endsWith('\\') || normalizedRoot.endsWith('/')
+  return endsWithSeparator(normalizedRoot)
     ? normalizedPath.startsWith(normalizedRoot)
-    : remainder.startsWith('\\') || remainder.startsWith('/')
+    : startsWithSeparator(remainder)
+}
+
+function endsWithSeparator(path: string) {
+  return path.endsWith('\\') || path.endsWith('/')
+}
+
+function startsWithSeparator(path: string) {
+  return path.startsWith('\\') || path.startsWith('/')
+}
+
+function isDeeperMount(candidate: VolumeInfo, current: VolumeInfo | null) {
+  if (!current) {
+    return true
+  }
+  return candidate.mountRoot.length > current.mountRoot.length
 }
 
 /** Strip trailing separators and apply OS-appropriate identity normalization. */
@@ -39,7 +54,7 @@ export function findVolumeForPath(path: string, volumes: VolumeInfo[]): VolumeIn
     if (!isPathInsideVolume(path, volume.mountRoot)) {
       continue
     }
-    if (!match || volume.mountRoot.length > match.mountRoot.length) {
+    if (isDeeperMount(volume, match)) {
       match = volume
     }
   }
@@ -123,7 +138,8 @@ export function formatVolumeTreeName(volume: VolumeInfo) {
     return drive
   }
 
-  if (trimmedLabel.localeCompare(drive, undefined, { sensitivity: 'base' }) === 0) {
+  const labelIsDrive = trimmedLabel.localeCompare(drive, undefined, { sensitivity: 'base' }) === 0
+  if (labelIsDrive) {
     return drive
   }
 
@@ -138,7 +154,10 @@ export type CapacityLevel = 'normal' | 'warning' | 'critical'
  * OS gave no capacity at all.
  */
 export function volumeUsedFraction(volume: VolumeInfo): number | null {
-  if (volumeCategory(volume) === 'network' || volume.totalBytes <= 0) {
+  if (volume.isNetwork) {
+    return null
+  }
+  if (volume.totalBytes <= 0) {
     return null
   }
   const used = (volume.totalBytes - volume.freeBytes) / volume.totalBytes

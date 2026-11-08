@@ -16,15 +16,22 @@ use std::sync::Arc;
 
 pub use ignore_backend::{walk, TraversalEntry, TraversalError, TraversalOptions};
 
+pub fn is_real_directory(metadata: &std::fs::Metadata) -> bool {
+    metadata.is_dir() && !metadata.file_type().is_symlink()
+}
+
+fn has_parent_component(member: &Path) -> bool {
+    member
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+}
+
 /// Lexically validate a relative archive member and ensure it cannot escape
 /// `destination`. Existing ancestor symlinks are rejected as well: joining an
 /// otherwise harmless relative path through one could write outside the root.
 pub fn safe_destination(destination: &Path, member: &Path) -> Result<PathBuf, TraversalError> {
-    if member.is_absolute()
-        || member
-            .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
-    {
+    let escapes = member.is_absolute() || has_parent_component(member);
+    if escapes {
         return Err(TraversalError::DestinationEscape(member.to_path_buf()));
     }
 

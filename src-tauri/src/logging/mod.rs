@@ -204,7 +204,8 @@ pub fn prune_old_logs(dir: &Path, today: Date, retention_days: i64) {
         let Some(date) = parse_log_file_date(name) else {
             continue;
         };
-        if (today - date).whole_days() >= retention_days {
+        let age_in_days = (today - date).whole_days();
+        if age_in_days >= retention_days {
             let _ = std::fs::remove_file(entry.path());
         }
     }

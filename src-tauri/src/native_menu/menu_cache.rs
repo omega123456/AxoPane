@@ -225,12 +225,13 @@ fn type_signature(selected_paths: &[String]) -> String {
 fn extension_of(path: &str) -> String {
     let file_name = path.rsplit(['/', '\\']).next().unwrap_or(path);
 
-    match file_name.rsplit_once('.') {
-        Some((stem, extension)) if !stem.is_empty() && !extension.is_empty() => {
-            extension.to_ascii_lowercase()
-        }
-        _ => String::new(),
+    let Some((stem, extension)) = file_name.rsplit_once('.') else {
+        return String::new();
+    };
+    if stem.is_empty() {
+        return String::new();
     }
+    extension.to_ascii_lowercase()
 }
 
 fn rebind_items(

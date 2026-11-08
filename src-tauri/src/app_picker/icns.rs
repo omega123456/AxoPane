@@ -5,13 +5,17 @@ const FILE_HEADER_LEN: usize = 8;
 const CHUNK_HEADER_LEN: usize = 8;
 const PNG_MAGIC: &[u8] = &[0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1A, b'\n'];
 
+fn has_icns_header(bytes: &[u8]) -> bool {
+    bytes.len() >= FILE_HEADER_LEN && bytes.starts_with(ICNS_MAGIC)
+}
+
 /// Walks an `.icns` file's chunk table (4-byte OSType + 4-byte big-endian
 /// length + payload) and returns the largest payload that is itself a raw
 /// embedded PNG (modern large-icon chunks like `ic07`-`ic14` embed PNG bytes
 /// directly). Older `.icns` files using legacy RLE-only chunks have no PNG
 /// payload and yield `None`, which callers treat as "no icon available".
 pub fn largest_embedded_png(bytes: &[u8]) -> Option<&[u8]> {
-    if bytes.len() < FILE_HEADER_LEN || &bytes[0..4] != ICNS_MAGIC {
+    if !has_icns_header(bytes) {
         return None;
     }
 
@@ -26,7 +30,8 @@ pub fn largest_embedded_png(bytes: &[u8]) -> Option<&[u8]> {
 
         let payload_start = offset + CHUNK_HEADER_LEN;
         let payload_end = offset.checked_add(length)?;
-        if payload_end > bytes.len() || payload_start > payload_end {
+        let payload_in_bounds = payload_start <= payload_end && payload_end <= bytes.len();
+        if !payload_in_bounds {
             break;
         }
 

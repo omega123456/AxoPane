@@ -4,7 +4,10 @@ import {
   defaultKeymap,
   findKeybindingConflicts,
   formatShortcutLabel,
+  isMacPlatform,
   isReservedCommand,
+  isSearchEverywhereShortcut,
+  isWindowsPlatform,
   migrateKeymap,
   mergeKeymap,
   normalizeShortcut,
@@ -167,5 +170,23 @@ describe('keymap', () => {
   it('labels modifiers per platform', () => {
     expect(formatShortcutLabel('Ctrl+Shift+F', 'macos')).toBe('⌘⇧F')
     expect(formatShortcutLabel('Meta+Space', 'windows')).toBe('Win+Space')
+  })
+
+  it('names the running platform', () => {
+    setPlatform('MacIntel')
+    expect(isMacPlatform()).toBe(true)
+    expect(isWindowsPlatform()).toBe(false)
+
+    setPlatform('Win32')
+    expect(isMacPlatform()).toBe(false)
+    expect(isWindowsPlatform()).toBe(true)
+  })
+
+  it('recognises the Search everywhere shortcut', () => {
+    const searchEverywhere = new KeyboardEvent('keydown', { key: 'F4' })
+    const refresh = new KeyboardEvent('keydown', { key: 'r', ctrlKey: true })
+
+    expect(isSearchEverywhereShortcut(searchEverywhere, defaultKeymap)).toBe(true)
+    expect(isSearchEverywhereShortcut(refresh, defaultKeymap)).toBe(false)
   })
 })

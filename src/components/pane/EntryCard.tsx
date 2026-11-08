@@ -1,7 +1,7 @@
 import { memo, useMemo } from 'react'
 import { getUnixTime, parseISO } from 'date-fns'
 import type { DragEvent, MouseEvent, ReactNode, RefObject } from 'react'
-import { MIDDLE_MOUSE_BUTTON } from '@/lib/mouse-buttons'
+import { isMiddleClickOpen } from '@/lib/mouse-buttons'
 import { EntryIcon } from '@/components/icons/EntryIcon'
 import { useRenameInputFocus, type FileRowActions } from './FileRow'
 import { SizeValue } from './SizeValue'
@@ -26,7 +26,9 @@ function ThumbnailPreview({
   override?: EntryCardThumbnail
 }) {
   const fingerprint = useMemo(() => {
-    if (entry.isDir || entry.sizeBytes === null || entry.modifiedAt === null) return null
+    if (entry.isDir) return null
+    if (entry.sizeBytes === null) return null
+    if (entry.modifiedAt === null) return null
     const modifiedUnixSeconds = getUnixTime(parseISO(entry.modifiedAt))
     return Number.isFinite(modifiedUnixSeconds)
       ? thumbnailFingerprintKey({
@@ -139,7 +141,7 @@ function cardInteractionProps(
     onClick: (event: MouseEvent<HTMLDivElement>) => actions.onClick(entry.id, event),
     onContextMenu: (event: MouseEvent<HTMLDivElement>) => actions.onContextMenu(entry.id, event),
     onAuxClick: (event: MouseEvent<HTMLDivElement>) => {
-      if (event.button === MIDDLE_MOUSE_BUTTON && entry.isDir && !entry.trashId) {
+      if (isMiddleClickOpen(event, entry)) {
         event.preventDefault()
         actions.onMiddleClick(entry.id)
       }

@@ -231,7 +231,8 @@ export function listingFailed(state: PanesPatch, paneId: PaneId, error: unknown)
 
 function historyAfterNavigation(pane: PaneState, path: string) {
   const base = pane.historyIndex >= 0 ? pane.history.slice(0, pane.historyIndex + 1) : []
-  const history = base.at(-1) === path ? base : [...base, path]
+  const alreadyCurrent = base.at(-1) === path
+  const history = alreadyCurrent ? base : [...base, path]
   return { history, historyIndex: history.length - 1 }
 }
 

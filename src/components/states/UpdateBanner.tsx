@@ -10,7 +10,10 @@ export function UpdateBanner() {
   const downloadAndInstall = useUpdaterStore((state) => state.downloadAndInstall)
   const dismiss = useUpdaterStore((state) => state.dismiss)
 
-  if (!summary || !update) {
+  if (!summary) {
+    return null
+  }
+  if (!update) {
     return null
   }
 

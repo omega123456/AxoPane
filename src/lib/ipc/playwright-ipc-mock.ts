@@ -51,7 +51,10 @@ function readScenario() {
  */
 function readCommandOverride<CommandName extends keyof IpcCommandMap>(command: CommandName) {
   const overrides = readScenario()?.commands
-  if (overrides && command in overrides) {
+  if (!overrides) {
+    return { found: false, value: undefined as IpcCommandMap[CommandName]['response'] }
+  }
+  if (command in overrides) {
     return { found: true, value: overrides[command] as IpcCommandMap[CommandName]['response'] }
   }
   return { found: false, value: undefined as IpcCommandMap[CommandName]['response'] }
@@ -88,10 +91,7 @@ function loadSessionFixture() {
 function rootForPath(path: string) {
   const normalized = path.toLowerCase()
   return listVolumesFixture()
-    .filter((volume) => {
-      const root = volume.mountRoot.toLowerCase()
-      return normalized === root || normalized.startsWith(root)
-    })
+    .filter((volume) => normalized.startsWith(volume.mountRoot.toLowerCase()))
     .sort((left, right) => right.mountRoot.length - left.mountRoot.length)[0]?.mountRoot
 }
 
@@ -103,7 +103,10 @@ function defaultTreeFixtureTarget() {
       : [session.leftPath, session.rightPath]
 
   for (const path of preferred) {
-    if (!path || path === TRASH_PATH) {
+    if (!path) {
+      continue
+    }
+    if (path === TRASH_PATH) {
       continue
     }
     const root = rootForPath(path)

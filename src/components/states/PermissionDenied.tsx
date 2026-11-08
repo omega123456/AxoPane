@@ -1,12 +1,12 @@
 import { LockIcon } from '@/components/icons'
 import { log } from '@/lib/app-log-commands'
 import { openFullDiskAccessSettings, restartAsAdmin } from '@/lib/ipc/commands'
-import { detectPlatformOs } from '@/lib/keymap'
+import { isMacPlatform } from '@/lib/keymap'
 import { StatePanel } from './StatePanel'
 
 /** Offers the fix that matches the OS: elevation on Windows, Full Disk Access on macOS. */
 export function PermissionDenied() {
-  const isMac = detectPlatformOs() === 'macos'
+  const isMac = isMacPlatform()
 
   function fix() {
     const attempt = isMac ? openFullDiskAccessSettings() : restartAsAdmin()

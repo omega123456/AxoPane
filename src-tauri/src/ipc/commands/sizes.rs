@@ -101,7 +101,8 @@ pub fn request_folder_sizes(
     });
 
     let deadline = Instant::now() + Duration::from_secs(1);
-    while Instant::now() < deadline {
+    let before_deadline = || Instant::now() < deadline;
+    while before_deadline() {
         let recorded = updates.lock().expect("size updates lock");
         let terminal_count = recorded
             .iter()

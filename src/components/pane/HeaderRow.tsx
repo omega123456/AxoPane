@@ -23,6 +23,11 @@ const ariaSortByDirection: Record<SortDirection, 'ascending' | 'descending'> = {
   desc: 'descending',
 }
 
+function columnLabel(columnKey: ColumnKey, isTrash: boolean) {
+  const showsDeletedDate = isTrash && columnKey === 'modified'
+  return showsDeletedDate ? 'Deleted' : columnDefinitions[columnKey].label
+}
+
 function nameColumnIndentClass(columnKey: ColumnKey) {
   return columnKey === 'name' ? 'pl-6' : NO_CLASS
 }
@@ -113,9 +118,7 @@ export function HeaderRow({ pane }: HeaderRowProps) {
           key={column.key}
           pane={pane}
           columnKey={column.key}
-          label={
-            isTrash && column.key === 'modified' ? 'Deleted' : columnDefinitions[column.key].label
-          }
+          label={columnLabel(column.key, isTrash)}
           showItemsSortStatus={column.key === 'items' && itemsSortPending}
           columnWidths={columnWidths}
           resize={resize}

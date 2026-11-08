@@ -1,5 +1,6 @@
 import { create, type StoreApi } from 'zustand'
 import { log } from '@/lib/app-log-commands'
+import { isRejectionWithKind } from '@/lib/error-message'
 import { folderSizeIndexStatus, searchClose, searchPage, searchQuery } from '@/lib/ipc/commands'
 import type { SearchCapabilities, SearchHit, SearchRejection, SearchScope } from '@/lib/types/ipc'
 import { usePanesStore } from '@/stores/panes-store'
@@ -64,10 +65,18 @@ export function isSearchable(query: string) {
 }
 
 function asRejection(error: unknown): SearchRejection {
-  if (typeof error === 'object' && error !== null && 'kind' in error) {
+  if (isRejectionWithKind(error)) {
     return error as SearchRejection
   }
   return { kind: 'failed', message: String(error) }
+}
+
+function isSupersededRequest(requestSequence: number) {
+  return requestSequence !== latestRequestSequence
+}
+
+function shouldIgnoreRejection(requestSequence: number, rejection: SearchRejection) {
+  return isSupersededRequest(requestSequence) || rejection.kind === 'stale'
 }
 
 function cancelPending() {
@@ -91,7 +100,7 @@ async function runQuery(set: PaletteSet, get: PaletteGet) {
       scope,
       includeHidden: usePanesStore.getState().showHiddenFiles,
     })
-    if (requestSequence !== latestRequestSequence) {
+    if (isSupersededRequest(requestSequence)) {
       return
     }
     set({
@@ -105,7 +114,7 @@ async function runQuery(set: PaletteSet, get: PaletteGet) {
     })
   } catch (error) {
     const rejection = asRejection(error)
-    if (requestSequence !== latestRequestSequence || rejection.kind === 'stale') {
+    if (shouldIgnoreRejection(requestSequence, rejection)) {
       return
     }
     set(rejection.kind === 'tooShort' ? cleared : { ...cleared, status: 'error', error: rejection })
@@ -133,13 +142,22 @@ function closePalette(set: PaletteSet, get: PaletteGet) {
   })
 }
 
+function isPastLoadedButMoreAvailable(target: number, loadedCount: number, total: number) {
+  const pastLastLoaded = target > loadedCount - 1
+  return pastLastLoaded && loadedCount < total
+}
+
+function hasMoreToLoad(state: SearchPaletteState) {
+  return !state.loadingMore && state.items.length < state.total
+}
+
 function moveActive(set: PaletteSet, get: PaletteGet, delta: number) {
   const { activeIndex, items, total } = get()
   if (items.length === 0) {
     return
   }
   const target = activeIndex + delta
-  if (target > items.length - 1 && items.length < total) {
+  if (isPastLoadedButMoreAvailable(target, items.length, total)) {
     set({ activeIndex: items.length - 1 })
     void get()
       .loadMore()
@@ -150,8 +168,11 @@ function moveActive(set: PaletteSet, get: PaletteGet, delta: number) {
 }
 
 async function loadMore(set: PaletteSet, get: PaletteGet) {
-  const { queryId, items, total, loadingMore } = get()
-  if (queryId === null || loadingMore || items.length >= total) {
+  const { queryId, items } = get()
+  if (queryId === null) {
+    return
+  }
+  if (!hasMoreToLoad(get())) {
     return
   }
   set({ loadingMore: true })

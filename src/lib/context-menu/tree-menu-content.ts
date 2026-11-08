@@ -142,17 +142,25 @@ function treeFooterSection(target: TreeTarget, platform: PlatformOs): ContextMen
   ])
 }
 
+function ejectableVolumeAt(path: string, platform: PlatformOs) {
+  if (platform !== 'macos') {
+    return null
+  }
+  const volume = findVolumeForPath(path, usePanesStore.getState().volumes)
+  if (!volume?.isRemovable) {
+    return null
+  }
+  return isVolumeRoot(path, volume) ? volume : null
+}
+
 /**
  * Eject is macOS-only: on Windows a safe removal isn't possible from here (an
  * in-use volume can only be force-dismounted), so Windows users use the native
  * "Eject" entry in the shell context menu instead.
  */
 function ejectSections(target: TreeTarget, platform: PlatformOs): ContextMenuSection[] {
-  const volume = findVolumeForPath(target.path, usePanesStore.getState().volumes)
-  const isEjectableRoot =
-    platform === 'macos' &&
-    Boolean(volume && isVolumeRoot(target.path, volume) && volume.isRemovable)
-  if (!isEjectableRoot || !volume) {
+  const volume = ejectableVolumeAt(target.path, platform)
+  if (!volume) {
     return []
   }
   return [

@@ -6,7 +6,9 @@ export function HighlightedText({ text, ranges }: { text: string; ranges: [numbe
   const parts: { text: string; match: boolean }[] = []
   let cursor = 0
   for (const [start, end] of ranges) {
-    if (start < cursor || end > text.length) {
+    const overlapsPrevious = start < cursor
+    const pastText = end > text.length
+    if (overlapsPrevious || pastText) {
       continue
     }
     if (start > cursor) {

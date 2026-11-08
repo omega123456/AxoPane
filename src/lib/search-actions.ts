@@ -4,6 +4,7 @@ import { resolveCommandForEvent } from '@/lib/keymap'
 import type { CommandId, SearchHit, Shortcut } from '@/lib/types/ipc'
 import { getParentPath, usePanesStore } from '@/stores/panes-store'
 import { otherPane } from '@/lib/pane-id'
+import { hasPrimaryModifier } from '@/lib/key-table'
 
 /** `open` launches a file; everything else opens in a new tab in a pane. */
 export type SearchActivation = 'default' | 'open' | 'newTab' | 'otherPane'
@@ -16,7 +17,8 @@ export type SearchActivation = 'default' | 'open' | 'newTab' | 'otherPane'
 export async function activateSearchHit(hit: SearchHit, how: SearchActivation) {
   const panes = usePanesStore.getState()
   const paneId = panes.activePaneId
-  if (!hit.isDir && how === 'open') {
+  const launchesFile = !hit.isDir && how === 'open'
+  if (launchesFile) {
     await openPath({ path: hit.path }).catch((error: unknown) => {
       log.error('search open failed', { path: hit.path, error })
     })
@@ -34,6 +36,10 @@ const activationByCommand: Partial<Record<CommandId, SearchActivation>> = {
   openInOtherPane: 'otherPane',
 }
 
+function isPlainShiftEnter(event: KeyboardEvent) {
+  return event.key === 'Enter' && event.shiftKey && !hasPrimaryModifier(event)
+}
+
 /**
  * Enter opens or reveals, Shift+Enter launches a file, and the remappable
  * "Open in new tab" / "Open in other pane" bindings choose those targets.
@@ -42,7 +48,7 @@ export function searchActivationForEvent(
   event: KeyboardEvent,
   keymap: Record<CommandId, Shortcut[]>,
 ): SearchActivation | null {
-  if (event.key === 'Enter' && event.shiftKey && !event.ctrlKey && !event.metaKey) {
+  if (isPlainShiftEnter(event)) {
     return 'open'
   }
   const commandId = resolveCommandForEvent(event, keymap)

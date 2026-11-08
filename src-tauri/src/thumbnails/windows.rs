@@ -26,6 +26,10 @@ use windows::Win32::UI::Shell::{
     SIIGBF_THUMBNAILONLY,
 };
 
+fn is_past(deadline: Instant) -> bool {
+    Instant::now() >= deadline
+}
+
 const WORKER_COUNT: usize = 2;
 const QUEUE_CAPACITY: usize = 64;
 const GENERATION_DEADLINE: Duration = Duration::from_secs(2);
@@ -141,7 +145,7 @@ fn worker_loop(receiver: std::sync::Arc<Mutex<Receiver<Work>>>) {
             Err(_) => break,
         };
         let Ok(work) = message else { break };
-        if Instant::now() >= work.deadline {
+        if is_past(work.deadline) {
             let _ = work.reply.send(ThumbnailState::Failed);
             continue;
         }
@@ -168,7 +172,7 @@ fn extract(candidate: &ThumbnailCandidate, deadline: Instant) -> ThumbnailState 
     };
     let bitmap = match cached {
         Ok(bitmap) => Ok(bitmap),
-        Err(_) if Instant::now() >= deadline => return ThumbnailState::Failed,
+        Err(_) if is_past(deadline) => return ThumbnailState::Failed,
         Err(_) => unsafe {
             item.GetImage(requested_size, SIIGBF_RESIZETOFIT | SIIGBF_THUMBNAILONLY)
         },

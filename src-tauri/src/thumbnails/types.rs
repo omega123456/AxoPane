@@ -109,6 +109,22 @@ impl ThumbnailState {
     }
 }
 
+fn has_png_header(png: &[u8]) -> bool {
+    let long_enough = png.len() >= PNG_HEIGHT_RANGE.end;
+    long_enough && png.starts_with(PNG_SIGNATURE) && &png[PNG_IHDR_TYPE_RANGE] == PNG_IHDR_TYPE
+}
+
+fn is_valid_preview_axis(length: u32) -> bool {
+    (1..=MAX_PREVIEW_DIMENSION).contains(&length)
+}
+
+pub fn is_within_preview_bounds(width: u32, height: u32) -> bool {
+    let fits_area = width
+        .checked_mul(height)
+        .is_some_and(|pixels| pixels <= MAX_PREVIEW_PIXELS);
+    is_valid_preview_axis(width) && is_valid_preview_axis(height) && fits_area
+}
+
 /// Accepts only the transport format and hard payload cap used by the UI.
 /// Native providers must call this after bounded raster conversion and PNG
 /// encoding, before handing a preview to the cache or scheduler.
@@ -122,11 +138,10 @@ pub fn validated_png_data_url(data_url: String) -> Result<ThumbnailState, Thumbn
     let Ok(png) = base64::engine::general_purpose::STANDARD.decode(encoded) else {
         return Err(ThumbnailState::Failed);
     };
-    if png.len() > MAX_PNG_BYTES
-        || png.len() < PNG_HEIGHT_RANGE.end
-        || !png.starts_with(PNG_SIGNATURE)
-        || &png[PNG_IHDR_TYPE_RANGE] != PNG_IHDR_TYPE
-    {
+    if png.len() > MAX_PNG_BYTES {
+        return Err(ThumbnailState::Failed);
+    }
+    if !has_png_header(&png) {
         return Err(ThumbnailState::Failed);
     }
     let width = u32::from_be_bytes(
@@ -139,14 +154,7 @@ pub fn validated_png_data_url(data_url: String) -> Result<ThumbnailState, Thumbn
             .try_into()
             .map_err(|_| ThumbnailState::Failed)?,
     );
-    if width == 0
-        || height == 0
-        || width > MAX_PREVIEW_DIMENSION
-        || height > MAX_PREVIEW_DIMENSION
-        || width
-            .checked_mul(height)
-            .is_none_or(|pixels| pixels > MAX_PREVIEW_PIXELS)
-    {
+    if !is_within_preview_bounds(width, height) {
         return Err(ThumbnailState::Failed);
     }
     Ok(ThumbnailState::Ready {

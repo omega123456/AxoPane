@@ -13,7 +13,7 @@ import { TrashTreeRow } from './TrashTreeRow'
 import { TreeFoldRow } from './TreeFoldRow'
 import { FavouritesPanel } from './FavouritesPanel'
 import { buildContextMenuContent } from '@/components/menus/menu-definitions'
-import { detectPlatformOs } from '@/lib/keymap'
+import { detectPlatformOs, isWindowsPlatform } from '@/lib/keymap'
 import { TRASH_PATH } from '@/lib/trash'
 import { buildTreeFlatModel, treeRowHeight, type TreeFlatRow } from '@/lib/tree-flat'
 import { buildStickyChain, capStickyChain } from '@/lib/tree-sticky'
@@ -67,7 +67,7 @@ const trashRowActions = {
   onNavigate: () => navigateActivePane(TRASH_PATH),
   onOpenTab: () => openTabInActivePane(TRASH_PATH),
   onContextMenu: (event: MouseEvent) => {
-    const trashLabel = detectPlatformOs() === 'windows' ? 'Recycle Bin' : 'Trash'
+    const trashLabel = isWindowsPlatform() ? 'Recycle Bin' : 'Trash'
     openTreeContextMenu(trashLabel, TRASH_PATH, event)
   },
 }
@@ -292,7 +292,10 @@ function PinnedAncestors({
       {pinnedRows.map(({ path, chainIndex, top }) => {
         const node = treeNodes[path]
         const index = indexByPath.get(path)
-        if (!node || index === undefined) {
+        if (!node) {
+          return null
+        }
+        if (index === undefined) {
           return null
         }
         const row = rows[index]

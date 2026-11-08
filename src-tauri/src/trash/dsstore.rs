@@ -129,7 +129,8 @@ fn parse(bytes: &[u8]) -> Option<HashMap<String, PutBack>> {
 
     let version = reader.u32(0)?;
     let magic = reader.slice(HEADER_MAGIC_OFFSET, HEADER_MAGIC.len())?;
-    if version != HEADER_VERSION || magic != HEADER_MAGIC {
+    let header_matches = version == HEADER_VERSION && magic == HEADER_MAGIC;
+    if !header_matches {
         return None;
     }
 

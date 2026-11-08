@@ -250,7 +250,8 @@ impl EverythingHandle {
             (self.set_max)(query.max);
             (self.set_request_flags)(flags);
 
-            if !(self.query_w)(true) {
+            let query_succeeded = (self.query_w)(true);
+            if !query_succeeded {
                 return Err(EverythingError::from_code((self.get_last_error)()));
             }
 

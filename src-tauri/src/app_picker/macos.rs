@@ -32,7 +32,8 @@ fn read_info_plist_json(bundle_dir: &Path) -> Option<serde_json::Value> {
         .output()
         .ok()?;
 
-    if !output.status.success() {
+    let succeeded = output.status.success();
+    if !succeeded {
         return None;
     }
 

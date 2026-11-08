@@ -67,7 +67,9 @@ impl<T> SizeScheduler<T> {
     /// that could never match.
     pub fn schedule(&self, path: String, cancelled: Arc<AtomicBool>, payload: T) -> bool {
         let mut state = self.state.lock().expect("size scheduler lock");
-        if state.jobs.contains_key(&path) || state.jobs.len() >= self.capacity {
+        let already_scheduled = state.jobs.contains_key(&path);
+        let at_capacity = state.jobs.len() >= self.capacity;
+        if already_scheduled || at_capacity {
             return false;
         }
         state.jobs.insert(
@@ -108,7 +110,7 @@ impl<T> SizeScheduler<T> {
     pub fn next(&self) -> Option<ScheduledJob<T>> {
         let mut state = self.state.lock().expect("size scheduler lock");
         let mut claimable = pop_claimable(&mut state);
-        while claimable.is_none() && !state.shutdown {
+        while must_wait_for_job(&claimable, &state) {
             state = self.ready.wait(state).expect("size scheduler condvar");
             claimable = pop_claimable(&mut state);
         }
@@ -151,6 +153,10 @@ impl<T> SizeScheduler<T> {
         state.queued.clear();
         self.ready.notify_all();
     }
+}
+
+fn must_wait_for_job<T>(claimable: &Option<ScheduledJob<T>>, state: &State<T>) -> bool {
+    claimable.is_none() && !state.shutdown
 }
 
 /// Takes `path`'s payload out of `jobs` if present and not already claimed,

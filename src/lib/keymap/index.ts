@@ -40,15 +40,13 @@ export const commandLabels: Record<CommandId, string> = {
 // still listening to the physical Delete keys present on full-size keyboards.
 // Windows keeps the conventional Delete / Shift+Delete. The platform-primary
 // binding is listed first so the Settings UI surfaces the right one.
-const deleteDefaults: { delete: Shortcut[]; deletePermanent: Shortcut[] } =
-  detectPlatformOs() === 'macos'
-    ? { delete: ['F8', 'Delete'], deletePermanent: ['Shift+F8', 'Shift+Delete'] }
-    : { delete: ['Delete'], deletePermanent: ['Shift+Delete'] }
+const deleteDefaults: { delete: Shortcut[]; deletePermanent: Shortcut[] } = isMacPlatform()
+  ? { delete: ['F8', 'Delete'], deletePermanent: ['Shift+F8', 'Shift+Delete'] }
+  : { delete: ['Delete'], deletePermanent: ['Shift+Delete'] }
 
 // F4 is a media/Spotlight key on most Mac keyboards unless Fn is held, so
 // macOS also gets ⌘⇧F ("Ctrl" renders as ⌘ there) for Search everywhere.
-const searchEverywhereDefaults: Shortcut[] =
-  detectPlatformOs() === 'macos' ? ['F4', 'Ctrl+Shift+F'] : ['F4']
+const searchEverywhereDefaults: Shortcut[] = isMacPlatform() ? ['F4', 'Ctrl+Shift+F'] : ['F4']
 
 export const defaultKeymap: Record<CommandId, Shortcut[]> = {
   open: ['Enter'],
@@ -129,6 +127,14 @@ export function detectPlatformOs(): PlatformOs {
   }
 
   return /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? 'macos' : 'windows'
+}
+
+export function isMacPlatform() {
+  return detectPlatformOs() === 'macos'
+}
+
+export function isWindowsPlatform() {
+  return detectPlatformOs() === 'windows'
 }
 
 const platformCommandModifier: Record<PlatformOs, Modifier> = {
@@ -337,6 +343,15 @@ export function findKeybindingConflicts(keymap: Record<CommandId, Shortcut[]>) {
   }
 
   return Array.from(seen.entries()).filter(([, commandIds]) => commandIds.length > 1)
+}
+
+export const SEARCH_EVERYWHERE_COMMAND: CommandId = 'searchEverywhere'
+
+export function isSearchEverywhereShortcut(
+  event: KeyboardEvent,
+  keymap: Record<CommandId, Shortcut[]>,
+) {
+  return resolveCommandForEvent(event, keymap) === SEARCH_EVERYWHERE_COMMAND
 }
 
 export function resolveCommandForEvent(

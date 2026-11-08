@@ -124,7 +124,9 @@ export function insertSorted(
   let high = entries.length
   while (low < high) {
     const middle = Math.floor((low + high) / HALF_DIVISOR)
-    if (compareEntries(entries[middle], entry, sortKey, sortDirection, sizeStates) < 0) {
+    const sortsBefore =
+      compareEntries(entries[middle], entry, sortKey, sortDirection, sizeStates) < 0
+    if (sortsBefore) {
       low = middle + 1
       continue
     }

@@ -140,7 +140,8 @@ function handlePosition(event: DragPositionEvent) {
   // `dropEffect`, exactly as it would for a webview drag — so the badge reports
   // what the existing handlers decided, with no second copy of that logic.
   const { accepted, dropEffect } = dispatchDragEvent('dragover', target, session)
-  setCursor(accepted && isDropKind(dropEffect) ? { x, y, kind: dropEffect } : null)
+  const showsDropKind = accepted && isDropKind(dropEffect)
+  setCursor(showsDropKind ? { x, y, kind: dropEffect } : null)
 }
 
 function isDropKind(effect: string): effect is DropKind {
@@ -162,7 +163,8 @@ function isDropKind(effect: string): effect is DropKind {
 function sameRegion(previous: Element | null, next: Element | null) {
   const previousRow = entryRowId(previous)
   const nextRow = entryRowId(next)
-  if (previousRow !== null || nextRow !== null) {
+  const eitherIsRow = previousRow !== null || nextRow !== null
+  if (eitherIsRow) {
     return previousRow === nextRow
   }
   return sameOrNested(previous, next)
@@ -173,8 +175,11 @@ function entryRowId(element: Element | null) {
 }
 
 function sameOrNested(previous: Element | null, next: Element | null) {
-  if (previous === null || next === null) {
-    return previous === next
+  if (previous === null) {
+    return next === null
+  }
+  if (next === null) {
+    return false
   }
   return previous === next || previous.contains(next) || next.contains(previous)
 }

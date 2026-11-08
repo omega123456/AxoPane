@@ -59,7 +59,10 @@ function useNativeMenuLoad(menu: ContextMenuDocument | null, nativeRequestId: st
   const failNativeLoad = useContextMenuStore((state) => state.failNativeLoad)
 
   useEffect(() => {
-    if (!menu?.nativeRequest || nativeRequestId) {
+    if (!menu?.nativeRequest) {
+      return
+    }
+    if (nativeRequestId) {
       return
     }
 
@@ -116,7 +119,10 @@ function useMenuFocusAndPlacement(
   // effect with no extra render.
   useLayoutEffect(() => {
     const node = ref.current
-    if (!menu || !node) {
+    if (!menu) {
+      return
+    }
+    if (!node) {
       return
     }
 

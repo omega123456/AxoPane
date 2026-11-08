@@ -49,7 +49,10 @@ function normalizePath(path: string, platform: PlatformOs) {
   const hasLeadingDouble = /^[\\/]{2}/.test(path)
   const leading = hasLeadingDouble ? separator + separator : ''
   let normalized = leading + path.slice(leading.length).replace(/[\\/]+/g, separator)
-  while (normalized.length > leading.length + 1 && normalized.endsWith(separator)) {
+  const minimumLength = leading.length + 1
+  const hasTrimmableSeparator = (candidate: string) =>
+    candidate.length > minimumLength && candidate.endsWith(separator)
+  while (hasTrimmableSeparator(normalized)) {
     normalized = normalized.slice(0, -1)
   }
   return normalized.toLowerCase()
@@ -96,8 +99,9 @@ function volumeKey(path: string, platform: PlatformOs) {
   }
   // POSIX: `/Volumes/name` is its own mount; everything else keys on `/`.
   const parts = normalized.split('/').filter(Boolean)
-  if (parts[0] === 'volumes' && parts[1]) {
-    return `/volumes/${parts[1]}`
+  const mountName = parts[0] === 'volumes' ? parts[1] : undefined
+  if (mountName) {
+    return `/volumes/${mountName}`
   }
   return '/'
 }
@@ -157,17 +161,22 @@ export function canDropInto(
   destinationDir: string,
   platform: PlatformOs = detectPlatformOs(),
 ): boolean {
-  if (!payload || payload.kind !== 'file-transfer' || payload.items.length === 0) {
+  if (payload?.kind !== 'file-transfer') {
+    return false
+  }
+  const { items, sourceDir } = payload
+  if (items.length === 0) {
     return false
   }
   // Same directory: a move would be a no-op and a copy would collide with the
   // originals, so treat dropping onto the source folder as invalid.
-  if (normalizedEqual(destinationDir, payload.sourceDir, platform)) {
+  if (normalizedEqual(destinationDir, sourceDir, platform)) {
     return false
   }
-  for (const item of payload.items) {
+  for (const item of items) {
     // Dropping a folder into itself (or its own subtree) is impossible.
-    if (item.isDir && isSameOrDescendant(destinationDir, item.path, platform)) {
+    const intoOwnSubtree = item.isDir && isSameOrDescendant(destinationDir, item.path, platform)
+    if (intoOwnSubtree) {
       return false
     }
   }
@@ -189,10 +198,10 @@ export async function performDrop(
   modifiers: DropModifiers,
   platform: PlatformOs = detectPlatformOs(),
 ): Promise<string | null> {
-  if (!payload || !canDropInto(payload, destinationDir, platform)) {
+  if (!canDropInto(payload, destinationDir, platform)) {
     return null
   }
-  if (payload.kind !== 'file-transfer') return null
+  if (payload?.kind !== 'file-transfer') return null
   const kind = resolveDropKind(modifiers, payload.sourceDir, destinationDir, platform)
   return startOp({
     kind,

@@ -43,7 +43,9 @@ impl Machine {
         for root in self.update_full_disk_access(granted) {
             self.queue_background(root);
         }
-        if matches!(self.phase, Phase::Live) && self.stream.is_some() && self.weekly_due() {
+        let weekly_scan_due =
+            matches!(self.phase, Phase::Live) && self.stream.is_some() && self.weekly_due();
+        if weekly_scan_due {
             self.start_full_scan();
         }
     }

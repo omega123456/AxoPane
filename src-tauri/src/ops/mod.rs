@@ -233,6 +233,16 @@ pub struct OpState {
 }
 
 impl OpState {
+    pub(crate) fn is_held_by_pause(&self) -> bool {
+        let paused = self.pause.load(Ordering::Relaxed);
+        let cancelled = self.cancel.load(Ordering::Relaxed);
+        paused && !cancelled
+    }
+
+    pub(crate) fn take_skip_request(&self) -> bool {
+        self.skip.swap(false, Ordering::Relaxed)
+    }
+
     fn progress_percent(&self, visible_copied_bytes: u64) -> f64 {
         if self.total_bytes != 0 {
             return (visible_copied_bytes as f64 / self.total_bytes as f64) * PERCENT_SCALE;

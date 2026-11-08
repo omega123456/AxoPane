@@ -81,7 +81,8 @@ impl PathStyle {
     pub fn parent(self, path: &str) -> Option<String> {
         let parts = self.split(path);
         let (_, ancestors) = parts.components.split_last()?;
-        if parts.root.is_empty() && ancestors.is_empty() {
+        let is_top_level = parts.root.is_empty() && ancestors.is_empty();
+        if is_top_level {
             return None;
         }
         Some(self.compose(&parts.root, ancestors))
@@ -115,7 +116,8 @@ fn windows_root(path: &str) -> (String, &str) {
         let mut parts = unc.splitn(UNC_ROOT_PARTS, ['\\', '/']);
         let server = parts.next().unwrap_or_default();
         let share = parts.next().unwrap_or_default();
-        if !server.is_empty() && !share.is_empty() {
+        let has_share_root = !server.is_empty() && !share.is_empty();
+        if has_share_root {
             return (
                 format!(r"\\{server}\{share}\"),
                 parts.next().unwrap_or_default(),

@@ -34,15 +34,14 @@ function formatItemSize(sizeBytes: number | null, itemCount: number | null, isDi
     return formatBytes(sizeBytes)
   }
 
-  if (isDir && typeof itemCount === 'number') {
-    return `${formatCount(itemCount)} ${itemCount === 1 ? 'item' : 'items'}`
-  }
-
-  return '—'
+  return formatContains(itemCount, isDir)
 }
 
 function formatContains(itemCount: number | null, isDir: boolean) {
-  if (!isDir || typeof itemCount !== 'number') {
+  if (!isDir) {
+    return '—'
+  }
+  if (typeof itemCount !== 'number') {
     return '—'
   }
 
@@ -87,7 +86,10 @@ function useDefaultApplication(dialog: PropertiesDialogState | null) {
   }, [dialog])
 
   useEffect(() => {
-    if (!dialog || !canSetDefaultApplication(dialog.items)) {
+    if (!dialog) {
+      return
+    }
+    if (!canSetDefaultApplication(dialog.items)) {
       return
     }
 
@@ -131,10 +133,12 @@ function propertiesSummary(dialog: PropertiesDialogState | null) {
     return null
   }
 
-  const singleItem = dialog.items.length === 1 ? dialog.items[0] : null
+  const itemCount = dialog.items.length
+  const isSingleItem = itemCount === 1
+  const singleItem = isSingleItem ? dialog.items[0] : null
   return {
-    heading: singleItem ? singleItem.name : `${formatCount(dialog.items.length)} items selected`,
-    itemCountLabel: `${formatCount(dialog.items.length)} ${dialog.items.length === 1 ? 'item' : 'items'}`,
+    heading: singleItem ? singleItem.name : `${formatCount(itemCount)} items selected`,
+    itemCountLabel: `${formatCount(itemCount)} ${isSingleItem ? 'item' : 'items'}`,
     singleItem,
   }
 }
@@ -148,7 +152,10 @@ export function PropertiesDialog() {
   const defaultApplication = useDefaultApplication(dialog)
   const summary = useMemo(() => propertiesSummary(dialog), [dialog])
 
-  if (!dialog || !summary) {
+  if (!dialog) {
+    return null
+  }
+  if (!summary) {
     return null
   }
 

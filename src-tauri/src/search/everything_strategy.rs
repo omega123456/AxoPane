@@ -67,10 +67,13 @@ fn collect(
     let mut seen = HashSet::new();
     let mut batch = CandidateBatch::default();
     for pass in passes {
-        if pass.fuzzy && batch.candidates.len() >= FUZZY_PASS_THRESHOLD {
+        let found = batch.candidates.len();
+        let fuzzy_pass_unneeded = pass.fuzzy && found >= FUZZY_PASS_THRESHOLD;
+        if fuzzy_pass_unneeded {
             continue;
         }
-        if !control.proceed()? || batch.candidates.len() >= CANDIDATE_CAP {
+        let must_stop = !control.proceed()? || found >= CANDIDATE_CAP;
+        if must_stop {
             batch.truncated = true;
             break;
         }

@@ -12,7 +12,7 @@ import { cutFadeClass, rowDropTargetClass, rowHighlightClass } from './entry-cla
 
 import type { DragEvent, MouseEvent, ReactNode, RefObject } from 'react'
 import { memo, useEffect, useMemo, useRef } from 'react'
-import { MIDDLE_MOUSE_BUTTON } from '@/lib/mouse-buttons'
+import { isMiddleClickOpen } from '@/lib/mouse-buttons'
 import { TEXT_SECONDARY } from '@/lib/class-names'
 
 /**
@@ -48,12 +48,9 @@ export function focusRenameInput(input: HTMLInputElement | null, isDirectory: bo
 
   input.focus()
   const extensionIndex = isDirectory ? -1 : input.value.lastIndexOf('.')
-  input.setSelectionRange(
-    0,
-    extensionIndex > 0 && extensionIndex < input.value.length - 1
-      ? extensionIndex
-      : input.value.length,
-  )
+  const lastCharacterIndex = input.value.length - 1
+  const hasInnerExtension = extensionIndex > 0 && extensionIndex < lastCharacterIndex
+  input.setSelectionRange(0, hasInnerExtension ? extensionIndex : input.value.length)
 }
 
 export function useRenameInputFocus(isRenaming: boolean, isDirectory: boolean) {
@@ -269,7 +266,7 @@ function rowInteractionProps(entry: DirectoryEntry, actions: FileRowActions) {
     onClick: (event: MouseEvent<HTMLDivElement>) => actions.onClick(entry.id, event),
     onContextMenu: (event: MouseEvent<HTMLDivElement>) => actions.onContextMenu(entry.id, event),
     onAuxClick: (event: MouseEvent<HTMLDivElement>) => {
-      if (event.button === MIDDLE_MOUSE_BUTTON && entry.isDir && !entry.trashId) {
+      if (isMiddleClickOpen(event, entry)) {
         event.preventDefault()
         actions.onMiddleClick(entry.id)
       }

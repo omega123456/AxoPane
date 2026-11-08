@@ -93,7 +93,10 @@ export function handleGlobalKeyDown(event: KeyboardEvent, context: GlobalKeyCont
 
 export function handleHistoryMouseUp(event: MouseEvent, modalOpen: boolean) {
   const navigateHistory = historyNavigationByMouseButton[event.button]
-  if (!navigateHistory || modalOpen) {
+  if (!navigateHistory) {
+    return
+  }
+  if (modalOpen) {
     return
   }
   event.preventDefault()

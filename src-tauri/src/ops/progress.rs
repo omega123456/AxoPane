@@ -38,7 +38,8 @@ impl TransferThrottle {
     }
 
     fn claim_emission(&mut self, now: Instant) -> bool {
-        if now.saturating_duration_since(self.last_emit) < self.interval {
+        let since_last_emit = now.saturating_duration_since(self.last_emit);
+        if since_last_emit < self.interval {
             return false;
         }
         self.last_emit = now;
@@ -101,7 +102,10 @@ pub(super) fn measure_totals_up_front(
         ));
     }
 
-    if discovered_bytes == 0 || cancel.load(Ordering::Relaxed) {
+    if discovered_bytes == 0 {
+        return;
+    }
+    if cancel.load(Ordering::Relaxed) {
         return;
     }
 
@@ -221,7 +225,8 @@ pub(super) fn refresh_rate_locked_with_now(
 
     let stable_elapsed = start.elapsed().as_secs_f64().max(0.001);
     let stable_rate = (visible_copied as f64 / stable_elapsed) as u64;
-    if operation.sample_count >= ETA_STABILIZATION_SAMPLES && stable_rate > 0 {
+    let rate_is_stable = operation.sample_count >= ETA_STABILIZATION_SAMPLES && stable_rate > 0;
+    if rate_is_stable {
         let remaining = operation.total_bytes.saturating_sub(visible_copied);
         operation.eta_seconds = Some(remaining / stable_rate.max(1));
     }

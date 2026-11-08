@@ -1,6 +1,6 @@
 import { memo, type MouseEvent } from 'react'
 import { Trash2Icon } from '@/components/icons'
-import { detectPlatformOs } from '@/lib/keymap'
+import { isWindowsPlatform } from '@/lib/keymap'
 import { SelectionPill } from '@/components/controls/SelectionPill'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
 import { activeFillClass, TEXT_SECONDARY } from '@/lib/class-names'
@@ -13,7 +13,7 @@ type TrashTreeRowProps = {
 }
 
 function TrashTreeRowImpl({ isCurrent, onNavigate, onOpenTab, onContextMenu }: TrashTreeRowProps) {
-  const trashLabel = detectPlatformOs() === 'windows' ? 'Recycle Bin' : 'Trash'
+  const trashLabel = isWindowsPlatform() ? 'Recycle Bin' : 'Trash'
 
   return (
     <div

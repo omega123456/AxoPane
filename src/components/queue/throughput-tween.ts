@@ -68,7 +68,8 @@ function appendedPoint(previous: TailTween, target: ThroughputSample[]) {
   const end = target.at(-1) ?? null
   const previousPoint = target.at(SECOND_TO_LAST_INDEX) ?? null
   const grew = target.length > previous.length
-  return end !== null && grew ? previousPoint : null
+  const appended = end !== null && grew
+  return appended ? previousPoint : null
 }
 
 export function tailForTarget(previous: TailTween, target: ThroughputSample[]): TailTween {

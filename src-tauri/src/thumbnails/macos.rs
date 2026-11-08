@@ -7,8 +7,8 @@
 
 use super::provider::{ProviderCapability, ThumbnailPreviewCallback, ThumbnailProvider};
 use super::types::{
-    validated_png_data_url, ThumbnailCandidate, ThumbnailFingerprint, ThumbnailState,
-    MAX_PNG_BYTES, MAX_PREVIEW_DIMENSION, MAX_PREVIEW_PIXELS,
+    is_within_preview_bounds, validated_png_data_url, ThumbnailCandidate, ThumbnailFingerprint,
+    ThumbnailState, MAX_PNG_BYTES, MAX_PREVIEW_DIMENSION,
 };
 use base64::Engine;
 use block2::RcBlock;
@@ -307,6 +307,11 @@ impl QuickLookOwner {
         self.begin(id, candidate, reply);
     }
 
+    fn is_draining_before(&self, deadline: Instant) -> bool {
+        let before_deadline = Instant::now() < deadline;
+        !self.pending.is_empty() && before_deadline
+    }
+
     fn drain_on_shutdown(&mut self, completions: &Receiver<Completion>) {
         self.accepting = false;
         for pending in self.pending.values() {
@@ -314,7 +319,7 @@ impl QuickLookOwner {
         }
         // A framework callback owns the terminal acknowledgement, so its representation is not retained.
         let deadline = Instant::now() + SHUTDOWN_DEADLINE;
-        while !self.pending.is_empty() && Instant::now() < deadline {
+        while self.is_draining_before(deadline) {
             self.settle_drained_completion(completions);
         }
         for (_, pending) in self.pending.drain() {
@@ -442,12 +447,11 @@ unsafe fn rgba_frame_from_representation(
     let image = representation.CGImage();
     let width = CGImage::width(Some(&image));
     let height = CGImage::height(Some(&image));
-    if width == 0
-        || height == 0
-        || width > MAX_PREVIEW_DIMENSION as usize
-        || height > MAX_PREVIEW_DIMENSION as usize
-        || width.checked_mul(height)? > MAX_PREVIEW_PIXELS as usize
-    {
+    let (Ok(narrow_width), Ok(narrow_height)) = (u32::try_from(width), u32::try_from(height))
+    else {
+        return None;
+    };
+    if !is_within_preview_bounds(narrow_width, narrow_height) {
         return None;
     }
     let row = width.checked_mul(4)?;

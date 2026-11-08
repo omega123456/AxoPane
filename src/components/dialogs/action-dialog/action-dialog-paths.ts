@@ -5,8 +5,16 @@ const SUMMARY_TARGET_LIMIT = 3
 const DEFAULT_ARCHIVE_STEM = 'Archive'
 const ZIP_EXTENSION = '.zip'
 
+function isWindowsLikePath(path: string) {
+  return path.includes('\\') || /^[A-Za-z]:/.test(path)
+}
+
+function isRootPath(path: string) {
+  return path === '/' || /^[A-Za-z]:[\\/]$/.test(path)
+}
+
 function pathSeparatorFor(path: string) {
-  return path.includes('\\') || /^[A-Za-z]:/.test(path) ? '\\' : '/'
+  return isWindowsLikePath(path) ? '\\' : '/'
 }
 
 export function joinPath(basePath: string, name: string) {
@@ -17,7 +25,7 @@ export function joinPath(basePath: string, name: string) {
   if (trimmedBase === '') {
     return name
   }
-  if (trimmedBase === '/' || /^[A-Za-z]:[\\/]$/.test(trimmedBase)) {
+  if (isRootPath(trimmedBase)) {
     return `${trimmedBase}${name}`
   }
   return `${trimmedBase}${separator}${name}`

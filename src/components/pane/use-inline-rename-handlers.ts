@@ -12,10 +12,15 @@ function isRenameSubmittable(
   return rename !== null && !rename.busy && !alreadySubmitting
 }
 
+function renameInPane(rename: InlineRenameState | null, paneId: PaneId) {
+  if (rename?.paneId !== paneId) {
+    return null
+  }
+  return rename
+}
+
 export function useInlineRenameHandlers(paneId: PaneId, focusPaneShell: () => void) {
-  const rename = useInlineRenameStore((state) =>
-    state.rename?.paneId === paneId ? state.rename : null,
-  )
+  const rename = useInlineRenameStore((state) => renameInPane(state.rename, paneId))
   const { cancelRename, setBusy, setError, setValue } = useInlineRenameStore.getState()
   const renameSubmittingRef = useRef(false)
   const ignoreNextRenameBlurRef = useRef(false)

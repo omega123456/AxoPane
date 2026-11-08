@@ -9,6 +9,7 @@ import {
   type MarqueeDrag,
 } from './marquee-selection'
 import { PRIMARY_MOUSE_BUTTON } from '@/lib/mouse-buttons'
+import { hasPrimaryModifier } from '@/lib/key-table'
 
 const ROW_SELECTOR = '[role="row"], [role="gridcell"]'
 
@@ -43,10 +44,6 @@ function contentPointIn(
     x: (clientX - bounds.left) / zoom + container.scrollLeft,
     y: (clientY - bounds.top) / zoom + container.scrollTop,
   }
-}
-
-function hasToggleModifier(event: MouseEvent<HTMLDivElement>) {
-  return event.ctrlKey || event.metaKey
 }
 
 export function useMarqueeSelection(options: MarqueeSelectionOptions) {
@@ -95,7 +92,10 @@ export function useMarqueeSelection(options: MarqueeSelectionOptions) {
 
   function handleContainerMouseDown(event: MouseEvent<HTMLDivElement>) {
     options.onPointerDown()
-    if (event.button !== PRIMARY_MOUSE_BUTTON || startsOnRow(event)) {
+    if (event.button !== PRIMARY_MOUSE_BUTTON) {
+      return
+    }
+    if (startsOnRow(event)) {
       return
     }
 
@@ -104,7 +104,7 @@ export function useMarqueeSelection(options: MarqueeSelectionOptions) {
       return
     }
 
-    const additive = hasToggleModifier(event)
+    const additive = hasPrimaryModifier(event)
     if (!additive) {
       setSelection(paneId, [], null, null)
     }

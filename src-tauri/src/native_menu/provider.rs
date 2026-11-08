@@ -153,7 +153,8 @@ fn is_app_owned_duplicate(item: &ProviderNativeMenuItem) -> bool {
         == Some(NativeMenuCanonicalActionKind::OpenWith)
         || is_open_with_variant(&normalized_verb);
 
-    if !item.children.is_empty() && !always_remove_submenu {
+    let keeps_submenu = !item.children.is_empty() && !always_remove_submenu;
+    if keeps_submenu {
         return false;
     }
 

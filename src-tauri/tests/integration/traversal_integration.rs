@@ -3,7 +3,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use file_explorer_lib::traversal::{
-    safe_destination, walk, walk_without_links, TraversalError, TraversalOptions,
+    is_real_directory, safe_destination, walk, walk_without_links, TraversalError, TraversalOptions,
 };
 use tempfile::tempdir;
 
@@ -136,4 +136,24 @@ fn missing_roots_map_to_a_path_aware_error() {
     assert!(
         matches!(walk(&missing, TraversalOptions::default(), Arc::new(AtomicBool::new(false))), Err(TraversalError::Io(path, _)) if path == missing)
     );
+}
+
+#[test]
+fn real_directories_exclude_files_and_directory_links() {
+    let fixture = tempdir().expect("fixture");
+    let root = fixture.path();
+    fs::create_dir(root.join("folder")).expect("folder");
+    fs::write(root.join("file.txt"), b"file").expect("file");
+
+    let folder = fs::symlink_metadata(root.join("folder")).expect("folder metadata");
+    let file = fs::symlink_metadata(root.join("file.txt")).expect("file metadata");
+    assert!(is_real_directory(&folder));
+    assert!(!is_real_directory(&file));
+
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(root.join("folder"), root.join("link")).expect("link");
+        let link = fs::symlink_metadata(root.join("link")).expect("link metadata");
+        assert!(!is_real_directory(&link));
+    }
 }

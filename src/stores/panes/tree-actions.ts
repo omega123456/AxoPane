@@ -66,11 +66,15 @@ export function setVolumes(volumes: VolumeInfo[]) {
   panesStore().setState((state) => withVolumes(state, volumes))
 }
 
+function isNodeLoaded(path: string) {
+  return panesStore().getState().treeNodes[path]?.loaded === true
+}
+
 export async function ensureTreeChildren(path: string | null) {
   if (!path) {
     return
   }
-  if (panesStore().getState().treeNodes[path]?.loaded) {
+  if (isNodeLoaded(path)) {
     return
   }
   const existingFlight = treeLoads.flights.get(path)
@@ -97,7 +101,7 @@ export async function revealPath(path: string | null) {
 }
 
 export async function toggleTreeNode(path: string) {
-  if (!panesStore().getState().treeNodes[path]?.loaded) {
+  if (!isNodeLoaded(path)) {
     await panesStore().getState().ensureTreeChildren(path)
   }
   panesStore().setState((state) => toggledTreeNode(state, path))
@@ -115,7 +119,10 @@ export async function initializePanes() {
   const { ensureTreeChildren, treeRoots, panes, activePaneId } = panesStore().getState()
   const activePath = panes[activePaneId].path
 
-  if (!activePath || isTrashPath(activePath)) {
+  if (!activePath) {
+    return
+  }
+  if (isTrashPath(activePath)) {
     return
   }
 

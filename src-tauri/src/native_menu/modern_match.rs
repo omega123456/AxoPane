@@ -91,8 +91,9 @@ pub fn selection_type_tokens(request: &LoadNativeMenuRequest) -> Vec<HashSet<Str
 /// The selection paths a menu acts on: explicit `selected_paths`, else the
 /// single `target_path`.
 pub fn selected_paths(request: &LoadNativeMenuRequest) -> Vec<String> {
-    if !request.selected_paths.is_empty() {
-        return request.selected_paths.clone();
+    let explicit_paths = &request.selected_paths;
+    if !explicit_paths.is_empty() {
+        return explicit_paths.clone();
     }
     request.target_path.iter().cloned().collect()
 }

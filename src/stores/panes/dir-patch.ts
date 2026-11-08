@@ -59,7 +59,8 @@ function patchInserts(event: DirPatchEvent, pane: PaneState, showHiddenFiles: bo
   for (const change of event.changed) {
     const matchingKey = Array.from(inserts.keys()).find((path) => pathsMatch(path, change.path))
     if (matchingKey) inserts.delete(matchingKey)
-    if (change.entry && entryMatchesPane(change.entry, pane, showHiddenFiles)) {
+    if (!change.entry) continue
+    if (entryMatchesPane(change.entry, pane, showHiddenFiles)) {
       inserts.set(change.entry.path, change.entry)
     }
   }

@@ -23,8 +23,12 @@ function isWindowsStylePath(path: string) {
 
 export type PathComparisonPlatform = 'windows' | 'macos' | 'case-sensitive'
 
+function isMacNavigator() {
+  return typeof navigator !== 'undefined' && /mac/i.test(navigator.platform)
+}
+
 function runtimePathComparisonPlatform(): PathComparisonPlatform {
-  if (typeof navigator !== 'undefined' && /mac/i.test(navigator.platform)) return 'macos'
+  if (isMacNavigator()) return 'macos'
   return 'case-sensitive'
 }
 
@@ -42,7 +46,8 @@ export function pathsMatch(
 
   const normalizedLeft = normalizeWindowsCompatibilityPath(left)
   const normalizedRight = normalizeWindowsCompatibilityPath(right)
-  if (isWindowsStylePath(normalizedLeft) && isWindowsStylePath(normalizedRight)) {
+  const bothWindowsStyle = isWindowsStylePath(normalizedLeft) && isWindowsStylePath(normalizedRight)
+  if (bothWindowsStyle) {
     return normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
   }
   return platform === 'macos' && normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
@@ -57,7 +62,6 @@ export function pathKey(
   platform: PathComparisonPlatform = runtimePathComparisonPlatform(),
 ) {
   const normalized = normalizeWindowsCompatibilityPath(path)
-  return isWindowsStylePath(normalized) || platform === 'macos'
-    ? normalized.toLowerCase()
-    : normalized
+  const foldsCase = isWindowsStylePath(normalized) || platform === 'macos'
+  return foldsCase ? normalized.toLowerCase() : normalized
 }

@@ -46,7 +46,10 @@ export function entryPointerActivation(
   clickCount?: number,
   eventTimeStamp?: number,
 ): PointerActivationResult {
-  if (clickCount === undefined || eventTimeStamp === undefined) {
+  if (clickCount === undefined) {
+    return { shouldActivate: true, next: state }
+  }
+  if (eventTimeStamp === undefined) {
     return { shouldActivate: true, next: state }
   }
   if (isStrayExtraClick(state, clickCount, eventTimeStamp)) {

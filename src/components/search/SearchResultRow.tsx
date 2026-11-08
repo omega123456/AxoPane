@@ -6,6 +6,7 @@ import type { SearchActivation } from '@/lib/search-actions'
 import type { SearchHit } from '@/lib/types/ipc'
 import { useDateDisplay } from '@/lib/use-date-display'
 import { HOVER_ON_POINTER, TEXT_SECONDARY } from '@/lib/class-names'
+import { hasPrimaryModifier } from '@/lib/key-table'
 
 const ACTIVE_RESULT_ROW_CLASS =
   'bg-light-neutral-selection before:absolute before:inset-y-3 before:left-0 before:w-0.75 before:rounded-full before:bg-light-accent dark:bg-dark-neutral-selection dark:before:bg-dark-accent'
@@ -22,7 +23,7 @@ function activationForClick(event: MouseEvent): SearchActivation {
   if (event.shiftKey) {
     return 'open'
   }
-  if (event.ctrlKey || event.metaKey) {
+  if (hasPrimaryModifier(event)) {
     return 'newTab'
   }
   return 'default'

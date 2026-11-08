@@ -9,7 +9,9 @@ export function formatBytes(value: number): string {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   let current = value
   let unitIndex = 0
-  while (current >= BYTES_PER_KIBIBYTE && unitIndex < units.length - 1) {
+  const largestUnitIndex = units.length - 1
+  const canScaleUp = () => current >= BYTES_PER_KIBIBYTE && unitIndex < largestUnitIndex
+  while (canScaleUp()) {
     current /= BYTES_PER_KIBIBYTE
     unitIndex += 1
   }

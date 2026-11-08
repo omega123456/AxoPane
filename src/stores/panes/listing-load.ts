@@ -1,5 +1,4 @@
 import { listTrash, setTabWatch } from '@/lib/ipc/commands'
-import { pathsMatch } from '@/lib/path-compare'
 import { trashEntryToDirectoryEntry } from '@/lib/trash'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import { panesStore } from '@/stores/panes/store-handle'
@@ -27,7 +26,7 @@ import { reportSizeSubscriptions } from '@/stores/panes/size-actions'
 import { schedulePersistSession } from '@/stores/panes/session-persistence'
 import { useRecentFoldersStore } from '@/stores/recent-folders-store'
 import { useSelectionStore } from '@/stores/selection-store'
-import { activeTab, useTabsStore } from '@/stores/tabs-store'
+import { activeTab, isActiveTabShowingPath, useTabsStore } from '@/stores/tabs-store'
 import type { PaneId } from '@/types/pane'
 
 const FAILED_LISTING_MESSAGE = 'Failed to load directory'
@@ -70,8 +69,7 @@ function revisesActiveSession(
   if (sessionPath == null) {
     return false
   }
-  const sameTab = activeTab(paneId).id === tabId
-  return sameTab && pathsMatch(sessionPath, path)
+  return isActiveTabShowingPath(paneId, sessionPath, { tabId, path })
 }
 
 function throwIfSessionFailed(session: ListingSession) {

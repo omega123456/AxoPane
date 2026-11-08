@@ -43,6 +43,10 @@ function isWindowsRuntime() {
   return typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows')
 }
 
+function needsManualRelaunch() {
+  return isTauriRuntime() && !isWindowsRuntime()
+}
+
 // The native updater works on every desktop target (Windows, macOS, Linux), so
 // availability hinges only on running inside the Tauri runtime — not on the OS.
 function canUseNativeUpdater() {
@@ -105,7 +109,7 @@ export async function downloadAndInstallAppUpdate(update?: AppUpdate | null): Pr
   // update. On macOS/Linux nothing restarts the process for us, so the freshly
   // installed binary only takes effect on the next launch unless we relaunch
   // explicitly here.
-  if (isTauriRuntime() && !isWindowsRuntime()) {
+  if (needsManualRelaunch()) {
     const { relaunch } = await import('@tauri-apps/plugin-process')
     await relaunch()
   }

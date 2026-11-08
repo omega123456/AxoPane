@@ -47,15 +47,8 @@ pub(super) fn patch_changed_path(
 }
 
 pub(super) fn matches_target_filter(entry: &DirectoryEntry, target: &WatchTarget) -> bool {
-    if !target.show_hidden && (entry.is_hidden || entry.is_system) {
-        return false;
-    }
-
-    target.filter.is_empty()
-        || entry
-            .name
-            .to_lowercase()
-            .contains(&target.filter.to_lowercase())
+    entry.is_visible_with(target.show_hidden)
+        && entry.name_matches_filter(&target.filter.to_lowercase())
 }
 
 pub fn snapshot_for_target(
@@ -179,7 +172,8 @@ pub fn diff_entries(
     let mut removed = Vec::new();
 
     for (entry_path, entry) in next {
-        if previous.get(entry_path) != Some(entry) {
+        let differs = previous.get(entry_path) != Some(entry);
+        if differs {
             changed.push(DirEntryPatch {
                 path: entry_path.clone(),
                 entry: Some(entry.clone()),

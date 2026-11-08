@@ -12,7 +12,8 @@ const handlers = new Map<PaneId, FilterKeyHandler>()
 export function registerPaneFilterKeys(paneId: PaneId, handler: FilterKeyHandler) {
   handlers.set(paneId, handler)
   return () => {
-    if (handlers.get(paneId) === handler) {
+    const stillRegistered = handlers.get(paneId) === handler
+    if (stillRegistered) {
       handlers.delete(paneId)
     }
   }

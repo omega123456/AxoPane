@@ -213,7 +213,8 @@ impl DirectorySessionService {
             .lock()
             .expect("directory navigation reservation lock");
         let mut sessions = self.sessions.lock().expect("directory session lock");
-        if reservations.get(pane_id) != Some(&navigation_revision) {
+        let still_reserved = reservations.get(pane_id) == Some(&navigation_revision);
+        if !still_reserved {
             return Err("Directory navigation was superseded.".to_string());
         }
         sessions.insert(pane_id.to_string(), session);

@@ -84,7 +84,8 @@ pub(super) fn run_operation(id: String, inner: &Arc<Mutex<Inner>>, runtime: &Wor
         instant_now: &instant_now,
     };
     for item in &items {
-        if run_item(&context, item, &runtime.conflict) == ItemFlow::Stop {
+        let flow = run_item(&context, item, &runtime.conflict);
+        if flow == ItemFlow::Stop {
             break;
         }
     }
@@ -157,7 +158,7 @@ fn finish_operation(shared_operation: &Arc<Mutex<OpState>>, progress: &Option<Pr
 
 fn finish_skipped_item(context: &WorkerContext<'_>, item: &OpItem, copied_before: u64) -> bool {
     let mut operation = context.shared_operation.lock_operation();
-    if !operation.skip.swap(false, Ordering::Relaxed) {
+    if !operation.take_skip_request() {
         return false;
     }
 

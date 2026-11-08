@@ -102,7 +102,8 @@ export function useDetachedHorizontalScroll(
   }, [])
 
   function handleBodyWheel(event: React.WheelEvent<HTMLDivElement>) {
-    if (!usesDetachedMacScrollbars || event.deltaX === 0) return
+    if (!usesDetachedMacScrollbars) return
+    if (event.deltaX === 0) return
 
     const horizontalScroll = horizontalScrollRef.current
     if (!horizontalScroll) return
@@ -112,6 +113,12 @@ export function useDetachedHorizontalScroll(
       horizontalScroll.scrollLeft = nextScrollLeft
       syncHorizontalScroll(nextScrollLeft)
     }
+  }
+
+  function syncAttachedHeaderScroll(scrollLeft: number) {
+    if (usesDetachedMacScrollbars) return
+    if (!headerScrollRef.current) return
+    headerScrollRef.current.scrollLeft = scrollLeft
   }
 
   useLayoutEffect(() => {
@@ -129,6 +136,7 @@ export function useDetachedHorizontalScroll(
     contentLayerRef,
     horizontalScrollLeftRef,
     syncHorizontalScroll,
+    syncAttachedHeaderScroll,
     handleBodyWheel,
   }
 }

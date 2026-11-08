@@ -1,4 +1,5 @@
 import type { DirectoryEntry } from '@/lib/types/ipc'
+import { hasPrimaryModifier } from '@/lib/key-table'
 
 export type CurrentSelection = {
   selectedIds: string[]
@@ -52,7 +53,7 @@ export function selectionForClick(
   if (rangeAnchorId) {
     return rangeSelection(entries, rangeAnchorId, entryId)
   }
-  const togglesEntry = modifiers.ctrlKey || modifiers.metaKey
+  const togglesEntry = hasPrimaryModifier(modifiers)
   if (togglesEntry) {
     return toggledSelection(selection, entryId)
   }

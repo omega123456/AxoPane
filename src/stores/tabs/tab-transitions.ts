@@ -171,7 +171,8 @@ export function withHydratedPane(
   pane: PaneTabs,
   fallbackTabs: () => TabState[],
 ): TabPanes {
-  const tabs = pane.tabs.length > 0 ? pane.tabs : fallbackTabs()
+  const hasTabs = pane.tabs.length > 0
+  const tabs = hasTabs ? pane.tabs : fallbackTabs()
   return withPane(panes, paneId, {
     activeTabIndex: clampIndex(pane.activeTabIndex, pane.tabs.length),
     tabs,
@@ -201,7 +202,8 @@ function activeIndexAfterClose(pane: PaneTabs, closingIndex: number, remainingCo
 }
 
 function closableTabIndex(pane: PaneTabs, tabId: string) {
-  if (pane.tabs.length <= 1) {
+  const isLastTab = pane.tabs.length <= 1
+  if (isLastTab) {
     return -1
   }
   const closingIndex = pane.tabs.findIndex((tab) => tab.id === tabId)
@@ -237,7 +239,10 @@ export function withTabLocked(
 export function withActiveTab(panes: TabPanes, paneId: PaneId, tabId: string): TabPanes | null {
   const pane = panes[paneId]
   const index = pane.tabs.findIndex((tab) => tab.id === tabId)
-  if (index === -1 || index === pane.activeTabIndex) {
+  if (index === -1) {
+    return null
+  }
+  if (index === pane.activeTabIndex) {
     return null
   }
   return withPane(panes, paneId, { ...pane, activeTabIndex: index })

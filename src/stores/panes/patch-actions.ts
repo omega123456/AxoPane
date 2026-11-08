@@ -1,5 +1,4 @@
 import { log } from '@/lib/app-log-commands'
-import { pathsMatch } from '@/lib/path-compare'
 import type { DirPatchEvent, SessionPatchEvent } from '@/lib/types/ipc'
 import { panesStore } from '@/stores/panes/store-handle'
 import { dirPatchOutcome, paneIdFromTabId } from '@/stores/panes/dir-patch'
@@ -17,7 +16,7 @@ import {
   sessionPaneId,
   type ReplacementView,
 } from '@/stores/panes/session-patch'
-import { activeTab } from '@/stores/tabs-store'
+import { activeTab, isActiveTabShowingPath } from '@/stores/tabs-store'
 import type { PaneId } from '@/types/pane'
 
 export function applyDirPatch(event: DirPatchEvent) {
@@ -67,8 +66,8 @@ function logSkippedDirPatch(
 }
 
 function sessionStillShowsEvent(paneId: PaneId, event: SessionPatchEvent) {
-  const sameTab = activeTab(paneId).id === event.tabId
-  return sameTab && pathsMatch(panesStore().getState().panes[paneId].path, event.path)
+  const paneShownPath = panesStore().getState().panes[paneId].path
+  return isActiveTabShowingPath(paneId, paneShownPath, event)
 }
 
 type ReplaceViewEvent = Extract<SessionPatchEvent, { mode: 'replaceView' }>
@@ -114,8 +113,9 @@ async function materializeReplacementView(paneId: PaneId, event: ReplaceViewEven
     loadedEntries: session.loadedEntries(),
     requestId: nextListRequestId(),
   }
-  const stillAccepted = session.currentBaseline === acceptedBaseline
-  if (stillAccepted && sessionStillShowsEvent(paneId, event)) {
+  const stillApplicable =
+    session.currentBaseline === acceptedBaseline && sessionStillShowsEvent(paneId, event)
+  if (stillApplicable) {
     panesStore().setState((state) => replacementViewApplied(state, replacement))
   }
   void runActiveItemsSortForPane(paneId)
@@ -123,11 +123,14 @@ async function materializeReplacementView(paneId: PaneId, event: ReplaceViewEven
 
 export function applySessionPatch(event: SessionPatchEvent) {
   const paneId = sessionPaneId(event)
-  if (!paneId || activeTab(paneId).id !== event.tabId) {
+  if (!paneId) {
     return
   }
-  const pathMatches = pathsMatch(panesStore().getState().panes[paneId].path, event.path)
-  if (!pathMatches || !listingSessions[paneId].applyPatch(event)) {
+  if (!sessionStillShowsEvent(paneId, event)) {
+    return
+  }
+  const session = listingSessions[paneId]
+  if (!session.applyPatch(event)) {
     return
   }
 

@@ -197,7 +197,7 @@ impl FolderSizeIndex {
         &self,
         read: impl FnOnce(&FolderSizeTree, &[PathBuf]) -> R,
     ) -> Result<R, TreeUnavailable> {
-        if !self.shared.booted.load(Ordering::Acquire) {
+        if !self.shared.is_booted() {
             return Err(TreeUnavailable::NotReady);
         }
         let view = self.shared.view();
@@ -224,7 +224,7 @@ impl FolderSizeIndex {
     /// Answers indexed paths at once; the rest are boosted and
     /// answered through `emitter` when their walk completes.
     pub fn request(&self, paths: Vec<String>, mode: RequestMode, emitter: SizeEmitter) {
-        if !self.shared.booted.load(Ordering::Acquire) {
+        if !self.shared.is_booted() {
             let _ = self.sender.send(Message::Request {
                 paths,
                 mode,
@@ -336,6 +336,10 @@ pub(super) fn spawn(name: &str, body: impl FnOnce() + Send + 'static) -> JoinHan
 }
 
 impl Shared {
+    fn is_booted(&self) -> bool {
+        self.booted.load(Ordering::Acquire)
+    }
+
     fn shut_down_lanes(&self) {
         let mut lanes = self.lanes();
         lanes.shutdown = true;
@@ -356,11 +360,12 @@ impl Shared {
             triage.record(path, answer);
         }
         drop(view);
-        if !triage.answered.is_empty() {
-            emitter(triage.answered);
+        let RequestTriage { answered, boosted } = triage;
+        if !answered.is_empty() {
+            emitter(answered);
         }
-        if !triage.boosted.is_empty() {
-            self.queue_boosts(triage.boosted, mode == RequestMode::Refresh, Some(emitter));
+        if !boosted.is_empty() {
+            self.queue_boosts(boosted, mode == RequestMode::Refresh, Some(emitter));
         }
     }
 

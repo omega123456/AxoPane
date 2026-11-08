@@ -158,3 +158,36 @@ fn helper_metadata_collects_attributes_and_item_counts() {
     assert_eq!(entry.name, ".hidden.txt");
     assert_eq!(entry.size_bytes, Some(5));
 }
+
+#[test]
+fn hidden_or_system_entries_are_visible_only_when_hidden_files_are_shown() {
+    let plain = entry("plain.txt", false);
+    let hidden = DirectoryEntry {
+        is_hidden: true,
+        ..entry(".hidden", false)
+    };
+    let system = DirectoryEntry {
+        is_system: true,
+        ..entry("pagefile.sys", false)
+    };
+
+    assert!(!plain.is_hidden_or_system());
+    assert!(hidden.is_hidden_or_system());
+    assert!(system.is_hidden_or_system());
+
+    assert!(plain.is_visible_with(false));
+    assert!(!hidden.is_visible_with(false));
+    assert!(!system.is_visible_with(false));
+    assert!(hidden.is_visible_with(true));
+    assert!(system.is_visible_with(true));
+}
+
+#[test]
+fn entry_names_match_a_normalized_filter_case_insensitively() {
+    let report = entry("Quarterly Report.TXT", false);
+
+    assert!(report.name_matches_filter(""));
+    assert!(report.name_matches_filter("report"));
+    assert!(report.name_matches_filter("quarterly report.txt"));
+    assert!(!report.name_matches_filter("invoice"));
+}

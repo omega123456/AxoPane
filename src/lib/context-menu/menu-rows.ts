@@ -217,7 +217,10 @@ function isArchiveEntry(entry: DirectoryEntry) {
 }
 
 export function isZipArchiveEntry(entry: DirectoryEntry) {
-  if (entry.isDir || !isArchiveEntry(entry)) {
+  if (entry.isDir) {
+    return false
+  }
+  if (!isArchiveEntry(entry)) {
     return false
   }
 

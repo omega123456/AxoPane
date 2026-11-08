@@ -97,7 +97,8 @@ export function formatJobProgress(operation: OpProgress, options: { scanning: bo
   // Rust grows `total_bytes` while it walks the selected folders, so the total
   // is still climbing here. Say so rather than printing a total that is wrong
   // and an estimate derived from it.
-  if (options.scanning && operation.kind !== 'delete') {
+  const totalStillGrowing = options.scanning && operation.kind !== 'delete'
+  if (totalStillGrowing) {
     return [`${measured} (still scanning)`]
   }
   if (operation.status === 'paused') {

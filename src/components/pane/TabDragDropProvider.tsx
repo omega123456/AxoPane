@@ -63,11 +63,15 @@ class MouseDistanceConstraint {
       return
     }
 
-    if (event.type === 'pointermove' && this.start) {
-      const distance = Math.hypot(event.clientX - this.start.x, event.clientY - this.start.y)
-      if (distance >= TAB_DRAG_ACTIVATION_DISTANCE_PX) {
-        this.activateDrag?.(event)
-      }
+    if (event.type !== 'pointermove') {
+      return
+    }
+    if (!this.start) {
+      return
+    }
+    const distance = Math.hypot(event.clientX - this.start.x, event.clientY - this.start.y)
+    if (distance >= TAB_DRAG_ACTIVATION_DISTANCE_PX) {
+      this.activateDrag?.(event)
     }
   }
 
@@ -164,12 +168,16 @@ function domPositionOf(element: HTMLElement | null): SourceDomPosition | null {
   return { element, parent: element.parentElement, nextSibling: element.nextElementSibling }
 }
 
+function isStillDragging(position: SourceDomPosition | null) {
+  return position?.element.hasAttribute('data-dnd-dragging') === true
+}
+
 function restoreDomPosition(position: SourceDomPosition | null) {
   if (!position) return
 
   const placeholder = document.querySelector<HTMLElement>('[data-dnd-placeholder]')
-  const anchor =
-    position.nextSibling?.parentElement === position.parent ? position.nextSibling : null
+  const siblingStillInParent = position.nextSibling?.parentElement === position.parent
+  const anchor = siblingStillInParent ? position.nextSibling : null
   position.parent.insertBefore(position.element, anchor)
   if (placeholder) {
     position.element.insertAdjacentElement('afterend', placeholder)
@@ -179,8 +187,13 @@ function restoreDomPosition(position: SourceDomPosition | null) {
 function invalidMoveState(event: DragMoveEvent): TabDragState | null {
   const sourcePaneId = paneIdFromEntity(event.operation.source)
   const destinationPaneId = event.to && paneIdAtPoint(event.to.x, event.to.y)
-  const unresolved = !sourcePaneId || !destinationPaneId
-  if (unresolved || validDestination(sourcePaneId, destinationPaneId)) {
+  if (!sourcePaneId) {
+    return null
+  }
+  if (!destinationPaneId) {
+    return null
+  }
+  if (validDestination(sourcePaneId, destinationPaneId)) {
     return null
   }
   return { sourcePaneId, destinationPaneId: null, isInvalid: true }
@@ -252,7 +265,7 @@ function useTabDragSession() {
       )
     },
     reset: () => {
-      if (!sourceDomPosition.current?.element.hasAttribute('data-dnd-dragging')) {
+      if (!isStillDragging(sourceDomPosition.current)) {
         restoreDragZoom.current?.()
       }
       restoreDragZoom.current = undefined

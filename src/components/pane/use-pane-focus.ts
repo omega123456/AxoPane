@@ -78,7 +78,8 @@ function useRevealScroll(paneId: PaneId, target: RowScrollTarget, focusedRowInde
     const alreadyHandled =
       revealScrollRequestId === undefined ||
       revealScrollRequestId === handledRevealScrollIdRef.current
-    if (alreadyHandled || focusedRowIndex < 0) return
+    if (alreadyHandled) return
+    if (focusedRowIndex < 0) return
     handledRevealScrollIdRef.current = revealScrollRequestId
     scrollViewToRow({ detailsViewRef, graphicalViewRef, viewMode, parentOffset }, focusedRowIndex)
   }, [
@@ -118,7 +119,8 @@ export function usePaneFocus(options: PaneFocusOptions) {
 
   function focusByRowIndex(nextRowIndex: number) {
     const boundedRowIndex = clamp(nextRowIndex, 0, layout.rowCount - 1)
-    if (hasParent && boundedRowIndex === PARENT_ROW_INDEX) {
+    const isParentRow = hasParent && boundedRowIndex === PARENT_ROW_INDEX
+    if (isParentRow) {
       focusParentRow()
       return
     }

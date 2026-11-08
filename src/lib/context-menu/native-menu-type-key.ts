@@ -24,7 +24,9 @@ export function extensionOf(path: string): string {
   const fileName = segments[segments.length - 1] as string
 
   const lastDotIndex = fileName.lastIndexOf('.')
-  if (lastDotIndex <= 0 || lastDotIndex === fileName.length - 1) {
+  const lastCharacterIndex = fileName.length - 1
+  const hasExtension = lastDotIndex > 0 && lastDotIndex < lastCharacterIndex
+  if (!hasExtension) {
     return ''
   }
 

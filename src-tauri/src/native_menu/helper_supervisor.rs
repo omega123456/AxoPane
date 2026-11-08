@@ -193,7 +193,8 @@ fn forward_responses(
     loop {
         let response = read_frame(&mut reader).map_err(|_| HelperFailure::Malformed);
         let failed = response.is_err();
-        if response_sender.send(response).is_err() || failed {
+        let receiver_gone = response_sender.send(response).is_err();
+        if receiver_gone || failed {
             break;
         }
     }

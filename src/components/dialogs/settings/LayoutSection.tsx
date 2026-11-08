@@ -36,13 +36,20 @@ function FolderSizeStatusIcon({ state }: { state: FolderSizeIndexStatus['state']
   return <LoaderCircleIcon className={`${STATUS_ICON_CLASS} animate-spin`} />
 }
 
+function scannedItemsSuffix(status: FolderSizeIndexStatus) {
+  if (status.state !== 'indexing') {
+    return ''
+  }
+  if (status.itemsScanned === undefined) {
+    return ''
+  }
+  return ` ${compactCount.format(status.itemsScanned)} items`
+}
+
 /** The macOS index's state, shown under the auto folder size description. */
 function FolderSizeStatusLine({ status }: { status: FolderSizeIndexStatus }) {
   const label = folderSizeStatusLabel(status)
-  const count =
-    status.state === 'indexing' && status.itemsScanned !== undefined
-      ? ` ${compactCount.format(status.itemsScanned)} items`
-      : ''
+  const count = scannedItemsSuffix(status)
 
   // The status region announces state transitions only, not count ticks.
   return (

@@ -78,7 +78,8 @@ fn replace_target(
     transfer: &ItemTransfer,
     target: PathBuf,
 ) -> Option<TransferTarget> {
-    if normalized_components(&transfer.source) == normalized_components(&target) {
+    let targets_source = normalized_components(&transfer.source) == normalized_components(&target);
+    if targets_source {
         skip_conflicting_item(context, item);
         return None;
     }
@@ -150,7 +151,7 @@ pub(super) fn resolve_or_park(
 
 pub(super) fn wait_while_paused(shared_operation: &Arc<Mutex<OpState>>, resolver: &Arc<Condvar>) {
     let mut guard = shared_operation.lock_operation();
-    while guard.pause.load(Ordering::Relaxed) && !guard.cancel.load(Ordering::Relaxed) {
+    while guard.is_held_by_pause() {
         guard = resolver.wait(guard).expect("pause wait");
     }
 }

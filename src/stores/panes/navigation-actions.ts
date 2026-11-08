@@ -38,7 +38,7 @@ import {
   withScrollPosition,
 } from '@/stores/panes/listing-transitions'
 import { getParentPath } from '@/stores/panes/pane-paths'
-import { defaultPanesData, directoryPaths } from '@/stores/panes/pane-state'
+import { defaultPanesData, directoryPaths, isListingSettled } from '@/stores/panes/pane-state'
 import { schedulePersistSession, sessionPaneOrDefault } from '@/stores/panes/session-persistence'
 import {
   releaseSizesOnLeave,
@@ -217,7 +217,7 @@ export async function finalizeListing(paneId: PaneId) {
 
 export async function setSort(paneId: PaneId, sortKey: SortKey) {
   const pane = panesStore().getState().panes[paneId]
-  if (pane.loading || !pane.listingComplete) {
+  if (!isListingSettled(pane)) {
     return
   }
   if (isTrashPath(pane.path)) {

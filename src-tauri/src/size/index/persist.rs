@@ -67,11 +67,17 @@ pub fn encode(meta: &SnapshotMeta, tree: &FolderSizeTree) -> Vec<u8> {
 /// `None` for anything but an intact snapshot of the current version.
 pub fn decode(bytes: &[u8]) -> Option<Snapshot> {
     let (body, checksum) = bytes.split_last_chunk::<{ size_of::<u64>() }>()?;
-    if fnv1a(body) != u64::from_le_bytes(*checksum) {
+    let checksum_matches = fnv1a(body) == u64::from_le_bytes(*checksum);
+    if !checksum_matches {
         return None;
     }
     let mut reader = Reader(body);
-    if reader.take(MAGIC.len())? != MAGIC || reader.u32()? != FORMAT_VERSION {
+    let magic_matches = reader.take(MAGIC.len())? == MAGIC;
+    if !magic_matches {
+        return None;
+    }
+    let version_matches = reader.u32()? == FORMAT_VERSION;
+    if !version_matches {
         return None;
     }
     let volume_uuid = reader.string()?;
@@ -93,7 +99,7 @@ pub fn decode(bytes: &[u8]) -> Option<Snapshot> {
         let flags = reader.take(1)?[0];
         tree.import_node(parent, name.into(), direct, flags)?;
     }
-    if !reader.0.is_empty() {
+    if !reader.is_exhausted() {
         return None;
     }
     tree.finish_import();
@@ -182,11 +188,12 @@ pub fn plan_catch_up(
     current_event_id: u64,
     events: &[ChangeEvent],
 ) -> ReplayOutcome {
-    if saved.volume_uuid != current_uuid
-        || saved.os_build != current_os_build
-        || saved.event_id > current_event_id
-        || events.iter().any(|event| event.flags.must_scan_sub_dirs)
-    {
+    let volume_changed = saved.volume_uuid != current_uuid;
+    let os_changed = saved.os_build != current_os_build;
+    let history_rewound = saved.event_id > current_event_id;
+    let subtree_dropped = events.iter().any(|event| event.flags.must_scan_sub_dirs);
+    let needs_full_rescan = volume_changed || os_changed || history_rewound || subtree_dropped;
+    if needs_full_rescan {
         return ReplayOutcome::FullRescan;
     }
     if saved.event_id == current_event_id {
@@ -234,7 +241,8 @@ fn outermost(mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
     paths.sort();
     let mut kept: Vec<PathBuf> = Vec::new();
     for path in paths {
-        if !kept.iter().any(|kept_path| path.starts_with(kept_path)) {
+        let nested = kept.iter().any(|kept_path| path.starts_with(kept_path));
+        if !nested {
             kept.push(path);
         }
     }
@@ -259,6 +267,10 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 struct Reader<'a>(&'a [u8]);
 
 impl<'a> Reader<'a> {
+    fn is_exhausted(&self) -> bool {
+        self.0.is_empty()
+    }
+
     fn take(&mut self, byte_count: usize) -> Option<&'a [u8]> {
         let (head, rest) = self.0.split_at_checked(byte_count)?;
         self.0 = rest;

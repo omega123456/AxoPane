@@ -3,7 +3,7 @@
 //! so these strings stay loose and never depend on the user's Everything
 //! settings (whole-filename wildcards, literal operators).
 
-use super::matcher::{Token, FUZZY_MIN_CHARS};
+use super::matcher::{Pattern, Token, FUZZY_MIN_CHARS};
 use super::path_style::PathStyle;
 use super::query::{ParsedQuery, Segment};
 use super::{Candidate, SearchOptions, SearchScope};
@@ -77,13 +77,17 @@ pub fn browse_children_queries(parents: &[String], options: &SearchOptions) -> V
         .collect()
 }
 
+fn is_cleanly_decoded(row: &EverythingRow) -> bool {
+    let has_name = !row.file_name.is_empty();
+    let lossless = !row.path.contains(char::REPLACEMENT_CHARACTER)
+        && !row.file_name.contains(char::REPLACEMENT_CHARACTER);
+    has_name && lossless
+}
+
 /// A row as a candidate; rows whose UTF-16 names did not decode cleanly are
 /// dropped because the path could not be opened.
 pub fn row_to_candidate(row: EverythingRow) -> Option<Candidate> {
-    if row.file_name.is_empty()
-        || row.path.contains(char::REPLACEMENT_CHARACTER)
-        || row.file_name.contains(char::REPLACEMENT_CHARACTER)
-    {
+    if !is_cleanly_decoded(&row) {
         return None;
     }
     Some(Candidate {
@@ -122,9 +126,13 @@ fn folder_terms(segment: &Segment, pass: Pass) -> Vec<String> {
         .collect()
 }
 
+fn is_fuzzy_literal(pattern: &Pattern, pass: Pass) -> bool {
+    pass == Pass::Fuzzy && pattern.len() >= FUZZY_MIN_CHARS
+}
+
 fn token_text(token: &Token, pass: Pass) -> String {
     match token {
-        Token::Literal(pattern) if pass == Pass::Fuzzy && pattern.len() >= FUZZY_MIN_CHARS => {
+        Token::Literal(pattern) if is_fuzzy_literal(pattern, pass) => {
             let mut text = String::from("*");
             for character in pattern
                 .as_string()

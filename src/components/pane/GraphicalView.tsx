@@ -246,7 +246,8 @@ function useGraphicalViewModel(props: GraphicalViewProps, ref: ForwardedRef<Grap
 
   function onGridKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     const movement = gridKeyMovement(event)
-    if (!movement || entryCount === 0) return
+    if (!movement) return
+    if (entryCount === 0) return
     event.preventDefault()
     moveFocus(movement)
   }

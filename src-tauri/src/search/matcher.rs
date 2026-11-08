@@ -215,7 +215,8 @@ fn match_literal(pattern: &[char], name: &FoldedName, kind: NameKind, worst: u8)
             ranges: vec![name.range(0, pattern.len())],
         })
     };
-    if chars.as_slice() == pattern || stem(chars, kind) == Some(pattern) {
+    let is_exact = chars.as_slice() == pattern || stem(chars, kind) == Some(pattern);
+    if is_exact {
         return whole(EXACT);
     }
     if chars.starts_with(pattern) {
@@ -230,7 +231,8 @@ fn match_literal(pattern: &[char], name: &FoldedName, kind: NameKind, worst: u8)
             ranges: vec![name.range(start, start + pattern.len())],
         });
     }
-    if worst < FUZZY || pattern.len() < FUZZY_MIN_CHARS {
+    let fuzzy_allowed = worst >= FUZZY && pattern.len() >= FUZZY_MIN_CHARS;
+    if !fuzzy_allowed {
         return None;
     }
     subsequence(pattern, chars).map(|positions| Match {
@@ -260,7 +262,8 @@ fn subsequence(pattern: &[char], text: &[char]) -> Option<Vec<usize>> {
     let mut positions = Vec::with_capacity(pattern.len());
     let mut next = 0;
     for (position, &character) in text.iter().enumerate().take(end + 1).skip(start) {
-        if next < pattern.len() && character == pattern[next] {
+        let matches_next = next < pattern.len() && character == pattern[next];
+        if matches_next {
             positions.push(position);
             next += 1;
         }
@@ -371,8 +374,12 @@ impl<'glob> GlobCursor<'glob> {
         Some(())
     }
 
+    fn at_star(&self) -> bool {
+        self.pattern.get(self.pattern_index) == Some(&'*')
+    }
+
     fn finish(mut self) -> Option<Vec<usize>> {
-        while self.pattern.get(self.pattern_index) == Some(&'*') {
+        while self.at_star() {
             self.pattern_index += 1;
         }
         (self.pattern_index == self.pattern.len()).then_some(self.positions)

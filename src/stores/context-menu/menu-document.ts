@@ -63,7 +63,10 @@ function hasSection(menu: ContextMenuDocument, sectionId: string) {
 
 export function injectNativeSection(menu: ContextMenuDocument): ContextMenuDocument {
   const nativeSectionId = menu.nativeSectionId
-  if (!menu.nativeRequest || !nativeSectionId) {
+  if (!menu.nativeRequest) {
+    return menu
+  }
+  if (!nativeSectionId) {
     return menu
   }
   if (hasSection(menu, nativeSectionId)) {

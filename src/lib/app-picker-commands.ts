@@ -1,5 +1,5 @@
 import { log } from '@/lib/app-log-commands'
-import { detectPlatformOs } from '@/lib/keymap'
+import { isMacPlatform } from '@/lib/keymap'
 import {
   getDefaultApplication as getDefaultApplicationIpc,
   listApplications as listApplicationsIpc,
@@ -15,7 +15,10 @@ import type { PropertiesDialogItem } from '@/stores/properties-dialog-store'
  * key the association on.
  */
 export function canSetDefaultApplication(items: PropertiesDialogItem[]): boolean {
-  if (detectPlatformOs() !== 'macos' || items.length !== 1) {
+  if (!isMacPlatform()) {
+    return false
+  }
+  if (items.length !== 1) {
     return false
   }
 

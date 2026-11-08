@@ -18,7 +18,8 @@ const MAX_FILE_CHIP_LENGTH = 4
 function fileChip(entry: DirectoryEntry): string {
   const extensionStart = entry.name.lastIndexOf('.')
   const extension = extensionStart > 0 ? entry.name.slice(extensionStart + 1).toUpperCase() : ''
-  return extension && extension.length <= MAX_FILE_CHIP_LENGTH ? extension : 'FILE'
+  const fitsChip = extension !== '' && extension.length <= MAX_FILE_CHIP_LENGTH
+  return fitsChip ? extension : 'FILE'
 }
 
 type MenuTargetDescription = { title: string; chip?: string }
@@ -56,17 +57,13 @@ export function buildContextMenuContent(
 
 export function resolveMenuTarget(paneId: PaneId, entry?: DirectoryEntry): ContextMenuTarget {
   const selection = useSelectionStore.getState().selections[paneId]
-
-  if (!entry && selection.selectedIds.length > 1) {
-    return { kind: 'multi' }
-  }
+  const hasMultipleSelected = selection.selectedIds.length > 1
 
   if (!entry) {
-    return selection.selectedIds.length > 1 ? { kind: 'multi' } : { kind: 'empty' }
+    return hasMultipleSelected ? { kind: 'multi' } : { kind: 'empty' }
   }
 
-  const multipleSelected =
-    selection.selectedIds.length > 1 && selection.selectedIds.includes(entry.id)
+  const multipleSelected = hasMultipleSelected && selection.selectedIds.includes(entry.id)
   if (multipleSelected) {
     return { kind: 'multi' }
   }

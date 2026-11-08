@@ -139,7 +139,10 @@ export function entriesIntersectingRect({ entries, rect, gridWidth, grid }: Inte
   const rectRight = rect.left + rect.width
   const rectBottom = rect.top + rect.height
 
-  if (cardWidth <= 0 || cardHeight <= 0) {
+  if (cardWidth <= 0) {
+    return []
+  }
+  if (cardHeight <= 0) {
     return []
   }
 
@@ -198,7 +201,8 @@ export function useVisibleEntryReport(
   onVisibleRangeChange: (start: number, end: number, viewportCount: number) => void,
 ) {
   useEffect(() => {
-    if (rowsToRender.length === 0 || entryCount === 0) {
+    const nothingVisible = rowsToRender.length === 0 || entryCount === 0
+    if (nothingVisible) {
       onVisibleRangeChange(0, 0, 0)
       return
     }
@@ -266,7 +270,9 @@ export function useThumbnailRangeReport(
   const { mode, grid, rowCount, entryCount, rowsToRender, scrollRef, onThumbnailRangeChange } =
     report
   useEffect(() => {
-    if (mode !== 'thumbnails' || !onThumbnailRangeChange || entryCount === 0) return
+    if (mode !== 'thumbnails') return
+    if (!onThumbnailRangeChange) return
+    if (entryCount === 0) return
     onThumbnailRangeChange(
       thumbnailRange({
         element: scrollRef.current,

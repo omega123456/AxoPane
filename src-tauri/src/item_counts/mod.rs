@@ -620,7 +620,8 @@ impl AutomaticCountBatch {
         self.results.push(result);
         let is_last = index + 1 == self.path_count;
         let is_full = self.results.len() >= ITEM_COUNT_BATCH_SIZE;
-        if !is_full && !is_last {
+        let should_emit = is_full || is_last;
+        if !should_emit {
             return None;
         }
         self.emitted_any = true;

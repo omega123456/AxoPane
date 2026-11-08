@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { SessionPane } from '@/lib/types/ipc'
 import { resolvePaneViewMode, type PaneViewMode } from '@/lib/pane-view'
+import { pathsMatch } from '@/lib/path-compare'
 import { useLayoutStore } from '@/stores/layout-store'
 import type { PaneId } from '@/types/pane'
 import {
@@ -142,6 +143,13 @@ export const useTabsStore = create<TabsStore>((set, get) => ({
 export function activeTab(paneId: PaneId): TabState {
   const pane = useTabsStore.getState().panes[paneId]
   return pane.tabs[pane.activeTabIndex] ?? pane.tabs[0]
+}
+
+export type TabPath = { tabId: string; path: string }
+
+export function isActiveTabShowingPath(paneId: PaneId, shownPath: string, expected: TabPath) {
+  const isActive = activeTab(paneId).id === expected.tabId
+  return isActive && pathsMatch(shownPath, expected.path)
 }
 
 export function toSessionPane(paneId: PaneId): SessionPane {

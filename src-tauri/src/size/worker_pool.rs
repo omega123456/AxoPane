@@ -196,7 +196,8 @@ fn run_manual_job(
         [JobClass::Throughput],
         [format!("size:{path}")],
     ));
-    if admission.is_err() || cancel.load(Ordering::Relaxed) {
+    let abandoned = admission.is_err() || cancel.load(Ordering::Relaxed);
+    if abandoned {
         SizeService::complete_job(inner, &path, &cancel);
         return;
     }

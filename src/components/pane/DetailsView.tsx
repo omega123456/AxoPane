@@ -81,7 +81,8 @@ type DetailsRowProps = Pick<
 function DetailsRow(props: DetailsRowProps) {
   const { pane, isActivePane, actions, index, hasParent, parentOffset } = props
   const style = { top: `${props.start}px` }
-  if (hasParent && index === 0)
+  const isParentRow = hasParent && index === 0
+  if (isParentRow)
     return (
       <div className="absolute inset-x-0.75" style={style}>
         <ParentRow
@@ -120,7 +121,8 @@ function rowKey(
   hasParent: boolean,
   parentOffset: number,
 ) {
-  if (hasParent && virtualRow.index === 0) {
+  const isParentRow = hasParent && virtualRow.index === 0
+  if (isParentRow) {
     return PARENT_ROW_ID
   }
   return pane.entries[virtualRow.index - parentOffset]?.id ?? String(virtualRow.key)
@@ -256,6 +258,7 @@ export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(
       contentLayerRef,
       horizontalScrollLeftRef,
       syncHorizontalScroll,
+      syncAttachedHeaderScroll,
       handleBodyWheel,
     } = useDetachedHorizontalScroll(usesDetachedMacScrollbars, totalHeight)
     useDetailsHandle(ref, {
@@ -282,8 +285,7 @@ export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(
               onWheel={handleBodyWheel}
               onScroll={(event: UIEvent<HTMLDivElement>) => {
                 onScroll(event.currentTarget.scrollTop)
-                if (!usesDetachedMacScrollbars && headerScrollRef.current)
-                  headerScrollRef.current.scrollLeft = event.currentTarget.scrollLeft
+                syncAttachedHeaderScroll(event.currentTarget.scrollLeft)
               }}
               layout={{ itemsToRender, totalHeight, contentWidth, parentOffset }}
             />

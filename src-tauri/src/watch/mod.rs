@@ -36,6 +36,10 @@ use tab_patch::{snapshot_for_watch_baseline, snapshot_from_entries_for_watch};
 /// A paired rename event carries the old path and then the new one.
 const RENAME_EVENT_PATH_COUNT: usize = 2;
 
+fn is_paired_rename(event: &notify::Event) -> bool {
+    event.paths.len() >= RENAME_EVENT_PATH_COUNT
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DirEntryPatch {

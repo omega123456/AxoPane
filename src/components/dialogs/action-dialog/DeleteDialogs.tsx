@@ -1,5 +1,5 @@
 import { DialogList, DialogText } from '@/components/dialogs/DialogShell'
-import { detectPlatformOs } from '@/lib/keymap'
+import { isMacPlatform } from '@/lib/keymap'
 import { deleteFromTrash, emptyTrash } from '@/lib/ipc/commands'
 import { startOp } from '@/lib/queue-commands'
 import type { ActionDialog as ActionDialogState, DeleteTarget } from '@/stores/action-dialog-store'
@@ -50,7 +50,7 @@ export function DeleteDialog({
     >
       <DialogText>
         {count === 1 ? 'This item skips' : 'These items skip'} the{' '}
-        {detectPlatformOs() === 'macos' ? 'Trash' : 'Recycle Bin'}. You can't undo this.
+        {isMacPlatform() ? 'Trash' : 'Recycle Bin'}. You can't undo this.
       </DialogText>
       <DialogList items={targetSummary(dialog.targets)} />
     </ConfirmDialogShell>

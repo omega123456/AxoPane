@@ -85,7 +85,8 @@ pub(super) fn schedule_auto_remove(
     removed: Option<RemovedEmitter>,
     retention: Duration,
 ) {
-    if !inner.lock().expect("ops lock").is_retired(id) {
+    let retired = inner.lock().expect("ops lock").is_retired(id);
+    if !retired {
         return;
     }
 

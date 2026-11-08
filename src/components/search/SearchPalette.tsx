@@ -58,7 +58,8 @@ function useLoadMoreWhenLoadingRowRendered(
   lastRendered: number,
 ) {
   useEffect(() => {
-    if (hasMore && lastRendered >= loadedCount) {
+    const reachedLoadedEnd = lastRendered >= loadedCount
+    if (hasMore && reachedLoadedEnd) {
       void useSearchPaletteStore.getState().loadMore()
     }
   }, [hasMore, loadedCount, lastRendered])

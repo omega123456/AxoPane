@@ -37,16 +37,6 @@ pub(crate) fn is_background_target(request: &LoadNativeMenuRequest) -> bool {
     )
 }
 
-/// The selection the menu should act on: explicit `selected_paths` when present,
-/// otherwise the single `target_path`.
-pub(crate) fn selected_target_paths(request: &LoadNativeMenuRequest) -> Vec<String> {
-    if !request.selected_paths.is_empty() {
-        return request.selected_paths.clone();
-    }
-
-    request.target_path.iter().cloned().collect()
-}
-
 /// Removes the accelerator (`&`) markers and trailing shortcut text Windows
 /// stores in menu strings, leaving a clean display label.
 pub(crate) fn sanitize_menu_label(raw: String) -> String {
@@ -113,7 +103,8 @@ pub(crate) fn icon_resource_to_data_url(resource: &str) -> Option<String> {
             MENU_ICON_EXTRACT_SIZE,
         )
     };
-    if extracted.is_err() || large.0.is_null() {
+    let icon_extracted = extracted.is_ok() && !large.0.is_null();
+    if !icon_extracted {
         return None;
     }
     let _icon_guard = IconGuard(large);
