@@ -1,5 +1,5 @@
 import { log } from '@/lib/app-log-commands'
-import { usePanesStore } from '@/stores/panes-store'
+import { panesStore } from '@/stores/panes/store-handle'
 import { resetPaneForActiveTab } from '@/stores/panes/listing-load'
 import { listingSessions, parkRevealPath } from '@/stores/panes/listing-runtime'
 import {
@@ -22,13 +22,13 @@ export async function openTabFromPath(
   const tab = { path, ...DEFAULT_TAB_VIEW }
   useTabsStore.getState().addTab(paneId, { ...tab, locked: false })
 
-  usePanesStore.setState((state) => ({
+  panesStore().setState((state) => ({
     ...focusRequested(state, paneId),
     ...paneResetForTab(state, paneId, tab),
   }))
 
   void listingSessions[paneId].release()
-  await usePanesStore.getState().reloadPane(paneId)
+  await panesStore().getState().reloadPane(paneId)
 }
 
 export async function closeTab(paneId: PaneId, tabId: string) {
@@ -41,7 +41,7 @@ export async function closeTab(paneId: PaneId, tabId: string) {
 
   const wasActive = before.tabs[before.activeTabIndex]?.id === tabId
   useTabsStore.getState().closeTab(paneId, tabId)
-  schedulePersistSession(usePanesStore.getState().activePaneId)
+  schedulePersistSession(panesStore().getState().activePaneId)
 
   if (!wasActive) {
     return
@@ -50,7 +50,7 @@ export async function closeTab(paneId: PaneId, tabId: string) {
   void reportSizeSubscriptions(paneId, null, [])
   resetPaneForActiveTab(paneId)
   void listingSessions[paneId].release()
-  await usePanesStore.getState().reloadPane(paneId)
+  await panesStore().getState().reloadPane(paneId)
 }
 
 export async function closeTabsBeside(paneId: PaneId, tabId: string, side: 'left' | 'right') {
@@ -64,16 +64,16 @@ export async function closeTabsBeside(paneId: PaneId, tabId: string, side: 'left
   const closing = besideTabs.filter((tab) => !tab.locked)
   const closesActiveTab = closing.some((tab) => tab.id === tabs[activeTabIndex]?.id)
   if (closesActiveTab) {
-    await usePanesStore.getState().switchTab(paneId, tabId)
+    await panesStore().getState().switchTab(paneId, tabId)
   }
   for (const tab of closing) {
-    await usePanesStore.getState().closeTab(paneId, tab.id)
+    await panesStore().getState().closeTab(paneId, tab.id)
   }
 }
 
 export function setTabLocked(paneId: PaneId, tabId: string, locked: boolean) {
   useTabsStore.getState().setTabLocked(paneId, tabId, locked)
-  schedulePersistSession(usePanesStore.getState().activePaneId)
+  schedulePersistSession(panesStore().getState().activePaneId)
 }
 
 export async function moveTab(
@@ -90,7 +90,7 @@ export async function moveTab(
   }
 
   schedulePersistSession(
-    result.kind === 'transfer' ? result.destinationPaneId : usePanesStore.getState().activePaneId,
+    result.kind === 'transfer' ? result.destinationPaneId : panesStore().getState().activePaneId,
   )
   if (result.kind === 'reorder') {
     return result
@@ -102,19 +102,19 @@ export async function moveTab(
   for (const paneId of resetPaneIds) {
     resetPaneForActiveTab(paneId)
   }
-  usePanesStore.setState({ activePaneId: result.destinationPaneId })
+  panesStore().setState({ activePaneId: result.destinationPaneId })
 
   for (const paneId of resetPaneIds) {
     void listingSessions[paneId].release()
   }
-  await Promise.all(resetPaneIds.map((paneId) => usePanesStore.getState().reloadPane(paneId)))
+  await Promise.all(resetPaneIds.map((paneId) => panesStore().getState().reloadPane(paneId)))
   return result
 }
 
 export async function switchTab(paneId: PaneId, tabId: string) {
   const before = useTabsStore.getState().panes[paneId]
   if (before.tabs[before.activeTabIndex]?.id === tabId) {
-    usePanesStore.setState({ activePaneId: paneId })
+    panesStore().setState({ activePaneId: paneId })
     return
   }
 
@@ -122,10 +122,10 @@ export async function switchTab(paneId: PaneId, tabId: string) {
   schedulePersistSession(paneId)
 
   const tab = activeTab(paneId)
-  usePanesStore.setState((state) => ({
+  panesStore().setState((state) => ({
     activePaneId: paneId,
     ...paneResetForTab(state, paneId, tab),
   }))
   void listingSessions[paneId].release()
-  await usePanesStore.getState().reloadPane(paneId)
+  await panesStore().getState().reloadPane(paneId)
 }

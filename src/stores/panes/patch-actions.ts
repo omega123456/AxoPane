@@ -1,7 +1,7 @@
 import { log } from '@/lib/app-log-commands'
 import { pathsMatch } from '@/lib/path-compare'
 import type { DirPatchEvent, SessionPatchEvent } from '@/lib/types/ipc'
-import { usePanesStore } from '@/stores/panes-store'
+import { panesStore } from '@/stores/panes/store-handle'
 import { dirPatchOutcome, paneIdFromTabId } from '@/stores/panes/dir-patch'
 import { runActiveItemsSortForPane } from '@/stores/panes/item-count-actions'
 import {
@@ -21,7 +21,7 @@ import { activeTab } from '@/stores/tabs-store'
 import type { PaneId } from '@/types/pane'
 
 export function applyDirPatch(event: DirPatchEvent) {
-  const state = usePanesStore.getState()
+  const state = panesStore().getState()
   const paneId = paneIdFromTabId(event.tabId)
   const pane = state.panes[paneId]
   const outcome = dirPatchOutcome(state, paneId, event, activeTab(paneId).id)
@@ -30,7 +30,7 @@ export function applyDirPatch(event: DirPatchEvent) {
     logSkippedDirPatch(outcome.reason, paneId, pane, event)
     return
   }
-  usePanesStore.setState(outcome.next)
+  panesStore().setState(outcome.next)
   if (outcome.kind === 'itemsSortPending') {
     queueMicrotask(() => void runActiveItemsSortForPane(paneId))
     return
@@ -68,7 +68,7 @@ function logSkippedDirPatch(
 
 function sessionStillShowsEvent(paneId: PaneId, event: SessionPatchEvent) {
   const sameTab = activeTab(paneId).id === event.tabId
-  return sameTab && pathsMatch(usePanesStore.getState().panes[paneId].path, event.path)
+  return sameTab && pathsMatch(panesStore().getState().panes[paneId].path, event.path)
 }
 
 type ReplaceViewEvent = Extract<SessionPatchEvent, { mode: 'replaceView' }>
@@ -116,7 +116,7 @@ async function materializeReplacementView(paneId: PaneId, event: ReplaceViewEven
   }
   const stillAccepted = session.currentBaseline === acceptedBaseline
   if (stillAccepted && sessionStillShowsEvent(paneId, event)) {
-    usePanesStore.setState((state) => replacementViewApplied(state, replacement))
+    panesStore().setState((state) => replacementViewApplied(state, replacement))
   }
   void runActiveItemsSortForPane(paneId)
 }
@@ -126,7 +126,7 @@ export function applySessionPatch(event: SessionPatchEvent) {
   if (!paneId || activeTab(paneId).id !== event.tabId) {
     return
   }
-  const pathMatches = pathsMatch(usePanesStore.getState().panes[paneId].path, event.path)
+  const pathMatches = pathsMatch(panesStore().getState().panes[paneId].path, event.path)
   if (!pathMatches || !listingSessions[paneId].applyPatch(event)) {
     return
   }
@@ -141,5 +141,5 @@ export function applySessionPatch(event: SessionPatchEvent) {
     })
     return
   }
-  usePanesStore.getState().applyDirPatch(dirPatchFromSessionPatch(event))
+  panesStore().getState().applyDirPatch(dirPatchFromSessionPatch(event))
 }

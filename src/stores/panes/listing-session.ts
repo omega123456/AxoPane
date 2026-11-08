@@ -28,12 +28,14 @@ import {
   reviseDirectorySessionView,
 } from '@/lib/ipc/commands'
 import { log } from '@/lib/app-log-commands'
+import { errorMessage } from '@/lib/error-message'
 import type {
   BeginNavigationResponse,
   DirectoryEntry,
   SessionBaseline,
   SessionRejection,
   SessionPatchEvent,
+  SessionRangeResponse,
   SessionViewParams,
 } from '@/lib/types/ipc'
 import { MAX_RETAINED_PAGES, PaneEntryCollection, pageIndexForRow } from './entry-collection'
@@ -250,7 +252,7 @@ export class ListingSession {
         return
       }
       this.status = 'error'
-      this.error = error instanceof Error ? error.message : String(error)
+      this.error = errorMessage(error)
       log.error('ListingSession.reviseView failed', { paneId: this.paneId, error })
       this.callbacks.onChange()
     }
@@ -387,20 +389,7 @@ export class ListingSession {
           return
         }
         this.inFlightPages.delete(pageIndex)
-        // The response is only meaningful if this session's baseline has not
-        // moved on since the request was issued — a superseded baseline (new
-        // navigation, or a view revision from `reviseView`) means this page
-        // index may not even mean the same thing anymore under the new view.
-        if (!this.baseline || !baselinesMatch(this.baseline, response.baseline)) {
-          log.debug('ListingSession discarded stale range response', {
-            paneId: this.paneId,
-            pageIndex,
-          })
-        } else {
-          this.collection.setTotalRows(response.totalRows)
-          this.collection.installPage(response.page.pageIndex, response.page.entries)
-          this.callbacks.onChange()
-        }
+        this.installRangeResponseIfCurrent(response, pageIndex)
         this.drainQueue()
       })
       .catch((error: unknown) => {
@@ -408,29 +397,45 @@ export class ListingSession {
           return
         }
         this.inFlightPages.delete(pageIndex)
-        if (isSessionRejection(error)) {
-          // Stale/rejected range fetch: nothing to install, and nothing to
-          // surface as a user-facing error — the active navigation/view has
-          // already moved on.
-          log.debug('ListingSession range request rejected', {
-            paneId: this.paneId,
-            pageIndex,
-            kind: error.kind,
-          })
-        } else {
-          this.status = 'error'
-          this.error = error instanceof Error ? error.message : String(error)
-          log.error('ListingSession range request failed', {
-            paneId: this.paneId,
-            pageIndex,
-            error,
-          })
-          // A non-protocol error has no newer baseline to recover us. Notify
-          // the pane walk so it can terminate rather than await forever.
-          this.callbacks.onChange()
-        }
+        this.recordRangeFailure(error, pageIndex)
         this.drainQueue()
       })
+  }
+
+  private isCurrentBaseline(candidate: SessionBaseline): boolean {
+    return this.baseline !== null && baselinesMatch(this.baseline, candidate)
+  }
+
+  private installRangeResponseIfCurrent(response: SessionRangeResponse, pageIndex: number): void {
+    if (!this.isCurrentBaseline(response.baseline)) {
+      log.debug('ListingSession discarded stale range response', {
+        paneId: this.paneId,
+        pageIndex,
+      })
+      return
+    }
+    this.collection.setTotalRows(response.totalRows)
+    this.collection.installPage(response.page.pageIndex, response.page.entries)
+    this.callbacks.onChange()
+  }
+
+  private recordRangeFailure(error: unknown, pageIndex: number): void {
+    if (isSessionRejection(error)) {
+      log.debug('ListingSession range request rejected', {
+        paneId: this.paneId,
+        pageIndex,
+        kind: error.kind,
+      })
+      return
+    }
+    this.status = 'error'
+    this.error = errorMessage(error)
+    log.error('ListingSession range request failed', {
+      paneId: this.paneId,
+      pageIndex,
+      error,
+    })
+    this.callbacks.onChange()
   }
 
   private drainQueue(): void {

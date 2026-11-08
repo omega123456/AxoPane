@@ -2,12 +2,27 @@ import { DialogList, DialogText } from '@/components/dialogs/DialogShell'
 import { detectPlatformOs } from '@/lib/keymap'
 import { deleteFromTrash, emptyTrash } from '@/lib/ipc/commands'
 import { startOp } from '@/lib/queue-commands'
-import type { ActionDialog as ActionDialogState } from '@/stores/action-dialog-store'
+import type { ActionDialog as ActionDialogState, DeleteTarget } from '@/stores/action-dialog-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { ConfirmDialogShell } from './ConfirmDialogShell'
 import { itemCountLabel, targetSummary } from './action-dialog-paths'
 import { useFocusOnMount } from '@/lib/use-focus-on-mount'
 import { useActionDialogSubmit } from './use-action-dialog-submit'
+
+const DELETE_HAS_NO_DESTINATION_DIR = ''
+const UNKNOWN_SIZE_BYTES = 0
+
+function enqueuePermanentDelete(targets: readonly DeleteTarget[]) {
+  return startOp({
+    kind: 'delete',
+    destinationDir: DELETE_HAS_NO_DESTINATION_DIR,
+    items: targets.map((target) => ({
+      sourcePath: target.path,
+      name: target.name,
+      sizeBytes: target.sizeBytes ?? UNKNOWN_SIZE_BYTES,
+    })),
+  })
+}
 
 export function DeleteDialog({
   dialog,
@@ -19,20 +34,7 @@ export function DeleteDialog({
   const count = dialog.targets.length
 
   function confirm() {
-    // Enqueue an irreversible delete through the shared queue engine so it
-    // reuses the copy/move toast, progress and per-disk lock. Destination is
-    // unused for deletes.
-    const enqueueDelete = () =>
-      startOp({
-        kind: 'delete',
-        destinationDir: '',
-        items: dialog.targets.map((target) => ({
-          sourcePath: target.path,
-          name: target.name,
-          sizeBytes: target.sizeBytes ?? 0,
-        })),
-      })
-    void run(enqueueDelete, { message: 'delete failed' })
+    void run(() => enqueuePermanentDelete(dialog.targets), { message: 'delete failed' })
   }
 
   return (

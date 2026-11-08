@@ -5,7 +5,10 @@ use std::time::{Duration, Instant};
 
 use super::execution::WorkerContext;
 use super::measure::measure_path_size;
-use super::{LockOperation, OpItem, OpKind, OpState, ProgressEmitter, ETA_STABILIZATION_SAMPLES};
+use super::{
+    LockOperation, OpItem, OpKind, OpState, ProgressEmitter, ETA_STABILIZATION_SAMPLES,
+    PROGRESS_EMIT_INTERVAL,
+};
 
 /// Coalesces the flood of per-chunk / per-member progress emissions produced
 /// while transferring bytes. Every transfer-shaped path carries one of these:
@@ -28,6 +31,10 @@ impl TransferThrottle {
             last_emit,
             interval,
         }
+    }
+
+    pub(super) fn starting_now(context: &WorkerContext<'_>) -> Self {
+        Self::new((context.instant_now)(), PROGRESS_EMIT_INTERVAL)
     }
 
     fn claim_emission(&mut self, now: Instant) -> bool {

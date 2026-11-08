@@ -3,7 +3,7 @@ import { pathsMatch } from '@/lib/path-compare'
 import { isTrashPath } from '@/lib/trash'
 import type { SortKey } from '@/lib/types/ipc'
 import { useConfigStore } from '@/stores/config-store'
-import { usePanesStore } from '@/stores/panes-store'
+import { panesStore } from '@/stores/panes/store-handle'
 import { sortedPanes, trashSortedPanes } from '@/stores/panes/entry-sort'
 import { runActiveItemsSortForPane } from '@/stores/panes/item-count-actions'
 import {
@@ -81,23 +81,23 @@ export function initialize({
     rightTab: activeTab('right'),
     ...buildRootTreeState(volumes),
   }
-  usePanesStore.setState((state) => initializedPanes(state, initial))
+  panesStore().setState((state) => initializedPanes(state, initial))
 }
 
 export function setActivePane(paneId: PaneId) {
-  usePanesStore.setState({ activePaneId: paneId })
+  panesStore().setState({ activePaneId: paneId })
   schedulePersistSession(paneId)
 }
 
 export async function reloadPane(paneId: PaneId) {
-  const pane = usePanesStore.getState().panes[paneId]
+  const pane = panesStore().getState().panes[paneId]
   const revealChildPath = takeRevealPath(paneId)
   const selection = selectionSnapshot(paneId)
-  usePanesStore.setState((state) => listingStarted(state, paneId))
+  panesStore().setState((state) => listingStarted(state, paneId))
   const attempt: ListingAttempt = {
     paneId,
     tabId: activeTab(paneId).id,
-    listingGeneration: usePanesStore.getState().panes[paneId].listingGeneration,
+    listingGeneration: panesStore().getState().panes[paneId].listingGeneration,
     requestedView: listingViewOf(pane),
   }
 
@@ -113,13 +113,13 @@ export async function reloadPane(paneId: PaneId) {
     }
     recordResolvedListing(paneId)
     await runActiveItemsSortForPane(paneId)
-    await usePanesStore.getState().finalizeListing(paneId)
+    await panesStore().getState().finalizeListing(paneId)
   } catch (error) {
     if (isListingAttemptStale(attempt)) {
       return
     }
     log.error('reloadPane failed to load directory', { paneId, path: pane.path, error })
-    usePanesStore.setState((state) => listingFailed(state, paneId, error))
+    panesStore().setState((state) => listingFailed(state, paneId, error))
   }
 }
 
@@ -128,7 +128,7 @@ export async function navigatePane(paneId: PaneId, path: string, options: Naviga
   const currentTab = activeTab(paneId)
   const lockedElsewhere = currentTab.locked && !pathsMatch(currentTab.path, path)
   if (lockedElsewhere) {
-    await usePanesStore.getState().openTabFromPath(paneId, path, { revealPath: options.revealPath })
+    await panesStore().getState().openTabFromPath(paneId, path, { revealPath: options.revealPath })
     return
   }
   const viaHistory = options.viaHistory ?? false
@@ -136,25 +136,25 @@ export async function navigatePane(paneId: PaneId, path: string, options: Naviga
     clearFilterTimer(paneId)
   }
 
-  const leavingPath = usePanesStore.getState().panes[paneId].path
+  const leavingPath = panesStore().getState().panes[paneId].path
   parkRevealPath(paneId, revealTargetAfterNavigation(leavingPath, path, options.revealPath))
   releaseSizesOnLeave(paneId, path)
 
-  usePanesStore.setState((state) => navigatedPanes(state, paneId, path, viaHistory))
-  await usePanesStore.getState().reloadPane(paneId)
+  panesStore().setState((state) => navigatedPanes(state, paneId, path, viaHistory))
+  await panesStore().getState().reloadPane(paneId)
 }
 
 export async function goUp(paneId: PaneId) {
-  const currentPath = usePanesStore.getState().panes[paneId].path
+  const currentPath = panesStore().getState().panes[paneId].path
   const parentPath = getParentPath(currentPath)
   log.debug('goUp', { paneId, currentPath, parentPath })
   if (parentPath) {
-    await usePanesStore.getState().navigatePane(paneId, parentPath)
+    await panesStore().getState().navigatePane(paneId, parentPath)
   }
 }
 
 export async function goBack(paneId: PaneId) {
-  const pane = usePanesStore.getState().panes[paneId]
+  const pane = panesStore().getState().panes[paneId]
   if (pane.historyIndex <= 0) {
     return
   }
@@ -162,7 +162,7 @@ export async function goBack(paneId: PaneId) {
 }
 
 export async function goForward(paneId: PaneId) {
-  const pane = usePanesStore.getState().panes[paneId]
+  const pane = panesStore().getState().panes[paneId]
   const atHistoryEdge = pane.historyIndex < 0 || pane.historyIndex >= pane.history.length - 1
   if (atHistoryEdge) {
     return
@@ -171,7 +171,7 @@ export async function goForward(paneId: PaneId) {
 }
 
 async function stepThroughHistory(paneId: PaneId, historyIndex: number, action: string) {
-  const store = usePanesStore.getState()
+  const store = panesStore().getState()
   const path = store.panes[paneId].history[historyIndex]
   log.debug(action, { paneId, path })
   const tab = activeTab(paneId)
@@ -180,19 +180,19 @@ async function stepThroughHistory(paneId: PaneId, historyIndex: number, action: 
     await store.openTabFromPath(paneId, path)
     return
   }
-  usePanesStore.setState((state) => withHistoryIndex(state, paneId, historyIndex))
+  panesStore().setState((state) => withHistoryIndex(state, paneId, historyIndex))
   await store.navigatePane(paneId, path, { viaHistory: true })
 }
 
 export async function finalizeListing(paneId: PaneId) {
-  const pane = usePanesStore.getState().panes[paneId]
+  const pane = panesStore().getState().panes[paneId]
   if (isTrashPath(pane.path)) {
     return
   }
 
   try {
     await armTabWatch(paneId, pane)
-    const folders = directoryPaths(usePanesStore.getState().panes[paneId].entries)
+    const folders = directoryPaths(panesStore().getState().panes[paneId].entries)
     await reportSizeSubscriptions(
       paneId,
       pane.path,
@@ -203,33 +203,35 @@ export async function finalizeListing(paneId: PaneId) {
     log.debug('finalizeListing done', {
       paneId,
       path: pane.path,
-      entries: usePanesStore.getState().panes[paneId].entries.length,
+      entries: panesStore().getState().panes[paneId].entries.length,
       sizeRequests: requested.length,
     })
 
-    await usePanesStore.getState().ensureTreeChildren(getParentPath(pane.path) ?? pane.path)
+    await panesStore()
+      .getState()
+      .ensureTreeChildren(getParentPath(pane.path) ?? pane.path)
   } catch (error) {
     log.error('finalizeListing failed', { paneId, path: pane.path, error })
   }
 }
 
 export async function setSort(paneId: PaneId, sortKey: SortKey) {
-  const pane = usePanesStore.getState().panes[paneId]
+  const pane = panesStore().getState().panes[paneId]
   if (pane.loading || !pane.listingComplete) {
     return
   }
   if (isTrashPath(pane.path)) {
-    usePanesStore.setState((state) => trashSortedPanes(state, paneId, sortKey))
+    panesStore().setState((state) => trashSortedPanes(state, paneId, sortKey))
     return
   }
 
-  usePanesStore.setState((state) => sortedPanes(state, paneId, sortKey))
-  const nextPane = usePanesStore.getState().panes[paneId]
+  panesStore().setState((state) => sortedPanes(state, paneId, sortKey))
+  const nextPane = panesStore().getState().panes[paneId]
   useTabsStore.getState().patchActiveTab(paneId, {
     sortKey: nextPane.sortKey,
     sortDirection: nextPane.sortDirection,
   })
-  schedulePersistSession(usePanesStore.getState().activePaneId)
+  schedulePersistSession(panesStore().getState().activePaneId)
   if (sortKey === 'items') {
     await runActiveItemsSortForPane(paneId)
   }
@@ -237,43 +239,43 @@ export async function setSort(paneId: PaneId, sortKey: SortKey) {
 
 export function setFilterDraft(paneId: PaneId, value: string) {
   clearFilterTimer(paneId)
-  usePanesStore.setState((state) => withFilterDraft(state, paneId, value))
+  panesStore().setState((state) => withFilterDraft(state, paneId, value))
 
   const nextTimer = window.setTimeout(() => {
-    usePanesStore.setState((state) => withAppliedFilter(state, paneId, value))
-    void usePanesStore.getState().reloadPane(paneId)
+    panesStore().setState((state) => withAppliedFilter(state, paneId, value))
+    void panesStore().getState().reloadPane(paneId)
   }, FILTER_DELAY_MILLISECONDS)
 
-  usePanesStore.setState((state) => withFilterTimer(state, paneId, nextTimer))
+  panesStore().setState((state) => withFilterTimer(state, paneId, nextTimer))
 }
 
 export function clearFilter(paneId: PaneId) {
   clearFilterTimer(paneId)
-  usePanesStore.setState((state) => withClearedFilter(state, paneId))
-  void usePanesStore.getState().reloadPane(paneId)
+  panesStore().setState((state) => withClearedFilter(state, paneId))
+  void panesStore().getState().reloadPane(paneId)
 }
 
 export function setFocusedEntry(paneId: PaneId, entryId: string | null) {
-  usePanesStore.setState((state) => withFocusedEntry(state, paneId, entryId))
+  panesStore().setState((state) => withFocusedEntry(state, paneId, entryId))
 }
 
 export function setScrollPosition(paneId: PaneId, path: string, scrollTop: number) {
-  const previous = usePanesStore.getState().panes[paneId].scrollPositions[path]
+  const previous = panesStore().getState().panes[paneId].scrollPositions[path]
   if (previous === scrollTop) {
     return
   }
-  usePanesStore.setState((state) => withScrollPosition(state, paneId, path, scrollTop))
+  panesStore().setState((state) => withScrollPosition(state, paneId, path, scrollTop))
 }
 
 export async function setShowHiddenFiles(showHiddenFiles: boolean) {
-  if (usePanesStore.getState().showHiddenFiles === showHiddenFiles) {
+  if (panesStore().getState().showHiddenFiles === showHiddenFiles) {
     return
   }
-  usePanesStore.setState({ showHiddenFiles })
+  panesStore().setState({ showHiddenFiles })
   await useConfigStore.getState().setShowHiddenFiles(showHiddenFiles)
   await Promise.all([
-    usePanesStore.getState().reloadPane('left'),
-    usePanesStore.getState().reloadPane('right'),
+    panesStore().getState().reloadPane('left'),
+    panesStore().getState().reloadPane('right'),
   ])
 }
 
@@ -284,5 +286,5 @@ export function reset() {
   useTabsStore.getState().reset()
   void listingSessions.left.release()
   void listingSessions.right.release()
-  usePanesStore.setState(defaultPanesData())
+  panesStore().setState(defaultPanesData())
 }

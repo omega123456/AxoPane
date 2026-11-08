@@ -9,7 +9,7 @@ use super::conflict::wait_while_paused;
 use super::delete::{remove_clearing_readonly, remove_source, remove_target};
 use super::execution::{is_operation_cancelled, WorkerContext};
 use super::manifest::ProgressiveManifest;
-use super::paths::is_real_directory;
+use super::paths::{is_real_directory, is_real_directory_type};
 use super::progress::{
     add_discovered_total, begin_file_progress, finish_file_progress, report_chunk_progress,
     TransferThrottle,
@@ -21,7 +21,7 @@ use super::transfer::portable::PortableAdapter;
 #[cfg(windows)]
 use super::transfer::windows::WindowsCapabilities;
 use super::transfer::{self, TransferRequirements};
-use super::{worker, COPY_BUFFER_BYTES, PROGRESS_EMIT_INTERVAL};
+use super::{worker, COPY_BUFFER_BYTES};
 use crate::error_text::StringifyError;
 
 /// Test-only hook proving the capability-adapter selection genuinely
@@ -50,44 +50,37 @@ pub(super) fn copy_path_with_total_discovery(
     manifest: Option<&mut ProgressiveManifest>,
 ) -> Result<(), String> {
     let source_metadata = fs::symlink_metadata(source).stringify_err()?;
+    let mut whole_transfer_throttle = TransferThrottle::starting_now(context);
     if source_metadata.file_type().is_symlink() {
-        let mut throttle = TransferThrottle::new((context.instant_now)(), PROGRESS_EMIT_INTERVAL);
-        copy_symlink_with_total_discovery(
+        return copy_symlink_with_total_discovery(
             source,
             target,
             add_discovered_totals,
             context,
-            Some(&mut throttle),
-        )
-    } else if source_metadata.is_dir() {
+            Some(&mut whole_transfer_throttle),
+        );
+    }
+    if source_metadata.is_dir() {
         let root = source.canonicalize().stringify_err()?;
         let mut visited = HashSet::from([root.clone()]);
-        // The directory walk shares one throttle across the whole recursive
-        // tree so a many-small-file tree does not flood the frontend.
-        let mut throttle = TransferThrottle::new((context.instant_now)(), PROGRESS_EMIT_INTERVAL);
-        copy_dir_recursive(
+        return copy_dir_recursive(
             source,
             target,
             &root,
             &mut visited,
             add_discovered_totals,
             context,
-            Some(&mut throttle),
+            Some(&mut whole_transfer_throttle),
             manifest,
-        )
-    } else {
-        // A single top-level file transfer gets its own throttle: a large
-        // file (e.g. a multi-GB video) emits one progress event per 1 MiB
-        // chunk, which floods exactly the same way a directory walk does.
-        let mut throttle = TransferThrottle::new((context.instant_now)(), PROGRESS_EMIT_INTERVAL);
-        copy_file_with_total_discovery(
-            source,
-            target,
-            add_discovered_totals,
-            context,
-            Some(&mut throttle),
-        )
+        );
     }
+    copy_file_with_total_discovery(
+        source,
+        target,
+        add_discovered_totals,
+        context,
+        Some(&mut whole_transfer_throttle),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -242,10 +235,9 @@ fn create_symlink(source: &Path, link_target: &Path, target: &Path) -> io::Resul
 
     let metadata = fs::symlink_metadata(source)?;
     if metadata.file_type().is_symlink_dir() {
-        std::os::windows::fs::symlink_dir(link_target, target)
-    } else {
-        std::os::windows::fs::symlink_file(link_target, target)
+        return std::os::windows::fs::symlink_dir(link_target, target);
     }
+    std::os::windows::fs::symlink_file(link_target, target)
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -336,14 +328,15 @@ pub(super) fn move_merge_dir(
         let entry = entry.stringify_err()?;
         let child_source = entry.path();
         let child_target = target.join(entry.file_name());
-        let file_type = entry.file_type().stringify_err()?;
-        let target_is_real_directory = is_real_directory(&child_target);
-        if file_type.is_dir() && !file_type.is_symlink() && target_is_real_directory {
+        let source_is_real_directory = is_real_directory_type(entry.file_type().stringify_err()?);
+        let merges_into_existing_directory =
+            source_is_real_directory && is_real_directory(&child_target);
+        if merges_into_existing_directory {
             move_merge_dir(&child_source, &child_target, context)?;
-        } else {
-            clear_merge_target(&child_target, false)?;
-            move_path_with_total_discovery(&child_source, &child_target, false, context)?;
+            continue;
         }
+        clear_merge_target(&child_target, false)?;
+        move_path_with_total_discovery(&child_source, &child_target, false, context)?;
     }
     if is_operation_cancelled(context) {
         return Ok(());
@@ -357,11 +350,7 @@ pub(super) fn move_merge_dir(
 fn clear_merge_target(target: &Path, keep_real_dir: bool) -> Result<(), String> {
     match fs::symlink_metadata(target) {
         Err(_) => Ok(()),
-        Ok(metadata)
-            if keep_real_dir && metadata.is_dir() && !metadata.file_type().is_symlink() =>
-        {
-            Ok(())
-        }
+        Ok(metadata) if keep_real_dir && is_real_directory_type(metadata.file_type()) => Ok(()),
         Ok(_) => remove_target(target),
     }
 }

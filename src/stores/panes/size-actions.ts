@@ -8,7 +8,7 @@ import { log } from '@/lib/app-log-commands'
 import { isTrashPath } from '@/lib/trash'
 import type { FolderSizeIndexStatus, SizeStateEvent } from '@/lib/types/ipc'
 import { useConfigStore } from '@/stores/config-store'
-import { usePanesStore } from '@/stores/panes-store'
+import { panesStore } from '@/stores/panes/store-handle'
 import { listingSessions } from '@/stores/panes/listing-runtime'
 import { directoryPaths } from '@/stores/panes/pane-state'
 import {
@@ -63,7 +63,7 @@ export async function reportSizeSubscriptions(
 }
 
 function cancelStaleSizes(paneId: PaneId, staleSizePaths: string[]) {
-  usePanesStore.setState((state) => withoutStaleSizes(state, staleSizePaths))
+  panesStore().setState((state) => withoutStaleSizes(state, staleSizePaths))
   const cancelStartedAt = performance.now()
   void cancelSizes(staleSizePaths)
     .then((response) => {
@@ -80,7 +80,7 @@ function cancelStaleSizes(paneId: PaneId, staleSizePaths: string[]) {
 }
 
 export function releaseSizesOnLeave(paneId: PaneId, destinationPath: string) {
-  const state = usePanesStore.getState()
+  const state = panesStore().getState()
   const leaving = state.panes[paneId]
   const staleSizePaths = staleSizePathsOnLeave(state, paneId)
   log.debug('size: navigate cancel evaluation', {
@@ -97,18 +97,18 @@ export function releaseSizesOnLeave(paneId: PaneId, destinationPath: string) {
 }
 
 async function requestSizesMarkingPending(paths: string[], request: () => Promise<unknown>) {
-  usePanesStore.setState((state) => withPendingSizeRequests(state, paths, true))
+  panesStore().setState((state) => withPendingSizeRequests(state, paths, true))
   try {
     await request()
   } catch (error) {
-    usePanesStore.setState((state) => withPendingSizeRequests(state, paths, false))
+    panesStore().setState((state) => withPendingSizeRequests(state, paths, false))
     throw error
   }
 }
 
 function eagerSizingEnabledNow() {
   return eagerSizesEnabled(
-    usePanesStore.getState().folderSizeIndexStatus,
+    panesStore().getState().folderSizeIndexStatus,
     useConfigStore.getState().autoFolderSize,
   )
 }
@@ -121,7 +121,7 @@ export async function requestEagerDirectorySizes(paths: string[]) {
     return []
   }
 
-  const pending = collectPendingSizeRequests(paths, usePanesStore.getState())
+  const pending = collectPendingSizeRequests(paths, panesStore().getState())
   if (pending.length === 0) {
     return []
   }
@@ -133,16 +133,16 @@ export async function requestEagerDirectorySizes(paths: string[]) {
 
 export async function refreshSizes(paneId: PaneId) {
   await listingSessions[paneId].release()
-  await usePanesStore.getState().reloadPane(paneId)
+  await panesStore().getState().reloadPane(paneId)
 
-  const pane = usePanesStore.getState().panes[paneId]
+  const pane = panesStore().getState().panes[paneId]
   if (isTrashPath(pane.path)) {
     return
   }
   const folders = directoryPaths(pane.entries)
   const paths = refreshSizePaths(
     folders,
-    usePanesStore.getState().sizeStates,
+    panesStore().getState().sizeStates,
     eagerSizingEnabledNow(),
   )
   if (paths.length === 0) {
@@ -156,11 +156,13 @@ export function applySizeStates(events: SizeStateEvent[]) {
     return
   }
   logSizeEventProgress(summarizeSizeEvents(events))
-  usePanesStore.setState((state) => appliedSizeStates(state, events))
+  panesStore().setState((state) => appliedSizeStates(state, events))
 }
 
 export async function requestManualSize(paneId: PaneId, entryId: string) {
-  const entry = usePanesStore.getState().panes[paneId].entries.find((item) => item.id === entryId)
+  const entry = panesStore()
+    .getState()
+    .panes[paneId].entries.find((item) => item.id === entryId)
   if (!entry?.isDir) {
     return
   }
@@ -168,9 +170,9 @@ export async function requestManualSize(paneId: PaneId, entryId: string) {
 }
 
 export async function calculateAllFolderSizes(paneId: PaneId) {
-  const pane = usePanesStore.getState().panes[paneId]
+  const pane = panesStore().getState().panes[paneId]
   const paths = directoryPaths(pane.entries)
-  const pending = paths.filter((path) => !usePanesStore.getState().pendingSizeRequests[path])
+  const pending = paths.filter((path) => !panesStore().getState().pendingSizeRequests[path])
   log.debug('size: calculateAllFolderSizes', {
     paneId,
     path: pane.path,
@@ -191,5 +193,5 @@ export async function calculateAllFolderSizes(paneId: PaneId) {
 }
 
 export function setFolderSizeIndexStatus(folderSizeIndexStatus: FolderSizeIndexStatus) {
-  usePanesStore.setState({ folderSizeIndexStatus })
+  panesStore().setState({ folderSizeIndexStatus })
 }

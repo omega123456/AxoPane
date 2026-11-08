@@ -27,6 +27,7 @@ import {
   requestManualSize,
   setFolderSizeIndexStatus,
 } from '@/stores/panes/size-actions'
+import { bindPanesStore } from '@/stores/panes/store-handle'
 import type { PanesStore } from '@/stores/panes/store-types'
 import {
   closeTab,
@@ -97,3 +98,5 @@ export const usePanesStore = create<PanesStore>(() => ({
   revealTreeHiddenLevels,
   reset,
 }))
+
+bindPanesStore(usePanesStore)

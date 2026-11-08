@@ -470,6 +470,20 @@ fn display_paths_strip_windows_extended_unc_prefix() {
             display_path_from_text("\\\\?\\C:\\Users\\Omega"),
             "C:\\Users\\Omega"
         );
+        assert_eq!(
+            display_path_from_text(r"\\?\unc\raspberry.pi\share"),
+            r"\\raspberry.pi\share"
+        );
+    }
+}
+
+#[test]
+fn display_paths_keep_verbatim_text_outside_windows() {
+    if !cfg!(windows) {
+        assert_eq!(
+            display_path_from_text(r"\\?\unc\raspberry.pi\share"),
+            r"\\?\unc\raspberry.pi\share"
+        );
     }
 }
 

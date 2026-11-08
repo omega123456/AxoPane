@@ -4,13 +4,27 @@ export function withKeyFlags(
   keys: readonly string[],
   flagged: boolean,
 ): Record<string, true> {
+  return flagged ? withKeysFlagged(record, keys) : withoutKeys(record, keys)
+}
+
+function withKeysFlagged(
+  record: Readonly<Record<string, true>>,
+  keys: readonly string[],
+): Record<string, true> {
   const next = { ...record }
   for (const key of keys) {
-    if (flagged) {
-      next[key] = true
-    } else {
-      delete next[key]
-    }
+    next[key] = true
+  }
+  return next
+}
+
+function withoutKeys<Value>(
+  record: Readonly<Record<string, Value>>,
+  keys: readonly string[],
+): Record<string, Value> {
+  const next = { ...record }
+  for (const key of keys) {
+    delete next[key]
   }
   return next
 }

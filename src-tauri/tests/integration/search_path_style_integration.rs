@@ -22,6 +22,7 @@ fn separators_follow_the_style() {
 fn verbatim_prefixes_are_stripped_on_windows_only() {
     assert_eq!(WIN.strip_verbatim(r"\\?\C:\Users\a"), r"C:\Users\a");
     assert_eq!(WIN.strip_verbatim(r"\\?\UNC\nas\home\a"), r"\\nas\home\a");
+    assert_eq!(WIN.strip_verbatim(r"\\?\unc\nas\home\a"), r"\\nas\home\a");
     assert_eq!(WIN.strip_verbatim(r"C:\plain"), r"C:\plain");
     assert_eq!(POSIX.strip_verbatim(r"\\?\C:\x"), r"\\?\C:\x");
 }

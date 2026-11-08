@@ -1,6 +1,6 @@
 import { requestIcons } from '@/lib/ipc/commands'
 import type { IconStateEvent } from '@/lib/types/ipc'
-import { usePanesStore } from '@/stores/panes-store'
+import { panesStore } from '@/stores/panes/store-handle'
 import {
   appliedIconStates,
   collectPendingIconRequests,
@@ -17,24 +17,24 @@ function isWindowsNavigator() {
 
 export async function requestVisibleIcons(paneId: PaneId, paths: string[]) {
   const pending = collectPendingIconRequests(
-    usePanesStore.getState().panes[paneId].entries,
+    panesStore().getState().panes[paneId].entries,
     paths,
-    usePanesStore.getState(),
+    panesStore().getState(),
   )
   if (pending.length === 0) {
     return
   }
 
-  usePanesStore.setState((state) => withPendingIconRequests(state, pending, true))
+  panesStore().setState((state) => withPendingIconRequests(state, pending, true))
   try {
     await requestIcons({ paths: pending })
   } catch (error) {
-    usePanesStore.setState((state) => withPendingIconRequests(state, pending, false))
+    panesStore().setState((state) => withPendingIconRequests(state, pending, false))
     throw error
   }
 }
 
 export function applyIconStates(events: IconStateEvent[]) {
   const input = { events, now: cacheNow(), windowsPlatform: isWindowsNavigator() }
-  usePanesStore.setState((state) => appliedIconStates(state, input))
+  panesStore().setState((state) => appliedIconStates(state, input))
 }

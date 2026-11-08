@@ -5,8 +5,12 @@ use crate::volumes::VolumeInfo;
 
 pub(super) fn is_real_directory(path: &Path) -> bool {
     fs::symlink_metadata(path)
-        .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+        .map(|metadata| is_real_directory_type(metadata.file_type()))
         .unwrap_or(false)
+}
+
+pub(super) fn is_real_directory_type(file_type: fs::FileType) -> bool {
+    file_type.is_dir() && !file_type.is_symlink()
 }
 
 /// `Path::exists` follows links and misses dangling symlinks, so the directory

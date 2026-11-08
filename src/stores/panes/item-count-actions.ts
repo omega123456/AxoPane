@@ -3,7 +3,7 @@ import {
   sortActiveItems,
 } from '@/lib/ipc/commands'
 import type { ItemCountEvent } from '@/lib/types/ipc'
-import { usePanesStore } from '@/stores/panes-store'
+import { panesStore } from '@/stores/panes/store-handle'
 import {
   appliedItemCounts,
   canCountVisibleItems,
@@ -46,21 +46,21 @@ function activeTabIds() {
 
 function setPanes(patch: Partial<PanesData> | null) {
   if (patch) {
-    usePanesStore.setState(patch)
+    panesStore().setState(patch)
   }
 }
 
 async function runActiveItemsSort(scope: ItemsSortScope) {
-  const pane = usePanesStore.getState().panes[scope.paneId]
+  const pane = panesStore().getState().panes[scope.paneId]
   if (!canStartItemsSort(pane, scope)) {
     return
   }
 
-  const started = startedItemsSort(usePanesStore.getState(), withLiveActiveTab(scope))
+  const started = startedItemsSort(panesStore().getState(), withLiveActiveTab(scope))
   if (!started) {
     return
   }
-  usePanesStore.setState(started.next)
+  panesStore().setState(started.next)
   const operation: ItemsSortOperation = { ...scope, operationId: started.operationId }
 
   try {
@@ -68,21 +68,21 @@ async function runActiveItemsSort(scope: ItemsSortScope) {
       context: scope.context,
       sortDirection: scope.expected.sortDirection,
       filter: scope.expected.filterApplied,
-      showHidden: usePanesStore.getState().showHiddenFiles,
+      showHidden: panesStore().getState().showHiddenFiles,
     })
     const liveOperation = withLiveActiveTab(operation)
     if (response.kind === 'superseded') {
-      setPanes(supersededItemsSort(usePanesStore.getState(), liveOperation, response.context))
+      setPanes(supersededItemsSort(panesStore().getState(), liveOperation, response.context))
       return
     }
-    setPanes(completedItemsSort(usePanesStore.getState(), liveOperation, response))
+    setPanes(completedItemsSort(panesStore().getState(), liveOperation, response))
   } catch (error) {
-    setPanes(failedItemsSort(usePanesStore.getState(), withLiveActiveTab(operation), error))
+    setPanes(failedItemsSort(panesStore().getState(), withLiveActiveTab(operation), error))
   }
 }
 
 export function runActiveItemsSortForPane(paneId: PaneId) {
-  const pane = usePanesStore.getState().panes[paneId]
+  const pane = panesStore().getState().panes[paneId]
   return runActiveItemsSort(itemsSortScope(paneId, pane))
 }
 
@@ -92,7 +92,7 @@ export async function requestVisibleItemCounts(
   visibleEndIndex: number,
   viewportCount: number,
 ) {
-  const pane = usePanesStore.getState().panes[paneId]
+  const pane = panesStore().getState().panes[paneId]
   if (!canCountVisibleItems(pane)) {
     return
   }
@@ -103,21 +103,21 @@ export async function requestVisibleItemCounts(
     pane,
     scope.context,
     countWindow,
-    usePanesStore.getState().passiveItemCountRequests,
+    panesStore().getState().passiveItemCountRequests,
   )
   if (pending.length === 0) {
     return
   }
 
-  setPanes(withRequestedItemCounts(usePanesStore.getState(), withLiveActiveTab(scope), pending))
+  setPanes(withRequestedItemCounts(panesStore().getState(), withLiveActiveTab(scope), pending))
   try {
     await requestVisibleItemCountsCommand({ context: scope.context, paths: pending })
   } catch (error) {
-    usePanesStore.setState((state) => withoutRequestedItemCounts(state, scope.context, pending))
+    panesStore().setState((state) => withoutRequestedItemCounts(state, scope.context, pending))
     throw error
   }
 }
 
 export function applyItemCountEvents(events: ItemCountEvent[]) {
-  setPanes(appliedItemCounts(usePanesStore.getState(), events, activeTabIds()))
+  setPanes(appliedItemCounts(panesStore().getState(), events, activeTabIds()))
 }

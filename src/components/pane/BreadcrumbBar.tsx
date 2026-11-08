@@ -1,4 +1,11 @@
-import { useEffect, useState, type FocusEvent, type MouseEvent, type RefObject } from 'react'
+import {
+  useEffect,
+  useReducer,
+  useState,
+  type FocusEvent,
+  type MouseEvent,
+  type RefObject,
+} from 'react'
 import type { PaneState } from '@/types/pane'
 import type { VolumeInfo } from '@/lib/types/ipc'
 import { ChevronRightIcon, FolderGlyph } from '@/components/icons'
@@ -18,20 +25,20 @@ type BreadcrumbBarProps = {
 
 const NOT_YET_MEASURABLE: BreadcrumbLayoutMeasure = { segment: () => Number.NaN }
 
-function useRemeasureOnFontLoad() {
-  const [measureVersion, setMeasureVersion] = useState(0)
+function useRerenderWhenFontsLoad() {
+  const [, rerender] = useReducer((renderCount: number) => renderCount + 1, 0)
 
   useEffect(() => {
     let active = true
-    const bumpMeasureVersion = () => {
+    const rerenderIfActive = () => {
       if (!active) {
         return
       }
 
-      setMeasureVersion((version) => version + 1)
+      rerender()
     }
 
-    const animationFrame = window.requestAnimationFrame(bumpMeasureVersion)
+    const animationFrame = window.requestAnimationFrame(rerenderIfActive)
     const fonts = document.fonts
     if (!fonts) {
       return () => {
@@ -40,23 +47,20 @@ function useRemeasureOnFontLoad() {
       }
     }
 
-    void fonts.ready.then(bumpMeasureVersion)
-    fonts.addEventListener?.('loadingdone', bumpMeasureVersion)
+    void fonts.ready.then(rerenderIfActive)
+    fonts.addEventListener?.('loadingdone', rerenderIfActive)
 
     return () => {
       active = false
       window.cancelAnimationFrame(animationFrame)
-      fonts.removeEventListener?.('loadingdone', bumpMeasureVersion)
+      fonts.removeEventListener?.('loadingdone', rerenderIfActive)
     }
   }, [])
-
-  return measureVersion
 }
 
 function useBreadcrumbLayout(path: string, navElement: HTMLElement | null) {
   const volumes = usePanesStore((state) => state.volumes)
   const navWidth = useElementWidth(navElement)
-  useRemeasureOnFontLoad()
   return computeBreadcrumbLayout({
     segments: withRootVolumeLabel(splitPath(path), volumes),
     availableWidth: navWidth,
@@ -99,6 +103,7 @@ function isFocusMovingInside(event: FocusEvent<HTMLElement>) {
 
 export function BreadcrumbBar({ pane }: BreadcrumbBarProps) {
   const { pathInputRef, ...pathEdit } = usePathEdit(pane)
+  useRerenderWhenFontsLoad()
 
   return (
     <div

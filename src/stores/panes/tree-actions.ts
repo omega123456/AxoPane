@@ -2,7 +2,7 @@ import { listTreeChildren } from '@/lib/ipc/commands'
 import { isTrashPath } from '@/lib/trash'
 import type { VolumeInfo } from '@/lib/types/ipc'
 import { findVolumeForPath, isPathInsideVolume } from '@/lib/volumes'
-import { usePanesStore } from '@/stores/panes-store'
+import { panesStore } from '@/stores/panes/store-handle'
 import {
   failedTreeNodes,
   loadedTreeNodes,
@@ -21,27 +21,27 @@ export const treeLoads = {
 }
 
 async function loadTreeChildren(path: string) {
-  const currentNode = usePanesStore.getState().treeNodes[path]
+  const currentNode = panesStore().getState().treeNodes[path]
   const requestGeneration = treeLoads.generation
   const isSuperseded = () => requestGeneration !== treeLoads.generation
   try {
     const response = await listTreeChildren({
       path,
-      showHidden: usePanesStore.getState().showHiddenFiles,
+      showHidden: panesStore().getState().showHiddenFiles,
     })
     if (!isSuperseded()) {
-      usePanesStore.setState((state) => ({
+      panesStore().setState((state) => ({
         treeNodes: loadedTreeNodes(state, path, currentNode, response.children),
       }))
     }
   } catch {
     if (!isSuperseded()) {
-      usePanesStore.setState((state) => ({
+      panesStore().setState((state) => ({
         treeNodes: failedTreeNodes(state, path, currentNode),
       }))
     }
   } finally {
-    usePanesStore.setState((state) => ({
+    panesStore().setState((state) => ({
       treeNodes: prunedTreeNodes(state.treeNodes, state, state.treeRoots),
     }))
   }
@@ -63,14 +63,14 @@ async function loadTreeChildrenOnce(path: string) {
 
 export function setVolumes(volumes: VolumeInfo[]) {
   treeLoads.generation += 1
-  usePanesStore.setState((state) => withVolumes(state, volumes))
+  panesStore().setState((state) => withVolumes(state, volumes))
 }
 
 export async function ensureTreeChildren(path: string | null) {
   if (!path) {
     return
   }
-  if (usePanesStore.getState().treeNodes[path]?.loaded) {
+  if (panesStore().getState().treeNodes[path]?.loaded) {
     return
   }
   const existingFlight = treeLoads.flights.get(path)
@@ -84,35 +84,35 @@ export async function revealPath(path: string | null) {
   if (!path) {
     return
   }
-  const root = findVolumeForPath(path, usePanesStore.getState().volumes)?.mountRoot ?? null
+  const root = findVolumeForPath(path, panesStore().getState().volumes)?.mountRoot ?? null
   if (!root) {
     return
   }
 
   const chain = revealChain(path, root)
   for (const ancestor of chain.slice(0, -1)) {
-    await usePanesStore.getState().ensureTreeChildren(ancestor)
+    await panesStore().getState().ensureTreeChildren(ancestor)
   }
-  usePanesStore.setState((state) => revealedTree(state, path, chain))
+  panesStore().setState((state) => revealedTree(state, path, chain))
 }
 
 export async function toggleTreeNode(path: string) {
-  if (!usePanesStore.getState().treeNodes[path]?.loaded) {
-    await usePanesStore.getState().ensureTreeChildren(path)
+  if (!panesStore().getState().treeNodes[path]?.loaded) {
+    await panesStore().getState().ensureTreeChildren(path)
   }
-  usePanesStore.setState((state) => toggledTreeNode(state, path))
+  panesStore().setState((state) => toggledTreeNode(state, path))
 }
 
 export function revealTreeSiblings(parentPath: string) {
-  usePanesStore.setState((state) => withRevealedSiblings(state, parentPath) ?? state)
+  panesStore().setState((state) => withRevealedSiblings(state, parentPath) ?? state)
 }
 
 export function revealTreeHiddenLevels() {
-  usePanesStore.setState((state) => withHiddenLevelsShown(state))
+  panesStore().setState((state) => withHiddenLevelsShown(state))
 }
 
 export async function initializePanes() {
-  const { ensureTreeChildren, treeRoots, panes, activePaneId } = usePanesStore.getState()
+  const { ensureTreeChildren, treeRoots, panes, activePaneId } = panesStore().getState()
   const activePath = panes[activePaneId].path
 
   if (!activePath || isTrashPath(activePath)) {

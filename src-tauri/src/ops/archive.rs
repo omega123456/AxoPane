@@ -21,7 +21,7 @@ use super::progress::{
     add_discovered_total, begin_file_progress, finish_file_progress, report_chunk_progress,
     TransferThrottle,
 };
-use super::{LockOperation, OpItem, OpKind, PROGRESS_EMIT_INTERVAL};
+use super::{LockOperation, OpItem, OpKind};
 use crate::error_text::StringifyError;
 use crate::traversal::{TraversalEntry, TraversalError, TraversalOptions};
 
@@ -47,7 +47,7 @@ pub(super) fn compress_item_with_progress(
     let mut writer = open_archive_writer(archive_path, is_later_archive_item(item, context))?;
     // One throttle shared across every member appended below (mirrors how
     // `copy_dir_recursive` shares a single throttle through its recursion).
-    let mut throttle = TransferThrottle::new((context.instant_now)(), PROGRESS_EMIT_INTERVAL);
+    let mut throttle = TransferThrottle::starting_now(context);
     let mut append = ArchiveAppend {
         writer: &mut writer,
         add_discovered_totals: item.size_bytes == 0,
@@ -124,7 +124,7 @@ pub(super) fn extract_item_with_progress(
         output_root,
         wrapper_root,
         context,
-        throttle: TransferThrottle::new((context.instant_now)(), PROGRESS_EMIT_INTERVAL),
+        throttle: TransferThrottle::starting_now(context),
         directory_modes: Vec::new(),
     };
 

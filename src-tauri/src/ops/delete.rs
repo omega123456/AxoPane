@@ -4,8 +4,9 @@ use std::path::Path;
 
 use super::conflict::wait_while_paused;
 use super::execution::{is_operation_cancelled, WorkerContext};
+use super::paths::is_real_directory_type;
 use super::progress::{maybe_emit_delete, refresh_rate_locked_with_now, TransferThrottle};
-use super::{LockOperation, PROGRESS_EMIT_INTERVAL};
+use super::LockOperation;
 use crate::error_text::StringifyError;
 
 /// Remove `source` (file or directory tree) reporting byte progress through the
@@ -17,7 +18,7 @@ pub fn delete_path_with_progress(
     add_discovered_totals: bool,
     context: &WorkerContext<'_>,
 ) -> Result<(), String> {
-    let mut throttle = TransferThrottle::new((context.instant_now)(), PROGRESS_EMIT_INTERVAL);
+    let mut throttle = TransferThrottle::starting_now(context);
     delete_path_with_progress_throttled(source, add_discovered_totals, context, &mut throttle)
 }
 
@@ -28,11 +29,10 @@ fn delete_path_with_progress_throttled(
     throttle: &mut TransferThrottle,
 ) -> Result<(), String> {
     let metadata = fs::symlink_metadata(source).stringify_err()?;
-    if metadata.is_dir() && !metadata.file_type().is_symlink() {
-        delete_dir_recursive(source, add_discovered_totals, context, throttle)
-    } else {
-        delete_file_with_progress(source, add_discovered_totals, context, throttle)
+    if is_real_directory_type(metadata.file_type()) {
+        return delete_dir_recursive(source, add_discovered_totals, context, throttle);
     }
+    delete_file_with_progress(source, add_discovered_totals, context, throttle)
 }
 
 fn delete_dir_recursive(
@@ -48,11 +48,11 @@ fn delete_dir_recursive(
 
         let entry = entry.stringify_err()?;
         let file_type = entry.file_type().stringify_err()?;
-        if file_type.is_dir() && !file_type.is_symlink() {
+        if is_real_directory_type(file_type) {
             delete_dir_recursive(&entry.path(), add_discovered_totals, context, throttle)?;
-        } else {
-            delete_file_with_progress(&entry.path(), add_discovered_totals, context, throttle)?;
+            continue;
         }
+        delete_file_with_progress(&entry.path(), add_discovered_totals, context, throttle)?;
     }
 
     if is_operation_cancelled(context) {
@@ -119,10 +119,9 @@ fn remove_file_or_symlink(path: &Path, link_metadata: &fs::Metadata) -> io::Resu
     use std::os::windows::fs::FileTypeExt;
 
     if link_metadata.file_type().is_symlink_dir() {
-        remove_clearing_readonly(path, |path| fs::remove_dir(path))
-    } else {
-        remove_clearing_readonly(path, |path| fs::remove_file(path))
+        return remove_clearing_readonly(path, |path| fs::remove_dir(path));
     }
+    remove_clearing_readonly(path, |path| fs::remove_file(path))
 }
 
 #[cfg(not(windows))]
@@ -182,9 +181,8 @@ pub fn remove_source(source: &Path) -> Result<(), String> {
 /// access denied, same as the bug this guards against for live symlinks.
 fn remove_path(path: &Path) -> io::Result<()> {
     let link_metadata = fs::symlink_metadata(path)?;
-    if link_metadata.is_dir() && !link_metadata.file_type().is_symlink() {
-        fs::remove_dir_all(path)
-    } else {
-        remove_file_or_symlink(path, &link_metadata)
+    if is_real_directory_type(link_metadata.file_type()) {
+        return fs::remove_dir_all(path);
     }
+    remove_file_or_symlink(path, &link_metadata)
 }

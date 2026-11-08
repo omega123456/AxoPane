@@ -2,7 +2,7 @@ import { listTrash, setTabWatch } from '@/lib/ipc/commands'
 import { pathsMatch } from '@/lib/path-compare'
 import { trashEntryToDirectoryEntry } from '@/lib/trash'
 import type { DirectoryEntry } from '@/lib/types/ipc'
-import { usePanesStore } from '@/stores/panes-store'
+import { panesStore } from '@/stores/panes/store-handle'
 import { sortEntries, clientSortedEntries } from '@/stores/panes/entry-sort'
 import {
   directoryListingResolved,
@@ -45,7 +45,7 @@ export function selectionSnapshot(paneId: PaneId): SelectionSnapshot {
 }
 
 export function isListingAttemptStale(attempt: ListingAttempt) {
-  const currentPane = usePanesStore.getState().panes[attempt.paneId]
+  const currentPane = panesStore().getState().panes[attempt.paneId]
   return (
     activeTab(attempt.paneId).id !== attempt.tabId ||
     currentPane.listingGeneration !== attempt.listingGeneration ||
@@ -81,7 +81,7 @@ function throwIfSessionFailed(session: ListingSession) {
 }
 
 export function syncActiveTabWithPane(paneId: PaneId) {
-  const pane = usePanesStore.getState().panes[paneId]
+  const pane = panesStore().getState().panes[paneId]
   useTabsStore.getState().patchActiveTab(paneId, tabViewOf(pane))
 }
 
@@ -95,14 +95,14 @@ export async function reloadTrashPane(
     response.entries.map(trashEntryToDirectoryEntry),
     pane.sortKey,
     pane.sortDirection,
-    usePanesStore.getState().sizeStates,
+    panesStore().getState().sizeStates,
   )
 
   const listing = { paneId, path: pane.path, sortedEntries, selection }
-  usePanesStore.setState((state) => trashListingResolved(state, listing))
+  panesStore().setState((state) => trashListingResolved(state, listing))
 
   syncActiveTabWithPane(paneId)
-  schedulePersistSession(usePanesStore.getState().activePaneId)
+  schedulePersistSession(panesStore().getState().activePaneId)
   await reportSizeSubscriptions(paneId, null, [])
 }
 
@@ -117,7 +117,7 @@ function selectRevealedEntry(paneId: PaneId, revealEntry: DirectoryEntry | undef
 
 async function openListingSession(paneId: PaneId, tabId: string, pane: PaneState) {
   const session = listingSessions[paneId]
-  const view = currentViewParams(pane, usePanesStore.getState().showHiddenFiles)
+  const view = currentViewParams(pane, panesStore().getState().showHiddenFiles)
   if (revisesActiveSession(session, paneId, tabId, pane.path)) {
     await session.reviseView(view)
     return session
@@ -147,7 +147,7 @@ export async function loadDirectoryListing(
   const sortedEntries = clientSortedEntries(
     session.loadedEntries(),
     pane,
-    usePanesStore.getState().sizeStates,
+    panesStore().getState().sizeStates,
   )
   const revealEntry = findRevealEntry(sortedEntries, revealChildPath)
   const listing = {
@@ -159,24 +159,24 @@ export async function loadDirectoryListing(
     revealEntry,
     revealScrollRequestId: nextRevealScrollRequestId(revealEntry),
   }
-  usePanesStore.setState((state) => directoryListingResolved(state, listing))
+  panesStore().setState((state) => directoryListingResolved(state, listing))
   selectRevealedEntry(paneId, revealEntry)
   return true
 }
 
 export function recordResolvedListing(paneId: PaneId) {
   syncActiveTabWithPane(paneId)
-  useRecentFoldersStore.getState().record(usePanesStore.getState().panes[paneId].path)
-  schedulePersistSession(usePanesStore.getState().activePaneId)
+  useRecentFoldersStore.getState().record(panesStore().getState().panes[paneId].path)
+  schedulePersistSession(panesStore().getState().activePaneId)
 }
 
 export function resetPaneForActiveTab(paneId: PaneId) {
   const tab = activeTab(paneId)
-  usePanesStore.setState((state) => paneResetForTab(state, paneId, tab))
+  panesStore().setState((state) => paneResetForTab(state, paneId, tab))
 }
 
 export function clearFilterTimer(paneId: PaneId) {
-  const timer = usePanesStore.getState().filterTimers[paneId]
+  const timer = panesStore().getState().filterTimers[paneId]
   if (timer) {
     window.clearTimeout(timer)
   }
@@ -191,7 +191,7 @@ export async function armTabWatch(paneId: PaneId, pane: PaneState) {
       sortKey: pane.sortKey,
       sortDirection: pane.sortDirection,
       filter: pane.filterApplied,
-      showHidden: usePanesStore.getState().showHiddenFiles,
+      showHidden: panesStore().getState().showHiddenFiles,
       includeItemCounts: false,
     },
     undefined,
