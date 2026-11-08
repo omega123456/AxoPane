@@ -10,9 +10,8 @@ import { usePanesStore } from '@/stores/panes-store'
 import { initializeTheme, useThemeStore } from '@/stores/theme-store'
 import { applyWindowBackdrop } from '@/lib/window-commands'
 import type { PaneId } from '@/types/pane'
+import { BACK_MOUSE_BUTTON, FORWARD_MOUSE_BUTTON } from '@/lib/mouse-buttons'
 
-const MOUSE_BUTTON_BACK = 3
-const MOUSE_BUTTON_FORWARD = 4
 const TAB_KEY = 'Tab'
 const DUAL_PANE_MODE: PaneMode = 'dual'
 
@@ -25,8 +24,8 @@ export type GlobalKeyContext = {
 }
 
 const historyNavigationByMouseButton: Partial<Record<number, HistoryNavigation>> = {
-  [MOUSE_BUTTON_BACK]: (paneId) => usePanesStore.getState().goBack(paneId),
-  [MOUSE_BUTTON_FORWARD]: (paneId) => usePanesStore.getState().goForward(paneId),
+  [BACK_MOUSE_BUTTON]: (paneId) => usePanesStore.getState().goBack(paneId),
+  [FORWARD_MOUSE_BUTTON]: (paneId) => usePanesStore.getState().goForward(paneId),
 }
 
 function focusOtherPane() {

@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use crossbeam_channel::{bounded, RecvTimeoutError, Sender};
+use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -313,27 +313,7 @@ where
         let worker_value = Arc::clone(&value);
         thread::Builder::new()
             .name("persistence-flush".to_string())
-            .spawn(move || {
-                // One worker per durable store, with a one-message wake
-                // queue. A burst resets the debounce window without creating
-                // threads or retaining an unbounded series of writes.
-                while flush_receiver.recv().is_ok() {
-                    loop {
-                        match flush_receiver.recv_timeout(debounce) {
-                            Ok(()) => continue,
-                            Err(RecvTimeoutError::Timeout) => {
-                                let snapshot = worker_value
-                                    .lock()
-                                    .expect("persist store mutex poisoned")
-                                    .clone();
-                                let _ = write_json_atomic(&worker_path, &snapshot);
-                                break;
-                            }
-                            Err(RecvTimeoutError::Disconnected) => return,
-                        }
-                    }
-                }
-            })
+            .spawn(move || run_flush_worker(&flush_receiver, debounce, &worker_path, &worker_value))
             .expect("failed to spawn persistence worker");
 
         Ok(Self {
@@ -467,4 +447,33 @@ fn replace_file_atomic(source: &Path, target: &Path) -> Result<(), PersistError>
 fn replace_file_atomic(source: &Path, target: &Path) -> Result<(), PersistError> {
     fs::rename(source, target)?;
     Ok(())
+}
+
+/// One worker per durable store, with a one-message wake queue. A burst
+/// resets the debounce window without creating threads or retaining an
+/// unbounded series of writes.
+fn run_flush_worker<T: Serialize + Clone>(
+    flush_receiver: &Receiver<()>,
+    debounce: Duration,
+    path: &Path,
+    value: &Mutex<T>,
+) {
+    while flush_receiver.recv().is_ok() {
+        if !wait_for_quiet_period(flush_receiver, debounce) {
+            return;
+        }
+        let snapshot = value.lock().expect("persist store mutex poisoned").clone();
+        let _ = write_json_atomic(path, &snapshot);
+    }
+}
+
+/// Returns `false` once the store has been dropped.
+fn wait_for_quiet_period(flush_receiver: &Receiver<()>, debounce: Duration) -> bool {
+    loop {
+        match flush_receiver.recv_timeout(debounce) {
+            Ok(()) => continue,
+            Err(RecvTimeoutError::Timeout) => return true,
+            Err(RecvTimeoutError::Disconnected) => return false,
+        }
+    }
 }

@@ -11,6 +11,7 @@ import type { DirectoryEntry, LoadNativeMenuRequest } from '@/lib/types/ipc'
 import { usePanesStore } from '@/stores/panes-store'
 import type { PaneId } from '@/types/pane'
 import { withKeyFlags } from '@/lib/collections'
+import { errorMessage } from '@/lib/error-message'
 
 /**
  * Session-scoped, in-memory record of native-menu cache type keys
@@ -42,86 +43,103 @@ type NativeMenuWarmStore = {
   resetWarmedTypeKeys: () => void
 }
 
-export const useNativeMenuWarmStore = create<NativeMenuWarmStore>((set, get) => ({
-  warmedTypeKeys: {},
-  warmVisibleNativeMenus: async (paneId, paths) => {
-    const platform = detectPlatformOs()
-    if (platform !== 'windows') {
-      log.debug('skipping native menu warm batch on unsupported platform', {
-        paneId,
-        platform,
-        visiblePathCount: paths.length,
-      })
-      return
-    }
+type WarmStoreSet = (update: (state: NativeMenuWarmStore) => Partial<NativeMenuWarmStore>) => void
 
-    const pane = usePanesStore.getState().panes[paneId]
-    if (isTrashPath(pane.path)) {
-      log.debug('skipping native menu warm batch for trash pane', {
-        paneId,
-        panePath: pane.path,
-        visiblePathCount: paths.length,
-      })
-      return
-    }
+type WarmBatchContext = {
+  paneId: PaneId
+  panePath: string
+  visiblePathCount: number
+}
 
-    const collected = collectWarmRequests(pane.entries, pane.path, paths, get().warmedTypeKeys)
-    const {
-      requests,
-      skippedAlreadyWarmedOrInFlight,
-      skippedDuplicateInBatch,
-      skippedMissingEntry,
-    } = collected
-    if (requests.length === 0) {
-      log.debug('skipping native menu warm batch because every visible type was already handled', {
-        paneId,
-        panePath: pane.path,
-        visiblePathCount: paths.length,
-        skippedAlreadyWarmedOrInFlight,
-        skippedDuplicateInBatch,
-        skippedMissingEntry,
-      })
-      return
-    }
+function warmablePanePath(paneId: PaneId, visiblePathCount: number): string | null {
+  const platform = detectPlatformOs()
+  if (platform !== 'windows') {
+    log.debug('skipping native menu warm batch on unsupported platform', {
+      paneId,
+      platform,
+      visiblePathCount,
+    })
+    return null
+  }
 
-    const newKeys = requests.map((entry) => entry.key)
-    log.debug('dispatching native menu warm batch', {
+  const pane = usePanesStore.getState().panes[paneId]
+  if (isTrashPath(pane.path)) {
+    log.debug('skipping native menu warm batch for trash pane', {
       paneId,
       panePath: pane.path,
-      visiblePathCount: paths.length,
-      requestCount: requests.length,
-      keys: newKeys,
-      skippedAlreadyWarmedOrInFlight,
-      skippedDuplicateInBatch,
-      skippedMissingEntry,
+      visiblePathCount,
     })
+    return null
+  }
+  return pane.path
+}
 
+async function warmVisibleNativeMenus(
+  set: WarmStoreSet,
+  warmedTypeKeys: WarmedTypeKeys,
+  paneId: PaneId,
+  paths: string[],
+) {
+  const panePath = warmablePanePath(paneId, paths.length)
+  if (panePath === null) {
+    return
+  }
+
+  const context = { paneId, panePath, visiblePathCount: paths.length }
+  const pane = usePanesStore.getState().panes[paneId]
+  const collected = collectWarmRequests(pane.entries, panePath, paths, warmedTypeKeys)
+  const { requests, ...skipped } = collected
+  if (requests.length === 0) {
+    log.debug('skipping native menu warm batch because every visible type was already handled', {
+      ...context,
+      ...skipped,
+    })
+    return
+  }
+
+  await dispatchWarmBatch(set, context, collected)
+}
+
+async function dispatchWarmBatch(
+  set: WarmStoreSet,
+  context: WarmBatchContext,
+  collected: CollectWarmRequestsResult,
+) {
+  const { requests, ...skipped } = collected
+  const newKeys = requests.map((entry) => entry.key)
+  const { visiblePathCount, ...batchContext } = context
+  log.debug('dispatching native menu warm batch', {
+    ...batchContext,
+    visiblePathCount,
+    requestCount: requests.length,
+    keys: newKeys,
+    ...skipped,
+  })
+
+  set((state) => ({
+    warmedTypeKeys: withKeyFlags(state.warmedTypeKeys, newKeys, true),
+  }))
+
+  const outcome = { ...batchContext, requestCount: requests.length, keys: newKeys }
+  try {
+    await warmNativeMenus({ requests: requests.map((entry) => entry.request) })
+    log.debug('native menu warm batch completed', outcome)
+  } catch (error) {
     set((state) => ({
-      warmedTypeKeys: withKeyFlags(state.warmedTypeKeys, newKeys, true),
+      warmedTypeKeys: withKeyFlags(state.warmedTypeKeys, newKeys, false),
     }))
+    log.warn('native menu warm batch failed; rolling back warmed keys', {
+      ...outcome,
+      error: errorMessage(error),
+    })
+    throw error
+  }
+}
 
-    try {
-      await warmNativeMenus({ requests: requests.map((entry) => entry.request) })
-      log.debug('native menu warm batch completed', {
-        paneId,
-        panePath: pane.path,
-        requestCount: requests.length,
-        keys: newKeys,
-      })
-    } catch (error) {
-      set((state) => ({
-        warmedTypeKeys: withKeyFlags(state.warmedTypeKeys, newKeys, false),
-      }))
-      log.warn('native menu warm batch failed; rolling back warmed keys', {
-        paneId,
-        panePath: pane.path,
-        requestCount: requests.length,
-        keys: newKeys,
-        error: error instanceof Error ? error.message : String(error),
-      })
-      throw error
-    }
-  },
+export const useNativeMenuWarmStore = create<NativeMenuWarmStore>((set, get) => ({
+  warmedTypeKeys: {},
+  warmVisibleNativeMenus: (paneId, paths) =>
+    warmVisibleNativeMenus(set, get().warmedTypeKeys, paneId, paths),
   resetWarmedTypeKeys: () => set({ warmedTypeKeys: {} }),
 }))
 

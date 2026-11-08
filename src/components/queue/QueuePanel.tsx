@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import { Button } from '@/components/controls'
 import {
   ChevronDownIcon,
@@ -20,6 +19,7 @@ import { throughputTrackOf } from '@/stores/queue/throughput'
 import { clampPercent } from '@/lib/numbers'
 import { SCROLLBAR_THIN } from '@/lib/class-names'
 import { TEXT_SECONDARY } from '@/lib/class-names'
+import { useOrderedOperations } from './use-ordered-operations'
 
 function movePendingOperation(operations: OpProgress[], id: string, delta: number) {
   const pending = operations
@@ -207,26 +207,28 @@ function CompactJobRow({
   )
 }
 
+function operationHandlers(operation: OpProgress, operations: OpProgress[]) {
+  const queue = useQueueStore.getState()
+  const id = operation.operationId
+  const reorderable = operation.status === 'pending'
+  return {
+    onPause: () => queue.pause(id),
+    onResume: () => queue.resume(id),
+    onCancel: () => queue.cancel(id),
+    onDismiss: () => queue.dismissOperation(id),
+    onSkip: () => queue.skip(id),
+    onRetry: () => queue.retry(id),
+    onResolve: () => queue.setExpanded(true),
+    onMoveUp: reorderable ? () => movePendingOperation(operations, id, -1) : undefined,
+    onMoveDown: reorderable ? () => movePendingOperation(operations, id, 1) : undefined,
+  }
+}
+
 export function QueuePanel() {
-  const order = useQueueStore((state) => state.order)
-  const operationsMap = useQueueStore((state) => state.operations)
   const throughput = useQueueStore((state) => state.throughput)
-  const operations = useMemo(
-    () =>
-      order
-        .map((id) => operationsMap[id])
-        .filter((operation): operation is OpProgress => operation !== undefined),
-    [order, operationsMap],
-  )
+  const operations = useOrderedOperations()
   const conflicts = useQueueStore((state) => state.conflicts)
   const collapse = useQueueStore((state) => state.setExpanded)
-  const pause = useQueueStore((state) => state.pause)
-  const resume = useQueueStore((state) => state.resume)
-  const cancel = useQueueStore((state) => state.cancel)
-  const skip = useQueueStore((state) => state.skip)
-  const retry = useQueueStore((state) => state.retry)
-  const dismiss = useQueueStore((state) => state.dismissOperation)
-  const setExpanded = useQueueStore((state) => state.setExpanded)
   const primary = primaryOperation(operations, conflicts)
   const secondary = primary
     ? operations.filter((operation) => operation.operationId !== primary.operationId)
@@ -260,23 +262,7 @@ export function QueuePanel() {
             throughputPeak={throughputTrackOf(throughput, primary.operationId).peak}
             hasConflict={Boolean(conflicts[primary.operationId])}
             reorderable={primary.status === 'pending'}
-            onPause={() => pause(primary.operationId)}
-            onResume={() => resume(primary.operationId)}
-            onCancel={() => cancel(primary.operationId)}
-            onDismiss={() => dismiss(primary.operationId)}
-            onSkip={() => skip(primary.operationId)}
-            onRetry={() => retry(primary.operationId)}
-            onResolve={() => setExpanded(true)}
-            onMoveUp={
-              primary.status === 'pending'
-                ? () => movePendingOperation(operations, primary.operationId, -1)
-                : undefined
-            }
-            onMoveDown={
-              primary.status === 'pending'
-                ? () => movePendingOperation(operations, primary.operationId, 1)
-                : undefined
-            }
+            {...operationHandlers(primary, operations)}
           />
         ) : null}
         {secondary.length > 0 ? (
@@ -284,33 +270,15 @@ export function QueuePanel() {
             aria-label="Queued jobs"
             className={`min-h-0 flex-1 overflow-auto ${SCROLLBAR_THIN}`}
           >
-            {secondary.map((operation) => {
-              const reorderable = operation.status === 'pending'
-              return (
-                <CompactJobRow
-                  key={operation.operationId}
-                  operation={operation}
-                  hasConflict={Boolean(conflicts[operation.operationId])}
-                  reorderable={reorderable}
-                  onPause={() => pause(operation.operationId)}
-                  onResume={() => resume(operation.operationId)}
-                  onCancel={() => cancel(operation.operationId)}
-                  onDismiss={() => dismiss(operation.operationId)}
-                  onRetry={() => retry(operation.operationId)}
-                  onResolve={() => setExpanded(true)}
-                  onMoveUp={
-                    reorderable
-                      ? () => movePendingOperation(operations, operation.operationId, -1)
-                      : undefined
-                  }
-                  onMoveDown={
-                    reorderable
-                      ? () => movePendingOperation(operations, operation.operationId, 1)
-                      : undefined
-                  }
-                />
-              )
-            })}
+            {secondary.map((operation) => (
+              <CompactJobRow
+                key={operation.operationId}
+                operation={operation}
+                hasConflict={Boolean(conflicts[operation.operationId])}
+                reorderable={operation.status === 'pending'}
+                {...operationHandlers(operation, operations)}
+              />
+            ))}
           </div>
         ) : null}
       </div>

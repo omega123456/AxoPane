@@ -1,34 +1,16 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import {
-  CheckIcon,
-  ChevronDownIcon,
-  ChevronUpIcon,
-  GripVerticalIcon,
-  PauseIcon,
-  PlayIcon,
-  RotateCcwIcon,
-  SkipForwardIcon,
-} from '@/components/icons'
+import { useId, useState, type ReactNode } from 'react'
+import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from '@/components/icons'
 import { Button, ProgressBar } from '@/components/controls'
 import { ThroughputChart } from '@/components/queue/ThroughputChart'
 import { DETAIL_SEPARATOR, formatCount, formatRate } from '@/lib/format'
-import {
-  formatItemPreview,
-  formatJobProgress,
-  formatJobTitle,
-  jobFlags,
-  type JobFlags,
-} from '@/lib/queue-format'
+import { formatItemPreview, formatJobTitle, jobFlags, type JobFlags } from '@/lib/queue-format'
 import type { OpProgress, ThroughputSample } from '@/lib/types/ipc'
 import { clampPercent } from '@/lib/numbers'
 import { SCROLLBAR_THIN } from '@/lib/class-names'
 import { TEXT_SECONDARY } from '@/lib/class-names'
 import { JobStatusIcon } from '@/components/queue/JobStatusIcon'
-import {
-  announcementToPublish,
-  isDiscoveringBytes,
-  retainedCurrentFile,
-} from '@/components/queue/job-view-state'
+import { useJobCardView, type LiveJobView } from '@/components/queue/use-job-card-view'
+import { JobActions, MoveUpHandle } from '@/components/queue/JobActions'
 
 type JobCardProps = {
   operation: OpProgress
@@ -47,16 +29,6 @@ type JobCardProps = {
   onMoveDown?: () => void
 }
 
-const LIVE_REGION_THROTTLE_MS = 5000
-/**
- * Cadence the visible metrics refresh at. The backend reports a jittery
- * instantaneous rate many times a second; sampling it on a calm interval keeps
- * the numbers readable (and roughly in step with the averaged chart) instead of
- * flickering on every progress event. The same tick decides whether the backend
- * is still discovering bytes, by comparing successive totals.
- */
-const METRICS_REFRESH_MS = 500
-
 /** Where the items go; a delete has no destination, so it names what it removes. */
 function jobDestination(operation: OpProgress) {
   const preview =
@@ -65,108 +37,6 @@ function jobDestination(operation: OpProgress) {
     return `Waiting${DETAIL_SEPARATOR}${preview}`
   }
   return operation.destinationDir ? `to ${operation.destinationDir}` : preview
-}
-
-/**
- * While a job is working through its queue, "N completed" reads as "item 0 of
- * 2" for the whole time the first item copies, so show the item being worked on
- * (like Windows' "item 1 of 2"). A stopped job shows the true completed count.
- */
-function displayedItemNumber(operation: OpProgress, isFinished: boolean) {
-  if (isFinished) {
-    return operation.completedItems
-  }
-  return Math.min(operation.completedItems + 1, operation.totalItems)
-}
-
-function useLastCurrentFile(currentFileName: string | null) {
-  const [lastCurrentFile, setLastCurrentFile] = useState(currentFileName)
-  const retainedFile = retainedCurrentFile(lastCurrentFile, currentFileName)
-  if (retainedFile !== lastCurrentFile) {
-    setLastCurrentFile(retainedFile)
-  }
-  return retainedFile
-}
-
-type LiveJobView = {
-  operation: OpProgress
-  rate: number
-  samples: ThroughputSample[]
-  peak: number
-}
-
-function useThrottledJobView(liveView: LiveJobView) {
-  const [view, setView] = useState({ ...liveView, scanning: false })
-  const latestViewRef = useRef(liveView)
-  const lastTotalBytesRef = useRef(liveView.operation.totalBytes)
-  useEffect(() => {
-    latestViewRef.current = liveView
-  })
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      const latest = latestViewRef.current
-      const scanning = isDiscoveringBytes(latest.operation.totalBytes, lastTotalBytesRef.current)
-      lastTotalBytesRef.current = latest.operation.totalBytes
-      setView({ ...latest, scanning })
-    }, METRICS_REFRESH_MS)
-    return () => window.clearInterval(intervalId)
-  }, [])
-  return view
-}
-
-function useThrottledAnnouncement(announcement: string) {
-  const [liveAnnouncement, setLiveAnnouncement] = useState(announcement)
-  const liveAnnouncementRef = useRef(liveAnnouncement)
-  const pendingLiveAnnouncementRef = useRef<string | null>(null)
-  const liveRegionTimerRef = useRef<number | null>(null)
-
-  useEffect(() => {
-    liveAnnouncementRef.current = liveAnnouncement
-  }, [liveAnnouncement])
-
-  useEffect(() => {
-    if (announcement === liveAnnouncement) {
-      pendingLiveAnnouncementRef.current = null
-      if (liveRegionTimerRef.current !== null) {
-        window.clearTimeout(liveRegionTimerRef.current)
-        liveRegionTimerRef.current = null
-      }
-      return
-    }
-
-    pendingLiveAnnouncementRef.current = announcement
-    if (liveRegionTimerRef.current !== null) {
-      return
-    }
-
-    liveRegionTimerRef.current = window.setTimeout(() => {
-      liveRegionTimerRef.current = null
-      const nextAnnouncement = announcementToPublish(
-        pendingLiveAnnouncementRef.current,
-        liveAnnouncementRef.current,
-      )
-      pendingLiveAnnouncementRef.current = null
-      if (nextAnnouncement !== null) {
-        setLiveAnnouncement(nextAnnouncement)
-        liveAnnouncementRef.current = nextAnnouncement
-      }
-    }, LIVE_REGION_THROTTLE_MS)
-  }, [announcement, liveAnnouncement])
-
-  useEffect(() => {
-    return () => {
-      if (liveRegionTimerRef.current !== null) {
-        window.clearTimeout(liveRegionTimerRef.current)
-      }
-    }
-  }, [])
-
-  return liveAnnouncement
-}
-
-/** The chart's smoothed leading-edge rate, so the number matches the curve; the raw rate before any history. */
-function currentRate(throughputHistory: ThroughputSample[], operation: OpProgress) {
-  return throughputHistory.at(-1)?.rate ?? operation.bytesPerSecond
 }
 
 function ItemsToggle({
@@ -322,102 +192,141 @@ function CurrentFileLine({ fileName, itemIndex }: { fileName: string | null; ite
   )
 }
 
-type JobActionHandlers = Pick<
-  JobCardProps,
-  'onPause' | 'onResume' | 'onCancel' | 'onDismiss' | 'onSkip' | 'onRetry' | 'onResolve'
->
-
-function PrimaryJobActions({ flags, handlers }: { flags: JobFlags; handlers: JobActionHandlers }) {
-  if (flags.isConflict) {
-    return (
-      <Button variant="primary" onClick={handlers.onResolve}>
-        Resolve conflict
-      </Button>
-    )
-  }
-  if (flags.isFailed) {
-    return (
-      <>
-        <Button onClick={handlers.onRetry}>
-          <RotateCcwIcon className="size-4" /> Retry
-        </Button>
-        <Button variant="subtle" onClick={handlers.onDismiss}>
-          Dismiss
-        </Button>
-      </>
-    )
-  }
-  if (flags.isFinished) {
-    return <Button onClick={handlers.onDismiss}>Dismiss</Button>
-  }
-  if (flags.isPaused) {
-    return (
-      <Button onClick={handlers.onResume}>
-        <PlayIcon className="size-4" /> Resume
-      </Button>
-    )
-  }
-  if (flags.isPending) {
-    return null
-  }
-  return (
-    <Button onClick={handlers.onPause}>
-      <PauseIcon className="size-4" /> Pause
-    </Button>
-  )
-}
-
-function JobActions({
-  flags,
-  handlers,
-  onMoveDown,
+function JobHeading({
+  operation,
+  headingId,
+  moveUpHandle,
+  itemsToggle,
 }: {
-  flags: JobFlags
-  handlers: JobActionHandlers
-  onMoveDown: (() => void) | undefined
+  operation: OpProgress
+  headingId: string
+  moveUpHandle: ReactNode
+  itemsToggle: ReactNode
 }) {
   return (
-    <div className="mt-1 flex flex-wrap items-center gap-2">
-      <PrimaryJobActions flags={flags} handlers={handlers} />
-
-      {flags.isUnderway ? (
-        <Button onClick={handlers.onSkip} disabled={!flags.isPaused}>
-          <SkipForwardIcon className="size-4" /> Skip
-        </Button>
-      ) : null}
-
-      {!flags.isFinished ? (
-        <Button variant="subtle" onClick={handlers.onCancel}>
-          Cancel
-        </Button>
-      ) : null}
-
-      {onMoveDown ? (
-        <Button
-          variant="subtle"
-          aria-label="Move job down"
-          onClick={onMoveDown}
-          className="ml-auto"
-        >
-          Move down
-        </Button>
-      ) : null}
+    <div className="flex min-w-0 items-center gap-1.5">
+      {moveUpHandle}
+      <JobStatusIcon status={operation.status} />
+      <span
+        id={headingId}
+        className="min-w-0 truncate text-body font-semibold text-light-text dark:text-dark-text"
+      >
+        {formatJobTitle(operation)}
+      </span>
+      {itemsToggle}
     </div>
   )
 }
 
-function MoveUpHandle({ onMoveUp }: { onMoveUp: (() => void) | undefined }) {
+function JobDestinationLine({
+  where,
+  percent,
+  isUnderway,
+}: {
+  where: string
+  percent: number
+  isUnderway: boolean
+}) {
   return (
-    <Button
-      variant="subtle"
-      aria-label="Move job up"
-      onClick={onMoveUp}
-      disabled={!onMoveUp}
-      size="compact"
-      className="-ml-2"
-    >
-      <GripVerticalIcon className="size-3.5" />
-    </Button>
+    <div className={`flex min-w-0 justify-between gap-3 text-caption ${TEXT_SECONDARY}`}>
+      <span className="min-w-0 truncate" title={where}>
+        {where}
+      </span>
+      {isUnderway ? <span className="shrink-0 tabular-nums">{Math.round(percent)}%</span> : null}
+    </div>
+  )
+}
+
+type JobOverviewProps = {
+  operation: OpProgress
+  headingId: string
+  moveUpHandle: ReactNode
+  percent: number
+  flags: JobFlags
+  completedItems: number
+}
+
+function JobOverview({
+  operation,
+  headingId,
+  moveUpHandle,
+  percent,
+  flags,
+  completedItems,
+}: JobOverviewProps) {
+  const itemListId = useId()
+  const [itemsExpanded, setItemsExpanded] = useState(false)
+  const listedNames = operation.itemNames
+  return (
+    <>
+      <JobHeading
+        operation={operation}
+        headingId={headingId}
+        moveUpHandle={moveUpHandle}
+        itemsToggle={
+          listedNames.length > 0 ? (
+            <ItemsToggle
+              expanded={itemsExpanded}
+              listId={itemListId}
+              onToggle={() => setItemsExpanded((expanded) => !expanded)}
+            />
+          ) : null
+        }
+      />
+      <JobDestinationLine
+        where={jobDestination(operation)}
+        percent={percent}
+        isUnderway={flags.isUnderway}
+      />
+      {itemsExpanded ? (
+        <JobItemList
+          listId={itemListId}
+          names={listedNames}
+          // The backend sends a bounded preview, so a very large selection can still
+          // have names beyond the ones it shipped. Say how many are unlisted rather
+          // than implying the list is complete.
+          unlistedCount={Math.max(0, operation.totalItems - listedNames.length)}
+          completedItems={completedItems}
+          isFinished={flags.isFinished}
+        />
+      ) : null}
+    </>
+  )
+}
+
+function JobLiveStatus({
+  operation,
+  flags,
+  percent,
+  headingId,
+  jobView,
+}: {
+  operation: OpProgress
+  flags: JobFlags
+  percent: number
+  headingId: string
+  jobView: ReturnType<typeof useJobCardView>
+}) {
+  const { view, progressSegments, itemIndex, liveAnnouncement, lastCurrentFile } = jobView
+  return (
+    <>
+      <span className="sr-only" aria-live="polite" aria-atomic="true">
+        {liveAnnouncement}
+      </span>
+      {flags.isUnderway ? (
+        <JobProgress
+          percent={percent}
+          headingId={headingId}
+          summary={progressSegments.join(DETAIL_SEPARATOR)}
+          flags={flags}
+          rate={view.rate}
+        />
+      ) : null}
+      <JobOutcome operation={operation} flags={flags} view={view} />
+      {flags.isUnderway ? (
+        <CurrentFileLine fileName={lastCurrentFile} itemIndex={itemIndex} />
+      ) : null}
+    </>
   )
 }
 
@@ -432,33 +341,10 @@ export function JobCard({
   ...handlers
 }: JobCardProps) {
   const headingId = useId()
-  const itemListId = useId()
   const percent = clampPercent(operation.progressPercent)
   const flags = jobFlags(operation, hasConflict)
 
-  const listedNames = operation.itemNames
-  // The backend sends a bounded preview, so a very large selection can still
-  // have names beyond the ones it shipped. Say how many are unlisted rather
-  // than implying the list is complete.
-  const unlistedCount = Math.max(0, operation.totalItems - listedNames.length)
-  const [itemsExpanded, setItemsExpanded] = useState(false)
-
-  const lastCurrentFile = useLastCurrentFile(operation.currentFileName)
-  const rate = currentRate(throughputHistory, operation)
-  const liveView = useMemo(
-    () => ({ operation, rate, samples: throughputHistory, peak: throughputPeak }),
-    [rate, operation, throughputHistory, throughputPeak],
-  )
-  const view = useThrottledJobView(liveView)
-
-  const displayed = view.operation
-  const progressSegments = useMemo(
-    () => formatJobProgress(displayed, { scanning: view.scanning }),
-    [displayed, view.scanning],
-  )
-  const itemIndex = `item ${formatCount(displayedItemNumber(displayed, flags.isFinished))} of ${formatCount(displayed.totalItems)}`
-  const liveAnnouncement = useThrottledAnnouncement(progressSegments.join(', '))
-  const where = jobDestination(operation)
+  const jobView = useJobCardView(operation, throughputHistory, throughputPeak, flags)
 
   return (
     <article
@@ -466,63 +352,21 @@ export function JobCard({
       data-status={operation.status}
       className="grid gap-2 px-4 py-3.5"
     >
-      <div className="flex min-w-0 items-center gap-1.5">
-        {reorderable ? <MoveUpHandle onMoveUp={onMoveUp} /> : null}
-        <JobStatusIcon status={operation.status} />
-        <span
-          id={headingId}
-          className="min-w-0 truncate text-body font-semibold text-light-text dark:text-dark-text"
-        >
-          {formatJobTitle(operation)}
-        </span>
-        {listedNames.length > 0 ? (
-          <ItemsToggle
-            expanded={itemsExpanded}
-            listId={itemListId}
-            onToggle={() => setItemsExpanded((expanded) => !expanded)}
-          />
-        ) : null}
-      </div>
-
-      <div className={`flex min-w-0 justify-between gap-3 text-caption ${TEXT_SECONDARY}`}>
-        <span className="min-w-0 truncate" title={where}>
-          {where}
-        </span>
-        {flags.isUnderway ? (
-          <span className="shrink-0 tabular-nums">{Math.round(percent)}%</span>
-        ) : null}
-      </div>
-
-      {itemsExpanded ? (
-        <JobItemList
-          listId={itemListId}
-          names={listedNames}
-          completedItems={displayed.completedItems}
-          isFinished={flags.isFinished}
-          unlistedCount={unlistedCount}
-        />
-      ) : null}
-
-      <span className="sr-only" aria-live="polite" aria-atomic="true">
-        {liveAnnouncement}
-      </span>
-
-      {flags.isUnderway ? (
-        <JobProgress
-          percent={percent}
-          headingId={headingId}
-          summary={progressSegments.join(DETAIL_SEPARATOR)}
-          flags={flags}
-          rate={view.rate}
-        />
-      ) : null}
-
-      <JobOutcome operation={operation} flags={flags} view={view} />
-
-      {flags.isUnderway ? (
-        <CurrentFileLine fileName={lastCurrentFile} itemIndex={itemIndex} />
-      ) : null}
-
+      <JobOverview
+        operation={operation}
+        headingId={headingId}
+        moveUpHandle={reorderable ? <MoveUpHandle onMoveUp={onMoveUp} /> : null}
+        percent={percent}
+        flags={flags}
+        completedItems={jobView.view.operation.completedItems}
+      />
+      <JobLiveStatus
+        operation={operation}
+        flags={flags}
+        percent={percent}
+        headingId={headingId}
+        jobView={jobView}
+      />
       <JobActions
         flags={flags}
         handlers={handlers}

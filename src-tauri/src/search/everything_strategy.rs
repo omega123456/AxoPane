@@ -81,13 +81,12 @@ fn collect(
             max: (CANDIDATE_CAP - batch.candidates.len()) as u32,
         })?;
         batch.truncated |= result.total as usize > result.rows.len();
-        for row in result.rows {
-            if let Some(candidate) = plan::row_to_candidate(row) {
-                if seen.insert(candidate.path.clone()) {
-                    batch.candidates.push(candidate);
-                }
-            }
-        }
+        let unseen = result
+            .rows
+            .into_iter()
+            .filter_map(plan::row_to_candidate)
+            .filter(|candidate| seen.insert(candidate.path.clone()));
+        batch.candidates.extend(unseen);
     }
     Ok(batch)
 }

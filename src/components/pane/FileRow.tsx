@@ -1,17 +1,18 @@
 import type { ColumnKey, DirectoryEntry } from '@/lib/types/ipc'
 import { columnCellClassName } from '@/lib/columns'
-import { dateToneClassName, formatEntryDate } from '@/lib/date-format'
+import { dateToneClassName, formatEntryDate, type FormatDateOptions } from '@/lib/date-format'
 import { AlertTriangleIcon } from '@/components/icons'
 import { EntryIcon } from '@/components/icons/EntryIcon'
-import { useConfigStore } from '@/stores/config-store'
+import { useDateDisplay } from '@/lib/use-date-display'
 import { useLayoutStore } from '@/stores/layout-store'
 import { columnFlexStyle } from './HeaderRow'
 import { SizeValue } from './SizeValue'
 import { InlineRenameInput } from './InlineRenameInput'
 import { cutFadeClass, rowDropTargetClass, rowHighlightClass } from './entry-classes'
 
-import type { DragEvent, MouseEvent } from 'react'
+import type { DragEvent, MouseEvent, ReactNode, RefObject } from 'react'
 import { memo, useEffect, useMemo, useRef } from 'react'
+import { MIDDLE_MOUSE_BUTTON } from '@/lib/mouse-buttons'
 import { TEXT_SECONDARY } from '@/lib/class-names'
 
 /**
@@ -55,6 +56,127 @@ export function focusRenameInput(input: HTMLInputElement | null, isDirectory: bo
   )
 }
 
+export function useRenameInputFocus(isRenaming: boolean, isDirectory: boolean) {
+  const renameInputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (!isRenaming) {
+      return
+    }
+
+    focusRenameInput(renameInputRef.current, isDirectory)
+  }, [isDirectory, isRenaming])
+  return renameInputRef
+}
+
+export function useVisibleColumns() {
+  const columns = useLayoutStore((state) => state.columns)
+  return useMemo(() => columns.filter((column) => column.visible), [columns])
+}
+
+type DateDisplay = FormatDateOptions
+
+type RenameCellState = {
+  inputRef: RefObject<HTMLInputElement | null>
+  value: string
+  busy: boolean
+  error: string | null
+  actions: FileRowActions
+}
+
+type CellContext = {
+  entry: DirectoryEntry
+  dateDisplay: DateDisplay
+  rename: RenameCellState
+}
+
+type CellRenderer = (context: CellContext) => ReactNode
+
+function DateCellText({ value, dateDisplay }: { value: string | null; dateDisplay: DateDisplay }) {
+  const formatted = formatEntryDate(value, dateDisplay)
+  return (
+    <span className={`text-caption ${dateToneClassName[formatted.tone]}`}>{formatted.text}</span>
+  )
+}
+
+function ItemCountCellText({ entry }: { entry: DirectoryEntry }) {
+  return (
+    <span className={`font-mono text-caption ${TEXT_SECONDARY}`}>
+      {entry.isDir ? (entry.itemCount ?? '—') : '—'}
+    </span>
+  )
+}
+
+function SizeCellText({ entry }: { entry: DirectoryEntry }) {
+  return (
+    <span className={`font-mono text-caption ${TEXT_SECONDARY}`}>
+      <SizeValue entry={entry} />
+    </span>
+  )
+}
+
+function RenameStatusText({ rename }: { rename: RenameCellState }) {
+  if (rename.error) {
+    return (
+      <span className="flex items-center gap-1 text-caption text-light-warning dark:text-dark-warning">
+        <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" />
+        <span className="truncate">{rename.error}</span>
+      </span>
+    )
+  }
+  return (
+    <span className={`truncate text-caption ${TEXT_SECONDARY}`}>
+      {rename.busy ? 'Renaming…' : 'Rename'}
+    </span>
+  )
+}
+
+const sharedCells = {
+  size: ({ entry }: CellContext) => <SizeCellText entry={entry} />,
+  items: ({ entry }: CellContext) => <ItemCountCellText entry={entry} />,
+  modified: ({ entry, dateDisplay }: CellContext) => (
+    <DateCellText value={entry.modifiedAt} dateDisplay={dateDisplay} />
+  ),
+  created: ({ entry, dateDisplay }: CellContext) => (
+    <DateCellText value={entry.createdAt} dateDisplay={dateDisplay} />
+  ),
+} satisfies Partial<Record<ColumnKey, CellRenderer>>
+
+const browseCells: Record<ColumnKey, CellRenderer> = {
+  ...sharedCells,
+  name: ({ entry }) => (
+    <span className="flex min-w-0 items-center gap-2">
+      <EntryIcon entry={entry} />
+      <span
+        title={entry.originalPath ? `Original location: ${entry.originalPath}` : undefined}
+        className="truncate text-light-text dark:text-dark-text"
+      >
+        {entry.name}
+      </span>
+    </span>
+  ),
+  type: ({ entry }) => (
+    <span className={`truncate text-caption ${TEXT_SECONDARY}`}>{entry.typeLabel}</span>
+  ),
+}
+
+const renameCells: Record<ColumnKey, CellRenderer> = {
+  ...sharedCells,
+  name: ({ entry, rename }) => (
+    <span className="flex min-w-0 items-center gap-2">
+      <EntryIcon entry={entry} />
+      <InlineRenameInput
+        inputRef={rename.inputRef}
+        entryName={entry.name}
+        value={rename.value}
+        busy={rename.busy}
+        actions={rename.actions}
+        className="flex-1"
+      />
+    </span>
+  ),
+  type: ({ rename }) => <RenameStatusText rename={rename} />,
+}
+
 type FileRowProps = {
   entry: DirectoryEntry
   isActivePane: boolean
@@ -85,117 +207,33 @@ function FileRowImpl({
   isDropTarget = false,
   draggable = false,
 }: FileRowProps) {
-  const columns = useLayoutStore((state) => state.columns)
   const columnWidths = useLayoutStore((state) => state.columnWidths)
-  const dateFormat = useConfigStore((state) => state.dateFormat)
-  const showTime = useConfigStore((state) => state.showTime)
-  const showSeconds = useConfigStore((state) => state.showSeconds)
-  const relativeDates = useConfigStore((state) => state.relativeDates)
-  const visibleColumns = useMemo(() => columns.filter((column) => column.visible), [columns])
-  const renameInputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (!isRenaming) {
-      return
-    }
-
-    focusRenameInput(renameInputRef.current, entry.isDir)
-  }, [entry.isDir, isRenaming])
-
+  const visibleColumns = useVisibleColumns()
+  const dateDisplay = useDateDisplay()
+  const renameInputRef = useRenameInputFocus(isRenaming, entry.isDir)
+  const rename = {
+    inputRef: renameInputRef,
+    value: renameValue,
+    busy: renameBusy,
+    error: renameError,
+    actions,
+  }
+  const cellRenderers = isRenaming ? renameCells : browseCells
   const rowClassName = `group flex h-row w-full items-center rounded-control px-2 text-row text-left focus-visible:outline-none ${rowHighlightClass({ isActivePane, isSelected, isFocused })}`
-  const cellClassName = (key: ColumnKey) => `${columnCellClassName(key)} ${cutFadeClass(isCut)}`
+  const cells = visibleColumns.map((column) => (
+    <span
+      key={column.key}
+      style={columnFlexStyle(column.key, columnWidths)}
+      className={`${columnCellClassName(column.key)} ${cutFadeClass(isCut)}`}
+    >
+      {cellRenderers[column.key]({ entry, dateDisplay, rename })}
+    </span>
+  ))
 
   if (isRenaming) {
     return (
       <div role="row" data-entry-id={entry.id} className={rowClassName}>
-        {visibleColumns.map((column) => {
-          if (column.key === 'name') {
-            return (
-              <span
-                key={column.key}
-                style={columnFlexStyle(column.key, columnWidths)}
-                className={cellClassName(column.key)}
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  <EntryIcon entry={entry} />
-                  <InlineRenameInput
-                    inputRef={renameInputRef}
-                    entryName={entry.name}
-                    value={renameValue}
-                    busy={renameBusy}
-                    actions={actions}
-                    className="flex-1"
-                  />
-                </span>
-              </span>
-            )
-          }
-
-          if (column.key === 'size') {
-            return (
-              <span
-                key={column.key}
-                style={columnFlexStyle(column.key, columnWidths)}
-                className={cellClassName(column.key)}
-              >
-                <span className={`font-mono text-caption ${TEXT_SECONDARY}`}>
-                  <SizeValue entry={entry} />
-                </span>
-              </span>
-            )
-          }
-
-          if (column.key === 'items') {
-            return (
-              <span
-                key={column.key}
-                style={columnFlexStyle(column.key, columnWidths)}
-                className={cellClassName(column.key)}
-              >
-                <span className={`font-mono text-caption ${TEXT_SECONDARY}`}>
-                  {entry.isDir ? (entry.itemCount ?? '—') : '—'}
-                </span>
-              </span>
-            )
-          }
-
-          if (column.key === 'type') {
-            return (
-              <span
-                key={column.key}
-                style={columnFlexStyle(column.key, columnWidths)}
-                className={cellClassName(column.key)}
-              >
-                {renameError ? (
-                  <span className="flex items-center gap-1 text-caption text-light-warning dark:text-dark-warning">
-                    <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">{renameError}</span>
-                  </span>
-                ) : (
-                  <span className={`truncate text-caption ${TEXT_SECONDARY}`}>
-                    {renameBusy ? 'Renaming…' : 'Rename'}
-                  </span>
-                )}
-              </span>
-            )
-          }
-
-          const formatted = formatEntryDate(
-            column.key === 'created' ? entry.createdAt : entry.modifiedAt,
-            { format: dateFormat, showTime, showSeconds, relative: relativeDates },
-          )
-          return (
-            <span
-              key={column.key}
-              style={columnFlexStyle(column.key, columnWidths)}
-              className={cellClassName(column.key)}
-            >
-              <span className={`text-caption ${dateToneClassName[formatted.tone]}`}>
-                {formatted.text}
-              </span>
-            </span>
-          )
-        })}
+        {cells}
       </div>
     )
   }
@@ -205,109 +243,38 @@ function FileRowImpl({
       role="row"
       data-entry-id={entry.id}
       draggable={draggable}
-      onDragStart={(event) => actions.onDragStart(entry.id, event)}
-      onDragEnd={actions.onDragEnd}
-      onDragEnter={(event) => actions.onDragEnter(entry.id, event)}
-      onDragOver={(event) => actions.onDragOver(entry.id, event)}
-      onDragLeave={() => actions.onDragLeave(entry.id)}
-      onDrop={(event) => actions.onDrop(entry.id, event)}
-      // A non-focusable div (not a <button>) so mousedown never steals keyboard
-      // focus away from the pane <section>; that lets us skip the mousedown
-      // preventDefault a <button> needed, which would otherwise suppress the
-      // native `dragstart` and break drag-and-drop entirely.
-      onMouseDown={actions.onPointerDown}
-      onDoubleClick={(event) => actions.onActivate(entry.id, event.detail, event.timeStamp)}
-      onClick={(event) => actions.onClick(entry.id, event)}
-      onContextMenu={(event) => actions.onContextMenu(entry.id, event)}
-      onAuxClick={(event) => {
-        if (event.button === 1 && entry.isDir && !entry.trashId) {
-          event.preventDefault()
-          actions.onMiddleClick(entry.id)
-        }
-      }}
+      {...rowInteractionProps(entry, actions)}
       className={`${rowClassName} cursor-pointer select-none ${rowDropTargetClass(isDropTarget)}`}
     >
-      {visibleColumns.map((column) => {
-        if (column.key === 'name') {
-          return (
-            <span
-              key={column.key}
-              style={columnFlexStyle(column.key, columnWidths)}
-              className={cellClassName(column.key)}
-            >
-              <span className="flex min-w-0 items-center gap-2">
-                <EntryIcon entry={entry} />
-                <span
-                  title={
-                    entry.originalPath ? `Original location: ${entry.originalPath}` : undefined
-                  }
-                  className="truncate text-light-text dark:text-dark-text"
-                >
-                  {entry.name}
-                </span>
-              </span>
-            </span>
-          )
-        }
-
-        if (column.key === 'size') {
-          return (
-            <span
-              key={column.key}
-              style={columnFlexStyle(column.key, columnWidths)}
-              className={cellClassName(column.key)}
-            >
-              <span className={`font-mono text-caption ${TEXT_SECONDARY}`}>
-                <SizeValue entry={entry} />
-              </span>
-            </span>
-          )
-        }
-
-        if (column.key === 'items') {
-          return (
-            <span
-              key={column.key}
-              style={columnFlexStyle(column.key, columnWidths)}
-              className={cellClassName(column.key)}
-            >
-              <span className={`font-mono text-caption ${TEXT_SECONDARY}`}>
-                {entry.isDir ? (entry.itemCount ?? '—') : '—'}
-              </span>
-            </span>
-          )
-        }
-
-        if (column.key === 'type') {
-          return (
-            <span
-              key={column.key}
-              style={columnFlexStyle(column.key, columnWidths)}
-              className={cellClassName(column.key)}
-            >
-              <span className={`truncate text-caption ${TEXT_SECONDARY}`}>{entry.typeLabel}</span>
-            </span>
-          )
-        }
-
-        const formatted = formatEntryDate(
-          column.key === 'created' ? entry.createdAt : entry.modifiedAt,
-          { format: dateFormat, showTime, showSeconds, relative: relativeDates },
-        )
-        return (
-          <span
-            key={column.key}
-            style={columnFlexStyle(column.key, columnWidths)}
-            className={cellClassName(column.key)}
-          >
-            <span className={`text-caption ${dateToneClassName[formatted.tone]}`}>
-              {formatted.text}
-            </span>
-          </span>
-        )
-      })}
+      {cells}
     </div>
   )
+}
+
+// A non-focusable div (not a <button>) so mousedown never steals keyboard
+// focus away from the pane <section>; that lets us skip the mousedown
+// preventDefault a <button> needed, which would otherwise suppress the
+// native `dragstart` and break drag-and-drop entirely.
+function rowInteractionProps(entry: DirectoryEntry, actions: FileRowActions) {
+  return {
+    onDragStart: (event: DragEvent<HTMLDivElement>) => actions.onDragStart(entry.id, event),
+    onDragEnd: actions.onDragEnd,
+    onDragEnter: (event: DragEvent<HTMLDivElement>) => actions.onDragEnter(entry.id, event),
+    onDragOver: (event: DragEvent<HTMLDivElement>) => actions.onDragOver(entry.id, event),
+    onDragLeave: () => actions.onDragLeave(entry.id),
+    onDrop: (event: DragEvent<HTMLDivElement>) => actions.onDrop(entry.id, event),
+    onMouseDown: actions.onPointerDown,
+    onDoubleClick: (event: MouseEvent<HTMLDivElement>) =>
+      actions.onActivate(entry.id, event.detail, event.timeStamp),
+    onClick: (event: MouseEvent<HTMLDivElement>) => actions.onClick(entry.id, event),
+    onContextMenu: (event: MouseEvent<HTMLDivElement>) => actions.onContextMenu(entry.id, event),
+    onAuxClick: (event: MouseEvent<HTMLDivElement>) => {
+      if (event.button === MIDDLE_MOUSE_BUTTON && entry.isDir && !entry.trashId) {
+        event.preventDefault()
+        actions.onMiddleClick(entry.id)
+      }
+    },
+  }
 }
 
 /**

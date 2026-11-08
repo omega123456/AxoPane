@@ -14,6 +14,60 @@ use file_explorer_lib::native_menu::shell_executor::ShellExecutor;
 use file_explorer_lib::native_menu::types::{NativeMenuIcon, NativeMenuIconKind};
 use file_explorer_lib::native_menu::NativeMenuService;
 
+fn plain_item(id: &str, label: &str, verb: &str) -> ProviderNativeMenuItem {
+    ProviderNativeMenuItem {
+        id: id.to_string(),
+        label: label.to_string(),
+        enabled: true,
+        danger: false,
+        canonical_action_kind: None,
+        normalized_verb: Some(verb.to_string()),
+        icon: None,
+        invocation: None,
+        children: Vec::new(),
+    }
+}
+
+fn classic_item(request: &LoadNativeMenuRequest) -> ProviderNativeMenuItem {
+    ProviderNativeMenuItem {
+        icon: Some(NativeMenuIcon {
+            kind: NativeMenuIconKind::DataUrl,
+            data_url: "data:image/png;base64,QUJD".to_string(),
+            alt: Some("icon".to_string()),
+        }),
+        invocation: Some(ProviderInvocation::Windows {
+            request: request.clone(),
+            command_path: vec![3],
+        }),
+        ..plain_item("classic", "Classic command", "classiccommand")
+    }
+}
+
+fn tools_item(request: &LoadNativeMenuRequest) -> ProviderNativeMenuItem {
+    let modern = ProviderNativeMenuItem {
+        invocation: Some(ProviderInvocation::WindowsModern {
+            clsid: 0x1234_5678_9abc_def0_1122_3344_5566_7788,
+            packaged: true,
+            request: request.clone(),
+            command_path: vec![0, 2],
+        }),
+        ..plain_item("modern", "Modern command", "moderncommand")
+    };
+    ProviderNativeMenuItem {
+        children: vec![modern],
+        ..plain_item("tools", "Tools", "tools")
+    }
+}
+
+fn scriptable_item() -> ProviderNativeMenuItem {
+    ProviderNativeMenuItem {
+        invocation: Some(ProviderInvocation::Fake {
+            action_id: "fake.scriptable".to_string(),
+        }),
+        ..plain_item("scriptable", "Scriptable command", "scriptablecommand")
+    }
+}
+
 /// Provider that records every load request and returns a tree exercising all
 /// invocation variants (`Windows`, `WindowsModern`, `Fake`, and a `None`
 /// submenu container with a nested child).
@@ -33,63 +87,9 @@ impl NativeMenuProvider for RecordingProvider {
         self.requests.lock().unwrap().push(request.clone());
 
         vec![
-            ProviderNativeMenuItem {
-                id: "classic".to_string(),
-                label: "Classic command".to_string(),
-                enabled: true,
-                danger: false,
-                canonical_action_kind: None,
-                normalized_verb: Some("classiccommand".to_string()),
-                icon: Some(NativeMenuIcon {
-                    kind: NativeMenuIconKind::DataUrl,
-                    data_url: "data:image/png;base64,QUJD".to_string(),
-                    alt: Some("icon".to_string()),
-                }),
-                invocation: Some(ProviderInvocation::Windows {
-                    request: request.clone(),
-                    command_path: vec![3],
-                }),
-                children: Vec::new(),
-            },
-            ProviderNativeMenuItem {
-                id: "tools".to_string(),
-                label: "Tools".to_string(),
-                enabled: true,
-                danger: false,
-                canonical_action_kind: None,
-                normalized_verb: Some("tools".to_string()),
-                icon: None,
-                invocation: None,
-                children: vec![ProviderNativeMenuItem {
-                    id: "modern".to_string(),
-                    label: "Modern command".to_string(),
-                    enabled: true,
-                    danger: false,
-                    canonical_action_kind: None,
-                    normalized_verb: Some("moderncommand".to_string()),
-                    icon: None,
-                    invocation: Some(ProviderInvocation::WindowsModern {
-                        clsid: 0x1234_5678_9abc_def0_1122_3344_5566_7788,
-                        packaged: true,
-                        request: request.clone(),
-                        command_path: vec![0, 2],
-                    }),
-                    children: Vec::new(),
-                }],
-            },
-            ProviderNativeMenuItem {
-                id: "scriptable".to_string(),
-                label: "Scriptable command".to_string(),
-                enabled: true,
-                danger: false,
-                canonical_action_kind: None,
-                normalized_verb: Some("scriptablecommand".to_string()),
-                icon: None,
-                invocation: Some(ProviderInvocation::Fake {
-                    action_id: "fake.scriptable".to_string(),
-                }),
-                children: Vec::new(),
-            },
+            classic_item(request),
+            tools_item(request),
+            scriptable_item(),
         ]
     }
 

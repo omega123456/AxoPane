@@ -8,7 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use file_explorer_lib::size::fast_walk::{
-    helper_threads_for_tests, list_dir, subtree_records, subtree_total, DirRecord, Qos,
+    helper_threads_for_tests, list_dir, subtree_records, subtree_total, DirHook, DirRecord, Qos,
     WalkOptions, INDEX_EXCLUDED_ROOTS, MAX_HELPER_THREADS, MAX_JOB_THREADS,
 };
 use file_explorer_lib::size::index::platform::DATA_VOLUME_PREFIX;
@@ -259,17 +259,13 @@ fn index_walks_stop_at_exclusions_and_device_boundaries() {
         let mut options = options();
         options.stay_on_device = true;
         options.excluded.insert(root.join("Volumes"));
-        let (second, third) = (root.join("a/b"), root.join("a/b/c"));
+        let devices = FakeDevices {
+            data_dev,
+            second: root.join("a/b"),
+            third: root.join("a/b/c"),
+        };
         options.hooks.device_of = Some(Arc::new(move |dir: &Path, _dev: u64| {
-            if dir == Path::new(DATA_VOLUME_PREFIX) {
-                data_dev
-            } else if dir == second {
-                2
-            } else if dir == third {
-                3
-            } else {
-                1
-            }
+            devices.device_of(dir)
         }));
         (records(root, &options), subtree_total(root, &options))
     };
@@ -337,6 +333,16 @@ fn single_directory_listing_reports_bytes_subdirs_and_denial() {
     assert!(!by_path.contains_key(&root.join("a/b/c")));
 }
 
+/// Parks the walk when it opens `parked_root` until the test releases it.
+fn park_at(parked_root: PathBuf, entered: Arc<Barrier>, release: Arc<Barrier>) -> DirHook {
+    Arc::new(move |dir: &Path| {
+        if dir == parked_root {
+            entered.wait();
+            release.wait();
+        }
+    })
+}
+
 #[test]
 fn concurrent_jobs_never_exceed_the_process_helper_cap() {
     let fixture = tempdir().expect("temp dir");
@@ -355,13 +361,7 @@ fn concurrent_jobs_never_exceed_the_process_helper_cap() {
                 (root.clone(), Arc::clone(&entered), Arc::clone(&release));
             thread::spawn(move || {
                 let mut options = options();
-                let parked_root = root.clone();
-                options.hooks.before_dir_open = Some(Arc::new(move |dir: &Path| {
-                    if dir == parked_root {
-                        entered.wait();
-                        release.wait();
-                    }
-                }));
+                options.hooks.before_dir_open = Some(park_at(root.clone(), entered, release));
                 subtree_total(&root, &options).expect("total")
             })
         })
@@ -393,4 +393,29 @@ fn a_panicking_record_callback_aborts_the_walk_instead_of_hanging() {
     });
     assert!(outcome.is_err());
     assert_eq!(helper_threads_for_tests().0, 0);
+}
+
+struct FakeDevices {
+    data_dev: u64,
+    second: PathBuf,
+    third: PathBuf,
+}
+
+impl FakeDevices {
+    const ROOT_DEVICE: u64 = 1;
+    const SECOND_DEVICE: u64 = 2;
+    const THIRD_DEVICE: u64 = 3;
+
+    fn device_of(&self, dir: &Path) -> u64 {
+        if dir == Path::new(DATA_VOLUME_PREFIX) {
+            return self.data_dev;
+        }
+        if dir == self.second {
+            return Self::SECOND_DEVICE;
+        }
+        if dir == self.third {
+            return Self::THIRD_DEVICE;
+        }
+        Self::ROOT_DEVICE
+    }
 }

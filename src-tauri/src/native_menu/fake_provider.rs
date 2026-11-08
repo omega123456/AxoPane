@@ -15,138 +15,8 @@ impl NativeMenuProvider for FakeNativeMenuProvider {
         request: &LoadNativeMenuRequest,
         executor: &ShellExecutor,
     ) -> Vec<ProviderNativeMenuItem> {
-        let request = request.clone();
-        executor.execute(move || {
-            if matches!(request.target_kind, NativeMenuTargetKind::Tab) {
-                return Vec::new();
-            }
-
-            vec![
-                ProviderNativeMenuItem {
-                    id: format!("fixture-target-{}", target_suffix(&request.target_kind)),
-                    label: format!("Fixture {}", target_label(&request.target_kind)),
-                    enabled: true,
-                    danger: false,
-                    canonical_action_kind: None,
-                    normalized_verb: Some(format!(
-                        "fixture{}",
-                        target_suffix(&request.target_kind)
-                    )),
-                    icon: None,
-                    invocation: Some(ProviderInvocation::Fake {
-                        action_id: format!("fake.target.{}", target_suffix(&request.target_kind)),
-                    }),
-                    children: Vec::new(),
-                },
-                ProviderNativeMenuItem {
-                    id: "fixture-open-with".to_string(),
-                    label: "Open with Fixture".to_string(),
-                    enabled: true,
-                    danger: false,
-                    canonical_action_kind: Some(NativeMenuCanonicalActionKind::OpenWith),
-                    normalized_verb: Some("OpenWith".to_string()),
-                    icon: None,
-                    invocation: Some(ProviderInvocation::Fake {
-                        action_id: "fake.openWith".to_string(),
-                    }),
-                    children: Vec::new(),
-                },
-                ProviderNativeMenuItem {
-                    id: "fixture-archive-tools".to_string(),
-                    label: "Fixture archive tools".to_string(),
-                    enabled: true,
-                    danger: false,
-                    canonical_action_kind: None,
-                    normalized_verb: None,
-                    icon: None,
-                    invocation: None,
-                    children: vec![
-                        ProviderNativeMenuItem {
-                            id: "fixture-compress".to_string(),
-                            label: "Add to fixture.zip".to_string(),
-                            enabled: true,
-                            danger: false,
-                            canonical_action_kind: Some(NativeMenuCanonicalActionKind::Compress),
-                            normalized_verb: Some("compress".to_string()),
-                            icon: None,
-                            invocation: Some(ProviderInvocation::Fake {
-                                action_id: "fake.compress".to_string(),
-                            }),
-                            children: Vec::new(),
-                        },
-                        ProviderNativeMenuItem {
-                            id: "fixture-extract".to_string(),
-                            label: "Extract with Fixture".to_string(),
-                            enabled: true,
-                            danger: false,
-                            canonical_action_kind: Some(NativeMenuCanonicalActionKind::Extract),
-                            normalized_verb: Some("extract".to_string()),
-                            icon: None,
-                            invocation: Some(ProviderInvocation::Fake {
-                                action_id: "fake.extract".to_string(),
-                            }),
-                            children: Vec::new(),
-                        },
-                        ProviderNativeMenuItem {
-                            id: "fixture-share-with-team".to_string(),
-                            label: "Share with team".to_string(),
-                            enabled: true,
-                            danger: false,
-                            canonical_action_kind: None,
-                            normalized_verb: Some("sharewithteam".to_string()),
-                            icon: None,
-                            invocation: Some(ProviderInvocation::Fake {
-                                action_id: "fake.shareWithTeam".to_string(),
-                            }),
-                            children: Vec::new(),
-                        },
-                    ],
-                },
-                ProviderNativeMenuItem {
-                    id: "fixture-open-terminal".to_string(),
-                    label: "Open in Fixture Terminal".to_string(),
-                    enabled: true,
-                    danger: false,
-                    canonical_action_kind: None,
-                    normalized_verb: Some("openinfixtureterminal".to_string()),
-                    icon: Some(NativeMenuIcon {
-                        kind: NativeMenuIconKind::DataUrl,
-                        data_url: "data:image/png;base64,RkFLRQ==".to_string(),
-                        alt: Some("Fixture icon".to_string()),
-                    }),
-                    invocation: Some(ProviderInvocation::Fake {
-                        action_id: "fake.openTerminal".to_string(),
-                    }),
-                    children: Vec::new(),
-                },
-                ProviderNativeMenuItem {
-                    id: "fixture-copy-duplicate".to_string(),
-                    label: "Copy".to_string(),
-                    enabled: true,
-                    danger: false,
-                    canonical_action_kind: Some(NativeMenuCanonicalActionKind::Copy),
-                    normalized_verb: Some("copy".to_string()),
-                    icon: None,
-                    invocation: Some(ProviderInvocation::Fake {
-                        action_id: "fake.copy".to_string(),
-                    }),
-                    children: Vec::new(),
-                },
-                ProviderNativeMenuItem {
-                    id: "fixture-properties-duplicate".to_string(),
-                    label: "Properties".to_string(),
-                    enabled: true,
-                    danger: false,
-                    canonical_action_kind: None,
-                    normalized_verb: Some("properties".to_string()),
-                    icon: None,
-                    invocation: Some(ProviderInvocation::Fake {
-                        action_id: "fake.properties".to_string(),
-                    }),
-                    children: Vec::new(),
-                },
-            ]
-        })
+        let target_kind = request.target_kind.clone();
+        executor.execute(move || fixture_menu(&target_kind))
     }
 
     fn invoke(
@@ -192,5 +62,130 @@ fn target_label(kind: &NativeMenuTargetKind) -> &'static str {
         NativeMenuTargetKind::Background => "background action",
         NativeMenuTargetKind::Tree => "tree action",
         NativeMenuTargetKind::Tab => "tab action",
+    }
+}
+
+fn fixture_menu(target_kind: &NativeMenuTargetKind) -> Vec<ProviderNativeMenuItem> {
+    if matches!(target_kind, NativeMenuTargetKind::Tab) {
+        return Vec::new();
+    }
+    let suffix = target_suffix(target_kind);
+    vec![
+        fake_action(
+            &format!("fixture-target-{suffix}"),
+            &format!("Fixture {}", target_label(target_kind)),
+            &format!("fixture{suffix}"),
+            &format!("fake.target.{suffix}"),
+        ),
+        canonical_fake_action(
+            NativeMenuCanonicalActionKind::OpenWith,
+            fake_action(
+                "fixture-open-with",
+                "Open with Fixture",
+                "OpenWith",
+                "fake.openWith",
+            ),
+        ),
+        fake_submenu(
+            "fixture-archive-tools",
+            "Fixture archive tools",
+            archive_tool_items(),
+        ),
+        ProviderNativeMenuItem {
+            icon: Some(NativeMenuIcon {
+                kind: NativeMenuIconKind::DataUrl,
+                data_url: "data:image/png;base64,RkFLRQ==".to_string(),
+                alt: Some("Fixture icon".to_string()),
+            }),
+            ..fake_action(
+                "fixture-open-terminal",
+                "Open in Fixture Terminal",
+                "openinfixtureterminal",
+                "fake.openTerminal",
+            )
+        },
+        canonical_fake_action(
+            NativeMenuCanonicalActionKind::Copy,
+            fake_action("fixture-copy-duplicate", "Copy", "copy", "fake.copy"),
+        ),
+        fake_action(
+            "fixture-properties-duplicate",
+            "Properties",
+            "properties",
+            "fake.properties",
+        ),
+    ]
+}
+
+fn archive_tool_items() -> Vec<ProviderNativeMenuItem> {
+    vec![
+        canonical_fake_action(
+            NativeMenuCanonicalActionKind::Compress,
+            fake_action(
+                "fixture-compress",
+                "Add to fixture.zip",
+                "compress",
+                "fake.compress",
+            ),
+        ),
+        canonical_fake_action(
+            NativeMenuCanonicalActionKind::Extract,
+            fake_action(
+                "fixture-extract",
+                "Extract with Fixture",
+                "extract",
+                "fake.extract",
+            ),
+        ),
+        fake_action(
+            "fixture-share-with-team",
+            "Share with team",
+            "sharewithteam",
+            "fake.shareWithTeam",
+        ),
+    ]
+}
+
+fn fake_action(id: &str, label: &str, verb: &str, action_id: &str) -> ProviderNativeMenuItem {
+    ProviderNativeMenuItem {
+        id: id.to_string(),
+        label: label.to_string(),
+        enabled: true,
+        danger: false,
+        canonical_action_kind: None,
+        normalized_verb: Some(verb.to_string()),
+        icon: None,
+        invocation: Some(ProviderInvocation::Fake {
+            action_id: action_id.to_string(),
+        }),
+        children: Vec::new(),
+    }
+}
+
+fn canonical_fake_action(
+    kind: NativeMenuCanonicalActionKind,
+    item: ProviderNativeMenuItem,
+) -> ProviderNativeMenuItem {
+    ProviderNativeMenuItem {
+        canonical_action_kind: Some(kind),
+        ..item
+    }
+}
+
+fn fake_submenu(
+    id: &str,
+    label: &str,
+    children: Vec<ProviderNativeMenuItem>,
+) -> ProviderNativeMenuItem {
+    ProviderNativeMenuItem {
+        id: id.to_string(),
+        label: label.to_string(),
+        enabled: true,
+        danger: false,
+        canonical_action_kind: None,
+        normalized_verb: None,
+        icon: None,
+        invocation: None,
+        children,
     }
 }

@@ -51,9 +51,9 @@
 
 pub mod queue;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::thread::{available_parallelism, JoinHandle};
 use std::time::Duration;
 
@@ -495,129 +495,161 @@ impl AdmissionAwait {
 /// decisions), which is what makes every reservation atomic without needing
 /// per-call locking gymnastics from callers.
 fn run_dispatcher(receiver: Receiver<Message>, state: Arc<Mutex<SchedulerState>>) {
-    // Pending reply channels for jobs that are queued but not yet granted,
-    // so a later admission or cancellation can find who to notify.
-    let mut waiting_replies: std::collections::HashMap<JobId, Sender<Result<JobId, SubmitError>>> =
-        std::collections::HashMap::new();
-
+    let mut dispatcher = Dispatcher {
+        state,
+        waiting_replies: HashMap::new(),
+    };
     loop {
-        let message = match receiver.recv() {
-            Ok(message) => message,
-            // All senders dropped (coordinator dropped without an explicit
-            // shutdown reaching the channel first) — clear state and exit.
-            Err(_) => {
-                let mut guard = state.lock().expect("resource coordinator state lock");
-                guard.clear_all();
-                return;
-            }
+        // All senders dropped (coordinator dropped without an explicit
+        // shutdown reaching the channel first) — clear state and exit.
+        let Ok(message) = receiver.recv() else {
+            dispatcher.lock_state().clear_all();
+            return;
         };
+        match dispatcher.handle(message) {
+            AfterMessage::AdmitRunnable => dispatcher.admit_runnable(),
+            AfterMessage::AwaitNext => {}
+            AfterMessage::Stop => return,
+        }
+    }
+}
 
+type AdmissionReply = Sender<Result<JobId, SubmitError>>;
+
+struct AdmittedJob {
+    id: JobId,
+    coalesced: Vec<JobId>,
+}
+
+struct Dispatcher {
+    state: Arc<Mutex<SchedulerState>>,
+    /// Pending reply channels for jobs that are queued but not yet granted,
+    /// so a later admission or cancellation can find who to notify.
+    waiting_replies: HashMap<JobId, AdmissionReply>,
+}
+
+enum AfterMessage {
+    AdmitRunnable,
+    AwaitNext,
+    Stop,
+}
+
+impl Dispatcher {
+    fn lock_state(&self) -> MutexGuard<'_, SchedulerState> {
+        self.state.lock().expect("resource coordinator state lock")
+    }
+
+    fn handle(&mut self, message: Message) -> AfterMessage {
         match message {
-            Message::Submit { request, reply } => {
-                let mut guard = state.lock().expect("resource coordinator state lock");
-                let id = request.id;
-
-                if let Some(coalesce_key) = request.coalesce_key.clone() {
-                    if let Some(target_id) = guard.find_coalesce_target(&coalesce_key) {
-                        if target_id != id {
-                            guard.record_coalesced(id, target_id);
-                            if guard.is_granted(target_id) {
-                                // The target already holds its reservation:
-                                // safe to resolve the coalesced caller
-                                // immediately, since it is only ever
-                                // piggy-backing on a reservation that
-                                // already exists. Register it as a live
-                                // holder so its later release does not pull
-                                // the reservation out from under the target
-                                // or any other coalesced co-holder.
-                                guard.add_granted_reference(target_id);
-                                let _ = reply.send(Ok(target_id));
-                            } else {
-                                // The target is still queued: the
-                                // coalesced caller must wait for the
-                                // target's own admission so it never
-                                // observes a `JobHandle` before the
-                                // underlying resources are actually
-                                // reserved. Register its reply so the
-                                // admission loop below (and any future
-                                // admission of the target) notifies it at
-                                // the same moment the target is granted.
-                                waiting_replies.insert(id, reply);
-                            }
-                            continue;
-                        }
-                    }
-                }
-
-                if !guard.enqueue(request) {
-                    let _ = reply.send(Err(SubmitError::QueueFull));
-                    continue;
-                }
-                waiting_replies.insert(id, reply);
-            }
+            Message::Submit { request, reply } => self.submit(request, reply),
             Message::CancelQueued { id, reply } => {
-                let mut guard = state.lock().expect("resource coordinator state lock");
-                let affected = guard.cancel_queued(id);
-                drop(guard);
-                let removed_self = affected.contains(&id);
-                for affected_id in affected {
-                    if let Some(sender) = waiting_replies.remove(&affected_id) {
-                        let _ = sender.send(Err(SubmitError::Cancelled));
-                    }
-                }
-                let _ = reply.send(removed_self);
+                self.cancel_queued(id, &reply);
+                AfterMessage::AdmitRunnable
             }
             Message::Release { id } => {
-                let mut guard = state.lock().expect("resource coordinator state lock");
-                guard.release_granted(id);
+                self.lock_state().release_granted(id);
+                AfterMessage::AdmitRunnable
             }
             Message::Shutdown { reply } => {
-                let mut guard = state.lock().expect("resource coordinator state lock");
-                guard.clear_all();
-                drop(guard);
-                // Notify every still-waiting caller, not just ids
-                // `clear_all` reported: a coalesced job never held its own
-                // queue/grant slot but still has a caller blocked on
-                // `AdmissionAwait::recv` that must not hang past shutdown.
-                for (_, sender) in waiting_replies.drain() {
-                    let _ = sender.send(Err(SubmitError::ShuttingDown));
-                }
-                let _ = reply.send(());
-                return;
-            }
-        }
-
-        // After every mutation, greedily admit every queued job that can
-        // currently be granted (not just one), so a burst of independent
-        // resources all become runnable together instead of one per
-        // message round-trip.
-        loop {
-            let mut guard = state.lock().expect("resource coordinator state lock");
-            match guard.try_admit_next() {
-                AdmitOutcome::Granted(id) => {
-                    // Every id coalesced onto `id` resolves to the same
-                    // grant at the same moment `id` itself is granted, so
-                    // no coalesced caller can observe a `JobHandle` before
-                    // the target's reservation actually exists. Each one
-                    // becomes an equal live holder of `id`'s reservation,
-                    // so its later release does not end the reservation
-                    // out from under the target or its other co-holders.
-                    let coalesced = guard.coalesced_onto_target(id);
-                    for _ in 0..coalesced.len() {
-                        guard.add_granted_reference(id);
-                    }
-                    drop(guard);
-                    if let Some(sender) = waiting_replies.remove(&id) {
-                        let _ = sender.send(Ok(id));
-                    }
-                    for coalesced_id in coalesced {
-                        if let Some(sender) = waiting_replies.remove(&coalesced_id) {
-                            let _ = sender.send(Ok(id));
-                        }
-                    }
-                }
-                AdmitOutcome::NoneRunnable => break,
+                self.shutdown(&reply);
+                AfterMessage::Stop
             }
         }
     }
+
+    fn submit(&mut self, request: JobRequest, reply: AdmissionReply) -> AfterMessage {
+        let id = request.id;
+        let mut state = self.state.lock().expect("resource coordinator state lock");
+        let coalesce_target = request
+            .coalesce_key
+            .as_ref()
+            .and_then(|coalesce_key| state.find_coalesce_target(coalesce_key))
+            .filter(|&target_id| target_id != id);
+        if let Some(target_id) = coalesce_target {
+            coalesce(&mut state, &mut self.waiting_replies, id, target_id, reply);
+            return AfterMessage::AwaitNext;
+        }
+        if !state.enqueue(request) {
+            let _ = reply.send(Err(SubmitError::QueueFull));
+            return AfterMessage::AwaitNext;
+        }
+        self.waiting_replies.insert(id, reply);
+        AfterMessage::AdmitRunnable
+    }
+
+    fn cancel_queued(&mut self, id: JobId, reply: &Sender<bool>) {
+        let affected = self.lock_state().cancel_queued(id);
+        let removed_self = affected.contains(&id);
+        for affected_id in affected {
+            self.reply_to(affected_id, Err(SubmitError::Cancelled));
+        }
+        let _ = reply.send(removed_self);
+    }
+
+    /// Notifies every still-waiting caller, not just ids `clear_all`
+    /// reported: a coalesced job never held its own queue/grant slot but
+    /// still has a caller blocked on `AdmissionAwait::recv`.
+    fn shutdown(&mut self, reply: &Sender<()>) {
+        self.lock_state().clear_all();
+        for (_, sender) in self.waiting_replies.drain() {
+            let _ = sender.send(Err(SubmitError::ShuttingDown));
+        }
+        let _ = reply.send(());
+    }
+
+    /// Greedily admits every queued job that can currently be granted, so a
+    /// burst of independent resources all become runnable together. Every id
+    /// coalesced onto a granted job resolves at the same moment as an equal
+    /// live holder of its reservation.
+    fn admit_runnable(&mut self) {
+        while let Some(admitted) = self.admit_next() {
+            self.reply_admitted(admitted);
+        }
+    }
+
+    fn admit_next(&mut self) -> Option<AdmittedJob> {
+        let mut state = self.lock_state();
+        let AdmitOutcome::Granted(id) = state.try_admit_next() else {
+            return None;
+        };
+        let coalesced = state.coalesced_onto_target(id);
+        for _ in 0..coalesced.len() {
+            state.add_granted_reference(id);
+        }
+        Some(AdmittedJob { id, coalesced })
+    }
+
+    fn reply_admitted(&mut self, admitted: AdmittedJob) {
+        self.reply_to(admitted.id, Ok(admitted.id));
+        for coalesced_id in admitted.coalesced {
+            self.reply_to(coalesced_id, Ok(admitted.id));
+        }
+    }
+
+    fn reply_to(&mut self, id: JobId, result: Result<JobId, SubmitError>) {
+        if let Some(sender) = self.waiting_replies.remove(&id) {
+            let _ = sender.send(result);
+        }
+    }
+}
+
+/// A target that already holds its reservation resolves the coalesced caller
+/// at once as a live co-holder, so its later release does not pull the
+/// reservation out from under the target. A still-queued target makes the
+/// caller wait for the target's own admission, so it never observes a
+/// `JobHandle` before the underlying resources are reserved.
+fn coalesce(
+    state: &mut SchedulerState,
+    waiting_replies: &mut HashMap<JobId, AdmissionReply>,
+    id: JobId,
+    target_id: JobId,
+    reply: AdmissionReply,
+) {
+    state.record_coalesced(id, target_id);
+    if !state.is_granted(target_id) {
+        waiting_replies.insert(id, reply);
+        return;
+    }
+    state.add_granted_reference(target_id);
+    let _ = reply.send(Ok(target_id));
 }

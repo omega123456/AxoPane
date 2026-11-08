@@ -95,38 +95,8 @@ impl ReconcileCoordinator {
         if target.scheduled.swap(true, Ordering::SeqCst) {
             return generation;
         }
-        let target_for_worker = Arc::clone(&target);
-        let work = Arc::new(work);
-
         std::thread::spawn(move || {
-            // A request may arrive while a pass is admitted or running. Drain
-            // until no newer generation exists, retaining only its latest
-            // value instead of retaining every intermediate focus event.
-            let mut requested_generation = generation;
-            loop {
-                let spec = JobSpec::new([JobClass::Latency], [resource_key.clone()]);
-                if let Ok(_permit) = coordinator.submit(spec) {
-                    let latest = target_for_worker.generation.load(Ordering::SeqCst);
-                    if latest == requested_generation {
-                        work(requested_generation);
-                    }
-                }
-
-                let latest = target_for_worker.generation.load(Ordering::SeqCst);
-                if latest == requested_generation {
-                    target_for_worker.scheduled.store(false, Ordering::SeqCst);
-                    // Close the race where a focus event arrives between the
-                    // equality check and clearing `scheduled`.
-                    if target_for_worker.generation.load(Ordering::SeqCst) == latest
-                        || target_for_worker.scheduled.swap(true, Ordering::SeqCst)
-                    {
-                        return;
-                    }
-                    requested_generation = target_for_worker.generation.load(Ordering::SeqCst);
-                } else {
-                    requested_generation = latest;
-                }
-            }
+            drain_reconcile_requests(&target, &coordinator, &resource_key, generation, &work);
         });
 
         generation
@@ -137,4 +107,62 @@ impl ReconcileCoordinator {
 #[allow(dead_code)]
 pub fn generation_for_tests(coordinator: &ReconcileCoordinator) -> u64 {
     coordinator.target("test").generation.load(Ordering::SeqCst)
+}
+
+/// A request may arrive while a pass is admitted or running. Drains until no
+/// newer generation exists, running only the latest one instead of every
+/// intermediate focus event.
+fn drain_reconcile_requests(
+    target: &ReconcileTarget,
+    coordinator: &ResourceCoordinator,
+    resource_key: &str,
+    first_generation: u64,
+    work: &impl Fn(u64),
+) {
+    let mut requested_generation = first_generation;
+    loop {
+        run_if_current(
+            target,
+            coordinator,
+            resource_key,
+            requested_generation,
+            work,
+        );
+        let Some(next_generation) = next_requested_generation(target, requested_generation) else {
+            return;
+        };
+        requested_generation = next_generation;
+    }
+}
+
+fn run_if_current(
+    target: &ReconcileTarget,
+    coordinator: &ResourceCoordinator,
+    resource_key: &str,
+    requested_generation: u64,
+    work: &impl Fn(u64),
+) {
+    let spec = JobSpec::new([JobClass::Latency], [resource_key.to_string()]);
+    let Ok(_permit) = coordinator.submit(spec) else {
+        return;
+    };
+    if target.generation.load(Ordering::SeqCst) == requested_generation {
+        work(requested_generation);
+    }
+}
+
+/// `None` once no newer generation was requested. Re-reading the generation
+/// after clearing `scheduled` closes the race where a focus event arrives
+/// between the equality check and the clear.
+fn next_requested_generation(target: &ReconcileTarget, requested_generation: u64) -> Option<u64> {
+    let latest = target.generation.load(Ordering::SeqCst);
+    if latest != requested_generation {
+        return Some(latest);
+    }
+    target.scheduled.store(false, Ordering::SeqCst);
+    let unchanged = target.generation.load(Ordering::SeqCst) == latest;
+    if unchanged || target.scheduled.swap(true, Ordering::SeqCst) {
+        return None;
+    }
+    Some(target.generation.load(Ordering::SeqCst))
 }

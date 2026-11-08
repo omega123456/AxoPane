@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react'
-import type { KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 import { FOCUS_RING } from '@/lib/focus-ring'
+import { handleKeyByTable } from '@/lib/key-table'
+import { PRIMARY_MOUSE_BUTTON } from '@/lib/mouse-buttons'
 
 type ResizeHandleProps = {
   /**
@@ -33,6 +35,58 @@ type ResizeHandleProps = {
   onCommit: () => void
 }
 
+type DragCallbacks = Pick<ResizeHandleProps, 'onDragStart' | 'onResize' | 'onCommit'>
+
+function usePointerDrag(horizontal: boolean, callbacks: DragCallbacks) {
+  const [dragging, setDragging] = useState(false)
+  const pointerId = useRef<number | null>(null)
+  const startPos = useRef(0)
+  const axisPosition = (event: ReactPointerEvent<HTMLDivElement>) =>
+    horizontal ? event.clientY : event.clientX
+
+  function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== PRIMARY_MOUSE_BUTTON) {
+      return
+    }
+    event.preventDefault()
+    pointerId.current = event.pointerId
+    startPos.current = axisPosition(event)
+    event.currentTarget.setPointerCapture(event.pointerId)
+    callbacks.onDragStart()
+    setDragging(true)
+  }
+
+  function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (pointerId.current === null) {
+      return
+    }
+    callbacks.onResize(axisPosition(event) - startPos.current)
+  }
+
+  function endDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    if (pointerId.current === null) {
+      return
+    }
+    // The capture was taken on pointerdown for this exact pointer, so releasing
+    // it here is always valid.
+    event.currentTarget.releasePointerCapture(event.pointerId)
+    pointerId.current = null
+    setDragging(false)
+    callbacks.onCommit()
+  }
+
+  return { dragging, onPointerDown, onPointerMove, endDrag }
+}
+
+function stepKeyTable(horizontal: boolean, onStep: (delta: number) => void, onCommit: () => void) {
+  const [back, forward] = horizontal ? ['ArrowUp', 'ArrowDown'] : ['ArrowLeft', 'ArrowRight']
+  const stepBy = (delta: number) => () => {
+    onStep(delta)
+    onCommit()
+  }
+  return { [back]: stepBy(-1), [forward]: stepBy(1) }
+}
+
 /**
  * A draggable divider that resizes its neighbouring panes. It occupies
  * a single pixel of layout (so it never disturbs the fixed design geometry) but
@@ -51,55 +105,8 @@ export function ResizeHandle({
   onStep,
   onCommit,
 }: ResizeHandleProps) {
-  const [dragging, setDragging] = useState(false)
-  const pointerId = useRef<number | null>(null)
-  const startPos = useRef(0)
   const horizontal = orientation === 'horizontal'
-
-  function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    if (event.button !== 0) {
-      return
-    }
-    event.preventDefault()
-    pointerId.current = event.pointerId
-    startPos.current = horizontal ? event.clientY : event.clientX
-    event.currentTarget.setPointerCapture(event.pointerId)
-    onDragStart()
-    setDragging(true)
-  }
-
-  function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
-    if (pointerId.current === null) {
-      return
-    }
-    onResize((horizontal ? event.clientY : event.clientX) - startPos.current)
-  }
-
-  function endDrag(event: ReactPointerEvent<HTMLDivElement>) {
-    if (pointerId.current === null) {
-      return
-    }
-    // The capture was taken on pointerdown for this exact pointer, so releasing
-    // it here is always valid.
-    event.currentTarget.releasePointerCapture(event.pointerId)
-    pointerId.current = null
-    setDragging(false)
-    onCommit()
-  }
-
-  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    const [back, forward] = horizontal ? ['ArrowUp', 'ArrowDown'] : ['ArrowLeft', 'ArrowRight']
-    if (event.key === back) {
-      event.preventDefault()
-      onStep(-1)
-      onCommit()
-    } else if (event.key === forward) {
-      event.preventDefault()
-      onStep(1)
-      onCommit()
-    }
-  }
-
+  const drag = usePointerDrag(horizontal, { onDragStart, onResize, onCommit })
   const restLine = showRestLine ? 'bg-light-divider dark:bg-dark-divider' : 'bg-transparent'
 
   return (
@@ -111,11 +118,11 @@ export function ResizeHandle({
       aria-valuemin={Math.round(min)}
       aria-valuemax={Math.round(max)}
       tabIndex={0}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
-      onKeyDown={onKeyDown}
+      onPointerDown={drag.onPointerDown}
+      onPointerMove={drag.onPointerMove}
+      onPointerUp={drag.endDrag}
+      onPointerCancel={drag.endDrag}
+      onKeyDown={(event) => handleKeyByTable(event, stepKeyTable(horizontal, onStep, onCommit))}
       // Zero layout width keeps the fixed pane geometry pixel-exact; the line and
       // grab zone are painted as absolute overlays around it.
       className={`group relative z-10 shrink-0 touch-none select-none ${
@@ -126,7 +133,7 @@ export function ResizeHandle({
         className={`pointer-events-none absolute ${
           horizontal ? 'inset-x-0 top-0 h-px' : 'inset-y-0 left-0 w-px'
         } group-hover:bg-light-accent dark:group-hover:bg-dark-accent ${
-          dragging ? 'bg-light-accent dark:bg-dark-accent' : restLine
+          drag.dragging ? 'bg-light-accent dark:bg-dark-accent' : restLine
         }`}
       />
       {/* Invisible grab zone that overhangs the line on both sides. */}

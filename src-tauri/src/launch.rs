@@ -160,20 +160,24 @@ mod platform {
             return Ok(());
         }
 
-        if super::should_prompt_open_with(status) {
-            let fallback = shell_execute(&ShellExecuteRequest {
-                verb: Some(OsStr::new(super::OPEN_WITH_VERB)),
-                ..open_default
-            });
-            if super::shell_execute_succeeded(fallback) {
-                return Ok(());
-            }
+        let opened_with_prompt =
+            super::should_prompt_open_with(status) && open_with_prompt(open_default);
+        if opened_with_prompt {
+            return Ok(());
         }
 
         Err(OpenPathError::LaunchFailed {
             path: path.to_path_buf(),
             detail: super::launch_failure_detail(status),
         })
+    }
+
+    fn open_with_prompt(open_default: ShellExecuteRequest<'_>) -> bool {
+        let fallback = shell_execute(&ShellExecuteRequest {
+            verb: Some(OsStr::new(super::OPEN_WITH_VERB)),
+            ..open_default
+        });
+        super::shell_execute_succeeded(fallback)
     }
 
     pub fn restart_as_admin(executable: &Path) -> Result<(), OpenPathError> {

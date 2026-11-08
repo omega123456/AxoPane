@@ -222,7 +222,7 @@ function buildChartSamples(
   )
 }
 
-export function ThroughputChart({ samples, currentPercent, peakRate }: ThroughputChartProps) {
+function useThroughputChartModel({ samples, currentPercent, peakRate }: ThroughputChartProps) {
   const clampedCurrentPercent = clampPercent(currentPercent)
   const normalizedSamples = useMemo(
     () => normalizeSamples(samples, clampedCurrentPercent),
@@ -271,11 +271,139 @@ export function ThroughputChart({ samples, currentPercent, peakRate }: Throughpu
   // screenshot wait lands on a stable frame.
   const chartSettled =
     Math.abs(displayedCeilingRate - ceilingRate) < SCALE_SETTLED_TOLERANCE && tailSettled
+  return {
+    chartSamples,
+    xScale,
+    yScale,
+    scaleRate,
+    showCurve,
+    clipId,
+    currentX,
+    unfilledWidth,
+    chartSettled,
+  }
+}
+
+type ChartModel = ReturnType<typeof useThroughputChartModel>
+
+function ChartBackdrop({ clipId, currentX, unfilledWidth }: ChartModel) {
+  return (
+    <>
+      <defs>
+        <clipPath id={clipId}>
+          <rect
+            data-testid="throughput-chart-fill-extent"
+            x="0"
+            y="0"
+            width={currentX}
+            height={VIEWBOX_HEIGHT}
+          />
+        </clipPath>
+      </defs>
+
+      <rect
+        data-testid="throughput-chart-progress-fill"
+        x="0"
+        y="0"
+        width={currentX}
+        height={VIEWBOX_HEIGHT}
+        className="fill-light-accent/10 dark:fill-dark-accent/10"
+      />
+
+      <rect
+        data-testid="throughput-chart-unfilled"
+        x={currentX}
+        y="0"
+        width={unfilledWidth}
+        height={VIEWBOX_HEIGHT}
+        className="fill-light-card/60 dark:fill-dark-layer/45"
+      />
+
+      <ChartGuides />
+    </>
+  )
+}
+
+function ChartGuides() {
+  return (
+    <>
+      <line
+        data-testid="throughput-chart-ceiling"
+        x1="0"
+        x2={VIEWBOX_WIDTH}
+        y1={CEILING_Y}
+        y2={CEILING_Y}
+        className="stroke-light-divider dark:stroke-dark-divider"
+        strokeWidth="1"
+        strokeDasharray="2 2"
+        vectorEffect="non-scaling-stroke"
+      />
+
+      <line
+        data-testid="throughput-chart-track"
+        x1="0"
+        x2={VIEWBOX_WIDTH}
+        y1={BASELINE_Y}
+        y2={BASELINE_Y}
+        className="stroke-light-divider dark:stroke-dark-divider"
+        strokeWidth="1"
+        vectorEffect="non-scaling-stroke"
+      />
+    </>
+  )
+}
+
+function ChartTrace({ chartSamples, xScale, yScale, scaleRate, showCurve, clipId }: ChartModel) {
+  if (!showCurve) {
+    return (
+      <line
+        data-testid="throughput-chart-baseline"
+        x1="0"
+        x2={VIEWBOX_WIDTH}
+        y1={BASELINE_Y}
+        y2={BASELINE_Y}
+        clipPath={`url(#${clipId})`}
+        className="stroke-light-accent/35 dark:stroke-dark-accent/40"
+        strokeWidth="1.5"
+        vectorEffect="non-scaling-stroke"
+      />
+    )
+  }
+  return (
+    <>
+      <AreaClosed
+        data={chartSamples}
+        x={(sample) => xScale(sample.percent)}
+        y={(sample) => scaleRate(sample.rate)}
+        yScale={yScale}
+        curve={curveLinear}
+        clipPath={`url(#${clipId})`}
+        className="fill-light-accent/18 dark:fill-dark-accent/55"
+        data-testid="throughput-chart-area"
+      />
+      <LinePath
+        data={chartSamples}
+        x={(sample) => xScale(sample.percent)}
+        y={(sample) => scaleRate(sample.rate)}
+        curve={curveLinear}
+        clipPath={`url(#${clipId})`}
+        className="stroke-light-accent dark:stroke-dark-accent"
+        strokeWidth="1.5"
+        fill="none"
+        vectorEffect="non-scaling-stroke"
+        data-testid="throughput-chart-line"
+      />
+    </>
+  )
+}
+
+export function ThroughputChart(props: ThroughputChartProps) {
+  const model = useThroughputChartModel(props)
 
   return (
     <div
       data-testid="throughput-chart"
-      data-scale-settled={chartSettled ? 'true' : 'false'}
+      data-scale-settled={model.chartSettled ? 'true' : 'false'}
       className="relative w-full overflow-hidden rounded-control border border-light-stroke bg-light-skeleton dark:border-dark-stroke dark:bg-dark-skeleton"
     >
       <svg
@@ -284,101 +412,12 @@ export function ThroughputChart({ samples, currentPercent, peakRate }: Throughpu
         preserveAspectRatio="none"
         className="block h-queue-chart w-full"
       >
-        <defs>
-          <clipPath id={clipId}>
-            <rect
-              data-testid="throughput-chart-fill-extent"
-              x="0"
-              y="0"
-              width={currentX}
-              height={VIEWBOX_HEIGHT}
-            />
-          </clipPath>
-        </defs>
-
-        <rect
-          data-testid="throughput-chart-progress-fill"
-          x="0"
-          y="0"
-          width={currentX}
-          height={VIEWBOX_HEIGHT}
-          className="fill-light-accent/10 dark:fill-dark-accent/10"
-        />
-
-        <rect
-          data-testid="throughput-chart-unfilled"
-          x={currentX}
-          y="0"
-          width={unfilledWidth}
-          height={VIEWBOX_HEIGHT}
-          className="fill-light-card/60 dark:fill-dark-layer/45"
-        />
-
-        <line
-          data-testid="throughput-chart-ceiling"
-          x1="0"
-          x2={VIEWBOX_WIDTH}
-          y1={CEILING_Y}
-          y2={CEILING_Y}
-          className="stroke-light-divider dark:stroke-dark-divider"
-          strokeWidth="1"
-          strokeDasharray="2 2"
-          vectorEffect="non-scaling-stroke"
-        />
-
-        <line
-          data-testid="throughput-chart-track"
-          x1="0"
-          x2={VIEWBOX_WIDTH}
-          y1={BASELINE_Y}
-          y2={BASELINE_Y}
-          className="stroke-light-divider dark:stroke-dark-divider"
-          strokeWidth="1"
-          vectorEffect="non-scaling-stroke"
-        />
-
-        {showCurve ? (
-          <>
-            <AreaClosed
-              data={chartSamples}
-              x={(sample) => xScale(sample.percent)}
-              y={(sample) => scaleRate(sample.rate)}
-              yScale={yScale}
-              curve={curveLinear}
-              clipPath={`url(#${clipId})`}
-              className="fill-light-accent/18 dark:fill-dark-accent/55"
-              data-testid="throughput-chart-area"
-            />
-            <LinePath
-              data={chartSamples}
-              x={(sample) => xScale(sample.percent)}
-              y={(sample) => scaleRate(sample.rate)}
-              curve={curveLinear}
-              clipPath={`url(#${clipId})`}
-              className="stroke-light-accent dark:stroke-dark-accent"
-              strokeWidth="1.5"
-              fill="none"
-              vectorEffect="non-scaling-stroke"
-              data-testid="throughput-chart-line"
-            />
-          </>
-        ) : (
-          <line
-            data-testid="throughput-chart-baseline"
-            x1="0"
-            x2={VIEWBOX_WIDTH}
-            y1={BASELINE_Y}
-            y2={BASELINE_Y}
-            clipPath={`url(#${clipId})`}
-            className="stroke-light-accent/35 dark:stroke-dark-accent/40"
-            strokeWidth="1.5"
-            vectorEffect="non-scaling-stroke"
-          />
-        )}
+        <ChartBackdrop {...model} />
+        <ChartTrace {...model} />
       </svg>
       <span
         data-testid="throughput-chart-leading-edge"
-        style={{ left: `${currentX}%` }}
+        style={{ left: `${model.currentX}%` }}
         className="pointer-events-none absolute inset-y-0 w-px bg-light-accent/45 dark:bg-dark-accent/45"
       />
     </div>

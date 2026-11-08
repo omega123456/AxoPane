@@ -110,6 +110,25 @@ export function ContextMenuIconGlyph({
   return <Icon className={className} aria-hidden="true" />
 }
 
+function unlessDisabled(item: { disabled?: boolean }, action: () => void) {
+  return () => {
+    if (!item.disabled) {
+      action()
+    }
+  }
+}
+
+function RowIconSlot({ icon }: { icon: ContextMenuRowItem['icon'] }) {
+  if (!icon) {
+    return <span className="size-4 flex-none" aria-hidden="true" />
+  }
+  return (
+    <span className="flex size-4 flex-none items-center justify-center">
+      <ContextMenuIconGlyph icon={icon} className="size-4" />
+    </span>
+  )
+}
+
 export function ContextMenuRow({
   item,
   active,
@@ -141,24 +160,10 @@ export function ContextMenuRow({
             ? 'bg-light-hover dark:bg-dark-hover'
             : 'hover:bg-light-hover dark:hover:bg-dark-hover'
         } ${itemTextClass(item)} ${item.strong ? 'font-semibold' : ''}`}
-        onMouseEnter={() => {
-          if (!item.disabled) {
-            onPointerEnter()
-          }
-        }}
-        onClick={() => {
-          if (!item.disabled) {
-            onActivate()
-          }
-        }}
+        onMouseEnter={unlessDisabled(item, onPointerEnter)}
+        onClick={unlessDisabled(item, onActivate)}
       >
-        {item.icon ? (
-          <span className="flex size-4 flex-none items-center justify-center">
-            <ContextMenuIconGlyph icon={item.icon} className="size-4" />
-          </span>
-        ) : (
-          <span className="size-4 flex-none" aria-hidden="true" />
-        )}
+        <RowIconSlot icon={item.icon} />
         <span className="flex-1 truncate">{item.label}</span>
         {item.shortcut ? (
           <span className="flex-none text-caption text-light-text-tertiary dark:text-dark-text-tertiary">

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::ops::ControlFlow;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -172,6 +173,10 @@ impl ItemCountService {
         }
         queue.push_back(plan);
         drop(queue);
+        self.try_claim_automatic_worker()
+    }
+
+    fn try_claim_automatic_worker(&self) -> bool {
         let mut workers = self
             .automatic_workers
             .lock()
@@ -183,49 +188,51 @@ impl ItemCountService {
         true
     }
 
+    /// An enqueue can race the empty pop while all workers are winding down.
+    /// Reclaims this thread when work appeared; otherwise a later enqueue
+    /// observes the released slot and starts a bounded replacement worker.
+    fn reclaim_worker_for_raced_work(&self) -> bool {
+        *self
+            .automatic_workers
+            .lock()
+            .expect("item-count workers lock") -= 1;
+        let queue_empty = self
+            .automatic_queue
+            .lock()
+            .expect("item-count queue lock")
+            .is_empty();
+        if queue_empty {
+            return false;
+        }
+        self.try_claim_automatic_worker()
+    }
+
     pub fn process_automatic_queue<F>(&self, mut emit: F)
     where
         F: FnMut(ItemCountEvent),
     {
-        loop {
-            let plan = self
-                .automatic_queue
-                .lock()
-                .expect("item-count queue lock")
-                .pop_front();
-            let Some(plan) = plan else {
-                {
-                    let mut workers = self
-                        .automatic_workers
-                        .lock()
-                        .expect("item-count workers lock");
-                    *workers -= 1;
-                }
-                // An enqueue can race the empty-pop above while all workers
-                // are winding down. Reclaim this thread when work appeared;
-                // otherwise a later enqueue observes the released slot and
-                // starts a bounded replacement worker.
-                if self
-                    .automatic_queue
-                    .lock()
-                    .expect("item-count queue lock")
-                    .is_empty()
-                {
-                    return;
-                }
-                let mut workers = self
-                    .automatic_workers
-                    .lock()
-                    .expect("item-count workers lock");
-                if *workers >= MAX_AUTOMATIC_ITEM_COUNT_WORKERS {
-                    return;
-                }
-                *workers += 1;
-                continue;
-            };
-            self.process_automatic_request(plan, &mut emit);
+        self.drain_automatic_queue(&mut emit);
+        while self.reclaim_worker_for_raced_work() {
+            self.drain_automatic_queue(&mut emit);
         }
     }
+
+    fn drain_automatic_queue<F>(&self, emit: &mut F)
+    where
+        F: FnMut(ItemCountEvent),
+    {
+        while let Some(plan) = self.pop_automatic_plan() {
+            self.process_automatic_request(plan, &mut *emit);
+        }
+    }
+
+    fn pop_automatic_plan(&self) -> Option<AutomaticCountPlan> {
+        self.automatic_queue
+            .lock()
+            .expect("item-count queue lock")
+            .pop_front()
+    }
+
     pub fn plan_automatic_request(&self, request: &VisibleItemCountsRequest) -> AutomaticCountPlan {
         self.plan_automatic_request_with_generation(request, request.context.request_id)
     }
@@ -264,18 +271,7 @@ impl ItemCountService {
             Vec::new()
         };
         let remaining = AUTO_ITEM_COUNT_LIMIT.saturating_sub(carried.len());
-        let mut selected = Vec::new();
-        for path in &request.paths {
-            if selected.len() >= remaining {
-                break;
-            }
-
-            if contains_path(&carried, path) || contains_path(&selected, path) {
-                continue;
-            }
-
-            selected.push(path.clone());
-        }
+        let selected = select_uncarried_paths(&request.paths, &carried, remaining);
 
         state.requested_paths = carried.clone();
         state.requested_paths.extend(selected.iter().cloned());
@@ -311,63 +307,72 @@ impl ItemCountService {
             return;
         }
 
-        let mut batch = Vec::new();
-        let mut emitted_any = false;
-        for (index, path) in plan.paths.iter().enumerate() {
-            if self.is_automatic_cancelled(&plan) {
-                self.release_cancelled_automatic_paths(&plan);
-                return;
-            }
-
-            let generation = plan.generation;
-            let state = {
-                let mut cache = self.cache.lock().expect("item-count cache lock");
-                let current = cache.state(path, generation);
-                if matches!(
-                    current,
-                    ItemCountState::Exact { .. } | ItemCountState::Unavailable
-                ) {
-                    current
-                } else if cache.begin(path, generation) {
-                    drop(cache);
-                    let resolved = match fs::read_item_count(Path::new(path)) {
-                        Some(value) => ItemCountState::Exact { value },
-                        None => ItemCountState::Unavailable,
-                    };
-                    let mut cache = self.cache.lock().expect("item-count cache lock");
-                    cache.resolve(path, generation, resolved.clone());
-                    resolved
-                } else {
-                    // Equivalent in-flight work owns this key. Do not recount;
-                    // a later viewport event will observe its cached result.
-                    ItemCountState::Pending
-                }
-            };
-            batch.push(ItemCountResult {
-                path: path.clone(),
-                item_count: state.value(),
-            });
-
-            let is_last = index + 1 == plan.paths.len();
-            if batch.len() >= ITEM_COUNT_BATCH_SIZE || is_last {
-                let results = std::mem::take(&mut batch);
-                let event = ItemCountEvent {
-                    context: plan.context.clone(),
-                    results,
-                    done: is_last,
-                };
-                emit(event);
-                emitted_any = true;
-            }
+        let mut batch = AutomaticCountBatch::new(&plan);
+        let flow = plan.paths.iter().enumerate().try_for_each(|(index, path)| {
+            self.count_automatic_path(&plan, index, path, &mut batch, &mut emit)
+        });
+        if flow.is_break() {
+            self.release_cancelled_automatic_paths(&plan);
+            return;
         }
 
-        if !emitted_any && !self.is_automatic_cancelled(&plan) {
+        let needs_terminal_event = !batch.emitted_any && !self.is_automatic_cancelled(&plan);
+        if needs_terminal_event {
             emit(ItemCountEvent {
                 context: plan.context,
                 results: Vec::new(),
                 done: true,
             });
         }
+    }
+
+    fn count_automatic_path<F>(
+        &self,
+        plan: &AutomaticCountPlan,
+        index: usize,
+        path: &str,
+        batch: &mut AutomaticCountBatch,
+        emit: &mut F,
+    ) -> ControlFlow<()>
+    where
+        F: FnMut(ItemCountEvent),
+    {
+        if self.is_automatic_cancelled(plan) {
+            return ControlFlow::Break(());
+        }
+        let state = self.resolve_item_count(path, plan.generation);
+        let result = ItemCountResult {
+            path: path.to_string(),
+            item_count: state.value(),
+        };
+        if let Some(event) = batch.add(index, result) {
+            emit(event);
+        }
+        ControlFlow::Continue(())
+    }
+
+    /// A cached exact or unavailable count is reused; equivalent in-flight
+    /// work that owns the key is left to finish instead of recounting.
+    fn resolve_item_count(&self, path: &str, generation: u64) -> ItemCountState {
+        let mut cache = self.cache.lock().expect("item-count cache lock");
+        let current = cache.state(path, generation);
+        if matches!(
+            current,
+            ItemCountState::Exact { .. } | ItemCountState::Unavailable
+        ) {
+            return current;
+        }
+        if !cache.begin(path, generation) {
+            return ItemCountState::Pending;
+        }
+        drop(cache);
+        let resolved = match fs::read_item_count(Path::new(path)) {
+            Some(value) => ItemCountState::Exact { value },
+            None => ItemCountState::Unavailable,
+        };
+        let mut cache = self.cache.lock().expect("item-count cache lock");
+        cache.resolve(path, generation, resolved.clone());
+        resolved
     }
 
     fn release_cancelled_automatic_paths(&self, plan: &AutomaticCountPlan) {
@@ -415,19 +420,11 @@ impl ItemCountService {
     ) -> Result<ActiveItemsSortResponse, FsError> {
         let handle = self.begin_explicit_request(request);
 
-        if let Some(sessions) = sessions {
-            let pane_id = request.context.pane_id.clone();
-            if let Some((snapshot, generation, resolved_path)) =
-                sessions.snapshot_for_pane_path(&pane_id, &request.context.path)
-            {
-                return self.sort_from_snapshot(
-                    request,
-                    &handle,
-                    snapshot,
-                    generation,
-                    resolved_path,
-                );
-            }
+        let session_snapshot = sessions.and_then(|sessions| {
+            sessions.snapshot_for_pane_path(&request.context.pane_id, &request.context.path)
+        });
+        if let Some((snapshot, generation, resolved_path)) = session_snapshot {
+            return self.sort_from_snapshot(request, &handle, snapshot, generation, resolved_path);
         }
 
         let outcome = fs::list_dir_with_cancellation(
@@ -443,26 +440,16 @@ impl ItemCountService {
         )?;
 
         match outcome {
-            ListDirOutcome::Complete(response) => {
-                if self.is_explicit_cancelled(&handle) {
-                    Ok(ActiveItemsSortResponse::Superseded(
-                        ActiveItemsSortSuperseded {
-                            context: request.context.clone(),
-                        },
-                    ))
-                } else {
-                    Ok(ActiveItemsSortResponse::Ready(ActiveItemsSortReady {
-                        context: request.context.clone(),
-                        path: response.path,
-                        entries: response.entries,
-                    }))
-                }
-            }
-            ListDirOutcome::Cancelled => Ok(ActiveItemsSortResponse::Superseded(
-                ActiveItemsSortSuperseded {
+            ListDirOutcome::Complete(response) if !self.is_explicit_cancelled(&handle) => {
+                Ok(ActiveItemsSortResponse::Ready(ActiveItemsSortReady {
                     context: request.context.clone(),
-                },
-            )),
+                    path: response.path,
+                    entries: response.entries,
+                }))
+            }
+            ListDirOutcome::Complete(_) | ListDirOutcome::Cancelled => {
+                Ok(superseded_sort_response(request))
+            }
         }
     }
 
@@ -497,45 +484,11 @@ impl ItemCountService {
         let view = SessionView::derive(&snapshot, &view_params);
         let mut entries: Vec<DirectoryEntry> = view.rows().to_vec();
 
-        for entry in &mut entries {
-            if self.is_explicit_cancelled(handle) {
-                return Ok(ActiveItemsSortResponse::Superseded(
-                    ActiveItemsSortSuperseded {
-                        context: request.context.clone(),
-                    },
-                ));
-            }
-            if !entry.is_dir {
-                continue;
-            }
-
-            let state = {
-                let mut cache = self.cache.lock().expect("item-count cache lock");
-                let current = cache.state(&entry.path, generation);
-                if matches!(
-                    current,
-                    ItemCountState::Exact { .. } | ItemCountState::Unavailable
-                ) {
-                    current
-                } else if cache.begin(&entry.path, generation) {
-                    drop(cache);
-                    let resolved = match fs::read_item_count(Path::new(&entry.path)) {
-                        Some(value) => ItemCountState::Exact { value },
-                        None => ItemCountState::Unavailable,
-                    };
-                    let mut cache = self.cache.lock().expect("item-count cache lock");
-                    cache.resolve(&entry.path, generation, resolved.clone());
-                    resolved
-                } else {
-                    // Equivalent in-flight work owns this key; leave the
-                    // entry's count as whatever the snapshot already carried
-                    // (usually `None`) rather than recount redundantly.
-                    ItemCountState::Pending
-                }
-            };
-            if let Some(value) = state.value() {
-                entry.item_count = Some(value);
-            }
+        let flow = entries
+            .iter_mut()
+            .try_for_each(|entry| self.fill_directory_item_count(entry, handle, generation));
+        if flow.is_break() {
+            return Ok(superseded_sort_response(request));
         }
 
         // Re-sort now that item counts (the active sort key's field) may
@@ -547,11 +500,7 @@ impl ItemCountService {
         });
 
         if self.is_explicit_cancelled(handle) {
-            return Ok(ActiveItemsSortResponse::Superseded(
-                ActiveItemsSortSuperseded {
-                    context: request.context.clone(),
-                },
-            ));
+            return Ok(superseded_sort_response(request));
         }
 
         Ok(ActiveItemsSortResponse::Ready(ActiveItemsSortReady {
@@ -559,6 +508,25 @@ impl ItemCountService {
             path: resolved_path,
             entries,
         }))
+    }
+
+    fn fill_directory_item_count(
+        &self,
+        entry: &mut DirectoryEntry,
+        handle: &ExplicitCountHandle,
+        generation: u64,
+    ) -> ControlFlow<()> {
+        if self.is_explicit_cancelled(handle) {
+            return ControlFlow::Break(());
+        }
+        if !entry.is_dir {
+            return ControlFlow::Continue(());
+        }
+        let state = self.resolve_item_count(&entry.path, generation);
+        if let Some(value) = state.value() {
+            entry.item_count = Some(value);
+        }
+        ControlFlow::Continue(())
     }
 
     /// Called by watch/session owners after an accepted direct-child patch.
@@ -633,6 +601,59 @@ fn contexts_match(left: &ItemCountRequestContext, right: &ItemCountRequestContex
         && left.pane_id == right.pane_id
         && left.tab_id == right.tab_id
         && strings_match(&left.path, &right.path)
+}
+
+struct AutomaticCountBatch {
+    context: ItemCountRequestContext,
+    path_count: usize,
+    results: Vec<ItemCountResult>,
+    emitted_any: bool,
+}
+
+impl AutomaticCountBatch {
+    fn new(plan: &AutomaticCountPlan) -> Self {
+        Self {
+            context: plan.context.clone(),
+            path_count: plan.paths.len(),
+            results: Vec::new(),
+            emitted_any: false,
+        }
+    }
+
+    fn add(&mut self, index: usize, result: ItemCountResult) -> Option<ItemCountEvent> {
+        self.results.push(result);
+        let is_last = index + 1 == self.path_count;
+        let is_full = self.results.len() >= ITEM_COUNT_BATCH_SIZE;
+        if !is_full && !is_last {
+            return None;
+        }
+        self.emitted_any = true;
+        Some(ItemCountEvent {
+            context: self.context.clone(),
+            results: std::mem::take(&mut self.results),
+            done: is_last,
+        })
+    }
+}
+
+fn select_uncarried_paths(candidates: &[String], carried: &[String], limit: usize) -> Vec<String> {
+    let mut selected = Vec::new();
+    for path in candidates {
+        if selected.len() >= limit {
+            break;
+        }
+        let already_planned = contains_path(carried, path) || contains_path(&selected, path);
+        if !already_planned {
+            selected.push(path.clone());
+        }
+    }
+    selected
+}
+
+fn superseded_sort_response(request: &ActiveItemsSortRequest) -> ActiveItemsSortResponse {
+    ActiveItemsSortResponse::Superseded(ActiveItemsSortSuperseded {
+        context: request.context.clone(),
+    })
 }
 
 fn contains_path(paths: &[String], candidate: &str) -> bool {

@@ -94,72 +94,105 @@ export function flattenVisibleTree(
   excludedRootPaths: ReadonlySet<string> = new Set(),
   fold: TreeFoldState = EMPTY_TREE_FOLD,
 ): FlatTreeRow[] {
-  const rows: FlatTreeRow[] = []
-  const chainIndex = new Map(fold.chain.map((path, index) => [path, index]))
-  const hidden = hiddenChainLevels(treeNodes, fold)
+  const walk = new VisibleTreeWalk(treeNodes, excludedRootPaths, fold)
+  walk.walk(rootPath, 0)
+  return walk.rows
+}
 
-  const walkPath = (path: string, depth: number): void => {
-    if (hidden[0] !== path) {
-      walk(path, depth)
-      return
-    }
-    rows.push({ kind: 'fold-levels', hiddenPaths: hidden, depth })
-    const resume = fold.chain[(chainIndex.get(hidden[hidden.length - 1]) ?? 0) + 1]
-    walk(resume, depth + hidden.length)
+class VisibleTreeWalk {
+  readonly rows: FlatTreeRow[] = []
+  private readonly treeNodes: Record<string, TreeNodeState>
+  private readonly excludedRootPaths: ReadonlySet<string>
+  private readonly fold: TreeFoldState
+  private readonly chainIndex: Map<string, number>
+  private readonly hidden: string[]
+
+  constructor(
+    treeNodes: Record<string, TreeNodeState>,
+    excludedRootPaths: ReadonlySet<string>,
+    fold: TreeFoldState,
+  ) {
+    this.treeNodes = treeNodes
+    this.excludedRootPaths = excludedRootPaths
+    this.fold = fold
+    this.chainIndex = new Map(fold.chain.map((path, index) => [path, index]))
+    this.hidden = hiddenChainLevels(treeNodes, fold)
   }
 
-  const nextOnChain = (path: string) => {
-    const index = chainIndex.get(path)
-    return index === undefined ? undefined : fold.chain[index + 1]
-  }
-
-  const isExcludedRoot = (path: string, depth: number) =>
-    depth > 0 && excludedRootPaths.has(path.toLowerCase())
-
-  const isFoldableChild = (node: TreeNodeState, next: string | undefined): next is string =>
-    next !== undefined && node.children.includes(next) && !excludedRootPaths.has(next.toLowerCase())
-
-  const walkChildren = (node: TreeNodeState, next: string | undefined, depth: number) => {
-    for (const childPath of node.children) {
-      const visit = childPath === next ? walkPath : walk
-      visit(childPath, depth + 1)
-    }
-  }
-
-  const walkFolded = (path: string, node: TreeNodeState, next: string, depth: number) => {
-    walkPath(next, depth + 1)
-    const others = node.children.length - 1
-    if (others > 0) {
-      rows.push({ kind: 'fold-siblings', parentPath: path, count: others, depth: depth + 1 })
-    }
-  }
-
-  const walk = (path: string, depth: number): void => {
-    const node = treeNodes[path]
-    if (isExcludedRoot(path, depth)) {
+  walk(path: string, depth: number): void {
+    const node = this.treeNodes[path]
+    if (this.isExcludedRoot(path, depth)) {
       return
     }
     if (!node) {
       return
     }
-    rows.push({ kind: 'node', path, depth })
+    this.rows.push({ kind: 'node', path, depth })
     if (!node.expanded) {
       return
     }
 
-    const next = nextOnChain(path)
-    if (fold.revealedSiblings.has(path)) {
-      walkChildren(node, next, depth)
+    const next = this.nextOnChain(path)
+    if (this.fold.revealedSiblings.has(path)) {
+      this.walkChildren(node, next, depth)
       return
     }
-    if (!isFoldableChild(node, next)) {
-      walkChildren(node, next, depth)
+    if (!this.isFoldableChild(node, next)) {
+      this.walkChildren(node, next, depth)
       return
     }
-    walkFolded(path, node, next, depth)
+    this.walkFolded(path, node, next, depth)
   }
-  walk(rootPath, 0)
-  return rows
+
+  private walkPath(path: string, depth: number): void {
+    const { hidden } = this
+    if (hidden[0] !== path) {
+      this.walk(path, depth)
+      return
+    }
+    this.rows.push({ kind: 'fold-levels', hiddenPaths: hidden, depth })
+    const resume = this.fold.chain[(this.chainIndex.get(hidden[hidden.length - 1]) ?? 0) + 1]
+    this.walk(resume, depth + hidden.length)
+  }
+
+  private nextOnChain(path: string) {
+    const index = this.chainIndex.get(path)
+    return index === undefined ? undefined : this.fold.chain[index + 1]
+  }
+
+  private isExcludedRoot(path: string, depth: number) {
+    return depth > 0 && this.excludedRootPaths.has(path.toLowerCase())
+  }
+
+  private isFoldableChild(node: TreeNodeState, next: string | undefined): next is string {
+    return (
+      next !== undefined &&
+      node.children.includes(next) &&
+      !this.excludedRootPaths.has(next.toLowerCase())
+    )
+  }
+
+  private walkChildren(node: TreeNodeState, next: string | undefined, depth: number) {
+    for (const childPath of node.children) {
+      this.visitChild(childPath, childPath === next, depth + 1)
+    }
+  }
+
+  private visitChild(path: string, onActivePath: boolean, depth: number) {
+    if (onActivePath) {
+      this.walkPath(path, depth)
+      return
+    }
+    this.walk(path, depth)
+  }
+
+  private walkFolded(path: string, node: TreeNodeState, next: string, depth: number) {
+    this.walkPath(next, depth + 1)
+    const others = node.children.length - 1
+    if (others > 0) {
+      this.rows.push({ kind: 'fold-siblings', parentPath: path, count: others, depth: depth + 1 })
+    }
+  }
 }
 
 /**

@@ -77,37 +77,19 @@ fn scan(
             truncated = true;
             break;
         }
-        let mut end = start;
-        let mut slots = 0;
-        source.read(&mut |tree, blocked| {
-            let blocked = blocked_prefixes(blocked);
-            slots = tree.slot_len();
-            end = (start + slots_per_read).min(slots);
-            for id in start..end {
-                let Some((node_name, _)) = tree.live_node(id as u32) else {
-                    continue;
-                };
-                if !name.may_match(node_name) {
-                    continue;
-                }
-                let Some(hit) = name.matches(&FoldedName::new(&nfc(node_name)), NameKind::Folder)
-                else {
-                    continue;
-                };
-                if let Some(path) = visible_path(tree, id as u32, &blocked, options.include_hidden)
-                {
-                    found.push((hit.tier, folder(path)));
-                }
-            }
-        })?;
+        let chunk = SlotChunk {
+            start,
+            len: slots_per_read,
+        };
+        let read = read_slot_chunk(source, name, options, chunk, &mut found)?;
         if found.len() > FOUND_PRUNE_THRESHOLD {
             keep_best(&mut found);
             truncated = true;
         }
-        if end >= slots {
+        if read.end >= read.slot_count {
             break;
         }
-        start = end;
+        start = read.end;
     }
     if found.len() > CANDIDATE_CAP {
         keep_best(&mut found);
@@ -117,6 +99,57 @@ fn scan(
         candidates: found.into_iter().map(|(_, candidate)| candidate).collect(),
         truncated,
     })
+}
+
+#[derive(Clone, Copy)]
+struct SlotChunk {
+    start: usize,
+    len: usize,
+}
+
+struct SlotChunkRead {
+    end: usize,
+    slot_count: usize,
+}
+
+fn read_slot_chunk(
+    source: &dyn FolderTreeSource,
+    name: &Segment,
+    options: &SearchOptions,
+    chunk: SlotChunk,
+    found: &mut Vec<(u8, Candidate)>,
+) -> Result<SlotChunkRead, SearchError> {
+    let mut read = SlotChunkRead {
+        end: chunk.start,
+        slot_count: 0,
+    };
+    source.read(&mut |tree, blocked| {
+        let blocked = blocked_prefixes(blocked);
+        read.slot_count = tree.slot_len();
+        read.end = (chunk.start + chunk.len).min(read.slot_count);
+        let hits = (chunk.start..read.end)
+            .filter_map(|id| folder_hit(tree, id as u32, name, &blocked, options.include_hidden));
+        found.extend(hits);
+    })?;
+    Ok(read)
+}
+
+/// The match tier and candidate for a live, visible folder whose name
+/// matches `name`.
+fn folder_hit(
+    tree: &FolderSizeTree,
+    id: u32,
+    name: &Segment,
+    blocked: &[String],
+    include_hidden: bool,
+) -> Option<(u8, Candidate)> {
+    let (node_name, _) = tree.live_node(id)?;
+    if !name.may_match(node_name) {
+        return None;
+    }
+    let hit = name.matches(&FoldedName::new(&nfc(node_name)), NameKind::Folder)?;
+    let path = visible_path(tree, id, blocked, include_hidden)?;
+    Some((hit.tier, folder(path)))
 }
 
 fn keep_best(found: &mut Vec<(u8, Candidate)>) {
@@ -133,22 +166,47 @@ fn list_children(
     let mut batch = CandidateBatch::default();
     source.read(&mut |tree, blocked| {
         let blocked = blocked_prefixes(blocked);
-        for parent in parents {
-            let Some(id) = tree.lookup(Path::new(parent)) else {
-                continue;
-            };
-            for &child in tree.child_ids(id) {
-                if batch.candidates.len() == CANDIDATE_CAP {
-                    batch.truncated = true;
-                    return;
-                }
-                if let Some(path) = visible_path(tree, child, &blocked, options.include_hidden) {
-                    batch.candidates.push(folder(path));
-                }
-            }
-        }
+        push_children_of_parents(tree, parents, &blocked, options.include_hidden, &mut batch);
     })?;
     Ok(batch)
+}
+
+fn push_children_of_parents(
+    tree: &FolderSizeTree,
+    parents: &[String],
+    blocked: &[String],
+    include_hidden: bool,
+    batch: &mut CandidateBatch,
+) {
+    let parent_ids = parents
+        .iter()
+        .filter_map(|parent| tree.lookup(Path::new(parent)));
+    for parent_id in parent_ids {
+        let has_room = push_visible_children(tree, parent_id, blocked, include_hidden, batch);
+        if !has_room {
+            return;
+        }
+    }
+}
+
+/// Returns `false` once the batch is full.
+fn push_visible_children(
+    tree: &FolderSizeTree,
+    parent_id: u32,
+    blocked: &[String],
+    include_hidden: bool,
+    batch: &mut CandidateBatch,
+) -> bool {
+    for &child in tree.child_ids(parent_id) {
+        if batch.candidates.len() == CANDIDATE_CAP {
+            batch.truncated = true;
+            return false;
+        }
+        if let Some(path) = visible_path(tree, child, blocked, include_hidden) {
+            batch.candidates.push(folder(path));
+        }
+    }
+    true
 }
 
 /// The node's POSIX path, unless it is hidden (a dot-named component while

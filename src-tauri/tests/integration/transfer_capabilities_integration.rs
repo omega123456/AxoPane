@@ -323,67 +323,69 @@ const EVERY_REQUIREMENT: TransferRequirements = TransferRequirements {
     cancellation: true,
 };
 
+const CAPABLE_WINDOWS: WindowsCapabilities = WindowsCapabilities {
+    api_available: true,
+    supported_build: true,
+    local_filesystem: true,
+    server_supports_copyfile2: true,
+    sparse: true,
+    offload: true,
+    metadata: true,
+    reparse_links: true,
+    progress: true,
+    cancellation: true,
+};
+
+const WINDOWS_PRECEDENCE_CASES: [(WindowsCapabilities, PortableReason); 6] = [
+    (
+        WindowsCapabilities {
+            api_available: false,
+            supported_build: false,
+            ..CAPABLE_WINDOWS
+        },
+        PortableReason::ApiUnavailable,
+    ),
+    (
+        WindowsCapabilities {
+            supported_build: false,
+            ..CAPABLE_WINDOWS
+        },
+        PortableReason::UnsupportedBuild,
+    ),
+    (
+        WindowsCapabilities {
+            offload: false,
+            metadata: false,
+            ..CAPABLE_WINDOWS
+        },
+        PortableReason::OffloadUnsupported,
+    ),
+    (
+        WindowsCapabilities {
+            metadata: false,
+            ..CAPABLE_WINDOWS
+        },
+        PortableReason::MetadataUnsupported,
+    ),
+    (
+        WindowsCapabilities {
+            reparse_links: false,
+            ..CAPABLE_WINDOWS
+        },
+        PortableReason::LinkUnsupported,
+    ),
+    (
+        WindowsCapabilities {
+            progress: false,
+            ..CAPABLE_WINDOWS
+        },
+        PortableReason::ProgressUnsupported,
+    ),
+];
+
 #[test]
 fn windows_reports_the_first_missing_capability_in_precedence_order() {
-    let capable = WindowsCapabilities {
-        api_available: true,
-        supported_build: true,
-        local_filesystem: true,
-        server_supports_copyfile2: true,
-        sparse: true,
-        offload: true,
-        metadata: true,
-        reparse_links: true,
-        progress: true,
-        cancellation: true,
-    };
-    let cases = [
-        (
-            WindowsCapabilities {
-                api_available: false,
-                supported_build: false,
-                ..capable
-            },
-            PortableReason::ApiUnavailable,
-        ),
-        (
-            WindowsCapabilities {
-                supported_build: false,
-                ..capable
-            },
-            PortableReason::UnsupportedBuild,
-        ),
-        (
-            WindowsCapabilities {
-                offload: false,
-                metadata: false,
-                ..capable
-            },
-            PortableReason::OffloadUnsupported,
-        ),
-        (
-            WindowsCapabilities {
-                metadata: false,
-                ..capable
-            },
-            PortableReason::MetadataUnsupported,
-        ),
-        (
-            WindowsCapabilities {
-                reparse_links: false,
-                ..capable
-            },
-            PortableReason::LinkUnsupported,
-        ),
-        (
-            WindowsCapabilities {
-                progress: false,
-                ..capable
-            },
-            PortableReason::ProgressUnsupported,
-        ),
-    ];
-    for (capabilities, reason) in cases {
+    for (capabilities, reason) in WINDOWS_PRECEDENCE_CASES {
         assert_eq!(
             capabilities.select(EVERY_REQUIREMENT),
             AdapterSelection::Portable(reason)
@@ -391,7 +393,7 @@ fn windows_reports_the_first_missing_capability_in_precedence_order() {
     }
     let remote_with_copyfile2 = WindowsCapabilities {
         local_filesystem: false,
-        ..capable
+        ..CAPABLE_WINDOWS
     };
     assert_eq!(
         remote_with_copyfile2.select(EVERY_REQUIREMENT),
@@ -399,65 +401,67 @@ fn windows_reports_the_first_missing_capability_in_precedence_order() {
     );
 }
 
+const CAPABLE_MACOS: MacosCapabilities = MacosCapabilities {
+    api_available: true,
+    filesystem_supports_copyfile: true,
+    clone: true,
+    sparse: true,
+    metadata: true,
+    links: true,
+    progress: true,
+    cancellation: true,
+};
+
+const MACOS_PRECEDENCE_CASES: [(MacosCapabilities, PortableReason); 6] = [
+    (
+        MacosCapabilities {
+            api_available: false,
+            filesystem_supports_copyfile: false,
+            ..CAPABLE_MACOS
+        },
+        PortableReason::ApiUnavailable,
+    ),
+    (
+        MacosCapabilities {
+            filesystem_supports_copyfile: false,
+            ..CAPABLE_MACOS
+        },
+        PortableReason::UnsupportedFilesystem,
+    ),
+    (
+        MacosCapabilities {
+            sparse: false,
+            links: false,
+            ..CAPABLE_MACOS
+        },
+        PortableReason::SparseUnsupported,
+    ),
+    (
+        MacosCapabilities {
+            links: false,
+            ..CAPABLE_MACOS
+        },
+        PortableReason::LinkUnsupported,
+    ),
+    (
+        MacosCapabilities {
+            progress: false,
+            ..CAPABLE_MACOS
+        },
+        PortableReason::ProgressUnsupported,
+    ),
+    (
+        MacosCapabilities {
+            cancellation: false,
+            ..CAPABLE_MACOS
+        },
+        PortableReason::CancellationUnsupported,
+    ),
+];
+
 #[test]
 fn macos_reports_the_first_missing_capability_in_precedence_order() {
-    let capable = MacosCapabilities {
-        api_available: true,
-        filesystem_supports_copyfile: true,
-        clone: true,
-        sparse: true,
-        metadata: true,
-        links: true,
-        progress: true,
-        cancellation: true,
-    };
-    let cases = [
-        (
-            MacosCapabilities {
-                api_available: false,
-                filesystem_supports_copyfile: false,
-                ..capable
-            },
-            PortableReason::ApiUnavailable,
-        ),
-        (
-            MacosCapabilities {
-                filesystem_supports_copyfile: false,
-                ..capable
-            },
-            PortableReason::UnsupportedFilesystem,
-        ),
-        (
-            MacosCapabilities {
-                sparse: false,
-                links: false,
-                ..capable
-            },
-            PortableReason::SparseUnsupported,
-        ),
-        (
-            MacosCapabilities {
-                links: false,
-                ..capable
-            },
-            PortableReason::LinkUnsupported,
-        ),
-        (
-            MacosCapabilities {
-                progress: false,
-                ..capable
-            },
-            PortableReason::ProgressUnsupported,
-        ),
-        (
-            MacosCapabilities {
-                cancellation: false,
-                ..capable
-            },
-            PortableReason::CancellationUnsupported,
-        ),
-    ];
-    for (capabilities, reason) in cases {
+    for (capabilities, reason) in MACOS_PRECEDENCE_CASES {
         assert_eq!(
             capabilities.select(EVERY_REQUIREMENT),
             AdapterSelection::Portable(reason)

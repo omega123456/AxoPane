@@ -29,13 +29,16 @@ fn entry(name: &str, is_dir: bool) -> DirectoryEntry {
     }
 }
 
-#[test]
-fn helper_validation_and_sorting_cover_private_branches() {
+fn expected_platform_root() -> std::path::PathBuf {
     if cfg!(windows) {
-        assert_eq!(platform_root(), std::path::PathBuf::from("C:\\"));
-    } else {
-        assert_eq!(platform_root(), std::path::PathBuf::from("/"));
+        return std::path::PathBuf::from("C:\\");
     }
+    std::path::PathBuf::from("/")
+}
+
+#[test]
+fn helper_validation_and_labels_cover_private_branches() {
+    assert_eq!(platform_root(), expected_platform_root());
 
     assert!(validate_name("report.txt").is_ok());
     for invalid in ["", " ", ".", "..", "a/b", "a\\b", "bad\0name"] {
@@ -61,6 +64,14 @@ fn helper_validation_and_sorting_cover_private_branches() {
     );
     assert_eq!(compare_optional_string(None, None), Ordering::Equal);
 
+    assert!(system_time_to_rfc3339(Some(SystemTime::UNIX_EPOCH))
+        .expect("timestamp")
+        .starts_with("1970-01-01T00:00:00"));
+    assert_eq!(common::bootstrap_message(), "phase-1-common");
+}
+
+#[test]
+fn helper_compare_entries_orders_by_each_sort_key() {
     let directory = entry("docs", true);
     let file = entry("todo.txt", false);
     assert_eq!(
@@ -86,6 +97,10 @@ fn helper_validation_and_sorting_cover_private_branches() {
         compare_entries(&small, &large, SortKey::Created, SortDirection::Desc),
         Ordering::Greater
     );
+}
+
+#[test]
+fn helper_compare_entries_breaks_equal_keys_by_name() {
     let mut left = entry("alpha.txt", false);
     let mut right = entry("beta.txt", false);
     left.modified_at = Some("2026-01-01T00:00:00Z".to_string());
@@ -101,9 +116,6 @@ fn helper_validation_and_sorting_cover_private_branches() {
         Ordering::Less
     );
 
-    // Equal primary keys force the `then_with` name tiebreak closures to run for
-    // the Size and Items sort keys (names are equal length, so sizes/item counts
-    // match and the comparison falls through to the natural-name ordering).
     let size_a = entry("aaa.txt", false);
     let size_b = entry("bbb.txt", false);
     assert_eq!(size_a.size_bytes, size_b.size_bytes);
@@ -118,11 +130,6 @@ fn helper_validation_and_sorting_cover_private_branches() {
         compare_entries(&items_a, &items_b, SortKey::Items, SortDirection::Asc),
         Ordering::Less
     );
-
-    assert!(system_time_to_rfc3339(Some(SystemTime::UNIX_EPOCH))
-        .expect("timestamp")
-        .starts_with("1970-01-01T00:00:00"));
-    assert_eq!(common::bootstrap_message(), "phase-1-common");
 }
 
 #[test]

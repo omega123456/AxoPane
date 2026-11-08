@@ -79,3 +79,5 @@ debug = false
 
 [lints.clippy]
 min_ident_chars = "warn"
+excessive_nesting = "warn"
+too_many_lines = "warn"

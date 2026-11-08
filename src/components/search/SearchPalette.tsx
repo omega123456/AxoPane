@@ -1,400 +1,76 @@
-import { useEffect, useMemo, useRef, type KeyboardEvent } from 'react'
-import { LoaderCircleIcon, SearchIcon } from '@/components/icons'
-import { SearchNoResults, SearchUnavailableState } from '@/components/search/SearchEmptyState'
-import { SearchResultRow, searchOptionId } from '@/components/search/SearchResultRow'
-import { favouriteLabel } from '@/components/tree/FavouriteTreeRow'
-import { FOCUS_RING_INSET } from '@/lib/focus-ring'
-import { DETAIL_SEPARATOR } from '@/lib/format'
-import { compactCount, folderSizeStatusLabel } from '@/lib/folder-size-status'
+import { useEffect, useRef, type ReactNode, type RefObject } from 'react'
+import { searchOptionId } from '@/components/search/SearchResultRow'
+import { detectPlatformOs } from '@/lib/keymap'
+import type { SearchScope } from '@/lib/types/ipc'
+import { useSearchPaletteStore } from '@/stores/search-palette-store'
 import {
-  detectPlatformOs,
-  formatShortcutLabel,
-  resolveCommandForEvent,
-  type PlatformOs,
-} from '@/lib/keymap'
-import { handleKeyByTable, type KeyHandlerTable } from '@/lib/key-table'
+  footerText,
+  inputPlaceholder,
+  lastRenderedIndex,
+  paletteRows,
+  resultAnnouncement,
+  scopeNoteFor,
+  searchBackendInfo,
+} from './search-palette-model'
 import {
-  activateSearchHit,
-  completeSearchQuery,
-  searchActivationForEvent,
-  type SearchActivation,
-} from '@/lib/search-actions'
-import type {
-  FolderSizeIndexStatus,
-  SearchCapabilities,
-  SearchHit,
-  SearchRejection,
-  SearchScope,
-  Shortcut,
-} from '@/lib/types/ipc'
-import { useElementVirtualizer } from '@/lib/use-element-virtualizer'
-import { virtualRowsOrFallback } from '@/lib/virtual-rows'
-import { useConfigStore } from '@/stores/config-store'
-import { useKeymapStore } from '@/stores/keymap-store'
-import { getParentPath, usePanesStore } from '@/stores/panes-store'
-import { useRecentFoldersStore } from '@/stores/recent-folders-store'
+  SearchInputField,
+  SearchListMessage,
+  SearchPaletteFooter,
+  SearchResultsList,
+  SearchScopeBar,
+} from './SearchPaletteParts'
 import {
-  isSearchable,
-  useSearchPaletteStore,
-  type SearchStatus,
-} from '@/stores/search-palette-store'
-import { TEXT_SECONDARY } from '@/lib/class-names'
+  activatePaletteHit,
+  handlePaletteKeyDown,
+  SEARCH_ROW_HEIGHT,
+  useCloseOnOutsidePointer,
+  useFolderShortcutRows,
+  useSearchPaletteView,
+  useSearchVirtualRows,
+} from './use-search-palette'
 
-const ROW_HEIGHT = 44
-const PAGE_ROWS = 8
-const UNMEASURED_FALLBACK_ROWS = PAGE_ROWS + PAGE_ROWS
-const MAX_RECENTS = 6
-const FALLBACK_ROW_KEY_PREFIX = 'search-row'
-const LISTBOX_ID = 'search-everywhere-results'
-const SCOPES: { scope: SearchScope; label: string }[] = [
-  { scope: 'all', label: 'All' },
-  { scope: 'folders', label: 'Folders' },
-  { scope: 'files', label: 'Files' },
-]
-
-/** A favourite or recent folder, shaped like a hit so rows and actions are shared. */
-function folderRow(path: string, name: string): SearchHit {
-  return {
-    path,
-    name,
-    parentPath: getParentPath(path) ?? '',
-    isDir: true,
-    modifiedAt: null,
-    nameRanges: [],
-    parentRanges: [],
-  }
-}
-
-function withTrailingSeparator(path: string) {
-  return /[\\/]$/.test(path) ? path : `${path}${path.includes('\\') ? '\\' : '/'}`
-}
-
-type SearchBackend = SearchCapabilities['backend']
-
-function resultCountText(loaded: number, total: number) {
-  if (loaded < total) {
-    return `Showing ${loaded} of ${total}`
-  }
-  return `${total} ${total === 1 ? 'result' : 'results'}`
-}
-
-function resultsSuffix(searching: boolean, loaded: number, total: number, truncated: boolean) {
-  if (!searching) {
-    return ''
-  }
-  const refineHint = truncated ? `${DETAIL_SEPARATOR}refine your search` : ''
-  return `${DETAIL_SEPARATOR}${resultCountText(loaded, total)}${refineHint}`
-}
-
-function indexingFooter(status: FolderSizeIndexStatus) {
-  const scanned =
-    status.itemsScanned === undefined ? '' : ` ${compactCount.format(status.itemsScanned)} folders`
-  return `Indexing…${scanned}${DETAIL_SEPARATOR}results may be incomplete`
-}
-
-const macIndexStateFooters: Partial<
-  Record<FolderSizeIndexStatus['state'], (status: FolderSizeIndexStatus) => string>
-> = {
-  indexing: indexingFooter,
-  paused: folderSizeStatusLabel,
-}
-
-function macIndexFooter(status: FolderSizeIndexStatus | null, results: string) {
-  const foldersFooter = `Folders on this Mac${results}`
-  if (!status) {
-    return foldersFooter
-  }
-  const stateFooter = macIndexStateFooters[status.state]
-  return stateFooter ? stateFooter(status) : foldersFooter
-}
-
-function footerText(
-  backend: SearchBackend,
-  status: FolderSizeIndexStatus | null,
-  searching: boolean,
-  loaded: number,
-  total: number,
-  truncated: boolean,
-) {
-  const results = resultsSuffix(searching, loaded, total, truncated)
-  if (backend !== 'macIndex') {
-    return `Everything${results}`
-  }
-  return macIndexFooter(status, results)
-}
-
-function searchBackendInfo(
-  capabilities: SearchCapabilities | null,
-  indexStatus: FolderSizeIndexStatus | null,
-): SearchCapabilities {
-  const backend = capabilities?.backend ?? indexStatus?.backend ?? 'none'
-  return { backend, foldersOnly: capabilities?.foldersOnly ?? backend === 'macIndex' }
-}
-
-function lastRenderedIndex(virtualRows: { index: number }[]) {
-  return virtualRows.at(-1)?.index ?? -1
-}
-
-function scopeNoteFor(searching: boolean, query: string, foldersOnly: boolean) {
-  const shortQuery = !searching && query.trim().length > 0 && !isSearchable(query)
-  if (shortQuery) {
-    return 'Keep typing. Search starts at 3 characters'
-  }
-  return foldersOnly ? 'Folder names only on this Mac' : ''
-}
-
-function resultAnnouncement(status: SearchStatus, total: number) {
-  if (status !== 'ready') {
-    return ''
-  }
-  return total === 0 ? 'No results' : `${total} results`
-}
-
-function inputPlaceholder(foldersOnly: boolean) {
-  return foldersOnly
-    ? 'Search folders, or type a path like alex/'
-    : 'Search files and folders, or type a path like alex/'
-}
-
-function paletteRows(
-  searching: boolean,
-  items: SearchHit[],
-  favouriteRows: SearchHit[],
-  recentRows: SearchHit[],
-) {
-  return searching ? items : [...favouriteRows, ...recentRows]
-}
-
-function SearchListMessage({
-  status,
-  error,
-  backend,
-  total,
-  query,
-  foldersOnly,
-}: {
-  status: SearchStatus
-  error: SearchRejection | null
-  backend: SearchBackend
-  total: number
-  query: string
-  foldersOnly: boolean
-}) {
-  const rejection = status === 'error' ? error : null
-  if (rejection) {
-    return <SearchUnavailableState backend={backend} rejection={rejection} />
-  }
-  const foundNothing = status === 'ready' && total === 0
-  if (foundNothing) {
-    return <SearchNoResults query={query} foldersOnly={foldersOnly} />
-  }
-  return null
-}
-
-function SearchInputAdornments({
-  shortcut,
-  platform,
-  loading,
-}: {
-  shortcut: Shortcut | undefined
-  platform: PlatformOs
-  loading: boolean
-}) {
-  return (
-    <>
-      {shortcut ? (
-        <kbd className="shrink-0 rounded-control border border-light-divider px-1.5 font-ui text-caption text-light-text-tertiary dark:border-dark-divider dark:text-dark-text-tertiary">
-          {formatShortcutLabel(shortcut, platform)}
-        </kbd>
-      ) : null}
-      {loading ? (
-        <span
-          aria-hidden="true"
-          className="absolute inset-x-0 -bottom-0.5 h-0.5 animate-pulse bg-light-accent dark:bg-dark-accent"
-        />
-      ) : null}
-    </>
-  )
-}
+type SearchPaletteView = ReturnType<typeof useSearchPaletteView>
+type SearchVirtualizer = ReturnType<typeof useSearchVirtualRows>['virtualizer']
 
 export function SearchPalette() {
   const isOpen = useSearchPaletteStore((state) => state.isOpen)
   return isOpen ? <SearchPaletteFlyout /> : null
 }
 
-function SearchPaletteFlyout() {
-  const query = useSearchPaletteStore((state) => state.query)
-  const scope = useSearchPaletteStore((state) => state.scope)
-  const status = useSearchPaletteStore((state) => state.status)
-  const items = useSearchPaletteStore((state) => state.items)
-  const total = useSearchPaletteStore((state) => state.total)
-  const truncated = useSearchPaletteStore((state) => state.truncated)
-  const loadingMore = useSearchPaletteStore((state) => state.loadingMore)
-  const activeIndex = useSearchPaletteStore((state) => state.activeIndex)
-  const error = useSearchPaletteStore((state) => state.error)
-  const capabilities = useSearchPaletteStore((state) => state.capabilities)
-  const focusRequest = useSearchPaletteStore((state) => state.focusRequest)
-  const { close, setQuery, setScope, setActiveIndex, moveActive, loadMore } =
-    useSearchPaletteStore.getState()
-  const indexStatus = usePanesStore((state) => state.folderSizeIndexStatus)
-  const favourites = useConfigStore((state) => state.favourites)
-  const favouriteNames = useConfigStore((state) => state.favouriteNames)
-  const recentFolders = useRecentFoldersStore((state) => state.folders)
-  const keymap = useKeymapStore((state) => state.bindings)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
-  const listRef = useRef<HTMLDivElement>(null)
+function usePaletteRows(view: SearchPaletteView) {
+  const { favouriteRows, recentRows } = useFolderShortcutRows()
+  const searching = view.status !== 'idle'
+  const rows = paletteRows(searching, view.items, favouriteRows, recentRows)
+  const hasMore = searching && view.items.length < view.total
+  return { searching, rows, hasMore, activeRow: rows[view.activeIndex] }
+}
 
-  const { backend, foldersOnly } = searchBackendInfo(capabilities, indexStatus)
-  const searching = status !== 'idle'
-  const shortcut = keymap.searchEverywhere[0]
-  const platform = detectPlatformOs()
-
-  const favouriteRows = useMemo(
-    () => favourites.map((path) => folderRow(path, favouriteNames[path] ?? favouriteLabel(path))),
-    [favourites, favouriteNames],
-  )
-  const recentRows = useMemo(
-    () =>
-      recentFolders
-        .filter((path) => !favourites.includes(path))
-        .slice(0, MAX_RECENTS)
-        .map((path) => folderRow(path, favouriteLabel(path))),
-    [favourites, recentFolders],
-  )
-  const rows = paletteRows(searching, items, favouriteRows, recentRows)
-  const hasMore = searching && items.length < total
-  const activeRow = rows[activeIndex]
-
-  const rowCount = rows.length + (hasMore ? 1 : 0)
-  const virtualizer = useElementVirtualizer({
-    count: rowCount,
-    estimateSize: () => ROW_HEIGHT,
-    getScrollElement: () => listRef.current,
-    overscan: PAGE_ROWS,
-  })
-  const virtualRows = virtualRowsOrFallback({
-    measuredRows: virtualizer.getVirtualItems(),
-    rowCount,
-    fallbackRowLimit: UNMEASURED_FALLBACK_ROWS,
-    rowStart: (index) => index * ROW_HEIGHT,
-    keyPrefix: FALLBACK_ROW_KEY_PREFIX,
-  })
-  const lastRendered = lastRenderedIndex(virtualRows)
-
+function useFocusInputOnRequest(inputRef: RefObject<HTMLInputElement | null>, request: number) {
   useEffect(() => {
     inputRef.current?.focus()
     inputRef.current?.select()
-  }, [focusRequest])
+  }, [inputRef, request])
+}
 
+function useLoadMoreWhenLoadingRowRendered(
+  hasMore: boolean,
+  loadedCount: number,
+  lastRendered: number,
+) {
   useEffect(() => {
-    function onPointerDown(event: PointerEvent) {
-      const target = event.target as Element
-      if (!panelRef.current?.contains(target) && !target.closest('[data-search-trigger]')) {
-        close()
-      }
+    if (hasMore && lastRendered >= loadedCount) {
+      void useSearchPaletteStore.getState().loadMore()
     }
-    document.addEventListener('pointerdown', onPointerDown)
-    return () => document.removeEventListener('pointerdown', onPointerDown)
-  }, [close])
+  }, [hasMore, loadedCount, lastRendered])
+}
 
-  useEffect(() => {
-    if (rows.length > 0) {
-      virtualizer.scrollToIndex(activeIndex, { align: 'auto' })
-    }
-  }, [activeIndex, rows.length, virtualizer])
-
-  // Scrolling the loading row into view fetches the next page.
-  useEffect(() => {
-    if (hasMore && lastRendered >= items.length) {
-      void loadMore()
-    }
-  }, [hasMore, items.length, lastRendered, loadMore])
-
-  function dismiss() {
-    const paneId = usePanesStore.getState().activePaneId
-    close()
-    document.querySelector<HTMLElement>(`[data-pane-id="${paneId}"]`)?.focus()
-  }
-
-  function activate(hit: SearchHit, how: SearchActivation) {
-    dismiss()
-    void activateSearchHit(hit, how)
-  }
-
-  function move(delta: number) {
-    if (searching) {
-      moveActive(delta)
-    } else if (rows.length > 0) {
-      setActiveIndex(Math.min(Math.max(activeIndex + delta, 0), rows.length - 1))
-    }
-  }
-
-  function clearQueryOrDismiss() {
-    if (query) {
-      setQuery('')
-      return
-    }
-    dismiss()
-  }
-
-  function jumpToLastRow() {
-    setActiveIndex(rows.length - 1)
-    void loadMore()
-  }
-
-  function jumpKeys(event: KeyboardEvent<HTMLInputElement>): KeyHandlerTable {
-    const withPrimaryModifier = event.ctrlKey || event.metaKey
-    if (!withPrimaryModifier) {
-      return {}
-    }
-    const endKey: KeyHandlerTable = rows.length > 0 ? { End: jumpToLastRow } : {}
-    return { Home: () => setActiveIndex(0), ...endKey }
-  }
-
-  function completionKeys(event: KeyboardEvent<HTMLInputElement>): KeyHandlerTable {
-    if (event.shiftKey) {
-      return {}
-    }
-    if (!activeRow?.isDir) {
-      return {}
-    }
-    const completed = searching
-      ? completeSearchQuery(query, activeRow)
-      : withTrailingSeparator(activeRow.path)
-    return { Tab: () => setQuery(completed) }
-  }
-
-  function paletteKeyTable(event: KeyboardEvent<HTMLInputElement>): KeyHandlerTable {
-    return {
-      ArrowDown: () => move(1),
-      ArrowUp: () => move(-1),
-      PageDown: () => move(PAGE_ROWS),
-      PageUp: () => move(-PAGE_ROWS),
-      Escape: clearQueryOrDismiss,
-      ...jumpKeys(event),
-      ...completionKeys(event),
-    }
-  }
-
-  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    const how = searchActivationForEvent(event.nativeEvent, keymap)
-    if (how && activeRow) {
-      event.preventDefault()
-      activate(activeRow, how)
-      return
-    }
-    if (resolveCommandForEvent(event.nativeEvent, keymap) === 'searchEverywhere') {
-      event.preventDefault()
-      inputRef.current?.select()
-      return
-    }
-    handleKeyByTable(event, paletteKeyTable(event))
-  }
-
-  const scopeNote = scopeNoteFor(searching, query, foldersOnly)
-  const showList = rows.length > 0 && status !== 'error'
-
+function SearchPaletteFrame({
+  panelRef,
+  children,
+}: {
+  panelRef: RefObject<HTMLDivElement | null>
+  children: ReactNode
+}) {
   return (
     <div className="pointer-events-none fixed inset-x-0 top-palette-top z-40 flex justify-center px-4">
       <div
@@ -403,134 +79,125 @@ function SearchPaletteFlyout() {
         aria-label="Search everywhere"
         className="pointer-events-auto flex w-palette max-w-full flex-col overflow-hidden rounded-overlay border border-light-flyout-stroke bg-light-card text-light-text shadow-light-flyout dark:border-dark-flyout-stroke dark:bg-dark-card dark:text-dark-text dark:shadow-dark-flyout"
       >
-        <label className="relative mx-2 mt-2 flex h-command items-center gap-2.5 rounded-control border border-light-control-stroke border-b-2 border-b-light-accent bg-light-control px-2.5 focus-within:ring-2 focus-within:ring-light-focus-outer dark:border-dark-control-stroke dark:border-b-dark-accent dark:bg-dark-control dark:focus-within:ring-dark-focus-outer">
-          <SearchIcon className={`size-4 shrink-0 ${TEXT_SECONDARY}`} />
-          <input
-            ref={inputRef}
-            role="combobox"
-            aria-expanded={showList}
-            aria-controls={LISTBOX_ID}
-            aria-autocomplete="list"
-            aria-activedescendant={activeRow ? searchOptionId(activeIndex) : undefined}
-            aria-label="Search everywhere"
-            autoComplete="off"
-            spellCheck={false}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder={inputPlaceholder(foldersOnly)}
-            className="min-w-0 flex-1 select-text bg-transparent text-body outline-none placeholder:text-light-text-tertiary dark:placeholder:text-dark-text-tertiary"
-          />
-          <SearchInputAdornments
-            shortcut={shortcut}
-            platform={platform}
-            loading={status === 'loading'}
-          />
-        </label>
-
-        <div className="flex flex-wrap items-center gap-2.5 px-2.5 pb-1.5 pt-2">
-          <div
-            role="group"
-            aria-label="Search scope"
-            className="inline-flex gap-0.5 rounded-control border border-light-stroke bg-light-base p-0.5 dark:border-dark-stroke dark:bg-dark-base"
-          >
-            {SCOPES.map((option) => (
-              <button
-                key={option.scope}
-                type="button"
-                aria-pressed={scope === option.scope}
-                disabled={option.scope === 'files' && foldersOnly}
-                onClick={() => {
-                  setScope(option.scope)
-                  inputRef.current?.focus()
-                }}
-                className={`h-6 rounded-control px-2.5 text-caption disabled:cursor-not-allowed disabled:text-light-text-disabled dark:disabled:text-dark-text-disabled ${
-                  scope === option.scope
-                    ? 'bg-light-card font-semibold text-light-text shadow-thumb dark:bg-dark-card dark:text-dark-text'
-                    : `${TEXT_SECONDARY} hover:bg-light-hover dark:hover:bg-dark-hover`
-                } ${FOCUS_RING_INSET}`}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-          {scopeNote ? (
-            <span className="min-w-0 flex-1 truncate text-caption text-light-text-tertiary dark:text-dark-text-tertiary">
-              {scopeNote}
-            </span>
-          ) : null}
-        </div>
-
-        <div ref={listRef} className="max-h-palette-list min-h-0 overflow-y-auto px-1 pb-1">
-          <SearchListMessage
-            status={status}
-            error={error}
-            backend={backend}
-            total={total}
-            query={query}
-            foldersOnly={foldersOnly}
-          />
-          {showList ? (
-            <div
-              role="listbox"
-              id={LISTBOX_ID}
-              aria-label={searching ? 'Results' : 'Favourites and recent folders'}
-              className="relative w-full"
-              style={{ height: virtualizer.getTotalSize() || rowCount * ROW_HEIGHT }}
-            >
-              {virtualRows.map((virtualRow) => {
-                const style = { transform: `translateY(${virtualRow.start}px)` }
-                const hit = rows[virtualRow.index]
-                if (!hit) {
-                  return (
-                    <div
-                      key="more"
-                      aria-hidden="true"
-                      style={style}
-                      className="absolute inset-x-0 top-0 flex h-search-row items-center justify-center gap-2 text-caption text-light-text-tertiary dark:text-dark-text-tertiary"
-                    >
-                      {loadingMore ? (
-                        <>
-                          <LoaderCircleIcon className="size-3.5 animate-spin" />
-                          Loading more…
-                        </>
-                      ) : (
-                        'Scroll or press ↓ for more'
-                      )}
-                    </div>
-                  )
-                }
-                return (
-                  <SearchResultRow
-                    key={`${virtualRow.index}:${hit.path}`}
-                    hit={hit}
-                    index={virtualRow.index}
-                    total={searching ? total : rows.length}
-                    active={virtualRow.index === activeIndex}
-                    style={style}
-                    onHover={setActiveIndex}
-                    onActivate={activate}
-                  />
-                )
-              })}
-            </div>
-          ) : null}
-        </div>
-
-        <div className="flex h-8 shrink-0 items-center gap-3.5 overflow-hidden whitespace-nowrap border-t border-light-divider px-3 text-caption text-light-text-tertiary dark:border-dark-divider dark:text-dark-text-tertiary">
-          <span className={`truncate ${TEXT_SECONDARY}`}>
-            {footerText(backend, indexStatus, status === 'ready', items.length, total, truncated)}
-          </span>
-          <span aria-hidden="true" className="ml-auto flex gap-3">
-            <span>↵ open</span>
-            <span>⇧↵ open file</span>
-            <span>Esc close</span>
-          </span>
-        </div>
-        <span role="status" aria-live="polite" className="sr-only">
-          {resultAnnouncement(status, total)}
-        </span>
+        {children}
       </div>
     </div>
+  )
+}
+
+function useScrollActiveRowIntoView(
+  virtualizer: SearchVirtualizer,
+  activeIndex: number,
+  rowCount: number,
+) {
+  useEffect(() => {
+    if (rowCount > 0) virtualizer.scrollToIndex(activeIndex, { align: 'auto' })
+  }, [activeIndex, rowCount, virtualizer])
+}
+
+function useSearchPaletteController() {
+  const view = useSearchPaletteView()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const { searching, rows, hasMore, activeRow } = usePaletteRows(view)
+  const rowCount = rows.length + (hasMore ? 1 : 0)
+  const { virtualizer, virtualRows } = useSearchVirtualRows(rowCount, listRef)
+  useFocusInputOnRequest(inputRef, view.focusRequest)
+  useCloseOnOutsidePointer(panelRef, useSearchPaletteStore.getState().close)
+  useScrollActiveRowIntoView(virtualizer, view.activeIndex, rows.length)
+  useLoadMoreWhenLoadingRowRendered(hasMore, view.items.length, lastRenderedIndex(virtualRows))
+  return {
+    view,
+    refs: { inputRef, panelRef, listRef },
+    navigation: { ...view, searching, rows, activeRow, inputRef },
+    backendInfo: searchBackendInfo(view.capabilities, view.indexStatus),
+    results: {
+      rows,
+      searching,
+      showList: rows.length > 0 && view.status !== 'error',
+      virtualRows,
+      listHeight: virtualizer.getTotalSize() || rowCount * SEARCH_ROW_HEIGHT,
+    },
+  }
+}
+
+type SearchPaletteController = ReturnType<typeof useSearchPaletteController>
+
+function footerFor({ view, backendInfo }: SearchPaletteController) {
+  return footerText({
+    backend: backendInfo.backend,
+    status: view.indexStatus,
+    searching: view.status === 'ready',
+    loaded: view.items.length,
+    total: view.total,
+    truncated: view.truncated,
+  })
+}
+
+type SearchPaletteResultsProps = {
+  listRef: RefObject<HTMLDivElement | null>
+  view: SearchPaletteView
+  backendInfo: SearchPaletteController['backendInfo']
+  results: SearchPaletteController['results']
+}
+
+function SearchPaletteResults({ listRef, view, backendInfo, results }: SearchPaletteResultsProps) {
+  return (
+    <div ref={listRef} className="max-h-palette-list min-h-0 overflow-y-auto px-1 pb-1">
+      <SearchListMessage {...view} {...backendInfo} />
+      {results.showList ? (
+        <SearchResultsList
+          {...view}
+          {...results}
+          onHover={useSearchPaletteStore.getState().setActiveIndex}
+          onActivate={activatePaletteHit}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+function SearchPaletteFlyout() {
+  const controller = useSearchPaletteController()
+  const { view, navigation, refs } = controller
+  const { foldersOnly } = controller.backendInfo
+  const { setQuery, setScope } = useSearchPaletteStore.getState()
+  const selectScope = (scope: SearchScope) => {
+    setScope(scope)
+    refs.inputRef.current?.focus()
+  }
+
+  return (
+    <SearchPaletteFrame panelRef={refs.panelRef}>
+      <SearchInputField
+        inputRef={refs.inputRef}
+        showList={controller.results.showList}
+        activeOptionId={navigation.activeRow ? searchOptionId(view.activeIndex) : undefined}
+        query={view.query}
+        placeholder={inputPlaceholder(foldersOnly)}
+        onQueryChange={setQuery}
+        onKeyDown={(event) => handlePaletteKeyDown(navigation, event)}
+        shortcut={view.keymap.searchEverywhere[0]}
+        platform={detectPlatformOs()}
+        loading={view.status === 'loading'}
+      />
+      <SearchScopeBar
+        scope={view.scope}
+        foldersOnly={foldersOnly}
+        scopeNote={scopeNoteFor(navigation.searching, view.query, foldersOnly)}
+        onSelectScope={selectScope}
+      />
+      <SearchPaletteResults
+        listRef={refs.listRef}
+        view={view}
+        backendInfo={controller.backendInfo}
+        results={controller.results}
+      />
+      <SearchPaletteFooter
+        footer={footerFor(controller)}
+        announcement={resultAnnouncement(view.status, view.total)}
+      />
+    </SearchPaletteFrame>
   )
 }

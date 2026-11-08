@@ -76,29 +76,36 @@ impl HelperSupervisor {
         }
         #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
         {
-            let request_id = self.next_request_id.fetch_add(1, Ordering::Relaxed) + 1;
-            let mut helper = self.helper_slot(role).lock().expect("native helper lock");
-            if helper.is_none() {
-                *helper = Some(PersistentHelper::spawn(role)?);
-            }
-            let outcome = helper.as_ref().expect("native helper initialized").call(
-                HelperRequest {
-                    request_id,
-                    operation,
-                },
-                deadline,
-            );
-            match outcome {
-                Ok(result) => Ok(result),
-                Err(failure) => {
-                    // A deadline, protocol error, or child crash contaminates
-                    // only this role. The next request lazily creates a fresh
-                    // helper while the other role remains untouched.
-                    helper.take();
-                    Err(failure)
-                }
-            }
+            self.call_persistent_helper(role, operation, deadline)
         }
+    }
+
+    #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
+    fn call_persistent_helper(
+        &self,
+        role: HelperRole,
+        operation: HelperOperation,
+        deadline: Duration,
+    ) -> Result<HelperResult, HelperFailure> {
+        let request_id = self.next_request_id.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut helper = self.helper_slot(role).lock().expect("native helper lock");
+        if helper.is_none() {
+            *helper = Some(PersistentHelper::spawn(role)?);
+        }
+        let outcome = helper.as_ref().expect("native helper initialized").call(
+            HelperRequest {
+                request_id,
+                operation,
+            },
+            deadline,
+        );
+        if outcome.is_err() {
+            // A deadline, protocol error, or child crash contaminates
+            // only this role. The next request lazily creates a fresh
+            // helper while the other role remains untouched.
+            helper.take();
+        }
+        outcome
     }
 
     #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
@@ -136,24 +143,8 @@ impl PersistentHelper {
         let child = Arc::new(Mutex::new(child));
         let (request_sender, request_receiver) = mpsc::sync_channel(1);
         let (response_sender, response_receiver) = mpsc::sync_channel(1);
-        thread::spawn(move || {
-            let mut writer = BufWriter::new(stdin);
-            while let Ok(request) = request_receiver.recv() {
-                if write_frame(&mut writer, &request).is_err() {
-                    break;
-                }
-            }
-        });
-        thread::spawn(move || {
-            let mut reader = BufReader::new(stdout);
-            loop {
-                let response = read_frame(&mut reader).map_err(|_| HelperFailure::Malformed);
-                let failed = response.is_err();
-                if response_sender.send(response).is_err() || failed {
-                    break;
-                }
-            }
-        });
+        thread::spawn(move || forward_requests(&request_receiver, stdin));
+        thread::spawn(move || forward_responses(&response_sender, stdout));
         Ok(Self {
             requests: request_sender,
             responses: response_receiver,
@@ -175,6 +166,35 @@ impl PersistentHelper {
             Ok(Ok(_)) | Ok(Err(_)) => Err(HelperFailure::Malformed),
             Err(mpsc::RecvTimeoutError::Timeout) => Err(HelperFailure::Deadline),
             Err(mpsc::RecvTimeoutError::Disconnected) => Err(HelperFailure::Crashed),
+        }
+    }
+}
+
+#[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
+fn forward_requests(
+    request_receiver: &mpsc::Receiver<HelperRequest>,
+    stdin: std::process::ChildStdin,
+) {
+    let mut writer = BufWriter::new(stdin);
+    while let Ok(request) = request_receiver.recv() {
+        if write_frame(&mut writer, &request).is_err() {
+            break;
+        }
+    }
+}
+
+/// Stops after the first malformed frame, once it has been reported.
+#[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
+fn forward_responses(
+    response_sender: &mpsc::SyncSender<Result<HelperResponse, HelperFailure>>,
+    stdout: std::process::ChildStdout,
+) {
+    let mut reader = BufReader::new(stdout);
+    loop {
+        let response = read_frame(&mut reader).map_err(|_| HelperFailure::Malformed);
+        let failed = response.is_err();
+        if response_sender.send(response).is_err() || failed {
+            break;
         }
     }
 }

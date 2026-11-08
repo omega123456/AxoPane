@@ -1,38 +1,83 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState, type Ref } from 'react'
 import { Button, CheckboxFlag, TextField } from '@/components/controls'
 import { DialogList, DialogShell, DialogText } from '@/components/dialogs/DialogShell'
 import type { ConflictInfo } from '@/lib/types/ipc'
+import { useFocusOnMount, useSelectWhen } from '@/lib/use-focus-on-mount'
 import { caseInsensitiveLetterKeys, handleKeyByTable, type KeyHandlerTable } from '@/lib/key-table'
+
+type ConflictResolution = 'replace' | 'skip' | 'rename'
 
 type ConflictDialogProps = {
   conflict: ConflictInfo
-  onResolve: (
-    resolution: 'replace' | 'skip' | 'rename',
-    applyToAll: boolean,
-    renameTo: string | null,
-  ) => void
+  onResolve: (resolution: ConflictResolution, applyToAll: boolean, renameTo: string | null) => void
+}
+
+type ConflictFooterProps = {
+  renaming: boolean
+  skipRef: Ref<HTMLButtonElement>
+  onResolve: (resolution: ConflictResolution) => void
+  onStartRename: () => void
+}
+
+function ConflictFooter({ renaming, skipRef, onResolve, onStartRename }: ConflictFooterProps) {
+  return (
+    <>
+      <Button
+        variant="primary"
+        title="Replace (R)"
+        aria-keyshortcuts="R"
+        onClick={() => onResolve('replace')}
+      >
+        Replace
+      </Button>
+      <Button
+        title={renaming ? 'Confirm rename (Enter)' : 'Rename (N)'}
+        aria-keyshortcuts={renaming ? 'Enter' : 'N'}
+        onClick={() => (renaming ? onResolve('rename') : onStartRename())}
+      >
+        {renaming ? 'Confirm rename' : 'Rename'}
+      </Button>
+      <Button
+        ref={skipRef}
+        title="Skip (Enter)"
+        aria-keyshortcuts="Enter"
+        onClick={() => onResolve('skip')}
+      >
+        Skip
+      </Button>
+    </>
+  )
+}
+
+type ConflictKeyActions = {
+  resolve: (resolution: ConflictResolution) => void
+  setRenaming: (renaming: boolean) => void
+  toggleApplyToAll: () => void
+}
+
+function conflictKeyTable(renaming: boolean, actions: ConflictKeyActions): KeyHandlerTable {
+  if (renaming) {
+    return { Enter: () => actions.resolve('rename'), Escape: () => actions.setRenaming(false) }
+  }
+  return {
+    Enter: () => actions.resolve('skip'),
+    Escape: () => actions.resolve('skip'),
+    ...caseInsensitiveLetterKeys({
+      r: () => actions.resolve('replace'),
+      n: () => actions.setRenaming(true),
+      a: actions.toggleApplyToAll,
+    }),
+  }
 }
 
 export function ConflictDialog({ conflict, onResolve }: ConflictDialogProps) {
   const [applyToAll, setApplyToAll] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState(conflict.name)
-  const skipRef = useRef<HTMLButtonElement>(null)
-  const renameInputRef = useRef<HTMLInputElement>(null)
+  const skipRef = useFocusOnMount<HTMLButtonElement>()
+  const renameInputRef = useSelectWhen(renaming)
 
-  // The Skip button is the default action and receives initial focus (Enter=Skip).
-  useEffect(() => {
-    skipRef.current?.focus()
-  }, [])
-
-  useEffect(() => {
-    if (renaming) {
-      renameInputRef.current?.focus()
-      renameInputRef.current?.select()
-    }
-  }, [renaming])
-
-  function resolve(resolution: 'replace' | 'skip' | 'rename') {
+  function resolve(resolution: ConflictResolution) {
     if (resolution === 'rename') {
       const trimmed = renameValue.trim()
       onResolve('rename', applyToAll, trimmed.length > 0 ? trimmed : null)
@@ -41,23 +86,9 @@ export function ConflictDialog({ conflict, onResolve }: ConflictDialogProps) {
     onResolve(resolution, applyToAll, null)
   }
 
-  function conflictKeyTable(): KeyHandlerTable {
-    if (renaming) {
-      return { Enter: () => resolve('rename'), Escape: () => setRenaming(false) }
-    }
-    return {
-      Enter: () => resolve('skip'),
-      Escape: () => resolve('skip'),
-      ...caseInsensitiveLetterKeys({
-        r: () => resolve('replace'),
-        n: () => setRenaming(true),
-        a: () => setApplyToAll((value) => !value),
-      }),
-    }
-  }
-
   function onKeyDown(event: React.KeyboardEvent) {
-    handleKeyByTable(event, conflictKeyTable())
+    const toggleApplyToAll = () => setApplyToAll((value) => !value)
+    handleKeyByTable(event, conflictKeyTable(renaming, { resolve, setRenaming, toggleApplyToAll }))
   }
 
   return (
@@ -69,31 +100,12 @@ export function ConflictDialog({ conflict, onResolve }: ConflictDialogProps) {
       onKeyDown={onKeyDown}
       footerColumns={3}
       footer={
-        <>
-          <Button
-            variant="primary"
-            title="Replace (R)"
-            aria-keyshortcuts="R"
-            onClick={() => resolve('replace')}
-          >
-            Replace
-          </Button>
-          <Button
-            title={renaming ? 'Confirm rename (Enter)' : 'Rename (N)'}
-            aria-keyshortcuts={renaming ? 'Enter' : 'N'}
-            onClick={() => (renaming ? resolve('rename') : setRenaming(true))}
-          >
-            {renaming ? 'Confirm rename' : 'Rename'}
-          </Button>
-          <Button
-            ref={skipRef}
-            title="Skip (Enter)"
-            aria-keyshortcuts="Enter"
-            onClick={() => resolve('skip')}
-          >
-            Skip
-          </Button>
-        </>
+        <ConflictFooter
+          renaming={renaming}
+          skipRef={skipRef}
+          onResolve={resolve}
+          onStartRename={() => setRenaming(true)}
+        />
       }
     >
       <DialogText>

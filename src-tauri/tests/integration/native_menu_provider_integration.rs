@@ -14,47 +14,57 @@ use file_explorer_lib::native_menu::types::NativeMenuCanonicalActionKind;
 use file_explorer_lib::native_menu::unsupported::{self, UnsupportedNativeMenuProvider};
 use file_explorer_lib::native_menu::NativeMenuService;
 
-#[test]
-fn fake_provider_covers_backend_dedupe_submenus_tokens_and_executor_isolation() {
-    let service = NativeMenuService::new(Arc::new(FakeNativeMenuProvider));
-    assert_eq!(common::bootstrap_message(), "phase-1-common");
-
-    let first_response = service.load_menu(load_request(
-        "req-provider",
+fn fixture_folder_request(request_id: &str) -> LoadNativeMenuRequest {
+    load_request(
+        request_id,
         NativeMenuTargetKind::Folder,
         Some("C:\\fixture"),
         Some("C:\\fixture"),
         &["C:\\fixture"],
-    ));
+    )
+}
 
-    assert_eq!(first_response.items.len(), 3);
-    assert_eq!(first_response.items[0].id, "fixture-target-folder");
+fn top_level_token(response: &file_explorer_lib::ipc::types::LoadNativeMenuResponse) -> String {
+    response.items[2]
+        .invoke_token
+        .clone()
+        .expect("top-level token")
+}
+
+#[test]
+fn fake_provider_covers_backend_dedupe_and_submenus() {
+    let service = NativeMenuService::new(Arc::new(FakeNativeMenuProvider));
+    assert_eq!(common::bootstrap_message(), "phase-1-common");
+
+    let response = service.load_menu(fixture_folder_request("req-provider"));
+
+    assert_eq!(response.items.len(), 3);
+    assert_eq!(response.items[0].id, "fixture-target-folder");
     assert_eq!(
-        first_response.items[0].normalized_verb.as_deref(),
+        response.items[0].normalized_verb.as_deref(),
         Some("fixturefolder")
     );
-    assert!(first_response.items[0].icon.is_none());
-    assert_eq!(first_response.items[1].id, "fixture-archive-tools");
+    assert!(response.items[0].icon.is_none());
+    assert_eq!(response.items[1].id, "fixture-archive-tools");
     assert_eq!(
-        first_response.items[1].children[0]
-            .normalized_verb
-            .as_deref(),
+        response.items[1].children[0].normalized_verb.as_deref(),
         Some("sharewithteam")
     );
-    assert_eq!(first_response.items[1].children.len(), 1);
+    assert_eq!(response.items[1].children.len(), 1);
     assert_eq!(
-        first_response.items[2].normalized_verb.as_deref(),
+        response.items[2].normalized_verb.as_deref(),
         Some("openinfixtureterminal")
     );
-    let terminal_icon = first_response.items[2].icon.as_ref().expect("fixture icon");
+    let terminal_icon = response.items[2].icon.as_ref().expect("fixture icon");
     assert_eq!(terminal_icon.kind, NativeMenuIconKind::DataUrl);
     assert_eq!(terminal_icon.data_url, "data:image/png;base64,RkFLRQ==");
     assert_eq!(terminal_icon.alt.as_deref(), Some("Fixture icon"));
+}
 
-    let first_token = first_response.items[2]
-        .invoke_token
-        .clone()
-        .expect("top-level token");
+#[test]
+fn fake_provider_tokens_invoke_through_the_executor_and_go_stale_on_reload() {
+    let service = NativeMenuService::new(Arc::new(FakeNativeMenuProvider));
+    let first_token = top_level_token(&service.load_menu(fixture_folder_request("req-provider")));
     assert!(service.execution_count() >= 1);
 
     let first_invoked = service.invoke_menu_action(InvokeNativeMenuRequest {
@@ -66,17 +76,8 @@ fn fake_provider_covers_backend_dedupe_submenus_tokens_and_executor_isolation() 
         Some("invoked:fake.openTerminal")
     );
 
-    let second_response = service.load_menu(load_request(
-        "req-provider",
-        NativeMenuTargetKind::Folder,
-        Some("C:\\fixture"),
-        Some("C:\\fixture"),
-        &["C:\\fixture"],
-    ));
-    let second_token = second_response.items[2]
-        .invoke_token
-        .clone()
-        .expect("refreshed token");
+    let second_response = service.load_menu(fixture_folder_request("req-provider"));
+    let second_token = top_level_token(&second_response);
     assert_ne!(first_token, second_token);
 
     let stale = service.invoke_menu_action(InvokeNativeMenuRequest { token: first_token });
@@ -95,13 +96,7 @@ fn fake_provider_covers_backend_dedupe_submenus_tokens_and_executor_isolation() 
     );
     assert!(service.execution_count() >= 3);
 
-    let third_response = service.load_menu(load_request(
-        "req-provider-next",
-        NativeMenuTargetKind::Folder,
-        Some("C:\\fixture"),
-        Some("C:\\fixture"),
-        &["C:\\fixture"],
-    ));
+    let third_response = service.load_menu(fixture_folder_request("req-provider-next"));
     assert_eq!(third_response.items.len(), 3);
 
     let stale_after_different_request = service.invoke_menu_action(InvokeNativeMenuRequest {
@@ -114,91 +109,96 @@ fn fake_provider_covers_backend_dedupe_submenus_tokens_and_executor_isolation() 
     );
 }
 
+struct TargetMappingCase {
+    kind: NativeMenuTargetKind,
+    target_path: Option<&'static str>,
+    folder_path: &'static str,
+    selected_paths: &'static [&'static str],
+    expected_first_id: &'static str,
+}
+
+const TARGET_MAPPING_CASES: [TargetMappingCase; 7] = [
+    TargetMappingCase {
+        kind: NativeMenuTargetKind::File,
+        target_path: Some("C:\\fixture\\report.txt"),
+        folder_path: "C:\\fixture",
+        selected_paths: &["C:\\fixture\\report.txt"],
+        expected_first_id: "fixture-target-file",
+    },
+    TargetMappingCase {
+        kind: NativeMenuTargetKind::Folder,
+        target_path: Some("C:\\fixture"),
+        folder_path: "C:\\fixture",
+        selected_paths: &["C:\\fixture"],
+        expected_first_id: "fixture-target-folder",
+    },
+    TargetMappingCase {
+        kind: NativeMenuTargetKind::Multi,
+        target_path: Some("C:\\fixture\\report.txt"),
+        folder_path: "C:\\fixture",
+        selected_paths: &["C:\\fixture\\report.txt", "C:\\fixture\\notes.txt"],
+        expected_first_id: "fixture-target-multi",
+    },
+    TargetMappingCase {
+        kind: NativeMenuTargetKind::Mixed,
+        target_path: Some("C:\\fixture\\report.txt"),
+        folder_path: "C:\\fixture",
+        selected_paths: &["C:\\fixture\\report.txt", "C:\\fixture\\docs"],
+        expected_first_id: "fixture-target-mixed",
+    },
+    TargetMappingCase {
+        kind: NativeMenuTargetKind::DriveRoot,
+        target_path: Some("C:\\"),
+        folder_path: "C:\\",
+        selected_paths: &["C:\\"],
+        expected_first_id: "fixture-target-drive-root",
+    },
+    TargetMappingCase {
+        kind: NativeMenuTargetKind::Background,
+        target_path: None,
+        folder_path: "C:\\fixture",
+        selected_paths: &[],
+        expected_first_id: "fixture-target-background",
+    },
+    TargetMappingCase {
+        kind: NativeMenuTargetKind::Tree,
+        target_path: Some("C:\\fixture"),
+        folder_path: "C:\\fixture",
+        selected_paths: &["C:\\fixture"],
+        expected_first_id: "fixture-target-tree",
+    },
+];
+
+fn assert_item_deduped(
+    response: &file_explorer_lib::ipc::types::LoadNativeMenuResponse,
+    duplicate_id: &str,
+    kind: &NativeMenuTargetKind,
+) {
+    assert!(
+        response.items.iter().all(|item| item.id != duplicate_id),
+        "{duplicate_id} should be deduped for {kind:?}"
+    );
+}
+
 #[test]
 fn fake_provider_covers_phase_five_target_mapping() {
     let service = NativeMenuService::new(Arc::new(FakeNativeMenuProvider));
 
-    let cases = [
-        (
-            NativeMenuTargetKind::File,
-            Some("C:\\fixture\\report.txt"),
-            Some("C:\\fixture"),
-            vec!["C:\\fixture\\report.txt"],
-            "fixture-target-file",
-        ),
-        (
-            NativeMenuTargetKind::Folder,
-            Some("C:\\fixture"),
-            Some("C:\\fixture"),
-            vec!["C:\\fixture"],
-            "fixture-target-folder",
-        ),
-        (
-            NativeMenuTargetKind::Multi,
-            Some("C:\\fixture\\report.txt"),
-            Some("C:\\fixture"),
-            vec!["C:\\fixture\\report.txt", "C:\\fixture\\notes.txt"],
-            "fixture-target-multi",
-        ),
-        (
-            NativeMenuTargetKind::Mixed,
-            Some("C:\\fixture\\report.txt"),
-            Some("C:\\fixture"),
-            vec!["C:\\fixture\\report.txt", "C:\\fixture\\docs"],
-            "fixture-target-mixed",
-        ),
-        (
-            NativeMenuTargetKind::DriveRoot,
-            Some("C:\\"),
-            Some("C:\\"),
-            vec!["C:\\"],
-            "fixture-target-drive-root",
-        ),
-        (
-            NativeMenuTargetKind::Background,
-            None,
-            Some("C:\\fixture"),
-            vec![],
-            "fixture-target-background",
-        ),
-        (
-            NativeMenuTargetKind::Tree,
-            Some("C:\\fixture"),
-            Some("C:\\fixture"),
-            vec!["C:\\fixture"],
-            "fixture-target-tree",
-        ),
-    ];
-
-    for (index, case) in cases.iter().enumerate() {
+    for (index, case) in TARGET_MAPPING_CASES.iter().enumerate() {
         let response = service.load_menu(load_request(
             &format!("req-target-{index}"),
-            case.0.clone(),
-            case.1,
-            case.2,
-            &case.3,
+            case.kind.clone(),
+            case.target_path,
+            Some(case.folder_path),
+            case.selected_paths,
         ));
 
         assert_eq!(
             response.items.first().map(|item| item.id.as_str()),
-            Some(case.4)
+            Some(case.expected_first_id)
         );
-        assert!(
-            response
-                .items
-                .iter()
-                .all(|item| item.id != "fixture-copy-duplicate"),
-            "copy duplicate should be deduped for {:?}",
-            case.0
-        );
-        assert!(
-            response
-                .items
-                .iter()
-                .all(|item| item.id != "fixture-properties-duplicate"),
-            "properties duplicate should be deduped for {:?}",
-            case.0
-        );
+        assert_item_deduped(&response, "fixture-copy-duplicate", &case.kind);
+        assert_item_deduped(&response, "fixture-properties-duplicate", &case.kind);
     }
 }
 

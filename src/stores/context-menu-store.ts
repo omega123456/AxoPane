@@ -85,74 +85,87 @@ function canBeginNativeLoad(
   return Boolean(state.menu && state.nativeRequest && !state.nativeRequestId)
 }
 
-export const useContextMenuStore = create<Store>((set, get) => {
-  const closeAndDispatch = (activation: Extract<MenuActivation, { kind: 'dispatch' }>) => {
+type StoreSet = (partial: Partial<Store>) => void
+type StoreGet = () => Store
+
+function closeAndDispatch(
+  set: StoreSet,
+  activation: Extract<MenuActivation, { kind: 'dispatch' }>,
+) {
+  clearNativePlaceholderTimer()
+  set(CLOSED_MENU_STATE)
+  dispatchContextMenuAction(activation.paneId, activation.action)
+}
+
+function finishNativeLoad(
+  set: StoreSet,
+  get: StoreGet,
+  requestId: string,
+  finish: (state: OpenStore) => Partial<Store>,
+) {
+  const state = get()
+  if (!isCurrentNativeRequest(state, requestId)) {
+    return
+  }
+  clearNativePlaceholderTimer()
+  set(finish(state))
+}
+
+function beginNativeLoad(set: StoreSet, get: StoreGet) {
+  const state = get()
+  if (!canBeginNativeLoad(state)) {
+    return null
+  }
+
+  const requestId = nextNativeRequestId()
+  clearNativePlaceholderTimer()
+  set(startedNativeLoad(requestId))
+  nativePlaceholderTimer = setTimeout(
+    () => showNativePlaceholderIfStillLoading(requestId),
+    NATIVE_PLACEHOLDER_DELAY_MS,
+  )
+  return { requestId, request: state.nativeRequest }
+}
+
+function activateItem(set: StoreSet, get: StoreGet, itemId: string) {
+  const menu = get().menu
+  const activation = menu ? activationFor(menu, itemId) : null
+  if (!activation) {
+    return
+  }
+  if (activation.kind === 'focus') {
+    set(activation.focus)
+    return
+  }
+  closeAndDispatch(set, activation)
+}
+
+export const useContextMenuStore = create<Store>((set, get) => ({
+  ...CLOSED_MENU_STATE,
+  openMenu: (menu) => {
+    clearNativePlaceholderTimer()
+    const opened = openedMenu(menu)
+    set({ ...CLOSED_MENU_STATE, ...opened, ...initialFocus(opened.menu) })
+  },
+  closeMenu: () => {
     clearNativePlaceholderTimer()
     set(CLOSED_MENU_STATE)
-    dispatchContextMenuAction(activation.paneId, activation.action)
-  }
-
-  const finishNativeLoad = (requestId: string, finish: (state: OpenStore) => Partial<Store>) => {
-    const state = get()
-    if (!isCurrentNativeRequest(state, requestId)) {
+  },
+  beginNativeLoad: () => beginNativeLoad(set, get),
+  resolveNativeLoad: (requestId, items) =>
+    finishNativeLoad(set, get, requestId, (state) => resolvedNativeLoad(state, items)),
+  failNativeLoad: (requestId) => finishNativeLoad(set, get, requestId, failedNativeLoad),
+  hoverItem: (itemId) => set((state) => hoveredFocus(state, itemId) ?? state),
+  moveActive: (direction) => set((state) => movedFocus(state, direction) ?? state),
+  moveActiveToEdge: (edge) => set((state) => edgeFocus(state, edge) ?? state),
+  openSubmenu: (itemId) => set((state) => openedSubmenuFocus(state, itemId) ?? state),
+  activateCurrent: () => {
+    const activeItemId = get().activeItemId
+    if (!activeItemId) {
       return
     }
-    clearNativePlaceholderTimer()
-    set(finish(state))
-  }
-
-  return {
-    ...CLOSED_MENU_STATE,
-    openMenu: (menu) => {
-      clearNativePlaceholderTimer()
-      const opened = openedMenu(menu)
-      set({ ...CLOSED_MENU_STATE, ...opened, ...initialFocus(opened.menu) })
-    },
-    closeMenu: () => {
-      clearNativePlaceholderTimer()
-      set(CLOSED_MENU_STATE)
-    },
-    beginNativeLoad: () => {
-      const state = get()
-      if (!canBeginNativeLoad(state)) {
-        return null
-      }
-
-      const requestId = nextNativeRequestId()
-      clearNativePlaceholderTimer()
-      set(startedNativeLoad(requestId))
-      nativePlaceholderTimer = setTimeout(
-        () => showNativePlaceholderIfStillLoading(requestId),
-        NATIVE_PLACEHOLDER_DELAY_MS,
-      )
-      return { requestId, request: state.nativeRequest }
-    },
-    resolveNativeLoad: (requestId, items) =>
-      finishNativeLoad(requestId, (state) => resolvedNativeLoad(state, items)),
-    failNativeLoad: (requestId) => finishNativeLoad(requestId, failedNativeLoad),
-    hoverItem: (itemId) => set((state) => hoveredFocus(state, itemId) ?? state),
-    moveActive: (direction) => set((state) => movedFocus(state, direction) ?? state),
-    moveActiveToEdge: (edge) => set((state) => edgeFocus(state, edge) ?? state),
-    openSubmenu: (itemId) => set((state) => openedSubmenuFocus(state, itemId) ?? state),
-    activateCurrent: () => {
-      const activeItemId = get().activeItemId
-      if (!activeItemId) {
-        return
-      }
-      get().activateItem(activeItemId)
-    },
-    activateItem: (itemId) => {
-      const menu = get().menu
-      const activation = menu ? activationFor(menu, itemId) : null
-      if (!activation) {
-        return
-      }
-      if (activation.kind === 'focus') {
-        set(activation.focus)
-        return
-      }
-      closeAndDispatch(activation)
-    },
-    closeSubmenu: () => set((state) => closedSubmenuFocus(state) ?? state),
-  }
-})
+    get().activateItem(activeItemId)
+  },
+  activateItem: (itemId) => activateItem(set, get, itemId),
+  closeSubmenu: () => set((state) => closedSubmenuFocus(state) ?? state),
+}))

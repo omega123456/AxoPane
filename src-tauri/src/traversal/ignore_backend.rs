@@ -99,34 +99,37 @@ impl Iterator for TraversalIter {
         if self.cancel.load(Ordering::Relaxed) {
             return Some(Err(TraversalError::Cancelled));
         }
-        loop {
-            let entry = self.walk.next()?;
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(error) => {
-                    return Some(Err(TraversalError::Io(
-                        self.root.clone(),
-                        std::io::Error::other(error.to_string()),
-                    )))
-                }
-            };
-            if !self.include_root && entry.path() == self.root {
-                continue;
-            }
-            let file_type = match entry.file_type() {
-                Some(file_type) => file_type,
-                None => match std::fs::symlink_metadata(entry.path()) {
-                    Ok(metadata) => metadata.file_type(),
-                    Err(error) => {
-                        return Some(Err(TraversalError::Io(entry.path().to_path_buf(), error)))
-                    }
-                },
-            };
-            return Some(Ok(TraversalEntry {
-                path: entry.path().to_path_buf(),
-                depth: entry.depth(),
-                file_type,
-            }));
-        }
+        let include_root = self.include_root;
+        let root = &self.root;
+        let entry = self
+            .walk
+            .by_ref()
+            .find(|entry| include_root || !is_root_entry(entry, root))?;
+        let entry = entry.map_err(|error| {
+            TraversalError::Io(root.clone(), std::io::Error::other(error.to_string()))
+        });
+        Some(entry.and_then(|entry| traversal_entry(&entry)))
     }
+}
+
+fn is_root_entry(entry: &Result<ignore::DirEntry, ignore::Error>, root: &Path) -> bool {
+    matches!(entry, Ok(entry) if entry.path() == root)
+}
+
+fn traversal_entry(entry: &ignore::DirEntry) -> Result<TraversalEntry, TraversalError> {
+    let file_type = match entry.file_type() {
+        Some(file_type) => file_type,
+        None => symlink_file_type(entry.path())?,
+    };
+    Ok(TraversalEntry {
+        path: entry.path().to_path_buf(),
+        depth: entry.depth(),
+        file_type,
+    })
+}
+
+fn symlink_file_type(path: &Path) -> Result<std::fs::FileType, TraversalError> {
+    std::fs::symlink_metadata(path)
+        .map(|metadata| metadata.file_type())
+        .map_err(|error| TraversalError::Io(path.to_path_buf(), error))
 }

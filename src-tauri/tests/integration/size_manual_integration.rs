@@ -517,21 +517,54 @@ fn completed_size_jobs_are_removed_from_the_registry() {
     assert!(!service.cancel(&target));
 }
 
+fn is_ready_or_na(state: SizeStateKind) -> bool {
+    matches!(state, SizeStateKind::Ready | SizeStateKind::Na)
+}
+
+fn everything_terminal_count(batches: &Arc<Mutex<Vec<Vec<SizeUpdate>>>>) -> usize {
+    batches
+        .lock()
+        .expect("updates lock")
+        .iter()
+        .flatten()
+        .filter(|update| is_ready_or_na(update.state) && update.source == SizeSource::Everything)
+        .count()
+}
+
+fn wait_for_everything_terminals(batches: &Arc<Mutex<Vec<Vec<SizeUpdate>>>>, expected: usize) {
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < deadline && everything_terminal_count(batches) < expected {
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn has_full_batch(
+    batches: &[Vec<SizeUpdate>],
+    batch_len: usize,
+    predicate: impl Fn(SizeStateKind) -> bool,
+) -> bool {
+    batches
+        .iter()
+        .any(|batch| batch.len() == batch_len && batch.iter().all(|update| predicate(update.state)))
+}
+
+fn everything_service_with_alpha_size(alpha_path: &str) -> SizeService {
+    SizeService::with_everything_handle(
+        Duration::from_secs(1),
+        Some(EverythingHandle::test_available(HashMap::from([(
+            alpha_path.to_string(),
+            Some(42),
+        )]))),
+    )
+}
+
 #[test]
 fn everything_backed_requests_emit_batched_ready_and_na_results() {
     let fixture = tempdir().expect("temp dir");
     let root = fixture.path();
-    let alpha = root.join("alpha");
-    let beta = root.join("beta");
-    let alpha_path = alpha.to_string_lossy().into_owned();
-    let beta_path = beta.to_string_lossy().into_owned();
-    let service = SizeService::with_everything_handle(
-        Duration::from_secs(1),
-        Some(EverythingHandle::test_available(HashMap::from([(
-            alpha_path.clone(),
-            Some(42),
-        )]))),
-    );
+    let alpha_path = root.join("alpha").to_string_lossy().into_owned();
+    let beta_path = root.join("beta").to_string_lossy().into_owned();
+    let service = everything_service_with_alpha_size(&alpha_path);
     let batches = Arc::new(Mutex::new(Vec::<Vec<SizeUpdate>>::new()));
     let batches_for_emitter = batches.clone();
 
@@ -553,39 +586,12 @@ fn everything_backed_requests_emit_batched_ready_and_na_results() {
                 .push(batch);
         }),
     );
-
-    let deadline = Instant::now() + Duration::from_secs(1);
-    while Instant::now() < deadline {
-        let terminal_count = batches
-            .lock()
-            .expect("updates lock")
-            .iter()
-            .flatten()
-            .filter(|update| {
-                matches!(update.state, SizeStateKind::Ready | SizeStateKind::Na)
-                    && update.source == SizeSource::Everything
-            })
-            .count()
-            >= 2;
-        if terminal_count {
-            break;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
+    wait_for_everything_terminals(&batches, 2);
 
     let recorded_batches = batches.lock().expect("updates lock").clone();
-    assert!(recorded_batches.iter().any(|batch| {
-        batch.len() == 2
-            && batch
-                .iter()
-                .all(|update| update.state == SizeStateKind::Calculating)
-    }));
-    assert!(recorded_batches.iter().any(|batch| {
-        batch.len() == 2
-            && batch
-                .iter()
-                .all(|update| matches!(update.state, SizeStateKind::Ready | SizeStateKind::Na))
-    }));
+    assert!(has_full_batch(&recorded_batches, 2, |state| state
+        == SizeStateKind::Calculating));
+    assert!(has_full_batch(&recorded_batches, 2, is_ready_or_na));
     let recorded = recorded_batches.into_iter().flatten().collect::<Vec<_>>();
     assert!(recorded.iter().any(|update| {
         update.path == alpha_path
@@ -764,27 +770,7 @@ fn size_service_reports_fixture_network_paths_as_not_applicable() {
     assert_eq!(recorded[0].size_bytes, None);
 }
 
-#[test]
-fn size_service_mixed_backend_requests_emit_network_and_manual_terminal_events() {
-    let fixture = tempdir().expect("temp dir");
-    let local_root = fixture.path();
-    fs::write(local_root.join("alpha.bin"), vec![1_u8; 4]).expect("alpha");
-
-    let service = SizeService::new(Duration::from_secs(1));
-    let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
-    let updates_for_emitter = updates.clone();
-
-    let local_mount = if cfg!(windows) {
-        local_root
-            .components()
-            .next()
-            .expect("component")
-            .as_os_str()
-            .to_string_lossy()
-            .into_owned()
-    } else {
-        "/".to_string()
-    };
+fn fixture_network_volume() -> (VolumeInfo, String) {
     let network_mount = if cfg!(windows) {
         "Z:\\".to_string()
     } else {
@@ -795,30 +781,41 @@ fn size_service_mixed_backend_requests_emit_network_and_manual_terminal_events()
     } else {
         "/network/share".to_string()
     };
+    let volume = VolumeInfo {
+        mount_root: network_mount,
+        label: "Network".to_string(),
+        total_bytes: 1,
+        free_bytes: 1,
+        is_network: true,
+        is_removable: false,
+    };
+    (volume, network_path)
+}
+
+fn is_terminal_size_state(state: SizeStateKind) -> bool {
+    matches!(
+        state,
+        SizeStateKind::Ready | SizeStateKind::Error | SizeStateKind::Na
+    )
+}
+
+#[test]
+fn size_service_mixed_backend_requests_emit_network_and_manual_terminal_events() {
+    let fixture = tempdir().expect("temp dir");
+    let local_root = fixture.path();
+    fs::write(local_root.join("alpha.bin"), vec![1_u8; 4]).expect("alpha");
+
+    let service = SizeService::new(Duration::from_secs(1));
+    let updates = Arc::new(Mutex::new(Vec::<SizeUpdate>::new()));
+    let updates_for_emitter = updates.clone();
+    let (network_volume, network_path) = fixture_network_volume();
 
     service.request_paths_with_volumes(
         vec![
             network_path.clone(),
             local_root.to_string_lossy().into_owned(),
         ],
-        vec![
-            VolumeInfo {
-                mount_root: network_mount,
-                label: "Network".to_string(),
-                total_bytes: 1,
-                free_bytes: 1,
-                is_network: true,
-                is_removable: false,
-            },
-            VolumeInfo {
-                mount_root: local_mount,
-                label: "Local".to_string(),
-                total_bytes: 1,
-                free_bytes: 1,
-                is_network: false,
-                is_removable: false,
-            },
-        ],
+        vec![network_volume, local_volume_for(local_root)],
         Arc::new(move |update| {
             updates_for_emitter
                 .lock()
@@ -830,12 +827,7 @@ fn size_service_mixed_backend_requests_emit_network_and_manual_terminal_events()
     wait_for_updates(&updates, |recorded| {
         recorded
             .iter()
-            .filter(|update| {
-                matches!(
-                    update.state,
-                    SizeStateKind::Ready | SizeStateKind::Error | SizeStateKind::Na
-                )
-            })
+            .filter(|update| is_terminal_size_state(update.state))
             .count()
             >= 2
     });

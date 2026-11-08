@@ -3,9 +3,6 @@ pub mod registry;
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(not(feature = "test-utils"))]
-use std::cmp::Ordering;
-
 #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
 use std::ffi::CStr;
 
@@ -260,15 +257,7 @@ fn sort_volumes(volumes: &mut [VolumeInfo]) {
         left.mount_root
             .to_ascii_lowercase()
             .cmp(&right.mount_root.to_ascii_lowercase())
-            .then_with(|| {
-                if left.is_network == right.is_network {
-                    Ordering::Equal
-                } else if left.is_network {
-                    Ordering::Greater
-                } else {
-                    Ordering::Less
-                }
-            })
+            .then_with(|| left.is_network.cmp(&right.is_network))
     });
 }
 
@@ -496,32 +485,32 @@ fn extend_network_resources_for_scope(volumes: &mut Vec<VolumeInfo>, scope: u32)
         };
 
         for resource in resources {
-            if resource.dwType != RESOURCETYPE_DISK {
-                continue;
-            }
-
-            let remote_name = wide_ptr_to_string(resource.lpRemoteName);
-            let local_name = wide_ptr_to_string(resource.lpLocalName);
-            let mount_root = normalize_network_mount_root(&local_name, &remote_name);
-
-            let Some(mount_root) = mount_root else {
-                continue;
-            };
-
-            if volumes
-                .iter()
-                .any(|volume| volume.mount_root.eq_ignore_ascii_case(&mount_root))
-            {
-                continue;
-            }
-
-            push_network_volume(volumes, mount_root, None, true);
+            add_network_resource(volumes, resource);
         }
     }
 
     unsafe {
         WNetCloseEnum(handle);
     }
+}
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+fn add_network_resource(volumes: &mut Vec<VolumeInfo>, resource: &NETRESOURCEW) {
+    if resource.dwType != RESOURCETYPE_DISK {
+        return;
+    }
+    let remote_name = wide_ptr_to_string(resource.lpRemoteName);
+    let local_name = wide_ptr_to_string(resource.lpLocalName);
+    let Some(mount_root) = normalize_network_mount_root(&local_name, &remote_name) else {
+        return;
+    };
+    let already_listed = volumes
+        .iter()
+        .any(|volume| volume.mount_root.eq_ignore_ascii_case(&mount_root));
+    if already_listed {
+        return;
+    }
+    push_network_volume(volumes, mount_root, None, true);
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]
@@ -543,24 +532,29 @@ fn extend_network_shortcuts(volumes: &mut Vec<VolumeInfo>) {
         .join("Network Shortcuts");
 
     let _apartment = crate::win32::com::ComApartment::initialize(COINIT_APARTMENTTHREADED);
-
-    {
-        let Ok(entries) = std::fs::read_dir(shortcuts_dir) else {
-            return;
-        };
-
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                extend_network_shortcut_dir(volumes, &path);
-            } else if path
-                .extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("lnk"))
-            {
-                extend_network_shortcut_file(volumes, &path, None);
-            }
-        }
+    let Ok(entries) = std::fs::read_dir(shortcuts_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        extend_network_shortcut_entry(volumes, &entry.path());
     }
+}
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+fn extend_network_shortcut_entry(volumes: &mut Vec<VolumeInfo>, path: &Path) {
+    if path.is_dir() {
+        extend_network_shortcut_dir(volumes, path);
+        return;
+    }
+    if is_shell_link(path) {
+        extend_network_shortcut_file(volumes, path, None);
+    }
+}
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+fn is_shell_link(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("lnk"))
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]
@@ -582,10 +576,7 @@ fn extend_network_shortcut_dir(volumes: &mut Vec<VolumeInfo>, path: &Path) {
 
     for entry in entries.flatten() {
         let shortcut = entry.path();
-        if shortcut
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("lnk"))
-        {
+        if is_shell_link(&shortcut) {
             extend_network_shortcut_file(volumes, &shortcut, label.as_deref());
         }
     }

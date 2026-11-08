@@ -4,11 +4,21 @@ import { HighlightedText } from '@/components/search/HighlightedText'
 import { formatEntryDate } from '@/lib/date-format'
 import type { SearchActivation } from '@/lib/search-actions'
 import type { SearchHit } from '@/lib/types/ipc'
-import { useConfigStore } from '@/stores/config-store'
+import { useDateDisplay } from '@/lib/use-date-display'
 import { TEXT_SECONDARY } from '@/lib/class-names'
 
 export function searchOptionId(index: number) {
   return `search-option-${index}`
+}
+
+function activationForClick(event: MouseEvent): SearchActivation {
+  if (event.shiftKey) {
+    return 'open'
+  }
+  if (event.ctrlKey || event.metaKey) {
+    return 'newTab'
+  }
+  return 'default'
 }
 
 export function SearchResultRow({
@@ -28,26 +38,7 @@ export function SearchResultRow({
   onHover: (index: number) => void
   onActivate: (hit: SearchHit, how: SearchActivation) => void
 }) {
-  const dateFormat = useConfigStore((state) => state.dateFormat)
-  const showTime = useConfigStore((state) => state.showTime)
-  const showSeconds = useConfigStore((state) => state.showSeconds)
-  const relativeDates = useConfigStore((state) => state.relativeDates)
-  const modified = formatEntryDate(hit.modifiedAt, {
-    format: dateFormat,
-    showTime,
-    showSeconds,
-    relative: relativeDates,
-  })
-
-  function onClick(event: MouseEvent) {
-    if (event.shiftKey) {
-      onActivate(hit, 'open')
-    } else if (event.ctrlKey || event.metaKey) {
-      onActivate(hit, 'newTab')
-    } else {
-      onActivate(hit, 'default')
-    }
-  }
+  const modified = formatEntryDate(hit.modifiedAt, useDateDisplay())
 
   return (
     <div
@@ -61,7 +52,7 @@ export function SearchResultRow({
       onMouseMove={() => onHover(index)}
       // Keep focus in the input: the row is chosen through the combobox.
       onMouseDown={(event) => event.preventDefault()}
-      onClick={onClick}
+      onClick={(event) => onActivate(hit, activationForClick(event))}
       className={`absolute inset-x-0 top-0 flex h-search-row cursor-default items-center gap-2.5 rounded-control px-2.5 ${
         active
           ? 'bg-light-neutral-selection before:absolute before:inset-y-3 before:left-0 before:w-0.75 before:rounded-full before:bg-light-accent dark:bg-dark-neutral-selection dark:before:bg-dark-accent'

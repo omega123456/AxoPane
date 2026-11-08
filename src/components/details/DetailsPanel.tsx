@@ -44,22 +44,10 @@ export function DetailsPanel({ paneId }: DetailsPanelProps) {
           {entry.name}
         </h2>
         <dl className="mt-4 space-y-2 text-row">
-          <div className="flex justify-between gap-3 border-b border-light-divider py-2 dark:border-dark-divider">
-            <dt className={TEXT_SECONDARY}>Type</dt>
-            <dd className={`text-right ${TEXT_SECONDARY}`}>{entry.typeLabel}</dd>
-          </div>
-          <div className="flex justify-between gap-3 border-b border-light-divider py-2 dark:border-dark-divider">
-            <dt className={TEXT_SECONDARY}>Path</dt>
-            <dd className={`text-right ${TEXT_SECONDARY}`}>{entry.path}</dd>
-          </div>
-          <div className="flex justify-between gap-3 border-b border-light-divider py-2 dark:border-dark-divider">
-            <dt className={TEXT_SECONDARY}>Modified</dt>
-            <dd className={`text-right ${TEXT_SECONDARY}`}>{entry.modifiedAt ?? '—'}</dd>
-          </div>
-          <div className="flex justify-between gap-3 border-b border-light-divider py-2 dark:border-dark-divider">
-            <dt className={TEXT_SECONDARY}>Created</dt>
-            <dd className={`text-right ${TEXT_SECONDARY}`}>{entry.createdAt ?? '—'}</dd>
-          </div>
+          <DetailRow label="Type" value={entry.typeLabel} />
+          <DetailRow label="Path" value={entry.path} />
+          <DetailRow label="Modified" value={entry.modifiedAt ?? '—'} />
+          <DetailRow label="Created" value={entry.createdAt ?? '—'} />
         </dl>
       </div>
       <div className="grid grid-cols-3 gap-2 border-t border-light-divider p-3 dark:border-dark-divider">
@@ -82,6 +70,15 @@ export function DetailsPanel({ paneId }: DetailsPanelProps) {
         </ActionButton>
       </div>
     </aside>
+  )
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-3 border-b border-light-divider py-2 dark:border-dark-divider">
+      <dt className={TEXT_SECONDARY}>{label}</dt>
+      <dd className={`text-right ${TEXT_SECONDARY}`}>{value}</dd>
+    </div>
   )
 }
 

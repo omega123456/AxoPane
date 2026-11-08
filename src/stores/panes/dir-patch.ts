@@ -12,7 +12,7 @@ import {
   type SizeStates,
   type TreeNodes,
 } from '@/stores/panes/pane-state'
-import { applyTreeDirPatch } from '@/stores/panes/tree-state'
+import { applyTreeDirPatch } from '@/stores/panes/tree-dir-patch'
 
 export type DirPatchSkipReason = 'typing' | 'inactiveTab' | 'pathMismatch'
 

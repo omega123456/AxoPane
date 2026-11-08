@@ -107,17 +107,12 @@ impl<T> SizeScheduler<T> {
     /// entry was removed by `cancel`/`complete` before this call reached it.
     pub fn next(&self) -> Option<ScheduledJob<T>> {
         let mut state = self.state.lock().expect("size scheduler lock");
-        loop {
-            while let Some(path) = state.queued.pop_front() {
-                if let Some(job) = take_payload(&mut state.jobs, &path) {
-                    return Some(job);
-                }
-            }
-            if state.shutdown {
-                return None;
-            }
+        let mut claimable = pop_claimable(&mut state);
+        while claimable.is_none() && !state.shutdown {
             state = self.ready.wait(state).expect("size scheduler condvar");
+            claimable = pop_claimable(&mut state);
         }
+        claimable
     }
 
     /// Claims one particular queued target's payload. This is used by a
@@ -161,6 +156,15 @@ impl<T> SizeScheduler<T> {
 /// Takes `path`'s payload out of `jobs` if present and not already claimed,
 /// returning `None` (and leaving the entry's bookkeeping otherwise intact)
 /// if it was already claimed by a concurrent caller or the entry is gone.
+fn pop_claimable<T>(state: &mut State<T>) -> Option<ScheduledJob<T>> {
+    while let Some(path) = state.queued.pop_front() {
+        if let Some(job) = take_payload(&mut state.jobs, &path) {
+            return Some(job);
+        }
+    }
+    None
+}
+
 fn take_payload<T>(jobs: &mut HashMap<String, JobEntry<T>>, path: &str) -> Option<ScheduledJob<T>> {
     let entry = jobs.get_mut(path)?;
     let payload = entry.payload.take()?;

@@ -10,20 +10,22 @@ use file_explorer_lib::persist::{
 };
 use tempfile::tempdir;
 
-#[test]
-fn config_and_session_round_trip_through_atomic_storage() {
-    let fixture = tempdir().expect("temp dir");
-    let config_path = fixture.path().join("config.json");
-    let session_path = fixture.path().join("session.json");
+fn customised_layout() -> LayoutConfig {
+    LayoutConfig {
+        details_visible: false,
+        tree_width_px: 320.0,
+        favourites_height_px: 168.0,
+        pane_split: 0.4,
+        column_widths: std::collections::HashMap::from([("type".to_string(), 188.0)]),
+        default_pane_mode: "single".to_string(),
+        default_view_mode: "icons".to_string(),
+        restore_session: false,
+        zoom: "150".to_string(),
+    }
+}
 
-    let config_store =
-        PersistedStore::<Config>::load(config_path.clone(), Duration::from_millis(5))
-            .expect("config store");
-    let session_store =
-        PersistedStore::<Session>::load(session_path.clone(), Duration::from_millis(5))
-            .expect("session store");
-
-    config_store.replace(Config {
+fn customised_config() -> Config {
+    Config {
         theme: "dark".to_string(),
         show_hidden_files: true,
         dismissed_everything_banner: true,
@@ -41,17 +43,7 @@ fn config_and_session_round_trip_through_atomic_storage() {
                 visible: false,
             },
         ],
-        layout: LayoutConfig {
-            details_visible: false,
-            tree_width_px: 320.0,
-            favourites_height_px: 168.0,
-            pane_split: 0.4,
-            column_widths: std::collections::HashMap::from([("type".to_string(), 188.0)]),
-            default_pane_mode: "single".to_string(),
-            default_view_mode: "icons".to_string(),
-            restore_session: false,
-            zoom: "150".to_string(),
-        },
+        layout: customised_layout(),
         update_check_interval: "5h".to_string(),
         log_level: "info".to_string(),
         date_format: "dmy".to_string(),
@@ -66,75 +58,40 @@ fn config_and_session_round_trip_through_atomic_storage() {
             "Left".to_string(),
         )]),
         favourites_collapsed: true,
-    });
-    session_store.replace(Session {
+    }
+}
+
+fn customised_session() -> Session {
+    Session {
         active_pane: "right".to_string(),
         left_path: "C:\\left".to_string(),
         right_path: "D:\\right".to_string(),
         ..Session::default()
-    });
+    }
+}
+
+#[test]
+fn config_and_session_round_trip_through_atomic_storage() {
+    let fixture = tempdir().expect("temp dir");
+    let config_path = fixture.path().join("config.json");
+    let session_path = fixture.path().join("session.json");
+
+    let config_store =
+        PersistedStore::<Config>::load(config_path.clone(), Duration::from_millis(5))
+            .expect("config store");
+    let session_store =
+        PersistedStore::<Session>::load(session_path.clone(), Duration::from_millis(5))
+            .expect("session store");
+
+    config_store.replace(customised_config());
+    session_store.replace(customised_session());
 
     thread::sleep(Duration::from_millis(30));
 
     let loaded_config: Config = load_json_or_default(&config_path).expect("load config");
     let loaded_session: Session = load_json_or_default(&session_path).expect("load session");
-
-    assert_eq!(
-        loaded_config,
-        Config {
-            theme: "dark".to_string(),
-            show_hidden_files: true,
-            dismissed_everything_banner: true,
-            keybindings: std::collections::HashMap::from([(
-                "refresh".to_string(),
-                vec!["Ctrl+R".to_string()],
-            )]),
-            columns: vec![
-                ColumnConfig {
-                    key: "name".to_string(),
-                    visible: true,
-                },
-                ColumnConfig {
-                    key: "size".to_string(),
-                    visible: false,
-                },
-            ],
-            layout: LayoutConfig {
-                details_visible: false,
-                tree_width_px: 320.0,
-                favourites_height_px: 168.0,
-                pane_split: 0.4,
-                column_widths: std::collections::HashMap::from([("type".to_string(), 188.0)]),
-                default_pane_mode: "single".to_string(),
-                default_view_mode: "icons".to_string(),
-                restore_session: false,
-                zoom: "150".to_string(),
-            },
-            update_check_interval: "5h".to_string(),
-            log_level: "info".to_string(),
-            date_format: "dmy".to_string(),
-            show_time: true,
-            show_seconds: true,
-            relative_dates: true,
-            auto_folder_size: true,
-            auto_expand_active_queue_toasts: true,
-            favourites: vec!["C:\\left".to_string()],
-            favourite_names: std::collections::HashMap::from([(
-                "C:\\left".to_string(),
-                "Left".to_string(),
-            )]),
-            favourites_collapsed: true,
-        }
-    );
-    assert_eq!(
-        loaded_session,
-        Session {
-            active_pane: "right".to_string(),
-            left_path: "C:\\left".to_string(),
-            right_path: "D:\\right".to_string(),
-            ..Session::default()
-        }
-    );
+    assert_eq!(loaded_config, customised_config());
+    assert_eq!(loaded_session, customised_session());
 }
 
 #[test]

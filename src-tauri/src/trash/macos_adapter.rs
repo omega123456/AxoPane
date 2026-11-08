@@ -157,43 +157,47 @@ pub fn correlate(
     let mut used = HashSet::new();
     let mut result = Vec::new();
     for source in sources {
-        let identity_matches: Vec<_> =
-            source
-                .stable_identity
-                .as_ref()
-                .map_or_else(Vec::new, |identity| {
-                    candidates
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(index, candidate)| {
-                            (!used.contains(&index)
-                                && candidate.facts.stable_identity.as_ref() == Some(identity))
-                            .then_some((index, *candidate))
-                        })
-                        .collect()
-                });
-        let matches = if identity_matches.len() == 1 {
-            identity_matches
-        } else {
-            candidates
-                .iter()
-                .enumerate()
-                .filter_map(|(index, candidate)| {
-                    (!used.contains(&index) && compatible(source, &candidate.facts))
-                        .then_some((index, *candidate))
-                })
-                .collect()
+        let Some((index, candidate)) = unique_unused_match(source, &candidates, &used) else {
+            continue;
         };
-        if matches.len() == 1 {
-            let (index, candidate) = matches[0];
-            used.insert(index);
-            result.push(BatchCorrelation {
-                trashed_name: candidate.trash_name.clone(),
-                original_path: source.path.clone(),
-            });
-        }
+        used.insert(index);
+        result.push(BatchCorrelation {
+            trashed_name: candidate.trash_name.clone(),
+            original_path: source.path.clone(),
+        });
     }
     result
+}
+
+fn unique_unused_match<'entry>(
+    source: &TrashFacts,
+    candidates: &[&'entry TrashSnapshotEntry],
+    used: &HashSet<usize>,
+) -> Option<(usize, &'entry TrashSnapshotEntry)> {
+    let identity_matches = unused_matches(candidates, used, |facts| {
+        source.stable_identity.is_some() && facts.stable_identity == source.stable_identity
+    });
+    if identity_matches.len() == 1 {
+        return identity_matches.into_iter().next();
+    }
+    let compatible_matches = unused_matches(candidates, used, |facts| compatible(source, facts));
+    if compatible_matches.len() != 1 {
+        return None;
+    }
+    compatible_matches.into_iter().next()
+}
+
+fn unused_matches<'entry>(
+    candidates: &[&'entry TrashSnapshotEntry],
+    used: &HashSet<usize>,
+    matches: impl Fn(&TrashFacts) -> bool,
+) -> Vec<(usize, &'entry TrashSnapshotEntry)> {
+    candidates
+        .iter()
+        .enumerate()
+        .filter(|(index, candidate)| !used.contains(index) && matches(&candidate.facts))
+        .map(|(index, candidate)| (index, *candidate))
+        .collect()
 }
 
 fn compatible(source: &TrashFacts, candidate: &TrashFacts) -> bool {

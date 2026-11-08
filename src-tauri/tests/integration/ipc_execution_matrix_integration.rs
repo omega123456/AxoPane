@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::common::wait_until;
 use file_explorer_lib::ipc::executor::{Cancellation, IpcExecutor};
 use file_explorer_lib::reconcile::ReconcileCoordinator;
 use file_explorer_lib::resource_coordinator::{JobClass, JobSpec, ResourceCoordinator};
@@ -69,13 +70,10 @@ fn fixed_ipc_queue_rejects_overload_without_spawning_more_workers() {
         let started = Arc::clone(&started);
         let started_sender = started_sender.clone();
         let release_receiver = release_receiver.clone();
-        callers.push(thread::spawn(move || {
-            tauri::async_runtime::block_on(executor.latency(format!("active-{index}"), move || {
-                started.fetch_add(1, Ordering::SeqCst);
-                started_sender.send(()).expect("test start receiver");
-                release_receiver.recv().expect("test releases worker");
-                Ok(())
-            }))
+        callers.push(spawn_active_caller(executor, index, move || {
+            started.fetch_add(1, Ordering::SeqCst);
+            started_sender.send(()).expect("test start receiver");
+            release_receiver.recv().expect("test releases worker");
         }));
     }
     for _ in 0..4 {
@@ -166,60 +164,78 @@ fn bounded_ipc_executor_uses_shared_latency_admission_and_shutdown_owner() {
     coordinator.shutdown();
 }
 
-#[test]
-fn saturated_ipc_queue_shutdown_drains_without_losing_worker_termination() {
-    let coordinator = Arc::new(ResourceCoordinator::new());
-    let executor = Arc::new(IpcExecutor::new(Arc::clone(&coordinator)));
-    let (started_sender, started_receiver) = mpsc::channel();
-    let (release_sender, release_receiver) = crossbeam_channel::bounded(4);
-    let mut active = Vec::new();
+const ACTIVE_WORKERS: usize = 4;
+const QUEUED_CALLERS: usize = 32;
 
-    for index in 0..4 {
-        let executor = Arc::clone(&executor);
+type CallerHandle = thread::JoinHandle<Result<(), String>>;
+
+fn occupy_every_worker(
+    executor: &Arc<IpcExecutor>,
+) -> (Vec<CallerHandle>, crossbeam_channel::Sender<()>) {
+    let (started_sender, started_receiver) = mpsc::channel();
+    let (release_sender, release_receiver) = crossbeam_channel::bounded(ACTIVE_WORKERS);
+    let mut active = Vec::new();
+    for index in 0..ACTIVE_WORKERS {
         let started_sender = started_sender.clone();
         let release_receiver = release_receiver.clone();
-        active.push(thread::spawn(move || {
-            tauri::async_runtime::block_on(executor.latency(format!("active-{index}"), move || {
+        active.push(spawn_active_caller(
+            Arc::clone(executor),
+            index,
+            move || {
                 started_sender.send(()).expect("active worker started");
                 release_receiver.recv().expect("release active worker");
-                Ok(())
-            }))
-        }));
+            },
+        ));
     }
-    for _ in 0..4 {
+    for _ in 0..ACTIVE_WORKERS {
         started_receiver.recv().expect("all workers occupied");
     }
+    (active, release_sender)
+}
 
-    let mut queued = Vec::new();
-    for index in 0..32 {
-        let executor = Arc::clone(&executor);
-        queued.push(thread::spawn(move || {
-            tauri::async_runtime::block_on(executor.latency(format!("queued-{index}"), || Ok(())))
-        }));
-    }
-    let deadline = Instant::now() + Duration::from_millis(500);
-    while executor.queued_len() != 32 {
-        assert!(Instant::now() < deadline, "queue did not saturate");
-        thread::yield_now();
-    }
+fn saturate_queue(executor: &Arc<IpcExecutor>) -> Vec<CallerHandle> {
+    let queued = (0..QUEUED_CALLERS)
+        .map(|index| {
+            let executor = Arc::clone(executor);
+            thread::spawn(move || {
+                tauri::async_runtime::block_on(
+                    executor.latency(format!("queued-{index}"), || Ok(())),
+                )
+            })
+        })
+        .collect();
+    wait_until(Duration::from_millis(500), "queue did not saturate", || {
+        executor.queued_len() == QUEUED_CALLERS
+    });
+    queued
+}
 
+fn shutdown_in_background(executor: &Arc<IpcExecutor>) -> mpsc::Receiver<()> {
     let (shutdown_done_sender, shutdown_done_receiver) = mpsc::channel();
-    let shutdown_executor = Arc::clone(&executor);
+    let shutdown_executor = Arc::clone(executor);
     thread::spawn(move || {
         shutdown_executor.shutdown();
         shutdown_done_sender
             .send(())
             .expect("shutdown completion receiver");
     });
-    let deadline = Instant::now() + Duration::from_millis(500);
-    while !executor.is_shutting_down() {
-        assert!(
-            Instant::now() < deadline,
-            "shutdown did not cross the admission boundary"
-        );
-        thread::yield_now();
-    }
-    for _ in 0..4 {
+    wait_until(
+        Duration::from_millis(500),
+        "shutdown did not cross the admission boundary",
+        || executor.is_shutting_down(),
+    );
+    shutdown_done_receiver
+}
+
+#[test]
+fn saturated_ipc_queue_shutdown_drains_without_losing_worker_termination() {
+    let coordinator = Arc::new(ResourceCoordinator::new());
+    let executor = Arc::new(IpcExecutor::new(Arc::clone(&coordinator)));
+    let (active, release_sender) = occupy_every_worker(&executor);
+    let queued = saturate_queue(&executor);
+
+    let shutdown_done_receiver = shutdown_in_background(&executor);
+    for _ in 0..ACTIVE_WORKERS {
         release_sender.send(()).expect("release active worker");
     }
 
@@ -308,4 +324,17 @@ fn owned_ipc_executor_runs_async_platform_work_through_its_bounded_owner() {
     assert_eq!(value, 9);
     executor.shutdown();
     coordinator.shutdown();
+}
+
+fn spawn_active_caller(
+    executor: Arc<IpcExecutor>,
+    index: usize,
+    work: impl FnOnce() + Send + 'static,
+) -> thread::JoinHandle<Result<(), String>> {
+    thread::spawn(move || {
+        tauri::async_runtime::block_on(executor.latency(format!("active-{index}"), move || {
+            work();
+            Ok(())
+        }))
+    })
 }

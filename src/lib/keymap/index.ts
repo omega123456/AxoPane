@@ -222,32 +222,14 @@ function normalizeEventKey(value: string, platform: PlatformOs) {
 }
 
 function eventModifierParts(event: KeyboardEvent, platform: PlatformOs) {
-  const parts: string[] = []
-
-  if (platform === 'macos') {
-    if (event.metaKey) {
-      parts.push('Ctrl')
-    }
-    if (event.ctrlKey) {
-      parts.push('Meta')
-    }
-  } else {
-    if (event.ctrlKey) {
-      parts.push('Ctrl')
-    }
-    if (event.metaKey) {
-      parts.push('Meta')
-    }
-  }
-
-  if (event.altKey) {
-    parts.push('Alt')
-  }
-  if (event.shiftKey) {
-    parts.push('Shift')
-  }
-
-  return parts
+  const isMac = platform === 'macos'
+  const modifiers = [
+    { part: 'Ctrl', pressed: isMac ? event.metaKey : event.ctrlKey },
+    { part: 'Meta', pressed: isMac ? event.ctrlKey : event.metaKey },
+    { part: 'Alt', pressed: event.altKey },
+    { part: 'Shift', pressed: event.shiftKey },
+  ]
+  return modifiers.filter((modifier) => modifier.pressed).map((modifier) => modifier.part)
 }
 
 export function captureShortcut(event: KeyboardEvent): Shortcut | null {
@@ -348,11 +330,8 @@ export function findKeybindingConflicts(keymap: Record<CommandId, Shortcut[]>) {
     if (isReservedCommand(commandId)) {
       continue
     }
-    for (const shortcut of shortcuts) {
-      const normalized = normalizeShortcut(shortcut)
-      if (!normalized) {
-        continue
-      }
+    const normalizedShortcuts = shortcuts.map(normalizeShortcut).filter(Boolean)
+    for (const normalized of normalizedShortcuts) {
       seen.set(normalized, [...(seen.get(normalized) ?? []), commandId])
     }
   }

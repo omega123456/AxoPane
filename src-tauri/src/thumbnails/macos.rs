@@ -112,6 +112,39 @@ impl Drop for MacosThumbnailProvider {
     }
 }
 
+impl MacosThumbnailProvider {
+    fn send_generate(&self, command: Command) -> Result<(), ThumbnailState> {
+        let Ok(owner) = self.owner.lock() else {
+            return Err(ThumbnailState::Failed);
+        };
+        let Some(owner) = owner.as_ref() else {
+            return Err(ThumbnailState::Unavailable);
+        };
+        owner
+            .commands
+            .send(command)
+            .map_err(|_| ThumbnailState::Failed)
+    }
+
+    fn await_generation(
+        &self,
+        candidate: &ThumbnailCandidate,
+        result: &Receiver<ProviderUpdate>,
+        preview: &ThumbnailPreviewCallback,
+    ) -> ThumbnailState {
+        let deadline = Instant::now() + GENERATION_DEADLINE;
+        loop {
+            match result.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(update) if update.is_final => return encode_payload(update.payload),
+                Ok(update) => forward_ready_preview(preview, update.payload),
+                Err(_) => break,
+            }
+        }
+        self.cancel(candidate);
+        ThumbnailState::Failed
+    }
+}
+
 impl ThumbnailProvider for MacosThumbnailProvider {
     fn capability(&self) -> ProviderCapability {
         ProviderCapability::Native
@@ -127,53 +160,27 @@ impl ThumbnailProvider for MacosThumbnailProvider {
         }
         let (reply, result) = bounded(REPLY_CAPACITY);
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        {
-            let Ok(owner) = self.owner.lock() else {
-                return ThumbnailState::Failed;
-            };
-            let Some(owner) = owner.as_ref() else {
-                return ThumbnailState::Unavailable;
-            };
-            if owner
-                .commands
-                .send(Command::Generate {
-                    id,
-                    candidate: candidate.clone(),
-                    reply,
-                })
-                .is_err()
-            {
-                return ThumbnailState::Failed;
-            }
+        let command = Command::Generate {
+            id,
+            candidate: candidate.clone(),
+            reply,
+        };
+        if let Err(state) = self.send_generate(command) {
+            return state;
         }
-        let deadline = Instant::now() + GENERATION_DEADLINE;
-        loop {
-            match result.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-                Ok(update) if update.is_final => {
-                    return encode_payload(update.payload);
-                }
-                Ok(update) => {
-                    let state = encode_payload(update.payload);
-                    if matches!(state, ThumbnailState::Ready { .. }) {
-                        preview(state);
-                    }
-                }
-                Err(_) => {
-                    self.cancel(candidate);
-                    return ThumbnailState::Failed;
-                }
-            }
-        }
+        self.await_generation(candidate, &result, &preview)
     }
 
     fn cancel(&self, candidate: &ThumbnailCandidate) {
-        if let Ok(owner) = self.owner.lock() {
-            if let Some(owner) = owner.as_ref() {
-                let _ = owner.commands.try_send(Command::Cancel {
-                    fingerprint: candidate.fingerprint.clone(),
-                });
-            }
-        }
+        let Ok(owner) = self.owner.lock() else {
+            return;
+        };
+        let Some(owner) = owner.as_ref() else {
+            return;
+        };
+        let _ = owner.commands.try_send(Command::Cancel {
+            fingerprint: candidate.fingerprint.clone(),
+        });
     }
 
     fn shutdown(&self) {
@@ -362,6 +369,13 @@ unsafe fn rgba_frame_from_representation(
             crate::ipc::types::ThumbnailQuality::Low
         },
     })
+}
+
+fn forward_ready_preview(preview: &ThumbnailPreviewCallback, payload: ProviderPayload) {
+    let state = encode_payload(payload);
+    if matches!(state, ThumbnailState::Ready { .. }) {
+        preview(state);
+    }
 }
 
 fn encode_payload(payload: ProviderPayload) -> ThumbnailState {

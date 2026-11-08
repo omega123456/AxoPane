@@ -32,15 +32,21 @@ pub fn safe_destination(destination: &Path, member: &Path) -> Result<PathBuf, Tr
     let mut ancestor = destination.to_path_buf();
     for component in member.components() {
         ancestor.push(component.as_os_str());
-        if ancestor.exists() {
-            let metadata = std::fs::symlink_metadata(&ancestor)
-                .map_err(|error| TraversalError::Io(ancestor.clone(), error))?;
-            if metadata.file_type().is_symlink() {
-                return Err(TraversalError::DestinationEscape(candidate));
-            }
-        }
+        reject_symlink_ancestor(&ancestor, &candidate)?;
     }
     Ok(candidate)
+}
+
+fn reject_symlink_ancestor(ancestor: &Path, candidate: &Path) -> Result<(), TraversalError> {
+    if !ancestor.exists() {
+        return Ok(());
+    }
+    let metadata = std::fs::symlink_metadata(ancestor)
+        .map_err(|error| TraversalError::Io(ancestor.to_path_buf(), error))?;
+    if metadata.file_type().is_symlink() {
+        return Err(TraversalError::DestinationEscape(candidate.to_path_buf()));
+    }
+    Ok(())
 }
 
 /// Convenience for callers that only need cancellation-aware serial walking.

@@ -198,15 +198,10 @@ pub fn home_dir() -> Option<PathBuf> {
     #[cfg(not(windows))]
     let keys = ["HOME"];
 
-    for key in keys {
-        if let Some(value) = std::env::var_os(key) {
-            if !value.is_empty() {
-                return Some(PathBuf::from(value));
-            }
-        }
-    }
-
-    None
+    keys.into_iter()
+        .filter_map(std::env::var_os)
+        .find(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 pub fn expand_home_path(path: &Path) -> PathBuf {
@@ -610,11 +605,10 @@ where
 {
     if let Some(pool) = item_count_pool() {
         pool.install(|| {
-            entries.par_iter_mut().for_each(|entry| {
-                if entry.is_dir && !is_cancelled() {
-                    entry.item_count = read_item_count(Path::new(&entry.path));
-                }
-            });
+            entries
+                .par_iter_mut()
+                .filter(|entry| entry.is_dir && !is_cancelled())
+                .for_each(|entry| entry.item_count = read_item_count(Path::new(&entry.path)));
         });
         return;
     }

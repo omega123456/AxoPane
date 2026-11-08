@@ -121,20 +121,38 @@ where
 {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        if let Some(snapshot) = service
+        let reached = service
             .snapshot()
             .into_iter()
             .find(|snapshot| snapshot.progress.operation_id == id)
-        {
-            if predicate(&snapshot.progress) {
-                return;
-            }
+            .is_some_and(|snapshot| predicate(&snapshot.progress));
+        if reached {
+            return;
         }
         if Instant::now() >= deadline {
             panic!("timed out waiting for operation {id}");
         }
         std::thread::sleep(Duration::from_millis(5));
     }
+}
+
+fn unsized_item(path: &Path, name: &str) -> OpItem {
+    OpItem {
+        source_path: path.to_string_lossy().into_owned(),
+        name: name.to_string(),
+        size_bytes: 0,
+    }
+}
+
+fn run_to_completion(service: &OpsService, kind: OpKind, destination: &Path, item: OpItem) {
+    let id = service.start_op(StartOpRequest {
+        kind,
+        destination_dir: destination.to_string_lossy().into_owned(),
+        items: vec![item],
+    });
+    wait_for(service, &id, |progress| {
+        progress.status == OpStatus::Completed
+    });
 }
 
 #[test]
@@ -162,82 +180,65 @@ fn copies_files_into_destination_and_completes() {
 }
 
 #[cfg(unix)]
-#[test]
-fn copying_and_moving_a_folder_preserves_its_symlinks() {
+fn symlinked_source_tree(root: &Path) -> std::path::PathBuf {
     use std::os::unix::fs::symlink;
 
-    let dir = tempdir().expect("temp dir");
-    let source = dir.path().join("source");
-    let copy_destination = dir.path().join("copies");
-    let move_destination = dir.path().join("moves");
+    let source = root.join("source");
     fs::create_dir_all(source.join("nested")).expect("source tree");
-    fs::create_dir(&copy_destination).expect("copy destination");
-    fs::create_dir(&move_destination).expect("move destination");
     fs::write(source.join("target.txt"), b"payload").expect("target file");
     fs::write(source.join("nested/item.txt"), b"nested payload").expect("nested file");
     symlink("target.txt", source.join("file-link")).expect("file symlink");
     symlink("nested", source.join("directory-link")).expect("directory symlink");
     symlink("missing-target", source.join("dangling-link")).expect("dangling symlink");
+    source
+}
+
+#[cfg(unix)]
+fn assert_symlink_to(link: &Path, expected_target: &str) {
+    assert!(
+        fs::symlink_metadata(link)
+            .expect("link metadata")
+            .file_type()
+            .is_symlink(),
+        "{} remains a symlink",
+        link.display()
+    );
+    assert_eq!(
+        fs::read_link(link).expect("link target"),
+        Path::new(expected_target)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn copying_and_moving_a_folder_preserves_its_symlinks() {
+    let dir = tempdir().expect("temp dir");
+    let source = symlinked_source_tree(dir.path());
+    let copy_destination = dir.path().join("copies");
+    let move_destination = dir.path().join("moves");
+    fs::create_dir(&copy_destination).expect("copy destination");
+    fs::create_dir(&move_destination).expect("move destination");
 
     let service = OpsService::new(Duration::from_millis(50));
     service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
-    let item = OpItem {
-        source_path: source.to_string_lossy().into_owned(),
-        name: "source".to_string(),
-        size_bytes: 0,
-    };
+    let item = unsized_item(&source, "source");
 
-    let copy_id = service.start_op(StartOpRequest {
-        kind: OpKind::Copy,
-        destination_dir: copy_destination.to_string_lossy().into_owned(),
-        items: vec![item.clone()],
-    });
-    wait_for(&service, &copy_id, |progress| {
-        progress.status == OpStatus::Completed
-    });
-
+    run_to_completion(&service, OpKind::Copy, &copy_destination, item.clone());
     let copied = copy_destination.join("source");
     for (name, expected_target) in [
         ("file-link", "target.txt"),
         ("directory-link", "nested"),
         ("dangling-link", "missing-target"),
     ] {
-        let copied_link = copied.join(name);
-        assert!(
-            fs::symlink_metadata(&copied_link)
-                .expect("copied link metadata")
-                .file_type()
-                .is_symlink(),
-            "{name} remains a symlink"
-        );
-        assert_eq!(
-            fs::read_link(copied_link).expect("copied link target"),
-            Path::new(expected_target)
-        );
+        assert_symlink_to(&copied.join(name), expected_target);
     }
     assert!(
         !copied.join("dangling-link").exists(),
         "dangling link remains dangling"
     );
 
-    let move_id = service.start_op(StartOpRequest {
-        kind: OpKind::Move,
-        destination_dir: move_destination.to_string_lossy().into_owned(),
-        items: vec![item],
-    });
-    wait_for(&service, &move_id, |progress| {
-        progress.status == OpStatus::Completed
-    });
-    assert!(
-        fs::symlink_metadata(move_destination.join("source/directory-link"))
-            .expect("moved link metadata")
-            .file_type()
-            .is_symlink()
-    );
-    assert_eq!(
-        fs::read_link(move_destination.join("source/directory-link")).expect("moved link target"),
-        Path::new("nested")
-    );
+    run_to_completion(&service, OpKind::Move, &move_destination, item);
+    assert_symlink_to(&move_destination.join("source/directory-link"), "nested");
 }
 
 #[test]
@@ -537,30 +538,18 @@ fn archive_round_trip_preserves_permissions_and_links() {
     let service = OpsService::new(Duration::from_secs(5));
     service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
     let archive_path = archive_dir.join("payload.zip");
-    let compress_id = service.start_op(StartOpRequest {
-        kind: OpKind::Compress,
-        destination_dir: archive_path.to_string_lossy().into_owned(),
-        items: vec![OpItem {
-            source_path: source.to_string_lossy().into_owned(),
-            name: "payload".to_string(),
-            size_bytes: 0,
-        }],
-    });
-    wait_for(&service, &compress_id, |progress| {
-        progress.status == OpStatus::Completed
-    });
-    let extract_id = service.start_op(StartOpRequest {
-        kind: OpKind::Extract,
-        destination_dir: extract_dir.to_string_lossy().into_owned(),
-        items: vec![OpItem {
-            source_path: archive_path.to_string_lossy().into_owned(),
-            name: "payload.zip".to_string(),
-            size_bytes: 0,
-        }],
-    });
-    wait_for(&service, &extract_id, |progress| {
-        progress.status == OpStatus::Completed
-    });
+    run_to_completion(
+        &service,
+        OpKind::Compress,
+        &archive_path,
+        unsized_item(&source, "payload"),
+    );
+    run_to_completion(
+        &service,
+        OpKind::Extract,
+        &extract_dir,
+        unsized_item(&archive_path, "payload.zip"),
+    );
 
     let out = extract_dir.join("payload");
     let extracted_locked = out.join("locked.txt");

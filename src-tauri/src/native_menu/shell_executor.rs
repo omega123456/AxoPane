@@ -47,30 +47,9 @@ impl ShellExecutor {
 
         match self.inner.as_ref() {
             #[cfg(any(not(target_os = "windows"), feature = "test-utils"))]
-            ShellExecutorInner::Direct { serialized, gate } => {
-                if *serialized {
-                    let _guard = gate.lock().expect("shell executor lock");
-                    task()
-                } else {
-                    task()
-                }
-            }
+            ShellExecutorInner::Direct { serialized, gate } => run_direct(*serialized, gate, task),
             #[cfg(all(target_os = "windows", not(feature = "test-utils")))]
-            ShellExecutorInner::Threaded { sender } => {
-                let (result_sender, result_receiver) = mpsc::sync_channel::<Box<dyn Any + Send>>(0);
-                let wrapped = Box::new(move || {
-                    let result = task();
-                    result_sender
-                        .send(Box::new(result))
-                        .expect("shell executor result send");
-                });
-                sender.send(wrapped).expect("shell executor task send");
-                *result_receiver
-                    .recv()
-                    .expect("shell executor result receive")
-                    .downcast::<T>()
-                    .expect("shell executor result type")
-            }
+            ShellExecutorInner::Threaded { sender } => run_on_shell_thread(sender, task),
         }
     }
 
@@ -85,19 +64,48 @@ impl Default for ShellExecutor {
     }
 }
 
+#[cfg(any(not(target_os = "windows"), feature = "test-utils"))]
+fn run_direct<T>(serialized: bool, gate: &Mutex<()>, task: impl FnOnce() -> T) -> T {
+    let _guard = serialized.then(|| gate.lock().expect("shell executor lock"));
+    task()
+}
+
+#[cfg(all(target_os = "windows", not(feature = "test-utils")))]
+fn run_on_shell_thread<T, F>(sender: &Sender<Box<dyn FnOnce() + Send>>, task: F) -> T
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    let (result_sender, result_receiver) = mpsc::sync_channel::<Box<dyn Any + Send>>(0);
+    let wrapped = Box::new(move || {
+        let result = task();
+        result_sender
+            .send(Box::new(result))
+            .expect("shell executor result send");
+    });
+    sender.send(wrapped).expect("shell executor task send");
+    *result_receiver
+        .recv()
+        .expect("shell executor result receive")
+        .downcast::<T>()
+        .expect("shell executor result type")
+}
+
+#[cfg(all(target_os = "windows", not(feature = "test-utils")))]
+fn run_shell_thread(receiver: mpsc::Receiver<Box<dyn FnOnce() + Send>>) {
+    let _apartment = crate::win32::com::ComApartment::initialize(COINIT_APARTMENTTHREADED);
+    while let Ok(task) = receiver.recv() {
+        task();
+    }
+}
+
 fn default_inner() -> ShellExecutorInner {
     #[cfg(all(target_os = "windows", not(feature = "test-utils")))]
     {
         let (sender, receiver) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
         thread::Builder::new()
             .name("native-menu-shell".to_string())
-            .spawn(move || {
-                let _apartment =
-                    crate::win32::com::ComApartment::initialize(COINIT_APARTMENTTHREADED);
-                while let Ok(task) = receiver.recv() {
-                    task();
-                }
-            })
+            .spawn(move || run_shell_thread(receiver))
             .expect("native menu shell executor thread");
 
         ShellExecutorInner::Threaded { sender }

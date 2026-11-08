@@ -246,14 +246,21 @@ impl SearchService {
             })
             .collect();
         let results = Arc::new(ResultSet::new(ticket.generation, hits, batch.truncated));
-        {
-            let mut state = self.state();
-            if state.generation != ticket.generation {
-                return Err(SearchRejection::Stale);
-            }
-            state.results = Some(Arc::clone(&results));
-        }
+        self.publish_results(ticket.generation, &results)?;
         Ok(self.page_of(&results, 0))
+    }
+
+    fn publish_results(
+        &self,
+        generation: u64,
+        results: &Arc<ResultSet>,
+    ) -> Result<(), SearchRejection> {
+        let mut state = self.state();
+        if state.generation != generation {
+            return Err(SearchRejection::Stale);
+        }
+        state.results = Some(Arc::clone(results));
+        Ok(())
     }
 
     pub fn page(&self, request: &SearchPageRequest) -> Result<SearchPage, SearchRejection> {

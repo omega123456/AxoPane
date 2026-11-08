@@ -114,25 +114,14 @@ impl ThumbnailService {
 
     #[cfg(not(feature = "test-utils"))]
     fn start_batch_timer(&self) {
-        let batches = Arc::clone(&self.batches);
-        let emitter = Arc::clone(&self.emitter);
-        let clock = Arc::clone(&self.clock);
-        let stop = Arc::clone(&self.batch_timer_stop);
-        let wake = Arc::clone(&self.batch_wake);
-        let timer = std::thread::spawn(move || loop {
-            let (lock, ready) = &*wake;
-            let mut signalled = lock.lock().expect("thumbnail batch wake lock");
-            while !*signalled && !stop.load(Ordering::Acquire) {
-                signalled = ready.wait(signalled).expect("thumbnail batch wake");
-            }
-            if stop.load(Ordering::Acquire) {
-                break;
-            }
-            *signalled = false;
-            drop(signalled);
-            std::thread::sleep(Duration::from_millis(PARTIAL_BATCH_FLUSH_MILLIS));
-            flush_due_batch(&batches, &emitter, clock());
-        });
+        let batch_timer = BatchTimer {
+            batches: Arc::clone(&self.batches),
+            emitter: Arc::clone(&self.emitter),
+            clock: Arc::clone(&self.clock),
+            stop: Arc::clone(&self.batch_timer_stop),
+            wake: Arc::clone(&self.batch_wake),
+        };
+        let timer = std::thread::spawn(move || batch_timer.run());
         *self.batch_timer.lock().expect("thumbnail batch timer lock") = Some(timer);
     }
 
@@ -142,28 +131,37 @@ impl ThumbnailService {
 
     pub fn request(&self, subscribers: Vec<(ThumbnailSubscriber, ThumbnailCandidate)>) {
         let now = now_seconds();
-        for (subscriber, candidate) in subscribers {
-            if candidate.is_directory {
-                continue;
-            }
-            let key = ThumbnailCacheKey(candidate.fingerprint.clone());
-            if let Some(state) = self
-                .cache
-                .lock()
-                .expect("thumbnail cache lock")
-                .get(&key, now)
-            {
-                enqueue_batch(
-                    &self.batches,
-                    &self.emitter,
-                    vec![result_event(subscriber, candidate, state)],
-                    (self.clock)(),
-                    &self.batch_wake,
-                );
-            } else {
-                self.scheduler.submit(subscriber, candidate);
-            }
+        let file_requests = subscribers
+            .into_iter()
+            .filter(|(_, candidate)| !candidate.is_directory);
+        for (subscriber, candidate) in file_requests {
+            self.publish_cached_or_submit(subscriber, candidate, now);
         }
+    }
+
+    fn publish_cached_or_submit(
+        &self,
+        subscriber: ThumbnailSubscriber,
+        candidate: ThumbnailCandidate,
+        now: u64,
+    ) {
+        let key = ThumbnailCacheKey(candidate.fingerprint.clone());
+        let cached = self
+            .cache
+            .lock()
+            .expect("thumbnail cache lock")
+            .get(&key, now);
+        let Some(state) = cached else {
+            self.scheduler.submit(subscriber, candidate);
+            return;
+        };
+        enqueue_batch(
+            &self.batches,
+            &self.emitter,
+            vec![result_event(subscriber, candidate, state)],
+            (self.clock)(),
+            &self.batch_wake,
+        );
     }
 
     pub fn replace_scope(
@@ -174,39 +172,63 @@ impl ThumbnailService {
     ) -> usize {
         let requested = candidates.len();
         let now = now_seconds();
+        let file_candidates = candidates
+            .into_iter()
+            .filter(|(candidate, _, _)| !candidate.is_directory);
         let mut pending = Vec::new();
-        for (candidate, priority, order) in candidates {
-            if candidate.is_directory {
-                continue;
-            }
-            let key = ThumbnailCacheKey(candidate.fingerprint.clone());
-            let cached = self
-                .cache
-                .lock()
-                .expect("thumbnail cache lock")
-                .get_with_upgrade(&key, now);
-            if let Some((state, should_upgrade)) = cached {
-                enqueue_batch(
-                    &self.batches,
-                    &self.emitter,
-                    vec![result_event(
-                        subscriber.clone(),
-                        candidate.clone(),
-                        state.clone(),
-                    )],
-                    (self.clock)(),
-                    &self.batch_wake,
-                );
-                if should_upgrade {
-                    pending.push((candidate, priority, order));
-                }
-            } else {
-                pending.push((candidate, priority, order));
-            }
+        for desired in file_candidates {
+            self.publish_cached_or_queue(&subscriber, desired, now, &mut pending);
         }
         let pending_count = pending.len();
         let accepted_pending = self.scheduler.replace_scope(subscriber, revision, pending);
         requested - pending_count + accepted_pending
+    }
+
+    fn publish_cached_or_queue(
+        &self,
+        subscriber: &ThumbnailSubscriber,
+        desired: (ThumbnailCandidate, ThumbnailPriority, u32),
+        now: u64,
+        pending: &mut Vec<(ThumbnailCandidate, ThumbnailPriority, u32)>,
+    ) {
+        let needs_generation = self.publish_if_cached(subscriber, &desired.0, now);
+        if needs_generation {
+            pending.push(desired);
+        }
+    }
+
+    fn publish_if_cached(
+        &self,
+        subscriber: &ThumbnailSubscriber,
+        candidate: &ThumbnailCandidate,
+        now: u64,
+    ) -> bool {
+        let key = ThumbnailCacheKey(candidate.fingerprint.clone());
+        let cached = self
+            .cache
+            .lock()
+            .expect("thumbnail cache lock")
+            .get_with_upgrade(&key, now);
+        let Some((state, should_upgrade)) = cached else {
+            return true;
+        };
+        self.publish_cached(subscriber, candidate, state);
+        should_upgrade
+    }
+
+    fn publish_cached(
+        &self,
+        subscriber: &ThumbnailSubscriber,
+        candidate: &ThumbnailCandidate,
+        state: ThumbnailState,
+    ) {
+        enqueue_batch(
+            &self.batches,
+            &self.emitter,
+            vec![result_event(subscriber.clone(), candidate.clone(), state)],
+            (self.clock)(),
+            &self.batch_wake,
+        );
     }
 
     #[cfg(feature = "test-utils")]
@@ -227,18 +249,53 @@ impl ThumbnailService {
     pub fn shutdown(&self) {
         self.scheduler.shutdown();
         #[cfg(not(feature = "test-utils"))]
-        {
-            self.batch_timer_stop.store(true, Ordering::Release);
-            self.batch_wake.1.notify_all();
-            if let Some(timer) = self
-                .batch_timer
-                .lock()
-                .expect("thumbnail batch timer lock")
-                .take()
-            {
-                let _ = timer.join();
-            }
+        self.stop_batch_timer();
+    }
+
+    #[cfg(not(feature = "test-utils"))]
+    fn stop_batch_timer(&self) {
+        self.batch_timer_stop.store(true, Ordering::Release);
+        self.batch_wake.1.notify_all();
+        let timer = self
+            .batch_timer
+            .lock()
+            .expect("thumbnail batch timer lock")
+            .take();
+        if let Some(timer) = timer {
+            let _ = timer.join();
         }
+    }
+}
+
+#[cfg(not(feature = "test-utils"))]
+struct BatchTimer {
+    batches: Arc<Mutex<BatchState>>,
+    emitter: Arc<Mutex<Option<ResultEmitter>>>,
+    clock: ThumbnailClock,
+    stop: Arc<AtomicBool>,
+    wake: Arc<(Mutex<bool>, Condvar)>,
+}
+
+#[cfg(not(feature = "test-utils"))]
+impl BatchTimer {
+    fn run(self) {
+        while self.wait_for_signal() {
+            std::thread::sleep(Duration::from_millis(PARTIAL_BATCH_FLUSH_MILLIS));
+            flush_due_batch(&self.batches, &self.emitter, (self.clock)());
+        }
+    }
+
+    fn wait_for_signal(&self) -> bool {
+        let (lock, ready) = &*self.wake;
+        let mut signalled = lock.lock().expect("thumbnail batch wake lock");
+        while !*signalled && !self.stop.load(Ordering::Acquire) {
+            signalled = ready.wait(signalled).expect("thumbnail batch wake");
+        }
+        if self.stop.load(Ordering::Acquire) {
+            return false;
+        }
+        *signalled = false;
+        true
     }
 }
 
@@ -298,26 +355,8 @@ fn enqueue_batch(
         let mut state = batches.lock().expect("thumbnail batches lock");
         state.events.extend(events);
         let mut ready = Vec::new();
-        loop {
-            let total_bytes = state.events.iter().map(result_event_weight).sum::<usize>();
-            if state.events.len() < MAX_RESULTS_PER_BATCH
-                && total_bytes <= MAX_RESULT_BYTES_PER_BATCH
-            {
-                break;
-            }
-            let mut batch_bytes = 0;
-            let mut count = 0;
-            for event in &state.events {
-                let event_bytes = result_event_weight(event);
-                if count > 0
-                    && (count >= MAX_RESULTS_PER_BATCH
-                        || batch_bytes + event_bytes > MAX_RESULT_BYTES_PER_BATCH)
-                {
-                    break;
-                }
-                count += 1;
-                batch_bytes += event_bytes;
-            }
+        while exceeds_one_batch(&state.events) {
+            let count = full_batch_len(&state.events);
             state.last_flush_millis = now_millis;
             ready.push(state.events.drain(..count).collect());
         }
@@ -440,4 +479,26 @@ pub fn platform_provider() -> Box<dyn ThumbnailProvider> {
     {
         Box::new(unsupported::UnsupportedThumbnailProvider)
     }
+}
+
+fn exceeds_one_batch(events: &[ThumbnailResultEvent]) -> bool {
+    let total_bytes = events.iter().map(result_event_weight).sum::<usize>();
+    events.len() >= MAX_RESULTS_PER_BATCH || total_bytes > MAX_RESULT_BYTES_PER_BATCH
+}
+
+/// How many leading events fit one batch; always at least one.
+fn full_batch_len(events: &[ThumbnailResultEvent]) -> usize {
+    let mut batch_bytes = 0;
+    let mut count = 0;
+    for event in events {
+        let event_bytes = result_event_weight(event);
+        let batch_full = count >= MAX_RESULTS_PER_BATCH
+            || batch_bytes + event_bytes > MAX_RESULT_BYTES_PER_BATCH;
+        if count > 0 && batch_full {
+            break;
+        }
+        count += 1;
+        batch_bytes += event_bytes;
+    }
+    count
 }

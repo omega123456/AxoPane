@@ -8,6 +8,7 @@ import { useConfigStore } from '@/stores/config-store'
 import { isTerminal, orderedOperations, useQueueStore } from '@/stores/queue-store'
 import { caseInsensitiveLetterKeys, handleKeyByTable, type KeyHandlerTable } from '@/lib/key-table'
 import type { OpProgress, OpStatus } from '@/lib/types/ipc'
+import { useOrderedOperations } from './use-ordered-operations'
 
 type QueueKeyActions = {
   collapse: () => void
@@ -45,23 +46,10 @@ function queueKeyTable(target: OpProgress | undefined, actions: QueueKeyActions)
   }
 }
 
-/**
- * Bottom-right job queue surface: a collapsed toast that expands into the
- * TransferCard-faithful panel. Owns the
- * `queue://*` event wiring and the queue keyboard model.
- */
-export function QueueOverlay() {
+function useFirstConflict() {
   const order = useQueueStore((state) => state.order)
-  const operationsMap = useQueueStore((state) => state.operations)
   const conflictsMap = useQueueStore((state) => state.conflicts)
-  const operations = useMemo(
-    () =>
-      order
-        .map((id) => operationsMap[id])
-        .filter((operation): operation is NonNullable<typeof operation> => operation !== undefined),
-    [order, operationsMap],
-  )
-  const conflict = useMemo(() => {
+  return useMemo(() => {
     for (const id of order) {
       if (conflictsMap[id]) {
         return conflictsMap[id]
@@ -69,18 +57,13 @@ export function QueueOverlay() {
     }
     return undefined
   }, [order, conflictsMap])
-  const expanded = useQueueStore((state) => state.expanded)
-  const setExpanded = useQueueStore((state) => state.setExpanded)
+}
+
+function useQueueEventSubscriptions() {
   const applyProgress = useQueueStore((state) => state.applyProgress)
   const applyConflict = useQueueStore((state) => state.applyConflict)
   const removeOperation = useQueueStore((state) => state.removeOperation)
   const hydrate = useQueueStore((state) => state.hydrate)
-  const pause = useQueueStore((state) => state.pause)
-  const resume = useQueueStore((state) => state.resume)
-  const cancel = useQueueStore((state) => state.cancel)
-  const retry = useQueueStore((state) => state.retry)
-  const autoExpandActiveQueueToasts = useConfigStore((state) => state.autoExpandActiveQueueToasts)
-  const hadActiveWorkRef = useRef(false)
 
   useEffect(() => {
     void queueSnapshot().then(hydrate)
@@ -103,36 +86,40 @@ export function QueueOverlay() {
       void unlistenRemoved.then((unlisten) => unlisten())
     }
   }, [applyConflict, applyProgress, removeOperation])
+}
 
-  // Queue keyboard model. Active only while the panel is expanded and no
-  // conflict modal is open (the modal owns its own keys).
+// Queue keyboard model. Active only while the panel is expanded and no
+// conflict modal is open (the modal owns its own keys).
+function useQueueKeyboard(hasConflict: boolean, expanded: boolean) {
+  const setExpanded = useQueueStore((state) => state.setExpanded)
+  const pause = useQueueStore((state) => state.pause)
+  const resume = useQueueStore((state) => state.resume)
+  const cancel = useQueueStore((state) => state.cancel)
+  const retry = useQueueStore((state) => state.retry)
+
   const onKeyDown = useCallback(
     (event: KeyboardEvent) => {
-      if (conflict) {
-        return
-      }
-      if (!expanded) {
+      if (hasConflict || !expanded) {
         return
       }
 
       const target = orderedOperations(useQueueStore.getState())[0] as OpProgress | undefined
-      const keyTable = queueKeyTable(target, {
-        collapse: () => setExpanded(false),
-        pause,
-        resume,
-        cancel,
-        retry,
-      })
-      handleKeyByTable(event, keyTable)
+      const collapse = () => setExpanded(false)
+      handleKeyByTable(event, queueKeyTable(target, { collapse, pause, resume, cancel, retry }))
     },
-    [cancel, conflict, expanded, pause, resume, retry, setExpanded],
+    [cancel, hasConflict, expanded, pause, resume, retry, setExpanded],
   )
 
   useEffect(() => {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onKeyDown])
+}
 
+function useAutoExpandOnActiveWork(operations: OpProgress[], expanded: boolean) {
+  const setExpanded = useQueueStore((state) => state.setExpanded)
+  const autoExpandActiveQueueToasts = useConfigStore((state) => state.autoExpandActiveQueueToasts)
+  const hadActiveWorkRef = useRef(false)
   const hasActiveWork = operations.some((operation) => !isTerminal(operation.status))
 
   useEffect(() => {
@@ -141,6 +128,20 @@ export function QueueOverlay() {
     }
     hadActiveWorkRef.current = hasActiveWork
   }, [autoExpandActiveQueueToasts, expanded, hasActiveWork, setExpanded])
+}
+
+/**
+ * Bottom-right job queue surface: a collapsed toast that expands into the
+ * TransferCard-faithful panel. Owns the
+ * `queue://*` event wiring and the queue keyboard model.
+ */
+export function QueueOverlay() {
+  const conflict = useFirstConflict()
+  const operations = useOrderedOperations()
+  const expanded = useQueueStore((state) => state.expanded)
+  useQueueEventSubscriptions()
+  useQueueKeyboard(Boolean(conflict), expanded)
+  useAutoExpandOnActiveWork(operations, expanded)
 
   if (operations.length === 0 && !conflict) {
     return null

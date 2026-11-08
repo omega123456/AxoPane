@@ -76,6 +76,21 @@ impl Drop for WindowsThumbnailProvider {
     }
 }
 
+impl WindowsThumbnailProvider {
+    fn send_work(&self, work: Work) -> Result<(), ThumbnailState> {
+        let Ok(guard) = self.workers.lock() else {
+            return Err(ThumbnailState::Failed);
+        };
+        let Some(workers) = guard.as_ref() else {
+            return Err(ThumbnailState::Unavailable);
+        };
+        workers
+            .sender
+            .try_send(work)
+            .map_err(|_| ThumbnailState::Failed)
+    }
+}
+
 impl ThumbnailProvider for WindowsThumbnailProvider {
     fn capability(&self) -> ProviderCapability {
         ProviderCapability::Native
@@ -90,24 +105,13 @@ impl ThumbnailProvider for WindowsThumbnailProvider {
             return ThumbnailState::Unavailable;
         }
         let (reply, result) = mpsc::channel();
-        {
-            let Ok(guard) = self.workers.lock() else {
-                return ThumbnailState::Failed;
-            };
-            let Some(workers) = guard.as_ref() else {
-                return ThumbnailState::Unavailable;
-            };
-            if workers
-                .sender
-                .try_send(Work {
-                    candidate: candidate.clone(),
-                    reply,
-                    deadline: Instant::now() + GENERATION_DEADLINE,
-                })
-                .is_err()
-            {
-                return ThumbnailState::Failed;
-            }
+        let work = Work {
+            candidate: candidate.clone(),
+            reply,
+            deadline: Instant::now() + GENERATION_DEADLINE,
+        };
+        if let Err(state) = self.send_work(work) {
+            return state;
         }
         result
             .recv_timeout(GENERATION_DEADLINE)

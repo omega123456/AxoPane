@@ -291,16 +291,27 @@ fn explicit_items_sort_returns_stable_backend_order_and_unknowns() {
     assert_eq!(events[0].results[0].item_count, None);
 }
 
-#[test]
-fn explicit_items_sort_serves_full_relisting_and_path_matching_is_case_fallback_safe() {
-    let fixture = tempdir().expect("temp dir");
-    let root = fixture.path();
+fn seed_count_fixture(root: &std::path::Path) {
     fs::create_dir(root.join("dir-a")).expect("dir-a");
     fs::create_dir(root.join("dir-b")).expect("dir-b");
     fs::write(root.join("dir-a").join("1.txt"), b"1").expect("seed");
     fs::write(root.join("dir-b").join("1.txt"), b"1").expect("seed");
     fs::write(root.join("dir-b").join("2.txt"), b"2").expect("seed");
     fs::write(root.join("note.txt"), b"note").expect("file");
+}
+
+fn case_fallback_message() -> &'static str {
+    if cfg!(any(target_os = "windows", target_os = "macos")) {
+        return "the latest coalesced plan carries the earlier visible path forward";
+    }
+    "POSIX paths remain distinct"
+}
+
+#[test]
+fn automatic_plans_are_case_fallback_safe() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    seed_count_fixture(root);
 
     let service = ItemCountService::default();
     let mixed_case = root.to_string_lossy().to_string().to_uppercase();
@@ -315,18 +326,17 @@ fn explicit_items_sort_serves_full_relisting_and_path_matching_is_case_fallback_
         },
         paths: vec![root.join("dir-a").to_string_lossy().into_owned()],
     });
-    if cfg!(any(target_os = "windows", target_os = "macos")) {
-        assert!(
-            !first.is_empty() && !second.is_empty(),
-            "the latest coalesced plan carries the earlier visible path forward"
-        );
-    } else {
-        assert!(
-            !first.is_empty() && !second.is_empty(),
-            "POSIX paths remain distinct"
-        );
-    }
+    let both_planned = !first.is_empty() && !second.is_empty();
+    assert!(both_planned, "{}", case_fallback_message());
+}
 
+#[test]
+fn explicit_items_sort_serves_full_relisting() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    seed_count_fixture(root);
+
+    let service = ItemCountService::default();
     let response = service
         .sort_active_items(&ActiveItemsSortRequest {
             context: ItemCountRequestContext {
@@ -481,6 +491,29 @@ fn item_count_cache_never_exceeds_approved_entry_limit() {
     assert_eq!(cache.len(), ITEM_COUNT_CACHE_LIMIT);
 }
 
+fn started_left_session(path: &str) -> DirectorySessionService {
+    let sessions = DirectorySessionService::default();
+    sessions
+        .begin_navigation(
+            BeginNavigationRequest {
+                pane_id: "left".to_string(),
+                tab_id: "left-1".to_string(),
+                path: path.to_string(),
+                view: ViewParams {
+                    sort_key: SortKey::Name,
+                    sort_direction: SortDirection::Asc,
+                    filter: String::new(),
+                    show_hidden: true,
+                    include_item_counts: false,
+                },
+            },
+            None,
+            None,
+        )
+        .expect("start session");
+    sessions
+}
+
 #[test]
 fn items_sort_reuses_active_session_snapshot_and_viewport_count_cache() {
     let fixture = tempdir().expect("temp dir");
@@ -494,25 +527,7 @@ fn items_sort_reuses_active_session_snapshot_and_viewport_count_cache() {
     fs::write(beta.join("b"), b"b").expect("beta child");
 
     let path = root.to_string_lossy().into_owned();
-    let sessions = DirectorySessionService::default();
-    sessions
-        .begin_navigation(
-            BeginNavigationRequest {
-                pane_id: "left".to_string(),
-                tab_id: "left-1".to_string(),
-                path: path.clone(),
-                view: ViewParams {
-                    sort_key: SortKey::Name,
-                    sort_direction: SortDirection::Asc,
-                    filter: String::new(),
-                    show_hidden: true,
-                    include_item_counts: false,
-                },
-            },
-            None,
-            None,
-        )
-        .expect("start session");
+    let sessions = started_left_session(&path);
 
     let service = ItemCountService::default();
     let generation = sessions

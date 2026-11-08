@@ -1,8 +1,9 @@
-import { memo, useEffect, useMemo, useRef } from 'react'
+import { memo, useMemo } from 'react'
 import { getUnixTime, parseISO } from 'date-fns'
-import type { DragEvent, MouseEvent } from 'react'
+import type { DragEvent, MouseEvent, ReactNode, RefObject } from 'react'
+import { MIDDLE_MOUSE_BUTTON } from '@/lib/mouse-buttons'
 import { EntryIcon } from '@/components/icons/EntryIcon'
-import { focusRenameInput, type FileRowActions } from './FileRow'
+import { useRenameInputFocus, type FileRowActions } from './FileRow'
 import { SizeValue } from './SizeValue'
 import { InlineRenameInput } from './InlineRenameInput'
 import { cardHighlightClass, cutFadeClass, itemCountLabel } from './entry-classes'
@@ -111,6 +112,79 @@ type EntryCardProps = {
   thumbnail?: EntryCardThumbnail
 }
 
+type CardGridPosition = {
+  draggable: boolean
+  rowIndex: number
+  columnIndex: number
+  isSelected: boolean
+}
+
+function cardInteractionProps(
+  entry: DirectoryEntry,
+  actions: FileRowActions,
+  position: CardGridPosition,
+) {
+  return {
+    'data-entry-id': entry.id,
+    draggable: position.draggable,
+    onDragStart: (event: DragEvent<HTMLDivElement>) => actions.onDragStart(entry.id, event),
+    onDragEnd: actions.onDragEnd,
+    onDragEnter: (event: DragEvent<HTMLDivElement>) => actions.onDragEnter(entry.id, event),
+    onDragOver: (event: DragEvent<HTMLDivElement>) => actions.onDragOver(entry.id, event),
+    onDragLeave: () => actions.onDragLeave(entry.id),
+    onDrop: (event: DragEvent<HTMLDivElement>) => actions.onDrop(entry.id, event),
+    onMouseDown: actions.onPointerDown,
+    onDoubleClick: (event: MouseEvent<HTMLDivElement>) =>
+      actions.onActivate(entry.id, event.detail, event.timeStamp),
+    onClick: (event: MouseEvent<HTMLDivElement>) => actions.onClick(entry.id, event),
+    onContextMenu: (event: MouseEvent<HTMLDivElement>) => actions.onContextMenu(entry.id, event),
+    onAuxClick: (event: MouseEvent<HTMLDivElement>) => {
+      if (event.button === MIDDLE_MOUSE_BUTTON && entry.isDir && !entry.trashId) {
+        event.preventDefault()
+        actions.onMiddleClick(entry.id)
+      }
+    },
+    role: 'gridcell' as const,
+    'aria-rowindex': position.rowIndex,
+    'aria-colindex': position.columnIndex,
+    'aria-selected': position.isSelected,
+    'aria-label': entry.name,
+    title: entry.name,
+  }
+}
+
+type CardRenameCaptionProps = {
+  inputRef: RefObject<HTMLInputElement | null>
+  entry: DirectoryEntry
+  value: string
+  busy: boolean
+  error: string | null
+  actions: FileRowActions
+}
+
+function CardRenameCaption({
+  inputRef,
+  entry,
+  value,
+  busy,
+  error,
+  actions,
+}: CardRenameCaptionProps) {
+  return (
+    <div className="min-w-0">
+      <InlineRenameInput
+        inputRef={inputRef}
+        entryName={entry.name}
+        value={value}
+        busy={busy}
+        actions={actions}
+        className="w-full"
+      />
+      <CardRenameError message={error} />
+    </div>
+  )
+}
+
 function EntryCardImpl({
   entry,
   mode,
@@ -129,66 +203,65 @@ function EntryCardImpl({
   draggable = false,
   thumbnail,
 }: EntryCardProps) {
-  const renameInputRef = useRef<HTMLInputElement>(null)
-  useEffect(() => {
-    if (isRenaming) {
-      focusRenameInput(renameInputRef.current, entry.isDir)
-    }
-  }, [entry.isDir, isRenaming])
+  const renameInputRef = useRenameInputFocus(isRenaming, entry.isDir)
 
   const stateClassName = cardHighlightClass({ isActivePane, isSelected, isFocused, isDropTarget })
   const contentClassName = cutFadeClass(isCut)
   const minimumCellClassName = minimumCellClassNames[mode]
-  const sharedProps = {
-    'data-entry-id': entry.id,
+  const sharedProps = cardInteractionProps(entry, actions, {
     draggable,
-    onDragStart: (event: DragEvent<HTMLDivElement>) => actions.onDragStart(entry.id, event),
-    onDragEnd: actions.onDragEnd,
-    onDragEnter: (event: DragEvent<HTMLDivElement>) => actions.onDragEnter(entry.id, event),
-    onDragOver: (event: DragEvent<HTMLDivElement>) => actions.onDragOver(entry.id, event),
-    onDragLeave: () => actions.onDragLeave(entry.id),
-    onDrop: (event: DragEvent<HTMLDivElement>) => actions.onDrop(entry.id, event),
-    onMouseDown: actions.onPointerDown,
-    onDoubleClick: (event: MouseEvent<HTMLDivElement>) =>
-      actions.onActivate(entry.id, event.detail, event.timeStamp),
-    onClick: (event: MouseEvent<HTMLDivElement>) => actions.onClick(entry.id, event),
-    onContextMenu: (event: MouseEvent<HTMLDivElement>) => actions.onContextMenu(entry.id, event),
-    onAuxClick: (event: MouseEvent<HTMLDivElement>) => {
-      if (event.button === 1 && entry.isDir && !entry.trashId) {
-        event.preventDefault()
-        actions.onMiddleClick(entry.id)
-      }
-    },
-    role: 'gridcell' as const,
-    'aria-rowindex': rowIndex,
-    'aria-colindex': columnIndex,
-    'aria-selected': isSelected,
-    'aria-label': entry.name,
-    title: entry.name,
-  }
-
+    rowIndex,
+    columnIndex,
+    isSelected,
+  })
   const caption = isRenaming ? (
-    <div className="min-w-0">
-      <InlineRenameInput
-        inputRef={renameInputRef}
-        entryName={entry.name}
-        value={renameValue}
-        busy={renameBusy}
-        actions={actions}
-        className="w-full"
-      />
-      <CardRenameError message={renameError} />
-    </div>
+    <CardRenameCaption
+      inputRef={renameInputRef}
+      entry={entry}
+      value={renameValue}
+      busy={renameBusy}
+      error={renameError}
+      actions={actions}
+    />
   ) : (
     <CardLabels entry={entry} />
   )
 
+  return (
+    <CardLayout
+      mode={mode}
+      interactionProps={sharedProps}
+      className={`${minimumCellClassName} cursor-pointer p-1.5 ${FOCUS_RING_INSET} ${stateClassName}`}
+      contentClassName={contentClassName}
+      entry={entry}
+      thumbnail={thumbnail}
+      caption={caption}
+    />
+  )
+}
+
+type CardLayoutProps = {
+  mode: EntryCardProps['mode']
+  interactionProps: ReturnType<typeof cardInteractionProps>
+  className: string
+  contentClassName: string
+  entry: DirectoryEntry
+  thumbnail?: EntryCardThumbnail
+  caption: ReactNode
+}
+
+function CardLayout({
+  mode,
+  interactionProps,
+  className,
+  contentClassName,
+  entry,
+  thumbnail,
+  caption,
+}: CardLayoutProps) {
   if (mode === 'icons') {
     return (
-      <div
-        {...sharedProps}
-        className={`flex h-icon-tile ${minimumCellClassName} cursor-pointer items-center gap-2 p-1.5 ${FOCUS_RING_INSET} ${stateClassName}`}
-      >
+      <div {...interactionProps} className={`flex h-icon-tile items-center gap-2 ${className}`}>
         <EntryIcon entry={entry} className={`size-entry-icon shrink-0 ${contentClassName}`} />
         <div className={`flex min-w-0 flex-1 flex-col gap-1.5 ${contentClassName}`}>{caption}</div>
       </div>
@@ -196,10 +269,7 @@ function EntryCardImpl({
   }
 
   return (
-    <div
-      {...sharedProps}
-      className={`flex h-thumbnail-card ${minimumCellClassName} cursor-pointer flex-col gap-1.5 p-1.5 ${FOCUS_RING_INSET} ${stateClassName}`}
-    >
+    <div {...interactionProps} className={`flex h-thumbnail-card flex-col gap-1.5 ${className}`}>
       <div className={`flex min-h-0 flex-col gap-1.5 ${contentClassName}`}>
         <ThumbnailPreview entry={entry} override={thumbnail} />
         {caption}

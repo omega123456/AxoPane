@@ -76,29 +76,34 @@ export function createTrashPropertiesDialogItem(platform: PlatformOs): Propertie
   }
 }
 
+async function showNativeDialog(items: PropertiesDialogItem[]): Promise<boolean> {
+  try {
+    const response = await showNativeProperties({ paths: items.map((item) => item.path) })
+    if (response.handled) {
+      return true
+    }
+    log.info('native properties unavailable, opening fallback dialog', {
+      ...describePropertiesResult(items),
+      message: response.message ?? null,
+    })
+  } catch (error) {
+    log.warn('show_properties IPC failed, opening fallback dialog', {
+      ...describePropertiesResult(items),
+      error,
+    })
+  }
+  return false
+}
+
 export async function showPropertiesDialog(items: PropertiesDialogItem[]) {
   if (items.length === 0) {
     log.info('properties requested without any targets')
     return
   }
 
-  if (shouldAttemptNativeProperties(items)) {
-    try {
-      const response = await showNativeProperties({ paths: items.map((item) => item.path) })
-      if (response.handled) {
-        return
-      }
-
-      log.info('native properties unavailable, opening fallback dialog', {
-        ...describePropertiesResult(items),
-        message: response.message ?? null,
-      })
-    } catch (error) {
-      log.warn('show_properties IPC failed, opening fallback dialog', {
-        ...describePropertiesResult(items),
-        error,
-      })
-    }
+  const nativeHandled = shouldAttemptNativeProperties(items) && (await showNativeDialog(items))
+  if (nativeHandled) {
+    return
   }
 
   log.info('opening fallback properties dialog', describePropertiesResult(items))

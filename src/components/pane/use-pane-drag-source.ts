@@ -1,4 +1,4 @@
-import { useState, type DragEvent } from 'react'
+import { useState, type Dispatch, type DragEvent, type SetStateAction } from 'react'
 import { log } from '@/lib/app-log-commands'
 import { startNativeDrag } from '@/lib/ipc/commands'
 import { beginNativeDragBridge, endNativeDragBridge } from '@/lib/native-drag-bridge'
@@ -55,14 +55,84 @@ function handOffToNativeDrag(items: DragItem[], onEnd: () => void) {
     })
 }
 
-export function usePaneDragSource({
-  paneId,
-  path,
-  entries,
-  selectedIds,
-  platform,
-}: PaneDragSourceOptions) {
-  const beginDrag = useDragStore((state) => state.begin)
+type DropInto = (targetPath: string, event: DragEvent<HTMLDivElement>) => Promise<void>
+
+type RowDragContext = PaneDragSourceOptions & {
+  clearDragState: () => void
+  dropInto: DropInto
+  setDropTargetEntryId: Dispatch<SetStateAction<string | null>>
+}
+
+function rowDragHandlers(context: RowDragContext) {
+  const { paneId, path, entries, selectedIds, platform } = context
+  return {
+    handleRowDragStart: (entryId: string, event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault()
+      const items = dragItemsForRow(entries, selectedIds, entryId)
+      if (items.length === 0) {
+        return
+      }
+      const begin = useDragStore.getState().begin
+      begin({ kind: 'file-transfer', sourcePaneId: paneId, sourceDir: path, items })
+      handOffToNativeDrag(items, context.clearDragState)
+    },
+    handleFolderDragOver: (entryId: string, event: DragEvent<HTMLDivElement>) => {
+      const entry = directoryEntryById(entries, entryId)
+      const drag = entry ? acceptableFileTransfer(entry.path, platform) : null
+      if (!entry || !drag) {
+        return
+      }
+      event.stopPropagation()
+      markDropEffect({ path: entry.path, event }, drag.sourceDir, platform)
+      context.setDropTargetEntryId(entry.id)
+    },
+    handleFolderDragLeave: (entryId: string) => {
+      context.setDropTargetEntryId((current) => (current === entryId ? null : current))
+    },
+    handleFolderDrop: async (entryId: string, event: DragEvent<HTMLDivElement>) => {
+      const entry = directoryEntryById(entries, entryId)
+      if (!entry) {
+        return
+      }
+      event.preventDefault()
+      event.stopPropagation()
+      await context.dropInto(entry.path, event)
+    },
+  }
+}
+
+type PaneDropContext = {
+  path: string
+  platform: PlatformOs
+  dropInto: DropInto
+  setIsPaneDropTarget: (isTarget: boolean) => void
+}
+
+function paneDropHandlers({ path, platform, dropInto, setIsPaneDropTarget }: PaneDropContext) {
+  return {
+    handlePaneDragOver: (event: DragEvent<HTMLDivElement>) => {
+      const drag = acceptableFileTransfer(path, platform)
+      if (!drag) {
+        return
+      }
+      markDropEffect({ path, event }, drag.sourceDir, platform)
+      setIsPaneDropTarget(true)
+    },
+    handlePaneDragLeave: (event: DragEvent<HTMLDivElement>) => {
+      const movedOntoChild = event.currentTarget.contains(event.relatedTarget as Node | null)
+      if (movedOntoChild) {
+        return
+      }
+      setIsPaneDropTarget(false)
+    },
+    handlePaneDrop: async (event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault()
+      await dropInto(path, event)
+    },
+  }
+}
+
+export function usePaneDragSource(options: PaneDragSourceOptions) {
   const endDrag = useDragStore((state) => state.end)
   const [dropTargetEntryId, setDropTargetEntryId] = useState<string | null>(null)
   const [isPaneDropTarget, setIsPaneDropTarget] = useState(false)
@@ -73,80 +143,23 @@ export function usePaneDragSource({
     setIsPaneDropTarget(false)
   }
 
-  function handleRowDragStart(entryId: string, event: DragEvent<HTMLDivElement>) {
-    event.preventDefault()
-    const items = dragItemsForRow(entries, selectedIds, entryId)
-    if (items.length === 0) {
-      return
-    }
-    beginDrag({ kind: 'file-transfer', sourcePaneId: paneId, sourceDir: path, items })
-    handOffToNativeDrag(items, clearDragState)
-  }
-
-  function handleFolderDragOver(entryId: string, event: DragEvent<HTMLDivElement>) {
-    const entry = directoryEntryById(entries, entryId)
-    const drag = entry ? acceptableFileTransfer(entry.path, platform) : null
-    if (!entry || !drag) {
-      return
-    }
-    event.stopPropagation()
-    markDropEffect({ path: entry.path, event }, drag.sourceDir, platform)
-    setDropTargetEntryId(entry.id)
-  }
-
-  function handleFolderDragLeave(entryId: string) {
-    setDropTargetEntryId((current) => (current === entryId ? null : current))
-  }
-
   async function dropInto(targetPath: string, event: DragEvent<HTMLDivElement>) {
     const drag = useDragStore.getState().drag
-    const modifiers = dropModifiers(event, platform)
+    const modifiers = dropModifiers(event, options.platform)
     clearDragState()
-    await performDrop(drag, targetPath, modifiers, platform)
-  }
-
-  async function handleFolderDrop(entryId: string, event: DragEvent<HTMLDivElement>) {
-    const entry = directoryEntryById(entries, entryId)
-    if (!entry) {
-      return
-    }
-    event.preventDefault()
-    event.stopPropagation()
-    await dropInto(entry.path, event)
-  }
-
-  function handlePaneDragOver(event: DragEvent<HTMLDivElement>) {
-    const drag = acceptableFileTransfer(path, platform)
-    if (!drag) {
-      return
-    }
-    markDropEffect({ path, event }, drag.sourceDir, platform)
-    setIsPaneDropTarget(true)
-  }
-
-  function handlePaneDragLeave(event: DragEvent<HTMLDivElement>) {
-    const movedOntoChild = event.currentTarget.contains(event.relatedTarget as Node | null)
-    if (movedOntoChild) {
-      return
-    }
-    setIsPaneDropTarget(false)
-  }
-
-  async function handlePaneDrop(event: DragEvent<HTMLDivElement>) {
-    event.preventDefault()
-    await dropInto(path, event)
+    await performDrop(drag, targetPath, modifiers, options.platform)
   }
 
   return {
     dropTargetEntryId,
     isPaneDropTarget,
     clearDragState,
-    handleRowDragStart,
-    handleFolderDragOver,
-    handleFolderDragLeave,
-    handleFolderDrop,
-    handlePaneDragOver,
-    handlePaneDragLeave,
-    handlePaneDrop,
+    ...rowDragHandlers({ ...options, clearDragState, dropInto, setDropTargetEntryId }),
+    ...paneDropHandlers({
+      path: options.path,
+      platform: options.platform,
+      dropInto,
+      setIsPaneDropTarget,
+    }),
   }
 }

@@ -4,7 +4,7 @@ use file_explorer_lib::watch::{
     add_watch, canonical_dir_for_tests, create_runtime, first_error_path_for_tests,
     handle_debounce_result_for_tests, insert_tab_for_tests, noop_watch_error_for_tests,
     process_compacted_batch_for_tests, raw_mutations_for_event_for_tests, remove_watch,
-    snapshot_for_target, DirPatch, WatchTarget,
+    snapshot_for_target, DirPatch, WatchRuntime, WatchTarget,
 };
 use notify::event::{
     AccessKind, CreateKind, DataChange, EventKind, ModifyKind, RemoveKind, RenameMode,
@@ -33,91 +33,112 @@ fn watch_runtime_tracks_reference_counts_for_paths() {
     remove_watch(&mut runtime, root).expect("missing remove is noop");
 }
 
+type WatchResults = Vec<Result<Event, notify::Error>>;
+
+#[derive(Clone, Default)]
+struct WatchRecorder {
+    patches: Arc<Mutex<Vec<DirPatch>>>,
+    errors: Arc<Mutex<Vec<(String, String)>>>,
+}
+
+impl WatchRecorder {
+    fn deliver(&self, runtime: &WatchRuntime, results: WatchResults) {
+        let patches = self.patches.clone();
+        let errors = self.errors.clone();
+        handle_debounce_result_for_tests(
+            runtime,
+            results,
+            Arc::new(move |patch| patches.lock().expect("patches lock").push(patch)),
+            Arc::new(move |path, error| {
+                errors.lock().expect("errors lock").push((path, error));
+            }),
+        );
+    }
+
+    fn removed_any(&self, suffix: &str) -> bool {
+        self.patches
+            .lock()
+            .expect("patches lock")
+            .iter()
+            .any(|patch| patch.removed.iter().any(|path| path.ends_with(suffix)))
+    }
+
+    fn changed_any(&self, suffix: &str) -> bool {
+        self.patches
+            .lock()
+            .expect("patches lock")
+            .iter()
+            .any(|patch| {
+                patch
+                    .changed
+                    .iter()
+                    .any(|entry| entry.path.ends_with(suffix))
+            })
+    }
+
+    fn has_no_patches(&self) -> bool {
+        self.patches.lock().expect("patches lock").is_empty()
+    }
+
+    fn has_error(&self, predicate: impl Fn(&str, &str) -> bool) -> bool {
+        self.errors
+            .lock()
+            .expect("errors lock")
+            .iter()
+            .any(|(path, error)| predicate(path, error))
+    }
+
+    fn has_no_errors(&self) -> bool {
+        self.errors.lock().expect("errors lock").is_empty()
+    }
+}
+
+fn runtime_watching(target: &WatchTarget, snapshot_target: &WatchTarget) -> WatchRuntime {
+    let mut runtime = create_runtime(Arc::new(|_| {}), Arc::new(|_, _| {})).expect("runtime");
+    insert_tab_for_tests(
+        &mut runtime,
+        target.clone(),
+        snapshot_for_target(snapshot_target).expect("initial snapshot"),
+    );
+    runtime
+}
+
+fn counting_target(root: &Path, tab_id: &str) -> WatchTarget {
+    WatchTarget {
+        tab_id: tab_id.to_string(),
+        include_item_counts: true,
+        ..watch_target(root)
+    }
+}
+
+fn event_at(kind: EventKind, path: &Path) -> Result<Event, notify::Error> {
+    Ok(Event::new(kind).add_path(path.to_path_buf()))
+}
+
 #[test]
 fn watch_runtime_test_hooks_drive_targeted_and_rescan_callbacks() {
     let fixture = tempdir().expect("temp dir");
     let root = fixture.path();
     let before = root.join("before.txt");
     std::fs::write(&before, b"before").expect("before");
-
-    let mut runtime = create_runtime(Arc::new(|_| {}), Arc::new(|_, _| {})).expect("runtime");
-    let target = WatchTarget {
-        tab_id: "left-1".to_string(),
-        path: root.to_string_lossy().into_owned(),
-        sort_key: SortKey::Name,
-        sort_direction: SortDirection::Asc,
-        filter: String::new(),
-        show_hidden: true,
-        include_item_counts: true,
-    };
-    insert_tab_for_tests(
-        &mut runtime,
-        target.clone(),
-        snapshot_for_target(&target).expect("initial snapshot"),
-    );
-
-    let patches = Arc::new(Mutex::new(Vec::<DirPatch>::new()));
-    let errors = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
-    let patches_for_callback = patches.clone();
-    let errors_for_callback = errors.clone();
+    let target = counting_target(root, "left-1");
+    let runtime = runtime_watching(&target, &target);
+    let recorder = WatchRecorder::default();
 
     let created = root.join("created.txt");
     std::fs::write(&created, b"created").expect("created");
-    handle_debounce_result_for_tests(
+    recorder.deliver(
         &runtime,
-        vec![Ok(
-            Event::new(EventKind::Create(CreateKind::File)).add_path(created.clone())
-        )],
-        Arc::new(move |patch| {
-            patches_for_callback
-                .lock()
-                .expect("patches lock")
-                .push(patch);
-        }),
-        Arc::new(move |path, error| {
-            errors_for_callback
-                .lock()
-                .expect("errors lock")
-                .push((path, error));
-        }),
+        vec![event_at(EventKind::Create(CreateKind::File), &created)],
     );
-    assert!(patches
-        .lock()
-        .expect("patches lock")
-        .iter()
-        .any(|patch| patch
-            .changed
-            .iter()
-            .any(|entry| entry.path.ends_with("created.txt"))));
-    assert!(errors.lock().expect("errors lock").is_empty());
+    assert!(recorder.changed_any("created.txt"));
+    assert!(recorder.has_no_errors());
 
     std::fs::remove_file(&before).expect("remove before");
-    let after = root.join("after.txt");
-    std::fs::write(&after, b"after").expect("after");
-    let patches_for_rescan = patches.clone();
-    let errors_for_rescan = errors.clone();
-    handle_debounce_result_for_tests(
-        &runtime,
-        vec![Ok(Event::new(EventKind::Any).add_path(before.clone()))],
-        Arc::new(move |patch| {
-            patches_for_rescan.lock().expect("patches lock").push(patch);
-        }),
-        Arc::new(move |path, error| {
-            errors_for_rescan
-                .lock()
-                .expect("errors lock")
-                .push((path, error));
-        }),
-    );
-    let patches = patches.lock().expect("patches lock");
-    assert!(patches.iter().any(|patch| patch
-        .removed
-        .iter()
-        .any(|path| path.ends_with("before.txt"))));
-    assert!(patches.iter().any(|patch| patch
-        .changed
-        .iter()
-        .any(|entry| entry.path.ends_with("after.txt"))));
+    std::fs::write(root.join("after.txt"), b"after").expect("after");
+    recorder.deliver(&runtime, vec![event_at(EventKind::Any, &before)]);
+    assert!(recorder.removed_any("before.txt"));
+    assert!(recorder.changed_any("after.txt"));
 }
 
 #[test]
@@ -126,71 +147,22 @@ fn watch_runtime_test_hook_surfaces_errors_and_removals() {
     let root = fixture.path();
     let doomed = root.join("doomed.txt");
     std::fs::write(&doomed, b"gone").expect("doomed");
+    let target = counting_target(root, "right-1");
+    let runtime = runtime_watching(&target, &target);
+    let recorder = WatchRecorder::default();
 
-    let mut runtime = create_runtime(Arc::new(|_| {}), Arc::new(|_, _| {})).expect("runtime");
-    let target = WatchTarget {
-        tab_id: "right-1".to_string(),
-        path: root.to_string_lossy().into_owned(),
-        sort_key: SortKey::Name,
-        sort_direction: SortDirection::Asc,
-        filter: String::new(),
-        show_hidden: true,
-        include_item_counts: true,
-    };
-    insert_tab_for_tests(
-        &mut runtime,
-        target.clone(),
-        snapshot_for_target(&target).expect("snapshot"),
-    );
-
-    let patches = Arc::new(Mutex::new(Vec::<DirPatch>::new()));
-    let errors = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
     std::fs::remove_file(&doomed).expect("remove doomed");
-    handle_debounce_result_for_tests(
+    recorder.deliver(
         &runtime,
-        vec![Ok(
-            Event::new(EventKind::Remove(RemoveKind::File)).add_path(doomed.clone())
-        )],
-        Arc::new({
-            let patches = patches.clone();
-            move |patch| {
-                patches.lock().expect("patches lock").push(patch);
-            }
-        }),
-        Arc::new({
-            let errors = errors.clone();
-            move |path, error| {
-                errors.lock().expect("errors lock").push((path, error));
-            }
-        }),
+        vec![event_at(EventKind::Remove(RemoveKind::File), &doomed)],
     );
-    assert!(patches
-        .lock()
-        .expect("patches lock")
-        .iter()
-        .any(|patch| patch
-            .removed
-            .iter()
-            .any(|path| path.ends_with("doomed.txt"))));
+    assert!(recorder.removed_any("doomed.txt"));
 
-    handle_debounce_result_for_tests(
-        &runtime,
-        vec![Err(
-            notify::Error::generic("boom").add_path(root.join("broken.txt"))
-        )],
-        Arc::new(|_| {}),
-        Arc::new({
-            let errors = errors.clone();
-            move |path, error| {
-                errors.lock().expect("errors lock").push((path, error));
-            }
-        }),
+    let broken = notify::Error::generic("boom").add_path(root.join("broken.txt"));
+    recorder.deliver(&runtime, vec![Err(broken)]);
+    assert!(
+        recorder.has_error(|path, error| path.ends_with("broken.txt") && error.contains("boom"))
     );
-    assert!(errors
-        .lock()
-        .expect("errors lock")
-        .iter()
-        .any(|(path, error)| path.ends_with("broken.txt") && error.contains("boom")));
 }
 
 #[test]
@@ -204,174 +176,92 @@ fn watch_runtime_test_hook_covers_modify_and_rename_filters() {
     std::fs::write(&old, b"old").expect("old");
     std::fs::write(&new, b"new").expect("new");
 
-    let mut runtime = create_runtime(Arc::new(|_| {}), Arc::new(|_, _| {})).expect("runtime");
+    let unfiltered = counting_target(root, "left-2");
     let target = WatchTarget {
-        tab_id: "left-2".to_string(),
-        path: root.to_string_lossy().into_owned(),
-        sort_key: SortKey::Name,
-        sort_direction: SortDirection::Asc,
         filter: "keep".to_string(),
-        show_hidden: true,
-        include_item_counts: true,
+        ..unfiltered.clone()
     };
-    insert_tab_for_tests(
-        &mut runtime,
-        target.clone(),
-        snapshot_for_target(&WatchTarget {
-            filter: String::new(),
-            ..target.clone()
-        })
-        .expect("snapshot"),
-    );
-
-    let patches = Arc::new(Mutex::new(Vec::<DirPatch>::new()));
-    handle_debounce_result_for_tests(
+    let runtime = runtime_watching(&target, &unfiltered);
+    let recorder = WatchRecorder::default();
+    let rename = Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Both)))
+        .add_path(old.clone())
+        .add_path(new.clone());
+    recorder.deliver(
         &runtime,
         vec![
-            Ok(
-                Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Content)))
-                    .add_path(drop.clone()),
+            event_at(
+                EventKind::Modify(ModifyKind::Data(DataChange::Content)),
+                &drop,
             ),
-            Ok(
-                Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Both)))
-                    .add_path(old.clone())
-                    .add_path(new.clone()),
-            ),
+            Ok(rename),
         ],
-        Arc::new({
-            let patches = patches.clone();
-            move |patch| {
-                patches.lock().expect("patches lock").push(patch);
-            }
-        }),
-        Arc::new(|_, _| {}),
     );
 
-    let patches = patches.lock().expect("patches lock");
-    assert!(patches
-        .iter()
-        .any(|patch| patch.removed.iter().any(|path| path.ends_with("drop.txt"))));
-    assert!(patches
-        .iter()
-        .any(|patch| patch.removed.iter().any(|path| path.ends_with("old.txt"))));
-    assert!(!patches.iter().any(|patch| patch
-        .changed
-        .iter()
-        .any(|entry| entry.path.ends_with("new.txt"))));
+    assert!(recorder.removed_any("drop.txt"));
+    assert!(recorder.removed_any("old.txt"));
+    assert!(!recorder.changed_any("new.txt"));
 }
 
 #[test]
-fn watch_runtime_test_hooks_cover_filtered_nonmatching_and_error_branches() {
+fn watch_runtime_test_hooks_ignore_siblings_and_drop_hidden_entries() {
     let fixture = tempdir().expect("temp dir");
     let root = fixture.path();
     let sibling = fixture.path().join("sibling");
     std::fs::create_dir(&sibling).expect("sibling");
     let visible = root.join("visible.txt");
-    let hidden = root.join(".hidden.txt");
     std::fs::write(&visible, b"visible").expect("visible");
-    std::fs::write(&hidden, b"hidden").expect("hidden");
+    std::fs::write(root.join(".hidden.txt"), b"hidden").expect("hidden");
 
-    let mut runtime = create_runtime(Arc::new(|_| {}), Arc::new(|_, _| {})).expect("runtime");
+    let showing_hidden = counting_target(root, "left-branches");
     let target = WatchTarget {
-        tab_id: "left-branches".to_string(),
-        path: root.to_string_lossy().into_owned(),
-        sort_key: SortKey::Name,
-        sort_direction: SortDirection::Asc,
-        filter: String::new(),
         show_hidden: false,
-        include_item_counts: true,
+        ..showing_hidden.clone()
     };
-    insert_tab_for_tests(
-        &mut runtime,
-        target.clone(),
-        snapshot_for_target(&WatchTarget {
-            show_hidden: true,
-            ..target.clone()
-        })
-        .expect("snapshot"),
-    );
+    let runtime = runtime_watching(&target, &showing_hidden);
+    let recorder = WatchRecorder::default();
 
-    let patches = Arc::new(Mutex::new(Vec::<DirPatch>::new()));
-    let errors = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
-
-    handle_debounce_result_for_tests(
+    let ignored = sibling.join("ignore.txt");
+    recorder.deliver(
         &runtime,
-        vec![Ok(
-            Event::new(EventKind::Create(CreateKind::File)).add_path(sibling.join("ignore.txt"))
-        )],
-        Arc::new({
-            let patches = patches.clone();
-            move |patch| patches.lock().expect("patches lock").push(patch)
-        }),
-        Arc::new({
-            let errors = errors.clone();
-            move |path, error| errors.lock().expect("errors lock").push((path, error))
-        }),
+        vec![event_at(EventKind::Create(CreateKind::File), &ignored)],
     );
-    assert!(patches.lock().expect("patches lock").is_empty());
-    assert!(errors.lock().expect("errors lock").is_empty());
+    assert!(recorder.has_no_patches());
+    assert!(recorder.has_no_errors());
 
-    handle_debounce_result_for_tests(
+    let write_closed = EventKind::Access(AccessKind::Close(notify::event::AccessMode::Write));
+    recorder.deliver(
         &runtime,
         vec![
-            Ok(
-                Event::new(EventKind::Access(notify::event::AccessKind::Close(
-                    notify::event::AccessMode::Write,
-                )))
-                .add_path(visible.clone()),
-            ),
-            Ok(Event::new(EventKind::Modify(ModifyKind::Any)).add_path(visible.clone())),
+            event_at(write_closed, &visible),
+            event_at(EventKind::Modify(ModifyKind::Any), &visible),
         ],
-        Arc::new({
-            let patches = patches.clone();
-            move |patch| patches.lock().expect("patches lock").push(patch)
-        }),
-        Arc::new({
-            let errors = errors.clone();
-            move |path, error| errors.lock().expect("errors lock").push((path, error))
-        }),
     );
-    assert!(patches
-        .lock()
-        .expect("patches lock")
-        .iter()
-        .any(|patch| patch
-            .removed
-            .iter()
-            .any(|path| path.ends_with(".hidden.txt"))));
+    assert!(recorder.removed_any(".hidden.txt"));
+}
 
-    std::fs::remove_dir_all(root).expect("remove watched dir");
-    handle_debounce_result_for_tests(
-        &runtime,
-        vec![Ok(
-            Event::new(EventKind::Any).add_path(Path::new(&target.path).join("gone.txt"))
-        )],
-        Arc::new(|_| {}),
-        Arc::new({
-            let errors = errors.clone();
-            move |path, error| errors.lock().expect("errors lock").push((path, error))
-        }),
-    );
-    assert!(errors
-        .lock()
-        .expect("errors lock")
-        .iter()
-        .any(|(path, error)| path == &target.path && !error.is_empty()));
+#[test]
+fn watch_runtime_test_hooks_report_missing_directories_and_plain_errors() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path().join("watched");
+    std::fs::create_dir(&root).expect("watched");
+    let target = counting_target(&root, "left-errors");
+    let runtime = runtime_watching(&target, &target);
+    let recorder = WatchRecorder::default();
 
-    handle_debounce_result_for_tests(
-        &runtime,
-        vec![Err(notify::Error::generic("plain boom"))],
-        Arc::new(|_| {}),
-        Arc::new({
-            let errors = errors.clone();
-            move |path, error| errors.lock().expect("errors lock").push((path, error))
-        }),
-    );
-    assert!(errors
-        .lock()
-        .expect("errors lock")
-        .iter()
-        .any(|(path, error)| path.is_empty() && error.contains("plain boom")));
+    std::fs::remove_dir_all(&root).expect("remove watched dir");
+    let gone = Path::new(&target.path).join("gone.txt");
+    recorder.deliver(&runtime, vec![event_at(EventKind::Any, &gone)]);
+    assert!(recorder.has_error(|path, error| path == target.path && !error.is_empty()));
+
+    recorder.deliver(&runtime, vec![Err(notify::Error::generic("plain boom"))]);
+    assert!(recorder.has_error(|path, error| path.is_empty() && error.contains("plain boom")));
+}
+
+#[test]
+fn watch_runtime_error_helpers_cover_paths_and_missing_targets() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    let visible = root.join("visible.txt");
 
     noop_watch_error_for_tests(String::new(), String::new());
     let plain_error = notify::Error::generic("plain boom");
@@ -385,16 +275,12 @@ fn watch_runtime_test_hooks_cover_filtered_nonmatching_and_error_branches() {
         canonical_dir_for_tests(&root.join("missing-dir")),
         root.join("missing-dir")
     );
-    assert!(snapshot_for_target(&WatchTarget {
+    let missing_target = WatchTarget {
         tab_id: "missing".to_string(),
-        path: root.join("missing-again").to_string_lossy().into_owned(),
-        sort_key: SortKey::Name,
-        sort_direction: SortDirection::Asc,
-        filter: String::new(),
-        show_hidden: true,
         include_item_counts: true,
-    })
-    .is_err());
+        ..watch_target(&root.join("missing-again"))
+    };
+    assert!(snapshot_for_target(&missing_target).is_err());
 }
 
 fn watch_target(root: &Path) -> WatchTarget {

@@ -8,8 +8,8 @@ import {
   type ContentPoint,
   type MarqueeDrag,
 } from './marquee-selection'
+import { PRIMARY_MOUSE_BUTTON } from '@/lib/mouse-buttons'
 
-const PRIMARY_MOUSE_BUTTON = 0
 const ROW_SELECTOR = '[role="row"], [role="gridcell"]'
 
 type MarqueeSelectionOptions = {

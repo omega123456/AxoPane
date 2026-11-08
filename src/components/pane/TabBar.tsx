@@ -10,7 +10,8 @@ import {
 } from '@/components/pane/TabDragDropProvider'
 import { useContextMenuStore } from '@/stores/context-menu-store'
 import { usePanesStore } from '@/stores/panes-store'
-import { tabLabel, useTabsStore } from '@/stores/tabs-store'
+import { tabLabel, useTabsStore, type TabState } from '@/stores/tabs-store'
+import { MIDDLE_MOUSE_BUTTON } from '@/lib/mouse-buttons'
 import type { PaneId } from '@/types/pane'
 import { FOCUS_RING } from '@/lib/focus-ring'
 import { TEXT_SECONDARY } from '@/lib/class-names'
@@ -23,27 +24,10 @@ type TabBarProps = {
 
 export function TabBar({ paneId, title, currentPath }: TabBarProps) {
   const paneTabs = useTabsStore((state) => state.panes[paneId])
-  const volumes = usePanesStore((state) => state.volumes)
-  const switchTab = usePanesStore((state) => state.switchTab)
-  const closeTab = usePanesStore((state) => state.closeTab)
   const openTabFromPath = usePanesStore((state) => state.openTabFromPath)
-  const openMenu = useContextMenuStore((state) => state.openMenu)
-  const platform = detectPlatformOs()
   const dragState = useTabDragState()
   const { ref: stripRef } = useTabStripDropTarget(paneId)
-
   const canClose = paneTabs.tabs.length > 1
-
-  function onCloseClick(event: MouseEvent<HTMLButtonElement>, tabId: string) {
-    event.stopPropagation()
-    void closeTab(paneId, tabId)
-  }
-
-  function onTabAuxClick(event: MouseEvent<HTMLDivElement>, tabId: string) {
-    if (event.button !== 1 || !canClose) return
-    event.preventDefault()
-    void closeTab(paneId, tabId)
-  }
 
   return (
     <div
@@ -53,77 +37,17 @@ export function TabBar({ paneId, title, currentPath }: TabBarProps) {
       data-tab-strip={paneId}
       className={`flex h-tabs min-w-0 items-end gap-0.5 overflow-x-auto overflow-y-hidden scrollbar-none ${dragState.isInvalid ? 'cursor-not-allowed' : ''}`}
     >
-      {paneTabs.tabs.map((tab, index) => {
-        const tabIsActive = index === paneTabs.activeTabIndex
-        return (
-          <SortableTab
-            key={tab.id}
-            paneId={paneId}
-            tabId={tab.id}
-            index={index}
-            onAuxClick={(event) => onTabAuxClick(event, tab.id)}
-            onContextMenu={(event) => {
-              event.preventDefault()
-              openMenu({
-                paneId,
-                title: tabLabel(tab),
-                chip: 'TAB',
-                x: event.clientX,
-                y: event.clientY,
-                ...buildContextMenuContent(paneId, { kind: 'tab', tabId: tab.id }, platform),
-              })
-            }}
-            // The selected tab shares the command bar's layer colour and covers the
-            // strip's bottom line, so tab and bar read as one shape.
-            className={`group relative inline-flex h-8 w-tab min-w-0 shrink items-center gap-2 rounded-t-control border-x border-t pl-2.75 pr-1.5 text-caption ${
-              tabIsActive
-                ? 'z-10 border-light-stroke bg-light-layer font-semibold text-light-text dark:border-dark-stroke dark:bg-dark-layer dark:text-dark-text'
-                : `border-transparent ${TEXT_SECONDARY} hover:bg-light-hover dark:hover:bg-dark-hover`
-            }`}
-          >
-            {(handleRef) => (
-              <>
-                <button
-                  ref={handleRef}
-                  data-tab-id={tab.id}
-                  data-tab-label-id={tab.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={tabIsActive}
-                  aria-label={`Tab ${tabLabel(tab)} in ${title}`}
-                  onClick={() => void switchTab(paneId, tab.id)}
-                  // The ::before layer stretches the hit area over the whole tab
-                  // (padding included), so a click or drag anywhere on it lands here.
-                  className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-control text-left before:absolute before:inset-0 before:rounded-t-control ${FOCUS_RING}`}
-                >
-                  <LocationIcon path={tab.path} volumes={volumes} />
-                  <span className="min-w-0 flex-1 truncate">{tabLabel(tab)}</span>
-                </button>
-                {tab.locked ? (
-                  <span
-                    aria-label={`Locked tab ${tabLabel(tab)} in ${title}`}
-                    className={`inline-flex size-5.5 shrink-0 items-center justify-center font-normal ${TEXT_SECONDARY}`}
-                  >
-                    <LockIcon className="size-3.5" />
-                  </span>
-                ) : canClose ? (
-                  <button
-                    type="button"
-                    aria-label={`Close tab ${tabLabel(tab)} in ${title}`}
-                    onClick={(event) => onCloseClick(event, tab.id)}
-                    // Close shows on the selected tab and on hover, as Windows tabs do.
-                    className={`relative z-10 inline-flex size-5.5 shrink-0 cursor-pointer items-center justify-center rounded-control font-normal ${TEXT_SECONDARY} hover:bg-light-hover hover:text-light-text focus-visible:opacity-100 dark:hover:bg-dark-hover dark:hover:text-dark-text ${
-                      tabIsActive ? '' : 'opacity-0 group-hover:opacity-100'
-                    } ${FOCUS_RING}`}
-                  >
-                    <XIcon className="size-3.5" />
-                  </button>
-                ) : null}
-              </>
-            )}
-          </SortableTab>
-        )
-      })}
+      {paneTabs.tabs.map((tab, index) => (
+        <PaneTab
+          key={tab.id}
+          paneId={paneId}
+          title={title}
+          tab={tab}
+          index={index}
+          isActive={index === paneTabs.activeTabIndex}
+          canClose={canClose}
+        />
+      ))}
       <button
         type="button"
         aria-label={`New tab in ${title}`}
@@ -133,6 +57,130 @@ export function TabBar({ paneId, title, currentPath }: TabBarProps) {
         <PlusIcon className="h-4 w-4" />
       </button>
     </div>
+  )
+}
+
+type PaneTabProps = {
+  paneId: PaneId
+  title: string
+  tab: TabState
+  index: number
+  isActive: boolean
+  canClose: boolean
+}
+
+function openTabContextMenu(event: MouseEvent<HTMLDivElement>, paneId: PaneId, tab: TabState) {
+  event.preventDefault()
+  useContextMenuStore.getState().openMenu({
+    paneId,
+    title: tabLabel(tab),
+    chip: 'TAB',
+    x: event.clientX,
+    y: event.clientY,
+    ...buildContextMenuContent(paneId, { kind: 'tab', tabId: tab.id }, detectPlatformOs()),
+  })
+}
+
+function PaneTab({ paneId, title, tab, index, isActive, canClose }: PaneTabProps) {
+  const volumes = usePanesStore((state) => state.volumes)
+  const switchTab = usePanesStore((state) => state.switchTab)
+  const closeTab = usePanesStore((state) => state.closeTab)
+
+  function onTabAuxClick(event: MouseEvent<HTMLDivElement>) {
+    if (event.button !== MIDDLE_MOUSE_BUTTON || !canClose) return
+    event.preventDefault()
+    void closeTab(paneId, tab.id)
+  }
+
+  return (
+    <SortableTab
+      paneId={paneId}
+      tabId={tab.id}
+      index={index}
+      onAuxClick={onTabAuxClick}
+      onContextMenu={(event) => openTabContextMenu(event, paneId, tab)}
+      // The selected tab shares the command bar's layer colour and covers the
+      // strip's bottom line, so tab and bar read as one shape.
+      className={`group relative inline-flex h-8 w-tab min-w-0 shrink items-center gap-2 rounded-t-control border-x border-t pl-2.75 pr-1.5 text-caption ${
+        isActive
+          ? 'z-10 border-light-stroke bg-light-layer font-semibold text-light-text dark:border-dark-stroke dark:bg-dark-layer dark:text-dark-text'
+          : `border-transparent ${TEXT_SECONDARY} hover:bg-light-hover dark:hover:bg-dark-hover`
+      }`}
+    >
+      {(handleRef) => (
+        <>
+          <button
+            ref={handleRef}
+            data-tab-id={tab.id}
+            data-tab-label-id={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            aria-label={`Tab ${tabLabel(tab)} in ${title}`}
+            onClick={() => void switchTab(paneId, tab.id)}
+            // The ::before layer stretches the hit area over the whole tab
+            // (padding included), so a click or drag anywhere on it lands here.
+            className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-control text-left before:absolute before:inset-0 before:rounded-t-control ${FOCUS_RING}`}
+          >
+            <LocationIcon path={tab.path} volumes={volumes} />
+            <span className="min-w-0 flex-1 truncate">{tabLabel(tab)}</span>
+          </button>
+          <TabTrailingControl
+            label={`${tabLabel(tab)} in ${title}`}
+            locked={tab.locked}
+            canClose={canClose}
+            isActive={isActive}
+            onClose={() => void closeTab(paneId, tab.id)}
+          />
+        </>
+      )}
+    </SortableTab>
+  )
+}
+
+type TabTrailingControlProps = {
+  label: string
+  locked: boolean
+  canClose: boolean
+  isActive: boolean
+  onClose: () => void
+}
+
+function TabTrailingControl({
+  label,
+  locked,
+  canClose,
+  isActive,
+  onClose,
+}: TabTrailingControlProps) {
+  if (locked) {
+    return (
+      <span
+        aria-label={`Locked tab ${label}`}
+        className={`inline-flex size-5.5 shrink-0 items-center justify-center font-normal ${TEXT_SECONDARY}`}
+      >
+        <LockIcon className="size-3.5" />
+      </span>
+    )
+  }
+  if (!canClose) {
+    return null
+  }
+  return (
+    <button
+      type="button"
+      aria-label={`Close tab ${label}`}
+      onClick={(event) => {
+        event.stopPropagation()
+        onClose()
+      }}
+      // Close shows on the selected tab and on hover, as Windows tabs do.
+      className={`relative z-10 inline-flex size-5.5 shrink-0 cursor-pointer items-center justify-center rounded-control font-normal ${TEXT_SECONDARY} hover:bg-light-hover hover:text-light-text focus-visible:opacity-100 dark:hover:bg-dark-hover dark:hover:text-dark-text ${
+        isActive ? '' : 'opacity-0 group-hover:opacity-100'
+      } ${FOCUS_RING}`}
+    >
+      <XIcon className="size-3.5" />
+    </button>
   )
 }
 

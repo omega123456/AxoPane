@@ -297,28 +297,37 @@ function expandLabelsToFillAvailableWidth({
   currentSegmentMeasure: (label: string) => number
 }) {
   const expandedLabels = [...labels]
+  const fitsWidth = (nextLabels: string[]) =>
+    sumLayoutWidths(nextLabels, segmentMeasure, currentSegmentMeasure) <= availableWidth
 
   while (true) {
     let changed = false
-
     for (let index = segments.length - 1; index >= 0; index -= 1) {
-      const fullLabel = segments[index]!.label
-      const currentLabel = expandedLabels[index]!
-      if (currentLabel.length >= fullLabel.length) {
-        continue
-      }
-
-      const nextLabels = [...expandedLabels]
-      nextLabels[index] = fullLabel.slice(0, currentLabel.length + 1)
-      const totalWidth = sumLayoutWidths(nextLabels, segmentMeasure, currentSegmentMeasure)
-      if (totalWidth <= availableWidth) {
-        expandedLabels[index] = nextLabels[index]!
-        changed = true
-      }
+      changed =
+        growLabelByOneCharacter(expandedLabels, segments[index]!.label, index, fitsWidth) || changed
     }
-
     if (!changed) {
       return expandedLabels
     }
   }
+}
+
+/** Reveals one more character of a truncated label when the row still fits. */
+function growLabelByOneCharacter(
+  expandedLabels: string[],
+  fullLabel: string,
+  index: number,
+  fitsWidth: (nextLabels: string[]) => boolean,
+): boolean {
+  const currentLabel = expandedLabels[index]!
+  if (currentLabel.length >= fullLabel.length) {
+    return false
+  }
+  const nextLabels = [...expandedLabels]
+  nextLabels[index] = fullLabel.slice(0, currentLabel.length + 1)
+  if (!fitsWidth(nextLabels)) {
+    return false
+  }
+  expandedLabels[index] = nextLabels[index]!
+  return true
 }

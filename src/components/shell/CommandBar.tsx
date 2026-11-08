@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react'
+import type { KeyboardEvent, ReactNode } from 'react'
+import type { PaneId } from '@/types/pane'
+import type { PaneState } from '@/stores/panes/pane-state'
 import type { ThemeMode } from '@/stores/theme-store'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
 import { useConfigStore } from '@/stores/config-store'
@@ -65,6 +67,15 @@ function CommandButton({
   )
 }
 
+function togglePalette() {
+  const palette = useSearchPaletteStore.getState()
+  if (palette.isOpen) {
+    palette.close()
+    return
+  }
+  palette.open()
+}
+
 /** Opens Search everywhere; hidden when no backend can search. */
 function SearchEverywhereButton() {
   const backend = usePanesStore((state) => state.folderSizeIndexStatus?.backend ?? 'none')
@@ -83,14 +94,7 @@ function SearchEverywhereButton() {
         label="Search everywhere"
         title={title}
         pressed={isOpen}
-        onClick={() => {
-          const palette = useSearchPaletteStore.getState()
-          if (palette.isOpen) {
-            palette.close()
-          } else {
-            palette.open()
-          }
-        }}
+        onClick={togglePalette}
       >
         <SearchIcon className="size-4" />
       </CommandButton>
@@ -107,22 +111,57 @@ function Separator() {
   )
 }
 
-/**
- * The one command bar over both panes. Every command acts on the active pane,
- * and the single filter field edits that pane's own filter text.
- */
-export function CommandBar({ theme, setTheme }: CommandBarProps) {
-  const activePaneId = usePanesStore((state) => state.activePaneId)
-  const pane = usePanesStore((state) => state.panes[state.activePaneId])
-  const canGoBack = pane.historyIndex > 0
+type ActivePaneProps = {
+  paneId: PaneId
+  pane: PaneState
+}
+
+function NavigationCommands({ paneId, pane }: ActivePaneProps) {
   const goBack = usePanesStore((state) => state.goBack)
   const goUp = usePanesStore((state) => state.goUp)
   const refreshSizes = usePanesStore((state) => state.refreshSizes)
   const navigatePane = usePanesStore((state) => state.navigatePane)
-  const setFilterDraft = usePanesStore((state) => state.setFilterDraft)
-  const clearFilter = usePanesStore((state) => state.clearFilter)
-  const showHiddenFiles = usePanesStore((state) => state.showHiddenFiles)
-  const setShowHiddenFiles = usePanesStore((state) => state.setShowHiddenFiles)
+  return (
+    <>
+      <CommandButton
+        label={`Back in ${pane.title}`}
+        title="Back"
+        disabled={pane.historyIndex <= 0}
+        onClick={() => void goBack(paneId)}
+      >
+        <ArrowLeftIcon className="size-4" />
+      </CommandButton>
+      <CommandButton label={`Up in ${pane.title}`} title="Up" onClick={() => void goUp(paneId)}>
+        <ArrowUpIcon className="size-4" />
+      </CommandButton>
+      <CommandButton
+        label={`Refresh ${pane.title}`}
+        title="Refresh"
+        onClick={() => void refreshSizes(paneId)}
+      >
+        <RefreshIcon className="size-4" />
+      </CommandButton>
+      <CommandButton
+        label="Navigate to ~"
+        title="Navigate to ~"
+        onClick={() => void navigatePane(paneId, '~')}
+        className={`font-mono text-body ${TEXT_SECONDARY}`}
+      >
+        ~
+      </CommandButton>
+      <CommandButton
+        label="Navigate to /"
+        title="Navigate to /"
+        onClick={() => void navigatePane(paneId, '/')}
+        className={`font-mono text-body ${TEXT_SECONDARY}`}
+      >
+        /
+      </CommandButton>
+    </>
+  )
+}
+
+function useShowsCalculateAllSizes(pane: PaneState) {
   const autoSizingAvailable = usePanesStore(
     (state) => state.folderSizeIndexStatus?.isAvailable ?? false,
   )
@@ -132,71 +171,30 @@ export function CommandBar({ theme, setTheme }: CommandBarProps) {
     pane.entries.some((entry) => entry.isDir && state.sizeStates[entry.path]?.state === 'unknown'),
   )
   const autoFolderSize = useConfigStore((state) => state.autoFolderSize)
-  const openActionDialog = useActionDialogStore((state) => state.open)
-  const openSettings = useSettingsStore((state) => state.open)
-  const showCalculateAllSizes =
+  return (
     !autoSizingAvailable ||
     !autoFolderSize ||
     autoFolderSizeDisabledForPane(pane.entries) ||
     hasUnknownFolder
-  const folderName = tabLabel(pane)
+  )
+}
 
+function CreateCommands({ paneId, pane }: ActivePaneProps) {
+  const openActionDialog = useActionDialogStore((state) => state.open)
+  const showCalculateAllSizes = useShowsCalculateAllSizes(pane)
   return (
-    <div
-      role="toolbar"
-      aria-label="Command bar"
-      className="flex h-command min-w-0 items-center gap-1 border-x border-b border-light-stroke bg-light-layer px-0.75 dark:border-dark-stroke dark:bg-dark-layer"
-    >
-      <CommandButton
-        label={`Back in ${pane.title}`}
-        title="Back"
-        disabled={!canGoBack}
-        onClick={() => void goBack(activePaneId)}
-      >
-        <ArrowLeftIcon className="size-4" />
-      </CommandButton>
-      <CommandButton
-        label={`Up in ${pane.title}`}
-        title="Up"
-        onClick={() => void goUp(activePaneId)}
-      >
-        <ArrowUpIcon className="size-4" />
-      </CommandButton>
-      <CommandButton
-        label={`Refresh ${pane.title}`}
-        title="Refresh"
-        onClick={() => void refreshSizes(activePaneId)}
-      >
-        <RefreshIcon className="size-4" />
-      </CommandButton>
-      <CommandButton
-        label="Navigate to ~"
-        title="Navigate to ~"
-        onClick={() => void navigatePane(activePaneId, '~')}
-        className={`font-mono text-body ${TEXT_SECONDARY}`}
-      >
-        ~
-      </CommandButton>
-      <CommandButton
-        label="Navigate to /"
-        title="Navigate to /"
-        onClick={() => void navigatePane(activePaneId, '/')}
-        className={`font-mono text-body ${TEXT_SECONDARY}`}
-      >
-        /
-      </CommandButton>
-      <Separator />
+    <>
       <CommandButton
         label={`Create new folder in ${pane.title}`}
         title="Create new folder"
-        onClick={() => openActionDialog({ kind: 'newFolder', paneId: activePaneId })}
+        onClick={() => openActionDialog({ kind: 'newFolder', paneId })}
       >
         <FolderPlusIcon className="size-4" />
       </CommandButton>
       <CommandButton
         label={`Create new file in ${pane.title}`}
         title="Create new file"
-        onClick={() => openActionDialog({ kind: 'newFile', paneId: activePaneId })}
+        onClick={() => openActionDialog({ kind: 'newFile', paneId })}
       >
         <FilePlusIcon className="size-4" />
       </CommandButton>
@@ -204,14 +202,22 @@ export function CommandBar({ theme, setTheme }: CommandBarProps) {
         <CommandButton
           label={`Calculate all folder sizes in ${pane.title}`}
           title="Calculate all folder sizes"
-          onClick={() => openActionDialog({ kind: 'calculateAllSizes', paneId: activePaneId })}
+          onClick={() => openActionDialog({ kind: 'calculateAllSizes', paneId })}
         >
           <PieChartIcon className="size-4" />
         </CommandButton>
       ) : null}
-      <Separator />
-      <PaneViewMenu paneId={activePaneId} />
-      <span className="flex-1" />
+    </>
+  )
+}
+
+function DisplayCommands({ theme, setTheme }: CommandBarProps) {
+  const showHiddenFiles = usePanesStore((state) => state.showHiddenFiles)
+  const setShowHiddenFiles = usePanesStore((state) => state.setShowHiddenFiles)
+  const openSettings = useSettingsStore((state) => state.open)
+  const themeLabel = theme === 'dark' ? 'Light theme' : 'Dark theme'
+  return (
+    <>
       <CommandButton
         label="Hidden files"
         title={showHiddenFiles ? 'Hidden files (on)' : 'Hidden files (off)'}
@@ -229,38 +235,74 @@ export function CommandBar({ theme, setTheme }: CommandBarProps) {
         <SettingsIcon className="size-4" />
       </CommandButton>
       <CommandButton
-        label={theme === 'dark' ? 'Light theme' : 'Dark theme'}
-        title={theme === 'dark' ? 'Light theme' : 'Dark theme'}
+        label={themeLabel}
+        title={themeLabel}
         onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
       >
         {theme === 'dark' ? <SunIcon className="size-4" /> : <MoonStarIcon className="size-4" />}
       </CommandButton>
+    </>
+  )
+}
+
+function PaneFilterField({ paneId, pane }: ActivePaneProps) {
+  const setFilterDraft = usePanesStore((state) => state.setFilterDraft)
+  const clearFilter = usePanesStore((state) => state.clearFilter)
+
+  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      clearFilter(paneId)
+      document.querySelector<HTMLElement>(`[data-pane-id="${paneId}"]`)?.focus()
+      return
+    }
+    forwardPaneFilterKey(paneId, event)
+  }
+
+  return (
+    <label
+      title="Filters the active pane"
+      className="ml-1.5 flex h-7 w-search shrink-0 items-center gap-1.5 rounded-control border border-light-control-stroke border-b-light-control-stroke-bottom bg-light-control px-2 text-light-text-tertiary focus-within:border-b-light-accent focus-within:bg-light-card dark:border-dark-control-stroke dark:border-b-dark-control-stroke-bottom dark:bg-dark-control dark:text-dark-text-tertiary dark:focus-within:border-b-dark-accent dark:focus-within:bg-dark-card"
+    >
+      <SearchIcon className="size-4 shrink-0" />
+      <input
+        data-filter-input=""
+        aria-label={`${pane.title} filter`}
+        autoComplete="off"
+        spellCheck={false}
+        value={pane.filterDraft}
+        onChange={(event) => setFilterDraft(paneId, event.target.value)}
+        onKeyDown={onKeyDown}
+        placeholder={`Filter ${tabLabel(pane)}`}
+        className="min-w-0 flex-1 select-text bg-transparent text-row text-light-text outline-none placeholder:text-light-text-tertiary dark:text-dark-text dark:placeholder:text-dark-text-tertiary"
+      />
+    </label>
+  )
+}
+
+/**
+ * The one command bar over both panes. Every command acts on the active pane,
+ * and the single filter field edits that pane's own filter text.
+ */
+export function CommandBar({ theme, setTheme }: CommandBarProps) {
+  const activePaneId = usePanesStore((state) => state.activePaneId)
+  const pane = usePanesStore((state) => state.panes[state.activePaneId])
+
+  return (
+    <div
+      role="toolbar"
+      aria-label="Command bar"
+      className="flex h-command min-w-0 items-center gap-1 border-x border-b border-light-stroke bg-light-layer px-0.75 dark:border-dark-stroke dark:bg-dark-layer"
+    >
+      <NavigationCommands paneId={activePaneId} pane={pane} />
+      <Separator />
+      <CreateCommands paneId={activePaneId} pane={pane} />
+      <Separator />
+      <PaneViewMenu paneId={activePaneId} />
+      <span className="flex-1" />
+      <DisplayCommands theme={theme} setTheme={setTheme} />
       <SearchEverywhereButton />
-      <label
-        title="Filters the active pane"
-        className="ml-1.5 flex h-7 w-search shrink-0 items-center gap-1.5 rounded-control border border-light-control-stroke border-b-light-control-stroke-bottom bg-light-control px-2 text-light-text-tertiary focus-within:border-b-light-accent focus-within:bg-light-card dark:border-dark-control-stroke dark:border-b-dark-control-stroke-bottom dark:bg-dark-control dark:text-dark-text-tertiary dark:focus-within:border-b-dark-accent dark:focus-within:bg-dark-card"
-      >
-        <SearchIcon className="size-4 shrink-0" />
-        <input
-          data-filter-input=""
-          aria-label={`${pane.title} filter`}
-          autoComplete="off"
-          spellCheck={false}
-          value={pane.filterDraft}
-          onChange={(event) => setFilterDraft(activePaneId, event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') {
-              event.preventDefault()
-              clearFilter(activePaneId)
-              document.querySelector<HTMLElement>(`[data-pane-id="${activePaneId}"]`)?.focus()
-              return
-            }
-            forwardPaneFilterKey(activePaneId, event)
-          }}
-          placeholder={`Filter ${folderName}`}
-          className="min-w-0 flex-1 select-text bg-transparent text-row text-light-text outline-none placeholder:text-light-text-tertiary dark:text-dark-text dark:placeholder:text-dark-text-tertiary"
-        />
-      </label>
+      <PaneFilterField paneId={activePaneId} pane={pane} />
     </div>
   )
 }

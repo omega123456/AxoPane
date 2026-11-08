@@ -3,6 +3,7 @@
 
 use super::types::{ThumbnailCacheKey, ThumbnailState};
 use crate::bounded_cache::BoundedCache;
+use crate::ipc::types::ThumbnailQuality;
 
 pub const MAX_CACHE_RECORDS: usize = 256;
 pub const MAX_CACHE_WEIGHT: usize = 16 * 1024 * 1024;
@@ -76,53 +77,20 @@ impl ThumbnailCache {
         state: ThumbnailState,
         now_seconds: u64,
     ) -> bool {
-        if let Some(existing) = self.records.get(&key).cloned() {
-            let preserve_existing = match (&existing.state, &state) {
-                (
-                    ThumbnailState::Ready {
-                        quality: crate::ipc::types::ThumbnailQuality::High,
-                        ..
-                    },
-                    _,
-                ) => true,
-                (
-                    ThumbnailState::Ready {
-                        quality: crate::ipc::types::ThumbnailQuality::Low,
-                        ..
-                    },
-                    next @ (ThumbnailState::Unavailable | ThumbnailState::Failed),
-                ) => {
-                    let retry_ttl = if matches!(next, ThumbnailState::Unavailable) {
-                        NEGATIVE_TTL_SECONDS
-                    } else {
-                        FAILED_TTL_SECONDS
-                    };
-                    self.records.insert(
-                        key,
-                        CacheRecord {
-                            state: existing.state.clone(),
-                            expires_at: existing.expires_at,
-                            retry_after: Some(now_seconds.saturating_add(retry_ttl)),
-                        },
-                        existing.state.weight(),
-                    );
-                    return false;
-                }
-                (
-                    ThumbnailState::Ready {
-                        data_url: existing_url,
-                        quality: crate::ipc::types::ThumbnailQuality::Low,
-                    },
-                    ThumbnailState::Ready {
-                        data_url,
-                        quality: crate::ipc::types::ThumbnailQuality::Low,
-                    },
-                ) => existing_url == data_url,
-                _ => false,
-            };
-            if preserve_existing {
+        let decision = self
+            .records
+            .get(&key)
+            .map_or(InsertDecision::Replace, |existing| {
+                insert_decision(existing, &state, now_seconds)
+            });
+        match decision {
+            InsertDecision::KeepExisting => return false,
+            InsertDecision::DeferRetry(record) => {
+                let weight = record.state.weight();
+                self.records.insert(key, record, weight);
                 return false;
             }
+            InsertDecision::Replace => {}
         }
         let expires_at = match &state {
             ThumbnailState::Unavailable => Some(now_seconds.saturating_add(NEGATIVE_TTL_SECONDS)),
@@ -140,5 +108,60 @@ impl ThumbnailCache {
             weight,
         );
         true
+    }
+}
+
+enum InsertDecision {
+    Replace,
+    KeepExisting,
+    /// Keep the low-quality preview, but retry a better one only later.
+    DeferRetry(CacheRecord),
+}
+
+fn insert_decision(
+    existing: &CacheRecord,
+    next: &ThumbnailState,
+    now_seconds: u64,
+) -> InsertDecision {
+    let defer_retry = |retry_ttl: u64| {
+        InsertDecision::DeferRetry(CacheRecord {
+            state: existing.state.clone(),
+            expires_at: existing.expires_at,
+            retry_after: Some(now_seconds.saturating_add(retry_ttl)),
+        })
+    };
+    match (&existing.state, next) {
+        (
+            ThumbnailState::Ready {
+                quality: ThumbnailQuality::High,
+                ..
+            },
+            _,
+        ) => InsertDecision::KeepExisting,
+        (
+            ThumbnailState::Ready {
+                quality: ThumbnailQuality::Low,
+                ..
+            },
+            ThumbnailState::Unavailable,
+        ) => defer_retry(NEGATIVE_TTL_SECONDS),
+        (
+            ThumbnailState::Ready {
+                quality: ThumbnailQuality::Low,
+                ..
+            },
+            ThumbnailState::Failed,
+        ) => defer_retry(FAILED_TTL_SECONDS),
+        (
+            ThumbnailState::Ready {
+                data_url: existing_url,
+                quality: ThumbnailQuality::Low,
+            },
+            ThumbnailState::Ready {
+                data_url,
+                quality: ThumbnailQuality::Low,
+            },
+        ) if existing_url == data_url => InsertDecision::KeepExisting,
+        _ => InsertDecision::Replace,
     }
 }

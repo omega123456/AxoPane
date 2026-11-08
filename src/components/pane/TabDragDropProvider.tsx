@@ -7,12 +7,19 @@ import {
   useRef,
   useState,
 } from 'react'
-import { move } from '@dnd-kit/helpers'
 import { DragDropProvider, PointerSensor, useDroppable } from '@dnd-kit/react'
 import { useSortable } from '@dnd-kit/react/sortable'
 import { usePanesStore } from '@/stores/panes-store'
 import { useTabsStore, type TabMoveResult } from '@/stores/tabs-store'
 import type { PaneId } from '@/types/pane'
+import {
+  focusTabLabel,
+  paneIdAtPoint,
+  paneIdFromEntity,
+  resolveTabDrop,
+  validDestination,
+  type TabDrop,
+} from './tab-drop'
 
 const TAB_DRAG_ACTIVATION_DISTANCE_PX = 5
 
@@ -75,30 +82,6 @@ const mouseSensor = PointerSensor.configure({
   activationConstraints: (() => [new MouseDistanceConstraint()]) as never,
 })
 
-function isPaneId(value: unknown): value is PaneId {
-  return value === 'left' || value === 'right'
-}
-
-function paneIdFromEntity(entity: { data: unknown; group?: unknown } | null | undefined) {
-  if (!entity) {
-    return null
-  }
-
-  const data = entity.data as { paneId?: unknown } | undefined
-  if (isPaneId(data?.paneId)) {
-    return data.paneId
-  }
-
-  return isPaneId(entity.group) ? entity.group : null
-}
-
-function paneIdAtPoint(clientX: number, clientY: number) {
-  const strip = document
-    .elementFromPoint(clientX, clientY)
-    ?.closest<HTMLElement>('[data-tab-strip]')
-  return isPaneId(strip?.dataset.tabStrip) ? strip.dataset.tabStrip : null
-}
-
 function compensateDragZoom(element: HTMLElement) {
   const zoom = Number.parseFloat(document.documentElement.style.zoom) || 1
   if (zoom === 1) return
@@ -116,75 +99,6 @@ function compensateDragZoom(element: HTMLElement) {
   }
   observer.observe(element, { attributes: true, attributeFilter: ['data-dnd-dragging'] })
   return restore
-}
-
-function validDestination(sourcePaneId: PaneId, destinationPaneId: PaneId) {
-  return (
-    sourcePaneId === destinationPaneId ||
-    useTabsStore.getState().panes[sourcePaneId].tabs.length > 1
-  )
-}
-
-type TabDragEndEvent = Parameters<
-  NonNullable<ComponentProps<typeof DragDropProvider>['onDragEnd']>
->[0]
-
-type TabIdsByPane = Record<PaneId, string[]>
-
-type TabDrop = {
-  sourcePaneId: PaneId
-  sourceTabId: string
-  destinationPaneId: PaneId
-  destinationIndex: number
-}
-
-function focusTabLabel(tabId: string) {
-  document.querySelector<HTMLElement>(`[data-tab-label-id="${CSS.escape(tabId)}"]`)?.focus()
-}
-
-function isStripTarget(target: TabDragEndEvent['operation']['target']) {
-  return Boolean((target?.data as { isStrip?: boolean } | undefined)?.isStrip)
-}
-
-function tabDropDestination(
-  event: TabDragEndEvent,
-  sourceTabId: string,
-  targetPaneId: PaneId,
-  tabIds: TabIdsByPane,
-): Pick<TabDrop, 'destinationPaneId' | 'destinationIndex'> {
-  if (isStripTarget(event.operation.target)) {
-    return { destinationPaneId: targetPaneId, destinationIndex: tabIds[targetPaneId].length }
-  }
-  const projected = move(tabIds, event)
-  const destinationPaneId =
-    (Object.keys(projected) as PaneId[]).find((paneId) =>
-      projected[paneId].includes(sourceTabId),
-    ) ?? targetPaneId
-  return { destinationPaneId, destinationIndex: projected[destinationPaneId].indexOf(sourceTabId) }
-}
-
-function resolveTabDrop(event: TabDragEndEvent, tabIds: TabIdsByPane): TabDrop | null {
-  const { source, target } = event.operation
-  const sourcePaneId = paneIdFromEntity(source)
-  const targetPaneId = paneIdFromEntity(target)
-  const sourceTabId = source?.id
-  if (event.canceled) {
-    return null
-  }
-  if (!sourcePaneId || !targetPaneId) {
-    return null
-  }
-  if (typeof sourceTabId !== 'string') {
-    return null
-  }
-  if (!validDestination(sourcePaneId, targetPaneId)) {
-    return null
-  }
-  const destination = tabDropDestination(event, sourceTabId, targetPaneId, tabIds)
-  if (destination.destinationIndex < 0) {
-    return null
-  }
-  return { sourcePaneId, sourceTabId, ...destination }
 }
 
 export function useTabDragState() {
@@ -223,47 +137,68 @@ type TabDragDropProviderProps = {
   children: ReactNode
 }
 
-export function TabDragDropProvider({ children }: TabDragDropProviderProps) {
+type DragProviderProps = ComponentProps<typeof DragDropProvider>
+type TabDragStartEvent = Parameters<NonNullable<DragProviderProps['onDragStart']>>[0]
+type TabDragMoveEvent = Parameters<NonNullable<DragProviderProps['onDragMove']>>[0]
+type TabDragOverEvent = Parameters<NonNullable<DragProviderProps['onDragOver']>>[0]
+
+const IDLE_DRAG_STATE: TabDragState = {
+  sourcePaneId: null,
+  destinationPaneId: null,
+  isInvalid: false,
+}
+
+function sourceTabIdOf(event: TabDragStartEvent) {
+  const id = event.operation.source?.id
+  return typeof id === 'string' ? id : null
+}
+
+function domPositionOf(element: HTMLElement | null): SourceDomPosition | null {
+  if (!(element?.parentElement instanceof HTMLElement)) {
+    return null
+  }
+  return { element, parent: element.parentElement, nextSibling: element.nextElementSibling }
+}
+
+function restoreDomPosition(position: SourceDomPosition | null) {
+  if (!position) return
+
+  const placeholder = document.querySelector<HTMLElement>('[data-dnd-placeholder]')
+  const anchor =
+    position.nextSibling?.parentElement === position.parent ? position.nextSibling : null
+  position.parent.insertBefore(position.element, anchor)
+  if (placeholder) {
+    position.element.insertAdjacentElement('afterend', placeholder)
+  }
+}
+
+function invalidMoveState(event: TabDragMoveEvent): TabDragState | null {
+  const sourcePaneId = paneIdFromEntity(event.operation.source)
+  const destinationPaneId = event.to && paneIdAtPoint(event.to.x, event.to.y)
+  const unresolved = !sourcePaneId || !destinationPaneId
+  if (unresolved || validDestination(sourcePaneId, destinationPaneId)) {
+    return null
+  }
+  return { sourcePaneId, destinationPaneId: null, isInvalid: true }
+}
+
+function dragOverState(event: TabDragOverEvent): TabDragState {
+  const sourcePaneId = paneIdFromEntity(event.operation.source)
+  const destinationPaneId = paneIdFromEntity(event.operation.target)
+  const isInvalid =
+    sourcePaneId !== null &&
+    destinationPaneId !== null &&
+    sourcePaneId !== destinationPaneId &&
+    !validDestination(sourcePaneId, destinationPaneId)
+  return { sourcePaneId, destinationPaneId: isInvalid ? null : destinationPaneId, isInvalid }
+}
+
+function useTabDragSession() {
   const moveTab = usePanesStore((state) => state.moveTab)
-  const tabs = useTabsStore((state) => state.panes)
-  const [dragState, setDragState] = useState<TabDragState>({
-    sourcePaneId: null,
-    destinationPaneId: null,
-    isInvalid: false,
-  })
+  const [dragState, setDragState] = useState<TabDragState>(IDLE_DRAG_STATE)
   const sourceTabId = useRef<string | null>(null)
   const sourceDomPosition = useRef<SourceDomPosition | null>(null)
   const restoreDragZoom = useRef<(() => void) | undefined>(undefined)
-
-  const tabIds = useMemo(
-    () => ({
-      left: tabs.left.tabs.map((tab) => tab.id),
-      right: tabs.right.tabs.map((tab) => tab.id),
-    }),
-    [tabs.left.tabs, tabs.right.tabs],
-  )
-
-  const reset = () => {
-    if (!sourceDomPosition.current?.element.hasAttribute('data-dnd-dragging')) {
-      restoreDragZoom.current?.()
-    }
-    restoreDragZoom.current = undefined
-    sourceDomPosition.current = null
-    setDragState({ sourcePaneId: null, destinationPaneId: null, isInvalid: false })
-  }
-
-  const restoreSourceDomPosition = () => {
-    const position = sourceDomPosition.current
-    if (!position) return
-
-    const placeholder = document.querySelector<HTMLElement>('[data-dnd-placeholder]')
-    const anchor =
-      position.nextSibling?.parentElement === position.parent ? position.nextSibling : null
-    position.parent.insertBefore(position.element, anchor)
-    if (placeholder) {
-      position.element.insertAdjacentElement('afterend', placeholder)
-    }
-  }
 
   const restoreSourceLabelFocus = () => {
     const tabId = sourceTabId.current
@@ -282,86 +217,81 @@ export function TabDragDropProvider({ children }: TabDragDropProviderProps) {
     }
   }
 
-  const finishTabDrop = (drop: TabDrop | null) => {
-    if (!drop) {
-      restoreSourceLabelFocus()
-      return
-    }
-    if (drop.sourcePaneId !== drop.destinationPaneId) {
-      restoreSourceDomPosition()
-    }
-    void moveTab(
-      drop.sourcePaneId,
-      drop.sourceTabId,
-      drop.destinationPaneId,
-      drop.destinationIndex,
-    ).then(handleMoveResult)
+  return {
+    dragState,
+    setDragState,
+    start: (event: TabDragStartEvent) => {
+      const sourcePaneId = paneIdFromEntity(event.operation.source)
+      sourceTabId.current = sourceTabIdOf(event)
+      const sourceElement = sourceTabId.current
+        ? document.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(sourceTabId.current)}"]`)
+        : null
+      sourceDomPosition.current = domPositionOf(sourceElement)
+      restoreDragZoom.current?.()
+      // Let DnD capture the original placeholder and pointer origin first.
+      queueMicrotask(() => {
+        restoreDragZoom.current = sourceElement ? compensateDragZoom(sourceElement) : undefined
+      })
+      setDragState({ sourcePaneId, destinationPaneId: sourcePaneId, isInvalid: false })
+    },
+    finish: (drop: TabDrop | null) => {
+      if (!drop) {
+        restoreSourceLabelFocus()
+        return
+      }
+      if (drop.sourcePaneId !== drop.destinationPaneId) {
+        restoreDomPosition(sourceDomPosition.current)
+      }
+      const { sourcePaneId, destinationPaneId, destinationIndex } = drop
+      void moveTab(sourcePaneId, drop.sourceTabId, destinationPaneId, destinationIndex).then(
+        handleMoveResult,
+      )
+    },
+    reset: () => {
+      if (!sourceDomPosition.current?.element.hasAttribute('data-dnd-dragging')) {
+        restoreDragZoom.current?.()
+      }
+      restoreDragZoom.current = undefined
+      sourceDomPosition.current = null
+      setDragState(IDLE_DRAG_STATE)
+    },
   }
+}
+
+export function TabDragDropProvider({ children }: TabDragDropProviderProps) {
+  const tabs = useTabsStore((state) => state.panes)
+  const session = useTabDragSession()
+  const tabIds = useMemo(
+    () => ({
+      left: tabs.left.tabs.map((tab) => tab.id),
+      right: tabs.right.tabs.map((tab) => tab.id),
+    }),
+    [tabs.left.tabs, tabs.right.tabs],
+  )
 
   return (
     <DragDropProvider
       sensors={[mouseSensor]}
-      onDragStart={(event) => {
-        const sourcePaneId = paneIdFromEntity(event.operation.source)
-        sourceTabId.current =
-          typeof event.operation.source?.id === 'string' ? event.operation.source.id : null
-        const sourceElement = sourceTabId.current
-          ? document.querySelector<HTMLElement>(
-              `[data-tab-id="${CSS.escape(sourceTabId.current)}"]`,
-            )
-          : null
-        sourceDomPosition.current =
-          sourceElement?.parentElement instanceof HTMLElement
-            ? {
-                element: sourceElement,
-                parent: sourceElement.parentElement,
-                nextSibling: sourceElement.nextElementSibling,
-              }
-            : null
-        restoreDragZoom.current?.()
-        // Let DnD capture the original placeholder and pointer origin first.
-        queueMicrotask(() => {
-          restoreDragZoom.current = sourceElement ? compensateDragZoom(sourceElement) : undefined
-        })
-        setDragState({ sourcePaneId, destinationPaneId: sourcePaneId, isInvalid: false })
-      }}
+      onDragStart={session.start}
       onDragMove={(event) => {
-        const sourcePaneId = paneIdFromEntity(event.operation.source)
-        const destinationPaneId = event.to && paneIdAtPoint(event.to.x, event.to.y)
-        if (
-          !sourcePaneId ||
-          !destinationPaneId ||
-          validDestination(sourcePaneId, destinationPaneId)
-        ) {
-          return
+        const invalidState = invalidMoveState(event)
+        if (invalidState) {
+          session.setDragState(invalidState)
         }
-
-        setDragState({ sourcePaneId, destinationPaneId: null, isInvalid: true })
       }}
       onDragOver={(event) => {
-        const sourcePaneId = paneIdFromEntity(event.operation.source)
-        const target = event.operation.target
-        const destinationPaneId = paneIdFromEntity(target)
-        const isInvalid =
-          sourcePaneId !== null &&
-          destinationPaneId !== null &&
-          sourcePaneId !== destinationPaneId &&
-          !validDestination(sourcePaneId, destinationPaneId)
-        setDragState({
-          sourcePaneId,
-          destinationPaneId: isInvalid ? null : destinationPaneId,
-          isInvalid,
-        })
-        if (isInvalid) {
+        const nextState = dragOverState(event)
+        session.setDragState(nextState)
+        if (nextState.isInvalid) {
           event.preventDefault()
         }
       }}
       onDragEnd={(event) => {
-        finishTabDrop(resolveTabDrop(event, tabIds))
-        reset()
+        session.finish(resolveTabDrop(event, tabIds))
+        session.reset()
       }}
     >
-      <TabDragContext.Provider value={dragState}>{children}</TabDragContext.Provider>
+      <TabDragContext.Provider value={session.dragState}>{children}</TabDragContext.Provider>
     </DragDropProvider>
   )
 }

@@ -3,11 +3,12 @@
 //! and the item, folders before files, shorter paths, newer items and name.
 
 use std::cmp::Ordering;
+use std::ops::Range;
 use std::time::SystemTime;
 
-use super::matcher::{nfc, FoldedName, NameKind};
+use super::matcher::{nfc, FoldedName, Match, NameKind, EXACT};
 use super::path_style::PathStyle;
-use super::query::ParsedQuery;
+use super::query::{Anchor, ParsedQuery, Segment};
 use super::Candidate;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,56 +48,112 @@ pub fn score(candidate: &Candidate, query: &ParsedQuery, style: PathStyle) -> Op
         .iter()
         .map(|ancestor| nfc(ancestor).into_owned())
         .collect();
-    let mut penalty = name_match
+    let folders = match &query.anchor {
+        Some(anchor) => match_anchor(anchor, &parts.root, &ancestors, query.browse)?,
+        None => match_folder_segments(query, &ancestors)?,
+    };
+    let name_penalty = name_match
         .as_ref()
         .map_or(0, |name_match| u32::from(name_match.tier));
-    let mut gap = 0;
-    let mut hits: Vec<(usize, Vec<(u32, u32)>)> = Vec::new();
-    if let Some(anchor) = &query.anchor {
-        let names: Vec<&str> = ancestors.iter().map(String::as_str).collect();
-        if !anchor.contains(&parts.root, &names) {
-            return None;
+    let (parent, offsets) = display_parent(style, &parts.root, &ancestors);
+    Some(Scored {
+        path: candidate.path.clone(),
+        name,
+        parent,
+        is_dir: candidate.is_dir,
+        modified: candidate.modified,
+        penalty: name_penalty + folders.penalty,
+        gap: folders.gap,
+        depth: parts.components.len() as u32,
+        name_ranges: name_match
+            .map(|name_match| name_match.ranges)
+            .unwrap_or_default(),
+        parent_ranges: parent_ranges(folders.hits, &offsets),
+    })
+}
+
+/// How a candidate's ancestors satisfied the query's folder part.
+#[derive(Default)]
+struct FolderMatch {
+    penalty: u32,
+    gap: u32,
+    /// Matched ancestor index with the ranges matched inside its name.
+    hits: Vec<(usize, Vec<(u32, u32)>)>,
+}
+
+fn match_anchor(
+    anchor: &Anchor,
+    root: &str,
+    ancestors: &[String],
+    browse: bool,
+) -> Option<FolderMatch> {
+    let names: Vec<&str> = ancestors.iter().map(String::as_str).collect();
+    if !anchor.contains(root, &names) {
+        return None;
+    }
+    let gap = (ancestors.len() - anchor.components.len()) as u32;
+    if browse && gap != 0 {
+        return None;
+    }
+    Some(FolderMatch {
+        gap,
+        ..FolderMatch::default()
+    })
+}
+
+/// Matches folder segments innermost first, each against ancestors above the
+/// previous match.
+fn match_folder_segments(query: &ParsedQuery, ancestors: &[String]) -> Option<FolderMatch> {
+    let mut folders = FolderMatch::default();
+    let mut upper = ancestors.len();
+    for (segment_index, segment) in query.folder_segs.iter().enumerate().rev() {
+        // Listing children: the innermost folder must be the parent.
+        let lists_parent = query.browse && segment_index + 1 == query.folder_segs.len();
+        let lowest = if lists_parent {
+            upper.checked_sub(1)?
+        } else {
+            0
+        };
+        let (ancestor_index, found) = best_ancestor_match(segment, ancestors, lowest..upper)?;
+        folders.gap += (upper - 1 - ancestor_index) as u32;
+        folders.penalty += u32::from(found.tier);
+        folders.hits.push((ancestor_index, found.ranges));
+        upper = ancestor_index;
+    }
+    Some(folders)
+}
+
+/// The best-tier ancestor in `range`, preferring the innermost; an exact
+/// match ends the search.
+fn best_ancestor_match(
+    segment: &Segment,
+    ancestors: &[String],
+    range: Range<usize>,
+) -> Option<(usize, Match)> {
+    let mut best: Option<(usize, Match)> = None;
+    for ancestor_index in range.rev() {
+        let Some(found) = segment.matches(
+            &FoldedName::new(&ancestors[ancestor_index]),
+            NameKind::Folder,
+        ) else {
+            continue;
+        };
+        let improves = best
+            .as_ref()
+            .is_none_or(|(_, best_match)| found.tier < best_match.tier);
+        if !improves {
+            continue;
         }
-        gap = (ancestors.len() - anchor.components.len()) as u32;
-        if query.browse && gap != 0 {
-            return None;
-        }
-    } else {
-        let mut upper = ancestors.len();
-        for (segment_index, segment) in query.folder_segs.iter().enumerate().rev() {
-            // Listing children: the innermost folder must be the parent.
-            let lowest = if query.browse && segment_index + 1 == query.folder_segs.len() {
-                upper.checked_sub(1)?
-            } else {
-                0
-            };
-            let mut best: Option<(usize, super::matcher::Match)> = None;
-            for ancestor_index in (lowest..upper).rev() {
-                let Some(found) = segment.matches(
-                    &FoldedName::new(&ancestors[ancestor_index]),
-                    NameKind::Folder,
-                ) else {
-                    continue;
-                };
-                if best
-                    .as_ref()
-                    .is_none_or(|(_, best_match)| found.tier < best_match.tier)
-                {
-                    let exact = found.tier == super::matcher::EXACT;
-                    best = Some((ancestor_index, found));
-                    if exact {
-                        break;
-                    }
-                }
-            }
-            let (ancestor_index, found) = best?;
-            gap += (upper - 1 - ancestor_index) as u32;
-            penalty += u32::from(found.tier);
-            hits.push((ancestor_index, found.ranges));
-            upper = ancestor_index;
+        let exact = found.tier == EXACT;
+        best = Some((ancestor_index, found));
+        if exact {
+            break;
         }
     }
-    let (parent, offsets) = display_parent(style, &parts.root, &ancestors);
+    best
+}
+
+fn parent_ranges(hits: Vec<(usize, Vec<(u32, u32)>)>, offsets: &[u32]) -> Vec<(u32, u32)> {
     let mut parent_ranges: Vec<(u32, u32)> = hits
         .into_iter()
         .flat_map(|(ancestor_index, ranges)| {
@@ -107,20 +164,7 @@ pub fn score(candidate: &Candidate, query: &ParsedQuery, style: PathStyle) -> Op
         })
         .collect();
     parent_ranges.sort_unstable();
-    Some(Scored {
-        path: candidate.path.clone(),
-        name,
-        parent,
-        is_dir: candidate.is_dir,
-        modified: candidate.modified,
-        penalty,
-        gap,
-        depth: parts.components.len() as u32,
-        name_ranges: name_match
-            .map(|name_match| name_match.ranges)
-            .unwrap_or_default(),
-        parent_ranges,
-    })
+    parent_ranges
 }
 
 /// The parent path for display, plus the UTF-16 offset of each ancestor

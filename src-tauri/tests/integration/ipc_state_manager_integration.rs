@@ -54,10 +54,8 @@ fn wait_for_op(service: &OpsService, id: &str, predicate: impl Fn(OpStatus) -> b
             .find(|snapshot| snapshot.progress.operation_id == id)
             .map(|snapshot| snapshot.progress.status);
 
-        if let Some(status) = status {
-            if predicate(status) {
-                return status;
-            }
+        if let Some(status) = status.filter(|status| predicate(*status)) {
+            return status;
         }
 
         assert!(Instant::now() < deadline, "timed out waiting for op {id}");
@@ -65,13 +63,38 @@ fn wait_for_op(service: &OpsService, id: &str, predicate: impl Fn(OpStatus) -> b
     }
 }
 
+fn path_text(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+fn list_request(path: &Path, show_hidden: bool) -> file_explorer_lib::ipc::types::ListDirRequest {
+    file_explorer_lib::ipc::types::ListDirRequest {
+        path: path_text(path),
+        sort_key: SortKey::Name,
+        sort_direction: SortDirection::Asc,
+        filter: String::new(),
+        show_hidden,
+        include_item_counts: true,
+    }
+}
+
+fn customised_config(initial: &Config, root: &Path) -> Config {
+    Config {
+        theme: "dark".to_string(),
+        show_hidden_files: true,
+        dismissed_everything_banner: true,
+        update_check_interval: "12h".to_string(),
+        log_level: "debug".to_string(),
+        favourites: vec![path_text(&root.join("favourite"))],
+        ..initial.clone()
+    }
+}
+
 #[test]
-fn commands_cover_filesystem_and_persistence_state() {
+fn commands_round_trip_config_through_persistence() {
     let config_dir = tempdir().expect("config dir");
     let persistence = PersistenceState::load(config_dir.path()).expect("persistence");
-
     let fixture = tempdir().expect("temp dir");
-    let root = fixture.path();
 
     let shell = commands::get_initial_shell();
     assert_eq!(shell.panes.len(), 2);
@@ -80,85 +103,64 @@ fn commands_cover_filesystem_and_persistence_state() {
     let initial_config = commands::load_config(as_state(&persistence));
     assert_eq!(initial_config.theme, "system");
 
-    let saved_config = Config {
-        theme: "dark".to_string(),
-        show_hidden_files: true,
-        dismissed_everything_banner: true,
-        keybindings: initial_config.keybindings.clone(),
-        columns: initial_config.columns.clone(),
-        layout: initial_config.layout.clone(),
-        update_check_interval: "12h".to_string(),
-        log_level: "debug".to_string(),
-        date_format: initial_config.date_format.clone(),
-        show_time: initial_config.show_time,
-        show_seconds: initial_config.show_seconds,
-        relative_dates: initial_config.relative_dates,
-        auto_folder_size: initial_config.auto_folder_size,
-        auto_expand_active_queue_toasts: initial_config.auto_expand_active_queue_toasts,
-        favourites: vec![root.join("favourite").to_string_lossy().into_owned()],
-        favourite_names: initial_config.favourite_names.clone(),
-        favourites_collapsed: initial_config.favourites_collapsed,
+    let saved_config = customised_config(&initial_config, fixture.path());
+    let request = SaveConfigRequest {
+        config: saved_config.clone(),
     };
     assert_eq!(
-        commands::save_config(
-            SaveConfigRequest {
-                config: saved_config.clone(),
-            },
-            as_state(&persistence),
-        ),
+        commands::save_config(request, as_state(&persistence)),
         saved_config
     );
     assert_eq!(commands::load_config(as_state(&persistence)), saved_config);
+}
+
+#[test]
+fn commands_round_trip_session_through_persistence() {
+    let config_dir = tempdir().expect("config dir");
+    let persistence = PersistenceState::load(config_dir.path()).expect("persistence");
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
 
     let saved_session = Session {
         active_pane: "right".to_string(),
-        left_path: root.join("left").to_string_lossy().into_owned(),
-        right_path: root.join("right").to_string_lossy().into_owned(),
+        left_path: path_text(&root.join("left")),
+        right_path: path_text(&root.join("right")),
         left: None,
         right: None,
         recent_folders: Vec::new(),
     };
+    let request = SaveSessionRequest {
+        session: saved_session.clone(),
+    };
     assert_eq!(
-        commands::save_session(
-            SaveSessionRequest {
-                session: saved_session.clone(),
-            },
-            as_state(&persistence),
-        ),
+        commands::save_session(request, as_state(&persistence)),
         saved_session
     );
     assert_eq!(
         commands::load_session(as_state(&persistence)),
         saved_session
     );
+}
 
-    let folder = commands::create_folder(CreateEntryRequest {
-        parent: root.to_string_lossy().into_owned(),
-        name: "Docs".to_string(),
-    })
-    .expect("create folder");
+#[test]
+fn commands_cover_filesystem_entry_lifecycle() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    let create_request = |name: &str| CreateEntryRequest {
+        parent: path_text(root),
+        name: name.to_string(),
+    };
+
+    let folder = commands::create_folder(create_request("Docs")).expect("create folder");
     assert!(folder.is_dir);
-
-    let file = commands::create_file(CreateEntryRequest {
-        parent: root.to_string_lossy().into_owned(),
-        name: "todo.txt".to_string(),
-    })
-    .expect("create file");
+    let file = commands::create_file(create_request("todo.txt")).expect("create file");
     assert_eq!(file.name, "todo.txt");
 
-    let listing = commands::list_dir(file_explorer_lib::ipc::types::ListDirRequest {
-        path: root.to_string_lossy().into_owned(),
-        sort_key: SortKey::Name,
-        sort_direction: SortDirection::Asc,
-        filter: String::new(),
-        show_hidden: true,
-        include_item_counts: true,
-    })
-    .expect("list dir");
+    let listing = commands::list_dir(list_request(root, true)).expect("list dir");
     assert_eq!(listing.entries.len(), 2);
 
     let renamed = commands::rename_entry(file_explorer_lib::ipc::types::RenameEntryRequest {
-        path: root.join("todo.txt").to_string_lossy().into_owned(),
+        path: path_text(&root.join("todo.txt")),
         new_name: "done.txt".to_string(),
     })
     .expect("rename");
@@ -166,45 +168,70 @@ fn commands_cover_filesystem_and_persistence_state() {
 
     commands::move_to_trash(TrashEntriesRequest {
         paths: vec![
-            root.join("Docs").to_string_lossy().into_owned(),
-            root.join("done.txt").to_string_lossy().into_owned(),
+            path_text(&root.join("Docs")),
+            path_text(&root.join("done.txt")),
         ],
     })
     .expect("move to trash");
     assert!(!root.join("Docs").exists());
     assert!(!root.join("done.txt").exists());
+}
 
-    let missing_dir_error = commands::list_dir(file_explorer_lib::ipc::types::ListDirRequest {
-        path: root.join("missing").to_string_lossy().into_owned(),
-        sort_key: SortKey::Name,
-        sort_direction: SortDirection::Asc,
-        filter: String::new(),
-        show_hidden: false,
-        include_item_counts: true,
-    })
-    .expect_err("missing directory");
+#[test]
+fn commands_report_missing_paths() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+
+    let missing_dir_error = commands::list_dir(list_request(&root.join("missing"), false))
+        .expect_err("missing directory");
     assert!(missing_dir_error.contains("Failed to load"));
 
     let missing_path_error = commands::open_path(OpenPathRequest {
-        path: root.join("missing.txt").to_string_lossy().into_owned(),
+        path: path_text(&root.join("missing.txt")),
     })
     .expect_err("missing path");
     assert!(missing_path_error.contains("Failed to open"));
 }
 
-#[test]
-fn commands_cover_size_and_logging_state() {
-    let size_service = SizeService::default();
-    let watch_service = std::sync::Arc::new(file_explorer_lib::watch::WatchService::default());
+const SIZE_FIXTURE_FILES: usize = 50;
 
+fn size_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
     let fixture = tempdir().expect("temp dir");
     let size_root = fixture.path().join("sizes");
-    for index in 0..50 {
+    for index in 0..SIZE_FIXTURE_FILES {
         write_file(
             &size_root.join(format!("file-{index}.txt")),
             b"0123456789abcdef0123456789abcdef",
         );
     }
+    (fixture, size_root)
+}
+
+fn has_ready_or_na(state: file_explorer_lib::size::SizeStateKind) -> bool {
+    matches!(
+        state,
+        file_explorer_lib::size::SizeStateKind::Ready | file_explorer_lib::size::SizeStateKind::Na
+    )
+}
+
+fn expected_auto_size_state() -> file_explorer_lib::size::SizeStateKind {
+    if cfg!(target_os = "macos") {
+        return file_explorer_lib::size::SizeStateKind::Unknown;
+    }
+    file_explorer_lib::size::SizeStateKind::Ready
+}
+
+fn fixture_network_root() -> String {
+    if cfg!(windows) {
+        return "Z:\\".to_string();
+    }
+    "/Volumes/fixture-network".to_string()
+}
+
+#[test]
+fn commands_report_unavailable_size_index_and_auto_sizing() {
+    let size_service = SizeService::default();
+    let (_fixture, size_root) = size_fixture();
 
     let status = commands::folder_size_index_status(as_state(&size_service));
     assert!(!status.is_available);
@@ -227,10 +254,9 @@ fn commands_cover_size_and_logging_state() {
         as_state(&size_service),
     );
 
-    // Automatic sizing never walks outside an index on macOS.
     let auto_batches = commands::request_folder_sizes(
         file_explorer_lib::ipc::types::FolderSizesRequest {
-            paths: vec![size_root.to_string_lossy().into_owned()],
+            paths: vec![path_text(&size_root)],
             mode: Some(file_explorer_lib::size::RequestMode::Auto),
         },
         as_state(&size_service),
@@ -240,63 +266,52 @@ fn commands_cover_size_and_logging_state() {
         .flatten()
         .map(|event| event.state)
         .next_back();
-    if cfg!(target_os = "macos") {
-        assert_eq!(
-            auto_state,
-            Some(file_explorer_lib::size::SizeStateKind::Unknown)
-        );
-    } else {
-        assert_eq!(
-            auto_state,
-            Some(file_explorer_lib::size::SizeStateKind::Ready)
-        );
-    }
+    assert_eq!(auto_state, Some(expected_auto_size_state()));
     let listed_volumes = commands::list_volumes().expect("list volumes");
     assert!(!listed_volumes.is_empty());
+}
+
+#[test]
+fn commands_size_a_folder_and_cancel_idle_requests() {
+    let size_service = SizeService::default();
+    let (_fixture, size_root) = size_fixture();
 
     let size_batches = commands::request_folder_size(
         file_explorer_lib::ipc::types::FolderSizeRequest {
-            path: size_root.to_string_lossy().into_owned(),
+            path: path_text(&size_root),
             mode: None,
         },
         as_state(&size_service),
     );
     let size_events = size_batches.into_iter().flatten().collect::<Vec<_>>();
-    assert!(size_events.iter().any(|event| {
-        matches!(
-            event.state,
-            file_explorer_lib::size::SizeStateKind::Ready
-                | file_explorer_lib::size::SizeStateKind::Na
-        )
-    }));
+    assert!(size_events.iter().any(|event| has_ready_or_na(event.state)));
 
     let cancel = commands::cancel_size(
         CancelSizeRequest {
-            path: size_root.to_string_lossy().into_owned(),
+            path: path_text(&size_root),
         },
         as_state(&size_service),
     );
     assert!(!cancel.cancelled);
 
-    // The batch cancel command reports zero for paths with no in-flight jobs.
     let batch_cancel = commands::cancel_sizes(
         CancelSizesRequest {
-            paths: vec![size_root.to_string_lossy().into_owned()],
+            paths: vec![path_text(&size_root)],
         },
         as_state(&size_service),
     );
     assert_eq!(batch_cancel.cancelled, 0);
+    assert_eq!(size_path_from_string(&path_text(&size_root)), size_root);
+}
+
+#[test]
+fn commands_mark_network_folders_as_not_applicable() {
+    let size_service = SizeService::default();
+    let (_fixture, size_root) = size_fixture();
 
     let network_size_batches = commands::request_folder_sizes(
         file_explorer_lib::ipc::types::FolderSizesRequest {
-            paths: vec![
-                size_root.to_string_lossy().into_owned(),
-                if cfg!(windows) {
-                    "Z:\\".to_string()
-                } else {
-                    "/Volumes/fixture-network".to_string()
-                },
-            ],
+            paths: vec![path_text(&size_root), fixture_network_root()],
             mode: None,
         },
         as_state(&size_service),
@@ -305,27 +320,21 @@ fn commands_cover_size_and_logging_state() {
         .into_iter()
         .flatten()
         .collect::<Vec<_>>();
-    assert!(network_size_events.iter().any(|event| {
-        event.path == size_root.to_string_lossy()
-            && matches!(
-                event.state,
-                file_explorer_lib::size::SizeStateKind::Ready
-                    | file_explorer_lib::size::SizeStateKind::Na
-            )
-    }));
+    assert!(network_size_events
+        .iter()
+        .any(|event| event.path == size_root.to_string_lossy() && has_ready_or_na(event.state)));
     assert!(network_size_events.iter().any(|event| {
         matches!(event.state, file_explorer_lib::size::SizeStateKind::Na)
             && event.source == file_explorer_lib::size::SizeSource::Network
     }));
+}
 
-    assert_eq!(
-        size_path_from_string(&size_root.to_string_lossy()),
-        size_root
-    );
-
+#[test]
+fn commands_return_placeholder_icons_in_request_order() {
+    let (_fixture, size_root) = size_fixture();
     let icon_paths = vec![
-        size_root.join("file-0.txt").to_string_lossy().into_owned(),
-        size_root.join("file-1.txt").to_string_lossy().into_owned(),
+        path_text(&size_root.join("file-0.txt")),
+        path_text(&size_root.join("file-1.txt")),
     ];
     let icon_batches =
         commands::request_icons(file_explorer_lib::ipc::types::RequestIconsRequest {
@@ -342,6 +351,22 @@ fn commands_cover_size_and_logging_state() {
     assert!(icon_events
         .iter()
         .all(|event| event.icon_data_url.is_none()));
+}
+
+fn thumbnail_candidate(path: &Path) -> file_explorer_lib::ipc::types::ThumbnailCandidateRequest {
+    file_explorer_lib::ipc::types::ThumbnailCandidateRequest {
+        path: path_text(path),
+        modified_unix_seconds: 0,
+        size_bytes: 32,
+        is_directory: false,
+        priority: file_explorer_lib::ipc::types::ThumbnailPriority::Visible,
+        order: 0,
+    }
+}
+
+#[test]
+fn commands_request_and_cancel_thumbnails() {
+    let (_fixture, size_root) = size_fixture();
     let thumbnail_service = Arc::new(file_explorer_lib::thumbnails::ThumbnailService::new(
         Arc::new(file_explorer_lib::resource_coordinator::ResourceCoordinator::new()),
     ));
@@ -349,17 +374,10 @@ fn commands_cover_size_and_logging_state() {
         file_explorer_lib::ipc::types::RequestThumbnailsRequest {
             pane_id: "left".into(),
             tab_id: "tab".into(),
-            path: size_root.to_string_lossy().into_owned(),
+            path: path_text(&size_root),
             generation: 1,
             revision: 1,
-            candidates: vec![file_explorer_lib::ipc::types::ThumbnailCandidateRequest {
-                path: size_root.join("file-0.txt").to_string_lossy().into_owned(),
-                modified_unix_seconds: 0,
-                size_bytes: 32,
-                is_directory: false,
-                priority: file_explorer_lib::ipc::types::ThumbnailPriority::Visible,
-                order: 0,
-            }],
+            candidates: vec![thumbnail_candidate(&size_root.join("file-0.txt"))],
         },
         as_state(&thumbnail_service),
     )
@@ -368,11 +386,15 @@ fn commands_cover_size_and_logging_state() {
         file_explorer_lib::ipc::types::CancelThumbnailsRequest {
             pane_id: "left".into(),
             tab_id: "tab".into(),
-            path: size_root.to_string_lossy().into_owned(),
+            path: path_text(&size_root),
             generation: 1,
         },
         as_state(&thumbnail_service),
     );
+}
+
+#[test]
+fn commands_format_and_record_frontend_logs() {
     assert_eq!(commands::frontend_log_level("error"), log::Level::Error);
     assert_eq!(commands::frontend_log_level("trace"), log::Level::Debug);
     assert_eq!(
@@ -383,46 +405,6 @@ fn commands_cover_size_and_logging_state() {
         commands::format_frontend_log(None, "refresh issued", None),
         "[frontend] refresh issued"
     );
-
-    let watch_target = file_explorer_lib::watch::WatchTarget {
-        tab_id: "left-1".to_string(),
-        path: fixture.path().to_string_lossy().into_owned(),
-        sort_key: SortKey::Name,
-        sort_direction: SortDirection::Asc,
-        filter: String::new(),
-        show_hidden: true,
-        include_item_counts: true,
-    };
-    commands::set_tab_watch(
-        SetTabWatchRequest {
-            target: Some(watch_target.clone()),
-            entries: None,
-        },
-        as_state(&watch_service),
-    )
-    .expect("set tab watch");
-    write_file(&fixture.path().join("watch.txt"), b"watch");
-    commands::set_tab_watch(
-        SetTabWatchRequest {
-            target: Some(watch_target.clone()),
-            entries: None,
-        },
-        as_state(&watch_service),
-    )
-    .expect("reseed tab watch after file write");
-    let baseline =
-        file_explorer_lib::watch::tab_snapshot_for_tests(&watch_service, &watch_target.tab_id)
-            .expect("baseline recorded for tab");
-    assert!(baseline.keys().any(|path| path.ends_with("watch.txt")));
-    commands::set_tab_watch(
-        SetTabWatchRequest {
-            target: None,
-            entries: None,
-        },
-        as_state(&watch_service),
-    )
-    .expect("clear tab watch");
-
     commands::log_frontend(LogFrontendRequest {
         level: "trace".to_string(),
         message: "refresh issued".to_string(),
@@ -431,56 +413,125 @@ fn commands_cover_size_and_logging_state() {
     });
 }
 
+fn set_watch(
+    watch_service: &Arc<file_explorer_lib::watch::WatchService>,
+    target: Option<file_explorer_lib::watch::WatchTarget>,
+) -> Result<(), String> {
+    commands::set_tab_watch(
+        SetTabWatchRequest {
+            target,
+            entries: None,
+        },
+        as_state(watch_service),
+    )
+}
+
+#[test]
+fn commands_reseed_and_clear_tab_watches() {
+    let watch_service = Arc::new(file_explorer_lib::watch::WatchService::default());
+    let fixture = tempdir().expect("temp dir");
+    let watch_target = file_explorer_lib::watch::WatchTarget {
+        tab_id: "left-1".to_string(),
+        path: path_text(fixture.path()),
+        sort_key: SortKey::Name,
+        sort_direction: SortDirection::Asc,
+        filter: String::new(),
+        show_hidden: true,
+        include_item_counts: true,
+    };
+    set_watch(&watch_service, Some(watch_target.clone())).expect("set tab watch");
+    write_file(&fixture.path().join("watch.txt"), b"watch");
+    set_watch(&watch_service, Some(watch_target.clone()))
+        .expect("reseed tab watch after file write");
+    let baseline =
+        file_explorer_lib::watch::tab_snapshot_for_tests(&watch_service, &watch_target.tab_id)
+            .expect("baseline recorded for tab");
+    assert!(baseline.keys().any(|path| path.ends_with("watch.txt")));
+    set_watch(&watch_service, None).expect("clear tab watch");
+}
+
+fn start_copy(service: &OpsService, destination: &Path, item: OpItem) -> String {
+    commands::start_op(
+        StartOpRequest {
+            kind: OpKind::Copy,
+            destination_dir: path_text(destination),
+            items: vec![item],
+        },
+        as_state(service),
+    )
+}
+
+fn op_request(id: &str) -> OpIdRequest {
+    OpIdRequest { id: id.to_string() }
+}
+
+fn wait_for_status(service: &OpsService, id: &str, expected: OpStatus) -> OpStatus {
+    wait_for_op(service, id, |status| status == expected)
+}
+
+fn queue_position(service: &OpsService, id: &str) -> usize {
+    commands::queue_snapshot(as_state(service))
+        .into_iter()
+        .position(|snapshot| snapshot.progress.operation_id == id)
+        .expect("operation queued")
+}
+
+fn missing_item(root: &Path) -> OpItem {
+    OpItem {
+        source_path: path_text(&root.join("missing.txt")),
+        name: "missing.txt".to_string(),
+        size_bytes: 1,
+    }
+}
+
+struct QueueFixture {
+    _fixture: tempfile::TempDir,
+    root: std::path::PathBuf,
+    destination: std::path::PathBuf,
+}
+
+fn queue_fixture() -> QueueFixture {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path().to_path_buf();
+    let destination = root.join("dest");
+    fs::create_dir_all(&destination).expect("dest");
+    QueueFixture {
+        _fixture: fixture,
+        root,
+        destination,
+    }
+}
+
+fn start_blocking_conflict(service: &OpsService, queue: &QueueFixture) -> String {
+    write_file(&queue.root.join("dup.txt"), b"new-content");
+    write_file(&queue.destination.join("dup.txt"), b"old-content");
+    let conflict_id = start_copy(
+        service,
+        &queue.destination,
+        op_item(&queue.root.join("dup.txt")),
+    );
+    assert_eq!(
+        wait_for_status(service, &conflict_id, OpStatus::Conflict),
+        OpStatus::Conflict
+    );
+    conflict_id
+}
+
+fn start_pending_copy(service: &OpsService, queue: &QueueFixture, name: &str) -> String {
+    let source = queue.root.join(name);
+    write_file(&source, name.as_bytes());
+    let id = start_copy(service, &queue.destination, op_item(&source));
+    wait_for_status(service, &id, OpStatus::Pending);
+    id
+}
+
 #[test]
 fn commands_cover_queue_state_lifecycle() {
     let service = OpsService::new(Duration::from_secs(30));
-
-    let fixture = tempdir().expect("temp dir");
-    let root = fixture.path();
-    let dest = root.join("dest");
-    fs::create_dir_all(&dest).expect("dest");
-
-    write_file(&root.join("dup.txt"), b"new-content");
-    write_file(&dest.join("dup.txt"), b"old-content");
-
-    let conflict_id = commands::start_op(
-        StartOpRequest {
-            kind: OpKind::Copy,
-            destination_dir: dest.to_string_lossy().into_owned(),
-            items: vec![op_item(&root.join("dup.txt"))],
-        },
-        as_state(&service),
-    );
-    assert_eq!(
-        wait_for_op(&service, &conflict_id, |status| status
-            == OpStatus::Conflict),
-        OpStatus::Conflict
-    );
-
-    let pending_one_source = root.join("pending-one.txt");
-    let pending_two_source = root.join("pending-two.txt");
-    write_file(&pending_one_source, b"one");
-    write_file(&pending_two_source, b"two");
-
-    let pending_one = commands::start_op(
-        StartOpRequest {
-            kind: OpKind::Copy,
-            destination_dir: dest.to_string_lossy().into_owned(),
-            items: vec![op_item(&pending_one_source)],
-        },
-        as_state(&service),
-    );
-    let pending_two = commands::start_op(
-        StartOpRequest {
-            kind: OpKind::Copy,
-            destination_dir: dest.to_string_lossy().into_owned(),
-            items: vec![op_item(&pending_two_source)],
-        },
-        as_state(&service),
-    );
-
-    wait_for_op(&service, &pending_one, |status| status == OpStatus::Pending);
-    wait_for_op(&service, &pending_two, |status| status == OpStatus::Pending);
+    let queue = queue_fixture();
+    let conflict_id = start_blocking_conflict(&service, &queue);
+    let pending_one = start_pending_copy(&service, &queue, "pending-one.txt");
+    let pending_two = start_pending_copy(&service, &queue, "pending-two.txt");
 
     commands::reorder_ops(
         ReorderOpsRequest {
@@ -488,34 +539,13 @@ fn commands_cover_queue_state_lifecycle() {
         },
         as_state(&service),
     );
-
-    let order = commands::queue_snapshot(as_state(&service))
-        .into_iter()
-        .map(|snapshot| snapshot.progress.operation_id)
-        .collect::<Vec<_>>();
-    let pending_one_index = order.iter().position(|id| id == &pending_one).unwrap();
-    let pending_two_index = order.iter().position(|id| id == &pending_two).unwrap();
-    assert!(pending_two_index < pending_one_index);
-
+    assert!(queue_position(&service, &pending_two) < queue_position(&service, &pending_one));
     assert!(commands::has_unfinished_ops(as_state(&service)));
 
-    commands::skip_op(
-        OpIdRequest {
-            id: pending_two.clone(),
-        },
-        as_state(&service),
-    );
-    wait_for_op(&service, &pending_two, |status| status == OpStatus::Pending);
-
-    commands::cancel_op(
-        OpIdRequest {
-            id: pending_two.clone(),
-        },
-        as_state(&service),
-    );
-    wait_for_op(&service, &pending_two, |status| {
-        status == OpStatus::Cancelled
-    });
+    commands::skip_op(op_request(&pending_two), as_state(&service));
+    wait_for_status(&service, &pending_two, OpStatus::Pending);
+    commands::cancel_op(op_request(&pending_two), as_state(&service));
+    wait_for_status(&service, &pending_two, OpStatus::Cancelled);
 
     commands::resolve_conflict(
         ResolveConflictRequest {
@@ -526,61 +556,31 @@ fn commands_cover_queue_state_lifecycle() {
         },
         as_state(&service),
     );
-    wait_for_op(&service, &conflict_id, |status| {
-        status == OpStatus::Completed
-    });
-    assert_eq!(fs::read(dest.join("dup.txt")).expect("dup"), b"new-content");
-
-    wait_for_op(&service, &pending_one, |status| {
-        status == OpStatus::Completed
-    });
-
-    let failed_id = commands::start_op(
-        StartOpRequest {
-            kind: OpKind::Copy,
-            destination_dir: dest.to_string_lossy().into_owned(),
-            items: vec![OpItem {
-                source_path: root.join("missing.txt").to_string_lossy().into_owned(),
-                name: "missing.txt".to_string(),
-                size_bytes: 1,
-            }],
-        },
-        as_state(&service),
+    wait_for_status(&service, &conflict_id, OpStatus::Completed);
+    assert_eq!(
+        fs::read(queue.destination.join("dup.txt")).expect("dup"),
+        b"new-content"
     );
-    wait_for_op(&service, &failed_id, |status| status == OpStatus::Failed);
+    wait_for_status(&service, &pending_one, OpStatus::Completed);
+}
 
-    commands::retry_op(
-        OpIdRequest {
-            id: failed_id.clone(),
-        },
-        as_state(&service),
-    );
-    wait_for_op(&service, &failed_id, |status| status == OpStatus::Failed);
+#[test]
+fn commands_retry_failed_and_resume_paused_operations() {
+    let service = OpsService::new(Duration::from_secs(30));
+    let queue = queue_fixture();
 
-    let paused_source = root.join("pause.txt");
+    let failed_id = start_copy(&service, &queue.destination, missing_item(&queue.root));
+    wait_for_status(&service, &failed_id, OpStatus::Failed);
+    commands::retry_op(op_request(&failed_id), as_state(&service));
+    wait_for_status(&service, &failed_id, OpStatus::Failed);
+
+    let paused_source = queue.root.join("pause.txt");
     write_file(&paused_source, &vec![b'x'; 8192]);
-    let paused_id = commands::start_op(
-        StartOpRequest {
-            kind: OpKind::Copy,
-            destination_dir: dest.to_string_lossy().into_owned(),
-            items: vec![op_item(&paused_source)],
-        },
-        as_state(&service),
-    );
-    commands::pause_op(
-        OpIdRequest {
-            id: paused_id.clone(),
-        },
-        as_state(&service),
-    );
+    let paused_id = start_copy(&service, &queue.destination, op_item(&paused_source));
+    commands::pause_op(op_request(&paused_id), as_state(&service));
     wait_for_op(&service, &paused_id, |status| {
         matches!(status, OpStatus::Paused | OpStatus::Completed)
     });
-    commands::resume_op(
-        OpIdRequest {
-            id: paused_id.clone(),
-        },
-        as_state(&service),
-    );
-    wait_for_op(&service, &paused_id, |status| status == OpStatus::Completed);
+    commands::resume_op(op_request(&paused_id), as_state(&service));
+    wait_for_status(&service, &paused_id, OpStatus::Completed);
 }

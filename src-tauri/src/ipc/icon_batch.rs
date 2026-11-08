@@ -54,21 +54,20 @@ impl IconBatcher {
         now: Instant,
     ) -> Option<Vec<IconStateEvent>> {
         self.buffer.push(event);
-        if self.buffer.len() >= MAX_BATCH || now.duration_since(self.last_flush) >= FLUSH_INTERVAL {
-            self.last_flush = now;
-            Some(std::mem::take(&mut self.buffer))
-        } else {
-            None
-        }
+        let is_due =
+            self.buffer.len() >= MAX_BATCH || now.duration_since(self.last_flush) >= FLUSH_INTERVAL;
+        is_due.then(|| self.flush(now))
+    }
+
+    fn flush(&mut self, now: Instant) -> Vec<IconStateEvent> {
+        self.last_flush = now;
+        std::mem::take(&mut self.buffer)
     }
 
     /// Flush any icons left in the buffer after the last `push`. Returns
     /// `None` when the buffer is already empty (nothing to flush).
     pub(crate) fn drain_remainder(&mut self) -> Option<Vec<IconStateEvent>> {
-        if self.buffer.is_empty() {
-            None
-        } else {
-            Some(std::mem::take(&mut self.buffer))
-        }
+        let has_remainder = !self.buffer.is_empty();
+        has_remainder.then(|| std::mem::take(&mut self.buffer))
     }
 }

@@ -149,21 +149,82 @@ impl TestApp<tauri::test::MockRuntime> {
         let deadline = Instant::now() + Duration::from_secs(2);
 
         loop {
-            let snapshot = self
+            let matching = self
                 .queue_snapshot()
                 .into_iter()
-                .find(|snapshot| snapshot.progress.operation_id == id);
+                .find(|snapshot| snapshot.progress.operation_id == id)
+                .filter(|snapshot| predicate(snapshot));
 
-            if let Some(snapshot) = snapshot {
-                if predicate(&snapshot) {
-                    return snapshot;
-                }
+            match matching {
+                Some(snapshot) => return snapshot,
+                None => wait_before_retry(deadline, id),
             }
-
-            assert!(Instant::now() < deadline, "timed out waiting for op {id}");
-            thread::sleep(Duration::from_millis(10));
         }
     }
+}
+
+impl TestApp<tauri::test::MockRuntime> {
+    fn wait_for_status(&self, id: &str, expected: OpStatus) -> OpSnapshot {
+        self.wait_for_op(id, |snapshot| snapshot.progress.status == expected)
+    }
+
+    fn start_copy(&self, destination: &Path, item: OpItem) -> String {
+        self.invoke_payload(
+            "start_op",
+            StartOpRequest {
+                kind: OpKind::Copy,
+                destination_dir: path_text(destination),
+                items: vec![item],
+            },
+        )
+        .expect("start copy op")
+    }
+
+    fn run_op_command(&self, command: &str, id: &str) {
+        self.invoke_payload::<(), _>(command, OpIdRequest { id: id.to_string() })
+            .unwrap_or_else(|error| panic!("{command} failed: {error}"));
+    }
+
+    fn list_dir(&self, path: &Path, show_hidden: bool) -> Result<ListDirResponse, String> {
+        self.invoke_payload(
+            "list_dir",
+            ListDirRequest {
+                path: path_text(path),
+                sort_key: SortKey::Name,
+                sort_direction: SortDirection::Asc,
+                filter: String::new(),
+                show_hidden,
+                include_item_counts: true,
+            },
+        )
+    }
+
+    fn queue_position(&self, id: &str) -> usize {
+        self.queue_snapshot()
+            .into_iter()
+            .position(|snapshot| snapshot.progress.operation_id == id)
+            .expect("operation in snapshot")
+    }
+
+    fn set_tab_watch(&self, target: Option<WatchTarget>) {
+        self.invoke_payload::<(), _>(
+            "set_tab_watch",
+            SetTabWatchRequest {
+                target,
+                entries: None,
+            },
+        )
+        .expect("set tab watch");
+    }
+}
+
+fn path_text(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+fn wait_before_retry(deadline: Instant, id: &str) {
+    assert!(Instant::now() < deadline, "timed out waiting for op {id}");
+    thread::sleep(Duration::from_millis(10));
 }
 
 fn op_item(path: &Path) -> OpItem {
@@ -186,8 +247,19 @@ fn write_file(path: &Path, contents: &[u8]) {
     fs::write(path, contents).expect("write file");
 }
 
+fn customised_config(initial: &AppConfig) -> Config {
+    Config {
+        theme: "dark".to_string(),
+        show_hidden_files: true,
+        dismissed_everything_banner: true,
+        update_check_interval: "12h".to_string(),
+        log_level: "info".to_string(),
+        ..initial.clone()
+    }
+}
+
 #[test]
-fn ipc_commands_cover_shell_filesystem_and_persistence_flows() {
+fn ipc_commands_round_trip_config_and_session() {
     let test_app = TestApp::new();
     let fixture = tempdir().expect("temp dir");
     let root = fixture.path();
@@ -198,33 +270,12 @@ fn ipc_commands_cover_shell_filesystem_and_persistence_flows() {
 
     let initial_config: AppConfig = test_app.invoke("load_config").expect("load config");
     assert_eq!(initial_config.theme, "system");
-
-    let saved_config = Config {
-        theme: "dark".to_string(),
-        show_hidden_files: true,
-        dismissed_everything_banner: true,
-        keybindings: initial_config.keybindings.clone(),
-        columns: initial_config.columns.clone(),
-        layout: initial_config.layout.clone(),
-        update_check_interval: "12h".to_string(),
-        log_level: "info".to_string(),
-        date_format: initial_config.date_format.clone(),
-        show_time: initial_config.show_time,
-        show_seconds: initial_config.show_seconds,
-        relative_dates: initial_config.relative_dates,
-        auto_folder_size: initial_config.auto_folder_size,
-        auto_expand_active_queue_toasts: initial_config.auto_expand_active_queue_toasts,
-        favourites: initial_config.favourites.clone(),
-        favourite_names: initial_config.favourite_names.clone(),
-        favourites_collapsed: initial_config.favourites_collapsed,
+    let saved_config = customised_config(&initial_config);
+    let config_request = SaveConfigRequest {
+        config: saved_config.clone(),
     };
     let echoed_config: AppConfig = test_app
-        .invoke_payload(
-            "save_config",
-            SaveConfigRequest {
-                config: saved_config.clone(),
-            },
-        )
+        .invoke_payload("save_config", config_request)
         .expect("save config");
     assert_eq!(echoed_config, saved_config);
     let reloaded_config: AppConfig = test_app.invoke("load_config").expect("reload config");
@@ -232,69 +283,63 @@ fn ipc_commands_cover_shell_filesystem_and_persistence_flows() {
 
     let saved_session = Session {
         active_pane: "right".to_string(),
-        left_path: root.join("left").to_string_lossy().into_owned(),
-        right_path: root.join("right").to_string_lossy().into_owned(),
+        left_path: path_text(&root.join("left")),
+        right_path: path_text(&root.join("right")),
         left: None,
         right: None,
         recent_folders: vec!["C:\\Users\\alex\\Documents".to_string()],
     };
+    let session_request = SaveSessionRequest {
+        session: saved_session.clone(),
+    };
     let echoed_session: SessionState = test_app
-        .invoke_payload(
-            "save_session",
-            SaveSessionRequest {
-                session: saved_session.clone(),
-            },
-        )
+        .invoke_payload("save_session", session_request)
         .expect("save session");
     assert_eq!(echoed_session, saved_session);
     let reloaded_session: SessionState = test_app.invoke("load_session").expect("reload session");
     assert_eq!(reloaded_session, saved_session);
+}
 
+fn created_entry_name(
+    test_app: &TestApp<tauri::test::MockRuntime>,
+    command: &str,
+    parent: &Path,
+    name: &str,
+) -> Option<String> {
+    let request = CreateEntryRequest {
+        parent: path_text(parent),
+        name: name.to_string(),
+    };
+    let created = test_app
+        .invoke_payload::<Value, _>(command, request)
+        .unwrap_or_else(|error| panic!("{command} failed: {error}"));
+    created
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+#[test]
+fn ipc_commands_cover_filesystem_entry_lifecycle() {
+    let test_app = TestApp::new();
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
     let folder_path = root.join("Docs");
-    let file_path = root.join("todo.txt");
+    let renamed_path = root.join("done.txt");
 
-    let folder = test_app
-        .invoke_payload::<Value, _>(
-            "create_folder",
-            CreateEntryRequest {
-                parent: root.to_string_lossy().into_owned(),
-                name: "Docs".to_string(),
-            },
-        )
-        .expect("create folder");
-    assert_eq!(folder.get("name").and_then(Value::as_str), Some("Docs"));
+    let folder_name = created_entry_name(&test_app, "create_folder", root, "Docs");
+    assert_eq!(folder_name.as_deref(), Some("Docs"));
+    let file_name = created_entry_name(&test_app, "create_file", root, "todo.txt");
+    assert_eq!(file_name.as_deref(), Some("todo.txt"));
 
-    let file = test_app
-        .invoke_payload::<Value, _>(
-            "create_file",
-            CreateEntryRequest {
-                parent: root.to_string_lossy().into_owned(),
-                name: "todo.txt".to_string(),
-            },
-        )
-        .expect("create file");
-    assert_eq!(file.get("name").and_then(Value::as_str), Some("todo.txt"));
-
-    let listing: ListDirResponse = test_app
-        .invoke_payload(
-            "list_dir",
-            ListDirRequest {
-                path: root.to_string_lossy().into_owned(),
-                sort_key: SortKey::Name,
-                sort_direction: SortDirection::Asc,
-                filter: String::new(),
-                show_hidden: true,
-                include_item_counts: true,
-            },
-        )
-        .expect("list dir");
+    let listing = test_app.list_dir(root, true).expect("list dir");
     assert_eq!(listing.entries.len(), 2);
 
     let tree_children: ListTreeChildrenResponse = test_app
         .invoke_payload(
             "list_tree_children",
             ListTreeChildrenRequest {
-                path: root.to_string_lossy().into_owned(),
+                path: path_text(root),
                 show_hidden: true,
             },
         )
@@ -302,47 +347,36 @@ fn ipc_commands_cover_shell_filesystem_and_persistence_flows() {
     assert_eq!(tree_children.children.len(), 1);
     assert_eq!(tree_children.children[0].name, "Docs");
 
+    let rename_request = file_explorer_lib::ipc::types::RenameEntryRequest {
+        path: path_text(&root.join("todo.txt")),
+        new_name: "done.txt".to_string(),
+    };
     let renamed = test_app
-        .invoke_payload::<Value, _>(
-            "rename_entry",
-            file_explorer_lib::ipc::types::RenameEntryRequest {
-                path: file_path.to_string_lossy().into_owned(),
-                new_name: "done.txt".to_string(),
-            },
-        )
+        .invoke_payload::<Value, _>("rename_entry", rename_request)
         .expect("rename");
-    let renamed_path = root.join("done.txt");
     assert_eq!(
         renamed.get("name").and_then(Value::as_str),
         Some("done.txt")
     );
 
+    let trash_request = TrashEntriesRequest {
+        paths: vec![path_text(&folder_path), path_text(&renamed_path)],
+    };
     test_app
-        .invoke_payload::<(), _>(
-            "move_to_trash",
-            TrashEntriesRequest {
-                paths: vec![
-                    folder_path.to_string_lossy().into_owned(),
-                    renamed_path.to_string_lossy().into_owned(),
-                ],
-            },
-        )
+        .invoke_payload::<(), _>("move_to_trash", trash_request)
         .expect("move to trash");
     assert!(!folder_path.exists());
     assert!(!renamed_path.exists());
+}
+
+#[test]
+fn ipc_commands_report_missing_paths() {
+    let test_app = TestApp::new();
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
 
     let missing_dir_error = test_app
-        .invoke_payload::<ListDirResponse, _>(
-            "list_dir",
-            ListDirRequest {
-                path: root.join("missing").to_string_lossy().into_owned(),
-                sort_key: SortKey::Name,
-                sort_direction: SortDirection::Asc,
-                filter: String::new(),
-                show_hidden: false,
-                include_item_counts: true,
-            },
-        )
+        .list_dir(&root.join("missing"), false)
         .expect_err("missing dir should fail");
     assert!(missing_dir_error.contains("Failed to load"));
 
@@ -350,7 +384,7 @@ fn ipc_commands_cover_shell_filesystem_and_persistence_flows() {
         .invoke_payload::<(), _>(
             "open_path",
             OpenPathRequest {
-                path: root.join("missing.txt").to_string_lossy().into_owned(),
+                path: path_text(&root.join("missing.txt")),
             },
         )
         .expect_err("missing path should fail");
@@ -358,7 +392,7 @@ fn ipc_commands_cover_shell_filesystem_and_persistence_flows() {
 }
 
 #[test]
-fn ipc_commands_cover_watch_size_and_logging_state() {
+fn ipc_commands_cover_size_index_volumes_and_watch() {
     let test_app = TestApp::new();
     let fixture = tempdir().expect("temp dir");
     let root = fixture.path();
@@ -384,103 +418,91 @@ fn ipc_commands_cover_watch_size_and_logging_state() {
     let volumes: Vec<Value> = test_app.invoke("list_volumes").expect("list volumes");
     assert!(!volumes.is_empty());
 
-    let watch_target = WatchTarget {
+    test_app.set_tab_watch(Some(WatchTarget {
         tab_id: "left-1".to_string(),
-        path: root.to_string_lossy().into_owned(),
+        path: path_text(root),
         sort_key: SortKey::Name,
         sort_direction: SortDirection::Asc,
         filter: String::new(),
         show_hidden: true,
         include_item_counts: true,
-    };
-    test_app
-        .invoke_payload::<(), _>(
-            "set_tab_watch",
-            SetTabWatchRequest {
-                target: Some(watch_target.clone()),
-                entries: None,
-            },
-        )
-        .expect("set watch");
-
+    }));
     fs::remove_file(root.join("before.txt")).expect("remove before");
     write_file(&root.join("after.txt"), b"after");
+    test_app.set_tab_watch(None);
+}
 
-    test_app
-        .invoke_payload::<(), _>(
-            "set_tab_watch",
-            SetTabWatchRequest {
-                target: None,
-                entries: None,
-            },
+const IPC_SIZE_FIXTURE_FILES: usize = 200;
+
+fn has_ready_or_na(batches: Vec<Vec<SizeStateEvent>>) -> bool {
+    batches.into_iter().flatten().any(|event| {
+        matches!(
+            event.state,
+            file_explorer_lib::size::SizeStateKind::Ready
+                | file_explorer_lib::size::SizeStateKind::Na
         )
-        .expect("clear watch");
+    })
+}
 
-    let size_root = root.join("sizes");
+#[test]
+fn ipc_commands_size_folders_and_return_icons() {
+    let test_app = TestApp::new();
+    let fixture = tempdir().expect("temp dir");
+    let size_root = fixture.path().join("sizes");
     fs::create_dir_all(&size_root).expect("size root");
-    for index in 0..200 {
+    for index in 0..IPC_SIZE_FIXTURE_FILES {
         write_file(
             &size_root.join(format!("file-{index}.txt")),
             b"0123456789abcdef0123456789abcdef",
         );
     }
 
-    let size_batches: Vec<Vec<SizeStateEvent>> = test_app
-        .invoke_payload(
-            "request_folder_size",
-            FolderSizeRequest {
-                path: size_root.to_string_lossy().into_owned(),
-                mode: None,
-            },
-        )
+    let single_request = FolderSizeRequest {
+        path: path_text(&size_root),
+        mode: None,
+    };
+    let size_batches = test_app
+        .invoke_payload("request_folder_size", single_request)
         .expect("request folder size");
-    assert!(size_batches.into_iter().flatten().any(|event| matches!(
-        event.state,
-        file_explorer_lib::size::SizeStateKind::Ready | file_explorer_lib::size::SizeStateKind::Na
-    )));
+    assert!(has_ready_or_na(size_batches));
 
-    let size_batches: Vec<Vec<SizeStateEvent>> = test_app
-        .invoke_payload(
-            "request_folder_sizes",
-            FolderSizesRequest {
-                paths: vec![size_root.to_string_lossy().into_owned()],
-                mode: None,
-            },
-        )
+    let batch_request = FolderSizesRequest {
+        paths: vec![path_text(&size_root)],
+        mode: None,
+    };
+    let size_batches = test_app
+        .invoke_payload("request_folder_sizes", batch_request)
         .expect("request folder sizes");
-    assert!(size_batches.into_iter().flatten().any(|event| matches!(
-        event.state,
-        file_explorer_lib::size::SizeStateKind::Ready | file_explorer_lib::size::SizeStateKind::Na
-    )));
+    assert!(has_ready_or_na(size_batches));
 
+    let cancel_request = file_explorer_lib::ipc::types::CancelSizeRequest {
+        path: path_text(&size_root),
+    };
     let cancel_response: CancelSizeResponse = test_app
-        .invoke_payload(
-            "cancel_size",
-            file_explorer_lib::ipc::types::CancelSizeRequest {
-                path: size_root.to_string_lossy().into_owned(),
-            },
-        )
+        .invoke_payload("cancel_size", cancel_request)
         .expect("cancel size");
     assert!(!cancel_response.cancelled);
 
     let icon_paths = vec![
-        size_root.join("file-0.txt").to_string_lossy().into_owned(),
-        size_root.join("file-1.txt").to_string_lossy().into_owned(),
+        path_text(&size_root.join("file-0.txt")),
+        path_text(&size_root.join("file-1.txt")),
     ];
+    let icon_request = RequestIconsRequest {
+        paths: icon_paths.clone(),
+    };
     let icon_batches: Vec<Vec<IconStateEvent>> = test_app
-        .invoke_payload(
-            "request_icons",
-            RequestIconsRequest {
-                paths: icon_paths.clone(),
-            },
-        )
+        .invoke_payload("request_icons", icon_request)
         .expect("request icons");
     let icon_events: Vec<IconStateEvent> = icon_batches.into_iter().flatten().collect();
     assert_eq!(icon_events.len(), icon_paths.len());
     assert!(icon_events
         .iter()
         .all(|event| event.icon_data_url.is_none()));
+}
 
+#[test]
+fn ipc_commands_record_frontend_logs() {
+    let test_app = TestApp::new();
     test_app
         .invoke_payload::<(), _>(
             "log_frontend",
@@ -494,200 +516,110 @@ fn ipc_commands_cover_watch_size_and_logging_state() {
         .expect("log frontend");
 }
 
+struct QueueFixture {
+    _fixture: tempfile::TempDir,
+    root: std::path::PathBuf,
+    destination: std::path::PathBuf,
+}
+
+fn queue_fixture() -> QueueFixture {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path().to_path_buf();
+    let destination = root.join("dest");
+    fs::create_dir_all(&destination).expect("dest");
+    QueueFixture {
+        _fixture: fixture,
+        root,
+        destination,
+    }
+}
+
+fn start_pending_copy(
+    test_app: &TestApp<tauri::test::MockRuntime>,
+    queue: &QueueFixture,
+    name: &str,
+) -> String {
+    let source = queue.root.join(name);
+    write_file(&source, name.as_bytes());
+    let id = test_app.start_copy(&queue.destination, op_item(&source));
+    test_app.wait_for_status(&id, OpStatus::Pending);
+    id
+}
+
 #[test]
 fn ipc_commands_cover_queue_lifecycle_commands() {
     let test_app = TestApp::new();
-    let fixture = tempdir().expect("temp dir");
-    let root = fixture.path();
-    let dest = root.join("dest");
-    fs::create_dir_all(&dest).expect("dest");
+    let queue = queue_fixture();
+    write_file(&queue.root.join("dup.txt"), b"new-content");
+    write_file(&queue.destination.join("dup.txt"), b"old-content");
 
-    write_file(&root.join("dup.txt"), b"new-content");
-    write_file(&dest.join("dup.txt"), b"old-content");
-
-    let conflict_id: String = test_app
-        .invoke_payload(
-            "start_op",
-            StartOpRequest {
-                kind: OpKind::Copy,
-                destination_dir: dest.to_string_lossy().into_owned(),
-                items: vec![op_item(&root.join("dup.txt"))],
-            },
-        )
-        .expect("start conflict op");
-    let conflict_snapshot = test_app.wait_for_op(&conflict_id, |snapshot| {
-        snapshot.progress.status == OpStatus::Conflict
-    });
+    let conflict_id = test_app.start_copy(&queue.destination, op_item(&queue.root.join("dup.txt")));
+    let conflict_snapshot = test_app.wait_for_status(&conflict_id, OpStatus::Conflict);
     assert_eq!(
         conflict_snapshot.progress.item_names,
         vec!["dup.txt".to_string()]
     );
+    let pending_one = start_pending_copy(&test_app, &queue, "pending-one.txt");
+    let pending_two = start_pending_copy(&test_app, &queue, "pending-two.txt");
 
-    let pending_one_source = root.join("pending-one.txt");
-    let pending_two_source = root.join("pending-two.txt");
-    write_file(&pending_one_source, b"one");
-    write_file(&pending_two_source, b"two");
-
-    let pending_one: String = test_app
-        .invoke_payload(
-            "start_op",
-            StartOpRequest {
-                kind: OpKind::Copy,
-                destination_dir: dest.to_string_lossy().into_owned(),
-                items: vec![op_item(&pending_one_source)],
-            },
-        )
-        .expect("start pending one");
-    let pending_two: String = test_app
-        .invoke_payload(
-            "start_op",
-            StartOpRequest {
-                kind: OpKind::Copy,
-                destination_dir: dest.to_string_lossy().into_owned(),
-                items: vec![op_item(&pending_two_source)],
-            },
-        )
-        .expect("start pending two");
-
-    test_app.wait_for_op(&pending_one, |snapshot| {
-        snapshot.progress.status == OpStatus::Pending
-    });
-    test_app.wait_for_op(&pending_two, |snapshot| {
-        snapshot.progress.status == OpStatus::Pending
-    });
-
+    let reorder_request = ReorderOpsRequest {
+        ids: vec![pending_two.clone(), pending_one.clone()],
+    };
     test_app
-        .invoke_payload::<(), _>(
-            "reorder_ops",
-            ReorderOpsRequest {
-                ids: vec![pending_two.clone(), pending_one.clone()],
-            },
-        )
+        .invoke_payload::<(), _>("reorder_ops", reorder_request)
         .expect("reorder ops");
+    assert!(test_app.queue_position(&pending_two) < test_app.queue_position(&pending_one));
 
-    let order = test_app
-        .queue_snapshot()
-        .into_iter()
-        .map(|snapshot| snapshot.progress.operation_id)
-        .collect::<Vec<_>>();
-    let pending_one_index = order
-        .iter()
-        .position(|id| id == &pending_one)
-        .expect("pending one in snapshot");
-    let pending_two_index = order
-        .iter()
-        .position(|id| id == &pending_two)
-        .expect("pending two in snapshot");
-    assert!(pending_two_index < pending_one_index);
-
-    test_app
-        .invoke_payload::<(), _>(
-            "cancel_op",
-            OpIdRequest {
-                id: pending_two.clone(),
-            },
-        )
-        .expect("cancel pending op");
-    test_app.wait_for_op(&pending_two, |snapshot| {
-        snapshot.progress.status == OpStatus::Cancelled
-    });
-
+    test_app.run_op_command("cancel_op", &pending_two);
+    test_app.wait_for_status(&pending_two, OpStatus::Cancelled);
     let has_unfinished_during_conflict: bool = test_app
         .invoke("has_unfinished_ops")
         .expect("unfinished ops");
     assert!(has_unfinished_during_conflict);
 
+    let resolve_request = ResolveConflictRequest {
+        id: conflict_id.clone(),
+        resolution: ConflictResolution::Replace,
+        apply_to_all: false,
+        rename_to: None,
+    };
     test_app
-        .invoke_payload::<(), _>(
-            "resolve_conflict",
-            ResolveConflictRequest {
-                id: conflict_id.clone(),
-                resolution: ConflictResolution::Replace,
-                apply_to_all: false,
-                rename_to: None,
-            },
-        )
+        .invoke_payload::<(), _>("resolve_conflict", resolve_request)
         .expect("resolve conflict");
-    test_app.wait_for_op(&conflict_id, |snapshot| {
-        snapshot.progress.status == OpStatus::Completed
-    });
+    test_app.wait_for_status(&conflict_id, OpStatus::Completed);
     assert_eq!(
-        fs::read(dest.join("dup.txt")).expect("resolved dest"),
+        fs::read(queue.destination.join("dup.txt")).expect("resolved dest"),
         b"new-content"
     );
+    test_app.wait_for_status(&pending_one, OpStatus::Completed);
+}
 
-    test_app.wait_for_op(&pending_one, |snapshot| {
-        snapshot.progress.status == OpStatus::Completed
-    });
+#[test]
+fn ipc_commands_retry_failed_and_resume_paused_operations() {
+    let test_app = TestApp::new();
+    let queue = queue_fixture();
+    let missing_item = OpItem {
+        source_path: path_text(&queue.root.join("missing.txt")),
+        name: "missing.txt".to_string(),
+        size_bytes: 1,
+    };
+    let failed_id = test_app.start_copy(&queue.destination, missing_item);
+    test_app.wait_for_status(&failed_id, OpStatus::Failed);
+    test_app.run_op_command("retry_op", &failed_id);
+    test_app.wait_for_status(&failed_id, OpStatus::Failed);
 
-    let failed_id: String = test_app
-        .invoke_payload(
-            "start_op",
-            StartOpRequest {
-                kind: OpKind::Copy,
-                destination_dir: dest.to_string_lossy().into_owned(),
-                items: vec![OpItem {
-                    source_path: root.join("missing.txt").to_string_lossy().into_owned(),
-                    name: "missing.txt".to_string(),
-                    size_bytes: 1,
-                }],
-            },
-        )
-        .expect("start failed op");
-    test_app.wait_for_op(&failed_id, |snapshot| {
-        snapshot.progress.status == OpStatus::Failed
-    });
-
-    test_app
-        .invoke_payload::<(), _>(
-            "retry_op",
-            OpIdRequest {
-                id: failed_id.clone(),
-            },
-        )
-        .expect("retry failed op");
-    test_app.wait_for_op(&failed_id, |snapshot| {
-        snapshot.progress.status == OpStatus::Failed
-    });
-
-    let paused_source = root.join("pause.txt");
+    let paused_source = queue.root.join("pause.txt");
     write_file(&paused_source, &vec![b'x'; 8192]);
-    let paused_id: String = test_app
-        .invoke_payload(
-            "start_op",
-            StartOpRequest {
-                kind: OpKind::Copy,
-                destination_dir: dest.to_string_lossy().into_owned(),
-                items: vec![op_item(&paused_source)],
-            },
-        )
-        .expect("start pause op");
-    test_app
-        .invoke_payload::<(), _>(
-            "pause_op",
-            OpIdRequest {
-                id: paused_id.clone(),
-            },
-        )
-        .expect("pause op");
+    let paused_id = test_app.start_copy(&queue.destination, op_item(&paused_source));
+    test_app.run_op_command("pause_op", &paused_id);
     test_app.wait_for_op(&paused_id, |snapshot| {
         matches!(
             snapshot.progress.status,
             OpStatus::Paused | OpStatus::Completed
         )
     });
-
-    test_app
-        .invoke_payload::<(), _>(
-            "resume_op",
-            OpIdRequest {
-                id: paused_id.clone(),
-            },
-        )
-        .expect("resume op");
-    test_app.wait_for_op(&paused_id, |snapshot| {
-        snapshot.progress.status == OpStatus::Completed
-    });
+    test_app.run_op_command("resume_op", &paused_id);
+    test_app.wait_for_status(&paused_id, OpStatus::Completed);
 
     let unfinished_after: bool = test_app
         .invoke("has_unfinished_ops")

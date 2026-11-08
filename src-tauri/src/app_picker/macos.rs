@@ -125,28 +125,39 @@ pub async fn set_default_application(request: &SetDefaultApplicationRequest) -> 
         nsworkspace::identifier(&uti)
     );
 
-    match nsworkspace::set_default_application(bundle_dir, extension).await {
+    let write_context = format!("extension=.{extension} dynamic={dynamic} bundle_id={bundle_id}");
+    let result = nsworkspace::set_default_application(bundle_dir, extension).await;
+    default_application_write_status(result, dynamic, &write_context)
+}
+
+fn default_application_write_status(
+    result: Result<(), nsworkspace::WriteError>,
+    dynamic: bool,
+    write_context: &str,
+) -> MenuActionStatus {
+    match result {
         Ok(()) => {
             log::debug!(
-                "set_default_application: NSWorkspace setDefaultApplication succeeded extension=.{extension} dynamic={dynamic} bundle_id={bundle_id}"
+                "set_default_application: NSWorkspace setDefaultApplication succeeded {write_context}"
             );
             MenuActionStatus::handled_with_message("default-application-set")
         }
         Err(nsworkspace::WriteError::Timeout) => {
             log::debug!(
-                "set_default_application: NSWorkspace setDefaultApplication timed out waiting for completion handler extension=.{extension} dynamic={dynamic} bundle_id={bundle_id}"
+                "set_default_application: NSWorkspace setDefaultApplication timed out waiting for completion handler {write_context}"
             );
             MenuActionStatus::unsupported("default-application-write-failed")
         }
         Err(nsworkspace::WriteError::Failed(reason)) => {
             log::debug!(
-                "set_default_application: NSWorkspace setDefaultApplication failed extension=.{extension} dynamic={dynamic} bundle_id={bundle_id} reason={reason}"
+                "set_default_application: NSWorkspace setDefaultApplication failed {write_context} reason={reason}"
             );
-            if dynamic {
-                MenuActionStatus::unsupported("default-application-rejected-dynamic-type")
+            let rejection = if dynamic {
+                "default-application-rejected-dynamic-type"
             } else {
-                MenuActionStatus::unsupported("default-application-write-failed")
-            }
+                "default-application-write-failed"
+            };
+            MenuActionStatus::unsupported(rejection)
         }
     }
 }
@@ -206,6 +217,17 @@ mod nsworkspace {
     use objc2_app_kit::NSWorkspace;
     use objc2_foundation::{NSError, NSString, NSURL};
     use objc2_uniform_type_identifiers::UTType;
+
+    fn error_description(error: *mut NSError) -> Option<String> {
+        if error.is_null() {
+            return None;
+        }
+        // SAFETY: `NSWorkspace` passes a valid, live `NSError*` (or null) for
+        // the duration of the completion block; it is only read here, and an
+        // owned `String` is copied out before the block returns.
+        let error = unsafe { &*error };
+        Some(error.localizedDescription().to_string())
+    }
 
     /// Upper bound on how long we wait for `NSWorkspace` to invoke the
     /// default-application-write completion handler before giving up. Guards
@@ -296,54 +318,8 @@ mod nsworkspace {
         let bundle_dir = bundle_dir.to_path_buf();
         let extension = extension.to_string();
 
-        let task = tauri::async_runtime::spawn_blocking(move || -> Result<(), WriteError> {
-            let Some(uti) = uti_for_extension(&extension) else {
-                // Already validated by the caller before spawning this
-                // blocking task; this should be unreachable in practice, but
-                // a failure here is treated as a normal write failure rather
-                // than panicking the blocking-pool thread.
-                return Err(WriteError::Failed(format!(
-                    "no UTI resolved for extension .{extension} on blocking-pool thread"
-                )));
-            };
-            let app_url = file_url(&bundle_dir);
-
-            let (sender, receiver) = mpsc::channel::<Option<String>>();
-
-            let completion = RcBlock::new(move |error: *mut NSError| {
-                let failure = if error.is_null() {
-                    None
-                } else {
-                    // SAFETY: `NSWorkspace` passes a valid, live `NSError*`
-                    // (or null) for the duration of this block invocation;
-                    // it is only read here, and an owned `String` is copied
-                    // out before the block returns.
-                    let error = unsafe { &*error };
-                    Some(error.localizedDescription().to_string())
-                };
-                let _ = sender.send(failure);
-            });
-
-            NSWorkspace::sharedWorkspace()
-                .setDefaultApplicationAtURL_toOpenContentType_completionHandler(
-                    &app_url,
-                    &uti,
-                    Some(&completion),
-                );
-
-            match receiver.recv_timeout(COMPLETION_TIMEOUT) {
-                Ok(None) => Ok(()),
-                Ok(Some(reason)) => Err(WriteError::Failed(reason)),
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    log::debug!(
-                        "nsworkspace::set_default_application: timed out after {COMPLETION_TIMEOUT:?} waiting for NSWorkspace completion handler"
-                    );
-                    Err(WriteError::Timeout)
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => Err(WriteError::Failed(
-                    "completion handler channel disconnected".to_string(),
-                )),
-            }
+        let task = tauri::async_runtime::spawn_blocking(move || {
+            set_default_application_blocking(&bundle_dir, &extension)
         });
 
         task.await.unwrap_or_else(|_| {
@@ -351,6 +327,49 @@ mod nsworkspace {
                 "NSWorkspace blocking-pool task panicked".to_string(),
             ))
         })
+    }
+
+    fn set_default_application_blocking(
+        bundle_dir: &Path,
+        extension: &str,
+    ) -> Result<(), WriteError> {
+        let Some(uti) = uti_for_extension(extension) else {
+            // Already validated by the caller before spawning this
+            // blocking task; this should be unreachable in practice, but
+            // a failure here is treated as a normal write failure rather
+            // than panicking the blocking-pool thread.
+            return Err(WriteError::Failed(format!(
+                "no UTI resolved for extension .{extension} on blocking-pool thread"
+            )));
+        };
+        let app_url = file_url(bundle_dir);
+
+        let (sender, receiver) = mpsc::channel::<Option<String>>();
+
+        let completion = RcBlock::new(move |error: *mut NSError| {
+            let _ = sender.send(error_description(error));
+        });
+
+        NSWorkspace::sharedWorkspace()
+            .setDefaultApplicationAtURL_toOpenContentType_completionHandler(
+                &app_url,
+                &uti,
+                Some(&completion),
+            );
+
+        match receiver.recv_timeout(COMPLETION_TIMEOUT) {
+            Ok(None) => Ok(()),
+            Ok(Some(reason)) => Err(WriteError::Failed(reason)),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                log::debug!(
+                    "nsworkspace::set_default_application: timed out after {COMPLETION_TIMEOUT:?} waiting for NSWorkspace completion handler"
+                );
+                Err(WriteError::Timeout)
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(WriteError::Failed(
+                "completion handler channel disconnected".to_string(),
+            )),
+        }
     }
 
     /// Looks up the app currently registered to open the given content type,

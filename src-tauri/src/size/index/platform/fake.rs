@@ -1,0 +1,134 @@
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+use super::{EventSink, IndexPlatform, PowerSignal, PowerSink, RawEvent, StreamHandle};
+
+/// Scriptable platform: tests set IDs, the UUID, the OS build, Full Disk
+/// Access and power, and push event batches into the running stream.
+pub struct FakePlatform {
+    state: Mutex<State>,
+}
+
+struct State {
+    event_id: u64,
+    uuid: Option<String>,
+    os_build: Option<String>,
+    full_disk_access: bool,
+    stream_fails: bool,
+    conditions: PowerSignal,
+    events: Option<EventSink>,
+    power: Option<PowerSink>,
+    stream_starts: Vec<Option<u64>>,
+}
+
+impl Default for FakePlatform {
+    fn default() -> Self {
+        Self {
+            state: Mutex::new(State {
+                event_id: 100,
+                uuid: Some("FAKE-VOLUME".to_string()),
+                os_build: Some("FAKE-BUILD".to_string()),
+                full_disk_access: false,
+                stream_fails: false,
+                conditions: PowerSignal::Conditions {
+                    low_power: false,
+                    thermal_pressure: false,
+                },
+                events: None,
+                power: None,
+                stream_starts: Vec::new(),
+            }),
+        }
+    }
+}
+
+impl FakePlatform {
+    fn state(&self) -> std::sync::MutexGuard<'_, State> {
+        self.state.lock().expect("fake platform lock")
+    }
+
+    pub fn set_event_id(&self, id: u64) {
+        self.state().event_id = id;
+    }
+
+    pub fn set_volume_uuid(&self, uuid: Option<&str>) {
+        self.state().uuid = uuid.map(str::to_string);
+    }
+
+    pub fn set_os_build(&self, build: Option<&str>) {
+        self.state().os_build = build.map(str::to_string);
+    }
+
+    pub fn set_full_disk_access(&self, granted: bool) {
+        self.state().full_disk_access = granted;
+    }
+
+    pub fn fail_stream(&self) {
+        self.state().stream_fails = true;
+    }
+
+    /// Conditions reported when observation starts.
+    pub fn set_initial_conditions(&self, low_power: bool, thermal_pressure: bool) {
+        self.state().conditions = PowerSignal::Conditions {
+            low_power,
+            thermal_pressure,
+        };
+    }
+
+    /// Delivers a batch to the running stream; false if none runs.
+    pub fn emit(&self, events: Vec<RawEvent>) -> bool {
+        let sink = self.state().events.clone();
+        sink.map(|sink| sink(events)).is_some()
+    }
+
+    /// Delivers a power signal; false before observation starts.
+    pub fn signal(&self, signal: PowerSignal) -> bool {
+        let sink = self.state().power.clone();
+        sink.map(|sink| sink(signal)).is_some()
+    }
+
+    /// The `since` argument of every stream start, in order.
+    pub fn stream_starts(&self) -> Vec<Option<u64>> {
+        self.state().stream_starts.clone()
+    }
+}
+
+impl IndexPlatform for FakePlatform {
+    fn current_event_id(&self) -> u64 {
+        self.state().event_id
+    }
+
+    fn volume_uuid(&self, _path: &Path) -> Option<String> {
+        self.state().uuid.clone()
+    }
+
+    fn os_build(&self) -> Option<String> {
+        self.state().os_build.clone()
+    }
+
+    fn start_stream(
+        &self,
+        _roots: &[PathBuf],
+        _excluded: &[PathBuf],
+        since: Option<u64>,
+        sink: EventSink,
+    ) -> Option<StreamHandle> {
+        let mut state = self.state();
+        state.stream_starts.push(since);
+        if state.stream_fails {
+            return None;
+        }
+        state.events = Some(sink);
+        Some(Box::new(()))
+    }
+
+    fn full_disk_access(&self) -> bool {
+        self.state().full_disk_access
+    }
+
+    fn observe_power(&self, sink: PowerSink) -> PowerSignal {
+        let mut state = self.state();
+        state.power = Some(sink);
+        state.conditions
+    }
+}

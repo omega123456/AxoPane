@@ -31,7 +31,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use crate::fs::{self, DirectoryEntry, FsError};
-use crate::resource_coordinator::{JobClass, JobSpec, ResourceCoordinator};
+use crate::resource_coordinator::{JobClass, JobHandle, JobSpec, ResourceCoordinator};
 use crate::watch::patch::{classify_patch, ClassifyPatchInput, MetadataDelta, SessionPatch};
 use crate::watch::{self, CaptureHandle};
 
@@ -116,36 +116,12 @@ impl DirectorySessionService {
         coordinator: Option<&ResourceCoordinator>,
         resource_key: Option<String>,
     ) -> Result<BeginNavigationResponse, String> {
-        // Retire any existing session for this pane up front, before doing
-        // any filesystem work, so a rapid double-navigation never leaves two
-        // sessions briefly alive for the same pane.
-        let navigation_revision =
-            NavigationRevision(self.next_session_id.fetch_add(1, Ordering::SeqCst));
+        let navigation_revision = self.retire_pane_session(&request.pane_id);
         let session_id = SessionId(navigation_revision.0);
-        {
-            let mut reservations = self
-                .navigation_reservations
-                .lock()
-                .expect("directory navigation reservation lock");
-            reservations.insert(request.pane_id.clone(), navigation_revision);
-            self.sessions
-                .lock()
-                .expect("directory session lock")
-                .remove(&request.pane_id);
-        }
 
         let path = PathBuf::from(&request.path);
 
-        let _permit = match (coordinator, resource_key.as_ref()) {
-            (Some(coordinator), Some(resource_key)) => {
-                let spec = JobSpec::new([JobClass::Latency], [resource_key.clone()]);
-                match coordinator.submit(spec) {
-                    Ok(handle) => Some(handle),
-                    Err(error) => return Err(format!("resource admission failed: {error:?}")),
-                }
-            }
-            _ => None,
-        };
+        let _permit = admit_enumeration(coordinator, resource_key)?;
 
         // Watch-first: start capturing direct-child mutations before the
         // directory is enumerated so nothing that happens during enumeration
@@ -189,22 +165,7 @@ impl DirectorySessionService {
             view_params: request.view,
         };
 
-        let mut reservations = self
-            .navigation_reservations
-            .lock()
-            .expect("directory navigation reservation lock");
-        if reservations.get(&request.pane_id) != Some(&navigation_revision) {
-            return Err("Directory navigation was superseded.".to_string());
-        }
-        let mut sessions = self.sessions.lock().expect("directory session lock");
-        // The reservation is held while publishing so a newer navigation
-        // cannot interleave an old session insert between its retirement and
-        // its own reservation.
-        if reservations.get(&request.pane_id) != Some(&navigation_revision) {
-            return Err("Directory navigation was superseded.".to_string());
-        }
-        sessions.insert(request.pane_id.clone(), session);
-        reservations.remove(&request.pane_id);
+        self.publish_session(&request.pane_id, navigation_revision, session)?;
 
         Ok(BeginNavigationResponse {
             pane_id: request.pane_id,
@@ -218,6 +179,46 @@ impl DirectorySessionService {
                 entries: first_page,
             },
         })
+    }
+
+    /// Retires any existing session for this pane up front, before any
+    /// filesystem work, so a rapid double-navigation never leaves two
+    /// sessions briefly alive for the same pane.
+    fn retire_pane_session(&self, pane_id: &str) -> NavigationRevision {
+        let navigation_revision =
+            NavigationRevision(self.next_session_id.fetch_add(1, Ordering::SeqCst));
+        let mut reservations = self
+            .navigation_reservations
+            .lock()
+            .expect("directory navigation reservation lock");
+        reservations.insert(pane_id.to_string(), navigation_revision);
+        self.sessions
+            .lock()
+            .expect("directory session lock")
+            .remove(pane_id);
+        navigation_revision
+    }
+
+    /// The reservation is held while publishing so a newer navigation cannot
+    /// interleave an old session insert between its retirement and its own
+    /// reservation.
+    fn publish_session(
+        &self,
+        pane_id: &str,
+        navigation_revision: NavigationRevision,
+        session: ActiveSession,
+    ) -> Result<(), String> {
+        let mut reservations = self
+            .navigation_reservations
+            .lock()
+            .expect("directory navigation reservation lock");
+        let mut sessions = self.sessions.lock().expect("directory session lock");
+        if reservations.get(pane_id) != Some(&navigation_revision) {
+            return Err("Directory navigation was superseded.".to_string());
+        }
+        sessions.insert(pane_id.to_string(), session);
+        reservations.remove(pane_id);
+        Ok(())
     }
 
     /// Revises the view (sort/filter/show-hidden/item-counts) for the
@@ -416,15 +417,7 @@ impl DirectorySessionService {
             .snapshot
             .retain(|entry| !removed_set.contains(entry.path.as_str()));
         for changed in changed_entries {
-            if let Some(existing) = session
-                .snapshot
-                .iter_mut()
-                .find(|entry| entry.path == changed.path)
-            {
-                *existing = changed;
-            } else {
-                session.snapshot.push(changed);
-            }
+            upsert_entry_by_path(&mut session.snapshot, changed);
         }
 
         session.view = SessionView::derive(&session.snapshot, &session.view_params);
@@ -665,4 +658,29 @@ pub fn resolve_reconciliation_for_tests(
     drained: Option<std::collections::HashSet<PathBuf>>,
 ) -> Result<(Vec<DirectoryEntry>, WatchRevision), String> {
     resolve_reconciliation(path, view, entries, drained)
+}
+
+/// Gates enumeration behind a `Latency` admission when the path resolved to a
+/// resource key; an unresolvable path proceeds ungated.
+fn admit_enumeration(
+    coordinator: Option<&ResourceCoordinator>,
+    resource_key: Option<String>,
+) -> Result<Option<JobHandle>, String> {
+    let (Some(coordinator), Some(resource_key)) = (coordinator, resource_key) else {
+        return Ok(None);
+    };
+    let spec = JobSpec::new([JobClass::Latency], [resource_key]);
+    coordinator
+        .submit(spec)
+        .map(Some)
+        .map_err(|error| format!("resource admission failed: {error:?}"))
+}
+
+fn upsert_entry_by_path(snapshot: &mut Vec<DirectoryEntry>, changed: DirectoryEntry) {
+    let existing = snapshot.iter_mut().find(|entry| entry.path == changed.path);
+    if let Some(existing) = existing {
+        *existing = changed;
+        return;
+    }
+    snapshot.push(changed);
 }

@@ -102,21 +102,13 @@ impl Pattern {
     /// Whether these chars (wildcards skipped) appear in order in an ASCII
     /// `name`, case-insensitively. Allocation-free pre-check for scans.
     pub fn ascii_subsequence_of(&self, name: &str) -> bool {
-        let mut wanted = self
-            .chars
+        let mut lowered_name = name
+            .bytes()
+            .map(|byte| char::from(byte.to_ascii_lowercase()));
+        self.chars
             .iter()
-            .filter(|character| !matches!(character, '*' | '?'));
-        let mut next = wanted.next();
-        for byte in name.bytes() {
-            match next {
-                None => break,
-                Some(&character) if character == char::from(byte.to_ascii_lowercase()) => {
-                    next = wanted.next()
-                }
-                Some(_) => {}
-            }
-        }
-        next.is_none()
+            .filter(|character| !matches!(character, '*' | '?'))
+            .all(|wanted| lowered_name.any(|character| character == *wanted))
     }
 
     /// Whole-name, case-insensitive equality.
@@ -253,31 +245,8 @@ fn stem(chars: &[char], kind: NameKind) -> Option<&[char]> {
 /// Positions of `pattern`'s chars in order within `text`, using the
 /// tightest window that ends at the earliest possible end.
 fn subsequence(pattern: &[char], text: &[char]) -> Option<Vec<usize>> {
-    let mut next = 0;
-    let mut end = 0;
-    for (position, &character) in text.iter().enumerate() {
-        if character == pattern[next] {
-            next += 1;
-            if next == pattern.len() {
-                end = position;
-                break;
-            }
-        }
-    }
-    if next < pattern.len() {
-        return None;
-    }
-    let mut start = end;
-    let mut remaining = pattern.len();
-    for position in (0..=end).rev() {
-        if text[position] == pattern[remaining - 1] {
-            remaining -= 1;
-            if remaining == 0 {
-                start = position;
-                break;
-            }
-        }
-    }
+    let end = earliest_subsequence_end(pattern, text)?;
+    let start = latest_subsequence_start(pattern, text, end);
     let mut positions = Vec::with_capacity(pattern.len());
     let mut next = 0;
     for (position, &character) in text.iter().enumerate().take(end + 1).skip(start) {
@@ -289,37 +258,115 @@ fn subsequence(pattern: &[char], text: &[char]) -> Option<Vec<usize>> {
     Some(positions)
 }
 
-/// Whole-name glob match; returns the positions of the literal chars.
-fn glob(pattern: &[char], text: &[char]) -> Option<Vec<usize>> {
-    let (mut pattern_index, mut text_index) = (0, 0);
-    let mut positions = Vec::new();
-    // After a `*`: the pattern index past it, the text index it has consumed
-    // up to, and how many positions were recorded before it.
-    let mut star: Option<(usize, usize, usize)> = None;
-    while text_index < text.len() {
-        let wanted = pattern.get(pattern_index).copied();
-        if wanted == Some('?') || wanted == Some(text[text_index]) {
-            if wanted != Some('?') {
-                positions.push(text_index);
-            }
-            pattern_index += 1;
-            text_index += 1;
-        } else if wanted == Some('*') {
-            star = Some((pattern_index + 1, text_index, positions.len()));
-            pattern_index += 1;
-        } else if let Some((after, consumed, recorded)) = star {
-            pattern_index = after;
-            text_index = consumed + 1;
-            positions.truncate(recorded);
-            star = Some((after, text_index, recorded));
-        } else {
-            return None;
+fn earliest_subsequence_end(pattern: &[char], text: &[char]) -> Option<usize> {
+    let mut matched = 0;
+    for (position, &character) in text.iter().enumerate() {
+        if character == pattern[matched] {
+            matched += 1;
+        }
+        if matched == pattern.len() {
+            return Some(position);
         }
     }
-    while pattern.get(pattern_index) == Some(&'*') {
-        pattern_index += 1;
+    None
+}
+
+fn latest_subsequence_start(pattern: &[char], text: &[char], end: usize) -> usize {
+    let mut remaining = pattern.len();
+    for position in (0..=end).rev() {
+        if text[position] == pattern[remaining - 1] {
+            remaining -= 1;
+        }
+        if remaining == 0 {
+            return position;
+        }
     }
-    (pattern_index == pattern.len()).then_some(positions)
+    end
+}
+
+/// Whole-name glob match; returns the positions of the literal chars.
+fn glob(pattern: &[char], text: &[char]) -> Option<Vec<usize>> {
+    let mut cursor = GlobCursor::new(pattern, text);
+    while cursor.has_text_left() {
+        cursor.step()?;
+    }
+    cursor.finish()
+}
+
+struct StarBacktrack {
+    pattern_after_star: usize,
+    text_consumed: usize,
+    recorded_positions: usize,
+}
+
+struct GlobCursor<'glob> {
+    pattern: &'glob [char],
+    text: &'glob [char],
+    pattern_index: usize,
+    text_index: usize,
+    positions: Vec<usize>,
+    star: Option<StarBacktrack>,
+}
+
+impl<'glob> GlobCursor<'glob> {
+    fn new(pattern: &'glob [char], text: &'glob [char]) -> Self {
+        Self {
+            pattern,
+            text,
+            pattern_index: 0,
+            text_index: 0,
+            positions: Vec::new(),
+            star: None,
+        }
+    }
+
+    fn has_text_left(&self) -> bool {
+        self.text_index < self.text.len()
+    }
+
+    fn step(&mut self) -> Option<()> {
+        let wanted = self.pattern.get(self.pattern_index).copied();
+        if wanted == Some('?') {
+            self.advance_both();
+            return Some(());
+        }
+        if wanted == Some(self.text[self.text_index]) {
+            self.positions.push(self.text_index);
+            self.advance_both();
+            return Some(());
+        }
+        if wanted == Some('*') {
+            self.star = Some(StarBacktrack {
+                pattern_after_star: self.pattern_index + 1,
+                text_consumed: self.text_index,
+                recorded_positions: self.positions.len(),
+            });
+            self.pattern_index += 1;
+            return Some(());
+        }
+        self.backtrack_to_star()
+    }
+
+    fn advance_both(&mut self) {
+        self.pattern_index += 1;
+        self.text_index += 1;
+    }
+
+    fn backtrack_to_star(&mut self) -> Option<()> {
+        let star = self.star.as_mut()?;
+        self.pattern_index = star.pattern_after_star;
+        self.text_index = star.text_consumed + 1;
+        self.positions.truncate(star.recorded_positions);
+        star.text_consumed = self.text_index;
+        Some(())
+    }
+
+    fn finish(mut self) -> Option<Vec<usize>> {
+        while self.pattern.get(self.pattern_index) == Some(&'*') {
+            self.pattern_index += 1;
+        }
+        (self.pattern_index == self.pattern.len()).then_some(self.positions)
+    }
 }
 
 pub fn merge_ranges(mut ranges: Vec<(u32, u32)>) -> Vec<(u32, u32)> {

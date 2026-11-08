@@ -1,4 +1,4 @@
-import { create } from 'zustand'
+import { create, type StoreApi } from 'zustand'
 import { cancelThumbnails, requestThumbnails } from '@/lib/ipc/commands'
 import { pathsMatch } from '@/lib/path-compare'
 import type { PaneViewMode } from '@/lib/pane-view'
@@ -244,62 +244,96 @@ function withThumbnailResults(
   return { cache: pruneThumbnailCache(cache, visibleProtection(state.scopes), now) }
 }
 
-export const useThumbnailStore = create<ThumbnailStore>((set, get) => ({
-  scopes: {},
-  cache: {},
-  setVisibleCandidates: async (scope, candidates) => {
-    const key = scopeKey(scope.paneId, scope.tabId)
-    const signature = candidateSignature(candidates)
-    const previous = get().scopes[key]
-    const contextMatches = sameScopeContext(previous, scope)
-    const candidatesUnchanged = contextMatches && previous.candidateSignature === signature
-    if (candidatesUnchanged) return
+type ThumbnailSet = StoreApi<ThumbnailStore>['setState']
+type ThumbnailGet = () => ThumbnailStore
+type VisibleScope = Parameters<ThumbnailStore['setVisibleCandidates']>[0]
+type VisibleCandidates = Parameters<ThumbnailStore['setVisibleCandidates']>[1]
 
-    const contextChanged = previous !== undefined && !contextMatches
-    const cancelPrevious = contextChanged ? cancelThumbnails(previous) : undefined
-    const { generation, revision } = nextScopeVersion(previous, scope)
-    const visibleCandidates = uniqueFileCandidates(candidates)
-    const candidatesByFingerprint = Object.fromEntries(
+function nextActiveScope(
+  previous: ActiveThumbnailScope | undefined,
+  scope: VisibleScope,
+  visibleCandidates: ReturnType<typeof uniqueFileCandidates>,
+  signature: string,
+): ActiveThumbnailScope {
+  const { generation, revision } = nextScopeVersion(previous, scope)
+  return {
+    ...scope,
+    generation,
+    revision,
+    candidates: Object.fromEntries(
       visibleCandidates.map((candidate) => [thumbnailFingerprintKey(candidate), candidate]),
-    )
-    const nextScope: ActiveThumbnailScope = {
+    ),
+    candidateSignature: signature,
+  }
+}
+
+async function setVisibleCandidates(
+  set: ThumbnailSet,
+  get: ThumbnailGet,
+  scope: VisibleScope,
+  candidates: VisibleCandidates,
+) {
+  const key = scopeKey(scope.paneId, scope.tabId)
+  const signature = candidateSignature(candidates)
+  const previous = get().scopes[key]
+  const contextMatches = sameScopeContext(previous, scope)
+  const candidatesUnchanged = contextMatches && previous.candidateSignature === signature
+  if (candidatesUnchanged) return
+
+  const contextChanged = previous !== undefined && !contextMatches
+  const cancelPrevious = contextChanged ? cancelThumbnails(previous) : undefined
+  const visibleCandidates = uniqueFileCandidates(candidates)
+  const nextScope = nextActiveScope(previous, scope, visibleCandidates, signature)
+  const scopes = { ...get().scopes, [key]: nextScope }
+  const now = cacheNow()
+  const touchedCache = touchCacheRecords(get().cache, Object.keys(nextScope.candidates), now)
+  const cache = pruneThumbnailCache(touchedCache, visibleProtection(scopes), now)
+  set({ scopes, cache })
+
+  if (scope.mode !== 'thumbnails') {
+    await cancelPrevious
+    return
+  }
+  const missing = visibleCandidates.filter((candidate) =>
+    needsThumbnail(cache[thumbnailFingerprintKey(candidate)], now),
+  )
+  const { generation, revision } = nextScope
+  await requestMissingThumbnails(set, { key, scope, generation, revision, missing, cancelPrevious })
+}
+
+type MissingThumbnailRequest = {
+  key: string
+  scope: VisibleScope
+  generation: number
+  revision: number
+  missing: VisibleCandidates
+  cancelPrevious: Promise<unknown> | undefined
+}
+
+async function requestMissingThumbnails(set: ThumbnailSet, request: MissingThumbnailRequest) {
+  const { key, scope, generation, revision, missing, cancelPrevious } = request
+  try {
+    await cancelPrevious
+    const response = await requestThumbnails({
       ...scope,
       generation,
       revision,
-      candidates: candidatesByFingerprint,
-      candidateSignature: signature,
+      candidates: missing,
+    })
+    if (response.revision !== revision || response.acceptedCount !== missing.length) {
+      throw new Error('thumbnail request was not fully accepted')
     }
-    const scopes = { ...get().scopes, [key]: nextScope }
-    const now = cacheNow()
-    const touchedCache = touchCacheRecords(get().cache, Object.keys(candidatesByFingerprint), now)
-    const cache = pruneThumbnailCache(touchedCache, visibleProtection(scopes), now)
-    set({ scopes, cache })
+  } catch (error) {
+    const failedAt = cacheNow()
+    set((state) => markRequestFailed(state, { key, generation, revision, missing, failedAt }))
+    throw error
+  }
+}
 
-    if (scope.mode !== 'thumbnails') {
-      await cancelPrevious
-      return
-    }
-    const missing = visibleCandidates.filter((candidate) =>
-      needsThumbnail(cache[thumbnailFingerprintKey(candidate)], now),
-    )
-
-    try {
-      await cancelPrevious
-      const response = await requestThumbnails({
-        ...scope,
-        generation,
-        revision,
-        candidates: missing,
-      })
-      if (response.revision !== revision || response.acceptedCount !== missing.length) {
-        throw new Error('thumbnail request was not fully accepted')
-      }
-    } catch (error) {
-      const failedAt = cacheNow()
-      set((state) => markRequestFailed(state, { key, generation, revision, missing, failedAt }))
-      throw error
-    }
-  },
+export const useThumbnailStore = create<ThumbnailStore>((set, get) => ({
+  scopes: {},
+  cache: {},
+  setVisibleCandidates: (scope, candidates) => setVisibleCandidates(set, get, scope, candidates),
   cancelScope: async (paneId, tabId) => {
     const key = scopeKey(paneId, tabId)
     const previous = get().scopes[key]

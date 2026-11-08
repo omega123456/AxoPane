@@ -135,13 +135,28 @@ fn parse(bytes: &[u8]) -> Option<HashMap<String, PutBack>> {
 
     let root_offset = reader.u32(HEADER_ROOT_OFFSET_POSITION)? as usize;
     let root_position = root_offset.checked_add(BLOCK_OFFSET_BASE)?;
-
-    let address_count = reader.u32(root_position)? as usize;
     let address_table_start = root_position.checked_add(ADDRESS_TABLE_PREAMBLE_BYTES)?;
+    let blocks = block_positions(&reader, root_position, address_table_start)?;
+
+    let table_of_contents_position = address_table_start + ADDRESS_TABLE_SLOTS * U32_BYTES;
+    let dsdb_block = dsdb_block_id(&reader, table_of_contents_position)?;
+    let dsdb_position = *blocks.get(&dsdb_block)?;
+    let root_node_id = reader.u32(dsdb_position)?;
+
+    let mut records = Vec::new();
+    walk(&reader, &blocks, root_node_id, &mut records)?;
+    Some(put_backs(records))
+}
+
+fn block_positions(
+    reader: &Reader<'_>,
+    root_position: usize,
+    address_table_start: usize,
+) -> Option<HashMap<u32, usize>> {
+    let address_count = reader.u32(root_position)? as usize;
     if address_count > ADDRESS_TABLE_SLOTS {
         return None;
     }
-
     let mut blocks: HashMap<u32, usize> = HashMap::with_capacity(address_count);
     for index in 0..address_count {
         let value = reader.u32(address_table_start + index * U32_BYTES)?;
@@ -149,13 +164,16 @@ fn parse(bytes: &[u8]) -> Option<HashMap<String, PutBack>> {
         let block_position = offset.checked_add(BLOCK_OFFSET_BASE)?;
         blocks.insert(index as u32, block_position);
     }
+    Some(blocks)
+}
 
-    let table_of_contents_position = address_table_start + ADDRESS_TABLE_SLOTS * U32_BYTES;
+/// The last table-of-contents entry named `DSDB`.
+fn dsdb_block_id(reader: &Reader<'_>, table_of_contents_position: usize) -> Option<u32> {
     let table_of_contents_count = reader.u32(table_of_contents_position)?;
     let mut cursor = table_of_contents_position + U32_BYTES;
     let mut dsdb_block: Option<u32> = None;
     for _ in 0..table_of_contents_count {
-        let name_length = *bytes.get(cursor)? as usize;
+        let name_length = *reader.bytes.get(cursor)? as usize;
         cursor += 1;
         let name = std::str::from_utf8(reader.slice(cursor, name_length)?).ok()?;
         cursor += name_length;
@@ -165,42 +183,51 @@ fn parse(bytes: &[u8]) -> Option<HashMap<String, PutBack>> {
             dsdb_block = Some(block_id);
         }
     }
+    dsdb_block
+}
 
-    let dsdb_position = *blocks.get(&dsdb_block?)?;
-    let root_node_id = reader.u32(dsdb_position)?;
+#[derive(Default)]
+struct PendingPutBack {
+    original_dir: Option<String>,
+    original_name: Option<String>,
+}
 
-    let mut records = Vec::new();
-    walk(&reader, &blocks, root_node_id, &mut records)?;
-
-    let mut pending: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
-    for record in records {
-        let entry = pending.entry(record.name).or_default();
+impl PendingPutBack {
+    fn absorb(&mut self, record: Record) {
         match (record.struct_id.as_str(), record.value) {
-            ("ptbL", Value::Str(dir)) => entry.0 = Some(dir),
-            ("ptbL", Value::Blob(blob)) => {
-                if let Some(dir) = extract_bookmark_path(&blob) {
-                    entry.0 = Some(dir);
-                }
-            }
-            ("ptbN", Value::Str(name)) => entry.1 = Some(name),
+            ("ptbL", Value::Str(dir)) => self.original_dir = Some(dir),
+            ("ptbL", Value::Blob(blob)) => self.absorb_bookmark(&blob),
+            ("ptbN", Value::Str(name)) => self.original_name = Some(name),
             _ => {}
         }
     }
 
-    Some(
+    fn absorb_bookmark(&mut self, blob: &[u8]) {
+        if let Some(dir) = extract_bookmark_path(blob) {
+            self.original_dir = Some(dir);
+        }
+    }
+
+    fn complete(self) -> Option<PutBack> {
+        Some(PutBack {
+            original_dir: self.original_dir?,
+            original_name: self.original_name?,
+        })
+    }
+}
+
+fn put_backs(records: Vec<Record>) -> HashMap<String, PutBack> {
+    let mut pending: HashMap<String, PendingPutBack> = HashMap::new();
+    for record in records {
         pending
-            .into_iter()
-            .filter_map(|(name, (dir, put_back_name))| {
-                Some((
-                    name,
-                    PutBack {
-                        original_dir: dir?,
-                        original_name: put_back_name?,
-                    },
-                ))
-            })
-            .collect(),
-    )
+            .entry(record.name.clone())
+            .or_default()
+            .absorb(record);
+    }
+    pending
+        .into_iter()
+        .filter_map(|(name, put_back)| Some((name, put_back.complete()?)))
+        .collect()
 }
 
 fn walk(
@@ -282,23 +309,17 @@ fn parse_record(reader: &Reader<'_>, position: usize) -> Option<(Record, usize)>
 /// embeds path components in cleartext. Returns `None` (never guesses) if no
 /// such run is found.
 fn extract_bookmark_path(blob: &[u8]) -> Option<String> {
-    let mut best: Option<&[u8]> = None;
-    let mut start = 0;
-    let is_printable = |byte: u8| PRINTABLE_ASCII.contains(&byte);
-
-    for (index, &byte) in blob.iter().enumerate() {
-        if !is_printable(byte) {
-            let run = &blob[start..index];
-            if run.contains(&b'/') && best.is_none_or(|current| run.len() > current.len()) {
-                best = Some(run);
-            }
-            start = index + 1;
-        }
-    }
-    let run = &blob[start..];
-    if run.contains(&b'/') && best.is_none_or(|current| run.len() > current.len()) {
-        best = Some(run);
-    }
-
+    let best = blob
+        .split(|byte| !PRINTABLE_ASCII.contains(byte))
+        .filter(|run| run.contains(&b'/'))
+        .fold(None, keep_longer_run);
     best.map(|run| String::from_utf8_lossy(run).into_owned())
+}
+
+fn keep_longer_run<'blob>(best: Option<&'blob [u8]>, run: &'blob [u8]) -> Option<&'blob [u8]> {
+    let is_longer = best.is_none_or(|current| run.len() > current.len());
+    if is_longer {
+        return Some(run);
+    }
+    best
 }

@@ -33,6 +33,23 @@ mod macos {
         executor.execute(move || run_diskutil_eject(&mount_root))
     }
 
+    fn eject_failure(mount_root: &str, stderr: &[u8]) -> MenuActionStatus {
+        let message = eject_failure_message(stderr);
+        log::warn!("diskutil eject failed for {mount_root}: {message}");
+        MenuActionStatus {
+            handled: false,
+            message: Some(message),
+        }
+    }
+
+    fn eject_failure_message(stderr: &[u8]) -> String {
+        let stderr = String::from_utf8_lossy(stderr).trim().to_string();
+        if stderr.is_empty() {
+            return "eject-failed".to_string();
+        }
+        stderr
+    }
+
     fn run_diskutil_eject(mount_root: &str) -> MenuActionStatus {
         match Command::new("diskutil")
             .arg("eject")
@@ -42,19 +59,7 @@ mod macos {
             Ok(output) if output.status.success() => {
                 MenuActionStatus::handled_with_message("ejected")
             }
-            Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                let message = if stderr.is_empty() {
-                    "eject-failed".to_string()
-                } else {
-                    stderr
-                };
-                log::warn!("diskutil eject failed for {mount_root}: {message}");
-                MenuActionStatus {
-                    handled: false,
-                    message: Some(message),
-                }
-            }
+            Ok(output) => eject_failure(mount_root, &output.stderr),
             Err(error) => {
                 log::warn!("diskutil eject spawn failed for {mount_root}: {error}");
                 MenuActionStatus::unsupported("eject-launch-failed")

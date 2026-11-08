@@ -4,6 +4,7 @@ import { columnCellClassName } from '@/lib/columns'
 import { useLayoutStore } from '@/stores/layout-store'
 import { columnFlexStyle } from './HeaderRow'
 import { TEXT_SECONDARY } from '@/lib/class-names'
+import type { ColumnConfig } from '@/lib/types/ipc'
 
 type ParentRowProps = {
   isActivePane: boolean
@@ -11,6 +12,24 @@ type ParentRowProps = {
   onPointerDown: () => void
   onActivate: (eventTimeStamp?: number) => void
   onFocus: () => void
+}
+
+function ParentRowCell({ columnKey }: { columnKey: ColumnConfig['key'] }) {
+  if (columnKey === 'name') {
+    return (
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
+          <FolderGlyph className="h-4 w-4" />
+          <ArrowUpIcon className="absolute top-1.5 h-2.5 w-2.5 text-light-text dark:text-dark-base" />
+        </span>
+        <span className={`truncate ${TEXT_SECONDARY}`}>..</span>
+      </span>
+    )
+  }
+  if (columnKey === 'type') {
+    return <span className={`truncate text-caption ${TEXT_SECONDARY}`}>Parent folder</span>
+  }
+  return <span className={`font-mono text-caption ${TEXT_SECONDARY}`}>—</span>
 }
 
 /**
@@ -60,47 +79,15 @@ export function ParentRow({
         isFocused && isActivePane ? 'ring-1 ring-inset ring-light-accent dark:ring-dark-accent' : ''
       } hover:bg-light-hover dark:hover:bg-dark-hover`}
     >
-      {visibleColumns.map((column) => {
-        if (column.key === 'name') {
-          return (
-            <span
-              key={column.key}
-              style={columnFlexStyle(column.key, columnWidths)}
-              className={columnCellClassName(column.key)}
-            >
-              <span className="flex min-w-0 items-center gap-2">
-                <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
-                  <FolderGlyph className="h-4 w-4" />
-                  <ArrowUpIcon className="absolute top-1.5 h-2.5 w-2.5 text-light-text dark:text-dark-base" />
-                </span>
-                <span className={`truncate ${TEXT_SECONDARY}`}>..</span>
-              </span>
-            </span>
-          )
-        }
-
-        if (column.key === 'type') {
-          return (
-            <span
-              key={column.key}
-              style={columnFlexStyle(column.key, columnWidths)}
-              className={columnCellClassName(column.key)}
-            >
-              <span className={`truncate text-caption ${TEXT_SECONDARY}`}>Parent folder</span>
-            </span>
-          )
-        }
-
-        return (
-          <span
-            key={column.key}
-            style={columnFlexStyle(column.key, columnWidths)}
-            className={columnCellClassName(column.key)}
-          >
-            <span className={`font-mono text-caption ${TEXT_SECONDARY}`}>—</span>
-          </span>
-        )
-      })}
+      {visibleColumns.map((column) => (
+        <span
+          key={column.key}
+          style={columnFlexStyle(column.key, columnWidths)}
+          className={columnCellClassName(column.key)}
+        >
+          <ParentRowCell columnKey={column.key} />
+        </span>
+      ))}
     </button>
   )
 }

@@ -207,12 +207,14 @@ impl FolderSizeTree {
         }
 
         let base = self.path_of(id);
+        let new_names: Vec<Box<str>> = listed
+            .into_iter()
+            .filter(|name| self.child(id, name).is_none())
+            .collect();
         let mut added = Vec::new();
-        for name in listed {
-            if self.child(id, &name).is_none() {
-                added.push(base.join(&*name));
-                self.child_or_insert(id, name);
-            }
+        for name in new_names {
+            added.push(base.join(&*name));
+            self.child_or_insert(id, name);
         }
         added
     }
@@ -241,13 +243,12 @@ impl FolderSizeTree {
         }
         // Exact only: a case-insensitive hit may be a distinct sibling on a
         // case-sensitive volume.
-        if let Some(existing) = self.resolve(to, false) {
-            if existing != id {
-                if self.is_within(id, existing) {
-                    return false;
-                }
-                self.remove(existing);
-            }
+        let replaced = self.resolve(to, false).filter(|&existing| existing != id);
+        if replaced.is_some_and(|existing| self.is_within(id, existing)) {
+            return false;
+        }
+        if let Some(existing) = replaced {
+            self.remove(existing);
         }
         let moved = Delta::of_subtree(self.node(id));
         self.detach(id, moved);
@@ -289,36 +290,51 @@ impl FolderSizeTree {
         };
         let mut stack = vec![id];
         while let Some(next) = stack.pop() {
-            let node = self.node(next);
-            if node.pending == 0 {
-                continue;
-            }
-            if node.flags & (SCANNED | SKIPPED) == 0 && node.parent != NONE {
-                self.remove(next);
-            } else {
-                stack.extend_from_slice(&node.children);
-            }
+            let children_to_visit = self.prune_if_unscanned(next);
+            stack.extend(children_to_visit);
         }
         true
+    }
+
+    fn prune_if_unscanned(&mut self, id: NodeId) -> Vec<NodeId> {
+        let node = self.node(id);
+        if node.pending == 0 {
+            return Vec::new();
+        }
+        let is_unscanned_non_root = awaits_scan(node) && node.parent != NONE;
+        if is_unscanned_non_root {
+            self.remove(id);
+            return Vec::new();
+        }
+        node.children.clone()
     }
 
     /// The topmost directories still waiting for a scan, e.g. after loading
     /// a snapshot written mid-scan.
     pub fn unscanned_tops(&self) -> Vec<PathBuf> {
-        let mut out = Vec::new();
+        let mut tops = Vec::new();
         let mut stack = self.roots.clone();
         while let Some(id) = stack.pop() {
-            let node = self.node(id);
-            if node.pending == 0 {
-                continue;
-            }
-            if node.flags & (SCANNED | SKIPPED) == 0 {
-                out.push(self.path_of(id));
-            } else {
-                stack.extend_from_slice(&node.children);
-            }
+            self.visit_for_unscanned_tops(id, &mut tops, &mut stack);
         }
-        out
+        tops
+    }
+
+    fn visit_for_unscanned_tops(
+        &self,
+        id: NodeId,
+        tops: &mut Vec<PathBuf>,
+        stack: &mut Vec<NodeId>,
+    ) {
+        let node = self.node(id);
+        if node.pending == 0 {
+            return;
+        }
+        if awaits_scan(node) {
+            tops.push(self.path_of(id));
+            return;
+        }
+        stack.extend_from_slice(&node.children);
     }
 
     /// The indexed total for a folder, or `None` if it is not in the tree.
@@ -350,20 +366,20 @@ impl FolderSizeTree {
     /// The largest fully indexed subtrees strictly below `path`; a boost
     /// excludes these from its walk.
     pub fn indexed_subtrees_under(&self, path: &Path) -> Vec<PathBuf> {
+        let Some(id) = self.find(path) else {
+            return Vec::new();
+        };
         let mut out = Vec::new();
-        if let Some(id) = self.find(path) {
-            let mut stack = vec![(id, self.path_of(id))];
-            while let Some((next, base)) = stack.pop() {
-                for &child in &self.node(next).children {
-                    let node = self.node(child);
-                    let child_path = base.join(&*node.name);
-                    if node.pending == 0 {
-                        out.push(child_path);
-                    } else {
-                        stack.push((child, child_path));
-                    }
-                }
-            }
+        let mut stack = vec![(id, self.path_of(id))];
+        while let Some((next, base)) = stack.pop() {
+            let (indexed, pending): (Vec<_>, Vec<_>) = self
+                .node(next)
+                .children
+                .iter()
+                .map(|&child| (child, base.join(&*self.node(child).name)))
+                .partition(|(child, _)| self.node(*child).pending == 0);
+            out.extend(indexed.into_iter().map(|(_, child_path)| child_path));
+            stack.extend(pending);
         }
         out
     }
@@ -396,41 +412,58 @@ impl FolderSizeTree {
     }
 
     fn resolve(&self, path: &Path, fold_case: bool) -> Option<NodeId> {
+        self.roots
+            .iter()
+            .find_map(|&root| self.resolve_below_root(root, path, fold_case))
+    }
+
+    fn resolve_below_root(&self, root: NodeId, path: &Path, fold_case: bool) -> Option<NodeId> {
+        let rest = strip_root(path, self.root_path(root), fold_case)?;
+        let mut id = root;
+        for component in rest {
+            let name = normal_name(component)?;
+            id = self.child_matching(id, &name, fold_case)?;
+        }
+        Some(id)
+    }
+
+    fn root_path(&self, root: NodeId) -> &Path {
+        Path::new(&*self.node(root).name)
+    }
+
+    fn strip_any_root<'path>(
+        &self,
+        path: &'path Path,
+        fold_case: bool,
+    ) -> Option<(NodeId, std::path::Components<'path>)> {
         self.roots.iter().find_map(|&root| {
-            let rest = strip_root(path, Path::new(&*self.node(root).name), fold_case)?;
-            let mut id = root;
-            for component in rest {
-                let name = normal_name(component)?;
-                id = self.child(id, &name).or_else(|| {
-                    fold_case
-                        .then(|| {
-                            self.node(id)
-                                .children
-                                .iter()
-                                .copied()
-                                .find(|&child| eq_fold(&self.node(child).name, &name))
-                        })
-                        .flatten()
-                })?;
-            }
-            Some(id)
+            strip_root(path, self.root_path(root), fold_case).map(|rest| (root, rest))
         })
     }
 
     /// Finds `path` (exact match), creating missing nodes below its root.
     fn ensure(&mut self, path: &Path) -> Option<NodeId> {
-        let (root, rest) = [false, true].into_iter().find_map(|fold_case| {
-            self.roots.iter().find_map(|&root| {
-                strip_root(path, Path::new(&*self.node(root).name), fold_case)
-                    .map(|rest| (root, rest))
-            })
-        })?;
+        let (root, rest) = [false, true]
+            .into_iter()
+            .find_map(|fold_case| self.strip_any_root(path, fold_case))?;
         let names = rest.map(normal_name).collect::<Option<Vec<_>>>()?;
         Some(
             names
                 .into_iter()
                 .fold(root, |id, name| self.child_or_insert(id, name.into())),
         )
+    }
+
+    fn child_matching(&self, parent: NodeId, name: &str, fold_case: bool) -> Option<NodeId> {
+        let exact = self.child(parent, name);
+        if exact.is_some() || !fold_case {
+            return exact;
+        }
+        self.node(parent)
+            .children
+            .iter()
+            .copied()
+            .find(|&child| eq_fold(&self.node(child).name, name))
     }
 
     fn child(&self, id: NodeId, name: &str) -> Option<NodeId> {
@@ -538,14 +571,17 @@ impl FolderSizeTree {
     }
 
     /// Whether `id` is `ancestor` or below it.
-    fn is_within(&self, mut id: NodeId, ancestor: NodeId) -> bool {
-        while id != NONE {
-            if id == ancestor {
-                return true;
-            }
-            id = self.node(id).parent;
-        }
-        false
+    fn is_within(&self, id: NodeId, ancestor: NodeId) -> bool {
+        self.self_and_ancestors(id)
+            .any(|current| current == ancestor)
+    }
+
+    fn self_and_ancestors(&self, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {
+        let first = (id != NONE).then_some(id);
+        std::iter::successors(first, |&current| {
+            let parent = self.node(current).parent;
+            (parent != NONE).then_some(parent)
+        })
     }
 
     fn path_of(&self, mut id: NodeId) -> PathBuf {
@@ -557,20 +593,22 @@ impl FolderSizeTree {
         names.into_iter().rev().collect()
     }
 
-    fn collect_skipped_names(&self, id: NodeId, out: &mut Vec<String>) {
+    fn collect_skipped_names(&self, id: NodeId, names: &mut Vec<String>) {
         for &child in &self.node(id).children {
-            let node = self.node(child);
-            if out.len() == MAX_SKIPPED_NAMES {
-                return;
-            }
-            if node.skipped == 0 {
-                continue;
-            }
-            if node.flags & SKIPPED != 0 {
-                out.push(node.name.to_string());
-            }
-            self.collect_skipped_names(child, out);
+            self.collect_skipped_names_from_child(child, names);
         }
+    }
+
+    fn collect_skipped_names_from_child(&self, child: NodeId, names: &mut Vec<String>) {
+        let node = self.node(child);
+        let has_room = names.len() < MAX_SKIPPED_NAMES;
+        if !has_room || node.skipped == 0 {
+            return;
+        }
+        if node.flags & SKIPPED != 0 {
+            names.push(node.name.to_string());
+        }
+        self.collect_skipped_names(child, names);
     }
 
     /// Arena slots, live or freed: node ids run `0..slot_len()`.
@@ -668,22 +706,23 @@ impl FolderSizeTree {
             node.denied = own.denied as u32;
         }
         for id in (0..self.nodes.len()).rev() {
-            let node = &self.nodes[id];
-            let (parent, total, pending, skipped, denied) = (
-                node.parent,
-                node.total,
-                node.pending,
-                node.skipped,
-                node.denied,
-            );
-            if parent != NONE {
-                let parent = &mut self.nodes[parent as usize];
-                parent.total = parent.total.wrapping_add(total);
-                parent.pending = parent.pending.wrapping_add(pending);
-                parent.skipped = parent.skipped.wrapping_add(skipped);
-                parent.denied = parent.denied.wrapping_add(denied);
-            }
+            self.roll_up_into_parent(id);
         }
+    }
+
+    fn roll_up_into_parent(&mut self, id: usize) {
+        let child = &self.nodes[id];
+        let parent_id = child.parent;
+        if parent_id == NONE {
+            return;
+        }
+        let (total, pending, skipped, denied) =
+            (child.total, child.pending, child.skipped, child.denied);
+        let parent = &mut self.nodes[parent_id as usize];
+        parent.total = parent.total.wrapping_add(total);
+        parent.pending = parent.pending.wrapping_add(pending);
+        parent.skipped = parent.skipped.wrapping_add(skipped);
+        parent.denied = parent.denied.wrapping_add(denied);
     }
 }
 
@@ -707,6 +746,10 @@ fn strip_root<'a>(
         }
     }
     Some(rest)
+}
+
+fn awaits_scan(node: &Node) -> bool {
+    node.flags & (SCANNED | SKIPPED) == 0
 }
 
 fn normal_name(component: Component<'_>) -> Option<String> {

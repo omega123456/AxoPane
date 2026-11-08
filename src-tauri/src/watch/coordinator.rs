@@ -24,6 +24,7 @@
 //! without bound and never blocking.
 
 use std::collections::HashMap;
+use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -304,113 +305,131 @@ fn run_compactor(
     overflow: Arc<OverflowTracker>,
     on_batch: Arc<dyn Fn(CompactedBatch) + Send + Sync>,
 ) {
-    let mut pending: HashMap<WatchId, PendingWatchState> = HashMap::new();
-    let mut dirty_generation = 1u64;
+    let mut compactor = Compactor {
+        raw_receiver,
+        control_receiver,
+        overflow,
+        on_batch,
+        pending: HashMap::new(),
+        dirty_generation: 1,
+    };
+    while compactor.run_cycle().is_continue() {}
+}
 
-    loop {
+struct Compactor {
+    raw_receiver: Receiver<RawMutation>,
+    control_receiver: Receiver<ControlMessage>,
+    overflow: Arc<OverflowTracker>,
+    on_batch: Arc<dyn Fn(CompactedBatch) + Send + Sync>,
+    pending: HashMap<WatchId, PendingWatchState>,
+    dirty_generation: u64,
+}
+
+impl Compactor {
+    fn run_cycle(&mut self) -> ControlFlow<()> {
         // Control lane is always drained first and completely, ahead of any
         // raw-mutation processing, so control work can never be starved by
         // mutation volume.
-        let mut shutting_down = false;
-        while let Ok(message) = control_receiver.try_recv() {
-            match message {
-                ControlMessage::Unwatch(id) => {
-                    pending.remove(&id);
-                }
-                ControlMessage::Replace(id) => {
-                    pending.remove(&id);
-                }
-                ControlMessage::ForceResnapshot(id) => {
-                    pending.remove(&id);
-                    let generation = dirty_generation;
-                    dirty_generation += 1;
-                    on_batch(CompactedBatch::Dirty {
-                        watch_id: id,
-                        generation,
-                    });
-                }
-                ControlMessage::Shutdown => {
-                    shutting_down = true;
-                }
-            }
-        }
+        let shutting_down = self.drain_control_lane();
         if shutting_down {
-            return;
+            return ControlFlow::Break(());
         }
-
         // Overflow-marked watches (raw lane was full when a callback tried
         // to push) become dirty regardless of what detailed state we may
         // still hold for them.
-        for watch_id in overflow.take_dirty() {
-            pending.remove(&watch_id);
-            let generation = dirty_generation;
-            dirty_generation += 1;
-            on_batch(CompactedBatch::Dirty {
-                watch_id,
-                generation,
-            });
+        for watch_id in self.overflow.take_dirty() {
+            self.mark_dirty(watch_id);
         }
-
-        let now = Instant::now();
-        match raw_receiver.recv_timeout(POLL_TICK) {
-            Ok(mutation) => {
-                let watch_id = mutation.watch_id;
-                let state = pending
-                    .entry(watch_id)
-                    .or_insert_with(|| PendingWatchState::new(now));
-                state.record(&mutation, now);
-
-                // Drain everything else immediately available without
-                // blocking, so a burst arriving together is compacted in one
-                // pass rather than one wake per event.
-                while let Ok(next) = raw_receiver.try_recv() {
-                    let watch_id = next.watch_id;
-                    let state = pending
-                        .entry(watch_id)
-                        .or_insert_with(|| PendingWatchState::new(now));
-                    state.record(&next, now);
-                }
-            }
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => return,
-        }
-
-        flush_ready(&mut pending, &mut dirty_generation, &on_batch);
+        self.absorb_raw_mutations()?;
+        self.flush_ready();
+        ControlFlow::Continue(())
     }
-}
 
-fn flush_ready(
-    pending: &mut HashMap<WatchId, PendingWatchState>,
-    dirty_generation: &mut u64,
-    on_batch: &Arc<dyn Fn(CompactedBatch) + Send + Sync>,
-) {
-    let now = Instant::now();
-    let ready: Vec<WatchId> = pending
-        .iter()
-        .filter(|(_, state)| state.ready_to_flush(now))
-        .map(|(id, _)| *id)
-        .collect();
+    fn drain_control_lane(&mut self) -> bool {
+        let mut shutting_down = false;
+        while let Ok(message) = self.control_receiver.try_recv() {
+            shutting_down |= matches!(message, ControlMessage::Shutdown);
+            self.handle_control(message);
+        }
+        shutting_down
+    }
 
-    for watch_id in ready {
-        let Some(state) = pending.remove(&watch_id) else {
-            continue;
+    fn handle_control(&mut self, message: ControlMessage) {
+        match message {
+            ControlMessage::Unwatch(id) | ControlMessage::Replace(id) => {
+                self.pending.remove(&id);
+            }
+            ControlMessage::ForceResnapshot(id) => self.mark_dirty(id),
+            ControlMessage::Shutdown => {}
+        }
+    }
+
+    fn mark_dirty(&mut self, watch_id: WatchId) {
+        self.pending.remove(&watch_id);
+        self.emit_dirty(watch_id);
+    }
+
+    fn emit_dirty(&mut self, watch_id: WatchId) {
+        let generation = self.dirty_generation;
+        self.dirty_generation += 1;
+        (self.on_batch)(CompactedBatch::Dirty {
+            watch_id,
+            generation,
+        });
+    }
+
+    fn absorb_raw_mutations(&mut self) -> ControlFlow<()> {
+        let now = Instant::now();
+        match self.raw_receiver.recv_timeout(POLL_TICK) {
+            Ok(mutation) => self.record_burst(&mutation, now),
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => return ControlFlow::Break(()),
+        }
+        ControlFlow::Continue(())
+    }
+
+    /// Drains everything else immediately available without blocking, so a
+    /// burst arriving together is compacted in one pass rather than one wake
+    /// per event.
+    fn record_burst(&mut self, first: &RawMutation, now: Instant) {
+        self.record(first, now);
+        while let Ok(next) = self.raw_receiver.try_recv() {
+            self.record(&next, now);
+        }
+    }
+
+    fn record(&mut self, mutation: &RawMutation, now: Instant) {
+        self.pending
+            .entry(mutation.watch_id)
+            .or_insert_with(|| PendingWatchState::new(now))
+            .record(mutation, now);
+    }
+
+    fn flush_ready(&mut self) {
+        let now = Instant::now();
+        let ready: Vec<WatchId> = self
+            .pending
+            .iter()
+            .filter(|(_, state)| state.ready_to_flush(now))
+            .map(|(id, _)| *id)
+            .collect();
+        for watch_id in ready {
+            self.flush_watch(watch_id);
+        }
+    }
+
+    fn flush_watch(&mut self, watch_id: WatchId) {
+        let Some(state) = self.pending.remove(&watch_id) else {
+            return;
         };
-
         if state.unresolved || state.pending_count() > MAX_PENDING_MUTATIONS_PER_WATCH {
-            let generation = *dirty_generation;
-            *dirty_generation += 1;
-            on_batch(CompactedBatch::Dirty {
-                watch_id,
-                generation,
-            });
-            continue;
+            self.emit_dirty(watch_id);
+            return;
         }
-
         if state.changed.is_empty() && state.removed.is_empty() {
-            continue;
+            return;
         }
-
-        on_batch(CompactedBatch::Targeted {
+        (self.on_batch)(CompactedBatch::Targeted {
             watch_id,
             changed: state.changed.into_keys().collect(),
             removed: state.removed.into_keys().collect(),

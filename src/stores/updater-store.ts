@@ -9,6 +9,7 @@ import {
 } from '@/lib/updater'
 import { UPDATE_INTERVAL_MS, type UpdateInterval } from '@/lib/update-intervals'
 import { useConfigStore } from '@/stores/config-store'
+import { errorMessage } from '@/lib/error-message'
 
 type UpdaterStatus = 'idle' | 'checking' | 'up-to-date' | 'available' | 'installing' | 'error'
 
@@ -43,10 +44,7 @@ function scheduleUpToDateReset() {
   }, UP_TO_DATE_RESET_MS)
 }
 
-function settleNoAvailableUpdate(
-  set: (partial: Partial<UpdaterStore>) => void,
-  acknowledge: boolean,
-) {
+function settleNoAvailableUpdate(set: UpdaterSet, acknowledge: boolean) {
   clearUpToDateTimer()
 
   if (acknowledge) {
@@ -56,10 +54,6 @@ function settleNoAvailableUpdate(
   }
 
   set({ update: null, summary: null, status: 'idle', error: null })
-}
-
-function toErrorMessage(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause)
 }
 
 type UpdaterStore = {
@@ -77,6 +71,73 @@ type UpdaterStore = {
   restartPeriodicCheck: () => void
 }
 
+type UpdaterSet = (partial: Partial<UpdaterStore>) => void
+type UpdaterGet = () => UpdaterStore
+
+async function checkForUpdate(set: UpdaterSet, get: UpdaterGet, manual: boolean) {
+  const { status, update: currentUpdate } = get()
+  if (status === 'checking' || status === 'installing') {
+    return
+  }
+
+  clearUpToDateTimer()
+
+  if (manual || !currentUpdate) {
+    set({ status: 'checking', error: null })
+  }
+
+  try {
+    const update = await checkForAppUpdate()
+
+    if (update) {
+      set({ update, summary: summarizeUpdate(update), status: 'available', error: null })
+      return
+    }
+
+    settleNoAvailableUpdate(set, manual)
+  } catch (cause) {
+    const message = errorMessage(cause)
+    log.error('app update check failed', { manual, error: message })
+
+    if (manual) {
+      set({ update: null, summary: null, status: 'error', error: message })
+      return
+    }
+
+    settleNoAvailableUpdate(set, false)
+  }
+}
+
+async function downloadAndInstall(set: UpdaterSet, get: UpdaterGet) {
+  const { update, status } = get()
+  if (!update || status === 'checking' || status === 'installing') {
+    return
+  }
+
+  set({ status: 'installing', error: null })
+  try {
+    const latestUpdate = await checkForAppUpdate()
+    if (!latestUpdate) {
+      settleNoAvailableUpdate(set, true)
+      return
+    }
+
+    set({
+      update: latestUpdate,
+      summary: summarizeUpdate(latestUpdate),
+      status: 'installing',
+      error: null,
+    })
+    await downloadAndInstallAppUpdate(latestUpdate)
+    // On Windows the NSIS passive installer relaunches the app, so reaching
+    // this point usually means the process is on its way out.
+  } catch (cause) {
+    const message = errorMessage(cause)
+    log.error('app update install failed', { error: message })
+    set({ status: 'error', error: message })
+  }
+}
+
 export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
   update: null,
   summary: null,
@@ -92,69 +153,9 @@ export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
     set({ update: null, summary: null, status: 'idle', error: null })
   },
 
-  checkForUpdate: async (manual) => {
-    const { status, update: currentUpdate } = get()
-    if (status === 'checking' || status === 'installing') {
-      return
-    }
+  checkForUpdate: (manual) => checkForUpdate(set, get, manual),
 
-    clearUpToDateTimer()
-
-    if (manual || !currentUpdate) {
-      set({ status: 'checking', error: null })
-    }
-
-    try {
-      const update = await checkForAppUpdate()
-
-      if (update) {
-        set({ update, summary: summarizeUpdate(update), status: 'available', error: null })
-        return
-      }
-
-      settleNoAvailableUpdate(set, manual)
-    } catch (cause) {
-      const message = toErrorMessage(cause)
-      log.error('app update check failed', { manual, error: message })
-
-      if (manual) {
-        set({ update: null, summary: null, status: 'error', error: message })
-        return
-      }
-
-      settleNoAvailableUpdate(set, false)
-    }
-  },
-
-  downloadAndInstall: async () => {
-    const { update, status } = get()
-    if (!update || status === 'checking' || status === 'installing') {
-      return
-    }
-
-    set({ status: 'installing', error: null })
-    try {
-      const latestUpdate = await checkForAppUpdate()
-      if (!latestUpdate) {
-        settleNoAvailableUpdate(set, true)
-        return
-      }
-
-      set({
-        update: latestUpdate,
-        summary: summarizeUpdate(latestUpdate),
-        status: 'installing',
-        error: null,
-      })
-      await downloadAndInstallAppUpdate(latestUpdate)
-      // On Windows the NSIS passive installer relaunches the app, so reaching
-      // this point usually means the process is on its way out.
-    } catch (cause) {
-      const message = toErrorMessage(cause)
-      log.error('app update install failed', { error: message })
-      set({ status: 'error', error: message })
-    }
-  },
+  downloadAndInstall: () => downloadAndInstall(set, get),
 
   startPeriodicCheck: () => {
     clearPeriodicTimer()

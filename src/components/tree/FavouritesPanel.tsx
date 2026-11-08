@@ -1,4 +1,4 @@
-import { useMemo, useRef, type DragEvent } from 'react'
+import { useRef, type DragEvent, type MouseEvent } from 'react'
 import { ChevronRightIcon } from '@/components/icons'
 import { ResizeHandle } from '@/components/shell/ResizeHandle'
 import { FavouriteTreeRow, favouriteLabel, type FavouriteRowActions } from './FavouriteTreeRow'
@@ -37,11 +37,139 @@ async function handleFavouritesDrop(event: DragEvent<HTMLElement>) {
     await config.reorderFavourite(drag.path, config.favourites.length)
     return
   }
-  if (drag?.kind === 'file-transfer') {
-    for (const item of drag.items) {
-      if (item.isDir) await config.addFavourite(item.path)
-    }
+  if (drag?.kind !== 'file-transfer') return
+  const folders = drag.items.filter((item) => item.isDir)
+  for (const folder of folders) {
+    await config.addFavourite(folder.path)
   }
+}
+
+function navigateActivePane(path: string) {
+  const panes = usePanesStore.getState()
+  void panes.navigatePane(panes.activePaneId, path)
+}
+
+function openTabInActivePane(path: string) {
+  const panes = usePanesStore.getState()
+  void panes.openTabFromPath(panes.activePaneId, path)
+}
+
+function openFavouriteContextMenu(path: string, event: MouseEvent) {
+  event.preventDefault()
+  const paneId = usePanesStore.getState().activePaneId
+  useContextMenuStore.getState().openMenu({
+    paneId,
+    title: useConfigStore.getState().favouriteNames[path] ?? favouriteLabel(path),
+    chip: 'DIR',
+    x: event.clientX,
+    y: event.clientY,
+    ...buildContextMenuContent(paneId, { kind: 'favourite', path }, detectPlatformOs()),
+  })
+}
+
+/** Stable for the memoized rows; every handler reads current store state. */
+const favouriteRowActions: FavouriteRowActions = {
+  onNavigate: navigateActivePane,
+  onOpenTab: openTabInActivePane,
+  onContextMenu: openFavouriteContextMenu,
+  onRename: (path, name) => void useConfigStore.getState().renameFavourite(path, name),
+  onRenameCancel: () => useConfigStore.getState().setRenamingFavourite(null),
+}
+
+function FavouritesHeading({ collapsed, count }: { collapsed: boolean; count: number }) {
+  return (
+    <div onDragOver={handleFavouritesDragOver} onDrop={(event) => void handleFavouritesDrop(event)}>
+      <button
+        type="button"
+        aria-expanded={!collapsed}
+        onClick={() => void useConfigStore.getState().setFavouritesCollapsed(!collapsed)}
+        className={`flex h-tree-header-first w-full cursor-pointer items-end gap-1.5 rounded-control px-2 pb-1 text-caption text-light-text-tertiary hover:text-light-text dark:text-dark-text-tertiary dark:hover:text-dark-text ${FOCUS_RING_INSET}`}
+      >
+        <ChevronRightIcon
+          aria-hidden="true"
+          className={`mb-0.5 size-3 flex-none ${collapsed ? '' : 'rotate-90'}`}
+        />
+        <span>Favourites</span>
+        {collapsed ? <span className="ml-auto tabular-nums">{count}</span> : null}
+      </button>
+    </div>
+  )
+}
+
+function EmptyFavourites() {
+  return (
+    <div
+      onDragOver={handleFavouritesDragOver}
+      onDrop={(event) => void handleFavouritesDrop(event)}
+      className="flex h-tree-row items-center rounded-control px-3 text-caption text-light-text-tertiary ring-1 ring-inset ring-light-divider dark:text-dark-text-tertiary dark:ring-dark-divider"
+    >
+      Drop folders here
+    </div>
+  )
+}
+
+function FavouritesList({ favourites, heightPx }: { favourites: string[]; heightPx: number }) {
+  const favouriteNames = useConfigStore((state) => state.favouriteNames)
+  const renamingFavourite = useConfigStore((state) => state.renamingFavourite)
+  const activePath = usePanesStore((state) => state.panes[state.activePaneId].path)
+  return (
+    <div
+      // Height is user-draggable runtime geometry; no static token can express it.
+      style={{ maxHeight: `${heightPx}px` }}
+      className={`overflow-x-hidden overflow-y-auto overscroll-contain ${SCROLLBAR_THIN}`}
+    >
+      {favourites.map((path, index) => (
+        <FavouriteTreeRow
+          key={path}
+          path={path}
+          name={favouriteNames[path]}
+          index={index}
+          isCurrent={pathsMatch(activePath, path)}
+          isRenaming={renamingFavourite === path}
+          actions={favouriteRowActions}
+        />
+      ))}
+    </div>
+  )
+}
+
+/**
+ * Rows are fixed-height, so the list's rendered height is the stored cap or
+ * its content, whichever is smaller. Resizing starts from that, so a short
+ * list reacts to the first pixel of an upward drag.
+ */
+function FavouritesResizeHandle({ heightPx, count }: { heightPx: number; count: number }) {
+  const setHeightPx = useLayoutStore((state) => state.setFavouritesHeightPx)
+  const shownHeightPx = Math.min(heightPx, count * TREE_ROW_HEIGHT_PX)
+  const dragStartHeight = useRef(shownHeightPx)
+  return (
+    <ResizeHandle
+      orientation="horizontal"
+      ariaLabel="Resize favourites"
+      value={shownHeightPx}
+      min={FAVOURITES_HEIGHT_MIN}
+      max={FAVOURITES_HEIGHT_MAX}
+      showRestLine={false}
+      onDragStart={() => {
+        dragStartHeight.current = shownHeightPx
+      }}
+      onResize={(deltaY) => setHeightPx(dragStartHeight.current + deltaY)}
+      onStep={(delta) => setHeightPx(shownHeightPx + delta * TREE_ROW_HEIGHT_PX)}
+      onCommit={() => void persistAppConfig()}
+    />
+  )
+}
+
+function FavouritesBody({ favourites, heightPx }: { favourites: string[]; heightPx: number }) {
+  if (favourites.length === 0) {
+    return <EmptyFavourites />
+  }
+  return (
+    <>
+      <FavouritesList favourites={favourites} heightPx={heightPx} />
+      <FavouritesResizeHandle heightPx={heightPx} count={favourites.length} />
+    </>
+  )
 }
 
 /**
@@ -52,110 +180,13 @@ async function handleFavouritesDrop(event: DragEvent<HTMLElement>) {
  */
 export function FavouritesPanel() {
   const favourites = useConfigStore((state) => state.favourites)
-  const favouriteNames = useConfigStore((state) => state.favouriteNames)
-  const renamingFavourite = useConfigStore((state) => state.renamingFavourite)
   const collapsed = useConfigStore((state) => state.favouritesCollapsed)
-  const activePath = usePanesStore((state) => state.panes[state.activePaneId].path)
   const heightPx = useLayoutStore((state) => state.favouritesHeightPx)
-  const setHeightPx = useLayoutStore((state) => state.setFavouritesHeightPx)
-  // Rows are fixed-height, so the list's rendered height is the stored cap or
-  // its content, whichever is smaller. Resizing starts from that, so a short
-  // list reacts to the first pixel of an upward drag.
-  const shownHeightPx = Math.min(heightPx, favourites.length * TREE_ROW_HEIGHT_PX)
-  const dragStartHeight = useRef(shownHeightPx)
-
-  // Stable for the memoized rows; every handler reads current store state.
-  const actions = useMemo<FavouriteRowActions>(
-    () => ({
-      onNavigate: (path) => {
-        const panes = usePanesStore.getState()
-        void panes.navigatePane(panes.activePaneId, path)
-      },
-      onOpenTab: (path) => {
-        const panes = usePanesStore.getState()
-        void panes.openTabFromPath(panes.activePaneId, path)
-      },
-      onContextMenu: (path, event) => {
-        event.preventDefault()
-        const paneId = usePanesStore.getState().activePaneId
-        useContextMenuStore.getState().openMenu({
-          paneId,
-          title: useConfigStore.getState().favouriteNames[path] ?? favouriteLabel(path),
-          chip: 'DIR',
-          x: event.clientX,
-          y: event.clientY,
-          ...buildContextMenuContent(paneId, { kind: 'favourite', path }, detectPlatformOs()),
-        })
-      },
-      onRename: (path, name) => void useConfigStore.getState().renameFavourite(path, name),
-      onRenameCancel: () => useConfigStore.getState().setRenamingFavourite(null),
-    }),
-    [],
-  )
 
   return (
     <section data-testid="favourites-panel" aria-label="Favourites" className="mx-1 flex-none pb-1">
-      <div
-        onDragOver={handleFavouritesDragOver}
-        onDrop={(event) => void handleFavouritesDrop(event)}
-      >
-        <button
-          type="button"
-          aria-expanded={!collapsed}
-          onClick={() => void useConfigStore.getState().setFavouritesCollapsed(!collapsed)}
-          className={`flex h-tree-header-first w-full cursor-pointer items-end gap-1.5 rounded-control px-2 pb-1 text-caption text-light-text-tertiary hover:text-light-text dark:text-dark-text-tertiary dark:hover:text-dark-text ${FOCUS_RING_INSET}`}
-        >
-          <ChevronRightIcon
-            aria-hidden="true"
-            className={`mb-0.5 size-3 flex-none ${collapsed ? '' : 'rotate-90'}`}
-          />
-          <span>Favourites</span>
-          {collapsed ? <span className="ml-auto tabular-nums">{favourites.length}</span> : null}
-        </button>
-      </div>
-      {collapsed ? null : favourites.length === 0 ? (
-        <div
-          onDragOver={handleFavouritesDragOver}
-          onDrop={(event) => void handleFavouritesDrop(event)}
-          className="flex h-tree-row items-center rounded-control px-3 text-caption text-light-text-tertiary ring-1 ring-inset ring-light-divider dark:text-dark-text-tertiary dark:ring-dark-divider"
-        >
-          Drop folders here
-        </div>
-      ) : (
-        <div
-          // Height is user-draggable runtime geometry; no static token can express it.
-          style={{ maxHeight: `${heightPx}px` }}
-          className={`overflow-x-hidden overflow-y-auto overscroll-contain ${SCROLLBAR_THIN}`}
-        >
-          {favourites.map((path, index) => (
-            <FavouriteTreeRow
-              key={path}
-              path={path}
-              name={favouriteNames[path]}
-              index={index}
-              isCurrent={pathsMatch(activePath, path)}
-              isRenaming={renamingFavourite === path}
-              actions={actions}
-            />
-          ))}
-        </div>
-      )}
-      {collapsed || favourites.length === 0 ? null : (
-        <ResizeHandle
-          orientation="horizontal"
-          ariaLabel="Resize favourites"
-          value={shownHeightPx}
-          min={FAVOURITES_HEIGHT_MIN}
-          max={FAVOURITES_HEIGHT_MAX}
-          showRestLine={false}
-          onDragStart={() => {
-            dragStartHeight.current = shownHeightPx
-          }}
-          onResize={(deltaY) => setHeightPx(dragStartHeight.current + deltaY)}
-          onStep={(delta) => setHeightPx(shownHeightPx + delta * TREE_ROW_HEIGHT_PX)}
-          onCommit={() => void persistAppConfig()}
-        />
-      )}
+      <FavouritesHeading collapsed={collapsed} count={favourites.length} />
+      {collapsed ? null : <FavouritesBody favourites={favourites} heightPx={heightPx} />}
     </section>
   )
 }

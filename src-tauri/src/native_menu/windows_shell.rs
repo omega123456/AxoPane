@@ -54,14 +54,10 @@ pub(crate) fn sanitize_menu_label(raw: String) -> String {
     let mut label = String::with_capacity(without_shortcut.len());
     let mut chars = without_shortcut.chars().peekable();
     while let Some(character) = chars.next() {
-        if character == '&' {
-            if matches!(chars.peek(), Some('&')) {
-                label.push('&');
-                chars.next();
-            }
-            continue;
+        let keeps_character = character != '&' || chars.next_if_eq(&'&').is_some();
+        if keeps_character {
+            label.push(character);
         }
-        label.push(character);
     }
     label.trim().to_string()
 }

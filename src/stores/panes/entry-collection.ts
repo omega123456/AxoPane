@@ -254,24 +254,25 @@ export class PaneEntryCollection {
    */
   private enforceRetentionLimit(): void {
     while (this.pages.size > MAX_RETAINED_PAGES) {
-      let lruPageIndex: number | undefined
-      let lruAccessedAt = Number.POSITIVE_INFINITY
-      for (const [pageIndex, record] of this.pages) {
-        if (this.pinnedPages.has(pageIndex)) {
-          continue
-        }
-        if (record.lastAccessedAt < lruAccessedAt) {
-          lruAccessedAt = record.lastAccessedAt
-          lruPageIndex = pageIndex
-        }
-      }
-
+      const lruPageIndex = this.leastRecentlyUsedUnpinnedPage()
       if (lruPageIndex === undefined) {
-        // Every remaining loaded page is pinned; nothing safe to evict.
         break
       }
-
       this.evictPage(lruPageIndex)
     }
+  }
+
+  private leastRecentlyUsedUnpinnedPage(): number | undefined {
+    let lruPageIndex: number | undefined
+    let lruAccessedAt = Number.POSITIVE_INFINITY
+    for (const [pageIndex, record] of this.pages) {
+      const olderUnpinned =
+        !this.pinnedPages.has(pageIndex) && record.lastAccessedAt < lruAccessedAt
+      if (olderUnpinned) {
+        lruAccessedAt = record.lastAccessedAt
+        lruPageIndex = pageIndex
+      }
+    }
+    return lruPageIndex
   }
 }

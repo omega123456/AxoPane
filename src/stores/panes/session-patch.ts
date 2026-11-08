@@ -15,7 +15,7 @@ import {
   type PaneState,
   type PanesData,
 } from '@/stores/panes/pane-state'
-import { applyTreeDirPatch } from '@/stores/panes/tree-state'
+import { applyTreeDirPatch } from '@/stores/panes/tree-dir-patch'
 import { treeNodesUpdate } from '@/stores/panes/dir-patch'
 
 type DirPatchChange = DirPatchEvent['changed'][number]

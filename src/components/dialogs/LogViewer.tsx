@@ -66,10 +66,8 @@ function rowTone(level: string): string {
   return ''
 }
 
-export function LogViewer() {
+function useLogEntries() {
   const [entries, setEntries] = useState<LogEntry[]>([])
-  const [filter, setFilter] = useState<LogDisplayFilter>('all')
-  const [page, setPage] = useState(1)
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [hasError, setHasError] = useState(false)
@@ -80,23 +78,24 @@ export function LogViewer() {
   // this is safe to invoke from an effect.
   const load = useCallback(() => {
     const requestId = ++requestIdRef.current
+    const isCurrent = () => requestId === requestIdRef.current
     return readLogs()
       .then((result) => {
-        if (requestId !== requestIdRef.current) {
+        if (!isCurrent()) {
           return
         }
         setEntries(result)
         setHasError(false)
       })
       .catch((error: unknown) => {
-        if (requestId !== requestIdRef.current) {
+        if (!isCurrent()) {
           return
         }
         setHasError(true)
         log.error('failed to read logs', { error: String(error) })
       })
       .finally(() => {
-        if (requestId === requestIdRef.current) {
+        if (isCurrent()) {
           setIsLoading(false)
           setIsRefreshing(false)
         }
@@ -120,15 +119,25 @@ export function LogViewer() {
     return () => window.clearInterval(intervalId)
   }, [autoRefresh, refresh])
 
-  const filtered = useMemo(() => {
-    const threshold = FILTER_RANK[filter]
-    // Newest first, then apply the severity floor.
-    return entries
-      .filter((entry) => (LEVEL_RANK[entry.level.toLowerCase()] ?? LEVEL_RANK.info) >= threshold)
-      .slice()
-      .reverse()
-  }, [entries, filter])
+  return { entries, isLoading, isRefreshing, hasError, autoRefresh, setAutoRefresh, refresh }
+}
 
+function newestAtOrAbove(entries: LogEntry[], filter: LogDisplayFilter) {
+  const threshold = FILTER_RANK[filter]
+  return entries
+    .filter((entry) => (LEVEL_RANK[entry.level.toLowerCase()] ?? LEVEL_RANK.info) >= threshold)
+    .slice()
+    .reverse()
+}
+
+type LogPage = {
+  totalPages: number
+  safePage: number
+  visible: LogEntry[]
+  summary: string
+}
+
+function logPage(filtered: LogEntry[], page: number): LogPage {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const safePage = Math.min(page, totalPages)
   const pageStart = (safePage - 1) * PAGE_SIZE
@@ -137,6 +146,15 @@ export function LogViewer() {
     filtered.length === 0
       ? 'No log entries'
       : `${pageStart + 1}-${Math.min(filtered.length, pageStart + visible.length)} of ${filtered.length}`
+  return { totalPages, safePage, visible, summary }
+}
+
+export function LogViewer() {
+  const logs = useLogEntries()
+  const [filter, setFilter] = useState<LogDisplayFilter>('all')
+  const [page, setPage] = useState(1)
+  const filtered = useMemo(() => newestAtOrAbove(logs.entries, filter), [logs.entries, filter])
+  const currentPage = logPage(filtered, page)
 
   return (
     <section
@@ -154,121 +172,182 @@ export function LogViewer() {
           }}
           options={FILTER_OPTIONS}
         />
-        <div className="flex items-center gap-2">
-          <Button
-            variant="subtle"
-            aria-label="Refresh logs"
-            title="Refresh logs"
-            onClick={refresh}
-            size="icon"
-            data-testid="log-viewer-refresh"
-          >
-            <RefreshIcon className={`size-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-          </Button>
-          <Button
-            variant="subtle"
-            aria-label="Toggle auto-refresh"
-            aria-pressed={autoRefresh}
-            onClick={() => setAutoRefresh((value) => !value)}
-            data-testid="log-viewer-auto-refresh"
-            className={autoRefresh ? 'bg-light-hover dark:bg-dark-hover' : ''}
-          >
-            <span
-              aria-hidden="true"
-              className={`size-2 rounded-full ${
-                autoRefresh
-                  ? 'bg-light-success dark:bg-dark-success'
-                  : 'bg-light-text-tertiary dark:bg-dark-text-tertiary'
-              }`}
-            />
-            {autoRefresh ? 'Auto-refresh on' : 'Auto-refresh off'}
-          </Button>
-        </div>
+        <LogRefreshControls
+          isRefreshing={logs.isRefreshing}
+          autoRefresh={logs.autoRefresh}
+          onRefresh={logs.refresh}
+          onToggleAutoRefresh={() => logs.setAutoRefresh((value) => !value)}
+        />
       </div>
-
-      <div className="flex items-center justify-between gap-3 border-b border-light-divider px-4 py-1 dark:border-dark-divider">
-        <div className="flex items-center gap-1">
-          <Button
-            variant="subtle"
-            aria-label="Previous page"
-            onClick={() => setPage(Math.max(1, safePage - 1))}
-            disabled={safePage <= 1}
-            size="icon"
-          >
-            <ArrowLeftIcon className="size-4" />
-          </Button>
-          <span className={`min-w-20 text-center text-caption ${TEXT_SECONDARY}`}>
-            Page {safePage} / {totalPages}
-          </span>
-          <Button
-            variant="subtle"
-            aria-label="Next page"
-            onClick={() => setPage(Math.min(totalPages, safePage + 1))}
-            disabled={safePage >= totalPages}
-            size="icon"
-          >
-            <ArrowRightIcon className="size-4" />
-          </Button>
-        </div>
-        <span className={`text-caption ${TEXT_SECONDARY}`} data-testid="log-viewer-summary">
-          {summary}
-        </span>
-      </div>
-
-      {hasError ? (
-        <div
-          role="alert"
-          data-testid="log-viewer-error"
-          className="px-3 py-8 text-center text-row text-light-danger dark:text-dark-danger"
-        >
-          Failed to load logs.
-        </div>
-      ) : !isLoading && filtered.length === 0 ? (
-        <div
-          data-testid="log-viewer-empty"
-          className={`px-3 py-8 text-center text-row ${TEXT_SECONDARY}`}
-        >
-          No log entries to show.
-        </div>
-      ) : (
-        <div className={`overflow-auto ${SCROLLBAR_THIN}`}>
-          <table className="w-full table-fixed border-collapse">
-            <thead>
-              <tr className={`text-left text-caption ${TEXT_SECONDARY}`}>
-                <th className="w-20 py-2 pl-4 pr-3 font-normal">Level</th>
-                <th className="px-3 py-2 font-normal">Message</th>
-                <th className="w-32 px-3 py-2 font-normal">Time</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map((entry) => (
-                <tr
-                  key={entry.id}
-                  className={`border-b border-light-divider dark:border-dark-divider ${rowTone(entry.level)}`}
-                >
-                  <td className="py-2 pl-4 pr-3 align-top">
-                    <LogLevelBadge level={entry.level} />
-                  </td>
-                  <td className="px-3 py-2 align-top">
-                    <span
-                      title={entry.message}
-                      className="block truncate font-mono text-caption text-light-text dark:text-dark-text"
-                      data-testid={`log-viewer-message-${entry.id}`}
-                    >
-                      {entry.message}
-                    </span>
-                  </td>
-                  <td
-                    className={`whitespace-nowrap px-3 py-2 align-top font-mono text-caption ${TEXT_SECONDARY}`}
-                  >
-                    {formatUtcLogTimestamp(entry.timestamp)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <LogPager currentPage={currentPage} onPageChange={setPage} />
+      <LogBody
+        hasError={logs.hasError}
+        isEmpty={!logs.isLoading && filtered.length === 0}
+        visible={currentPage.visible}
+      />
     </section>
+  )
+}
+
+type LogRefreshControlsProps = {
+  isRefreshing: boolean
+  autoRefresh: boolean
+  onRefresh: () => void
+  onToggleAutoRefresh: () => void
+}
+
+function LogRefreshControls({
+  isRefreshing,
+  autoRefresh,
+  onRefresh,
+  onToggleAutoRefresh,
+}: LogRefreshControlsProps) {
+  return (
+    <div className="flex items-center gap-2">
+      <Button
+        variant="subtle"
+        aria-label="Refresh logs"
+        title="Refresh logs"
+        onClick={onRefresh}
+        size="icon"
+        data-testid="log-viewer-refresh"
+      >
+        <RefreshIcon className={`size-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+      </Button>
+      <Button
+        variant="subtle"
+        aria-label="Toggle auto-refresh"
+        aria-pressed={autoRefresh}
+        onClick={onToggleAutoRefresh}
+        data-testid="log-viewer-auto-refresh"
+        className={autoRefresh ? 'bg-light-hover dark:bg-dark-hover' : ''}
+      >
+        <span
+          aria-hidden="true"
+          className={`size-2 rounded-full ${
+            autoRefresh
+              ? 'bg-light-success dark:bg-dark-success'
+              : 'bg-light-text-tertiary dark:bg-dark-text-tertiary'
+          }`}
+        />
+        {autoRefresh ? 'Auto-refresh on' : 'Auto-refresh off'}
+      </Button>
+    </div>
+  )
+}
+
+function LogPager({
+  currentPage,
+  onPageChange,
+}: {
+  currentPage: LogPage
+  onPageChange: (page: number) => void
+}) {
+  const { safePage, totalPages, summary } = currentPage
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-light-divider px-4 py-1 dark:border-dark-divider">
+      <div className="flex items-center gap-1">
+        <Button
+          variant="subtle"
+          aria-label="Previous page"
+          onClick={() => onPageChange(Math.max(1, safePage - 1))}
+          disabled={safePage <= 1}
+          size="icon"
+        >
+          <ArrowLeftIcon className="size-4" />
+        </Button>
+        <span className={`min-w-20 text-center text-caption ${TEXT_SECONDARY}`}>
+          Page {safePage} / {totalPages}
+        </span>
+        <Button
+          variant="subtle"
+          aria-label="Next page"
+          onClick={() => onPageChange(Math.min(totalPages, safePage + 1))}
+          disabled={safePage >= totalPages}
+          size="icon"
+        >
+          <ArrowRightIcon className="size-4" />
+        </Button>
+      </div>
+      <span className={`text-caption ${TEXT_SECONDARY}`} data-testid="log-viewer-summary">
+        {summary}
+      </span>
+    </div>
+  )
+}
+
+function LogBody({
+  hasError,
+  isEmpty,
+  visible,
+}: {
+  hasError: boolean
+  isEmpty: boolean
+  visible: LogEntry[]
+}) {
+  if (hasError) {
+    return (
+      <div
+        role="alert"
+        data-testid="log-viewer-error"
+        className="px-3 py-8 text-center text-row text-light-danger dark:text-dark-danger"
+      >
+        Failed to load logs.
+      </div>
+    )
+  }
+  if (isEmpty) {
+    return (
+      <div
+        data-testid="log-viewer-empty"
+        className={`px-3 py-8 text-center text-row ${TEXT_SECONDARY}`}
+      >
+        No log entries to show.
+      </div>
+    )
+  }
+  return (
+    <div className={`overflow-auto ${SCROLLBAR_THIN}`}>
+      <table className="w-full table-fixed border-collapse">
+        <thead>
+          <tr className={`text-left text-caption ${TEXT_SECONDARY}`}>
+            <th className="w-20 py-2 pl-4 pr-3 font-normal">Level</th>
+            <th className="px-3 py-2 font-normal">Message</th>
+            <th className="w-32 px-3 py-2 font-normal">Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          {visible.map((entry) => (
+            <LogRow key={entry.id} entry={entry} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function LogRow({ entry }: { entry: LogEntry }) {
+  return (
+    <tr
+      className={`border-b border-light-divider dark:border-dark-divider ${rowTone(entry.level)}`}
+    >
+      <td className="py-2 pl-4 pr-3 align-top">
+        <LogLevelBadge level={entry.level} />
+      </td>
+      <td className="px-3 py-2 align-top">
+        <span
+          title={entry.message}
+          className="block truncate font-mono text-caption text-light-text dark:text-dark-text"
+          data-testid={`log-viewer-message-${entry.id}`}
+        >
+          {entry.message}
+        </span>
+      </td>
+      <td
+        className={`whitespace-nowrap px-3 py-2 align-top font-mono text-caption ${TEXT_SECONDARY}`}
+      >
+        {formatUtcLogTimestamp(entry.timestamp)}
+      </td>
+    </tr>
   )
 }

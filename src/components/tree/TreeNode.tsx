@@ -1,4 +1,4 @@
-import { memo, useState, type DragEvent, type MouseEvent } from 'react'
+import { memo, useState, type DragEvent, type MouseEvent, type ReactNode } from 'react'
 import { ChevronRightIcon } from '@/components/icons'
 import { EntryIcon } from '@/components/icons/EntryIcon'
 import { VolumeIcon } from '@/components/icons/VolumeIcon'
@@ -93,35 +93,20 @@ function TreeNodeLabel({
   )
 }
 
-function TreeNodeImpl({
-  node,
-  depth,
-  volume,
-  isCurrent,
-  isPinned = false,
-  actions,
-}: TreeNodeProps) {
+/** Drop-target state and handlers for dragging files onto a tree folder. */
+function useTreeDropTarget(path: string) {
   const [isDropTarget, setIsDropTarget] = useState(false)
-
-  const rowStyle = {
-    // Styling-constraint exception: runtime geometry only. Indentation is a
-    // function of the tree depth (see `treeIndentPx`), so it cannot be a static
-    // utility/token. Colors/spacing elsewhere remain pure Tailwind utilities.
-    paddingLeft: `${treeIndentPx(depth)}px`,
-  }
-
-  const usedFraction = volume ? volumeUsedFraction(volume) : null
-
   const platform = detectPlatformOs()
+
   function handleDragOver(event: DragEvent<HTMLDivElement>) {
     const drag = useDragStore.getState().drag
-    if (drag?.kind !== 'file-transfer' || !canDropInto(drag, node.path, platform)) {
+    if (drag?.kind !== 'file-transfer' || !canDropInto(drag, path, platform)) {
       return
     }
     event.preventDefault()
     setDropEffect(
       event.dataTransfer,
-      resolveDropKind(dropModifiers(event, platform), drag.sourceDir, node.path, platform),
+      resolveDropKind(dropModifiers(event, platform), drag.sourceDir, path, platform),
     )
     setIsDropTarget(true)
   }
@@ -139,8 +124,74 @@ function TreeNodeImpl({
     const modifiers = dropModifiers(event, platform)
     setIsDropTarget(false)
     useDragStore.getState().end()
-    await performDrop(drag, node.path, modifiers, platform)
+    await performDrop(drag, path, modifiers, platform)
   }
+
+  return { isDropTarget, handleDragOver, handleDragLeave, handleDrop }
+}
+
+type TreeNodeButtonProps = {
+  node: TreeNodeState
+  actions: TreeRowActions
+}
+
+/** A 12px chevron column with a wider, overhanging hit area. */
+function TreeToggleButton({ node, actions }: TreeNodeButtonProps) {
+  return (
+    <button
+      type="button"
+      aria-label={`Toggle ${node.name}`}
+      onClick={() => actions.onToggle(node.path)}
+      className={`-mx-1 inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-control text-light-text-tertiary hover:bg-light-hover dark:text-dark-text-tertiary dark:hover:bg-dark-hover ${FOCUS_RING_INSET}`}
+    >
+      <ChevronRightIcon className={`size-3 ${node.expanded ? 'rotate-90' : ''}`} />
+    </button>
+  )
+}
+
+/**
+ * Named by the folder alone; the capacity bar inside is a visual aid. Middle
+ * mouse-down suppresses the browser's autoscroll, which would otherwise
+ * swallow the auxclick that opens the folder in a new tab.
+ */
+function TreeNavigateButton({
+  node,
+  actions,
+  children,
+}: TreeNodeButtonProps & { children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-label={node.name}
+      onClick={() => actions.onNavigate(node.path)}
+      onMouseDown={(event) => {
+        if (event.button === 1) {
+          event.preventDefault()
+        }
+      }}
+      onAuxClick={(event) => {
+        if (event.button === 1) {
+          event.preventDefault()
+          actions.onOpenTab(node.path)
+        }
+      }}
+      className={`flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-control text-left ${FOCUS_RING_INSET}`}
+    >
+      {children}
+    </button>
+  )
+}
+
+function TreeNodeImpl({
+  node,
+  depth,
+  volume,
+  isCurrent,
+  isPinned = false,
+  actions,
+}: TreeNodeProps) {
+  const { isDropTarget, handleDragOver, handleDragLeave, handleDrop } = useTreeDropTarget(node.path)
+  const usedFraction = volume ? volumeUsedFraction(volume) : null
 
   return (
     <div
@@ -154,41 +205,14 @@ function TreeNodeImpl({
       className={`relative flex ${usedFraction === null ? 'h-tree-row' : 'h-tree-drive-row'} items-center gap-2 rounded-control pr-2 text-row text-light-text dark:text-dark-text ${treeRowFillClass(isCurrent, isPinned)} ${
         isDropTarget ? 'ring-2 ring-inset ring-light-accent dark:ring-dark-accent' : ''
       }`}
-      style={rowStyle}
+      // Indentation is a function of the tree depth, so it cannot be a static token.
+      style={{ paddingLeft: `${treeIndentPx(depth)}px` }}
     >
       {isCurrent ? <SelectionPill /> : null}
-      {/* A 12px chevron column with a wider, overhanging hit area. */}
-      <button
-        type="button"
-        aria-label={`Toggle ${node.name}`}
-        onClick={() => actions.onToggle(node.path)}
-        className={`-mx-1 inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-control text-light-text-tertiary hover:bg-light-hover dark:text-dark-text-tertiary dark:hover:bg-dark-hover ${FOCUS_RING_INSET}`}
-      >
-        <ChevronRightIcon className={`size-3 ${node.expanded ? 'rotate-90' : ''}`} />
-      </button>
-      <button
-        type="button"
-        // Named by the folder alone; the capacity bar inside is a visual aid.
-        aria-label={node.name}
-        onClick={() => actions.onNavigate(node.path)}
-        onMouseDown={(event) => {
-          // Suppress the browser's middle-click autoscroll, which would
-          // otherwise swallow the subsequent auxclick and prevent the
-          // open-in-new-tab gesture from firing.
-          if (event.button === 1) {
-            event.preventDefault()
-          }
-        }}
-        onAuxClick={(event) => {
-          if (event.button === 1) {
-            event.preventDefault()
-            actions.onOpenTab(node.path)
-          }
-        }}
-        className={`flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-control text-left ${FOCUS_RING_INSET}`}
-      >
+      <TreeToggleButton node={node} actions={actions} />
+      <TreeNavigateButton node={node} actions={actions}>
         <TreeNodeLabel name={node.name} volume={volume} usedFraction={usedFraction} />
-      </button>
+      </TreeNavigateButton>
     </div>
   )
 }

@@ -55,6 +55,9 @@ export default tseslint.config(
     rules: {
       'id-length': ['error', { min: 2, properties: 'never', exceptions: ['_'] }],
       complexity: ['error', 10],
+      'max-depth': ['error', 2],
+      'max-lines-per-function': ['error', { max: 60, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['error', { max: 400, skipBlankLines: true, skipComments: true }],
       'no-magic-numbers': 'off',
       '@typescript-eslint/no-magic-numbers': [
         'error',

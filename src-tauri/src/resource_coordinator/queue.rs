@@ -86,49 +86,63 @@ impl Occupancy {
     /// occupied per stable resource key"); `Cpu` admission is a pure global
     /// lane with no per-resource sub-limit.
     fn can_grant(&self, request: &JobRequest) -> bool {
-        for &class in &request.classes {
-            let current_global = *self.global.get(&class).unwrap_or(&0);
-            if current_global + 1 > Self::global_cap(class) {
-                return false;
-            }
+        request
+            .classes
+            .iter()
+            .all(|&class| self.class_has_room(class, request))
+    }
 
-            if matches!(class, JobClass::Latency | JobClass::Throughput) {
-                for key in &request.resource_keys {
-                    let current_per_resource =
-                        *self.per_resource.get(&(key.clone(), class)).unwrap_or(&0);
-                    if current_per_resource + 1 > MAX_SLOTS_PER_RESOURCE_PER_CLASS {
-                        return false;
-                    }
-                }
-            }
+    fn class_has_room(&self, class: JobClass, request: &JobRequest) -> bool {
+        let current_global = *self.global.get(&class).unwrap_or(&0);
+        if current_global + 1 > Self::global_cap(class) {
+            return false;
         }
-        true
+        limited_resource_keys(class, request).all(|key| {
+            let current_per_resource = *self.per_resource.get(&(key.clone(), class)).unwrap_or(&0);
+            current_per_resource < MAX_SLOTS_PER_RESOURCE_PER_CLASS
+        })
     }
 
     fn grant(&mut self, request: &JobRequest) {
         for &class in &request.classes {
-            *self.global.entry(class).or_insert(0) += 1;
-            if matches!(class, JobClass::Latency | JobClass::Throughput) {
-                for key in &request.resource_keys {
-                    *self.per_resource.entry((key.clone(), class)).or_insert(0) += 1;
-                }
-            }
+            self.grant_class(class, request);
+        }
+    }
+
+    fn grant_class(&mut self, class: JobClass, request: &JobRequest) {
+        *self.global.entry(class).or_insert(0) += 1;
+        for key in limited_resource_keys(class, request) {
+            *self.per_resource.entry((key.clone(), class)).or_insert(0) += 1;
         }
     }
 
     fn release(&mut self, request: &JobRequest) {
         for &class in &request.classes {
-            if let Some(count) = self.global.get_mut(&class) {
-                *count = count.saturating_sub(1);
-            }
-            if matches!(class, JobClass::Latency | JobClass::Throughput) {
-                for key in &request.resource_keys {
-                    if let Some(count) = self.per_resource.get_mut(&(key.clone(), class)) {
-                        *count = count.saturating_sub(1);
-                    }
-                }
-            }
+            self.release_class(class, request);
         }
+    }
+
+    fn release_class(&mut self, class: JobClass, request: &JobRequest) {
+        saturating_decrement(self.global.get_mut(&class));
+        for key in limited_resource_keys(class, request) {
+            saturating_decrement(self.per_resource.get_mut(&(key.clone(), class)));
+        }
+    }
+}
+
+/// Resource keys are only rate-limited for the `Latency`/`Throughput`
+/// classes; `Cpu` admission is a pure global lane with no per-resource limit.
+fn limited_resource_keys(class: JobClass, request: &JobRequest) -> impl Iterator<Item = &String> {
+    let resource_limited = matches!(class, JobClass::Latency | JobClass::Throughput);
+    request
+        .resource_keys
+        .iter()
+        .filter(move |_| resource_limited)
+}
+
+fn saturating_decrement(count: Option<&mut usize>) {
+    if let Some(count) = count {
+        *count = count.saturating_sub(1);
     }
 }
 

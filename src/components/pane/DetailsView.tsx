@@ -1,36 +1,23 @@
-import {
-  forwardRef,
-  useCallback,
-  useEffect,
-  useImperativeHandle,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-} from 'react'
+import { forwardRef, useRef } from 'react'
 import type { ReactNode, RefObject, UIEvent } from 'react'
 import { FileRow, type FileRowActions } from './FileRow'
-import { HeaderRow, paneContentWidth } from './HeaderRow'
+import { HeaderRow } from './HeaderRow'
 import { ParentRow } from './ParentRow'
-import { useElementVirtualizer } from '@/lib/use-element-virtualizer'
 import { pathKey } from '@/lib/path-compare'
 import { entryRenameProps, type InlineRenameState } from '@/stores/inline-rename-store'
 import type { PaneState } from '@/types/pane'
-import { useLayoutStore } from '@/stores/layout-store'
-import { BOTH_SIDES } from '@/lib/numbers'
-import { documentZoom } from '@/components/menus/menu-geometry'
 import { dropTargetOutline, SCROLLBAR_THIN } from '@/lib/class-names'
-import { virtualListHeight, virtualRowsOrFallback } from '@/lib/virtual-rows'
 import { MarqueeSelection, type MarqueeRect } from './MarqueeSelection'
-
-/** Rows rendered before the virtualizer has measured its scroll element. */
-const UNMEASURED_FALLBACK_ROWS = 30
-const FALLBACK_ROW_KEY_PREFIX = 'row'
+import {
+  useDetachedHorizontalScroll,
+  useDetailsHandle,
+  useDetailsRows,
+  useVisibleContentWidth,
+  useVisibleRangeReport,
+} from './use-details-view'
 
 const PARENT_ROW_ID = '..'
-export const DETAILS_ROW_HEIGHT_PX = 28
-/** Blank band above the first row and below the last, matching the 3px side inset. */
-export const DETAILS_LIST_INSET_PX = 3
-const rowHeightPx = DETAILS_ROW_HEIGHT_PX
+export { DETAILS_LIST_INSET_PX, DETAILS_ROW_HEIGHT_PX } from './use-details-view'
 
 export type DetailsViewHandle = {
   scrollToRow: (index: number) => void
@@ -69,232 +56,244 @@ type DetailsViewProps = {
   scrollContainerRef?: RefObject<HTMLDivElement | null>
 }
 
-export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(function DetailsView(
-  {
-    pane,
-    isActivePane,
-    hasParent,
-    selectedIds,
-    cutEntryPaths,
-    dropTargetEntryId,
-    isPaneDropTarget,
-    rename,
-    actions,
-    usesDetachedMacScrollbars,
-    marqueeRect,
-    onVisibleRangeChange,
-    onContainerMouseDown,
-    onScroll,
-    onContainerContextMenu,
-    onPaneDragOver,
-    onPaneDragLeave,
-    onPaneDrop,
-    onParentFocus,
-    onParentActivate,
-    body,
-    scrollContainerRef,
-  },
-  ref,
-) {
-  const internalParentRef = useRef<HTMLDivElement | null>(null)
-  const internalHeaderScrollRef = useRef<HTMLDivElement | null>(null)
-  const internalHorizontalScrollRef = useRef<HTMLDivElement | null>(null)
-  const internalContentLayerRef = useRef<HTMLDivElement | null>(null)
-  const parentRef = scrollContainerRef ?? internalParentRef
-  const headerScrollRef = internalHeaderScrollRef
-  const horizontalScrollRef = internalHorizontalScrollRef
-  const contentLayerRef = internalContentLayerRef
-  const horizontalScrollLeftRef = useRef(0)
-  const parentOffset = hasParent ? 1 : 0
-  const rowCount = pane.entries.length + parentOffset
-  const rowVirtualizer = useElementVirtualizer({
-    count: rowCount,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => rowHeightPx,
-    overscan: 10,
-    padding: DETAILS_LIST_INSET_PX,
-  })
-  const itemsToRender = virtualRowsOrFallback({
-    measuredRows: rowVirtualizer.getVirtualItems(),
-    rowCount,
-    fallbackRowLimit: UNMEASURED_FALLBACK_ROWS,
-    rowStart: (index) => DETAILS_LIST_INSET_PX + index * rowHeightPx,
-    keyPrefix: FALLBACK_ROW_KEY_PREFIX,
-  })
-  const totalHeight = virtualListHeight({
-    measuredHeight: rowVirtualizer.getTotalSize(),
-    rowCount,
-    estimated: rowCount * rowHeightPx + BOTH_SIDES * DETAILS_LIST_INSET_PX,
-  })
-  const configuredColumns = useLayoutStore((state) => state.columns)
-  const columnWidths = useLayoutStore((state) => state.columnWidths)
-  const contentWidth = useMemo(
-    () =>
-      paneContentWidth(
-        configuredColumns.filter((column) => column.visible),
-        columnWidths,
-      ),
-    [columnWidths, configuredColumns],
-  )
+type DetailsRowProps = Pick<
+  DetailsViewProps,
+  | 'pane'
+  | 'isActivePane'
+  | 'selectedIds'
+  | 'cutEntryPaths'
+  | 'dropTargetEntryId'
+  | 'rename'
+  | 'actions'
+  | 'onParentFocus'
+  | 'onParentActivate'
+> & {
+  index: number
+  start: number
+  hasParent: boolean
+  parentOffset: number
+}
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      scrollToRow: (index) => rowVirtualizer.scrollToIndex(index),
-      getVisibleRowCount: () =>
-        Math.max(1, Math.floor((parentRef.current?.clientHeight ?? 0) / rowHeightPx)),
-      contentPoint: (clientX, clientY) => {
-        const container = parentRef.current
-        if (!container) return null
-        const bounds = container.getBoundingClientRect()
-        const zoom = documentZoom()
-        return {
-          x:
-            (clientX - bounds.left) / zoom +
-            (usesDetachedMacScrollbars ? horizontalScrollLeftRef.current : container.scrollLeft),
-          y: (clientY - bounds.top) / zoom + container.scrollTop,
-        }
-      },
-    }),
-    [parentRef, rowVirtualizer, usesDetachedMacScrollbars],
-  )
-
-  useEffect(() => {
-    if (itemsToRender.length === 0) return
-    const start = Math.max(0, itemsToRender[0].index - parentOffset)
-    const end = Math.max(0, itemsToRender[itemsToRender.length - 1].index - parentOffset)
-    onVisibleRangeChange(start, end, Math.max(1, end - start + 1))
-  }, [itemsToRender, onVisibleRangeChange, parentOffset])
-
-  const syncHorizontalScroll = useCallback(
-    (scrollLeft: number) => {
-      horizontalScrollLeftRef.current = scrollLeft
-      if (headerScrollRef.current) headerScrollRef.current.scrollLeft = scrollLeft
-      if (contentLayerRef.current)
-        contentLayerRef.current.style.transform =
-          scrollLeft === 0 ? '' : `translateX(-${scrollLeft}px)`
-    },
-    [contentLayerRef, headerScrollRef],
-  )
-  function handleBodyWheel(event: React.WheelEvent<HTMLDivElement>) {
-    if (!usesDetachedMacScrollbars || event.deltaX === 0) return
-
-    const horizontalScroll = horizontalScrollRef.current
-    if (!horizontalScroll) return
-
-    const maxScrollLeft = Math.max(0, horizontalScroll.scrollWidth - horizontalScroll.clientWidth)
-    const nextScrollLeft = Math.max(
-      0,
-      Math.min(maxScrollLeft, horizontalScroll.scrollLeft + event.deltaX),
-    )
-    if (nextScrollLeft !== horizontalScroll.scrollLeft) {
-      horizontalScroll.scrollLeft = nextScrollLeft
-      syncHorizontalScroll(nextScrollLeft)
-    }
-  }
-  useLayoutEffect(() => {
-    if (!usesDetachedMacScrollbars) {
-      horizontalScrollLeftRef.current = 0
-      if (contentLayerRef.current) contentLayerRef.current.style.transform = ''
-      return
-    }
-    syncHorizontalScroll(horizontalScrollRef.current?.scrollLeft ?? 0)
-  }, [
-    contentLayerRef,
-    horizontalScrollRef,
-    syncHorizontalScroll,
-    totalHeight,
-    usesDetachedMacScrollbars,
-  ])
-
-  return (
-    <>
-      <div
-        ref={headerScrollRef}
-        data-testid={`file-pane-header-scroll-${pane.id}`}
-        className="relative overflow-hidden"
-      >
-        <HeaderRow pane={pane} />
-        {usesDetachedMacScrollbars ? (
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute bottom-px right-0 top-0 w-2 bg-light-layer dark:bg-dark-layer"
-          />
-        ) : null}
+function DetailsRow(props: DetailsRowProps) {
+  const { pane, isActivePane, actions, index, hasParent, parentOffset } = props
+  const style = { top: `${props.start}px` }
+  if (hasParent && index === 0)
+    return (
+      <div className="absolute inset-x-0.75" style={style}>
+        <ParentRow
+          isActivePane={isActivePane}
+          isFocused={pane.focusedEntryId === PARENT_ROW_ID}
+          onPointerDown={actions.onPointerDown}
+          onActivate={props.onParentActivate}
+          onFocus={props.onParentFocus}
+        />
       </div>
-      {body ?? (
-        <div className="relative min-h-0 flex-1">
-          <div
-            ref={parentRef}
-            data-testid={`file-pane-scroll-${pane.id}`}
-            className={`h-full min-h-0 overscroll-contain ${SCROLLBAR_THIN} ${scrollOverflowClass(usesDetachedMacScrollbars)} ${dropTargetOutline(isPaneDropTarget)}`}
-            onMouseDown={onContainerMouseDown}
-            onWheel={handleBodyWheel}
-            onScroll={(event: UIEvent<HTMLDivElement>) => {
-              onScroll(event.currentTarget.scrollTop)
-              if (!usesDetachedMacScrollbars && headerScrollRef.current)
-                headerScrollRef.current.scrollLeft = event.currentTarget.scrollLeft
-            }}
-            onContextMenu={onContainerContextMenu}
-            onDragOver={onPaneDragOver}
-            onDragLeave={onPaneDragLeave}
-            onDrop={onPaneDrop}
-          >
-            <div
-              ref={contentLayerRef}
-              style={{
-                height: `${totalHeight}px`,
-                minWidth: `${contentWidth}px`,
-                position: 'relative',
-              }}
-              className={`min-h-full w-full ${usesDetachedMacScrollbars ? 'will-change-transform' : ''}`}
-            >
-              {itemsToRender.map((virtualRow) => {
-                const style = { top: `${virtualRow.start}px` }
-                if (hasParent && virtualRow.index === 0)
-                  return (
-                    <div key={PARENT_ROW_ID} className="absolute inset-x-0.75" style={style}>
-                      <ParentRow
-                        isActivePane={isActivePane}
-                        isFocused={pane.focusedEntryId === PARENT_ROW_ID}
-                        onPointerDown={actions.onPointerDown}
-                        onActivate={onParentActivate}
-                        onFocus={onParentFocus}
-                      />
-                    </div>
-                  )
-                const entry = pane.entries[virtualRow.index - parentOffset]
-                return entry ? (
-                  <div key={entry.id} className="absolute inset-x-0.75" style={style}>
-                    <FileRow
-                      entry={entry}
-                      isActivePane={isActivePane}
-                      isFocused={pane.focusedEntryId === entry.id}
-                      isSelected={selectedIds.has(entry.id)}
-                      isCut={cutEntryPaths.has(pathKey(entry.path))}
-                      isDropTarget={dropTargetEntryId === entry.id}
-                      draggable={!entry.trashId}
-                      {...entryRenameProps(rename, entry.id)}
-                      actions={actions}
-                    />
-                  </div>
-                ) : null
-              })}
-              <MarqueeSelection rect={marqueeRect} />
-            </div>
-          </div>
-          {usesDetachedMacScrollbars ? (
-            <div
-              ref={horizontalScrollRef}
-              data-testid={`file-pane-horizontal-scroll-${pane.id}`}
-              className={`absolute inset-x-0 bottom-0 z-20 h-2 overflow-x-auto overflow-y-hidden overscroll-contain bg-light-layer ${SCROLLBAR_THIN} dark:bg-dark-layer`}
-              onScroll={(event) => syncHorizontalScroll(event.currentTarget.scrollLeft)}
-            >
-              <div style={{ width: `${contentWidth}px`, height: '1px' }} />
-            </div>
-          ) : null}
-        </div>
-      )}
-    </>
+    )
+  const entry = pane.entries[index - parentOffset]
+  if (!entry) {
+    return null
+  }
+  return (
+    <div className="absolute inset-x-0.75" style={style}>
+      <FileRow
+        entry={entry}
+        isActivePane={isActivePane}
+        isFocused={pane.focusedEntryId === entry.id}
+        isSelected={props.selectedIds.has(entry.id)}
+        isCut={props.cutEntryPaths.has(pathKey(entry.path))}
+        isDropTarget={props.dropTargetEntryId === entry.id}
+        draggable={!entry.trashId}
+        {...entryRenameProps(props.rename, entry.id)}
+        actions={actions}
+      />
+    </div>
   )
-})
+}
+
+function rowKey(
+  virtualRow: { index: number; key: unknown },
+  pane: PaneState,
+  hasParent: boolean,
+  parentOffset: number,
+) {
+  if (hasParent && virtualRow.index === 0) {
+    return PARENT_ROW_ID
+  }
+  return pane.entries[virtualRow.index - parentOffset]?.id ?? String(virtualRow.key)
+}
+
+function DetailsHeader({
+  headerScrollRef,
+  pane,
+  usesDetachedMacScrollbars,
+}: {
+  headerScrollRef: RefObject<HTMLDivElement | null>
+  pane: PaneState
+  usesDetachedMacScrollbars: boolean
+}) {
+  return (
+    <div
+      ref={headerScrollRef}
+      data-testid={`file-pane-header-scroll-${pane.id}`}
+      className="relative overflow-hidden"
+    >
+      <HeaderRow pane={pane} />
+      {usesDetachedMacScrollbars ? (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute bottom-px right-0 top-0 w-2 bg-light-layer dark:bg-dark-layer"
+        />
+      ) : null}
+    </div>
+  )
+}
+
+type DetailsLayout = {
+  itemsToRender: Array<{ index: number; start: number; key: unknown }>
+  totalHeight: number
+  contentWidth: number
+  parentOffset: number
+}
+
+type DetailsScrollAreaProps = Omit<DetailsViewProps, 'onScroll'> & {
+  parentRef: RefObject<HTMLDivElement | null>
+  contentLayerRef: RefObject<HTMLDivElement | null>
+  onWheel: (event: React.WheelEvent<HTMLDivElement>) => void
+  onScroll: (event: UIEvent<HTMLDivElement>) => void
+  layout: DetailsLayout
+}
+
+function DetailsScrollArea({
+  parentRef,
+  contentLayerRef,
+  onWheel,
+  onScroll,
+  layout,
+  ...props
+}: DetailsScrollAreaProps) {
+  const { pane, hasParent, usesDetachedMacScrollbars } = props
+  const { itemsToRender, totalHeight, contentWidth, parentOffset } = layout
+  return (
+    <div
+      ref={parentRef}
+      data-testid={`file-pane-scroll-${pane.id}`}
+      className={`h-full min-h-0 overscroll-contain ${SCROLLBAR_THIN} ${scrollOverflowClass(usesDetachedMacScrollbars)} ${dropTargetOutline(props.isPaneDropTarget)}`}
+      onMouseDown={props.onContainerMouseDown}
+      onWheel={onWheel}
+      onScroll={onScroll}
+      onContextMenu={props.onContainerContextMenu}
+      onDragOver={props.onPaneDragOver}
+      onDragLeave={props.onPaneDragLeave}
+      onDrop={props.onPaneDrop}
+    >
+      <div
+        ref={contentLayerRef}
+        style={{
+          height: `${totalHeight}px`,
+          minWidth: `${contentWidth}px`,
+          position: 'relative',
+        }}
+        className={`min-h-full w-full ${usesDetachedMacScrollbars ? 'will-change-transform' : ''}`}
+      >
+        {itemsToRender.map((virtualRow) => (
+          <DetailsRow
+            key={rowKey(virtualRow, pane, hasParent, parentOffset)}
+            {...props}
+            index={virtualRow.index}
+            start={virtualRow.start}
+            parentOffset={parentOffset}
+          />
+        ))}
+        <MarqueeSelection rect={props.marqueeRect} />
+      </div>
+    </div>
+  )
+}
+
+type DetachedHorizontalScrollbarProps = {
+  scrollRef: RefObject<HTMLDivElement | null>
+  paneId: PaneState['id']
+  contentWidth: number
+  onScrollLeft: (scrollLeft: number) => void
+}
+
+function DetachedHorizontalScrollbar({
+  scrollRef,
+  paneId,
+  contentWidth,
+  onScrollLeft,
+}: DetachedHorizontalScrollbarProps) {
+  return (
+    <div
+      ref={scrollRef}
+      data-testid={`file-pane-horizontal-scroll-${paneId}`}
+      className={`absolute inset-x-0 bottom-0 z-20 h-2 overflow-x-auto overflow-y-hidden overscroll-contain bg-light-layer ${SCROLLBAR_THIN} dark:bg-dark-layer`}
+      onScroll={(event) => onScrollLeft(event.currentTarget.scrollLeft)}
+    >
+      <div style={{ width: `${contentWidth}px`, height: '1px' }} />
+    </div>
+  )
+}
+
+export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(
+  function DetailsView(props, ref) {
+    const { pane, hasParent, usesDetachedMacScrollbars, onScroll } = props
+    const internalParentRef = useRef<HTMLDivElement | null>(null)
+    const parentRef = props.scrollContainerRef ?? internalParentRef
+    const parentOffset = hasParent ? 1 : 0
+    const { scrollToIndex, itemsToRender, totalHeight } = useDetailsRows(
+      pane.entries.length + parentOffset,
+      parentRef,
+    )
+    const contentWidth = useVisibleContentWidth()
+    const {
+      headerScrollRef,
+      horizontalScrollRef,
+      contentLayerRef,
+      horizontalScrollLeftRef,
+      syncHorizontalScroll,
+      handleBodyWheel,
+    } = useDetachedHorizontalScroll(usesDetachedMacScrollbars, totalHeight)
+    useDetailsHandle(ref, {
+      parentRef,
+      horizontalScrollLeftRef,
+      scrollToIndex,
+      usesDetachedMacScrollbars,
+    })
+    useVisibleRangeReport(itemsToRender, parentOffset, props.onVisibleRangeChange)
+
+    return (
+      <>
+        <DetailsHeader
+          headerScrollRef={headerScrollRef}
+          pane={pane}
+          usesDetachedMacScrollbars={usesDetachedMacScrollbars}
+        />
+        {props.body ?? (
+          <div className="relative min-h-0 flex-1">
+            <DetailsScrollArea
+              {...props}
+              parentRef={parentRef}
+              contentLayerRef={contentLayerRef}
+              onWheel={handleBodyWheel}
+              onScroll={(event: UIEvent<HTMLDivElement>) => {
+                onScroll(event.currentTarget.scrollTop)
+                if (!usesDetachedMacScrollbars && headerScrollRef.current)
+                  headerScrollRef.current.scrollLeft = event.currentTarget.scrollLeft
+              }}
+              layout={{ itemsToRender, totalHeight, contentWidth, parentOffset }}
+            />
+            {usesDetachedMacScrollbars ? (
+              <DetachedHorizontalScrollbar
+                scrollRef={horizontalScrollRef}
+                paneId={pane.id}
+                contentWidth={contentWidth}
+                onScrollLeft={syncHorizontalScroll}
+              />
+            ) : null}
+          </div>
+        )}
+      </>
+    )
+  },
+)

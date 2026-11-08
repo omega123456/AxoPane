@@ -1,68 +1,38 @@
-import {
-  forwardRef,
-  useCallback,
-  useEffect,
-  useImperativeHandle,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
-import type { KeyboardEvent, ReactNode, RefObject, UIEvent } from 'react'
+import { forwardRef } from 'react'
+import type { ForwardedRef, KeyboardEvent, ReactNode, RefObject, UIEvent } from 'react'
 import { EntryCard } from './EntryCard'
 import { MarqueeSelection } from './MarqueeSelection'
 import type { FileRowActions } from './FileRow'
-import {
-  gridKeyMovement,
-  moveGridIndex,
-  PANE_GRID_GAP,
-  paneGridLayout,
-  visualRowCount,
-  type GridMovement,
-} from '@/lib/pane-grid'
+import { gridKeyMovement, type GridMovement } from '@/lib/pane-grid'
 import { pathKey } from '@/lib/path-compare'
-import { useElementVirtualizer } from '@/lib/use-element-virtualizer'
 import { useElementWidth } from '@/lib/use-element-width'
 import type { PaneViewMode } from '@/lib/pane-view'
 import { entryRenameProps, type InlineRenameState } from '@/stores/inline-rename-store'
 import type { PaneState } from '@/types/pane'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
-import { BOTH_SIDES } from '@/lib/numbers'
 import { dropTargetOutline, SCROLLBAR_THIN } from '@/lib/class-names'
-import { virtualListHeight, virtualRowsOrFallback } from '@/lib/virtual-rows'
 import type { GraphicalThumbnailRange } from '@/lib/thumbnail-candidates'
+import {
+  useGraphicalFocus,
+  useGraphicalHandle,
+  useGraphicalRows,
+  useScrollElementBinding,
+  useScrollFocusedRowIntoView,
+  useScrollDirectionTracking,
+  useThumbnailRangeReport,
+  useVisibleEntryReport,
+  type GraphicalMarqueeRect,
+  type GraphicalViewHandle,
+} from './use-graphical-view'
 
-const THUMBNAIL_OVERSCAN_ROWS = 2
-const ICON_OVERSCAN_ROWS = 4
-/** Rows rendered before the virtualizer has measured its scroll element. */
-const UNMEASURED_FALLBACK_ROWS = 8
-const FALLBACK_ROW_KEY_PREFIX = 'visual-row'
-const FALLBACK_VIEWPORT_HEIGHT_PX = 480
-const THUMBNAIL_PREFETCH_ROWS = 2
-
-function scrollDirection(
-  previousTop: number,
-  nextTop: number,
-): GraphicalThumbnailRange['direction'] {
-  if (nextTop > previousTop) {
-    return 'down'
-  }
-  return nextTop < previousTop ? 'up' : 'stationary'
-}
-
-export type GraphicalViewHandle = {
-  scrollToEntry: (index: number) => void
-  moveFocus: (movement: GridMovement) => void
-  getVisibleRowCount: () => number
-  getEntriesIntersectingRect: (rect: GraphicalMarqueeRect) => string[]
-}
-
-export type GraphicalMarqueeRect = { left: number; top: number; width: number; height: number }
-
+export type { GraphicalMarqueeRect, GraphicalViewHandle }
 export type { GraphicalThumbnailRange }
+
+type GraphicalMode = Exclude<PaneViewMode, 'details'>
 
 type GraphicalViewProps = {
   pane: PaneState
-  mode: Exclude<PaneViewMode, 'details'>
+  mode: GraphicalMode
   isActivePane: boolean
   selectedIds: Set<string>
   cutEntryPaths: Set<string>
@@ -80,287 +50,239 @@ type GraphicalViewProps = {
   onPaneDragLeave?: (event: React.DragEvent<HTMLDivElement>) => void
   onPaneDrop?: (event: React.DragEvent<HTMLDivElement>) => void
   isPaneDropTarget?: boolean
-  marqueeRect?: { left: number; top: number; width: number; height: number } | null
+  marqueeRect?: GraphicalMarqueeRect | null
   body?: ReactNode
   scrollContainerRef?: RefObject<HTMLDivElement | null>
 }
 
-export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>(
-  function GraphicalView(
+type ContainerEventProps = Pick<
+  GraphicalViewProps,
+  | 'onContainerMouseDown'
+  | 'onContainerContextMenu'
+  | 'onPaneDragOver'
+  | 'onPaneDragLeave'
+  | 'onPaneDrop'
+  | 'isPaneDropTarget'
+>
+
+type GraphicalCardProps = Pick<
+  GraphicalViewProps,
+  | 'pane'
+  | 'mode'
+  | 'isActivePane'
+  | 'selectedIds'
+  | 'cutEntryPaths'
+  | 'dropTargetEntryId'
+  | 'rename'
+  | 'actions'
+>
+
+type GraphicalRowProps = GraphicalCardProps & {
+  virtualRow: { index: number; start: number }
+  columns: number
+  rowPitch: number
+  gridClassName: string
+}
+
+type GraphicalGridProps = GraphicalCardProps &
+  ContainerEventProps & {
+    setScrollElement: (element: HTMLDivElement | null) => void
+    rowCount: number
+    columns: number
+    rowPitch: number
+    gridClassName: string
+    totalHeight: number
+    rowsToRender: Array<{ index: number; start: number; key: React.Key }>
+    marqueeRect?: GraphicalMarqueeRect | null
+    onGridKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void
+    onGridScroll: (event: UIEvent<HTMLDivElement>) => void
+  }
+
+function gridAriaLabel(mode: GraphicalMode, path: string) {
+  const modeLabel = mode === 'icons' ? 'Icons' : 'Large thumbnails'
+  return `${modeLabel} for ${path}`
+}
+
+function GraphicalRow({
+  virtualRow,
+  columns,
+  rowPitch,
+  gridClassName,
+  ...card
+}: GraphicalRowProps) {
+  const start = virtualRow.index * columns
+  const entries = card.pane.entries.slice(start, start + columns)
+  return (
+    <div
+      role="row"
+      aria-rowindex={virtualRow.index + 1}
+      className={`absolute inset-x-0 grid gap-1 px-1 pt-1 ${gridClassName}`}
+      style={{ top: `${virtualRow.start}px`, height: `${rowPitch}px` }}
+    >
+      {entries.map((entry, column) => (
+        <EntryCard
+          key={entry.id}
+          entry={entry}
+          mode={card.mode}
+          isActivePane={card.isActivePane}
+          isFocused={card.pane.focusedEntryId === entry.id}
+          isSelected={card.selectedIds.has(entry.id)}
+          isCut={card.cutEntryPaths.has(pathKey(entry.path))}
+          isDropTarget={card.dropTargetEntryId === entry.id}
+          {...entryRenameProps(card.rename, entry.id)}
+          draggable={!entry.trashId}
+          rowIndex={virtualRow.index + 1}
+          columnIndex={column + 1}
+          actions={card.actions}
+        />
+      ))}
+    </div>
+  )
+}
+
+function GraphicalBodyContainer({
+  setScrollElement,
+  body,
+  ...events
+}: ContainerEventProps & {
+  setScrollElement: (element: HTMLDivElement | null) => void
+  body: ReactNode
+}) {
+  return (
+    <div
+      ref={setScrollElement}
+      className={`relative min-h-0 flex-1 ${dropTargetOutline(events.isPaneDropTarget ?? false)}`}
+      onMouseDown={events.onContainerMouseDown}
+      onContextMenu={events.onContainerContextMenu}
+      onDragOver={events.onPaneDragOver}
+      onDragLeave={events.onPaneDragLeave}
+      onDrop={events.onPaneDrop}
+    >
+      {body}
+    </div>
+  )
+}
+
+function GraphicalGrid({ setScrollElement, ...props }: GraphicalGridProps) {
+  const { pane, mode, rowsToRender, columns, rowPitch, gridClassName } = props
+  return (
+    <div className="relative min-h-0 flex-1">
+      <div
+        ref={setScrollElement}
+        data-testid={`graphical-view-scroll-${pane.id}`}
+        role="grid"
+        aria-label={gridAriaLabel(mode, pane.path)}
+        aria-rowcount={props.rowCount}
+        aria-colcount={columns}
+        tabIndex={0}
+        className={`h-full min-h-0 overflow-auto overscroll-contain ${SCROLLBAR_THIN} ${FOCUS_RING_INSET} ${dropTargetOutline(props.isPaneDropTarget ?? false)}`}
+        onKeyDown={props.onGridKeyDown}
+        onMouseDown={props.onContainerMouseDown}
+        onScroll={props.onGridScroll}
+        onContextMenu={props.onContainerContextMenu}
+        onDragOver={props.onPaneDragOver}
+        onDragLeave={props.onPaneDragLeave}
+        onDrop={props.onPaneDrop}
+      >
+        <div className="relative min-h-full w-full" style={{ height: `${props.totalHeight}px` }}>
+          {rowsToRender.map((virtualRow) => (
+            <GraphicalRow
+              key={virtualRow.key}
+              {...props}
+              virtualRow={virtualRow}
+              columns={columns}
+              rowPitch={rowPitch}
+              gridClassName={gridClassName}
+            />
+          ))}
+          <MarqueeSelection rect={props.marqueeRect} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function useGraphicalViewModel(props: GraphicalViewProps, ref: ForwardedRef<GraphicalViewHandle>) {
+  const { pane, mode } = props
+  const entryCount = pane.entries.length
+  const { scrollRef, measuredElement, setScrollElement } = useScrollElementBinding(
+    props.scrollContainerRef,
+  )
+  const width = useElementWidth(measuredElement)
+  const rows = useGraphicalRows(mode, entryCount, scrollRef, width)
+  const { grid, rowCount, rowsToRender } = rows
+  const { focusedIndex, moveFocus } = useGraphicalFocus({
+    entries: pane.entries,
+    focusedEntryId: pane.focusedEntryId,
+    grid,
+    scrollRef,
+    onFocusEntry: props.onFocusEntry,
+    onKeyboardMove: props.onKeyboardMove,
+  })
+  const { scrollDirectionRef, trackScrollTop } = useScrollDirectionTracking()
+  const scrollToIndex = rows.rowVirtualizer.scrollToIndex
+  useGraphicalHandle(ref, {
+    entries: pane.entries,
+    grid,
+    width,
+    scrollRef,
+    scrollToIndex,
+    moveFocus,
+  })
+  useScrollFocusedRowIntoView(focusedIndex, grid.columns, scrollToIndex)
+  useVisibleEntryReport(rowsToRender, grid.columns, entryCount, props.onVisibleRangeChange)
+  useThumbnailRangeReport(
     {
-      pane,
       mode,
-      isActivePane,
-      selectedIds,
-      cutEntryPaths,
-      dropTargetEntryId,
-      rename,
-      actions,
-      onVisibleRangeChange,
-      onThumbnailRangeChange,
-      onFocusEntry,
-      onKeyboardMove,
-      onContainerMouseDown,
-      onScroll,
-      onContainerContextMenu,
-      onPaneDragOver,
-      onPaneDragLeave,
-      onPaneDrop,
-      isPaneDropTarget = false,
-      marqueeRect,
-      body,
-      scrollContainerRef,
-    },
-    ref,
-  ) {
-    const internalScrollRef = useRef<HTMLDivElement | null>(null)
-    const lastScrollTopRef = useRef(0)
-    const scrollDirectionRef = useRef<GraphicalThumbnailRange['direction']>('stationary')
-    const [measuredElement, setMeasuredElement] = useState<HTMLDivElement | null>(null)
-    const width = useElementWidth(measuredElement)
-    const grid = paneGridLayout(mode, width)
-    const rowCount = visualRowCount(pane.entries.length, grid.columns)
-    const scrollRef = scrollContainerRef ?? internalScrollRef
-    const rowVirtualizer = useElementVirtualizer({
-      count: rowCount,
-      getScrollElement: () => scrollRef.current,
-      estimateSize: () => grid.rowPitch,
-      overscan: mode === 'thumbnails' ? THUMBNAIL_OVERSCAN_ROWS : ICON_OVERSCAN_ROWS,
-      measurementKey: grid.rowPitch,
-    })
-    const rowsToRender = virtualRowsOrFallback({
-      measuredRows: rowVirtualizer.getVirtualItems(),
+      grid,
       rowCount,
-      fallbackRowLimit: UNMEASURED_FALLBACK_ROWS,
-      rowStart: (index) => index * grid.rowPitch,
-      keyPrefix: FALLBACK_ROW_KEY_PREFIX,
-    })
-    // The extra gap below the last row mirrors each row's `pt-1`.
-    const totalHeight = virtualListHeight({
-      measuredHeight: rowVirtualizer.getTotalSize(),
-      rowCount,
-      estimated: rowCount * grid.rowPitch,
-      trailing: PANE_GRID_GAP,
-    })
-
-    const setScrollElement = useCallback(
-      (element: HTMLDivElement | null) => {
-        internalScrollRef.current = element
-        if (scrollContainerRef) scrollContainerRef.current = element
-        setMeasuredElement(element)
-      },
-      [scrollContainerRef],
-    )
-
-    const focusedIndex = useMemo(
-      () => pane.entries.findIndex((entry) => entry.id === pane.focusedEntryId),
-      [pane.entries, pane.focusedEntryId],
-    )
-
-    const moveFocus = useCallback(
-      (movement: GridMovement) => {
-        const next = moveGridIndex({
-          index: focusedIndex < 0 ? 0 : focusedIndex,
-          entryCount: pane.entries.length,
-          columns: grid.columns,
-          visibleRows: Math.max(
-            1,
-            Math.floor((scrollRef.current?.clientHeight ?? 0) / grid.rowPitch),
-          ),
-          movement,
-        })
-        if (next === null) return
-        const entry = pane.entries[next]
-        onFocusEntry(entry.id)
-        onKeyboardMove?.(entry.id, movement)
-      },
-      [
-        focusedIndex,
-        grid.columns,
-        grid.rowPitch,
-        onFocusEntry,
-        onKeyboardMove,
-        pane.entries,
-        scrollRef,
-      ],
-    )
-
-    useImperativeHandle(
-      ref,
-      () => ({
-        scrollToEntry: (index) => rowVirtualizer.scrollToIndex(Math.floor(index / grid.columns)),
-        moveFocus,
-        getVisibleRowCount: () =>
-          Math.max(1, Math.floor((scrollRef.current?.clientHeight ?? 0) / grid.rowPitch)),
-        getEntriesIntersectingRect: (rect) => {
-          // Grid rows have `px-1 pt-1` and `gap-1`, so cards sit 4px apart on
-          // both axes. The remaining width is divided evenly by CSS Grid, so this
-          // gives every card's real rectangle without relying on which virtual
-          // rows happen to be mounted.
-          const gridWidth = scrollRef.current?.clientWidth || width
-          const gridPaddingPx = PANE_GRID_GAP
-          const cardWidth =
-            (gridWidth - gridPaddingPx * BOTH_SIDES - PANE_GRID_GAP * (grid.columns - 1)) /
-            grid.columns
-          const cardHeight = grid.rowPitch - gridPaddingPx
-          const rectRight = rect.left + rect.width
-          const rectBottom = rect.top + rect.height
-
-          if (cardWidth <= 0 || cardHeight <= 0) {
-            return []
-          }
-
-          return pane.entries.flatMap((entry, index) => {
-            const row = Math.floor(index / grid.columns)
-            const column = index % grid.columns
-            const left = gridPaddingPx + column * (cardWidth + PANE_GRID_GAP)
-            const top = row * grid.rowPitch + gridPaddingPx
-            const intersects =
-              rect.left < left + cardWidth &&
-              rectRight > left &&
-              rect.top < top + cardHeight &&
-              rectBottom > top
-            return intersects ? [entry.id] : []
-          })
-        },
-      }),
-      [grid.columns, grid.rowPitch, moveFocus, pane.entries, rowVirtualizer, scrollRef, width],
-    )
-
-    useEffect(() => {
-      if (focusedIndex >= 0) rowVirtualizer.scrollToIndex(Math.floor(focusedIndex / grid.columns))
-    }, [focusedIndex, grid.columns, rowVirtualizer])
-
-    useEffect(() => {
-      if (rowsToRender.length === 0 || pane.entries.length === 0) {
-        onVisibleRangeChange(0, 0, 0)
-        return
-      }
-      const first = rowsToRender[0].index * grid.columns
-      const finalRow = rowsToRender[rowsToRender.length - 1].index
-      const last = Math.min(pane.entries.length - 1, (finalRow + 1) * grid.columns - 1)
-      onVisibleRangeChange(
-        first,
-        last,
-        Math.max(1, finalRow - rowsToRender[0].index + 1) * grid.columns,
-      )
-    }, [grid.columns, onVisibleRangeChange, pane.entries.length, rowsToRender])
-
-    useEffect(() => {
-      if (mode !== 'thumbnails' || !onThumbnailRangeChange || pane.entries.length === 0) return
-      const element = scrollRef.current
-      const viewportHeight =
-        element?.clientHeight ||
-        element?.getBoundingClientRect().height ||
-        FALLBACK_VIEWPORT_HEIGHT_PX
-      const scrollTop = element?.scrollTop ?? 0
-      const firstRow = Math.max(0, Math.floor(scrollTop / grid.rowPitch))
-      const lastRow = Math.min(
-        rowCount - 1,
-        Math.max(firstRow, Math.ceil((scrollTop + viewportHeight) / grid.rowPitch) - 1),
-      )
-      const prefetchFirstRow = Math.max(0, firstRow - THUMBNAIL_PREFETCH_ROWS)
-      const prefetchLastRow = Math.min(rowCount - 1, lastRow + THUMBNAIL_PREFETCH_ROWS)
-      onThumbnailRangeChange({
-        visibleStart: firstRow * grid.columns,
-        visibleEnd: Math.min(pane.entries.length - 1, (lastRow + 1) * grid.columns - 1),
-        prefetchStart: prefetchFirstRow * grid.columns,
-        prefetchEnd: Math.min(pane.entries.length - 1, (prefetchLastRow + 1) * grid.columns - 1),
-        direction: scrollDirectionRef.current,
-      })
-    }, [
-      grid.columns,
-      grid.rowPitch,
-      mode,
-      onThumbnailRangeChange,
-      pane.entries.length,
-      rowCount,
+      entryCount,
       rowsToRender,
       scrollRef,
-    ])
+      onThumbnailRangeChange: props.onThumbnailRangeChange,
+    },
+    scrollDirectionRef,
+  )
 
-    function onGridKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-      const movement = gridKeyMovement(event)
-      if (!movement || pane.entries.length === 0) return
-      event.preventDefault()
-      moveFocus(movement)
-    }
+  function onGridKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const movement = gridKeyMovement(event)
+    if (!movement || entryCount === 0) return
+    event.preventDefault()
+    moveFocus(movement)
+  }
 
-    if (body)
+  function onGridScroll(event: UIEvent<HTMLDivElement>) {
+    const nextScrollTop = event.currentTarget.scrollTop
+    trackScrollTop(nextScrollTop)
+    props.onScroll?.(nextScrollTop)
+  }
+
+  return { ...rows, setScrollElement, onGridKeyDown, onGridScroll }
+}
+
+export const GraphicalView = forwardRef<GraphicalViewHandle, GraphicalViewProps>(
+  function GraphicalView(props, ref) {
+    const model = useGraphicalViewModel(props, ref)
+    const { setScrollElement, grid } = model
+
+    if (props.body)
       return (
-        <div
-          ref={setScrollElement}
-          className={`relative min-h-0 flex-1 ${dropTargetOutline(isPaneDropTarget)}`}
-          onMouseDown={onContainerMouseDown}
-          onContextMenu={onContainerContextMenu}
-          onDragOver={onPaneDragOver}
-          onDragLeave={onPaneDragLeave}
-          onDrop={onPaneDrop}
-        >
-          {body}
-        </div>
+        <GraphicalBodyContainer {...props} setScrollElement={setScrollElement} body={props.body} />
       )
 
     return (
-      <div className="relative min-h-0 flex-1">
-        <div
-          ref={setScrollElement}
-          data-testid={`graphical-view-scroll-${pane.id}`}
-          role="grid"
-          aria-label={`${mode === 'icons' ? 'Icons' : 'Large thumbnails'} for ${pane.path}`}
-          aria-rowcount={rowCount}
-          aria-colcount={grid.columns}
-          tabIndex={0}
-          className={`h-full min-h-0 overflow-auto overscroll-contain ${SCROLLBAR_THIN} ${FOCUS_RING_INSET} ${dropTargetOutline(isPaneDropTarget)}`}
-          onKeyDown={onGridKeyDown}
-          onMouseDown={onContainerMouseDown}
-          onScroll={(event: UIEvent<HTMLDivElement>) => {
-            const next = event.currentTarget.scrollTop
-            scrollDirectionRef.current = scrollDirection(lastScrollTopRef.current, next)
-            lastScrollTopRef.current = next
-            onScroll?.(next)
-          }}
-          onContextMenu={onContainerContextMenu}
-          onDragOver={onPaneDragOver}
-          onDragLeave={onPaneDragLeave}
-          onDrop={onPaneDrop}
-        >
-          <div className="relative min-h-full w-full" style={{ height: `${totalHeight}px` }}>
-            {rowsToRender.map((virtualRow) => {
-              const start = virtualRow.index * grid.columns
-              const entries = pane.entries.slice(start, start + grid.columns)
-              return (
-                <div
-                  key={virtualRow.key}
-                  role="row"
-                  aria-rowindex={virtualRow.index + 1}
-                  className={`absolute inset-x-0 grid gap-1 px-1 pt-1 ${grid.className}`}
-                  style={{ top: `${virtualRow.start}px`, height: `${grid.rowPitch}px` }}
-                >
-                  {entries.map((entry, column) => (
-                    <EntryCard
-                      key={entry.id}
-                      entry={entry}
-                      mode={mode}
-                      isActivePane={isActivePane}
-                      isFocused={pane.focusedEntryId === entry.id}
-                      isSelected={selectedIds.has(entry.id)}
-                      isCut={cutEntryPaths.has(pathKey(entry.path))}
-                      isDropTarget={dropTargetEntryId === entry.id}
-                      {...entryRenameProps(rename, entry.id)}
-                      draggable={!entry.trashId}
-                      rowIndex={virtualRow.index + 1}
-                      columnIndex={column + 1}
-                      actions={actions}
-                    />
-                  ))}
-                </div>
-              )
-            })}
-            <MarqueeSelection rect={marqueeRect} />
-          </div>
-        </div>
-      </div>
+      <GraphicalGrid
+        {...props}
+        setScrollElement={setScrollElement}
+        rowCount={model.rowCount}
+        columns={grid.columns}
+        rowPitch={grid.rowPitch}
+        gridClassName={grid.className}
+        totalHeight={model.totalHeight}
+        rowsToRender={model.rowsToRender}
+        onGridKeyDown={model.onGridKeyDown}
+        onGridScroll={model.onGridScroll}
+      />
     )
   },
 )

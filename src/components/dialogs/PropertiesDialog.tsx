@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+  type Ref,
+} from 'react'
 import { Button } from '@/components/controls'
 import { DialogShell } from '@/components/dialogs/DialogShell'
 import { EntryIcon } from '@/components/icons/EntryIcon'
@@ -20,6 +28,7 @@ import {
 import type { MacApp } from '@/lib/types/ipc'
 import { SCROLLBAR_THIN } from '@/lib/class-names'
 import { TEXT_SECONDARY } from '@/lib/class-names'
+import { handleKeyByTable } from '@/lib/key-table'
 
 function formatItemSize(sizeBytes: number | null, itemCount: number | null, isDir: boolean) {
   if (typeof sizeBytes === 'number') {
@@ -41,12 +50,7 @@ function formatContains(itemCount: number | null, isDir: boolean) {
   return `${formatCount(itemCount)} ${itemCount === 1 ? 'item' : 'items'}`
 }
 
-export function PropertiesDialog() {
-  const dialog = usePropertiesDialogStore((state) => state.dialog)
-  const close = usePropertiesDialogStore((state) => state.close)
-  const dateFormat = useConfigStore((state) => state.dateFormat)
-  const showTime = useConfigStore((state) => state.showTime)
-  const showSeconds = useConfigStore((state) => state.showSeconds)
+function useDefaultApplication(dialog: PropertiesDialogState | null) {
   const closeRef = useRef<HTMLButtonElement>(null)
   const defaultAppPickerGuardRef = useRef<{ cancelled: boolean } | null>(null)
   const defaultAppDialogClosed = useDefaultAppDialogStore((state) => state.dialog === null)
@@ -105,39 +109,7 @@ export function PropertiesDialog() {
     // Properties.
   }, [dialog, defaultAppDialogClosed])
 
-  const summary = useMemo(() => {
-    if (!dialog) {
-      return null
-    }
-
-    const singleItem = dialog.items.length === 1 ? dialog.items[0] : null
-    return {
-      heading: singleItem ? singleItem.name : `${formatCount(dialog.items.length)} items selected`,
-      itemCountLabel: `${formatCount(dialog.items.length)} ${dialog.items.length === 1 ? 'item' : 'items'}`,
-      singleItem,
-    }
-  }, [dialog])
-
-  if (!dialog || !summary) {
-    return null
-  }
-
-  const singleItem = summary.singleItem
-
-  function onKeyDown(event: KeyboardEvent) {
-    if (event.key === 'Escape' || event.key === 'Enter') {
-      event.preventDefault()
-      close()
-    }
-  }
-
-  async function openDefaultAppDialog() {
-    if (!singleItem) {
-      return
-    }
-
-    const filePath = singleItem.path
-    const fileName = singleItem.name
+  async function openDefaultAppDialog(item: PropertiesDialogItem) {
     const guard = { cancelled: false }
     defaultAppPickerGuardRef.current = guard
 
@@ -149,7 +121,42 @@ export function PropertiesDialog() {
     }
 
     setIsLoadingDefaultAppPicker(false)
-    useDefaultAppDialogStore.getState().open({ filePath, fileName, apps })
+    useDefaultAppDialogStore.getState().open({ filePath: item.path, fileName: item.name, apps })
+  }
+
+  return { closeRef, defaultApp, defaultAppLoaded, isLoadingDefaultAppPicker, openDefaultAppDialog }
+}
+
+function propertiesSummary(dialog: PropertiesDialogState | null) {
+  if (!dialog) {
+    return null
+  }
+
+  const singleItem = dialog.items.length === 1 ? dialog.items[0] : null
+  return {
+    heading: singleItem ? singleItem.name : `${formatCount(dialog.items.length)} items selected`,
+    itemCountLabel: `${formatCount(dialog.items.length)} ${dialog.items.length === 1 ? 'item' : 'items'}`,
+    singleItem,
+  }
+}
+
+export function PropertiesDialog() {
+  const dialog = usePropertiesDialogStore((state) => state.dialog)
+  const close = usePropertiesDialogStore((state) => state.close)
+  const dateFormat = useConfigStore((state) => state.dateFormat)
+  const showTime = useConfigStore((state) => state.showTime)
+  const showSeconds = useConfigStore((state) => state.showSeconds)
+  const defaultApplication = useDefaultApplication(dialog)
+  const summary = useMemo(() => propertiesSummary(dialog), [dialog])
+
+  if (!dialog || !summary) {
+    return null
+  }
+
+  const singleItem = summary.singleItem
+
+  function onKeyDown(event: KeyboardEvent) {
+    handleKeyByTable(event, { Escape: close, Enter: close })
   }
 
   const canSetDefault = canSetDefaultApplication(dialog.items)
@@ -160,52 +167,88 @@ export function PropertiesDialog() {
       onDismiss={close}
       onKeyDown={onKeyDown}
       footer={
-        <>
-          {canSetDefault ? (
-            <Button
-              disabled={isLoadingDefaultAppPicker}
-              onClick={() => void openDefaultAppDialog()}
-            >
-              {isLoadingDefaultAppPicker ? (
-                <>
-                  <LoaderCircleIcon className="size-4 animate-spin" />
-                  Loading…
-                </>
-              ) : (
-                'Set Default Application…'
-              )}
-            </Button>
-          ) : null}
-          <Button ref={closeRef} onClick={close} className={canSetDefault ? '' : 'col-start-2'}>
-            Close
-          </Button>
-        </>
+        <PropertiesFooter
+          canSetDefault={canSetDefault}
+          isLoadingPicker={defaultApplication.isLoadingDefaultAppPicker}
+          closeRef={defaultApplication.closeRef}
+          onSetDefault={() =>
+            singleItem && void defaultApplication.openDefaultAppDialog(singleItem)
+          }
+          onClose={close}
+        />
       }
     >
       <p className={`-mt-2 text-caption ${TEXT_SECONDARY}`}>{summary.itemCountLabel}</p>
-      {summary.singleItem ? (
+      {singleItem ? (
         <SingleItemProperties
-          item={summary.singleItem}
+          item={singleItem}
           defaultAppRow={
-            canSetDefault ? <DefaultAppRow loaded={defaultAppLoaded} app={defaultApp} /> : null
+            canSetDefault ? (
+              <DefaultAppRow
+                loaded={defaultApplication.defaultAppLoaded}
+                app={defaultApplication.defaultApp}
+              />
+            ) : null
           }
           dateDisplay={{ dateFormat, showTime, showSeconds }}
         />
       ) : (
-        <div className="grid gap-1">
-          <div className={`text-caption ${TEXT_SECONDARY}`}>Selected paths</div>
-          <ul
-            className={`grid max-h-56 gap-0.5 overflow-auto font-mono text-caption ${SCROLLBAR_THIN}`}
-          >
-            {dialog.items.map((item) => (
-              <li key={item.path} className="break-all">
-                {item.path}
-              </li>
-            ))}
-          </ul>
-        </div>
+        <SelectedPathsList items={dialog.items} />
       )}
     </DialogShell>
+  )
+}
+
+type PropertiesFooterProps = {
+  canSetDefault: boolean
+  isLoadingPicker: boolean
+  closeRef: Ref<HTMLButtonElement>
+  onSetDefault: () => void
+  onClose: () => void
+}
+
+function PropertiesFooter({
+  canSetDefault,
+  isLoadingPicker,
+  closeRef,
+  onSetDefault,
+  onClose,
+}: PropertiesFooterProps) {
+  return (
+    <>
+      {canSetDefault ? (
+        <Button disabled={isLoadingPicker} onClick={onSetDefault}>
+          {isLoadingPicker ? (
+            <>
+              <LoaderCircleIcon className="size-4 animate-spin" />
+              Loading…
+            </>
+          ) : (
+            'Set Default Application…'
+          )}
+        </Button>
+      ) : null}
+      <Button ref={closeRef} onClick={onClose} className={canSetDefault ? '' : 'col-start-2'}>
+        Close
+      </Button>
+    </>
+  )
+}
+
+function SelectedPathsList({ items }: { items: PropertiesDialogItem[] }) {
+  return (
+    <div className="grid gap-1">
+      <div className={`text-caption ${TEXT_SECONDARY}`}>Selected paths</div>
+      <ul
+        className={`grid max-h-56 gap-0.5 overflow-auto font-mono text-caption ${SCROLLBAR_THIN}`}
+      >
+        {items.map((item) => (
+          <li key={item.path} className="break-all">
+            {item.path}
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
 

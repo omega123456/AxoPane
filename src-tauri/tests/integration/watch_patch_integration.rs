@@ -38,6 +38,23 @@ fn entry(path: &str, name: &str) -> DirectoryEntry {
     }
 }
 
+const CAMEL_CASE_PATCH_KEYS: [&str; 6] = [
+    "paneId",
+    "tabId",
+    "previousBaseline",
+    "nextBaseline",
+    "totalRows",
+    "deltas",
+];
+
+const SNAKE_CASE_PATCH_KEYS: [&str; 5] = [
+    "pane_id",
+    "tab_id",
+    "previous_baseline",
+    "next_baseline",
+    "total_rows",
+];
+
 /// Guards the Rust->TypeScript wire contract: the frontend reads `paneId` /
 /// `tabId` / `previousBaseline` / `nextBaseline` / `totalRows` (and, for the
 /// nested row deltas, `rowIndex`). A plain `#[serde(rename_all = "camelCase")]`
@@ -69,26 +86,13 @@ fn session_patch_serializes_struct_variant_fields_as_camel_case() {
         object.get("mode").and_then(|value| value.as_str()),
         Some("delta")
     );
-    for key in [
-        "paneId",
-        "tabId",
-        "previousBaseline",
-        "nextBaseline",
-        "totalRows",
-        "deltas",
-    ] {
+    for key in CAMEL_CASE_PATCH_KEYS {
         assert!(
             object.contains_key(key),
             "expected camelCase key `{key}` in {json}"
         );
     }
-    for snake in [
-        "pane_id",
-        "tab_id",
-        "previous_baseline",
-        "next_baseline",
-        "total_rows",
-    ] {
+    for snake in SNAKE_CASE_PATCH_KEYS {
         assert!(
             !object.contains_key(snake),
             "unexpected snake_case key `{snake}` in {json}"

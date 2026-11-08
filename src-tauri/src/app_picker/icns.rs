@@ -31,11 +31,10 @@ pub fn largest_embedded_png(bytes: &[u8]) -> Option<&[u8]> {
         }
 
         let payload = &bytes[payload_start..payload_end];
-        if payload.starts_with(PNG_MAGIC) {
-            let is_larger = largest.is_none_or(|current| payload.len() > current.len());
-            if is_larger {
-                largest = Some(payload);
-            }
+        let is_larger_png = payload.starts_with(PNG_MAGIC)
+            && largest.is_none_or(|current| payload.len() > current.len());
+        if is_larger_png {
+            largest = Some(payload);
         }
 
         offset = payload_end;

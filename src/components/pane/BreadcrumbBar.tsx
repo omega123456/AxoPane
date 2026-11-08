@@ -1,49 +1,25 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState, type FocusEvent, type MouseEvent, type RefObject } from 'react'
 import type { PaneState } from '@/types/pane'
 import type { VolumeInfo } from '@/lib/types/ipc'
 import { ChevronRightIcon, FolderGlyph } from '@/components/icons'
-import type { BreadcrumbLayoutMeasure } from '@/lib/breadcrumb-layout'
+import type { BreadcrumbLayoutMeasure, LayoutSegment } from '@/lib/breadcrumb-layout'
 import { computeBreadcrumbLayout, createBreadcrumbMeasurer } from '@/lib/breadcrumb-layout'
 import { useElementWidth } from '@/lib/use-element-width'
 import { usePanesStore } from '@/stores/panes-store'
 import { FOCUS_RING } from '@/lib/focus-ring'
 import { normalizeWindowsCompatibilityPath } from '@/lib/path-compare'
 import { TEXT_SECONDARY } from '@/lib/class-names'
+import { handleKeyByTable } from '@/lib/key-table'
+import { useSelectWhen } from '@/lib/use-focus-on-mount'
 
 type BreadcrumbBarProps = {
   pane: PaneState
 }
 
-export function BreadcrumbBar({ pane }: BreadcrumbBarProps) {
-  const navigatePane = usePanesStore((state) => state.navigatePane)
-  const volumes = usePanesStore((state) => state.volumes)
-  const [editingPath, setEditingPath] = useState(false)
-  const [pathDraft, setPathDraft] = useState(pane.path)
-  const pathInputRef = useRef<HTMLInputElement>(null)
-  const [navElement, setNavElement] = useState<HTMLElement | null>(null)
+const NOT_YET_MEASURABLE: BreadcrumbLayoutMeasure = { segment: () => Number.NaN }
+
+function useRemeasureOnFontLoad() {
   const [measureVersion, setMeasureVersion] = useState(0)
-
-  const segments = withRootVolumeLabel(splitPath(pane.path), volumes)
-  const navWidth = useElementWidth(navElement)
-  const layout = computeBreadcrumbLayout({
-    segments,
-    availableWidth: navWidth,
-    measure:
-      navWidth > 0
-        ? createBreadcrumbMeasurer(navElement)
-        : ({
-            segment: () => Number.NaN,
-          } satisfies BreadcrumbLayoutMeasure),
-  })
-
-  useEffect(() => {
-    if (!editingPath) {
-      return
-    }
-
-    pathInputRef.current?.focus()
-    pathInputRef.current?.select()
-  }, [editingPath])
 
   useEffect(() => {
     let active = true
@@ -74,119 +50,192 @@ export function BreadcrumbBar({ pane }: BreadcrumbBarProps) {
     }
   }, [])
 
-  void measureVersion
+  return measureVersion
+}
 
-  function startPathEdit() {
-    setPathDraft(pane.path)
-    setEditingPath(true)
-  }
+function useBreadcrumbLayout(path: string, navElement: HTMLElement | null) {
+  const volumes = usePanesStore((state) => state.volumes)
+  const navWidth = useElementWidth(navElement)
+  useRemeasureOnFontLoad()
+  return computeBreadcrumbLayout({
+    segments: withRootVolumeLabel(splitPath(path), volumes),
+    availableWidth: navWidth,
+    measure: navWidth > 0 ? createBreadcrumbMeasurer(navElement) : NOT_YET_MEASURABLE,
+  })
+}
 
-  function submitPathEdit() {
-    const trimmed = pathDraft.trim()
-    setEditingPath(false)
-    if (trimmed && trimmed !== pane.path) {
-      void navigatePane(pane.id, trimmed)
-    }
+function usePathEdit(pane: PaneState) {
+  const navigatePane = usePanesStore((state) => state.navigatePane)
+  const [editingPath, setEditingPath] = useState(false)
+  const [pathDraft, setPathDraft] = useState(pane.path)
+  const pathInputRef = useSelectWhen(editingPath)
+
+  return {
+    editingPath,
+    pathDraft,
+    setPathDraft,
+    pathInputRef,
+    start: () => {
+      setPathDraft(pane.path)
+      setEditingPath(true)
+    },
+    submit: () => {
+      const trimmed = pathDraft.trim()
+      setEditingPath(false)
+      if (trimmed && trimmed !== pane.path) {
+        void navigatePane(pane.id, trimmed)
+      }
+    },
+    cancel: () => {
+      setEditingPath(false)
+      setPathDraft(pane.path)
+    },
   }
+}
+
+function isFocusMovingInside(event: FocusEvent<HTMLElement>) {
+  return event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)
+}
+
+export function BreadcrumbBar({ pane }: BreadcrumbBarProps) {
+  const { pathInputRef, ...pathEdit } = usePathEdit(pane)
 
   return (
     <div
       className="flex h-address shrink-0 items-center border-b border-light-divider px-0.75 dark:border-dark-divider"
       onBlur={(event) => {
-        if (
-          editingPath &&
-          !(
-            event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)
-          )
-        ) {
-          submitPathEdit()
+        if (pathEdit.editingPath && !isFocusMovingInside(event)) {
+          pathEdit.submit()
         }
       }}
       onContextMenu={(event) => {
         event.preventDefault()
         event.stopPropagation()
-        startPathEdit()
+        pathEdit.start()
       }}
     >
-      {editingPath ? (
-        <div className="ml-0.75 flex h-8 min-w-0 flex-1 items-center rounded-control border border-b-2 border-light-control-stroke border-b-light-accent bg-light-card px-2 dark:border-dark-control-stroke dark:border-b-dark-accent dark:bg-dark-card">
-          <input
-            ref={pathInputRef}
-            autoComplete="off"
-            spellCheck={false}
-            aria-label={`${pane.title} path`}
-            value={pathDraft}
-            onChange={(event) => setPathDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault()
-                submitPathEdit()
-              } else if (event.key === 'Escape') {
-                event.preventDefault()
-                setEditingPath(false)
-                setPathDraft(pane.path)
-              }
-            }}
-            className="w-0 min-w-0 flex-1 select-text bg-transparent font-mono text-row text-light-text outline-none selection:bg-light-accent selection:text-light-on-accent dark:text-dark-text dark:selection:bg-dark-accent dark:selection:text-dark-on-accent"
-          />
-        </div>
+      {pathEdit.editingPath ? (
+        <PathEditor
+          label={`${pane.title} path`}
+          inputRef={pathInputRef}
+          draft={pathEdit.pathDraft}
+          onDraftChange={pathEdit.setPathDraft}
+          onSubmit={pathEdit.submit}
+          onCancel={pathEdit.cancel}
+        />
       ) : (
-        // Flat at rest; the hover fill shows the row is clickable. Double-click
-        // its empty part (or right-click anywhere) to type a path.
-        <div
-          className="ml-0.75 flex h-8 min-w-0 flex-1 cursor-text items-center overflow-hidden rounded-control pl-1.5 pr-1 hover:bg-light-hover dark:hover:bg-dark-hover"
-          onDoubleClick={(event) => {
-            if (event.target === event.currentTarget) {
-              startPathEdit()
-            }
-          }}
-        >
-          <FolderGlyph className="mr-1 size-4 shrink-0" />
-          <nav
-            ref={setNavElement}
-            aria-label={`${pane.title} path`}
-            className="flex min-w-0 flex-1 items-center overflow-hidden whitespace-nowrap text-row"
-            onDoubleClick={(event) => {
-              if (event.target === event.currentTarget) {
-                startPathEdit()
-              }
-            }}
-          >
-            {layout.collapsed ? (
-              <span
-                aria-hidden="true"
-                data-testid="breadcrumb-collapse-marker"
-                className={`inline-flex shrink-0 items-center ${TEXT_SECONDARY}`}
-              >
-                <span className="px-1.5">{'…'}</span>
-                <CrumbSeparator />
-              </span>
-            ) : null}
-            {layout.items.map((segment, index) => {
-              const isCurrent = index === layout.items.length - 1
-              return (
-                <span key={segment.path} className="inline-flex shrink-0 items-center">
-                  <button
-                    type="button"
-                    aria-current={isCurrent ? 'location' : undefined}
-                    onClick={() => void navigatePane(pane.id, segment.path)}
-                    title={segment.truncated ? segment.fullLabel : undefined}
-                    className={`inline-flex shrink-0 items-center rounded-control px-1.5 py-1 text-row ${FOCUS_RING} ${
-                      isCurrent
-                        ? 'cursor-default font-semibold text-light-text dark:text-dark-text'
-                        : `cursor-pointer ${TEXT_SECONDARY} hover:bg-light-hover active:bg-light-press dark:hover:bg-dark-hover dark:active:bg-dark-press`
-                    }`}
-                  >
-                    <span className="truncate">{segment.label}</span>
-                  </button>
-                  {isCurrent ? null : <CrumbSeparator />}
-                </span>
-              )
-            })}
-          </nav>
-        </div>
+        <BreadcrumbTrail pane={pane} onStartEdit={pathEdit.start} />
       )}
     </div>
+  )
+}
+
+type PathEditorProps = {
+  label: string
+  inputRef: RefObject<HTMLInputElement | null>
+  draft: string
+  onDraftChange: (draft: string) => void
+  onSubmit: () => void
+  onCancel: () => void
+}
+
+function PathEditor({
+  label,
+  inputRef,
+  draft,
+  onDraftChange,
+  onSubmit,
+  onCancel,
+}: PathEditorProps) {
+  return (
+    <div className="ml-0.75 flex h-8 min-w-0 flex-1 items-center rounded-control border border-b-2 border-light-control-stroke border-b-light-accent bg-light-card px-2 dark:border-dark-control-stroke dark:border-b-dark-accent dark:bg-dark-card">
+      <input
+        ref={inputRef}
+        autoComplete="off"
+        spellCheck={false}
+        aria-label={label}
+        value={draft}
+        onChange={(event) => onDraftChange(event.target.value)}
+        onKeyDown={(event) => handleKeyByTable(event, { Enter: onSubmit, Escape: onCancel })}
+        className="w-0 min-w-0 flex-1 select-text bg-transparent font-mono text-row text-light-text outline-none selection:bg-light-accent selection:text-light-on-accent dark:text-dark-text dark:selection:bg-dark-accent dark:selection:text-dark-on-accent"
+      />
+    </div>
+  )
+}
+
+function BreadcrumbTrail({ pane, onStartEdit }: { pane: PaneState; onStartEdit: () => void }) {
+  const [navElement, setNavElement] = useState<HTMLElement | null>(null)
+  const layout = useBreadcrumbLayout(pane.path, navElement)
+  const startEditOnEmptyArea = (event: MouseEvent<HTMLElement>) => {
+    if (event.target === event.currentTarget) {
+      onStartEdit()
+    }
+  }
+
+  return (
+    // Flat at rest; the hover fill shows the row is clickable. Double-click
+    // its empty part (or right-click anywhere) to type a path.
+    <div
+      className="ml-0.75 flex h-8 min-w-0 flex-1 cursor-text items-center overflow-hidden rounded-control pl-1.5 pr-1 hover:bg-light-hover dark:hover:bg-dark-hover"
+      onDoubleClick={startEditOnEmptyArea}
+    >
+      <FolderGlyph className="mr-1 size-4 shrink-0" />
+      <nav
+        ref={setNavElement}
+        aria-label={`${pane.title} path`}
+        className="flex min-w-0 flex-1 items-center overflow-hidden whitespace-nowrap text-row"
+        onDoubleClick={startEditOnEmptyArea}
+      >
+        {layout.collapsed ? (
+          <span
+            aria-hidden="true"
+            data-testid="breadcrumb-collapse-marker"
+            className={`inline-flex shrink-0 items-center ${TEXT_SECONDARY}`}
+          >
+            <span className="px-1.5">{'…'}</span>
+            <CrumbSeparator />
+          </span>
+        ) : null}
+        {layout.items.map((segment, index) => (
+          <Crumb
+            key={segment.path}
+            paneId={pane.id}
+            segment={segment}
+            isCurrent={index === layout.items.length - 1}
+          />
+        ))}
+      </nav>
+    </div>
+  )
+}
+
+function Crumb({
+  paneId,
+  segment,
+  isCurrent,
+}: {
+  paneId: PaneState['id']
+  segment: LayoutSegment
+  isCurrent: boolean
+}) {
+  const navigatePane = usePanesStore((state) => state.navigatePane)
+  return (
+    <span className="inline-flex shrink-0 items-center">
+      <button
+        type="button"
+        aria-current={isCurrent ? 'location' : undefined}
+        onClick={() => void navigatePane(paneId, segment.path)}
+        title={segment.truncated ? segment.fullLabel : undefined}
+        className={`inline-flex shrink-0 items-center rounded-control px-1.5 py-1 text-row ${FOCUS_RING} ${
+          isCurrent
+            ? 'cursor-default font-semibold text-light-text dark:text-dark-text'
+            : `cursor-pointer ${TEXT_SECONDARY} hover:bg-light-hover active:bg-light-press dark:hover:bg-dark-hover dark:active:bg-dark-press`
+        }`}
+      >
+        <span className="truncate">{segment.label}</span>
+      </button>
+      {isCurrent ? null : <CrumbSeparator />}
+    </span>
   )
 }
 

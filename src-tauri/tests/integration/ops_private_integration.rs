@@ -7,13 +7,23 @@ pub mod ops_single_file_progress_throttle_integration;
 
 #[cfg(test)]
 mod tests {
+    use super::archive::*;
+    use super::conflict::*;
+    use super::copy::*;
+    use super::execution::*;
+    use super::progress::*;
+    use super::scheduler::*;
+    use super::service::*;
     use super::*;
     use std::collections::{HashMap, HashSet, VecDeque};
     use std::io::Cursor;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Condvar;
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
     use tempfile::tempdir;
+    use zip::ZipArchive;
 
     fn item(path: &Path, size_bytes: u64) -> OpItem {
         OpItem {
@@ -612,6 +622,57 @@ mod tests {
             .any(|id| id == "op-1"));
     }
 
+    fn delete_state(status: OpStatus, volume: &str, file: &Path, id: &str) -> OpState {
+        let mut state = operation_state(status, &[volume]);
+        state.kind = OpKind::Delete;
+        state.items = vec![item(file, 4)];
+        state.id = id.to_string();
+        state
+    }
+
+    fn inner_with_completed_then_pending(
+        completed_operation: Arc<Mutex<OpState>>,
+        pending_operation: Arc<Mutex<OpState>>,
+        legacy_busy_volume: &str,
+    ) -> Arc<Mutex<Inner>> {
+        Arc::new(Mutex::new(Inner {
+            ops: HashMap::from([
+                ("op-1".to_string(), completed_operation),
+                ("op-2".to_string(), pending_operation),
+            ]),
+            signals: HashMap::from([
+                ("op-1".to_string(), Arc::new(Condvar::new())),
+                ("op-2".to_string(), Arc::new(Condvar::new())),
+            ]),
+            order: VecDeque::from(["op-1".to_string(), "op-2".to_string()]),
+            busy_volumes: HashSet::from([legacy_busy_volume.to_string()]),
+            workers: Vec::new(),
+        }))
+    }
+
+    fn quiet_runtime(
+        coordinator: &Arc<resource_coordinator::ResourceCoordinator>,
+    ) -> WorkerRuntime {
+        WorkerRuntime {
+            progress: None,
+            conflict: None,
+            removed: None,
+            retention: Duration::from_millis(10),
+            rate_window: Duration::ZERO,
+            instant_now: Arc::new(Instant::now),
+            coordinator: Arc::clone(coordinator),
+        }
+    }
+
+    fn wait_while_pending(operation: &Arc<Mutex<OpState>>, timeout: Duration) {
+        let deadline = std::time::Instant::now() + timeout;
+        while operation.lock().expect("pending lock").status == OpStatus::Pending
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
     #[test]
     fn release_and_reschedule_admits_rescheduled_work_through_the_resource_coordinator() {
         let fixture = tempdir().expect("temp dir");
@@ -620,50 +681,27 @@ mod tests {
         std::fs::write(&completed_file, b"done").expect("completed");
         std::fs::write(&pending_file, b"wait").expect("pending");
 
-        let mut completed_state = operation_state(OpStatus::Completed, &["alpha"]);
-        completed_state.kind = OpKind::Delete;
-        completed_state.items = vec![item(&completed_file, 4)];
-        let mut pending_state = operation_state(OpStatus::Pending, &["beta"]);
-        pending_state.kind = OpKind::Delete;
-        pending_state.items = vec![item(&pending_file, 4)];
-        pending_state.id = "op-2".to_string();
-
-        let completed_operation = Arc::new(Mutex::new(completed_state));
-        let pending_operation = Arc::new(Mutex::new(pending_state));
-
-        let inner = Arc::new(Mutex::new(Inner {
-            ops: HashMap::from([
-                ("op-1".to_string(), completed_operation),
-                ("op-2".to_string(), pending_operation.clone()),
-            ]),
-            signals: HashMap::from([
-                ("op-1".to_string(), Arc::new(Condvar::new())),
-                ("op-2".to_string(), Arc::new(Condvar::new())),
-            ]),
-            order: VecDeque::from(["op-1".to_string(), "op-2".to_string()]),
-            // "beta" is not legacy-busy: `collect_startable` alone would
-            // consider op-2 immediately eligible. The coordinator hold
-            // below is the only thing standing between it and admission,
-            // which is exactly what this test is proving is now honored.
-            busy_volumes: HashSet::from(["alpha".to_string()]),
-            workers: Vec::new(),
-        }));
-
+        let completed_operation = Arc::new(Mutex::new(delete_state(
+            OpStatus::Completed,
+            "alpha",
+            &completed_file,
+            "op-1",
+        )));
+        let pending_operation = Arc::new(Mutex::new(delete_state(
+            OpStatus::Pending,
+            "beta",
+            &pending_file,
+            "op-2",
+        )));
+        let inner = inner_with_completed_then_pending(
+            completed_operation,
+            pending_operation.clone(),
+            "alpha",
+        );
         let coordinator = Arc::new(resource_coordinator::ResourceCoordinator::new());
-        let runtime = WorkerRuntime {
-            progress: None,
-            conflict: None,
-            removed: None,
-            retention: Duration::from_millis(10),
-            rate_window: Duration::ZERO,
-            instant_now: Arc::new(Instant::now),
-            coordinator: Arc::clone(&coordinator),
-        };
+        let runtime = quiet_runtime(&coordinator);
 
-        // Hold "beta"'s only throughput slot directly through the
-        // coordinator before op-2 ever becomes startable, simulating an
-        // unrelated in-flight job on that resource.
-        let hold = coordinator
+        let unrelated_hold_on_beta = coordinator
             .submit(resource_coordinator::JobSpec::new(
                 [resource_coordinator::JobClass::Throughput],
                 ["beta".to_string()],
@@ -672,9 +710,6 @@ mod tests {
 
         release_and_reschedule("op-1", &inner, &runtime);
 
-        // Give the rescheduled dispatch thread every chance to run; if it
-        // bypassed coordinator admission (the bug this test guards against)
-        // op-2 would complete almost immediately despite "beta" being held.
         std::thread::sleep(Duration::from_millis(80));
         assert_eq!(
             pending_operation.lock().expect("pending lock").status,
@@ -687,14 +722,8 @@ mod tests {
             "op-2 must not have run while admission was denied"
         );
 
-        drop(hold);
-
-        let deadline = std::time::Instant::now() + Duration::from_millis(500);
-        while pending_operation.lock().expect("pending lock").status == OpStatus::Pending
-            && std::time::Instant::now() < deadline
-        {
-            std::thread::sleep(Duration::from_millis(5));
-        }
+        drop(unrelated_hold_on_beta);
+        wait_while_pending(&pending_operation, Duration::from_millis(500));
         assert_eq!(
             pending_operation.lock().expect("pending lock").status,
             OpStatus::Completed,

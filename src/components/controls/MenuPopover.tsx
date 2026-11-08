@@ -7,6 +7,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   type Ref,
+  type RefObject,
 } from 'react'
 import { createPortal } from 'react-dom'
 import { CheckIcon } from '@/components/icons'
@@ -43,13 +44,63 @@ type MenuPopoverSharedProps = {
 type MenuPopoverProps = MenuPopoverSharedProps &
   ({ items: MenuPopoverRadioItem[]; radio: true } | { items: MenuPopoverItem[]; radio?: false })
 
-/**
- * A compact, trigger-anchored menu for toolbar controls. It intentionally owns
- * its keyboard and focus lifecycle so callers only describe actions.
- */
-export function MenuPopover({ ariaLabel, trigger, items, radio = false }: MenuPopoverProps) {
+const MENU_OPENING_KEYS = ['ArrowDown', 'ArrowUp', 'Home', 'End']
+
+function useMenuPlacement(
+  open: boolean,
+  menuRef: RefObject<HTMLDivElement | null>,
+  triggerRef: RefObject<HTMLButtonElement | null>,
+) {
+  useLayoutEffect(() => {
+    const menu = menuRef.current
+    const trigger = triggerRef.current
+    if (!open || !menu || !trigger) return
+
+    const geometry = placePopoverAtTrigger(
+      trigger.getBoundingClientRect(),
+      menu.getBoundingClientRect(),
+    )
+    applyMenuGeometry(menu, toZoomedGeometry(geometry, documentZoom()))
+  }, [open, menuRef, triggerRef])
+}
+
+function initialFocusIndex(items: MenuPopoverItem[], radio: boolean, enabledIndexes: number[]) {
+  const checkedIndex = radio
+    ? (items as MenuPopoverRadioItem[]).findIndex((item) => item.checked)
+    : -1
+  return checkedIndex >= 0 ? checkedIndex : (enabledIndexes[0] ?? 0)
+}
+
+type MenuFocusControls = {
+  itemRefs: RefObject<Array<HTMLButtonElement | null>>
+  enabledIndexes: () => number[]
+  focusItem: (index: number) => void
+  closeAndRestoreFocus: () => void
+}
+
+function handleMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>, controls: MenuFocusControls) {
+  if (event.key === 'Tab') {
+    controls.closeAndRestoreFocus()
+    return
+  }
+  const currentIndex = controls.itemRefs.current.findIndex(
+    (item) => item === document.activeElement,
+  )
+  const indexes = controls.enabledIndexes()
+  const currentPosition = indexes.indexOf(currentIndex)
+  const focusEnabledAt = (position: number) =>
+    controls.focusItem(indexes[(position + indexes.length) % indexes.length] ?? 0)
+  handleKeyByTable(event, {
+    Escape: () => controls.closeAndRestoreFocus(),
+    ArrowDown: () => focusEnabledAt(currentPosition + 1),
+    ArrowUp: () => focusEnabledAt(currentPosition - 1),
+    Home: () => focusEnabledAt(0),
+    End: () => focusEnabledAt(-1),
+  })
+}
+
+function useMenuPopoverState(items: MenuPopoverItem[], radio: boolean) {
   const [open, setOpen] = useState(false)
-  const menuId = useId()
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([])
@@ -64,17 +115,7 @@ export function MenuPopover({ ariaLabel, trigger, items, radio = false }: MenuPo
 
   function openMenu() {
     setOpen(true)
-    requestAnimationFrame(() => {
-      const checkedIndex = radio
-        ? (items as MenuPopoverRadioItem[]).findIndex((item) => item.checked)
-        : -1
-      focusItem(checkedIndex >= 0 ? checkedIndex : (enabledIndexes()[0] ?? 0))
-    })
-  }
-
-  function toggleMenu() {
-    if (open) closeAndRestoreFocus()
-    else openMenu()
+    requestAnimationFrame(() => focusItem(initialFocusIndex(items, radio, enabledIndexes())))
   }
 
   useEffect(() => {
@@ -88,39 +129,31 @@ export function MenuPopover({ ariaLabel, trigger, items, radio = false }: MenuPo
     return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [open])
 
-  useLayoutEffect(() => {
-    const menu = menuRef.current
-    const trigger = triggerRef.current
-    if (!open || !menu || !trigger) return
+  useMenuPlacement(open, menuRef, triggerRef)
 
-    const geometry = placePopoverAtTrigger(
-      trigger.getBoundingClientRect(),
-      menu.getBoundingClientRect(),
-    )
-    applyMenuGeometry(menu, toZoomedGeometry(geometry, documentZoom()))
-  }, [open])
+  const focusControls = { itemRefs, enabledIndexes, focusItem, closeAndRestoreFocus }
+  return { open, triggerRef, menuRef, focusControls, openMenu }
+}
 
-  function onMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
-    if (event.key === 'Tab') {
+/**
+ * A compact, trigger-anchored menu for toolbar controls. It intentionally owns
+ * its keyboard and focus lifecycle so callers only describe actions.
+ */
+export function MenuPopover({ ariaLabel, trigger, items, radio = false }: MenuPopoverProps) {
+  const menuId = useId()
+  const { open, triggerRef, menuRef, focusControls, openMenu } = useMenuPopoverState(items, radio)
+  const { itemRefs, closeAndRestoreFocus } = focusControls
+
+  function toggleMenu() {
+    if (open) {
       closeAndRestoreFocus()
       return
     }
-    const currentIndex = itemRefs.current.findIndex((item) => item === document.activeElement)
-    const indexes = enabledIndexes()
-    const currentPosition = indexes.indexOf(currentIndex)
-    const focusEnabledAt = (position: number) =>
-      focusItem(indexes[(position + indexes.length) % indexes.length] ?? 0)
-    handleKeyByTable(event, {
-      Escape: () => closeAndRestoreFocus(),
-      ArrowDown: () => focusEnabledAt(currentPosition + 1),
-      ArrowUp: () => focusEnabledAt(currentPosition - 1),
-      Home: () => focusEnabledAt(0),
-      End: () => focusEnabledAt(-1),
-    })
+    openMenu()
   }
 
   function onTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
-    if (!open && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+    if (!open && MENU_OPENING_KEYS.includes(event.key)) {
       event.preventDefault()
       openMenu()
     }
@@ -142,45 +175,58 @@ export function MenuPopover({ ariaLabel, trigger, items, radio = false }: MenuPo
               id={menuId}
               role="menu"
               aria-label={ariaLabel}
-              onKeyDown={onMenuKeyDown}
+              onKeyDown={(event) => handleMenuKeyDown(event, focusControls)}
               className="fixed z-30 w-menu rounded-overlay border border-light-flyout-stroke bg-light-card p-1 shadow-light-flyout dark:border-dark-flyout-stroke dark:bg-dark-card dark:shadow-dark-flyout"
             >
-              {items.map((item, index) => {
-                const radioItem = item as MenuPopoverRadioItem
-                return (
-                  <button
-                    key={item.id}
-                    ref={(element) => {
-                      itemRefs.current[index] = element
-                    }}
-                    type="button"
-                    role={radio ? 'menuitemradio' : 'menuitem'}
-                    aria-checked={radio ? radioItem.checked : undefined}
-                    disabled={item.disabled}
-                    onClick={() => {
-                      item.onSelect()
-                      closeAndRestoreFocus()
-                    }}
-                    className={`flex h-8 w-full cursor-pointer items-center gap-3 whitespace-nowrap rounded-control px-3 text-left text-row text-light-text hover:bg-light-hover active:bg-light-press disabled:cursor-not-allowed disabled:text-light-text-disabled dark:text-dark-text dark:hover:bg-dark-hover dark:active:bg-dark-press dark:disabled:text-dark-text-disabled ${FOCUS_RING_INSET}`}
-                  >
-                    <span
-                      className="flex size-4 shrink-0 items-center justify-center"
-                      aria-hidden="true"
-                    >
-                      {radio && radioItem.checked ? (
-                        <CheckIcon className="size-3.5 text-light-accent dark:text-dark-accent" />
-                      ) : (
-                        item.icon
-                      )}
-                    </span>
-                    {item.label}
-                  </button>
-                )
-              })}
+              {items.map((item, index) => (
+                <MenuPopoverItemButton
+                  key={item.id}
+                  item={item}
+                  radio={radio}
+                  itemRef={(element) => {
+                    itemRefs.current[index] = element
+                  }}
+                  onChosen={closeAndRestoreFocus}
+                />
+              ))}
             </div>,
             document.body,
           )
         : null}
     </div>
+  )
+}
+
+type MenuPopoverItemButtonProps = {
+  item: MenuPopoverItem
+  radio: boolean
+  itemRef: (element: HTMLButtonElement | null) => void
+  onChosen: () => void
+}
+
+function MenuPopoverItemButton({ item, radio, itemRef, onChosen }: MenuPopoverItemButtonProps) {
+  const radioItem = item as MenuPopoverRadioItem
+  return (
+    <button
+      ref={itemRef}
+      type="button"
+      role={radio ? 'menuitemradio' : 'menuitem'}
+      aria-checked={radio ? radioItem.checked : undefined}
+      disabled={item.disabled}
+      onClick={() => {
+        item.onSelect()
+        onChosen()
+      }}
+      className={`flex h-8 w-full cursor-pointer items-center gap-3 whitespace-nowrap rounded-control px-3 text-left text-row text-light-text hover:bg-light-hover active:bg-light-press disabled:cursor-not-allowed disabled:text-light-text-disabled dark:text-dark-text dark:hover:bg-dark-hover dark:active:bg-dark-press dark:disabled:text-dark-text-disabled ${FOCUS_RING_INSET}`}
+    >
+      <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
+        {radio && radioItem.checked ? (
+          <CheckIcon className="size-3.5 text-light-accent dark:text-dark-accent" />
+        ) : (
+          item.icon
+        )}
+      </span>
+      {item.label}
+    </button>
   )
 }

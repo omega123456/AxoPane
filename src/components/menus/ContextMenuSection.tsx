@@ -148,6 +148,52 @@ function ContextSubmenu({
   )
 }
 
+function useSubmenuPosition(openSubmenuItem: ContextMenuSubmenuRowItem | undefined) {
+  const submenuRef = useRef<HTMLDivElement | null>(null)
+  const [openSubmenuAnchor, setOpenSubmenuAnchor] = useState<HTMLButtonElement | null>(null)
+  const [openSubmenuPosition, setOpenSubmenuPosition] = useState<SubmenuPosition | null>(null)
+
+  useLayoutEffect(() => {
+    const submenu = submenuRef.current
+    if (!openSubmenuAnchor || !submenu || !openSubmenuItem) {
+      setOpenSubmenuPosition(null)
+      return
+    }
+
+    const next = measureSubmenuPosition(openSubmenuAnchor, submenu)
+    setOpenSubmenuPosition((current) => (sameSubmenuPosition(current, next) ? current : next))
+  }, [openSubmenuAnchor, openSubmenuItem])
+
+  return { submenuRef, setOpenSubmenuAnchor, openSubmenuPosition }
+}
+
+function SectionRow({
+  item,
+  active,
+  submenuOpen,
+  onSubmenuAnchor,
+  onHoverItem,
+  onActivateItem,
+}: {
+  item: ContextMenuSectionModel['rows'][number]
+  active: boolean
+  submenuOpen: boolean
+  onSubmenuAnchor: (anchor: HTMLButtonElement | null) => void
+  onHoverItem: (itemId: string) => void
+  onActivateItem: (itemId: string) => void
+}) {
+  return (
+    <ContextMenuRow
+      item={item}
+      active={active}
+      submenuOpen={submenuOpen}
+      buttonRef={submenuOpen ? onSubmenuAnchor : undefined}
+      onPointerEnter={() => onHoverItem(item.id)}
+      onActivate={() => onActivateItem(item.id)}
+    />
+  )
+}
+
 export function ContextMenuSection({
   section,
   showDivider,
@@ -165,26 +211,13 @@ export function ContextMenuSection({
   onActivateItem: (itemId: string) => void
   nativeState?: NativeSectionState
 }) {
-  const submenuRef = useRef<HTMLDivElement | null>(null)
-  const [openSubmenuAnchor, setOpenSubmenuAnchor] = useState<HTMLButtonElement | null>(null)
-  const [openSubmenuPosition, setOpenSubmenuPosition] = useState<SubmenuPosition | null>(null)
   const nativePlaceholder = nativePlaceholderFor(nativeState, section.rows.length > 0)
-
   const openSubmenuItem = section.rows.find(
     (item): item is ContextMenuSubmenuRowItem =>
       isContextMenuSubmenuRow(item) && item.id === openSubmenuId,
   )
-
-  useLayoutEffect(() => {
-    const submenu = submenuRef.current
-    if (!openSubmenuAnchor || !submenu || !openSubmenuItem) {
-      setOpenSubmenuPosition(null)
-      return
-    }
-
-    const next = measureSubmenuPosition(openSubmenuAnchor, submenu)
-    setOpenSubmenuPosition((current) => (sameSubmenuPosition(current, next) ? current : next))
-  }, [openSubmenuAnchor, openSubmenuItem])
+  const { submenuRef, setOpenSubmenuAnchor, openSubmenuPosition } =
+    useSubmenuPosition(openSubmenuItem)
 
   if (nativePlaceholder === 'hidden') {
     return null
@@ -196,21 +229,17 @@ export function ContextMenuSection({
       {/* The menu's 4px side padding lives here so dividers can span edge to edge. */}
       <div className="px-1">
         {nativePlaceholders[nativePlaceholder](Boolean(nativeState?.placeholderVisible))}
-        {section.rows.map((item) => {
-          const submenuOpen = isContextMenuSubmenuRow(item) && item.id === openSubmenuId
-
-          return (
-            <ContextMenuRow
-              key={item.id}
-              item={item}
-              active={item.id === activeItemId}
-              submenuOpen={submenuOpen}
-              buttonRef={submenuOpen ? setOpenSubmenuAnchor : undefined}
-              onPointerEnter={() => onHoverItem(item.id)}
-              onActivate={() => onActivateItem(item.id)}
-            />
-          )
-        })}
+        {section.rows.map((item) => (
+          <SectionRow
+            key={item.id}
+            item={item}
+            active={item.id === activeItemId}
+            submenuOpen={isContextMenuSubmenuRow(item) && item.id === openSubmenuId}
+            onSubmenuAnchor={setOpenSubmenuAnchor}
+            onHoverItem={onHoverItem}
+            onActivateItem={onActivateItem}
+          />
+        ))}
       </div>
       {openSubmenuItem ? (
         <ContextSubmenu

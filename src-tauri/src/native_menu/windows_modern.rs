@@ -49,7 +49,7 @@ use crate::native_menu::windows_shell::{
 use crate::win32::wide_nul;
 
 use windows::core::{Interface, GUID, PCWSTR, PWSTR};
-use windows::Win32::Foundation::ERROR_SUCCESS;
+use windows::Win32::Foundation::{ERROR_SUCCESS, WIN32_ERROR};
 use windows::Win32::Storage::Packaging::Appx::GetPackagePathByFullName;
 use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_ALL};
 use windows::Win32::System::Registry::{
@@ -58,8 +58,8 @@ use windows::Win32::System::Registry::{
 };
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
-    IExplorerCommand, IShellItemArray, SHCreateShellItemArrayFromIDLists, ECF_HASSUBCOMMANDS,
-    ECS_DISABLED, ECS_HIDDEN,
+    IEnumExplorerCommand, IExplorerCommand, IShellItemArray, SHCreateShellItemArrayFromIDLists,
+    ECF_HASSUBCOMMANDS, ECS_DISABLED, ECS_HIDDEN,
 };
 
 const MAX_SUBMENU_DEPTH: usize = 1;
@@ -169,31 +169,31 @@ fn resolve_subcommand(
 ) -> windows::core::Result<IExplorerCommand> {
     let mut current = command.clone();
     for target_index in command_path {
-        let enumerator = unsafe { current.EnumSubCommands()? };
-        let mut found = None;
-        let mut index = 0u32;
-        loop {
-            let mut fetched = [const { None }; 1];
-            let mut count = 0u32;
-            let _ = unsafe { enumerator.Next(&mut fetched, Some(&mut count)) };
-            if count == 0 {
-                break;
-            }
-            let Some(child) = fetched[0].take() else {
-                break;
-            };
-            if is_hidden(&child, array) {
-                continue;
-            }
-            if index == *target_index {
-                found = Some(child);
-                break;
-            }
-            index += 1;
-        }
-        current = found.ok_or_else(windows::core::Error::empty)?;
+        current = visible_subcommand_at(&current, array, *target_index)?;
     }
     Ok(current)
+}
+
+fn visible_subcommand_at(
+    command: &IExplorerCommand,
+    array: &IShellItemArray,
+    target_index: u32,
+) -> windows::core::Result<IExplorerCommand> {
+    let enumerator = unsafe { command.EnumSubCommands()? };
+    std::iter::from_fn(|| next_subcommand(&enumerator))
+        .filter(|child| !is_hidden(child, array))
+        .nth(target_index as usize)
+        .ok_or_else(windows::core::Error::empty)
+}
+
+fn next_subcommand(enumerator: &IEnumExplorerCommand) -> Option<IExplorerCommand> {
+    let mut fetched = [const { None }; 1];
+    let mut count = 0u32;
+    let _ = unsafe { enumerator.Next(&mut fetched, Some(&mut count)) };
+    if count == 0 {
+        return None;
+    }
+    fetched[0].take()
 }
 
 /// Builds a single menu item (and, to depth 1, its subcommands) from a command.
@@ -415,14 +415,15 @@ fn discover_packaged_handlers() -> Vec<HandlerRegistration> {
         let associations = manifest_cache
             .entry(package.clone())
             .or_insert_with(|| package_associations(&package));
-        if let Some(item_types) = associations.get(&clsid) {
-            if !item_types.is_empty() {
-                handlers.push(HandlerRegistration {
-                    clsid,
-                    packaged: true,
-                    item_types: item_types.clone(),
-                });
-            }
+        let item_types = associations
+            .get(&clsid)
+            .filter(|item_types| !item_types.is_empty());
+        if let Some(item_types) = item_types {
+            handlers.push(HandlerRegistration {
+                clsid,
+                packaged: true,
+                item_types: item_types.clone(),
+            });
         }
     }
 
@@ -557,18 +558,13 @@ fn explorer_command_handlers_for_class(class: &str) -> Vec<u128> {
         return Vec::new();
     };
 
-    let mut clsids = Vec::new();
-    for verb in shell_key.subkeys() {
-        let Some(verb_key) = shell_key.open_sub(&verb) else {
-            continue;
-        };
-        if let Some(value) = verb_key.read_sz("ExplorerCommandHandler") {
-            if let Some(clsid) = parse_guid_u128(&value) {
-                clsids.push(clsid);
-            }
-        }
-    }
-    clsids
+    shell_key
+        .subkeys()
+        .into_iter()
+        .filter_map(|verb| shell_key.open_sub(&verb))
+        .filter_map(|verb_key| verb_key.read_sz("ExplorerCommandHandler"))
+        .filter_map(|value| parse_guid_u128(&value))
+        .collect()
 }
 
 /// Resolves unpackaged handlers registered against the selection's specific
@@ -590,24 +586,23 @@ fn per_query_extension_handlers(request: &LoadNativeMenuRequest) -> Vec<HandlerR
 
     let mut handlers = Vec::new();
     for extension in extensions {
-        for clsid in explorer_command_handlers_for_class(&extension) {
-            handlers.push(HandlerRegistration {
-                clsid,
-                packaged: false,
-                item_types: HashSet::from([extension.clone()]),
-            });
-        }
-        if let Some(progid) = class_default_value(&extension) {
-            for clsid in explorer_command_handlers_for_class(&progid) {
-                handlers.push(HandlerRegistration {
-                    clsid,
-                    packaged: false,
-                    item_types: HashSet::from([extension.clone()]),
-                });
-            }
+        let classes = std::iter::once(extension.clone()).chain(class_default_value(&extension));
+        for class in classes {
+            let class_handlers = explorer_command_handlers_for_class(&class)
+                .into_iter()
+                .map(|clsid| unpackaged_handler(clsid, &extension));
+            handlers.extend(class_handlers);
         }
     }
     handlers
+}
+
+fn unpackaged_handler(clsid: u128, extension: &str) -> HandlerRegistration {
+    HandlerRegistration {
+        clsid,
+        packaged: false,
+        item_types: HashSet::from([extension.to_string()]),
+    }
 }
 
 fn class_default_value(class: &str) -> Option<String> {
@@ -661,57 +656,15 @@ impl RegKey {
     }
 
     fn subkeys(&self) -> Vec<String> {
-        let mut names = Vec::new();
-        let mut index = 0u32;
-        loop {
-            let mut buffer = [0u16; REGISTRY_KEY_NAME_UNITS];
-            let mut length = buffer.len() as u32;
-            let result = unsafe {
-                RegEnumKeyExW(
-                    self.0,
-                    index,
-                    Some(PWSTR(buffer.as_mut_ptr())),
-                    &mut length,
-                    None,
-                    None,
-                    None,
-                    None,
-                )
-            };
-            if result != ERROR_SUCCESS {
-                break;
-            }
-            names.push(String::from_utf16_lossy(&buffer[..length as usize]));
-            index += 1;
-        }
-        names
+        enumerate_registry_names::<REGISTRY_KEY_NAME_UNITS>(|index, buffer, length| unsafe {
+            RegEnumKeyExW(self.0, index, Some(buffer), length, None, None, None, None)
+        })
     }
 
     fn value_names(&self) -> Vec<String> {
-        let mut names = Vec::new();
-        let mut index = 0u32;
-        loop {
-            let mut buffer = [0u16; REGISTRY_VALUE_NAME_UNITS];
-            let mut length = buffer.len() as u32;
-            let result = unsafe {
-                RegEnumValueW(
-                    self.0,
-                    index,
-                    Some(PWSTR(buffer.as_mut_ptr())),
-                    &mut length,
-                    None,
-                    None,
-                    None,
-                    None,
-                )
-            };
-            if result != ERROR_SUCCESS {
-                break;
-            }
-            names.push(String::from_utf16_lossy(&buffer[..length as usize]));
-            index += 1;
-        }
-        names
+        enumerate_registry_names::<REGISTRY_VALUE_NAME_UNITS>(|index, buffer, length| unsafe {
+            RegEnumValueW(self.0, index, Some(buffer), length, None, None, None, None)
+        })
     }
 
     fn read_sz(&self, name: &str) -> Option<String> {
@@ -762,4 +715,25 @@ impl Drop for RegKey {
     fn drop(&mut self) {
         let _ = unsafe { RegCloseKey(self.0) };
     }
+}
+
+fn enumerate_registry_names<const NAME_UNITS: usize>(
+    read_name_at: impl Fn(u32, PWSTR, &mut u32) -> WIN32_ERROR,
+) -> Vec<String> {
+    (0u32..)
+        .map_while(|index| read_registry_name::<NAME_UNITS>(index, &read_name_at))
+        .collect()
+}
+
+fn read_registry_name<const NAME_UNITS: usize>(
+    index: u32,
+    read_name_at: &impl Fn(u32, PWSTR, &mut u32) -> WIN32_ERROR,
+) -> Option<String> {
+    let mut buffer = [0u16; NAME_UNITS];
+    let mut length = buffer.len() as u32;
+    let result = read_name_at(index, PWSTR(buffer.as_mut_ptr()), &mut length);
+    if result != ERROR_SUCCESS {
+        return None;
+    }
+    Some(String::from_utf16_lossy(&buffer[..length as usize]))
 }

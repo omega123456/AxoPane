@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import {
   CheckCircleIcon,
   ChevronUpIcon,
@@ -18,6 +17,7 @@ import { FOCUS_RING } from '@/lib/focus-ring'
 import { fractionToPercent } from '@/lib/numbers'
 import { operationVerbs } from '@/lib/queue-format'
 import { TEXT_SECONDARY } from '@/lib/class-names'
+import { useOrderedOperations } from './use-ordered-operations'
 
 const kindIcons: Record<OpKind, typeof CopyIcon> = {
   copy: CopyIcon,
@@ -106,17 +106,32 @@ function summarize(operations: OpProgress[]) {
   return finishedSummary(active, operations) ?? activeSummary(active)
 }
 
+type QueueSummary = ReturnType<typeof summarize>
+
+const summaryTones = {
+  failed: 'danger',
+  done: 'success',
+  cancelled: 'neutral',
+  active: 'accent',
+} as const satisfies Record<QueueSummary['icon'], string>
+
+function SummaryIcon({ summary }: { summary: QueueSummary }) {
+  if (summary.icon === 'active') {
+    const KindIcon = kindIcons[summary.kind]
+    return <KindIcon className="size-4 shrink-0 text-light-accent dark:text-dark-accent" />
+  }
+  if (summary.icon === 'done') {
+    return <CheckCircleIcon className="size-4 shrink-0 text-light-success dark:text-dark-success" />
+  }
+  if (summary.icon === 'failed') {
+    return <XCircleIcon className="size-4 shrink-0 text-light-danger dark:text-dark-danger" />
+  }
+  return <XCircleIcon className={`size-4 shrink-0 ${TEXT_SECONDARY}`} />
+}
+
 /** The collapsed queue: one line with a progress bar along its bottom edge. */
 export function QueueToast() {
-  const order = useQueueStore((state) => state.order)
-  const operationsMap = useQueueStore((state) => state.operations)
-  const operations = useMemo(
-    () =>
-      order
-        .map((id) => operationsMap[id])
-        .filter((operation): operation is OpProgress => operation !== undefined),
-    [order, operationsMap],
-  )
+  const operations = useOrderedOperations()
   const expand = useQueueStore((state) => state.setExpanded)
   const dismissOperation = useQueueStore((state) => state.dismissOperation)
 
@@ -128,20 +143,11 @@ export function QueueToast() {
       }
     }
   }
-  const KindIcon = summary.icon === 'active' ? kindIcons[summary.kind] : null
 
   return (
     <div className="grid w-queue-mini gap-2 rounded-overlay border border-light-flyout-stroke bg-light-card pl-3.5 pr-2 pt-2.5 text-light-text shadow-light-flyout dark:border-dark-flyout-stroke dark:bg-dark-card dark:text-dark-text dark:shadow-dark-flyout">
       <div className="flex items-center gap-2.5 text-row">
-        {KindIcon ? (
-          <KindIcon className="size-4 shrink-0 text-light-accent dark:text-dark-accent" />
-        ) : summary.icon === 'done' ? (
-          <CheckCircleIcon className="size-4 shrink-0 text-light-success dark:text-dark-success" />
-        ) : summary.icon === 'failed' ? (
-          <XCircleIcon className="size-4 shrink-0 text-light-danger dark:text-dark-danger" />
-        ) : (
-          <XCircleIcon className={`size-4 shrink-0 ${TEXT_SECONDARY}`} />
-        )}
+        <SummaryIcon summary={summary} />
         <button
           type="button"
           onClick={() => expand(true)}
@@ -177,15 +183,7 @@ export function QueueToast() {
       <ProgressBar
         value={summary.percent}
         label={summary.label}
-        tone={
-          summary.icon === 'failed'
-            ? 'danger'
-            : summary.icon === 'done'
-              ? 'success'
-              : summary.icon === 'cancelled'
-                ? 'neutral'
-                : 'accent'
-        }
+        tone={summaryTones[summary.icon]}
         className="mr-1.5 rounded-b-none"
       />
     </div>

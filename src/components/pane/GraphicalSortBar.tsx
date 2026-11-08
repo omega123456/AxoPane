@@ -1,3 +1,4 @@
+import type { ComponentProps } from 'react'
 import { ChevronDownIcon } from '@/components/icons'
 import { MenuPopover, type MenuPopoverRadioItem } from '@/components/controls'
 import { columnDefinitions } from '@/lib/columns'
@@ -9,6 +10,55 @@ import { TEXT_SECONDARY } from '@/lib/class-names'
 
 const sortKeys: SortKey[] = ['name', 'size', 'items', 'type', 'modified', 'created']
 
+const directionLabels = { asc: 'Ascending', desc: 'Descending' } as const
+
+type SortTriggerProps = Parameters<ComponentProps<typeof MenuPopover>['trigger']>[0] & {
+  ariaLabel: string
+  label: string
+}
+
+function SortTrigger({
+  ref,
+  expanded,
+  controls,
+  toggle,
+  onTriggerKeyDown,
+  ariaLabel,
+  label,
+}: SortTriggerProps) {
+  return (
+    <button
+      ref={ref}
+      type="button"
+      aria-label={ariaLabel}
+      aria-haspopup="menu"
+      aria-expanded={expanded}
+      aria-controls={controls}
+      onClick={toggle}
+      onKeyDown={onTriggerKeyDown}
+      className={`inline-flex items-center gap-1 rounded-control px-2 py-1 hover:bg-light-hover dark:hover:bg-dark-hover ${FOCUS_RING}`}
+    >
+      {label}
+      <ChevronDownIcon className="size-3" />
+    </button>
+  )
+}
+
+function directionItem(
+  pane: PaneState,
+  direction: PaneState['sortDirection'],
+  setSort: (paneId: PaneState['id'], key: SortKey) => unknown,
+): MenuPopoverRadioItem {
+  return {
+    id: direction,
+    label: directionLabels[direction],
+    checked: pane.sortDirection === direction,
+    onSelect: () => {
+      if (pane.sortDirection !== direction) void setSort(pane.id, pane.sortKey)
+    },
+  }
+}
+
 export function GraphicalSortBar({ pane }: { pane: PaneState }) {
   const setSort = usePanesStore((state) => state.setSort)
   const fields: MenuPopoverRadioItem[] = sortKeys.map((key) => ({
@@ -19,24 +69,9 @@ export function GraphicalSortBar({ pane }: { pane: PaneState }) {
       if (key !== pane.sortKey) void setSort(pane.id, key)
     },
   }))
-  const directions: MenuPopoverRadioItem[] = [
-    {
-      id: 'asc',
-      label: 'Ascending',
-      checked: pane.sortDirection === 'asc',
-      onSelect: () => {
-        if (pane.sortDirection !== 'asc') void setSort(pane.id, pane.sortKey)
-      },
-    },
-    {
-      id: 'desc',
-      label: 'Descending',
-      checked: pane.sortDirection === 'desc',
-      onSelect: () => {
-        if (pane.sortDirection !== 'desc') void setSort(pane.id, pane.sortKey)
-      },
-    },
-  ]
+  const directions = [directionItem(pane, 'asc', setSort), directionItem(pane, 'desc', setSort)]
+  const fieldLabel = columnDefinitions[pane.sortKey].label
+  const directionLabel = directionLabels[pane.sortDirection]
   return (
     <div
       className={`flex h-headrow items-center gap-2 border-b border-light-divider px-2.75 text-caption ${TEXT_SECONDARY} dark:border-dark-divider`}
@@ -46,42 +81,24 @@ export function GraphicalSortBar({ pane }: { pane: PaneState }) {
         ariaLabel="Sort field"
         radio
         items={fields}
-        trigger={({ ref, expanded, controls, toggle, onTriggerKeyDown }) => (
-          <button
-            ref={ref}
-            type="button"
-            aria-label={`Sort field: ${columnDefinitions[pane.sortKey].label}`}
-            aria-haspopup="menu"
-            aria-expanded={expanded}
-            aria-controls={controls}
-            onClick={toggle}
-            onKeyDown={onTriggerKeyDown}
-            className={`inline-flex items-center gap-1 rounded-control px-2 py-1 hover:bg-light-hover dark:hover:bg-dark-hover ${FOCUS_RING}`}
-          >
-            {columnDefinitions[pane.sortKey].label}
-            <ChevronDownIcon className="size-3" />
-          </button>
+        trigger={(triggerProps) => (
+          <SortTrigger
+            {...triggerProps}
+            ariaLabel={`Sort field: ${fieldLabel}`}
+            label={fieldLabel}
+          />
         )}
       />
       <MenuPopover
         ariaLabel="Sort direction"
         radio
         items={directions}
-        trigger={({ ref, expanded, controls, toggle, onTriggerKeyDown }) => (
-          <button
-            ref={ref}
-            type="button"
-            aria-label={`Sort direction: ${pane.sortDirection === 'asc' ? 'Ascending' : 'Descending'}`}
-            aria-haspopup="menu"
-            aria-expanded={expanded}
-            aria-controls={controls}
-            onClick={toggle}
-            onKeyDown={onTriggerKeyDown}
-            className={`inline-flex items-center gap-1 rounded-control px-2 py-1 hover:bg-light-hover dark:hover:bg-dark-hover ${FOCUS_RING}`}
-          >
-            {pane.sortDirection === 'asc' ? 'Ascending' : 'Descending'}
-            <ChevronDownIcon className="size-3" />
-          </button>
+        trigger={(triggerProps) => (
+          <SortTrigger
+            {...triggerProps}
+            ariaLabel={`Sort direction: ${directionLabel}`}
+            label={directionLabel}
+          />
         )}
       />
     </div>

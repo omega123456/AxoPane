@@ -1,4 +1,13 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Key,
+  type MouseEvent,
+  type RefObject,
+} from 'react'
 import { TreeNode, type TreeRowActions } from './TreeNode'
 import { TrashTreeRow } from './TrashTreeRow'
 import { TreeFoldRow } from './TreeFoldRow'
@@ -10,7 +19,7 @@ import { buildTreeFlatModel, treeRowHeight, type TreeFlatRow } from '@/lib/tree-
 import { buildStickyChain, capStickyChain } from '@/lib/tree-sticky'
 import { useElementVirtualizer } from '@/lib/use-element-virtualizer'
 import { useLayoutStore } from '@/stores/layout-store'
-import { usePanesStore } from '@/stores/panes-store'
+import { usePanesStore, type TreeNodeState } from '@/stores/panes-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
 import { SCROLLBAR_THIN } from '@/lib/class-names'
 
@@ -20,34 +29,68 @@ function rowKey(row: TreeFlatRow): string {
   return row.renderKey
 }
 
-export function FolderTree() {
+function openTreeContextMenu(title: string, path: string, event: MouseEvent) {
+  event.preventDefault()
+  const paneId = usePanesStore.getState().activePaneId
+  useContextMenuStore.getState().openMenu({
+    paneId,
+    title,
+    chip: 'DIR',
+    x: event.clientX,
+    y: event.clientY,
+    ...buildContextMenuContent(paneId, { kind: 'tree', path }, detectPlatformOs()),
+  })
+}
+
+function navigateActivePane(path: string) {
+  const panes = usePanesStore.getState()
+  void panes.navigatePane(panes.activePaneId, path)
+}
+
+function openTabInActivePane(path: string) {
+  const panes = usePanesStore.getState()
+  void panes.openTabFromPath(panes.activePaneId, path)
+}
+
+/**
+ * `TreeNode`/`TrashTreeRow` are memoized; these stable handler objects are
+ * what let them skip re-rendering. Every handler reads current store state.
+ */
+const treeRowActions: TreeRowActions = {
+  onToggle: (path) => void usePanesStore.getState().toggleTreeNode(path),
+  onNavigate: navigateActivePane,
+  onOpenTab: openTabInActivePane,
+  onContextMenu: (node, event) => openTreeContextMenu(node.name, node.path, event),
+}
+
+const trashRowActions = {
+  onNavigate: () => navigateActivePane(TRASH_PATH),
+  onOpenTab: () => openTabInActivePane(TRASH_PATH),
+  onContextMenu: (event: MouseEvent) => {
+    const trashLabel = detectPlatformOs() === 'windows' ? 'Recycle Bin' : 'Trash'
+    openTreeContextMenu(trashLabel, TRASH_PATH, event)
+  },
+}
+
+const ROW_LAYER_CLASS_NAME =
+  'absolute inset-x-0 overflow-hidden bg-light-base dark:bg-dark-base mica:bg-transparent'
+
+type PinnedRow = { path: string; chainIndex: number; top: number }
+
+/**
+ * One flat, virtualization-ready model spanning every category, volume subtree
+ * and the trash row. The ancestor chain (volume root -> active node) drives both
+ * the folding of the tree along the active path and the pinned breadcrumb
+ * overlay, which pins the capped chain as the user scrolls past each ancestor.
+ */
+function useTreeModel(activePath: string) {
   const volumes = usePanesStore((state) => state.volumes)
-  const revealPath = usePanesStore((state) => state.revealPath)
-  const activePaneId = usePanesStore((state) => state.activePaneId)
-  const activePath = usePanesStore((state) => state.panes[activePaneId].path)
   const treeNodes = usePanesStore((state) => state.treeNodes)
   const treeFold = usePanesStore((state) => state.treeFold)
-  const toggleTreeNode = usePanesStore((state) => state.toggleTreeNode)
-  const navigatePane = usePanesStore((state) => state.navigatePane)
-  const openTabFromPath = usePanesStore((state) => state.openTabFromPath)
-  const openMenu = useContextMenuStore((state) => state.openMenu)
-  const treeWidthPx = useLayoutStore((state) => state.treeWidthPx)
-
-  const scrollRef = useRef<HTMLDivElement | null>(null)
-  // Live scroll offset, held in component state (not just a ref) because the
-  // pinned-ancestor overlay below must re-render as it changes to decide which
-  // ancestors are pinned. Only the ~visible window of rows is mounted, so this
-  // per-frame re-render stays cheap - unlike the main pane, which keeps scroll
-  // in a ref precisely to avoid re-rendering its (unvirtualized-key) rows.
-  const [scrollTop, setScrollTop] = useState(0)
-
-  // The ancestor chain (volume root -> active node). It drives both the folding
-  // of the tree along the active path and the pinned breadcrumb overlay below.
   const stickyChain = useMemo(
     () => buildStickyChain(treeNodes, activePath),
     [treeNodes, activePath],
   )
-
   const platform = detectPlatformOs()
   const fold = useMemo(
     () => ({
@@ -57,25 +100,27 @@ export function FolderTree() {
     }),
     [stickyChain, treeFold],
   )
-
-  // One flat, virtualization-ready model spanning every category, volume subtree
-  // and the trash row. Rebuilt only when the underlying tree/volumes change.
-  const { rows, offsets, indexByPath } = useMemo(
+  const model = useMemo(
     () => buildTreeFlatModel(treeNodes, volumes, fold, platform),
     [treeNodes, volumes, fold, platform],
   )
-  const isMacOs = platform === 'macos'
-  const rowLayerClassName =
-    'absolute inset-x-0 overflow-hidden bg-light-base dark:bg-dark-base mica:bg-transparent'
-
-  // The capped chain pins to the top of the scroll area as the user scrolls past
-  // each ancestor - an editor-style "sticky scroll" breadcrumb, reimplemented as
-  // a manual overlay (below) instead of per-row `position: sticky`.
   const pinnedChain = useMemo(
-    () => capStickyChain(stickyChain, indexByPath),
-    [stickyChain, indexByPath],
+    () => capStickyChain(stickyChain, model.indexByPath),
+    [stickyChain, model.indexByPath],
   )
+  return { ...model, treeNodes, pinnedChain, isMacOs: platform === 'macos' }
+}
 
+/**
+ * jsdom (unit tests) has no layout, so the virtualizer reports no items - fall
+ * back to rendering every row, matching the main pane. Real runs always take
+ * the virtualized path.
+ */
+function useTreeVirtualRows(
+  rows: TreeFlatRow[],
+  offsets: number[],
+  scrollRef: RefObject<HTMLDivElement | null>,
+) {
   const rowVirtualizer = useElementVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
@@ -83,17 +128,24 @@ export function FolderTree() {
     overscan: 10,
   })
   const virtualItems = rowVirtualizer.getVirtualItems()
-  // jsdom (unit tests) has no layout, so the virtualizer reports no items -
-  // fall back to rendering every row, matching the main pane. Real runs always
-  // take the virtualized path.
   const itemsToRender =
     virtualItems.length > 0
       ? virtualItems
       : rows.map((_, index) => ({ key: index, index, start: offsets[index] }))
   const totalHeight = virtualItems.length > 0 ? rowVirtualizer.getTotalSize() : offsets[rows.length]
+  return { rowVirtualizer, itemsToRender, totalHeight }
+}
 
-  // Track the active folder: expand its ancestor chain so its row exists in the
-  // model, then scroll that row into view once it does.
+/**
+ * Tracks the active folder: expands its ancestor chain so its row exists in the
+ * model, then scrolls that row into view once it does.
+ */
+function useRevealActiveFolder(
+  activePath: string,
+  indexByPath: Map<string, number>,
+  scrollToIndex: (index: number) => void,
+) {
+  const revealPath = usePanesStore((state) => state.revealPath)
   useEffect(() => {
     void revealPath(activePath)
   }, [activePath, revealPath])
@@ -107,97 +159,223 @@ export function FolderTree() {
 
   useEffect(() => {
     if (activeIndex !== undefined) {
-      rowVirtualizer.scrollToIndex(activeIndex)
+      scrollToIndex(activeIndex)
     }
-  }, [activeIndex, rowVirtualizer])
+  }, [activeIndex, scrollToIndex])
+}
 
-  // `TreeNode`/`TrashTreeRow` are memoized; a single stable handler object per
-  // render is what lets them skip re-rendering. Each handler closes over current
-  // store values, so they are refreshed into `latestRef` after every commit and
-  // the stable dispatchers below read through it - the same pattern as the pane.
-  const latest = { activePaneId, toggleTreeNode, navigatePane, openTabFromPath, openMenu }
-  const latestRef = useRef(latest)
-  useLayoutEffect(() => {
-    latestRef.current = latest
+/**
+ * Ancestors scrolled up past their stacked slot are drawn in an opaque overlay
+ * pinned to the top; ancestors still in their natural position render normally.
+ * Slots stack by each ancestor's own height (a drive root is taller than the
+ * folder rows pinned beneath it), and `top` is in viewport space so it never
+ * lags the native scroll.
+ */
+function pinnedRowsAt(
+  pinnedChain: string[],
+  indexByPath: Map<string, number>,
+  offsets: number[],
+  rows: TreeFlatRow[],
+  scrollTop: number,
+): PinnedRow[] {
+  const pinned: PinnedRow[] = []
+  let slotTop = 0
+  pinnedChain.forEach((path, chainIndex) => {
+    const index = indexByPath.get(path)
+    if (index === undefined) {
+      return
+    }
+    if (offsets[index] - scrollTop < slotTop) {
+      pinned.push({ path, chainIndex, top: slotTop })
+    }
+    slotTop += treeRowHeight(rows[index])
   })
+  return pinned
+}
 
-  const actions = useMemo<TreeRowActions>(
-    () => ({
-      onToggle: (path) => void latestRef.current.toggleTreeNode(path),
-      onNavigate: (path) =>
-        void latestRef.current.navigatePane(latestRef.current.activePaneId, path),
-      onOpenTab: (path) =>
-        void latestRef.current.openTabFromPath(latestRef.current.activePaneId, path),
-      onContextMenu: (node, event) => {
-        event.preventDefault()
-        const paneId = latestRef.current.activePaneId
-        latestRef.current.openMenu({
-          paneId,
-          title: node.name,
-          chip: 'DIR',
-          x: event.clientX,
-          y: event.clientY,
-          ...buildContextMenuContent(paneId, { kind: 'tree', path: node.path }, detectPlatformOs()),
-        })
-      },
-    }),
-    [],
+type TreeRowContentProps = {
+  row: TreeFlatRow
+  treeNodes: Record<string, TreeNodeState>
+  activePath: string
+}
+
+function TreeRowContent({ row, treeNodes, activePath }: TreeRowContentProps) {
+  if (row.kind === 'header') {
+    return (
+      <div className="flex h-tree-header items-end px-3 pb-1">
+        <span className="text-caption text-light-text-tertiary dark:text-dark-text-tertiary">
+          {row.label}
+        </span>
+      </div>
+    )
+  }
+  if (row.kind === 'fold-siblings') {
+    return (
+      <TreeFoldRow
+        kind="siblings"
+        count={row.count}
+        depth={row.depth}
+        onReveal={() => usePanesStore.getState().revealTreeSiblings(row.parentPath)}
+      />
+    )
+  }
+  if (row.kind === 'fold-levels') {
+    return (
+      <TreeFoldRow
+        kind="levels"
+        hiddenNames={row.hiddenPaths.map((path) => treeNodes[path]?.name ?? path)}
+        depth={row.depth}
+        onReveal={() => usePanesStore.getState().revealTreeHiddenLevels()}
+      />
+    )
+  }
+  if (row.kind === 'trash') {
+    return (
+      <TrashTreeRow
+        isCurrent={activePath === TRASH_PATH}
+        onNavigate={trashRowActions.onNavigate}
+        onOpenTab={trashRowActions.onOpenTab}
+        onContextMenu={trashRowActions.onContextMenu}
+      />
+    )
+  }
+  const node = treeNodes[row.path]
+  return (
+    <TreeNode
+      node={node}
+      depth={row.depth}
+      volume={row.volume}
+      isCurrent={activePath === node.path}
+      actions={treeRowActions}
+    />
   )
+}
 
-  const trashActions = useMemo(
-    () => ({
-      onNavigate: () =>
-        void latestRef.current.navigatePane(latestRef.current.activePaneId, TRASH_PATH),
-      onOpenTab: () =>
-        void latestRef.current.openTabFromPath(latestRef.current.activePaneId, TRASH_PATH),
-      onContextMenu: (event: MouseEvent) => {
-        event.preventDefault()
-        const paneId = latestRef.current.activePaneId
-        const trashLabel = detectPlatformOs() === 'windows' ? 'Recycle Bin' : 'Trash'
-        latestRef.current.openMenu({
-          paneId,
-          title: trashLabel,
-          chip: 'DIR',
-          x: event.clientX,
-          y: event.clientY,
-          ...buildContextMenuContent(
-            paneId,
-            { kind: 'tree', path: TRASH_PATH },
-            detectPlatformOs(),
-          ),
-        })
-      },
-    }),
-    [],
+function isMissingNode(row: TreeFlatRow, treeNodes: Record<string, TreeNodeState>) {
+  return row.kind === 'node' && !treeNodes[row.path]
+}
+
+type PinnedAncestorsProps = {
+  pinnedRows: PinnedRow[]
+  rows: TreeFlatRow[]
+  indexByPath: Map<string, number>
+  treeNodes: Record<string, TreeNodeState>
+  activePath: string
+  isMacOs: boolean
+}
+
+/**
+ * Lives outside the scroll container so it never inherits the container's
+ * scroll offset: its rows sit in viewport space at a fixed `top`. The wrapper is
+ * zero-height so it never intercepts pointer events; each pinned row re-enables
+ * them. The rows are visual copies of rows still in the tree, so the overlay is
+ * hidden from assistive tech and kept out of the tab order.
+ */
+function PinnedAncestors({
+  pinnedRows,
+  rows,
+  indexByPath,
+  treeNodes,
+  activePath,
+  isMacOs,
+}: PinnedAncestorsProps) {
+  return (
+    <div
+      aria-hidden="true"
+      inert
+      className={`pointer-events-none absolute left-1 top-0 ${isMacOs ? 'right-3' : 'right-1'}`}
+    >
+      {pinnedRows.map(({ path, chainIndex, top }) => {
+        const node = treeNodes[path]
+        const index = indexByPath.get(path)
+        if (!node || index === undefined) {
+          return null
+        }
+        const row = rows[index]
+        return (
+          <div
+            key={`pinned-${path}`}
+            data-testid="tree-pinned-row"
+            className="pointer-events-auto absolute inset-x-0"
+            style={{
+              top: `${top}px`,
+              zIndex: PINNED_ROW_BASE_Z_INDEX + chainIndex,
+            }}
+          >
+            <TreeNode
+              node={node}
+              depth={row.kind === 'node' ? row.depth : 0}
+              volume={row.kind === 'node' ? row.volume : undefined}
+              isCurrent={activePath === node.path}
+              isPinned
+              actions={treeRowActions}
+            />
+          </div>
+        )
+      })}
+    </div>
   )
+}
 
-  // Ancestors scrolled up past their stacked slot are drawn in an opaque overlay
-  // pinned to the top; ancestors still in their natural position render normally
-  // in the window below. An ancestor's slot is `chainIndex` row-heights down from
-  // the viewport top; it pins once its natural top would sit above that slot.
-  //
-  // `top` is the slot's position in *viewport* space (measured from the scroll
-  // area's top edge), because the overlay is rendered outside the scroll
-  // container - see the render below. Membership still keys off `scrollTop`, but
-  // the position itself carries no `scrollTop` term, so it can never lag the
-  // native scroll and rubber-band.
-  const pinnedRows = useMemo(() => {
-    const pinned: { path: string; chainIndex: number; top: number }[] = []
-    // Slots stack by each ancestor's own height: a drive root is taller than
-    // the folder rows pinned beneath it.
-    let slotTop = 0
-    pinnedChain.forEach((path, chainIndex) => {
-      const index = indexByPath.get(path)
-      if (index === undefined) {
-        return
-      }
-      if (offsets[index] - scrollTop < slotTop) {
-        pinned.push({ path, chainIndex, top: slotTop })
-      }
-      slotTop += treeRowHeight(rows[index])
-    })
-    return pinned
-  }, [pinnedChain, indexByPath, offsets, rows, scrollTop])
+type TreeRowsProps = {
+  items: { key: Key; index: number; start: number }[]
+  rows: TreeFlatRow[]
+  treeNodes: Record<string, TreeNodeState>
+  activePath: string
+  totalHeight: number
+}
+
+function TreeRows({ items, rows, treeNodes, activePath, totalHeight }: TreeRowsProps) {
+  return (
+    <div
+      role="tree"
+      aria-label="Folders"
+      // Runtime geometry from @tanstack/react-virtual; no static token can express it.
+      style={{ height: `${totalHeight}px`, position: 'relative' }}
+      className="mx-1 min-h-full"
+    >
+      {items.map((item) => {
+        const row = rows[item.index]
+        if (isMissingNode(row, treeNodes)) {
+          return null
+        }
+        return (
+          <div
+            key={rowKey(row)}
+            className={ROW_LAYER_CLASS_NAME}
+            style={{ top: `${item.start}px` }}
+          >
+            <TreeRowContent row={row} treeNodes={treeNodes} activePath={activePath} />
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+export function FolderTree() {
+  const activePaneId = usePanesStore((state) => state.activePaneId)
+  const activePath = usePanesStore((state) => state.panes[activePaneId].path)
+  const treeWidthPx = useLayoutStore((state) => state.treeWidthPx)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  // Live scroll offset in state because the pinned-ancestor overlay must
+  // re-render as it changes; only the visible window of rows is mounted.
+  const [scrollTop, setScrollTop] = useState(0)
+  const { rows, offsets, indexByPath, treeNodes, pinnedChain, isMacOs } = useTreeModel(activePath)
+  const { rowVirtualizer, itemsToRender, totalHeight } = useTreeVirtualRows(
+    rows,
+    offsets,
+    scrollRef,
+  )
+  const scrollToIndex = useCallback(
+    (index: number) => rowVirtualizer.scrollToIndex(index),
+    [rowVirtualizer],
+  )
+  useRevealActiveFolder(activePath, indexByPath, scrollToIndex)
+  const pinnedRows = useMemo(
+    () => pinnedRowsAt(pinnedChain, indexByPath, offsets, rows, scrollTop),
+    [pinnedChain, indexByPath, offsets, rows, scrollTop],
+  )
 
   return (
     <aside
@@ -214,140 +392,22 @@ export function FolderTree() {
           className={`min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pb-2 ${SCROLLBAR_THIN}`}
           onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
         >
-          {/*
-            Styling-constraint exception: runtime geometry only. The total scroll
-            height and each row's top offset come from @tanstack/react-virtual and
-            are continuous px values no static token can express. Every
-            design-system value elsewhere stays a pure Tailwind utility.
-          */}
-          <div
-            role="tree"
-            aria-label="Folders"
-            style={{ height: `${totalHeight}px`, position: 'relative' }}
-            className="mx-1 min-h-full"
-          >
-            {itemsToRender.map((item) => {
-              const row = rows[item.index]
-              const style = {
-                top: `${item.start}px`,
-              }
-
-              if (row.kind === 'header') {
-                return (
-                  <div key={rowKey(row)} className={rowLayerClassName} style={style}>
-                    <div className="flex h-tree-header items-end px-3 pb-1">
-                      <span className="text-caption text-light-text-tertiary dark:text-dark-text-tertiary">
-                        {row.label}
-                      </span>
-                    </div>
-                  </div>
-                )
-              }
-
-              if (row.kind === 'fold-siblings') {
-                return (
-                  <div key={rowKey(row)} className={rowLayerClassName} style={style}>
-                    <TreeFoldRow
-                      kind="siblings"
-                      count={row.count}
-                      depth={row.depth}
-                      onReveal={() => usePanesStore.getState().revealTreeSiblings(row.parentPath)}
-                    />
-                  </div>
-                )
-              }
-
-              if (row.kind === 'fold-levels') {
-                return (
-                  <div key={rowKey(row)} className={rowLayerClassName} style={style}>
-                    <TreeFoldRow
-                      kind="levels"
-                      hiddenNames={row.hiddenPaths.map((path) => treeNodes[path]?.name ?? path)}
-                      depth={row.depth}
-                      onReveal={() => usePanesStore.getState().revealTreeHiddenLevels()}
-                    />
-                  </div>
-                )
-              }
-
-              if (row.kind === 'trash') {
-                return (
-                  <div key={rowKey(row)} className={rowLayerClassName} style={style}>
-                    <TrashTreeRow
-                      isCurrent={activePath === TRASH_PATH}
-                      onNavigate={trashActions.onNavigate}
-                      onOpenTab={trashActions.onOpenTab}
-                      onContextMenu={trashActions.onContextMenu}
-                    />
-                  </div>
-                )
-              }
-
-              const node = treeNodes[row.path]
-              if (!node) {
-                return null
-              }
-              return (
-                <div key={rowKey(row)} className={rowLayerClassName} style={style}>
-                  <TreeNode
-                    node={node}
-                    depth={row.depth}
-                    volume={row.volume}
-                    isCurrent={activePath === node.path}
-                    actions={actions}
-                  />
-                </div>
-              )
-            })}
-          </div>
+          <TreeRows
+            items={itemsToRender}
+            rows={rows}
+            treeNodes={treeNodes}
+            activePath={activePath}
+            totalHeight={totalHeight}
+          />
         </div>
-
-        {/*
-          Pinned-ancestor overlay. It lives OUTSIDE the scroll container so it never
-          inherits the container's scroll offset: its rows sit in viewport space at a
-          fixed `top`. When this overlay was a child of the scrolling content, the
-          native scroll moved it every frame while a React `scrollTop` state term
-          tried to hold it in place - the two were a frame out of sync, which read as
-          a rubber-band jitter. The wrapper is zero-height so it never intercepts
-          pointer events; each pinned row re-enables them for itself.
-
-          The rows are visual copies of rows still in the tree, so the overlay is
-          hidden from assistive tech and kept out of the tab order.
-        */}
-        <div
-          aria-hidden="true"
-          inert
-          className={`pointer-events-none absolute left-1 top-0 ${isMacOs ? 'right-3' : 'right-1'}`}
-        >
-          {pinnedRows.map(({ path, chainIndex, top }) => {
-            const node = treeNodes[path]
-            const index = indexByPath.get(path)
-            if (!node || index === undefined) {
-              return null
-            }
-            const row = rows[index]
-            return (
-              <div
-                key={`pinned-${path}`}
-                data-testid="tree-pinned-row"
-                className="pointer-events-auto absolute inset-x-0"
-                style={{
-                  top: `${top}px`,
-                  zIndex: PINNED_ROW_BASE_Z_INDEX + chainIndex,
-                }}
-              >
-                <TreeNode
-                  node={node}
-                  depth={row.kind === 'node' ? row.depth : 0}
-                  volume={row.kind === 'node' ? row.volume : undefined}
-                  isCurrent={activePath === node.path}
-                  isPinned
-                  actions={actions}
-                />
-              </div>
-            )
-          })}
-        </div>
+        <PinnedAncestors
+          pinnedRows={pinnedRows}
+          rows={rows}
+          indexByPath={indexByPath}
+          treeNodes={treeNodes}
+          activePath={activePath}
+          isMacOs={isMacOs}
+        />
       </div>
     </aside>
   )

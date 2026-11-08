@@ -121,29 +121,23 @@ fn run(bridge: Arc<RegistryReconcileBridge>, ready: Sender<Result<u32, String>>)
 }
 
 /// # Safety
-/// Must be called at most once, before any message loop for the created
-/// window is running.
-unsafe fn setup_window_and_registration(
-    bridge: Arc<RegistryReconcileBridge>,
-) -> Result<(HWND, u32, *mut ThreadContext), String> {
-    let class_name = crate::win32::wide_nul(WINDOW_CLASS_NAME_STR);
-    let class_name_ptr = PCWSTR(class_name.as_ptr());
-
+/// `class_name` must stay valid for the duration of the call.
+unsafe fn create_message_window(class_name: PCWSTR) -> Result<HWND, String> {
     let class = WNDCLASSEXW {
         cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
         style: WNDCLASS_STYLES(0),
         lpfnWndProc: Some(wnd_proc),
-        lpszClassName: class_name_ptr,
+        lpszClassName: class_name,
         ..Default::default()
     };
     if RegisterClassExW(&class) == 0 {
         return Err("RegisterClassExW failed".to_string());
     }
 
-    let hwnd = CreateWindowExW(
+    CreateWindowExW(
         Default::default(),
-        class_name_ptr,
-        class_name_ptr,
+        class_name,
+        class_name,
         WS_OVERLAPPED,
         0,
         0,
@@ -154,20 +148,14 @@ unsafe fn setup_window_and_registration(
         None,
         None,
     )
-    .map_err(|error| error.to_string())?;
+    .map_err(|error| error.to_string())
+}
 
-    let change_message_name = crate::win32::wide_nul(CHANGE_MESSAGE_NAME);
-    let change_message = RegisterWindowMessageW(PCWSTR(change_message_name.as_ptr()));
-    if change_message == 0 {
-        return Err("RegisterWindowMessageW failed".to_string());
-    }
-
-    let context = Box::into_raw(Box::new(ThreadContext {
-        bridge,
-        change_message,
-    }));
-    SetWindowLongPtrW(hwnd, GWLP_USERDATA, context as isize);
-
+/// Returns the registration id, or 0 when the shell refused it.
+///
+/// # Safety
+/// `hwnd` must be a live message window owned by the calling thread.
+unsafe fn register_volume_notifications(hwnd: HWND, change_message: u32) -> u32 {
     let entry = SHChangeNotifyEntry {
         pidl: ptr::null_mut(),
         fRecursive: true.into(),
@@ -181,14 +169,40 @@ unsafe fn setup_window_and_registration(
         | SHCNE_NETUNSHARE)
         .0;
 
-    let notify_id = SHChangeNotifyRegister(
+    SHChangeNotifyRegister(
         hwnd,
         windows::Win32::UI::Shell::SHCNRF_SOURCE(sources),
         events as i32,
         change_message,
         1,
         &entry,
-    );
+    )
+}
+
+/// # Safety
+/// Must be called at most once, before any message loop for the created
+/// window is running.
+unsafe fn setup_window_and_registration(
+    bridge: Arc<RegistryReconcileBridge>,
+) -> Result<(HWND, u32, *mut ThreadContext), String> {
+    let class_name = crate::win32::wide_nul(WINDOW_CLASS_NAME_STR);
+    let class_name_ptr = PCWSTR(class_name.as_ptr());
+
+    let hwnd = create_message_window(class_name_ptr)?;
+
+    let change_message_name = crate::win32::wide_nul(CHANGE_MESSAGE_NAME);
+    let change_message = RegisterWindowMessageW(PCWSTR(change_message_name.as_ptr()));
+    if change_message == 0 {
+        return Err("RegisterWindowMessageW failed".to_string());
+    }
+
+    let context = Box::into_raw(Box::new(ThreadContext {
+        bridge,
+        change_message,
+    }));
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, context as isize);
+
+    let notify_id = register_volume_notifications(hwnd, change_message);
     if notify_id == 0 {
         drop(Box::from_raw(context));
         let _ = DestroyWindow(hwnd);

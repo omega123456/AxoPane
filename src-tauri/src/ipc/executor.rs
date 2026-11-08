@@ -20,6 +20,8 @@ pub const IPC_QUEUE_CAPACITY: usize = 32;
 pub const IPC_WORKER_COUNT: usize = 4;
 pub const IPC_DEADLINE: Duration = Duration::from_secs(2);
 const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const REQUEST_CANCELLED: &str = "IPC latency request cancelled";
+const SHUTTING_DOWN_ERROR: &str = "IPC executor is shutting down";
 
 /// Cooperative cancellation shared with an owned IPC job. Platform helpers
 /// with hard-kill semantics retain their own owner; ordinary filesystem work
@@ -122,34 +124,10 @@ impl IpcExecutor {
         let worker_cancellation = cancellation.clone();
         let (reply_sender, reply_receiver) = oneshot::channel();
         let message = Message::Run(Box::new(move || {
-            if worker_cancellation.is_cancelled() {
-                let _ = reply_sender.send(Err("IPC latency request cancelled".to_string()));
-                return;
-            }
-            let result = coordinator
-                .submit(JobSpec::new([JobClass::Latency], [resource_key]))
-                .map_err(|error| format!("IPC latency admission failed: {error:?}"))
-                .and_then(|_permit| {
-                    if worker_cancellation.is_cancelled() {
-                        Err("IPC latency request cancelled".to_string())
-                    } else {
-                        work(&worker_cancellation)
-                    }
-                });
+            let result = run_admitted(&coordinator, resource_key, &worker_cancellation, work);
             let _ = reply_sender.send(result);
         }));
-        {
-            let _lifecycle = self.lifecycle.lock().expect("IPC executor lifecycle lock");
-            if self.shutting_down.load(Ordering::Acquire) {
-                return Err("IPC executor is shutting down".to_string());
-            }
-            self.sender.try_send(message).map_err(|error| match error {
-                crossbeam_channel::TrySendError::Full(_) => "IPC latency queue is full".to_string(),
-                crossbeam_channel::TrySendError::Disconnected(_) => {
-                    "IPC executor is shutting down".to_string()
-                }
-            })?;
-        }
+        self.admit(message)?;
 
         match tokio::time::timeout(deadline, reply_receiver).await {
             Ok(reply) => {
@@ -207,24 +185,37 @@ impl IpcExecutor {
         .await
     }
 
-    pub fn shutdown(&self) {
-        {
-            let _lifecycle = self.lifecycle.lock().expect("IPC executor lifecycle lock");
-            if self.shutting_down.swap(true, Ordering::AcqRel) {
-                return;
-            }
+    fn admit(&self, message: Message) -> Result<(), String> {
+        let _lifecycle = self.lifecycle.lock().expect("IPC executor lifecycle lock");
+        if self.shutting_down.load(Ordering::Acquire) {
+            return Err(SHUTTING_DOWN_ERROR.to_string());
+        }
+        self.sender.try_send(message).map_err(admission_error)
+    }
 
-            // Drop all not-yet-started jobs so their reply channels close
-            // promptly. This is intentionally independent of queue capacity:
-            // saturation cannot make shutdown lose a termination signal.
-            while let Ok(message) = self.receiver.try_recv() {
-                drop(message);
-            }
+    pub fn shutdown(&self) {
+        let newly_stopped = self.stop_admission();
+        if !newly_stopped {
+            return;
         }
         let mut workers = self.workers.lock().expect("IPC executor workers lock");
         for worker in workers.drain(..) {
             let _ = worker.join();
         }
+    }
+
+    fn stop_admission(&self) -> bool {
+        let _lifecycle = self.lifecycle.lock().expect("IPC executor lifecycle lock");
+        if self.shutting_down.swap(true, Ordering::AcqRel) {
+            return false;
+        }
+        // Drop all not-yet-started jobs so their reply channels close
+        // promptly. This is intentionally independent of queue capacity:
+        // saturation cannot make shutdown lose a termination signal.
+        while let Ok(message) = self.receiver.try_recv() {
+            drop(message);
+        }
+        true
     }
 
     /// Observable queue depth for deterministic integration coverage and
@@ -255,23 +246,52 @@ fn spawn_worker(
 ) -> JoinHandle<()> {
     thread::Builder::new()
         .name(format!("ipc-latency-{index}"))
-        .spawn(move || {
-            while !shutting_down.load(Ordering::Acquire) {
-                let Ok(message) = receiver.recv_timeout(SHUTDOWN_POLL_INTERVAL) else {
-                    continue;
-                };
-                // Shutdown may begin after the loop condition is checked but
-                // before this worker receives a queued job. Do not start work
-                // across that boundary; dropping the message closes its reply
-                // channel and lets the waiting caller return an error.
-                if shutting_down.load(Ordering::Acquire) {
-                    drop(message);
-                    break;
-                }
-                match message {
-                    Message::Run(job) => job(),
-                }
-            }
-        })
+        .spawn(move || run_worker_loop(&receiver, &shutting_down))
         .expect("failed to spawn IPC latency worker")
+}
+
+fn run_worker_loop(receiver: &Receiver<Message>, shutting_down: &AtomicBool) {
+    while !shutting_down.load(Ordering::Acquire) {
+        let Ok(message) = receiver.recv_timeout(SHUTDOWN_POLL_INTERVAL) else {
+            continue;
+        };
+        // Shutdown may begin after the loop condition is checked but
+        // before this worker receives a queued job. Do not start work
+        // across that boundary; dropping the message closes its reply
+        // channel and lets the waiting caller return an error.
+        if shutting_down.load(Ordering::Acquire) {
+            drop(message);
+            break;
+        }
+        match message {
+            Message::Run(job) => job(),
+        }
+    }
+}
+
+fn admission_error(error: crossbeam_channel::TrySendError<Message>) -> String {
+    match error {
+        crossbeam_channel::TrySendError::Full(_) => "IPC latency queue is full".to_string(),
+        crossbeam_channel::TrySendError::Disconnected(_) => SHUTTING_DOWN_ERROR.to_string(),
+    }
+}
+
+/// Runs `work` under a Latency admission unless the request was cancelled
+/// before or while waiting for it.
+fn run_admitted<T>(
+    coordinator: &ResourceCoordinator,
+    resource_key: String,
+    cancellation: &Cancellation,
+    work: impl FnOnce(&Cancellation) -> Result<T, String>,
+) -> Result<T, String> {
+    if cancellation.is_cancelled() {
+        return Err(REQUEST_CANCELLED.to_string());
+    }
+    let _permit = coordinator
+        .submit(JobSpec::new([JobClass::Latency], [resource_key]))
+        .map_err(|error| format!("IPC latency admission failed: {error:?}"))?;
+    if cancellation.is_cancelled() {
+        return Err(REQUEST_CANCELLED.to_string());
+    }
+    work(cancellation)
 }

@@ -25,6 +25,18 @@ struct TokenStoreState {
     invocations_by_token: HashMap<String, StoredInvocation>,
 }
 
+impl TokenStoreState {
+    fn detach_token(&mut self, request_id: &str, token: &str) {
+        let Some(tokens) = self.tokens_by_request.get_mut(request_id) else {
+            return;
+        };
+        tokens.retain(|candidate| candidate != token);
+        if tokens.is_empty() {
+            self.tokens_by_request.remove(request_id);
+        }
+    }
+}
+
 impl NativeMenuTokenStore {
     pub fn clear_all(&self) {
         let mut state = self.state.lock().expect("native menu token store lock");
@@ -35,10 +47,12 @@ impl NativeMenuTokenStore {
     pub fn replace_request(&self, request_id: &str) {
         let mut state = self.state.lock().expect("native menu token store lock");
         prune_expired(&mut state);
-        if let Some(tokens) = state.tokens_by_request.remove(request_id) {
-            for token in tokens {
-                state.invocations_by_token.remove(&token);
-            }
+        let tokens = state
+            .tokens_by_request
+            .remove(request_id)
+            .unwrap_or_default();
+        for token in tokens {
+            state.invocations_by_token.remove(&token);
         }
     }
 
@@ -67,12 +81,7 @@ impl NativeMenuTokenStore {
         let mut state = self.state.lock().expect("native menu token store lock");
         prune_expired(&mut state);
         let stored = state.invocations_by_token.remove(token)?;
-        if let Some(tokens) = state.tokens_by_request.get_mut(&stored.request_id) {
-            tokens.retain(|candidate| candidate != token);
-            if tokens.is_empty() {
-                state.tokens_by_request.remove(&stored.request_id);
-            }
-        }
+        state.detach_token(&stored.request_id, token);
         Some(stored)
     }
 
@@ -111,11 +120,6 @@ fn prune_expired(state: &mut TokenStoreState) {
 
     for (token, request_id) in expired {
         state.invocations_by_token.remove(&token);
-        if let Some(tokens) = state.tokens_by_request.get_mut(&request_id) {
-            tokens.retain(|candidate| candidate != &token);
-            if tokens.is_empty() {
-                state.tokens_by_request.remove(&request_id);
-            }
-        }
+        state.detach_token(&request_id, &token);
     }
 }

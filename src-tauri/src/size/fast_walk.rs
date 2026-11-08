@@ -201,6 +201,21 @@ struct Queue {
     failure: Option<ManualSizeError>,
 }
 
+impl Queue {
+    fn is_waiting_for_work(&self) -> bool {
+        self.failure.is_none() && self.pending.is_empty() && self.busy > 0
+    }
+
+    fn claim_pending(&mut self) -> Option<PathBuf> {
+        if self.failure.is_some() {
+            return None;
+        }
+        let dir = self.pending.pop()?;
+        self.busy += 1;
+        Some(dir)
+    }
+}
+
 struct Walk<'a> {
     options: &'a WalkOptions,
     allowed_devs: Option<Vec<u64>>,
@@ -252,11 +267,7 @@ fn walk(
             // the remaining threads still finish the walk.
             let _ = thread::Builder::new()
                 .name("fast-walk".to_string())
-                .spawn_scoped(scope, move || {
-                    let _permit = permit;
-                    apply_qos(walk.options.qos);
-                    walk.work();
-                });
+                .spawn_scoped(scope, move || run_helper(permit, walk));
         }
         apply_qos(options.qos);
         walk.work();
@@ -269,6 +280,12 @@ fn walk(
         return Err(ManualSizeError::Cancelled);
     }
     Ok(())
+}
+
+fn run_helper(permit: HelperPermit, walk: &Walk<'_>) {
+    let _permit = permit;
+    apply_qos(walk.options.qos);
+    walk.work();
 }
 
 impl Walk<'_> {
@@ -291,19 +308,10 @@ impl Walk<'_> {
     /// (nothing pending and nobody busy) or has failed.
     fn next(&self) -> Option<PathBuf> {
         let mut queue = self.queue.lock().expect("fast walk queue");
-        loop {
-            if queue.failure.is_some() {
-                return None;
-            }
-            if let Some(dir) = queue.pending.pop() {
-                queue.busy += 1;
-                return Some(dir);
-            }
-            if queue.busy == 0 {
-                return None;
-            }
+        while queue.is_waiting_for_work() {
             queue = self.wake.wait(queue).expect("fast walk queue");
         }
+        queue.claim_pending()
     }
 
     fn visit(&self, dir: PathBuf, buffer: &mut [u8]) -> Result<Vec<PathBuf>, ManualSizeError> {
@@ -394,18 +402,7 @@ fn read_dir(
         }
     }
 
-    let mut attributes = libc::attrlist {
-        bitmapcount: libc::ATTR_BIT_MAP_COUNT,
-        reserved: 0,
-        commonattr: libc::ATTR_CMN_RETURNED_ATTRS
-            | libc::ATTR_CMN_NAME
-            | ATTR_CMN_ERROR
-            | libc::ATTR_CMN_OBJTYPE,
-        volattr: 0,
-        dirattr: 0,
-        fileattr: libc::ATTR_FILE_DATALENGTH,
-        forkattr: 0,
-    };
+    let mut attributes = bulk_attributes();
     loop {
         check_stop(options)?;
         // SAFETY: `attributes` and `buffer` are live, exclusively borrowed and
@@ -427,27 +424,57 @@ fn read_dir(
             return Ok(Some(listing));
         }
 
-        let mut offset = 0;
-        for _ in 0..count {
-            let entry = buffer
-                .get(offset..)
-                .and_then(|rest| rest.get(..read_u32(rest, ENTRY_LENGTH)? as usize))
-                .filter(|entry| entry.len() >= ENTRY_DATA_LENGTH)
-                .ok_or_else(malformed)?;
-            offset += entry.len();
-            match parse_entry(entry).ok_or_else(malformed)? {
-                Entry::File(length) => {
-                    listing.direct_bytes = listing.direct_bytes.saturating_add(length);
-                    listing.file_count += 1;
-                }
-                Entry::Dir(name) => listing.subdirs.push(OsStr::from_bytes(name).to_os_string()),
-                Entry::Skip => {}
-                Entry::Error(errno) => {
-                    absorb(io::Error::from_raw_os_error(errno), &mut listing)?;
-                }
-            }
+        absorb_entries(buffer, count, &mut listing)?;
+    }
+}
+
+fn bulk_attributes() -> libc::attrlist {
+    libc::attrlist {
+        bitmapcount: libc::ATTR_BIT_MAP_COUNT,
+        reserved: 0,
+        commonattr: libc::ATTR_CMN_RETURNED_ATTRS
+            | libc::ATTR_CMN_NAME
+            | ATTR_CMN_ERROR
+            | libc::ATTR_CMN_OBJTYPE,
+        volattr: 0,
+        dirattr: 0,
+        fileattr: libc::ATTR_FILE_DATALENGTH,
+        forkattr: 0,
+    }
+}
+
+/// Folds the `count` packed entries `getattrlistbulk` wrote into `buffer`.
+fn absorb_entries(
+    buffer: &[u8],
+    count: libc::c_int,
+    listing: &mut DirListing,
+) -> Result<(), ManualSizeError> {
+    let mut offset = 0;
+    for _ in 0..count {
+        let entry = buffer
+            .get(offset..)
+            .and_then(|rest| rest.get(..read_u32(rest, ENTRY_LENGTH)? as usize))
+            .filter(|entry| entry.len() >= ENTRY_DATA_LENGTH)
+            .ok_or_else(malformed)?;
+        offset += entry.len();
+        absorb_entry(parse_entry(entry).ok_or_else(malformed)?, listing)?;
+    }
+    Ok(())
+}
+
+fn absorb_entry(entry: Entry<'_>, listing: &mut DirListing) -> Result<(), ManualSizeError> {
+    match entry {
+        Entry::File(length) => {
+            listing.direct_bytes = listing.direct_bytes.saturating_add(length);
+            listing.file_count += 1;
+        }
+        Entry::Dir(name) => listing.subdirs.push(OsStr::from_bytes(name).to_os_string()),
+        Entry::Skip => {}
+        Entry::Error(errno) => {
+            absorb(io::Error::from_raw_os_error(errno), listing)?;
         }
     }
+    Ok(())
 }
 
 enum Entry<'a> {

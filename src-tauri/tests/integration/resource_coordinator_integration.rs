@@ -240,6 +240,19 @@ fn global_caps_are_never_exceeded_across_many_resources() {
 // Fair progress: no resource is starved indefinitely while others cycle.
 // ---------------------------------------------------------------------
 
+fn submit_and_count_grant(
+    coordinator: &ResourceCoordinator,
+    resource: &str,
+    grants: &AtomicUsize,
+    round: usize,
+) {
+    let handle = coordinator
+        .submit(throughput([resource]))
+        .unwrap_or_else(|error| panic!("round {round} resource {resource} failed: {error:?}"));
+    grants.fetch_add(1, Ordering::SeqCst);
+    drop(handle);
+}
+
 #[test]
 fn every_resource_makes_progress_under_repeated_contention() {
     let coordinator = Arc::new(ResourceCoordinator::new());
@@ -253,18 +266,12 @@ fn every_resource_makes_progress_under_repeated_contention() {
     let mut workers = Vec::new();
     for round in 0..rounds {
         for (index, resource) in resources.iter().enumerate() {
-            let coordinator = Arc::clone(&coordinator);
-            let grants = Arc::clone(&grants);
-            let resource = *resource;
-            workers.push(std::thread::spawn(move || {
-                let handle = coordinator
-                    .submit(throughput([resource]))
-                    .unwrap_or_else(|error| {
-                        panic!("round {round} resource {resource} failed: {error:?}")
-                    });
-                grants[index].fetch_add(1, Ordering::SeqCst);
-                drop(handle);
-            }));
+            let grant_target = GrantTarget {
+                resource,
+                index,
+                round,
+            };
+            workers.push(spawn_counting_worker(&coordinator, &grants, grant_target));
         }
     }
 
@@ -297,29 +304,18 @@ fn opposing_resource_pair_jobs_never_deadlock_or_hold_partial_permits() {
         let coordinator = Arc::clone(&coordinator);
         let start = Arc::new(Barrier::new(2));
 
-        let forward = {
-            let coordinator = Arc::clone(&coordinator);
-            let start = Arc::clone(&start);
-            std::thread::spawn(move || {
-                start.wait();
-                let handle = coordinator
-                    .submit(throughput(["A", "B"]))
-                    .expect("forward job admitted without deadlock");
-                drop(handle);
-            })
-        };
-
-        let backward = {
-            let coordinator = Arc::clone(&coordinator);
-            let start = Arc::clone(&start);
-            std::thread::spawn(move || {
-                start.wait();
-                let handle = coordinator
-                    .submit(throughput(["B", "A"]))
-                    .expect("backward job admitted without deadlock");
-                drop(handle);
-            })
-        };
+        let forward = spawn_submit_after_barrier(
+            &coordinator,
+            &start,
+            throughput(["A", "B"]),
+            "forward job admitted without deadlock",
+        );
+        let backward = spawn_submit_after_barrier(
+            &coordinator,
+            &start,
+            throughput(["B", "A"]),
+            "backward job admitted without deadlock",
+        );
 
         forward
             .join()
@@ -339,35 +335,24 @@ fn mixed_cpu_and_throughput_reservations_make_progress_without_partial_holding()
     for iteration in 0..100 {
         let start = Arc::new(Barrier::new(2));
 
-        let mixed = {
-            let coordinator = Arc::clone(&coordinator);
-            let start = Arc::clone(&start);
-            std::thread::spawn(move || {
-                start.wait();
-                let spec = JobSpec::new(
-                    [JobClass::Throughput, JobClass::Cpu],
-                    ["archive-src".to_string(), "archive-dst".to_string()],
-                );
-                let handle = coordinator.submit(spec).expect("mixed job admitted");
-                drop(handle);
-            })
-        };
-
-        let opposing = {
-            let coordinator = Arc::clone(&coordinator);
-            let start = Arc::clone(&start);
-            std::thread::spawn(move || {
-                start.wait();
-                let spec = JobSpec::new(
-                    [JobClass::Throughput, JobClass::Cpu],
-                    ["archive-dst".to_string(), "archive-src".to_string()],
-                );
-                let handle = coordinator
-                    .submit(spec)
-                    .expect("opposing mixed job admitted");
-                drop(handle);
-            })
-        };
+        let mixed = spawn_submit_after_barrier(
+            &coordinator,
+            &start,
+            JobSpec::new(
+                [JobClass::Throughput, JobClass::Cpu],
+                ["archive-src".to_string(), "archive-dst".to_string()],
+            ),
+            "mixed job admitted",
+        );
+        let opposing = spawn_submit_after_barrier(
+            &coordinator,
+            &start,
+            JobSpec::new(
+                [JobClass::Throughput, JobClass::Cpu],
+                ["archive-dst".to_string(), "archive-src".to_string()],
+            ),
+            "opposing mixed job admitted",
+        );
 
         mixed
             .join()
@@ -868,4 +853,42 @@ fn distinct_job_ids_are_unique_across_many_submissions() {
         drop(handle);
     }
     coordinator.shutdown();
+}
+
+struct GrantTarget {
+    resource: &'static str,
+    index: usize,
+    round: usize,
+}
+
+fn spawn_counting_worker(
+    coordinator: &Arc<ResourceCoordinator>,
+    grants: &Arc<Vec<AtomicUsize>>,
+    target: GrantTarget,
+) -> std::thread::JoinHandle<()> {
+    let coordinator = Arc::clone(coordinator);
+    let grants = Arc::clone(grants);
+    std::thread::spawn(move || {
+        submit_and_count_grant(
+            &coordinator,
+            target.resource,
+            &grants[target.index],
+            target.round,
+        );
+    })
+}
+
+fn spawn_submit_after_barrier(
+    coordinator: &Arc<ResourceCoordinator>,
+    start: &Arc<Barrier>,
+    spec: JobSpec,
+    expectation: &'static str,
+) -> std::thread::JoinHandle<()> {
+    let coordinator = Arc::clone(coordinator);
+    let start = Arc::clone(start);
+    std::thread::spawn(move || {
+        start.wait();
+        let handle = coordinator.submit(spec).expect(expectation);
+        drop(handle);
+    })
 }

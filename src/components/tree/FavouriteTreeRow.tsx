@@ -28,10 +28,72 @@ type Props = {
   actions: FavouriteRowActions
 }
 
-function FavouriteTreeRowImpl({ path, name, index, isCurrent, isRenaming, actions }: Props) {
-  const [isDropTarget, setIsDropTarget] = useState(false)
+type FavouriteViewProps = {
+  path: string
+  label: string
+  actions: FavouriteRowActions
+}
+
+function FavouriteRenameInput({ path, label, actions }: FavouriteViewProps) {
   // Escape unmounts the input, which can still fire blur; that blur must not commit.
   const renameCancelled = useRef(false)
+  return (
+    <span className="flex h-full min-w-0 flex-1 items-center gap-2">
+      <EntryIcon entry={{ name: favouriteLabel(path), isDir: true }} />
+      <input
+        autoFocus
+        autoComplete="off"
+        aria-label={`Rename favourite ${label}`}
+        defaultValue={label}
+        onFocus={(event) => {
+          renameCancelled.current = false
+          event.currentTarget.select()
+        }}
+        onBlur={(event) => {
+          if (!renameCancelled.current) actions.onRename(path, event.currentTarget.value)
+        }}
+        onKeyDown={(event) => {
+          event.stopPropagation()
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            event.currentTarget.blur()
+            return
+          }
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            renameCancelled.current = true
+            actions.onRenameCancel()
+          }
+        }}
+        className="min-w-0 flex-1 select-text rounded-control border border-light-accent bg-light-base px-1 text-row text-light-text outline-none dark:border-dark-accent dark:bg-dark-base dark:text-dark-text"
+      />
+    </span>
+  )
+}
+
+function FavouriteLink({ path, name, label, actions }: FavouriteViewProps & { name?: string }) {
+  return (
+    <button
+      type="button"
+      title={name ? path : undefined}
+      onClick={() => actions.onNavigate(path)}
+      onMouseDown={(event) => event.button === 1 && event.preventDefault()}
+      onAuxClick={(event) => {
+        if (event.button === 1) {
+          event.preventDefault()
+          actions.onOpenTab(path)
+        }
+      }}
+      className={`flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-control text-left ${FOCUS_RING_INSET}`}
+    >
+      <EntryIcon entry={{ name: favouriteLabel(path), isDir: true }} />
+      <span className="truncate">{label}</span>
+    </button>
+  )
+}
+
+function FavouriteTreeRowImpl({ path, name, index, isCurrent, isRenaming, actions }: Props) {
+  const [isDropTarget, setIsDropTarget] = useState(false)
   const label = name ?? favouriteLabel(path)
 
   function handleDragOver(event: DragEvent<HTMLDivElement>) {
@@ -70,51 +132,9 @@ function FavouriteTreeRowImpl({ path, name, index, isCurrent, isRenaming, action
       {isCurrent ? <SelectionPill /> : null}
       <span className="w-3 flex-none" aria-hidden="true" />
       {isRenaming ? (
-        <span className="flex h-full min-w-0 flex-1 items-center gap-2">
-          <EntryIcon entry={{ name: favouriteLabel(path), isDir: true }} />
-          <input
-            autoFocus
-            autoComplete="off"
-            aria-label={`Rename favourite ${label}`}
-            defaultValue={label}
-            onFocus={(event) => {
-              renameCancelled.current = false
-              event.currentTarget.select()
-            }}
-            onBlur={(event) => {
-              if (!renameCancelled.current) actions.onRename(path, event.currentTarget.value)
-            }}
-            onKeyDown={(event) => {
-              event.stopPropagation()
-              if (event.key === 'Enter') {
-                event.preventDefault()
-                event.currentTarget.blur()
-              } else if (event.key === 'Escape') {
-                event.preventDefault()
-                renameCancelled.current = true
-                actions.onRenameCancel()
-              }
-            }}
-            className="min-w-0 flex-1 select-text rounded-control border border-light-accent bg-light-base px-1 text-row text-light-text outline-none dark:border-dark-accent dark:bg-dark-base dark:text-dark-text"
-          />
-        </span>
+        <FavouriteRenameInput path={path} label={label} actions={actions} />
       ) : (
-        <button
-          type="button"
-          title={name ? path : undefined}
-          onClick={() => actions.onNavigate(path)}
-          onMouseDown={(event) => event.button === 1 && event.preventDefault()}
-          onAuxClick={(event) => {
-            if (event.button === 1) {
-              event.preventDefault()
-              actions.onOpenTab(path)
-            }
-          }}
-          className={`flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-control text-left ${FOCUS_RING_INSET}`}
-        >
-          <EntryIcon entry={{ name: favouriteLabel(path), isDir: true }} />
-          <span className="truncate">{label}</span>
-        </button>
+        <FavouriteLink path={path} name={name} label={label} actions={actions} />
       )}
     </div>
   )

@@ -8,7 +8,7 @@ use std::thread::JoinHandle;
 use crate::ipc::types::ThumbnailPriority;
 use crate::resource_coordinator::{JobClass, JobSpec, ResourceCoordinator};
 
-use super::provider::ThumbnailProvider;
+use super::provider::{ThumbnailPreviewCallback, ThumbnailProvider};
 use super::types::{ThumbnailCacheKey, ThumbnailCandidate, ThumbnailState};
 
 pub type ResultPublisher =
@@ -61,6 +61,36 @@ struct JobSubscriber {
     order: u32,
 }
 
+impl JobSubscriber {
+    fn visible(context: ThumbnailSubscriber) -> Self {
+        Self {
+            context,
+            priority: ThumbnailPriority::Visible,
+            order: 0,
+        }
+    }
+
+    fn rank_key(&self) -> (u8, u32) {
+        (priority_rank(self.priority), self.order)
+    }
+
+    fn keep_after_retarget(
+        &mut self,
+        subscriber: &ThumbnailSubscriber,
+        rank: Option<SubscriberRank>,
+    ) -> bool {
+        if !self.context.same_scope(subscriber) {
+            return true;
+        }
+        let Some(rank) = rank else {
+            return false;
+        };
+        self.priority = rank.priority;
+        self.order = rank.order;
+        true
+    }
+}
+
 struct Job {
     candidate: ThumbnailCandidate,
     subscribers: Vec<JobSubscriber>,
@@ -101,17 +131,68 @@ impl Job {
         subscriber: &ThumbnailSubscriber,
         rank: Option<SubscriberRank>,
     ) {
-        self.subscribers.retain_mut(|existing| {
-            if !existing.context.same_scope(subscriber) {
-                return true;
-            }
-            let Some(rank) = rank else {
-                return false;
-            };
-            existing.priority = rank.priority;
-            existing.order = rank.order;
-            true
+        self.subscribers
+            .retain_mut(|existing| existing.keep_after_retarget(subscriber, rank));
+    }
+
+    fn drop_subscribers_matching(
+        &mut self,
+        pane_id: &str,
+        tab_id: &str,
+        path: &str,
+        generation: u64,
+    ) {
+        self.subscribers.retain(|subscriber| {
+            !subscriber
+                .context
+                .matches(pane_id, tab_id, path, generation)
         });
+    }
+
+    fn add_subscriber_once(&mut self, job_subscriber: JobSubscriber) {
+        if self.has_subscriber(&job_subscriber.context) {
+            return;
+        }
+        self.subscribers.push(job_subscriber);
+    }
+
+    fn best_subscriber(&self) -> Option<&JobSubscriber> {
+        self.subscribers
+            .iter()
+            .min_by_key(|subscriber| subscriber.rank_key())
+    }
+}
+
+#[derive(Default)]
+struct UnsubscribedJobs {
+    provider_cancels: Vec<ThumbnailCandidate>,
+    queued: HashSet<ThumbnailCacheKey>,
+}
+
+impl UnsubscribedJobs {
+    fn record(&mut self, key: &ThumbnailCacheKey, job: &Job) {
+        if !job.subscribers.is_empty() {
+            return;
+        }
+        if job.active {
+            self.provider_cancels.push(job.candidate.clone());
+            return;
+        }
+        self.queued.insert(key.clone());
+    }
+}
+
+struct QueuedChoice {
+    index: usize,
+    priority: u8,
+    same_pane: usize,
+    order: u32,
+    pane_id: String,
+}
+
+impl QueuedChoice {
+    fn rank_key(&self) -> (u8, usize, u32) {
+        (self.priority, self.same_pane, self.order)
     }
 }
 
@@ -185,24 +266,25 @@ impl State {
         subscriber: &ThumbnailSubscriber,
         desired: &HashMap<ThumbnailCacheKey, SubscriberRank>,
     ) -> Vec<ThumbnailCandidate> {
-        let mut provider_cancels = Vec::new();
-        let mut orphaned_queued = HashSet::new();
-        for (key, job) in &mut self.jobs {
+        self.drop_unsubscribed_jobs(|key, job| {
             job.retarget_subscriber(subscriber, desired.get(key).copied());
-            if !job.subscribers.is_empty() {
-                continue;
-            }
-            if job.active {
-                provider_cancels.push(job.candidate.clone());
-                continue;
-            }
-            orphaned_queued.insert(key.clone());
+        })
+    }
+
+    fn drop_unsubscribed_jobs(
+        &mut self,
+        mut update_job: impl FnMut(&ThumbnailCacheKey, &mut Job),
+    ) -> Vec<ThumbnailCandidate> {
+        let mut unsubscribed = UnsubscribedJobs::default();
+        for (key, job) in &mut self.jobs {
+            update_job(key, job);
+            unsubscribed.record(key, job);
         }
-        for key in &orphaned_queued {
+        for key in &unsubscribed.queued {
             self.jobs.remove(key);
         }
-        self.queued.retain(|key| !orphaned_queued.contains(key));
-        provider_cancels
+        self.queued.retain(|key| !unsubscribed.queued.contains(key));
+        unsubscribed.provider_cancels
     }
 
     fn subscribe_candidates(
@@ -223,11 +305,18 @@ impl State {
     fn add_subscriber(&mut self, candidate: ThumbnailCandidate, job_subscriber: JobSubscriber) {
         let key = ThumbnailCacheKey(candidate.fingerprint.clone());
         if let Some(job) = self.jobs.get_mut(&key) {
-            if !job.has_subscriber(&job_subscriber.context) {
-                job.subscribers.push(job_subscriber);
-            }
+            job.add_subscriber_once(job_subscriber);
             return;
         }
+        self.queue_new_job(key, candidate, job_subscriber);
+    }
+
+    fn queue_new_job(
+        &mut self,
+        key: ThumbnailCacheKey,
+        candidate: ThumbnailCandidate,
+        job_subscriber: JobSubscriber,
+    ) {
         self.jobs.insert(
             key.clone(),
             Job {
@@ -237,6 +326,65 @@ impl State {
             },
         );
         self.queued.push_back(key);
+    }
+
+    fn submit_visible(
+        &mut self,
+        subscriber: ThumbnailSubscriber,
+        candidate: ThumbnailCandidate,
+    ) -> bool {
+        if self.stopped {
+            return false;
+        }
+        let key = ThumbnailCacheKey(candidate.fingerprint.clone());
+        let job_subscriber = JobSubscriber::visible(subscriber);
+        if let Some(job) = self.jobs.get_mut(&key) {
+            job.subscribers.push(job_subscriber);
+            return false;
+        }
+        self.queue_new_job(key, candidate, job_subscriber);
+        true
+    }
+}
+
+impl State {
+    /// Drops the scope's subscriptions and its unsubscribed queued jobs;
+    /// returns the candidates of active jobs left without subscribers.
+    fn remove_scope(
+        &mut self,
+        pane_id: &str,
+        tab_id: &str,
+        path: &str,
+        generation: u64,
+    ) -> Vec<ThumbnailCandidate> {
+        self.scope_revisions.retain(|scope, _| {
+            !(scope.pane_id == pane_id
+                && scope.tab_id == tab_id
+                && scope.path == path
+                && scope.generation == generation)
+        });
+        self.drop_unsubscribed_jobs(|_, job| {
+            job.drop_subscribers_matching(pane_id, tab_id, path, generation);
+        })
+    }
+
+    fn finish_job(&mut self, key: &ThumbnailCacheKey) -> Vec<ThumbnailSubscriber> {
+        self.active = self.active.saturating_sub(1);
+        self.jobs.remove(key).map_or_else(Vec::new, |job| {
+            job.subscribers
+                .into_iter()
+                .map(|subscriber| subscriber.context)
+                .collect()
+        })
+    }
+
+    fn subscriber_contexts(&self, key: &ThumbnailCacheKey) -> Vec<ThumbnailSubscriber> {
+        self.jobs.get(key).map_or_else(Vec::new, |job| {
+            job.subscribers
+                .iter()
+                .map(|subscriber| subscriber.context.clone())
+                .collect()
+        })
     }
 }
 
@@ -339,87 +487,45 @@ impl ThumbnailScheduler {
             .lock()
             .expect("thumbnail scheduler lock")
             .replace_scope(&subscriber, revision, candidates);
-        match replacement {
-            ScopeReplacement::Ignored { accepted } => accepted,
+        let (accepted, provider_cancels) = match replacement {
+            ScopeReplacement::Ignored { accepted } => return accepted,
             ScopeReplacement::Applied {
                 accepted,
                 provider_cancels,
-            } => {
-                for candidate in provider_cancels {
-                    self.shared.provider.cancel(&candidate);
-                }
-                self.shared.wake.notify_all();
-                accepted
-            }
+            } => (accepted, provider_cancels),
+        };
+        self.cancel_in_provider(provider_cancels);
+        self.shared.wake.notify_all();
+        accepted
+    }
+
+    fn cancel_in_provider(&self, candidates: Vec<ThumbnailCandidate>) {
+        for candidate in candidates {
+            self.shared.provider.cancel(&candidate);
         }
     }
 
     /// Compatibility helper for direct scheduler callers and focused tests.
     pub fn submit(&self, subscriber: ThumbnailSubscriber, candidate: ThumbnailCandidate) {
-        let key = ThumbnailCacheKey(candidate.fingerprint.clone());
-        {
-            let mut state = self.shared.state.lock().expect("thumbnail scheduler lock");
-            if state.stopped {
-                return;
-            }
-            if let Some(job) = state.jobs.get_mut(&key) {
-                job.subscribers.push(JobSubscriber {
-                    context: subscriber,
-                    priority: ThumbnailPriority::Visible,
-                    order: 0,
-                });
-                return;
-            }
-            state.jobs.insert(
-                key.clone(),
-                Job {
-                    candidate,
-                    subscribers: vec![JobSubscriber {
-                        context: subscriber,
-                        priority: ThumbnailPriority::Visible,
-                        order: 0,
-                    }],
-                    active: false,
-                },
-            );
-            state.queued.push_back(key);
+        let queued_new_job = self
+            .shared
+            .state
+            .lock()
+            .expect("thumbnail scheduler lock")
+            .submit_visible(subscriber, candidate);
+        if queued_new_job {
+            self.shared.wake.notify_one();
         }
-        self.shared.wake.notify_one();
     }
 
     pub fn cancel_scope(&self, pane_id: &str, tab_id: &str, path: &str, generation: u64) {
-        let mut provider_cancels = Vec::new();
-        {
-            let mut state = self.shared.state.lock().expect("thumbnail scheduler lock");
-            state.scope_revisions.retain(|scope, _| {
-                !(scope.pane_id == pane_id
-                    && scope.tab_id == tab_id
-                    && scope.path == path
-                    && scope.generation == generation)
-            });
-            let mut remove_queued = HashSet::new();
-            for (key, job) in &mut state.jobs {
-                job.subscribers.retain(|subscriber| {
-                    !subscriber
-                        .context
-                        .matches(pane_id, tab_id, path, generation)
-                });
-                if job.subscribers.is_empty() {
-                    if job.active {
-                        provider_cancels.push(job.candidate.clone());
-                    } else {
-                        remove_queued.insert(key.clone());
-                    }
-                }
-            }
-            for key in &remove_queued {
-                state.jobs.remove(key);
-            }
-            state.queued.retain(|key| !remove_queued.contains(key));
-        }
-        for candidate in provider_cancels {
-            self.shared.provider.cancel(&candidate);
-        }
+        let provider_cancels = self
+            .shared
+            .state
+            .lock()
+            .expect("thumbnail scheduler lock")
+            .remove_scope(pane_id, tab_id, path, generation);
+        self.cancel_in_provider(provider_cancels);
         self.shared.wake.notify_all();
     }
 
@@ -435,20 +541,17 @@ impl ThumbnailScheduler {
                 .map(|(_, job)| job.candidate)
                 .collect::<Vec<_>>()
         };
-        for candidate in candidates {
-            self.shared.provider.cancel(&candidate);
-        }
+        self.cancel_in_provider(candidates);
         self.shared.provider.shutdown();
         self.shared.wake.notify_all();
-        if let Some(workers) = self
+        let workers = self
             .workers
             .lock()
             .expect("thumbnail scheduler workers lock")
             .take()
-        {
-            for worker in workers {
-                let _ = worker.join();
-            }
+            .unwrap_or_default();
+        for worker in workers {
+            let _ = worker.join();
         }
     }
 
@@ -468,74 +571,13 @@ impl Drop for ThumbnailScheduler {
 }
 
 fn worker_loop(shared: Arc<Shared>) {
-    loop {
-        let (key, candidate) = {
-            let mut state = shared.state.lock().expect("thumbnail scheduler lock");
-            loop {
-                if state.stopped {
-                    return;
-                }
-                if let Some((key, candidate)) = take_next_job(&mut state) {
-                    break (key, candidate);
-                }
-                state = shared.wake.wait(state).expect("thumbnail scheduler wake");
-            }
-        };
-
-        let result = if !(shared.metadata_matches)(&candidate) {
-            None
-        } else {
-            let permit = shared.coordinator.submit(JobSpec::new(
-                [JobClass::Cpu],
-                [format!(
-                    "thumbnail:{}",
-                    candidate.fingerprint.path.display()
-                )],
-            ));
-            let result = if permit.is_ok() {
-                let progress_shared = Arc::clone(&shared);
-                let progress_key = key.clone();
-                let progress_candidate = candidate.clone();
-                shared.provider.generate(
-                    &candidate,
-                    Arc::new(move |preview| {
-                        let subscribers = progress_shared
-                            .state
-                            .lock()
-                            .expect("thumbnail scheduler lock")
-                            .jobs
-                            .get(&progress_key)
-                            .map_or_else(Vec::new, |job| {
-                                job.subscribers
-                                    .iter()
-                                    .map(|subscriber| subscriber.context.clone())
-                                    .collect()
-                            });
-                        if !subscribers.is_empty() {
-                            (progress_shared.progress)(
-                                progress_candidate.clone(),
-                                preview,
-                                subscribers,
-                            );
-                        }
-                    }),
-                )
-            } else {
-                ThumbnailState::Failed
-            };
-            drop(permit);
-            Some(result)
-        };
-        let subscribers = {
-            let mut state = shared.state.lock().expect("thumbnail scheduler lock");
-            state.active = state.active.saturating_sub(1);
-            state.jobs.remove(&key).map_or_else(Vec::new, |job| {
-                job.subscribers
-                    .into_iter()
-                    .map(|subscriber| subscriber.context)
-                    .collect()
-            })
-        };
+    while let Some((key, candidate)) = wait_for_next_job(&shared) {
+        let result = generate_if_current(&shared, &key, &candidate);
+        let subscribers = shared
+            .state
+            .lock()
+            .expect("thumbnail scheduler lock")
+            .finish_job(&key);
         if let (Some(result), false) = (result, subscribers.is_empty()) {
             (shared.complete)(candidate, result, subscribers);
         }
@@ -543,36 +585,98 @@ fn worker_loop(shared: Arc<Shared>) {
     }
 }
 
+fn wait_for_next_job(shared: &Shared) -> Option<(ThumbnailCacheKey, ThumbnailCandidate)> {
+    let mut state = shared.state.lock().expect("thumbnail scheduler lock");
+    loop {
+        if state.stopped {
+            return None;
+        }
+        if let Some(next_job) = take_next_job(&mut state) {
+            return Some(next_job);
+        }
+        state = shared.wake.wait(state).expect("thumbnail scheduler wake");
+    }
+}
+
+/// `None` when the file changed since it was requested.
+fn generate_if_current(
+    shared: &Arc<Shared>,
+    key: &ThumbnailCacheKey,
+    candidate: &ThumbnailCandidate,
+) -> Option<ThumbnailState> {
+    if !(shared.metadata_matches)(candidate) {
+        return None;
+    }
+    let permit = shared.coordinator.submit(JobSpec::new(
+        [JobClass::Cpu],
+        [format!(
+            "thumbnail:{}",
+            candidate.fingerprint.path.display()
+        )],
+    ));
+    if permit.is_err() {
+        return Some(ThumbnailState::Failed);
+    }
+    Some(
+        shared
+            .provider
+            .generate(candidate, preview_reporter(shared, key, candidate)),
+    )
+}
+
+/// Forwards each preview to the job's current subscribers, if any remain.
+fn preview_reporter(
+    shared: &Arc<Shared>,
+    key: &ThumbnailCacheKey,
+    candidate: &ThumbnailCandidate,
+) -> ThumbnailPreviewCallback {
+    let shared = Arc::clone(shared);
+    let key = key.clone();
+    let candidate = candidate.clone();
+    Arc::new(move |preview| {
+        let subscribers = shared
+            .state
+            .lock()
+            .expect("thumbnail scheduler lock")
+            .subscriber_contexts(&key);
+        if !subscribers.is_empty() {
+            (shared.progress)(candidate.clone(), preview, subscribers);
+        }
+    })
+}
+
 fn take_next_job(state: &mut State) -> Option<(ThumbnailCacheKey, ThumbnailCandidate)> {
     let last_pane = state.last_pane.as_deref();
-    let (index, _, _, _, pane_id) = state
+    let choice = state
         .queued
         .iter()
         .enumerate()
-        .filter_map(|(index, key)| {
-            state.jobs.get(key).and_then(|job| {
-                job.subscribers
-                    .iter()
-                    .min_by_key(|subscriber| (priority_rank(subscriber.priority), subscriber.order))
-                    .map(|subscriber| {
-                        (
-                            index,
-                            priority_rank(subscriber.priority),
-                            usize::from(last_pane == Some(subscriber.context.pane_id.as_str())),
-                            subscriber.order,
-                            subscriber.context.pane_id.clone(),
-                        )
-                    })
-            })
-        })
-        .min_by_key(|(_, priority, same_pane, order, _)| (*priority, *same_pane, *order))?;
-    let key = state.queued.remove(index)?;
+        .filter_map(|(index, key)| queued_choice(state, index, key, last_pane))
+        .min_by_key(QueuedChoice::rank_key)?;
+    let key = state.queued.remove(choice.index)?;
     let job = state.jobs.get_mut(&key)?;
     job.active = true;
     let candidate = job.candidate.clone();
     state.active += 1;
-    state.last_pane = Some(pane_id);
+    state.last_pane = Some(choice.pane_id);
     Some((key, candidate))
+}
+
+fn queued_choice(
+    state: &State,
+    index: usize,
+    key: &ThumbnailCacheKey,
+    last_pane: Option<&str>,
+) -> Option<QueuedChoice> {
+    let subscriber = state.jobs.get(key)?.best_subscriber()?;
+    let pane_id = subscriber.context.pane_id.clone();
+    Some(QueuedChoice {
+        index,
+        priority: priority_rank(subscriber.priority),
+        same_pane: usize::from(last_pane == Some(pane_id.as_str())),
+        order: subscriber.order,
+        pane_id,
+    })
 }
 
 fn priority_rank(priority: ThumbnailPriority) -> u8 {

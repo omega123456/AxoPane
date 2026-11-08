@@ -134,9 +134,8 @@ fn a_queued_payload_is_claimed_by_exactly_one_caller() {
             let scheduler = Arc::clone(&scheduler);
             let claims = Arc::clone(&claims);
             thread::spawn(move || {
-                if scheduler.claim("/tmp/a").is_some() {
-                    claims.fetch_add(1, Ordering::SeqCst);
-                }
+                let claimed = scheduler.claim("/tmp/a").is_some();
+                claims.fetch_add(usize::from(claimed), Ordering::SeqCst);
             })
         })
         .collect();

@@ -72,26 +72,29 @@ impl<K: Eq + Hash + Clone, V> BoundedCache<K, V> {
     }
 
     pub fn retain(&mut self, mut keep: impl FnMut(&K, &V) -> bool) {
-        self.entries.retain(|key, record| {
-            let retained = keep(key, &record.value);
-            if !retained {
-                self.total_weight = self.total_weight.saturating_sub(record.weight);
-            }
-            retained
-        });
+        self.entries.retain(|key, record| keep(key, &record.value));
+        self.total_weight = self
+            .entries
+            .values()
+            .map(|record| record.weight)
+            .fold(0, usize::saturating_add);
     }
 
     fn evict(&mut self) {
-        while self.entries.len() > self.max_entries || self.total_weight > self.max_weight {
-            let Some(key) = self
-                .entries
-                .iter()
-                .min_by_key(|(_, record)| record.touched)
-                .map(|(key, _)| key.clone())
-            else {
-                break;
-            };
+        while let Some(key) = self.eviction_candidate() {
             let _ = self.remove(&key);
         }
+    }
+
+    fn eviction_candidate(&self) -> Option<K> {
+        let over_capacity =
+            self.entries.len() > self.max_entries || self.total_weight > self.max_weight;
+        if !over_capacity {
+            return None;
+        }
+        self.entries
+            .iter()
+            .min_by_key(|(_, record)| record.touched)
+            .map(|(key, _)| key.clone())
     }
 }

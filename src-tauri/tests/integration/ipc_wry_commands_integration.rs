@@ -32,8 +32,21 @@ fn build_app() -> (tempfile::TempDir, tauri::App<tauri::test::MockRuntime>) {
     (config_dir, app)
 }
 
+fn set_watch(
+    app: &tauri::App<tauri::test::MockRuntime>,
+    target: Option<WatchTarget>,
+) -> Result<(), String> {
+    commands::set_tab_watch(
+        SetTabWatchRequest {
+            target,
+            entries: None,
+        },
+        app.state::<Arc<WatchService>>(),
+    )
+}
+
 #[test]
-fn concrete_apphandle_commands_cover_volume_watch_and_size_wrappers() {
+fn concrete_apphandle_commands_cover_volume_and_watch_wrappers() {
     let (_config_dir, app) = build_app();
     let fixture = tempdir().expect("temp dir");
     let root = fixture.path();
@@ -52,27 +65,12 @@ fn concrete_apphandle_commands_cover_volume_watch_and_size_wrappers() {
         show_hidden: true,
         include_item_counts: true,
     };
-
-    commands::set_tab_watch(
-        SetTabWatchRequest {
-            target: Some(watch_target.clone()),
-            entries: None,
-        },
-        app.state::<Arc<WatchService>>(),
-    )
-    .expect("set watch");
+    set_watch(&app, Some(watch_target.clone())).expect("set watch");
 
     fs::remove_file(root.join("before.txt")).expect("remove");
     fs::write(root.join("after.txt"), b"after").expect("after");
 
-    commands::set_tab_watch(
-        SetTabWatchRequest {
-            target: Some(watch_target.clone()),
-            entries: None,
-        },
-        app.state::<Arc<WatchService>>(),
-    )
-    .expect("reseed watch after file changes");
+    set_watch(&app, Some(watch_target.clone())).expect("reseed watch after file changes");
     let baseline = file_explorer_lib::watch::tab_snapshot_for_tests(
         &app.state::<Arc<WatchService>>(),
         &watch_target.tab_id,
@@ -81,16 +79,14 @@ fn concrete_apphandle_commands_cover_volume_watch_and_size_wrappers() {
     assert!(baseline.keys().any(|path| path.ends_with("after.txt")));
     assert!(!baseline.keys().any(|path| path.ends_with("before.txt")));
 
-    commands::set_tab_watch(
-        SetTabWatchRequest {
-            target: None,
-            entries: None,
-        },
-        app.state::<Arc<WatchService>>(),
-    )
-    .expect("clear watch");
+    set_watch(&app, None).expect("clear watch");
+}
 
-    let size_root = root.join("sizes");
+#[test]
+fn concrete_apphandle_commands_cover_size_wrappers() {
+    let (_config_dir, app) = build_app();
+    let fixture = tempdir().expect("temp dir");
+    let size_root = fixture.path().join("sizes");
     fs::create_dir_all(&size_root).expect("sizes dir");
     for index in 0..20 {
         fs::write(size_root.join(format!("file-{index}.txt")), b"1234567890").expect("file");

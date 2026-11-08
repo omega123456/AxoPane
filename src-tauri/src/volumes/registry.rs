@@ -349,6 +349,27 @@ impl Default for VolumeRegistry {
 }
 
 impl VolumeRegistry {
+    #[cfg(not(feature = "test-utils"))]
+    fn attach_app(&self, app: &AppHandle) -> bool {
+        let mut inner = self.inner.lock().expect("volume registry inner lock");
+        if inner.app.is_some() {
+            return false;
+        }
+        inner.app = Some(app.clone());
+        true
+    }
+
+    #[cfg(not(feature = "test-utils"))]
+    fn publish_refresh(&self, generation: u64) {
+        let snapshot = build_snapshot(generation);
+        let is_latest = generation == self.generation.load(AtomicOrdering::SeqCst);
+        if !is_latest {
+            return;
+        }
+        self.publish_if_changed(snapshot);
+        self.mark_refreshing(false);
+    }
+
     /// Starts the registry: performs the first enumeration, builds the
     /// initial snapshot, and — outside `test-utils` — registers the
     /// long-lived native mount/unmount session that will call
@@ -357,12 +378,9 @@ impl VolumeRegistry {
     /// registration failed.
     #[cfg(not(feature = "test-utils"))]
     pub fn start(self: &Arc<Self>, app: AppHandle) {
-        {
-            let mut inner = self.inner.lock().expect("volume registry inner lock");
-            if inner.app.is_some() {
-                return;
-            }
-            inner.app = Some(app.clone());
+        let newly_started = self.attach_app(&app);
+        if !newly_started {
+            return;
         }
 
         // Build the first snapshot synchronously so `list_volumes`/`snapshot`
@@ -419,12 +437,7 @@ impl VolumeRegistry {
         let this = Arc::clone(self);
         let (sender, receiver) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let snapshot = build_snapshot(generation);
-            let is_latest = generation == this.generation.load(AtomicOrdering::SeqCst);
-            if is_latest {
-                this.publish_if_changed(snapshot);
-                this.mark_refreshing(false);
-            }
+            this.publish_refresh(generation);
             // Best-effort: only observed if the caller is still waiting
             // within the deadline. A closed receiver (caller already timed
             // out) is expected and not an error — the publish above already
