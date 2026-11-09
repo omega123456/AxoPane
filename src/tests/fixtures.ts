@@ -371,6 +371,7 @@ export const fixtures: {
     backend: 'everything',
     isAvailable: true,
     state: 'upToDate',
+    fileNamesAvailable: false,
   },
   search_query: {
     queryId: 1,
@@ -432,6 +433,17 @@ export const fixtures: {
   cancel_sizes: {
     cancelled: 0,
   },
+  add_index_exclusion: {
+    exclusions: [],
+    outcomes: [],
+  },
+  remove_index_exclusion: {
+    exclusions: [],
+  },
+  pick_index_exclusions: {
+    paths: [],
+  },
+  retry_folder_size_index: undefined,
   set_tab_watch: undefined,
   load_config: {
     theme: 'dark',
@@ -448,6 +460,7 @@ export const fixtures: {
     favourites: [],
     favouriteNames: {},
     favouritesCollapsed: false,
+    indexExclusions: [],
     keybindings: {},
     columns: [
       { key: 'name', visible: true },
@@ -491,6 +504,7 @@ export const fixtures: {
     favourites: [],
     favouriteNames: {},
     favouritesCollapsed: false,
+    indexExclusions: [],
     keybindings: {},
     columns: [
       { key: 'name', visible: true },

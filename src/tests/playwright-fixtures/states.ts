@@ -19,12 +19,14 @@ export const everythingUnavailable: FolderSizeIndexStatus = {
   backend: 'everything',
   isAvailable: false,
   state: 'unavailable',
+  fileNamesAvailable: false,
 }
 
 export const everythingAvailable: FolderSizeIndexStatus = {
   backend: 'everything',
   isAvailable: true,
   state: 'upToDate',
+  fileNamesAvailable: false,
 }
 
 /** No folder-size backend (macOS without the index). */
@@ -32,25 +34,39 @@ export const noFolderSizeBackend: FolderSizeIndexStatus = {
   backend: 'none',
   isAvailable: false,
   state: 'unavailable',
+  fileNamesAvailable: false,
 }
 
 /** macOS index statuses, one per Settings status line. */
 export const macIndexStatuses = {
-  notReady: { backend: 'macIndex', isAvailable: true, state: 'notReady' },
-  indexing: { backend: 'macIndex', isAvailable: true, state: 'indexing', itemsScanned: 1_234_567 },
-  updating: { backend: 'macIndex', isAvailable: true, state: 'updating' },
-  upToDate: { backend: 'macIndex', isAvailable: true, state: 'upToDate' },
+  notReady: {
+    backend: 'macIndex',
+    isAvailable: true,
+    state: 'notReady',
+    fileNamesAvailable: false,
+  },
+  indexing: {
+    backend: 'macIndex',
+    isAvailable: true,
+    state: 'indexing',
+    itemsScanned: 1_234_567,
+    fileNamesAvailable: true,
+  },
+  updating: { backend: 'macIndex', isAvailable: true, state: 'updating', fileNamesAvailable: true },
+  upToDate: { backend: 'macIndex', isAvailable: true, state: 'upToDate', fileNamesAvailable: true },
   pausedLowPower: {
     backend: 'macIndex',
     isAvailable: true,
     state: 'paused',
     pauseReason: 'lowPowerMode',
+    fileNamesAvailable: true,
   },
   pausedThermal: {
     backend: 'macIndex',
     isAvailable: true,
     state: 'paused',
     pauseReason: 'thermal',
+    fileNamesAvailable: true,
   },
 } satisfies Record<string, FolderSizeIndexStatus>
 

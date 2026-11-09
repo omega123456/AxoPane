@@ -185,7 +185,13 @@ describe('App', () => {
     const listenersAtFetch: number[] = []
     ipc.override('folder_size_index_status', () => {
       listenersAtFetch.push(ipc.listenerCount('size://index-status'))
-      return { backend: 'macIndex', isAvailable: true, state: 'indexing', itemsScanned: 3 }
+      return {
+        backend: 'macIndex',
+        isAvailable: true,
+        state: 'indexing',
+        itemsScanned: 3,
+        fileNamesAvailable: true,
+      }
     })
     renderApp()
 
@@ -195,7 +201,12 @@ describe('App', () => {
     expect(listenersAtFetch).toEqual([1])
 
     act(() => {
-      ipc.emit('size://index-status', { backend: 'macIndex', isAvailable: true, state: 'upToDate' })
+      ipc.emit('size://index-status', {
+        backend: 'macIndex',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: true,
+      })
     })
     expect(usePanesStore.getState().folderSizeIndexStatus?.state).toBe('upToDate')
     await waitFor(() => {
@@ -303,6 +314,7 @@ describe('App', () => {
       favourites: [],
       favouriteNames: {},
       favouritesCollapsed: false,
+      indexExclusions: [],
       keybindings: {
         refresh: ['F5'],
       },

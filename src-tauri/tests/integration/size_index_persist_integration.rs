@@ -2,8 +2,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use file_explorer_lib::size::index::persist::{
-    decode, encode, load, plan_batch, plan_catch_up, save, ChangeEvent, ChangeFlags, CurrentVolume,
-    ReplayOutcome, SnapshotMeta, FORMAT_VERSION,
+    decode, encode, load, plan_batch, plan_catch_up, save, save_encoded, temp_path, write_temp,
+    ChangeEvent, ChangeFlags, CurrentVolume, ReplayOutcome, SnapshotMeta, FORMAT_VERSION, NO_PAIR,
 };
 use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
 use tempfile::tempdir;
@@ -23,6 +23,11 @@ fn meta() -> SnapshotMeta {
         event_id: 500,
         last_full_scan_secs: 1_760_000_000,
         visited_roots: vec![path_of(&["home", "Desktop"])],
+        pair_token: 0x1234_5678_9abc_def0,
+        exclusions: vec![
+            path_of(&["build-cache"]),
+            path_of(&["home", "node_modules"]),
+        ],
     }
 }
 
@@ -93,6 +98,7 @@ fn current<'volume>(
 struct CraftedHeader {
     version: u32,
     visited: u32,
+    exclusions: u32,
     node_count: u32,
 }
 
@@ -100,6 +106,7 @@ fn header(version: u32, visited: u32, node_count: u32) -> CraftedHeader {
     CraftedHeader {
         version,
         visited,
+        exclusions: 0,
         node_count,
     }
 }
@@ -110,6 +117,7 @@ fn crafted(header: CraftedHeader, nodes: &[u8]) -> Vec<u8> {
     let CraftedHeader {
         version,
         visited,
+        exclusions,
         node_count,
     } = header;
     let mut out = b"AXOSIZE\0".to_vec();
@@ -118,6 +126,8 @@ fn crafted(header: CraftedHeader, nodes: &[u8]) -> Vec<u8> {
     put_str(&mut out, b"build");
     out.extend_from_slice(&[0; 16]);
     out.extend_from_slice(&visited.to_le_bytes());
+    out.extend_from_slice(&[0; 8]);
+    out.extend_from_slice(&exclusions.to_le_bytes());
     out.extend_from_slice(&node_count.to_le_bytes());
     out.extend_from_slice(nodes);
     let checksum = fnv1a(&out);
@@ -219,6 +229,11 @@ fn old_version_and_malformed_content_yield_none_even_with_a_valid_checksum() {
         "trailing"
     );
     assert!(decode(&crafted(header(FORMAT_VERSION, 2_000, 0), &[],)).is_none());
+    let too_many_exclusions = CraftedHeader {
+        exclusions: 2_000,
+        ..header(FORMAT_VERSION, 0, 0)
+    };
+    assert!(decode(&crafted(too_many_exclusions, &[])).is_none());
     assert!(decode(&crafted(header(FORMAT_VERSION, 1, 0), &[0xFF; 4],)).is_none());
     assert!(decode(&crafted(header(FORMAT_VERSION, 0, u32::MAX), &root,)).is_none());
 
@@ -344,8 +359,42 @@ fn a_different_os_build_forces_a_full_rescan_and_round_trips() {
     );
     let decoded = decode(&encode(&saved, &sample_tree())).expect("decodes");
     assert_eq!(decoded.meta.os_build, BUILD);
-    // A snapshot from before the build was stored is a different version.
-    assert_eq!(FORMAT_VERSION, 2);
+    // Version 3 added the pair token and the exclusion list.
+    assert_eq!(FORMAT_VERSION, 3);
+}
+
+#[test]
+fn the_pair_token_and_exclusion_list_round_trip_and_older_versions_are_rejected() {
+    let saved = meta();
+    let decoded = decode(&encode(&saved, &sample_tree())).expect("decodes");
+    assert_eq!(decoded.meta.pair_token, saved.pair_token);
+    assert_eq!(decoded.meta.exclusions, saved.exclusions);
+    let empty = SnapshotMeta::default();
+    assert_eq!(empty.pair_token, NO_PAIR);
+    assert!(empty.exclusions.is_empty());
+    let decoded_empty = decode(&encode(&empty, &FolderSizeTree::default())).expect("decodes");
+    assert_eq!(decoded_empty.meta, empty);
+    let version_two = crafted(header(2, 0, 1), &node(u32::MAX, b"idx", 1));
+    assert!(
+        decode(&version_two).is_none(),
+        "upgrading users rescan once"
+    );
+}
+
+#[test]
+fn write_temp_leaves_the_target_alone_until_renamed() {
+    let dir = tempdir().expect("temp dir");
+    let path = dir.path().join("cache").join("size-index.bin");
+    save(&path, &SnapshotMeta::default(), &FolderSizeTree::default()).expect("first save");
+    let before = fs::read(&path).expect("first");
+    let bytes = encode(&meta(), &sample_tree());
+    let temp = write_temp(&path, &bytes).expect("temp written");
+    assert_eq!(temp, temp_path(&path));
+    assert_eq!(fs::read(&path).expect("unchanged"), before);
+    assert_eq!(fs::read(&temp).expect("temp"), bytes);
+    save_encoded(&path, &bytes).expect("encoded save");
+    assert_eq!(load(&path).expect("loads").meta, meta());
+    assert!(!temp.exists());
 }
 
 #[test]

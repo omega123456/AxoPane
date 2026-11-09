@@ -12,14 +12,19 @@ use file_explorer_lib::search::tree_scan::{
     candidates, candidates_in_chunks, TreeSearchRun, SLOTS_PER_READ,
 };
 use file_explorer_lib::search::{CandidateBatch, Control, SearchError, SearchOptions, SearchScope};
+use file_explorer_lib::size::index::names::FileNameStore;
 use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
+use file_explorer_lib::size::index::IndexRead;
 
-/// A folder tree behind the source trait, counting reads.
-struct Source {
-    tree: Mutex<FolderSizeTree>,
-    blocked: Vec<PathBuf>,
+const NO_NAMES_FILE: &str = "no-file-names.bin";
+
+/// A folder tree and its file names behind the source trait, counting reads.
+pub(crate) struct Source {
+    pub(crate) tree: Mutex<FolderSizeTree>,
+    pub(crate) names: Mutex<FileNameStore>,
+    pub(crate) blocked: Vec<PathBuf>,
     reads: AtomicUsize,
-    fail: Option<SearchError>,
+    pub(crate) fail: Option<SearchError>,
 }
 
 impl Source {
@@ -28,32 +33,43 @@ impl Source {
     }
 
     fn from_tree(tree: FolderSizeTree) -> Self {
+        Self::with_names(tree, FileNameStore::new(PathBuf::from(NO_NAMES_FILE)))
+    }
+
+    pub(crate) fn with_names(tree: FolderSizeTree, names: FileNameStore) -> Self {
         Self {
             tree: Mutex::new(tree),
+            names: Mutex::new(names),
             blocked: Vec::new(),
             reads: AtomicUsize::new(0),
             fail: None,
         }
     }
 
-    fn reads(&self) -> usize {
+    pub(crate) fn reads(&self) -> usize {
         self.reads.load(Ordering::SeqCst)
     }
 }
 
 impl FolderTreeSource for Source {
-    fn read(&self, read: &mut dyn FnMut(&FolderSizeTree, &[PathBuf])) -> Result<(), SearchError> {
+    fn read(&self, read: &mut dyn FnMut(IndexRead<'_>)) -> Result<(), SearchError> {
         if let Some(error) = &self.fail {
             return Err(error.clone());
         }
         self.reads.fetch_add(1, Ordering::SeqCst);
-        read(&self.tree.lock().unwrap(), &self.blocked);
+        let tree = self.tree.lock().unwrap();
+        let names = self.names.lock().unwrap();
+        read(IndexRead {
+            tree: &tree,
+            names: &names,
+            blocked: &self.blocked,
+        });
         Ok(())
     }
 }
 
 /// A tree rooted at `/` holding every listed folder (and its ancestors).
-fn build(folders: &[&str]) -> FolderSizeTree {
+pub(crate) fn build(folders: &[&str]) -> FolderSizeTree {
     let mut children: BTreeMap<String, Vec<String>> = BTreeMap::new();
     children.entry("/".to_owned()).or_default();
     for folder in folders {
@@ -89,20 +105,20 @@ const LIBRARY: &[&str] = &[
     "/Applications",
 ];
 
-const VISIBLE: SearchOptions = SearchOptions {
+pub(crate) const VISIBLE: SearchOptions = SearchOptions {
     include_hidden: false,
     scope: SearchScope::All,
 };
 
-fn parsed(raw: &str) -> ParsedQuery {
+pub(crate) fn parsed(raw: &str) -> ParsedQuery {
     parse(raw, PathStyle::Posix, Some("/Users/alex")).expect("query")
 }
 
-fn never() -> bool {
+pub(crate) fn never() -> bool {
     false
 }
 
-fn run(source: &Source, raw: &str, options: &SearchOptions) -> CandidateBatch {
+pub(crate) fn run(source: &Source, raw: &str, options: &SearchOptions) -> CandidateBatch {
     let control = Control {
         cancelled: &never,
         expired: &never,
@@ -118,7 +134,7 @@ fn run(source: &Source, raw: &str, options: &SearchOptions) -> CandidateBatch {
     .expect("batch")
 }
 
-fn sorted(batch: &CandidateBatch) -> Vec<&str> {
+pub(crate) fn sorted(batch: &CandidateBatch) -> Vec<&str> {
     let mut paths: Vec<&str> = batch
         .candidates
         .iter()
@@ -147,7 +163,11 @@ fn name_scans_return_matching_folders_as_posix_paths() {
         .iter()
         .all(|candidate| candidate.is_dir && candidate.modified.is_none()));
     assert!(!batch.truncated);
-    assert_eq!(source.reads(), 1);
+    assert_eq!(
+        source.reads(),
+        2,
+        "one folder chunk plus the file names check"
+    );
     assert_eq!(SLOTS_PER_READ, 32_768);
 }
 
@@ -174,14 +194,17 @@ fn blocked_protected_roots_hide_their_contents_only() {
 }
 
 #[test]
-fn file_scope_finds_nothing_in_a_folder_only_index() {
+fn file_scope_finds_nothing_without_file_names() {
     let source = Source::new(LIBRARY);
     let files = SearchOptions {
         scope: SearchScope::Files,
         ..VISIBLE
     };
-    assert!(run(&source, "inv", &files).candidates.is_empty());
-    assert_eq!(source.reads(), 0);
+    let batch = run(&source, "inv", &files);
+    assert!(batch.candidates.is_empty());
+    assert!(!batch.truncated);
+    assert_eq!(source.reads(), 1, "only the names availability check reads");
+    assert!(!source.file_names_available());
 }
 
 #[test]

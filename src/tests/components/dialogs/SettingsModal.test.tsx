@@ -180,7 +180,12 @@ describe('SettingsModal', () => {
     useSettingsStore.getState().open('layout')
     setPlatform('MacIntel')
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'none', isAvailable: false, state: 'unavailable' },
+      folderSizeIndexStatus: {
+        backend: 'none',
+        isAvailable: false,
+        state: 'unavailable',
+        fileNamesAvailable: false,
+      },
     })
 
     render(<SettingsModal />)
@@ -194,7 +199,12 @@ describe('SettingsModal', () => {
     useSettingsStore.getState().open('layout')
     setPlatform('Win32')
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: false,
+        state: 'unavailable',
+        fileNamesAvailable: false,
+      },
     })
 
     render(<SettingsModal />)
@@ -209,7 +219,12 @@ describe('SettingsModal', () => {
     // The detected OS does not matter; the backend does.
     setPlatform('MacIntel')
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
     })
 
     render(<SettingsModal />)
@@ -230,10 +245,15 @@ describe('SettingsModal', () => {
     [{ state: 'paused', pauseReason: 'lowPowerMode' }, 'Paused in Low Power Mode', null],
     [{ state: 'paused', pauseReason: 'thermal' }, 'Paused to keep your Mac cool', null],
   ] as const)('shows the macOS copy and the %o status line', async (status, visible, announced) => {
-    useSettingsStore.getState().open('layout')
+    useSettingsStore.getState().open('searchIndex')
     setPlatform('Win32')
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'macIndex', isAvailable: true, ...status },
+      folderSizeIndexStatus: {
+        backend: 'macIndex',
+        isAvailable: true,
+        fileNamesAvailable: true,
+        ...status,
+      },
     })
 
     render(<SettingsModal />)
@@ -245,14 +265,133 @@ describe('SettingsModal', () => {
     expect(screen.queryByText(/Uses the Everything index/)).not.toBeInTheDocument()
     // The visible line carries the count; the status region only the state.
     expect(screen.getByText(visible, { selector: '[aria-hidden="true"]' })).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent(announced ?? visible)
+    expect(screen.getAllByRole('status')[0]).toHaveTextContent(announced ?? visible)
+  })
+
+  it('moves the macOS folder size toggle into Search index, right after View and layout', async () => {
+    const user = userEvent.setup()
+    useSettingsStore.getState().open('layout')
+    usePanesStore.setState({
+      folderSizeIndexStatus: {
+        backend: 'macIndex',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: true,
+      },
+    })
+
+    render(<SettingsModal />)
+    await screen.findByText('AxoPane 0.1.0')
+    const nav = screen.getByRole('navigation', { name: 'Settings sections' })
+    const labels = within(nav)
+      .getAllByRole('button')
+      .map((button) => button.textContent)
+    expect(labels.slice(0, 2)).toEqual(['View and layout', 'Search index'])
+    expect(
+      screen.queryByRole('switch', { name: 'Automatically calculate folder sizes' }),
+    ).not.toBeInTheDocument()
+
+    await user.click(within(nav).getByRole('button', { name: 'Search index' }))
+
+    expect(screen.getByRole('heading', { name: 'Search index' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('switch', { name: 'Automatically calculate folder sizes' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Everything is indexed')).toBeInTheDocument()
+  })
+
+  it('renders no Search index section without the macOS index', async () => {
+    setPlatform('Win32')
+    useSettingsStore.getState().open('layout')
+    usePanesStore.setState({
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
+    })
+
+    render(<SettingsModal />)
+    await screen.findByText('AxoPane 0.1.0')
+    expect(screen.queryByRole('button', { name: 'Search index' })).not.toBeInTheDocument()
+    expect(screen.getByText(/Uses the Everything index/)).toBeInTheDocument()
+  })
+
+  it('shows the index warning with Try again even when the index is not available', async () => {
+    const user = userEvent.setup()
+    const retry = vi.fn()
+    ipc.override('retry_folder_size_index', retry)
+    useSettingsStore.getState().open('searchIndex')
+    usePanesStore.setState({
+      folderSizeIndexStatus: {
+        backend: 'macIndex',
+        isAvailable: false,
+        state: 'unavailable',
+        fileNamesAvailable: false,
+      },
+    })
+
+    render(<SettingsModal />)
+    await screen.findByText('AxoPane 0.1.0')
+    expect(
+      screen.getByText("The index couldn't start", { selector: 'span:not(.sr-only)' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Search and folder sizes need the index.')).toBeInTheDocument()
+    expect(screen.queryByText('Preparing…')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+
+    await waitFor(() => expect(retry).toHaveBeenCalledTimes(1))
+  })
+
+  it.each([
+    [
+      'macIndex',
+      'Restore every setting to how AxoPane ships. Search index exclusions stay as they are.',
+    ],
+    ['everything', 'Restore every setting to how AxoPane ships'],
+  ] as const)('words the reset expander for the %s backend', async (backend, description) => {
+    useSettingsStore.getState().open('dates')
+    usePanesStore.setState({
+      folderSizeIndexStatus: {
+        backend,
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
+    })
+
+    render(<SettingsModal />)
+    await screen.findByText('AxoPane 0.1.0')
+    expect(screen.getByRole('button', { name: /Reset to defaults/ })).toHaveTextContent(description)
+  })
+
+  it('keeps the index exclusions when resetting to defaults', async () => {
+    const user = userEvent.setup()
+    const exclusions = ['/Users/alex/Projects/app/build-cache']
+    useConfigStore.setState({ indexExclusions: exclusions, showTime: true })
+    useSettingsStore.getState().open('dates')
+
+    render(<SettingsModal />)
+    await screen.findByText('AxoPane 0.1.0')
+    await user.click(screen.getByRole('button', { name: /Reset to defaults/ }))
+    await user.click(screen.getByRole('button', { name: 'Reset' }))
+
+    await waitFor(() => expect(useConfigStore.getState().showTime).toBe(false))
+    expect(useConfigStore.getState().indexExclusions).toEqual(exclusions)
   })
 
   it('shows the auto folder size toggle when Everything is available', async () => {
     useSettingsStore.getState().open('layout')
     setPlatform('Win32')
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
     })
 
     render(<SettingsModal />)
@@ -268,7 +407,12 @@ describe('SettingsModal', () => {
     ipc.override('save_config', saveConfig)
     setPlatform('Win32')
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
     })
     useSettingsStore.getState().open('layout')
 

@@ -18,6 +18,8 @@ pub fn wide_nul(value: impl AsRef<OsStr>) -> Vec<u16> {
         .collect()
 }
 
+/// # Safety
+/// `pointer` must be null or point to a NUL-terminated UTF-16 string that stays valid for the call.
 pub unsafe fn string_from_wide_ptr(pointer: *const u16) -> Option<String> {
     if pointer.is_null() {
         return None;

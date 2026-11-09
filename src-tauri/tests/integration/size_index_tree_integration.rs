@@ -280,6 +280,11 @@ fn skipped_roots_make_ancestors_lower_bounds_with_three_names_and_a_count() {
         home.lower_bound,
         Some(LowerBound {
             skipped_names: vec!["Cloud".into(), "Containers".into(), "Desktop".into()],
+            skipped_paths: vec![
+                path_of(&["home", "Cloud"]),
+                path_of(&["home", "Containers"]),
+                path_of(&["home", "Desktop"]),
+            ],
             skipped_more: 2,
             denied_count: 0,
         })
@@ -542,4 +547,129 @@ fn dirty_tracks_changes_since_the_last_snapshot() {
     assert!(!tree.is_dirty(), "no-op re-read");
     tree.prune(&path_of(&["s"]));
     assert!(tree.is_dirty());
+}
+
+#[test]
+fn structure_changes_are_tracked_until_a_pair_save_marks_them_saved() {
+    let mut tree = chain();
+    assert!(tree.structure_changed(), "new folders");
+    tree.mark_structure_saved();
+    tree.apply_listing::<&str>(&path_of(&["s"]), DirectoryListing::scanned(50, &[]));
+    assert!(tree.is_dirty());
+    assert!(
+        !tree.structure_changed(),
+        "a size change keeps the structure"
+    );
+
+    tree.apply_listing(&path_of(&["s"]), DirectoryListing::scanned(50, &["new"]));
+    assert!(tree.structure_changed(), "an added folder");
+    tree.mark_structure_saved();
+    assert!(tree.rename(&path_of(&["s", "new"]), &path_of(&["a", "moved"])));
+    assert!(tree.structure_changed(), "a move changes depth-first order");
+    tree.mark_structure_saved();
+    tree.prune(&path_of(&["a", "moved"]));
+    assert!(tree.structure_changed(), "a removal");
+}
+
+#[test]
+fn removed_slots_are_reported_once_including_descendants() {
+    let mut tree = chain();
+    let removed_root = tree.lookup(&path_of(&["a", "b"])).expect("b");
+    let removed_child = tree.lookup(&path_of(&["a", "b", "c"])).expect("c");
+    assert!(tree.take_removed_slots().is_empty());
+    tree.prune(&path_of(&["a", "b"]));
+    let mut removed = tree.take_removed_slots();
+    removed.sort_unstable();
+    let mut expected = vec![removed_root, removed_child];
+    expected.sort_unstable();
+    assert_eq!(removed, expected);
+    assert!(tree.take_removed_slots().is_empty(), "drained");
+
+    tree.apply_listing::<&str>(&path_of(&["a"]), DirectoryListing::scanned(10, &[]));
+    assert!(
+        tree.take_removed_slots().is_empty(),
+        "nothing left to remove"
+    );
+    tree.apply_listing::<&str>(&path_of(&[]), DirectoryListing::scanned(1, &["a"]));
+    assert_eq!(
+        tree.take_removed_slots().len(),
+        1,
+        "a stale child removed by a listing"
+    );
+}
+
+#[test]
+fn merge_record_slot_returns_the_live_slot_of_the_record() {
+    let mut tree = tree();
+    let slot = tree
+        .merge_record_slot::<&str>(&path_of(&["x", "y"]), DirectoryListing::scanned(3, &[]))
+        .expect("inside the root");
+    assert_eq!(tree.lookup(&path_of(&["x", "y"])), Some(slot));
+    assert_eq!(
+        tree.merge_record_slot::<&str>(Path::new("elsewhere"), DirectoryListing::scanned(1, &[])),
+        None
+    );
+}
+
+#[test]
+fn export_slots_follow_the_depth_first_snapshot_order_and_subtrees_are_contiguous() {
+    let tree = chain();
+    let order = tree.export_slots();
+    let ids = |parts: &[&str]| tree.lookup(&path_of(parts)).expect("indexed");
+    assert_eq!(
+        order,
+        vec![
+            ids(&[]),
+            ids(&["a"]),
+            ids(&["a", "b"]),
+            ids(&["a", "b", "c"]),
+            ids(&["s"]),
+        ]
+    );
+    assert_eq!(
+        tree.subtree_slots(ids(&["a"])),
+        vec![ids(&["a"]), ids(&["a", "b"]), ids(&["a", "b", "c"])]
+    );
+    assert_eq!(tree.subtree_slots(ids(&["s"])), vec![ids(&["s"])]);
+    assert!(tree.subtree_slots(u32::MAX).is_empty());
+
+    let mut pruned = chain();
+    let freed = pruned.lookup(&path_of(&["s"])).expect("s");
+    pruned.prune(&path_of(&["s"]));
+    assert!(pruned.subtree_slots(freed).is_empty(), "a freed slot");
+}
+
+#[test]
+fn excluding_a_folder_keeps_a_skipped_leaf_and_including_it_awaits_a_scan() {
+    let mut tree = chain();
+    let before = bytes(&tree, &[]);
+    tree.mark_structure_saved();
+    tree.take_removed_slots();
+
+    let excluded = tree.exclude_subtree(&path_of(&["a"])).expect("indexed");
+    assert!(excluded.changed);
+    assert!(tree.structure_changed());
+    assert_eq!(tree.take_removed_slots().len(), 2);
+    assert_eq!(bytes(&tree, &[]), before - 1110);
+    let leaf = tree.total(&path_of(&["a"])).expect("leaf");
+    assert!(leaf.skipped && leaf.bytes == 0 && leaf.fully_indexed);
+    assert!(tree.total(&path_of(&["a", "b"])).is_none());
+    let bound = tree
+        .total(&path_of(&[]))
+        .and_then(|total| total.lower_bound)
+        .expect("lower bound");
+    assert_eq!(bound.skipped_names, vec!["a"]);
+    assert_eq!(bound.skipped_paths, vec![path_of(&["a"])]);
+
+    let again = tree.exclude_subtree(&path_of(&["a"])).expect("indexed");
+    assert_eq!(again.slot, excluded.slot);
+    assert!(!again.changed, "already a skipped leaf");
+    assert!(tree.exclude_subtree(&path_of(&["missing"])).is_none());
+
+    assert!(tree.include_subtree(&path_of(&["a"])));
+    let pending = tree.total(&path_of(&["a"])).expect("pending");
+    assert!(!pending.skipped && !pending.fully_indexed);
+    assert_eq!(tree.unscanned_tops(), vec![path_of(&["a"])]);
+    assert!(!tree.include_subtree(&path_of(&["a"])), "no longer skipped");
+    assert!(!tree.include_subtree(&path_of(&["missing"])));
 }

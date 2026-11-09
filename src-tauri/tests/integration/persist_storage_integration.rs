@@ -58,6 +58,7 @@ fn customised_config() -> Config {
             "Left".to_string(),
         )]),
         favourites_collapsed: true,
+        index_exclusions: vec!["/Users/alex/Projects/app/build-cache".to_string()],
     }
 }
 
@@ -270,6 +271,7 @@ fn legacy_config_without_layout_fields_gets_defaults() {
     assert!(!loaded.auto_expand_active_queue_toasts);
     assert!(loaded.favourites.is_empty());
     assert!(!loaded.favourites_collapsed);
+    assert!(loaded.index_exclusions.is_empty());
 }
 
 #[test]

@@ -43,6 +43,13 @@ impl SearchBackend {
         }
     }
 
+    fn is_folders_only(&self) -> bool {
+        let Self::Tree(source) = self else {
+            return false;
+        };
+        !source.file_names_available()
+    }
+
     fn path_style(&self) -> PathStyle {
         match self {
             Self::Everything(_) => PathStyle::Windows,
@@ -177,7 +184,7 @@ impl SearchService {
     pub fn capabilities(&self) -> SearchCapabilities {
         SearchCapabilities {
             backend: self.backend.kind(),
-            folders_only: matches!(self.backend, SearchBackend::Tree(_)),
+            folders_only: self.backend.is_folders_only(),
         }
     }
 
@@ -232,6 +239,8 @@ impl SearchService {
             }
             SearchBackend::None => Err(SearchError::Unavailable),
         }?;
+        let scanned = started.elapsed();
+        let candidate_count = batch.candidates.len();
         let hits: Vec<Scored> = rank_candidates(batch.candidates, &query, style)
             .into_iter()
             .filter(|hit| match options.scope {
@@ -240,6 +249,15 @@ impl SearchService {
                 SearchScope::Files => !hit.is_dir,
             })
             .collect();
+        log_search(&SearchTiming {
+            query: &request.query,
+            scope: options.scope,
+            candidates: candidate_count,
+            hits: hits.len(),
+            truncated: batch.truncated,
+            scanned,
+            total: started.elapsed(),
+        });
         let results = Arc::new(ResultSet::new(ticket.generation, hits, batch.truncated));
         self.publish_results(ticket.generation, &results)?;
         Ok(self.page_of(&results, 0))
@@ -289,6 +307,29 @@ impl SearchService {
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
         self.state.lock().expect("search state lock")
     }
+}
+
+struct SearchTiming<'query> {
+    query: &'query str,
+    scope: SearchScope,
+    candidates: usize,
+    hits: usize,
+    truncated: bool,
+    scanned: Duration,
+    total: Duration,
+}
+
+fn log_search(timing: &SearchTiming<'_>) {
+    log::info!(
+        "search: {:?} scope={:?} candidates={} hits={} truncated={} scan={}ms total={}ms",
+        timing.query,
+        timing.scope,
+        timing.candidates,
+        timing.hits,
+        timing.truncated,
+        timing.scanned.as_millis(),
+        timing.total.as_millis()
+    );
 }
 
 fn to_hit(hit: &Scored) -> SearchHit {

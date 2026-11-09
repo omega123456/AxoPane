@@ -12,6 +12,7 @@ use file_explorer_lib::size::fast_walk::{
     HelperThreadCounts, Qos, WalkOptions, INDEX_EXCLUDED_ROOTS, MAX_HELPER_THREADS,
     MAX_JOB_THREADS,
 };
+use file_explorer_lib::size::index::names::PackedNames;
 use file_explorer_lib::size::index::platform::DATA_VOLUME_PREFIX;
 use file_explorer_lib::size::manual::{calculate, ManualSizeError};
 use file_explorer_lib::traversal::{walk, TraversalOptions};
@@ -332,6 +333,60 @@ fn single_directory_listing_reports_bytes_subdirs_and_denial() {
     ));
     assert!(by_path[&locked].denied);
     assert!(!by_path.contains_key(&root.join("a/b/c")));
+}
+
+fn sorted_names(names: Option<&PackedNames>) -> Vec<String> {
+    let mut listed: Vec<String> = names
+        .expect("names collected")
+        .names()
+        .map(|name| String::from_utf8_lossy(name).into_owned())
+        .collect();
+    listed.sort();
+    listed
+}
+
+#[test]
+fn file_names_are_collected_only_for_index_walks_and_never_list_symlinks() {
+    let fixture = tempdir().expect("temp dir");
+    let root = fixture.path();
+    seed_tree(root);
+    fs::write(root.join(".hidden"), b"h").expect("hidden file");
+    let mut manual = options();
+    manual.hooks.buffer_size = 512;
+    assert!(!manual.collect_file_names, "manual size jobs opt out");
+    assert!(records(root, &manual)
+        .values()
+        .all(|record| record.file_names.is_none()));
+    assert_eq!(list_dir(root, &manual).expect("listing").file_names, None);
+
+    let mut collecting = options();
+    collecting.hooks.buffer_size = 512;
+    collecting.collect_file_names = true;
+    let by_path = records(root, &collecting);
+    assert_eq!(
+        sorted_names(by_path[root].file_names.as_ref()),
+        [".hidden", "top.bin"],
+        "symlinks to files and folders are not listed"
+    );
+    assert_eq!(
+        sorted_names(by_path[&root.join("a")].file_names.as_ref()),
+        ["one.bin", "zero.bin"]
+    );
+    assert!(sorted_names(by_path[&root.join("empty")].file_names.as_ref()).is_empty());
+    let wide = sorted_names(by_path[&root.join("wide")].file_names.as_ref());
+    assert_eq!(
+        wide.len(),
+        WIDE_FILES,
+        "every buffer fill contributes names"
+    );
+    assert_eq!(wide.first().map(String::as_str), Some("file-00.bin"));
+
+    let listing = list_dir(&root.join("a"), &collecting).expect("listing");
+    assert_eq!(
+        sorted_names(listing.file_names.as_ref()),
+        ["one.bin", "zero.bin"]
+    );
+    assert_eq!(listing.file_count, 2);
 }
 
 /// Parks the walk when it opens `parked_root` until the test releases it.

@@ -6,6 +6,7 @@ use time::format_description::well_known::Rfc3339;
 use time::{Date, Month, OffsetDateTime};
 
 pub mod logger;
+pub mod panic;
 
 pub use logger::FileLogger;
 

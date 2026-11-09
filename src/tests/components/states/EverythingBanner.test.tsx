@@ -27,7 +27,12 @@ describe('EverythingBanner', () => {
   it('shows on Windows when Everything is unavailable and persists dismissal', async () => {
     const user = userEvent.setup()
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: false,
+        state: 'unavailable',
+        fileNamesAvailable: false,
+      },
     })
 
     const saveConfig = vi.fn(() => ({
@@ -45,6 +50,7 @@ describe('EverythingBanner', () => {
       favourites: [],
       favouriteNames: {},
       favouritesCollapsed: false,
+      indexExclusions: [],
       keybindings: {},
       columns: [],
       layout: {
@@ -80,7 +86,12 @@ describe('EverythingBanner', () => {
 
   it('does not show when Everything is available', () => {
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
     })
     render(<EverythingBanner />)
     expect(screen.queryByRole('status', { name: 'Everything unavailable' })).not.toBeInTheDocument()
@@ -91,7 +102,12 @@ describe('EverythingBanner', () => {
     expect(screen.queryByRole('status', { name: 'Everything unavailable' })).not.toBeInTheDocument()
     act(() =>
       usePanesStore.setState({
-        folderSizeIndexStatus: { backend: 'macIndex', isAvailable: false, state: 'unavailable' },
+        folderSizeIndexStatus: {
+          backend: 'macIndex',
+          isAvailable: false,
+          state: 'unavailable',
+          fileNamesAvailable: false,
+        },
       }),
     )
     expect(screen.queryByRole('status', { name: 'Everything unavailable' })).not.toBeInTheDocument()
@@ -100,7 +116,12 @@ describe('EverythingBanner', () => {
   it('does not show on non-Windows platforms', () => {
     setPlatform('MacIntel')
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: false,
+        state: 'unavailable',
+        fileNamesAvailable: false,
+      },
     })
     render(<EverythingBanner />)
     expect(screen.queryByRole('status', { name: 'Everything unavailable' })).not.toBeInTheDocument()

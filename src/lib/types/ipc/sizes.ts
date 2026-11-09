@@ -16,6 +16,7 @@ export type SizeStateEvent = {
   naReason?: 'network' | 'timeout' | 'denied'
   isLowerBound?: boolean
   skippedRoots?: string[]
+  excludedRoots?: string[]
   skippedMore?: number
 }
 
@@ -25,6 +26,7 @@ export type FolderSizeIndexStatus = {
   state: 'unavailable' | 'notReady' | 'indexing' | 'updating' | 'upToDate' | 'paused'
   itemsScanned?: number
   pauseReason?: 'lowPowerMode' | 'thermal'
+  fileNamesAvailable: boolean
 }
 export type SizeRequestMode = 'auto' | 'manual' | 'refresh'
 
@@ -97,6 +99,45 @@ export type ThumbnailResultEvent = {
   state: ThumbnailResultKind
   quality: ThumbnailQuality | null
   dataUrl: string | null
+}
+
+export type AddIndexExclusionRequest = {
+  paths: string[]
+}
+
+export type RemoveIndexExclusionRequest = {
+  path: string
+}
+
+export type IndexExclusionOutcomeKind =
+  | 'added'
+  | 'duplicate'
+  | 'insideExisting'
+  | 'mergedChildren'
+  | 'alwaysSkipped'
+  | 'rootRejected'
+  | 'homeWarning'
+  | 'notFound'
+  | 'notAFolder'
+
+export type IndexExclusionOutcome = {
+  path: string
+  outcome: IndexExclusionOutcomeKind
+  detail?: string
+  mergedCount?: number
+}
+
+export type AddIndexExclusionResponse = {
+  exclusions: string[]
+  outcomes: IndexExclusionOutcome[]
+}
+
+export type IndexExclusionsResponse = {
+  exclusions: string[]
+}
+
+export type PickIndexExclusionsResponse = {
+  paths: string[]
 }
 
 export type CancelSizeRequest = {

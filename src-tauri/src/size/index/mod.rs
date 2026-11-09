@@ -1,3 +1,5 @@
+pub mod exclusions;
+pub mod names;
 pub mod persist;
 #[cfg(target_os = "macos")]
 pub mod platform;
@@ -18,12 +20,23 @@ mod status;
 #[cfg(target_os = "macos")]
 mod subscriptions;
 
+use std::path::PathBuf;
+
+use names::FileNameStore;
+use tree::FolderSizeTree;
+
 #[cfg(all(target_os = "macos", feature = "test-utils"))]
 pub use service::LaneSnapshot;
 #[cfg(all(target_os = "macos", not(feature = "test-utils")))]
 pub use service::MacIndexSetup;
 #[cfg(target_os = "macos")]
 pub use service::{
-    Clock, FolderSizeIndex, IndexOptions, SizeEmitter, StatusEmitter, TreeUnavailable,
-    READMIT_EVERY_DIRS, SNAPSHOT_FILE,
+    names_path_beside, Clock, FolderSizeIndex, IndexOptions, SizeEmitter, StatusEmitter,
+    TreeUnavailable, READMIT_EVERY_DIRS, SNAPSHOT_FILE,
 };
+
+pub struct IndexRead<'view> {
+    pub tree: &'view FolderSizeTree,
+    pub names: &'view FileNameStore,
+    pub blocked: &'view [PathBuf],
+}

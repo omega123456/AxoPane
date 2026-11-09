@@ -21,6 +21,7 @@ use crate::resource_coordinator::{max_throughput_slots, ResourceCoordinator};
 use crate::volumes::{self, VolumeInfo};
 
 use everything::{EverythingAvailability, EverythingHandle};
+use index::exclusions::ExclusionChange;
 #[cfg(target_os = "macos")]
 pub(crate) use route::{route_of, Route};
 use worker_pool::{spawn_manual_worker, QueuedWork};
@@ -101,6 +102,8 @@ pub struct FolderSizeIndexStatus {
     pub items_scanned: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pause_reason: Option<PauseReason>,
+    #[serde(default)]
+    pub file_names_available: bool,
 }
 
 impl FolderSizeIndexStatus {
@@ -111,6 +114,7 @@ impl FolderSizeIndexStatus {
             state,
             items_scanned: None,
             pause_reason: None,
+            file_names_available: false,
         }
     }
 }
@@ -125,6 +129,7 @@ pub struct SizeUpdate {
     pub na_reason: Option<NaReason>,
     pub is_lower_bound: bool,
     pub skipped_roots: Option<Vec<String>>,
+    pub excluded_roots: Option<Vec<String>>,
     pub skipped_more: Option<u32>,
 }
 
@@ -138,6 +143,7 @@ impl SizeUpdate {
             na_reason: None,
             is_lower_bound: false,
             skipped_roots: None,
+            excluded_roots: None,
             skipped_more: None,
         }
     }
@@ -175,6 +181,9 @@ impl SizeRequest {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IndexUnsupported;
 
 pub struct SizeRequestWithVolumes {
     pub request: SizeRequest,
@@ -458,6 +467,59 @@ impl SizeService {
     pub fn index_lanes_for_tests(&self) -> Option<index::LaneSnapshot> {
         self.folder_size_index()
             .map(|index| index.lanes_for_tests())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn attached_index(&self) -> Result<Arc<index::FolderSizeIndex>, IndexUnsupported> {
+        self.folder_size_index().ok_or(IndexUnsupported)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn require_index(&self) -> Result<(), IndexUnsupported> {
+        self.attached_index().map(|_| ())
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn add_index_exclusions(
+        &self,
+        candidates: &[PathBuf],
+    ) -> Result<ExclusionChange, IndexUnsupported> {
+        self.attached_index()
+            .map(|index| index.add_exclusions(candidates))
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn remove_index_exclusion(&self, path: &Path) -> Result<Vec<PathBuf>, IndexUnsupported> {
+        self.attached_index()
+            .map(|index| index.remove_exclusion(path))
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn retry_folder_size_index(&self) -> Result<(), IndexUnsupported> {
+        self.attached_index().map(|index| index.retry_stream())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn require_index(&self) -> Result<(), IndexUnsupported> {
+        Err(IndexUnsupported)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn add_index_exclusions(
+        &self,
+        _candidates: &[PathBuf],
+    ) -> Result<ExclusionChange, IndexUnsupported> {
+        Err(IndexUnsupported)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn remove_index_exclusion(&self, _path: &Path) -> Result<Vec<PathBuf>, IndexUnsupported> {
+        Err(IndexUnsupported)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn retry_folder_size_index(&self) -> Result<(), IndexUnsupported> {
+        Err(IndexUnsupported)
     }
 
     pub fn flush_index(&self) {

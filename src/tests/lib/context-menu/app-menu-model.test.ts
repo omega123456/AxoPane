@@ -51,7 +51,12 @@ describe('buildAppContextMenuContent', () => {
     usePanesStore.getState().reset()
     useLayoutStore.setState({ defaultPaneMode: defaultLayout.defaultPaneMode })
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: false,
+        state: 'unavailable',
+        fileNamesAvailable: false,
+      },
       volumes: [
         {
           mountRoot: 'C:\\',
@@ -247,7 +252,12 @@ describe('buildAppContextMenuContent', () => {
 
   it('keeps unsupported file actions disabled and hides folder-size rows when Everything is available', () => {
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
     })
     const folderCalculateRow = () =>
       buildAppContextMenuContent(
@@ -302,7 +312,12 @@ describe('buildAppContextMenuContent', () => {
 
   it('shows "Calculate size" when automatic sizing is off or the folder size is unknown', () => {
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'macIndex', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'macIndex',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: true,
+      },
     })
     const calculateRow = () =>
       buildAppContextMenuContent(

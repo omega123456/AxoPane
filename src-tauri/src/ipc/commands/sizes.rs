@@ -1,3 +1,6 @@
+use std::path::{Path, PathBuf};
+
+use crate::persist::{Config, PersistenceState};
 use crate::size::SizeService;
 #[cfg(feature = "test-utils")]
 use std::sync::{Arc, Mutex};
@@ -5,12 +8,19 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::ipc::types::{
-    CancelSizeRequest, CancelSizeResponse, CancelSizesRequest, CancelSizesResponse,
-    FolderSizeRequest, FolderSizesRequest, SizeStateEvent, SizeSubscriptionsRequest,
+    path_strings, AddIndexExclusionRequest, AddIndexExclusionResponse, CancelSizeRequest,
+    CancelSizeResponse, CancelSizesRequest, CancelSizesResponse, FolderSizeRequest,
+    FolderSizesRequest, IndexCommandError, IndexExclusionsResponse, PickIndexExclusionsResponse,
+    RemoveIndexExclusionRequest, SizeStateEvent, SizeSubscriptionsRequest,
 };
 use tauri::State;
 #[cfg(not(feature = "test-utils"))]
 use tauri::{AppHandle, Emitter};
+#[cfg(not(feature = "test-utils"))]
+use tauri_plugin_dialog::DialogExt;
+
+#[cfg(not(feature = "test-utils"))]
+const EXCLUSION_PICKER_TITLE: &str = "Exclude folders";
 
 #[cfg(feature = "test-utils")]
 const SIZE_UPDATE_POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -147,6 +157,7 @@ pub fn size_state_event_from_update(update: crate::size::SizeUpdate) -> SizeStat
         na_reason: update.na_reason,
         is_lower_bound: update.is_lower_bound,
         skipped_roots: update.skipped_roots,
+        excluded_roots: update.excluded_roots,
         skipped_more: update.skipped_more,
     }
 }
@@ -169,4 +180,76 @@ pub fn cancel_sizes(
     CancelSizesResponse {
         cancelled: state.cancel_many(&payload.paths),
     }
+}
+
+#[tauri::command]
+pub fn add_index_exclusion(
+    payload: AddIndexExclusionRequest,
+    sizes: State<'_, SizeService>,
+    persistence: State<'_, PersistenceState>,
+) -> Result<AddIndexExclusionResponse, IndexCommandError> {
+    let candidates: Vec<PathBuf> = payload.paths.iter().map(PathBuf::from).collect();
+    let change = sizes.add_index_exclusions(&candidates)?;
+    Ok(AddIndexExclusionResponse {
+        exclusions: persist_exclusions(&persistence, &change.exclusions),
+        outcomes: change.verdicts.into_iter().map(Into::into).collect(),
+    })
+}
+
+#[tauri::command]
+pub fn remove_index_exclusion(
+    payload: RemoveIndexExclusionRequest,
+    sizes: State<'_, SizeService>,
+    persistence: State<'_, PersistenceState>,
+) -> Result<IndexExclusionsResponse, IndexCommandError> {
+    let exclusions = sizes.remove_index_exclusion(Path::new(&payload.path))?;
+    Ok(IndexExclusionsResponse {
+        exclusions: persist_exclusions(&persistence, &exclusions),
+    })
+}
+
+#[tauri::command]
+pub fn retry_folder_size_index(sizes: State<'_, SizeService>) -> Result<(), IndexCommandError> {
+    sizes.retry_folder_size_index()?;
+    Ok(())
+}
+
+#[cfg(not(feature = "test-utils"))]
+#[tauri::command(async)]
+pub fn pick_index_exclusions(
+    app: AppHandle,
+    sizes: State<'_, SizeService>,
+) -> Result<PickIndexExclusionsResponse, IndexCommandError> {
+    sizes.require_index()?;
+    let picked = app
+        .dialog()
+        .file()
+        .set_title(EXCLUSION_PICKER_TITLE)
+        .blocking_pick_folders()
+        .unwrap_or_default();
+    let paths: Vec<PathBuf> = picked
+        .into_iter()
+        .filter_map(|folder| folder.into_path().ok())
+        .collect();
+    Ok(PickIndexExclusionsResponse {
+        paths: path_strings(&paths),
+    })
+}
+
+#[cfg(feature = "test-utils")]
+#[tauri::command]
+pub fn pick_index_exclusions(
+    sizes: State<'_, SizeService>,
+) -> Result<PickIndexExclusionsResponse, IndexCommandError> {
+    sizes.require_index()?;
+    Ok(PickIndexExclusionsResponse { paths: Vec::new() })
+}
+
+fn persist_exclusions(persistence: &PersistenceState, exclusions: &[PathBuf]) -> Vec<String> {
+    let index_exclusions = path_strings(exclusions);
+    persistence.config.replace(Config {
+        index_exclusions: index_exclusions.clone(),
+        ..persistence.config.current()
+    });
+    index_exclusions
 }

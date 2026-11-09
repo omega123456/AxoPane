@@ -47,7 +47,20 @@ const everythingStatus: FolderSizeIndexStatus = {
   backend: 'everything',
   isAvailable: true,
   state: 'upToDate',
+  fileNamesAvailable: false,
 }
+
+function macStatus(overrides: Partial<FolderSizeIndexStatus> = {}): FolderSizeIndexStatus {
+  return {
+    backend: 'macIndex',
+    isAvailable: true,
+    state: 'upToDate',
+    fileNamesAvailable: true,
+    ...overrides,
+  }
+}
+
+const macPage = { capabilities: { backend: 'macIndex', foldersOnly: false } } as const
 
 function setIndexStatus(status: FolderSizeIndexStatus) {
   ipc.override('folder_size_index_status', status)
@@ -161,8 +174,7 @@ describe('SearchPalette', () => {
     await search(user, 'inv')
     expect(options().map((o) => o.getAttribute('aria-setsize'))).toEqual(['2', '2'])
     expect(screen.getByText('Everything · 2 results')).toBeInTheDocument()
-    expect(screen.getByRole('status', { name: '' }) ?? null).toBeTruthy()
-    expect(screen.getByText('2 results')).toBeInTheDocument()
+    expect(screen.getByText('2 results')).toHaveAttribute('role', 'status')
     expect(options()[0].querySelector('mark')?.textContent).toBe('Invoice')
   })
 
@@ -261,12 +273,29 @@ describe('SearchPalette', () => {
     expect(input()).toHaveFocus()
 
     act(() => useSearchPaletteStore.getState().reset())
-    setIndexStatus({ backend: 'macIndex', isAvailable: true, state: 'upToDate' })
+    setIndexStatus(macStatus({ fileNamesAvailable: false }))
     await openPalette()
     expect(screen.getByRole('button', { name: 'Files' })).toBeDisabled()
-    expect(screen.getByText('Folder names only on this Mac')).toBeInTheDocument()
+    expect(
+      screen.getByText('File names aren’t available on this Mac right now.'),
+    ).toBeInTheDocument()
     expect(input()).toHaveAttribute('placeholder', 'Search folders, or type a path like alex/')
     expect(screen.getByText('Folders on this Mac')).toBeInTheDocument()
+  })
+
+  it('offers files on macOS as soon as file names exist, before any query', async () => {
+    setIndexStatus(macStatus({ state: 'indexing', itemsScanned: 42 }))
+    await renderPalette()
+    expect(screen.getByRole('button', { name: 'Files' })).toBeEnabled()
+    expect(input()).toHaveAttribute(
+      'placeholder',
+      'Search files and folders, or type a path like alex/',
+    )
+    expect(
+      screen.getByText('Results may be incomplete until indexing finishes.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Indexing files… 42 items')).toBeInTheDocument()
+    expect(useSearchPaletteStore.getState().status).toBe('idle')
   })
 
   it('explains an unavailable backend', async () => {
@@ -291,14 +320,18 @@ describe('SearchPalette', () => {
 
   it('explains the macOS index states', async () => {
     const user = userEvent.setup()
-    setIndexStatus({ backend: 'macIndex', isAvailable: false, state: 'notReady' })
+    setIndexStatus(macStatus({ isAvailable: false, state: 'notReady', fileNamesAvailable: false }))
     ipc.override('search_query', () => Promise.reject({ kind: 'notReady' }))
     await renderPalette()
     await search(user, 'proj')
-    expect(screen.getByText('The folder index is starting')).toBeInTheDocument()
+    expect(screen.getByText('The search index is starting')).toBeInTheDocument()
+    expect(screen.getByText('Search works as soon as the index has loaded.')).toBeInTheDocument()
     ipc.override('search_query', () => Promise.reject({ kind: 'unavailable' }))
     await search(user, 'proje')
     expect(screen.getByText('Search is unavailable')).toBeInTheDocument()
+    expect(
+      screen.getByText('Search needs the index, which could not start on this Mac.'),
+    ).toBeInTheDocument()
   })
 
   it('says when nothing matched', async () => {
@@ -315,38 +348,67 @@ describe('SearchPalette', () => {
     )
     await search(user, 'tax return')
     expect(screen.getByText('No folders match “tax return”')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'File names aren’t available on this Mac right now. To find a file, open its folder and type to filter.',
+      ),
+    ).toBeInTheDocument()
   })
 
-  it('reports macOS indexing progress and pauses in the footer', async () => {
+  it('says when nothing matched yet while macOS is indexing', async () => {
     const user = userEvent.setup()
-    setIndexStatus({
-      backend: 'macIndex',
-      isAvailable: true,
-      state: 'indexing',
-      itemsScanned: 1_204_388,
-    })
+    setIndexStatus(macStatus({ state: 'indexing' }))
+    ipc.override('search_query', page([], 0, macPage))
+    await renderPalette()
+    await search(user, 'taxes 2019')
+    expect(screen.getByText('No results yet for “taxes 2019”')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'Files on this Mac are still being indexed. Search again when indexing finishes.',
+      ),
+    ).toBeInTheDocument()
+
+    setIndexStatus(macStatus())
+    expect(screen.getByText('No results for “taxes 2019”')).toBeInTheDocument()
+  })
+
+  it('reports macOS indexing, pauses and updates in the footer', async () => {
+    const user = userEvent.setup()
+    setIndexStatus(macStatus({ state: 'indexing', itemsScanned: 1_204_388 }))
     ipc.override(
       'search_query',
-      page([hit('Projects', true, '/Users/alex')], 1, {
-        capabilities: { backend: 'macIndex', foldersOnly: true },
-      }),
+      page(
+        [hit('Projects', true, '/Users/alex'), hit('projects.md', false, '/Users/alex')],
+        2,
+        macPage,
+      ),
     )
     await renderPalette()
-    expect(
-      screen.getByText('Indexing… 1.2M folders · results may be incomplete'),
-    ).toBeInTheDocument()
-    setIndexStatus({ backend: 'macIndex', isAvailable: true, state: 'indexing' })
-    expect(screen.getByText('Indexing… · results may be incomplete')).toBeInTheDocument()
-    setIndexStatus({
-      backend: 'macIndex',
-      isAvailable: true,
-      state: 'paused',
-      pauseReason: 'thermal',
-    })
+    expect(screen.getByText('Indexing files… 1.2M items')).toBeInTheDocument()
+    setIndexStatus(macStatus({ state: 'indexing' }))
+    expect(screen.getByText('Indexing files…')).toBeInTheDocument()
+    setIndexStatus(macStatus({ state: 'paused', pauseReason: 'thermal' }))
     expect(screen.getByText('Paused to keep your Mac cool')).toBeInTheDocument()
-    setIndexStatus({ backend: 'macIndex', isAvailable: true, state: 'upToDate' })
+    expect(
+      screen.getByText('Results may be incomplete until indexing resumes.'),
+    ).toBeInTheDocument()
+    setIndexStatus(macStatus({ state: 'updating' }))
     await search(user, 'proj')
-    expect(screen.getByText('Folders on this Mac · 1 result')).toBeInTheDocument()
+    expect(screen.getByText('Updating index… · 2 results')).toBeInTheDocument()
+    setIndexStatus(macStatus())
+    expect(screen.getByText('Files and folders on this Mac · 2 results')).toBeInTheDocument()
+  })
+
+  it('announces once when file names become ready', async () => {
+    setIndexStatus(macStatus({ state: 'indexing', itemsScanned: 10 }))
+    await renderPalette()
+    expect(screen.queryByText('File names are ready.')).toBeNull()
+    setIndexStatus(macStatus({ state: 'indexing', itemsScanned: 20 }))
+    expect(screen.queryByText('File names are ready.')).toBeNull()
+    setIndexStatus(macStatus())
+    expect(screen.getByText('File names are ready.')).toHaveAttribute('aria-live', 'polite')
+    setIndexStatus(macStatus({ state: 'updating' }))
+    expect(screen.getByText('File names are ready.')).toBeInTheDocument()
   })
 
   it('loads more results at the end of the list', async () => {

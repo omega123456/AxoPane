@@ -62,6 +62,11 @@ import type {
 } from './session'
 import type { InitialShellResponse } from './shell'
 import type {
+  AddIndexExclusionRequest,
+  AddIndexExclusionResponse,
+  IndexExclusionsResponse,
+  PickIndexExclusionsResponse,
+  RemoveIndexExclusionRequest,
   CancelSizeRequest,
   CancelSizeResponse,
   CancelSizesRequest,
@@ -270,6 +275,22 @@ export type IpcCommandMap = {
   cancel_sizes: {
     request: CancelSizesRequest
     response: CancelSizesResponse
+  }
+  add_index_exclusion: {
+    request: AddIndexExclusionRequest
+    response: AddIndexExclusionResponse
+  }
+  remove_index_exclusion: {
+    request: RemoveIndexExclusionRequest
+    response: IndexExclusionsResponse
+  }
+  pick_index_exclusions: {
+    request: undefined
+    response: PickIndexExclusionsResponse
+  }
+  retry_folder_size_index: {
+    request: undefined
+    response: void
   }
   set_tab_watch: {
     request: SetTabWatchRequest

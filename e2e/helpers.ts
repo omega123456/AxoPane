@@ -28,24 +28,22 @@ export async function gotoScenario(page: Page, scenario: PlaywrightScenario) {
   await page.goto('/')
 }
 
+const settingsSectionButtons = {
+  keybindings: { name: 'Keybindings' },
+  columns: { name: 'Columns' },
+  layout: { name: 'View and layout' },
+  searchIndex: { name: 'Search index', exact: true },
+  dates: { name: 'Dates', exact: true },
+  updates: { name: 'Updates' },
+  logs: { name: 'Logs' },
+}
+
 export async function openSettingsSection(
   page: Page,
-  section: 'keybindings' | 'columns' | 'layout' | 'dates' | 'updates' | 'logs',
+  section: keyof typeof settingsSectionButtons,
 ) {
   await page.getByRole('button', { name: 'Settings' }).click()
-  if (section === 'keybindings') {
-    await page.getByRole('button', { name: 'Keybindings' }).click()
-  } else if (section === 'columns') {
-    await page.getByRole('button', { name: 'Columns' }).click()
-  } else if (section === 'layout') {
-    await page.getByRole('button', { name: 'View and layout' }).click()
-  } else if (section === 'dates') {
-    await page.getByRole('button', { name: 'Dates', exact: true }).click()
-  } else if (section === 'updates') {
-    await page.getByRole('button', { name: 'Updates' }).click()
-  } else if (section === 'logs') {
-    await page.getByRole('button', { name: 'Logs' }).click()
-  }
+  await page.getByRole('button', settingsSectionButtons[section]).click()
 }
 
 export async function rightClickPane(page: Page, paneName: 'Left pane' | 'Right pane') {

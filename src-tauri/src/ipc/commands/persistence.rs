@@ -10,8 +10,12 @@ pub fn load_config(state: State<'_, PersistenceState>) -> AppConfig {
 
 #[tauri::command]
 pub fn save_config(payload: SaveConfigRequest, state: State<'_, PersistenceState>) -> AppConfig {
-    state.config.replace(payload.config.clone());
-    payload.config
+    let saved = AppConfig {
+        index_exclusions: state.config.current().index_exclusions,
+        ..payload.config
+    };
+    state.config.replace(saved.clone());
+    saved
 }
 
 #[tauri::command]

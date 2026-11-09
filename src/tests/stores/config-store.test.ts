@@ -83,6 +83,7 @@ describe('config-store', () => {
       favourites: ['C:\\Users\\Omega'],
       favouriteNames: {},
       favouritesCollapsed: true,
+      indexExclusions: [],
     })
 
     const state = useConfigStore.getState()
@@ -225,6 +226,7 @@ describe('config-store', () => {
       favourites: [],
       favouriteNames: {},
       favouritesCollapsed: false,
+      indexExclusions: [],
     })
     expect(useConfigStore.getState().logLevel).toBe('warn')
 
@@ -253,6 +255,7 @@ describe('config-store', () => {
       favourites: [],
       favouriteNames: {},
       favouritesCollapsed: false,
+      indexExclusions: [],
       keybindings: {},
       columns: [],
       layout: {

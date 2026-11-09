@@ -26,6 +26,7 @@ import {
   useCloseOnOutsidePointer,
   useFolderShortcutRows,
   useSearchPaletteView,
+  useIndexAnnouncement,
   useSearchVirtualRows,
 } from './use-search-palette'
 import { FLYOUT_SURFACE, PRIMARY_TEXT } from '@/lib/class-names'
@@ -129,6 +130,7 @@ type SearchPaletteController = ReturnType<typeof useSearchPaletteController>
 function footerFor({ view, backendInfo }: SearchPaletteController) {
   return footerText({
     backend: backendInfo.backend,
+    phase: backendInfo.phase,
     status: view.indexStatus,
     searching: view.status === 'ready',
     loaded: view.items.length,
@@ -163,7 +165,8 @@ function SearchPaletteResults({ listRef, view, backendInfo, results }: SearchPal
 function SearchPaletteFlyout() {
   const controller = useSearchPaletteController()
   const { view, navigation, refs } = controller
-  const { foldersOnly } = controller.backendInfo
+  const { foldersOnly, phase } = controller.backendInfo
+  const indexAnnouncement = useIndexAnnouncement(view.indexStatus)
   const { setQuery, setScope } = useSearchPaletteStore.getState()
   const selectScope = (scope: SearchScope) => {
     setScope(scope)
@@ -187,7 +190,7 @@ function SearchPaletteFlyout() {
       <SearchScopeBar
         scope={view.scope}
         foldersOnly={foldersOnly}
-        scopeNote={scopeNoteFor(navigation.searching, view.query, foldersOnly)}
+        scopeNote={scopeNoteFor(navigation.searching, view.query, phase)}
         onSelectScope={selectScope}
       />
       <SearchPaletteResults
@@ -198,7 +201,10 @@ function SearchPaletteFlyout() {
       />
       <SearchPaletteFooter
         footer={footerFor(controller)}
-        announcement={resultAnnouncement(view.status, view.total)}
+        announcements={{
+          results: resultAnnouncement(view.status, view.total),
+          index: indexAnnouncement,
+        }}
       />
     </SearchPaletteFrame>
   )

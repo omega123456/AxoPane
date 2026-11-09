@@ -149,6 +149,9 @@ describe('SizeValue', () => {
         'C:\\one': bound(['Documents']),
         'C:\\two': bound(['Documents', 'Desktop']),
         'C:\\denied-below': bound(undefined),
+        'C:\\excluded': { ...bound(undefined), excludedRoots: ['build-cache'] },
+        'C:\\excluded-many': { ...bound(undefined, 1), excludedRoots: ['build-cache', 'dist'] },
+        'C:\\mixed': { ...bound(['Documents'], 1), excludedRoots: ['build-cache'] },
         'C:\\denied': { state: 'na', sizeBytes: null, source: 'index', naReason: 'denied' },
         'C:\\error': { state: 'error', sizeBytes: null, source: 'manual' },
         'C:\\refreshing': { state: 'ready', sizeBytes: 1024, source: 'index', refreshing: true },
@@ -177,6 +180,21 @@ describe('SizeValue', () => {
     expect(screen.getByText('≥ 2.0 KB')).toHaveAttribute(
       'title',
       "Doesn't include folders macOS blocked access to.",
+    )
+    rerender(<SizeValue entry={entry({ path: 'C:\\excluded' })} />)
+    expect(screen.getByText('≥ 2.0 KB')).toHaveAttribute(
+      'title',
+      "Doesn't include build-cache, which is excluded in Search index settings.",
+    )
+    rerender(<SizeValue entry={entry({ path: 'C:\\excluded-many' })} />)
+    expect(screen.getByText('≥ 2.0 KB')).toHaveAttribute(
+      'title',
+      "Doesn't include build-cache, dist and 1 more, which are excluded in Search index settings.",
+    )
+    rerender(<SizeValue entry={entry({ path: 'C:\\mixed' })} />)
+    expect(screen.getByText('≥ 2.0 KB')).toHaveAttribute(
+      'title',
+      "Doesn't include Documents and 1 more. Open them to include them. Doesn't include build-cache, which is excluded in Search index settings.",
     )
 
     rerender(<SizeValue entry={entry({ path: 'C:\\denied' })} />)

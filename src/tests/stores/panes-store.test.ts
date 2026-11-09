@@ -323,7 +323,12 @@ describe('panes-store navigation', () => {
     ipc.override('set_tab_watch', setTabWatch)
     ipc.override('request_folder_sizes', requestFolderSizes)
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
     })
 
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
@@ -484,7 +489,12 @@ describe('panes-store navigation', () => {
 
     // With automatic sizing every folder is refreshed, known or not.
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'macIndex', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'macIndex',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: true,
+      },
     })
     request.mockClear()
     await usePanesStore.getState().refreshSizes('left')
@@ -499,7 +509,12 @@ describe('panes-store navigation', () => {
 
   it('clears pending refresh requests when the refresh request fails', async () => {
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
     })
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
     ipc.override('request_folder_sizes', () => {
@@ -549,7 +564,12 @@ describe('panes-store navigation', () => {
 
   it('reports the pane subscription set before auto requests, and clears it for Trash', async () => {
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
     })
     const calls: string[] = []
     const subscribe = vi.fn((payload: { currentPath: string | null; folderPaths: string[] }) => {
@@ -590,7 +610,12 @@ describe('panes-store navigation', () => {
 
   it('a failed subscription report only logs and still requests sizes', async () => {
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
     })
     const request = vi.fn(() => undefined)
     ipc.override('request_folder_sizes', request)
@@ -1194,7 +1219,12 @@ describe('panes-store navigation', () => {
     usePanesStore.getState().initialize({
       session: { activePane: 'left', leftPath: 'C:\\', rightPath: 'C:\\' },
       showHiddenFiles: false,
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: false,
+        state: 'unavailable',
+        fileNamesAvailable: false,
+      },
       volumes: [
         {
           mountRoot: 'C:\\',
@@ -1243,7 +1273,12 @@ describe('panes-store navigation', () => {
     usePanesStore.getState().initialize({
       session: { activePane: 'left', leftPath: '/', rightPath: '/' },
       showHiddenFiles: false,
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: false,
+        state: 'unavailable',
+        fileNamesAvailable: false,
+      },
       volumes: [
         {
           mountRoot: '/',
@@ -1297,7 +1332,12 @@ describe('panes-store navigation', () => {
     usePanesStore.getState().initialize({
       session: { activePane: 'left', leftPath: '/', rightPath: '/' },
       showHiddenFiles: false,
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: false,
+        state: 'unavailable',
+        fileNamesAvailable: false,
+      },
       volumes: [
         {
           mountRoot: '/',
@@ -1350,7 +1390,12 @@ describe('panes-store navigation', () => {
     usePanesStore.getState().initialize({
       session: { activePane: 'left', leftPath: 'C:\\', rightPath: 'C:\\' },
       showHiddenFiles: false,
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: false,
+        state: 'unavailable',
+        fileNamesAvailable: false,
+      },
       volumes: [
         {
           mountRoot: 'C:\\',
@@ -1413,7 +1458,12 @@ describe('panes-store navigation', () => {
     usePanesStore.getState().initialize({
       session: { activePane: 'left', leftPath: 'C:\\', rightPath: 'C:\\' },
       showHiddenFiles: false,
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: false,
+        state: 'unavailable',
+        fileNamesAvailable: false,
+      },
       volumes: [
         {
           mountRoot: 'C:\\',
@@ -1457,7 +1507,12 @@ describe('panes-store navigation', () => {
     usePanesStore.getState().initialize({
       session: { activePane: 'left', leftPath: 'C:\\', rightPath: 'C:\\' },
       showHiddenFiles: false,
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: false,
+        state: 'unavailable',
+        fileNamesAvailable: false,
+      },
       volumes: [
         {
           mountRoot: 'C:\\',
@@ -1483,7 +1538,12 @@ describe('panes-store navigation', () => {
         rightPath: 'D:\\work',
       },
       showHiddenFiles: false,
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: false,
+        state: 'unavailable',
+        fileNamesAvailable: false,
+      },
       volumes: [
         {
           mountRoot: '\\\\nas\\media',
@@ -1588,7 +1648,12 @@ describe('panes-store navigation', () => {
       ],
     }))
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
     })
 
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
@@ -1603,7 +1668,12 @@ describe('panes-store navigation', () => {
     const request = vi.fn(() => undefined)
     ipc.override('request_folder_sizes', request)
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: false,
+        state: 'unavailable',
+        fileNamesAvailable: false,
+      },
     })
 
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
@@ -1619,7 +1689,12 @@ describe('panes-store navigation', () => {
       entries: [dirAt('C:\\root\\Alpha'), dirAt('C:\\root\\Beta')],
     }))
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
     })
     useConfigStore.getState().hydrate({ ...useConfigStore.getState(), autoFolderSize: false })
 
@@ -1637,7 +1712,12 @@ describe('panes-store navigation', () => {
       entries: [dirAt('C:\\root\\Alpha'), dirAt('C:\\root\\Beta')],
     }))
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
     })
 
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
@@ -1678,7 +1758,12 @@ describe('panes-store navigation', () => {
       entries: [dirAt('C:\\root\\Alpha')],
     }))
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
     })
 
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
@@ -1708,7 +1793,12 @@ describe('panes-store navigation', () => {
       ),
     }))
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
     })
 
     // Exactly 500 folders is still eagerly sized.
@@ -1735,7 +1825,12 @@ describe('panes-store navigation', () => {
         : { path: payload.path, entries: [] },
     )
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
     })
 
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
@@ -1766,7 +1861,12 @@ describe('panes-store navigation', () => {
         : { path: payload.path, entries: [] },
     )
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
     })
 
     // Both panes land on C:\root, so Alpha is shared.
@@ -2276,7 +2376,12 @@ describe('panes-store v2 directory sessions', () => {
       beginResponse({ entries: [dir('Alpha'), dir('Bravo')], sessionId: 3 }),
     )
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
     })
 
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
@@ -2942,14 +3047,24 @@ describe('panes-store search reveals and recent folders', () => {
         recentFolders: ['C:\\two', 'C:\\one'],
       },
       showHiddenFiles: false,
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
       volumes: [],
     })
     expect(useRecentFoldersStore.getState().folders).toEqual(['C:\\two', 'C:\\one'])
     usePanesStore.getState().initialize({
       session: { activePane: 'left', leftPath: 'C:\\one', rightPath: 'C:\\two' },
       showHiddenFiles: false,
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: false,
+      },
       volumes: [],
     })
     expect(useRecentFoldersStore.getState().folders).toEqual([])

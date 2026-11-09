@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -11,7 +11,11 @@ use file_explorer_lib::search::{SearchError, SearchScope};
 use file_explorer_lib::size::everything::{
     EverythingHandle, EverythingQuery, EverythingQueryResult, EverythingRow,
 };
+use file_explorer_lib::size::index::names::file::NAMES_FILE;
+use file_explorer_lib::size::index::names::writer::{write_names, PairStamp};
+use file_explorer_lib::size::index::names::{FileNameStore, PackedNames};
 use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
+use file_explorer_lib::size::index::IndexRead;
 use file_explorer_lib::size::SizeService;
 use serde_json::json;
 use tempfile::tempdir;
@@ -225,27 +229,93 @@ fn scope_filters_hits_and_a_spent_budget_returns_a_truncated_page() {
 /// A folder tree source that can supersede the query while it is read.
 struct Tree {
     tree: FolderSizeTree,
+    names: FileNameStore,
     during_read: Mutex<Option<Box<dyn Fn() + Send>>>,
 }
 
 impl FolderTreeSource for Tree {
-    fn read(&self, read: &mut dyn FnMut(&FolderSizeTree, &[PathBuf])) -> Result<(), SearchError> {
+    fn read(&self, read: &mut dyn FnMut(IndexRead<'_>)) -> Result<(), SearchError> {
         if let Some(hook) = self.during_read.lock().unwrap().as_ref() {
             hook();
         }
-        read(&self.tree, &[]);
+        read(IndexRead {
+            tree: &self.tree,
+            names: &self.names,
+            blocked: &[],
+        });
         Ok(())
     }
 }
 
-fn tree_at(root: &Path, children: &[&str]) -> Arc<Tree> {
+fn folder_tree(root: &Path, children: &[&str]) -> FolderSizeTree {
     let mut tree = FolderSizeTree::default();
     assert!(tree.add_root(root));
     assert!(tree.merge_record(root, DirectoryListing::scanned(0, children)));
+    tree
+}
+
+fn tree_at(root: &Path, children: &[&str]) -> Arc<Tree> {
     Arc::new(Tree {
-        tree,
+        tree: folder_tree(root, children),
+        names: FileNameStore::new(root.join(NAMES_FILE)),
         during_read: Mutex::new(None),
     })
+}
+
+/// A tree whose root folder holds `files` in a written names file.
+fn tree_with_files(root: &Path, files: &[&str]) -> Arc<Tree> {
+    let tree = folder_tree(root, &["documents"]);
+    let mut names = FileNameStore::new(root.join(NAMES_FILE));
+    let root_slot = tree.lookup(root).expect("root slot");
+    names.set_names(
+        root_slot,
+        PackedNames::from_names(files.iter().map(|file| file.as_bytes())),
+    );
+    let stamp = PairStamp {
+        event_id: 1,
+        pair_token: 1,
+        deadline: None,
+    };
+    let written = write_names(names.capture(tree.export_slots()), stamp).expect("written");
+    names.install(written, || Ok(())).expect("installed");
+    Arc::new(Tree {
+        tree,
+        names,
+        during_read: Mutex::new(None),
+    })
+}
+
+#[test]
+fn the_tree_backend_finds_files_once_file_names_exist() {
+    let dir = tempdir().expect("temp dir");
+    std::fs::write(dir.path().join("documents.txt"), b"x").expect("file");
+    let tree = tree_with_files(dir.path(), &["documents.txt", "notes.md"]);
+    let service = SearchService::new(SearchBackend::Tree(tree), None);
+    assert_eq!(
+        service.capabilities(),
+        SearchCapabilities {
+            backend: SearchBackendKind::MacIndex,
+            folders_only: false,
+        }
+    );
+    let page = search(&service, "documents").expect("page");
+    assert_eq!(page.total, 2);
+    assert!(page.items[0].is_dir, "the exact folder ranks first");
+    assert!(!page.items[1].is_dir);
+    assert!(page.items[1].modified_at.is_some());
+    assert!(!page.capabilities.folders_only);
+    let ticket = service.begin();
+    let files = service
+        .run(
+            live(ticket),
+            &SearchQueryRequest {
+                scope: SearchScope::Files,
+                ..request("documents")
+            },
+        )
+        .expect("files");
+    assert_eq!(files.total, 1);
+    assert!(files.items.iter().all(|hit| !hit.is_dir));
 }
 
 #[test]
@@ -276,8 +346,8 @@ fn a_query_superseded_after_collection_is_stale() {
     let tree = tree_at(dir.path(), &["documents"]);
     let service = Arc::new(SearchService::new(SearchBackend::Tree(tree.clone()), None));
     let ticket = service.begin();
-    // Scope `files` collects nothing from a folder-only tree without
-    // checking for cancellation, so only the final generation check fires.
+    // Scope `files` reads no file names from a folder-only tree and never
+    // checks for cancellation, so only the final generation check fires.
     service.begin();
     assert_eq!(
         service.run(

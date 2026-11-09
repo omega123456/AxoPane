@@ -67,6 +67,10 @@ impl FakePlatform {
         self.state().stream_fails = true;
     }
 
+    pub fn restore_stream(&self) {
+        self.state().stream_fails = false;
+    }
+
     pub fn set_initial_conditions(&self, low_power: bool, thermal_pressure: bool) {
         self.state().conditions = PowerSignal::Conditions {
             low_power,

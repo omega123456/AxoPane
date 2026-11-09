@@ -62,6 +62,7 @@ pub mod listing_session_integration;
 pub mod logging_commands_integration;
 pub mod logging_format_integration;
 pub mod logging_frontend_integration;
+pub mod logging_panic_integration;
 pub mod logging_writer_integration;
 pub mod main_entry_integration;
 pub mod native_drag_integration;
@@ -89,6 +90,7 @@ pub mod resource_coordinator_integration;
 pub mod search_commands_integration;
 pub mod search_everything_plan_integration;
 pub mod search_everything_strategy_integration;
+pub mod search_file_scan_integration;
 pub mod search_matcher_integration;
 pub mod search_path_style_integration;
 pub mod search_query_parse_integration;
@@ -99,6 +101,13 @@ pub mod search_tree_scan_integration;
 pub mod size_everything_run_query_integration;
 #[cfg(target_os = "macos")]
 pub mod size_fast_walk_integration;
+#[cfg(target_os = "macos")]
+pub mod size_index_exclusions_integration;
+pub mod size_index_names_block_integration;
+pub mod size_index_names_file_integration;
+#[cfg(target_os = "macos")]
+pub mod size_index_names_service_integration;
+pub mod size_index_names_store_integration;
 pub mod size_index_persist_integration;
 #[cfg(target_os = "macos")]
 pub mod size_index_service_integration;

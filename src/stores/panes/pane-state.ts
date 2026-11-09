@@ -32,6 +32,7 @@ export type EntrySizeState = {
   naReason?: SizeStateEvent['naReason']
   isLowerBound?: boolean
   skippedRoots?: string[]
+  excludedRoots?: string[]
   skippedMore?: number
   refreshing?: boolean
 }

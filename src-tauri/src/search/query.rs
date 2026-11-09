@@ -40,6 +40,13 @@ impl Segment {
         matcher::match_words(words, name, kind)
     }
 
+    pub fn match_name(&self, name: &str, kind: NameKind) -> Option<Match> {
+        if !self.may_match(name) {
+            return None;
+        }
+        self.matches(&FoldedName::new(&matcher::nfc(name)), kind)
+    }
+
     pub fn may_match(&self, name: &str) -> bool {
         !name.is_ascii()
             || self

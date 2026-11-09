@@ -3,12 +3,16 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use crossbeam_channel::{bounded, unbounded, Sender};
 
+use super::exclusions::{ExclusionChange, ExclusionRules, ExclusionSet};
+use super::names::file::NAMES_FILE;
+use super::names::FileNameStore;
 use super::platform::{self, IndexPlatform};
-use super::tree::{FolderSizeTree, FolderTotal};
+use super::tree::{FolderSizeTree, FolderTotal, LowerBound};
+use super::IndexRead;
 use crate::resource_coordinator::ResourceCoordinator;
 use crate::size::fast_walk::{self, Qos, WalkOptions};
 use crate::size::{
@@ -17,7 +21,7 @@ use crate::size::{
 };
 
 use super::lanes::{run_background, run_boosts, BoostJob, Lanes, ScanJob};
-use super::machine::{Machine, Message};
+use super::machine::{ExclusionEdit, FlushRequest, Machine, Message};
 use super::subscriptions::SubscribedFolder;
 
 pub type SizeEmitter = Arc<dyn Fn(Vec<SizeUpdate>) + Send + Sync>;
@@ -36,6 +40,8 @@ pub struct IndexOptions {
     pub excluded: Vec<PathBuf>,
     pub protected: Vec<PathBuf>,
     pub stream_excluded: Vec<PathBuf>,
+    pub user_exclusions: Vec<PathBuf>,
+    pub home: Option<PathBuf>,
     pub snapshot_path: PathBuf,
     pub platform: Arc<dyn IndexPlatform>,
     pub clock: Clock,
@@ -61,6 +67,7 @@ pub struct LaneSnapshot {
 #[cfg(not(feature = "test-utils"))]
 pub struct MacIndexSetup<'setup> {
     pub cache_dir: &'setup Path,
+    pub user_exclusions: Vec<PathBuf>,
     pub emit_sizes: SizeEmitter,
     pub emit_status: StatusEmitter,
 }
@@ -70,6 +77,7 @@ impl IndexOptions {
     pub fn for_this_mac(setup: MacIndexSetup<'_>, coordinator: Arc<ResourceCoordinator>) -> Self {
         let MacIndexSetup {
             cache_dir,
+            user_exclusions,
             emit_sizes,
             emit_status,
         } = setup;
@@ -88,6 +96,8 @@ impl IndexOptions {
                 .as_deref()
                 .map(platform::stream_exclusions)
                 .unwrap_or_default(),
+            user_exclusions,
+            home,
             snapshot_path: cache_dir.join(SNAPSHOT_FILE),
             platform: Arc::new(platform::MacPlatform),
             clock: Arc::new(SystemTime::now),
@@ -104,6 +114,10 @@ pub enum TreeUnavailable {
     Unavailable,
 }
 
+pub fn names_path_beside(snapshot_path: &Path) -> PathBuf {
+    snapshot_path.with_file_name(NAMES_FILE)
+}
+
 pub struct FolderSizeIndex {
     shared: Arc<Shared>,
     sender: Sender<Message>,
@@ -118,6 +132,8 @@ pub(super) struct Shared {
     pub(super) roots: Vec<PathBuf>,
     pub(super) excluded: Vec<PathBuf>,
     pub(super) protected: Vec<PathBuf>,
+    pub(super) exclusions: RwLock<ExclusionSet>,
+    pub(super) exclusion_rules: ExclusionRules,
     pub(super) coordinator: Arc<ResourceCoordinator>,
     pub(super) booted: AtomicBool,
     #[cfg(feature = "test-utils")]
@@ -128,6 +144,7 @@ pub(super) struct Shared {
 
 pub(super) struct View {
     pub(super) tree: FolderSizeTree,
+    pub(super) names: FileNameStore,
     pub(super) visited: HashSet<PathBuf>,
     pub(super) full_disk_access: bool,
     pub(super) available: bool,
@@ -142,6 +159,7 @@ impl FolderSizeIndex {
         let shared = Arc::new(Shared {
             view: RwLock::new(View {
                 tree,
+                names: FileNameStore::new(names_path_beside(&options.snapshot_path)),
                 visited: HashSet::new(),
                 full_disk_access: false,
                 available: true,
@@ -156,6 +174,13 @@ impl FolderSizeIndex {
             roots: options.roots.clone(),
             excluded: options.excluded.clone(),
             protected: options.protected.clone(),
+            exclusions: RwLock::new(ExclusionSet::new(options.user_exclusions.clone())),
+            exclusion_rules: ExclusionRules {
+                roots: options.roots.clone(),
+                always_skipped: options.excluded.clone(),
+                alias_prefix: Some(PathBuf::from(platform::DATA_VOLUME_PREFIX)),
+                home: options.home.clone(),
+            },
             coordinator: Arc::clone(&options.coordinator),
             booted: AtomicBool::new(false),
             #[cfg(feature = "test-utils")]
@@ -183,9 +208,9 @@ impl FolderSizeIndex {
         }
     }
 
-    pub fn read_tree<R>(
+    pub fn read_index<R>(
         &self,
-        read: impl FnOnce(&FolderSizeTree, &[PathBuf]) -> R,
+        read: impl FnOnce(IndexRead<'_>) -> R,
     ) -> Result<R, TreeUnavailable> {
         if !self.shared.is_booted() {
             return Err(TreeUnavailable::NotReady);
@@ -195,7 +220,17 @@ impl FolderSizeIndex {
             return Err(TreeUnavailable::Unavailable);
         }
         let blocked = self.shared.privacy_blocked_paths(&view);
-        Ok(read(&view.tree, &blocked))
+        let result = read(IndexRead {
+            tree: &view.tree,
+            names: &view.names,
+            blocked: &blocked,
+        });
+        let names_failed = view.names.take_unreported_failure();
+        drop(view);
+        if names_failed {
+            let _ = self.sender.send(Message::NamesUnreadable);
+        }
+        Ok(result)
     }
 
     pub fn contains(&self, path: &Path) -> bool {
@@ -283,9 +318,67 @@ impl FolderSizeIndex {
         }
     }
 
+    pub fn exclusions(&self) -> Vec<PathBuf> {
+        self.shared.exclusions().paths().to_vec()
+    }
+
+    pub fn add_exclusions(&self, candidates: &[PathBuf]) -> ExclusionChange {
+        let mut set = self.shared.exclusions_mut();
+        let verdicts = candidates
+            .iter()
+            .map(|candidate| set.add(candidate, &self.shared.exclusion_rules))
+            .collect();
+        let exclusions = set.paths().to_vec();
+        drop(set);
+        let change = ExclusionChange {
+            exclusions,
+            verdicts,
+        };
+        let added = change.added_paths();
+        if !added.is_empty() {
+            self.apply_exclusion_edit(ExclusionEdit {
+                added,
+                removed: Vec::new(),
+            });
+        }
+        change
+    }
+
+    pub fn remove_exclusion(&self, path: &Path) -> Vec<PathBuf> {
+        let mut set = self.shared.exclusions_mut();
+        let removed = set.remove(path);
+        let exclusions = set.paths().to_vec();
+        drop(set);
+        if let Some(removed) = removed {
+            self.apply_exclusion_edit(ExclusionEdit {
+                added: Vec::new(),
+                removed: vec![removed],
+            });
+        }
+        exclusions
+    }
+
+    fn apply_exclusion_edit(&self, edit: ExclusionEdit) {
+        let (ack, done) = bounded(1);
+        if self.sender.send(Message::Exclusions { edit, ack }).is_ok() {
+            let _ = done.recv_timeout(FLUSH_TIMEOUT);
+        }
+    }
+
+    pub fn retry_stream(&self) {
+        let (ack, done) = bounded(1);
+        if self.sender.send(Message::RetryStream(ack)).is_ok() {
+            let _ = done.recv_timeout(FLUSH_TIMEOUT);
+        }
+    }
+
     pub fn flush(&self) {
         let (ack, done) = bounded(1);
-        if self.sender.send(Message::Flush(ack)).is_ok() {
+        let request = FlushRequest {
+            ack,
+            deadline: Instant::now() + FLUSH_TIMEOUT,
+        };
+        if self.sender.send(Message::Flush(request)).is_ok() {
             let _ = done.recv_timeout(FLUSH_TIMEOUT);
         }
     }
@@ -320,6 +413,7 @@ impl Shared {
         let running = lanes
             .running_background
             .iter()
+            .map(|running| &running.cancel)
             .chain(lanes.running_boost.iter().map(|(_, cancel)| cancel));
         for cancel in running {
             cancel.store(true, Ordering::Relaxed);
@@ -361,9 +455,22 @@ impl Shared {
         self.lanes.lock().expect("index lanes lock")
     }
 
+    pub(super) fn exclusions(&self) -> std::sync::RwLockReadGuard<'_, ExclusionSet> {
+        self.exclusions.read().expect("index exclusions lock")
+    }
+
+    fn exclusions_mut(&self) -> std::sync::RwLockWriteGuard<'_, ExclusionSet> {
+        self.exclusions.write().expect("index exclusions lock")
+    }
+
+    pub(super) fn user_excludes(&self, path: &Path) -> bool {
+        self.exclusions().covers(path)
+    }
+
     pub(super) fn indexes(&self, path: &Path) -> bool {
         self.roots.iter().any(|root| within(path, root))
             && !self.excluded.iter().any(|excluded| within(path, excluded))
+            && !self.user_excludes(path)
     }
 
     pub(super) fn protected_root_of(&self, path: &Path) -> Option<&PathBuf> {
@@ -394,7 +501,8 @@ impl Shared {
             return None;
         }
         let total = view.tree.total(&folder.normalized)?;
-        (total.fully_indexed && !total.skipped).then(|| update_from_total(&folder.path, &total))
+        (total.fully_indexed && !total.skipped)
+            .then(|| self.update_from_total(&folder.path, &total))
     }
 
     pub(super) fn privacy_blocked(&self, view: &View, path: &Path) -> bool {
@@ -417,7 +525,7 @@ impl Shared {
         }
         let total = view.tree.total(&normalized)?;
         (mode != RequestMode::Refresh && !total.skipped && total.fully_indexed)
-            .then(|| update_from_total(path, &total))
+            .then(|| self.update_from_total(path, &total))
     }
 
     pub(super) fn queue_boosts(&self, request: BoostRequest) {
@@ -456,6 +564,10 @@ impl Shared {
     pub(super) fn walk_options(&self, cancel: Arc<AtomicBool>, tuning: WalkTuning) -> WalkOptions {
         let mut options = WalkOptions::new(cancel, None).with_index_boundaries();
         options.excluded.extend(self.excluded.iter().cloned());
+        options
+            .excluded
+            .extend(self.exclusions().paths().iter().cloned());
+        options.collect_file_names = true;
         options.qos = tuning.qos;
         options.threads = tuning.threads;
         #[cfg(feature = "test-utils")]
@@ -464,6 +576,50 @@ impl Shared {
         }
         options
     }
+
+    pub(super) fn update_from_total(&self, path: &str, total: &FolderTotal) -> SizeUpdate {
+        if total.denied {
+            return SizeUpdate::na(path.to_string(), SizeSource::Index, Some(NaReason::Denied));
+        }
+        let mut update = SizeUpdate::ready(path.to_string(), SizeSource::Index, total.bytes);
+        if let Some(bound) = &total.lower_bound {
+            let named = self.skipped_names(bound);
+            update.is_lower_bound = true;
+            update.skipped_roots = non_empty(named.privacy);
+            update.excluded_roots = non_empty(named.excluded);
+            update.skipped_more = (bound.skipped_more > 0).then_some(bound.skipped_more);
+        }
+        update
+    }
+
+    fn skipped_names(&self, bound: &LowerBound) -> SkippedNames {
+        let exclusions = self.exclusions();
+        let mut names = SkippedNames::default();
+        for (name, path) in bound.skipped_names.iter().zip(&bound.skipped_paths) {
+            names.record(name, exclusions.covers(path));
+        }
+        names
+    }
+}
+
+#[derive(Default)]
+struct SkippedNames {
+    privacy: Vec<String>,
+    excluded: Vec<String>,
+}
+
+impl SkippedNames {
+    fn record(&mut self, name: &str, user_excluded: bool) {
+        if user_excluded {
+            self.excluded.push(name.to_string());
+            return;
+        }
+        self.privacy.push(name.to_string());
+    }
+}
+
+fn non_empty(names: Vec<String>) -> Option<Vec<String>> {
+    (!names.is_empty()).then_some(names)
 }
 
 #[derive(Clone, Copy)]
@@ -494,20 +650,6 @@ pub(super) fn lowercase(path: &Path) -> PathBuf {
 
 pub(super) fn unknown(path: &str) -> SizeUpdate {
     SizeUpdate::without_size(path.to_string(), SizeStateKind::Unknown, SizeSource::Index)
-}
-
-pub(super) fn update_from_total(path: &str, total: &FolderTotal) -> SizeUpdate {
-    if total.denied {
-        return SizeUpdate::na(path.to_string(), SizeSource::Index, Some(NaReason::Denied));
-    }
-    let mut update = SizeUpdate::ready(path.to_string(), SizeSource::Index, total.bytes);
-    if let Some(bound) = &total.lower_bound {
-        update.is_lower_bound = true;
-        update.skipped_roots =
-            (!bound.skipped_names.is_empty()).then(|| bound.skipped_names.clone());
-        update.skipped_more = (bound.skipped_more > 0).then_some(bound.skipped_more);
-    }
-    update
 }
 
 pub(super) fn unix_secs(time: SystemTime) -> u64 {

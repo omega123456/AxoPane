@@ -55,6 +55,7 @@ fn manage_logging(
         .unwrap_or(logging::LogLevel::Info);
     let logger = logging::FileLogger::new(&log_dir, initial_level).map_err(boxed_error)?;
     logging::logger::install_global(Arc::clone(&logger), initial_level);
+    logging::panic::install_panic_logging(Arc::clone(&logger));
     app.manage(Arc::new(logging::LoggingState {
         dir: log_dir,
         logger,
@@ -105,6 +106,7 @@ fn size_service(
     let cache_dir = resolved_app_config_dir(&app.path().app_cache_dir()?);
     let index_setup = size::index::MacIndexSetup {
         cache_dir: &cache_dir,
+        user_exclusions: persisted_index_exclusions(app),
         emit_sizes: size_state_emitter(app.handle()),
         emit_status: frontend_emitter(app.handle(), events::SIZE_INDEX_STATUS),
     };
@@ -113,6 +115,17 @@ fn size_service(
         Arc::clone(resource_coordinator),
         index_setup,
     ))
+}
+
+#[cfg(target_os = "macos")]
+fn persisted_index_exclusions(app: &App) -> Vec<std::path::PathBuf> {
+    app.state::<PersistenceState>()
+        .config
+        .current()
+        .index_exclusions
+        .iter()
+        .map(std::path::PathBuf::from)
+        .collect()
 }
 
 #[cfg(not(target_os = "macos"))]

@@ -263,6 +263,22 @@ export function cancelSizes(paths: string[]) {
   })
 }
 
+export function addIndexExclusion(paths: string[]) {
+  return invokeCommand({ command: 'add_index_exclusion', payload: { paths } })
+}
+
+export function removeIndexExclusion(path: string) {
+  return invokeCommand({ command: 'remove_index_exclusion', payload: { path } })
+}
+
+export function pickIndexExclusions() {
+  return invokeCommand({ command: 'pick_index_exclusions' })
+}
+
+export function retryFolderSizeIndex() {
+  return invokeCommand({ command: 'retry_folder_size_index' })
+}
+
 export function setTabWatch(
   target: WatchTarget | null,
   entries?: DirectoryEntry[],

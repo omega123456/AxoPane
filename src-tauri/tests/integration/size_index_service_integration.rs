@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use file_explorer_lib::resource_coordinator::ResourceCoordinator;
 use file_explorer_lib::search::service::{
-    RunTicket, SearchBackend, SearchBackendKind, SearchQueryRequest, SearchService,
+    RunTicket, SearchBackend, SearchBackendKind, SearchPage, SearchQueryRequest, SearchService,
 };
 use file_explorer_lib::search::source::FolderTreeSource;
 use file_explorer_lib::search::{SearchError, SearchScope};
@@ -41,7 +41,7 @@ fn notify() {
     CHANGED.notify_all();
 }
 
-fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
+pub(crate) fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
     let deadline = Instant::now() + WAIT;
     loop {
         let seen = *CHANGES.lock().unwrap();
@@ -59,17 +59,17 @@ fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
 
 /// Directories listed in it block in `before_dir_open` until released.
 #[derive(Default)]
-struct Blocker {
+pub(crate) struct Blocker {
     blocked: Mutex<HashSet<PathBuf>>,
     released: Condvar,
 }
 
 impl Blocker {
-    fn block(&self, path: &Path) {
+    pub(crate) fn block(&self, path: &Path) {
         self.blocked.lock().unwrap().insert(path.to_path_buf());
     }
 
-    fn release(&self, path: &Path) {
+    pub(crate) fn release(&self, path: &Path) {
         self.blocked.lock().unwrap().remove(path);
         self.released.notify_all();
     }
@@ -82,28 +82,30 @@ impl Blocker {
     }
 }
 
-struct Harness {
-    _dir: TempDir,
-    root: PathBuf,
-    roots: Vec<PathBuf>,
-    excluded: Vec<PathBuf>,
-    snapshot: PathBuf,
-    platform: Arc<FakePlatform>,
-    now: Arc<Mutex<SystemTime>>,
-    live: Arc<Mutex<Vec<SizeUpdate>>>,
-    statuses: Arc<Mutex<Vec<FolderSizeIndexStatus>>>,
-    opened: Arc<Mutex<Vec<PathBuf>>>,
-    blocker: Arc<Blocker>,
+pub(crate) struct Harness {
+    pub(crate) _dir: TempDir,
+    pub(crate) root: PathBuf,
+    pub(crate) roots: Vec<PathBuf>,
+    pub(crate) excluded: Vec<PathBuf>,
+    pub(crate) snapshot: PathBuf,
+    pub(crate) platform: Arc<FakePlatform>,
+    pub(crate) now: Arc<Mutex<SystemTime>>,
+    pub(crate) live: Arc<Mutex<Vec<SizeUpdate>>>,
+    pub(crate) statuses: Arc<Mutex<Vec<FolderSizeIndexStatus>>>,
+    pub(crate) opened: Arc<Mutex<Vec<PathBuf>>>,
+    pub(crate) blocker: Arc<Blocker>,
     /// Times a background walk parked for the power gate or a boost.
-    parked: Arc<AtomicUsize>,
-    protected: Vec<PathBuf>,
-    service: Option<SizeService>,
+    pub(crate) parked: Arc<AtomicUsize>,
+    pub(crate) protected: Vec<PathBuf>,
+    pub(crate) user_exclusions: Vec<PathBuf>,
+    pub(crate) home: Option<PathBuf>,
+    pub(crate) service: Option<SizeService>,
 }
 
 impl Harness {
     /// A temp index root (`root`) with `home/Documents` as the only
     /// protected folder; nothing starts until [`Harness::start`].
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let dir = tempdir().expect("temp dir");
         let base = dir.path().canonicalize().expect("canonical temp dir");
         let root = base.join("idx");
@@ -132,12 +134,14 @@ impl Harness {
             opened: Arc::default(),
             blocker: Arc::default(),
             parked: Arc::default(),
+            user_exclusions: Vec::new(),
+            home: None,
             service: None,
         }
     }
 
     /// Starts the index and waits until its stream is running.
-    fn start(&mut self) -> &SizeService {
+    pub(crate) fn start(&mut self) -> &SizeService {
         let starts = self.platform.stream_starts().len();
         let (opened, blocker) = (Arc::clone(&self.opened), Arc::clone(&self.blocker));
         let (now, parked) = (Arc::clone(&self.now), Arc::clone(&self.parked));
@@ -147,6 +151,8 @@ impl Harness {
             excluded: self.excluded.clone(),
             protected: self.protected.clone(),
             stream_excluded: Vec::new(),
+            user_exclusions: self.user_exclusions.clone(),
+            home: self.home.clone(),
             snapshot_path: self.snapshot.clone(),
             platform: self.platform.clone(),
             clock: Arc::new(move || *now.lock().unwrap()),
@@ -183,15 +189,15 @@ impl Harness {
         self.service()
     }
 
-    fn service(&self) -> &SizeService {
+    pub(crate) fn service(&self) -> &SizeService {
         self.service.as_ref().expect("started")
     }
 
-    fn stop(&mut self) {
+    pub(crate) fn stop(&mut self) {
         self.service = None;
     }
 
-    fn path(&self, relative: &str) -> PathBuf {
+    pub(crate) fn path(&self, relative: &str) -> PathBuf {
         if relative.is_empty() {
             self.root.clone()
         } else {
@@ -199,15 +205,15 @@ impl Harness {
         }
     }
 
-    fn key(&self, relative: &str) -> String {
+    pub(crate) fn key(&self, relative: &str) -> String {
         self.path(relative).to_string_lossy().into_owned()
     }
 
-    fn state(&self) -> IndexState {
+    pub(crate) fn state(&self) -> IndexState {
         self.service().folder_size_index_status().state
     }
 
-    fn wait_state(&self, state: IndexState) {
+    pub(crate) fn wait_state(&self, state: IndexState) {
         wait_until(&format!("{state:?}"), || self.state() == state);
     }
 
@@ -217,11 +223,15 @@ impl Harness {
             .expect("index attached")
     }
 
-    fn opened(&self, relative: &str) -> bool {
+    pub(crate) fn opened(&self, relative: &str) -> bool {
         self.opened.lock().unwrap().contains(&self.path(relative))
     }
 
-    fn request(&self, relatives: &[&str], mode: RequestMode) -> Arc<Mutex<Vec<SizeUpdate>>> {
+    pub(crate) fn request(
+        &self,
+        relatives: &[&str],
+        mode: RequestMode,
+    ) -> Arc<Mutex<Vec<SizeUpdate>>> {
         let paths = relatives
             .iter()
             .map(|relative| self.key(relative))
@@ -246,7 +256,7 @@ impl Harness {
         updates
     }
 
-    fn event(&self, relative: &str, flags: ChangeFlags) {
+    pub(crate) fn event(&self, relative: &str, flags: ChangeFlags) {
         let event = RawEvent {
             path: self.path(relative),
             id: 200,
@@ -256,7 +266,7 @@ impl Harness {
         assert!(self.platform.emit(vec![event]), "stream running");
     }
 
-    fn live_for(&self, relative: &str) -> Vec<SizeUpdate> {
+    pub(crate) fn live_for(&self, relative: &str) -> Vec<SizeUpdate> {
         let key = self.key(relative);
         let live = self.live.lock().unwrap();
         live.iter()
@@ -267,7 +277,7 @@ impl Harness {
 }
 
 /// The last terminal update for `path` (waits for it).
-fn terminal(updates: &Arc<Mutex<Vec<SizeUpdate>>>, path: &str) -> SizeUpdate {
+pub(crate) fn terminal(updates: &Arc<Mutex<Vec<SizeUpdate>>>, path: &str) -> SizeUpdate {
     let mut found = None;
     wait_until(&format!("terminal update for {path}"), || {
         found = updates
@@ -282,7 +292,7 @@ fn terminal(updates: &Arc<Mutex<Vec<SizeUpdate>>>, path: &str) -> SizeUpdate {
     found.expect("terminal update")
 }
 
-fn fresh_total(path: &Path) -> u64 {
+pub(crate) fn fresh_total(path: &Path) -> u64 {
     subtree_total(
         path,
         &WalkOptions::new(Arc::new(AtomicBool::new(false)), None),
@@ -290,7 +300,7 @@ fn fresh_total(path: &Path) -> u64 {
     .expect("walk")
 }
 
-fn ready(index: &Harness, relative: &str) -> u64 {
+pub(crate) fn ready(index: &Harness, relative: &str) -> u64 {
     let key = index.key(relative);
     let update = terminal(&index.request(&[relative], RequestMode::Auto), &key);
     assert_eq!(update.state, SizeStateKind::Ready, "{relative}: {update:?}");
@@ -1127,7 +1137,7 @@ fn blocked_now(index: &Harness) -> Vec<PathBuf> {
         .service()
         .folder_size_index()
         .expect("index attached")
-        .read_tree(|_, blocked| blocked.to_vec())
+        .read_index(|view| view.blocked.to_vec())
         .expect("readable")
 }
 
@@ -1138,14 +1148,14 @@ fn search_reads_the_tree_hiding_protected_roots_until_visited() {
     index.wait_state(IndexState::UpToDate);
     let tree_index = index.service().folder_size_index().expect("index attached");
     let nodes = tree_index
-        .read_tree(|tree, _| tree.node_count())
+        .read_index(|view| view.tree.node_count())
         .expect("readable");
     assert!(nodes >= 5, "{nodes}");
     assert_eq!(blocked_now(&index), vec![index.path("home/Documents")]);
 
     let mut seen = Vec::new();
-    FolderTreeSource::read(tree_index.as_ref(), &mut |_, blocked| {
-        seen = blocked.to_vec();
+    FolderTreeSource::read(tree_index.as_ref(), &mut |view| {
+        seen = view.blocked.to_vec();
     })
     .expect("search read");
     assert_eq!(seen, vec![index.path("home/Documents")]);
@@ -1175,39 +1185,127 @@ fn search_cannot_read_an_index_whose_stream_failed() {
     wait_until("unavailable", || index.state() == IndexState::Unavailable);
     let tree_index = index.service().folder_size_index().expect("index attached");
     assert_eq!(
-        tree_index.read_tree(|_, _| ()),
+        tree_index.read_index(|_| ()).map(|_| ()),
         Err(TreeUnavailable::Unavailable)
     );
     assert_eq!(
-        FolderTreeSource::read(tree_index.as_ref(), &mut |_, _| {}),
+        FolderTreeSource::read(tree_index.as_ref(), &mut |_| {}),
         Err(SearchError::Unavailable)
     );
 }
 
+pub(crate) fn live_search(search: &SearchService, query: &str, scope: SearchScope) -> SearchPage {
+    let run_ticket = RunTicket {
+        ticket: search.begin(),
+        cancelled: &|| false,
+    };
+    let request = SearchQueryRequest {
+        query: query.into(),
+        include_hidden: false,
+        scope,
+    };
+    search.run(run_ticket, &request).expect("page")
+}
+
 #[test]
-fn search_finds_folders_through_the_live_index() {
+fn search_finds_folders_and_files_through_the_live_index() {
     let mut index = Harness::new();
     index.start();
     index.wait_state(IndexState::UpToDate);
     let search = SearchService::new(SearchBackend::from_sizes(index.service()), None);
     assert_eq!(search.capabilities().backend, SearchBackendKind::MacIndex);
-    assert!(search.capabilities().folders_only);
-    let run_ticket = RunTicket {
-        ticket: search.begin(),
-        cancelled: &|| false,
-    };
-    let page = search
-        .run(
-            run_ticket,
-            &SearchQueryRequest {
-                query: "home".into(),
-                include_hidden: false,
-                scope: SearchScope::All,
-            },
-        )
-        .expect("page");
+    assert!(!search.capabilities().folders_only);
+    let page = live_search(&search, "home", SearchScope::All);
     assert!(
         page.items.iter().any(|hit| hit.path == index.key("home")),
         "{page:?}"
     );
+    let files = live_search(&search, "b.bin", SearchScope::Files);
+    assert!(
+        files
+            .items
+            .iter()
+            .any(|hit| hit.path == index.key("a/b/b.bin")),
+        "{files:?}"
+    );
+    assert!(files.items.iter().all(|hit| !hit.is_dir));
+    let protected = live_search(&search, "secret", SearchScope::Files);
+    assert_eq!(protected.total, 0, "protected roots hide their files");
+}
+
+#[test]
+fn try_again_with_a_still_failing_stream_stays_unavailable_and_reports_it() {
+    let mut index = Harness::new();
+    index.platform.fail_stream();
+    index.start();
+    wait_until("unavailable", || index.state() == IndexState::Unavailable);
+    let reported = index.statuses.lock().unwrap().len();
+
+    assert_eq!(index.service().retry_folder_size_index(), Ok(()));
+
+    assert_eq!(index.state(), IndexState::Unavailable);
+    assert_eq!(index.platform.stream_starts().len(), 2);
+    let statuses = index.statuses.lock().unwrap().clone();
+    assert_eq!(statuses.len(), reported + 1, "the failed retry is reported");
+    assert_eq!(
+        statuses.last().map(|status| status.state),
+        Some(IndexState::Unavailable)
+    );
+}
+
+#[test]
+fn try_again_after_the_stream_recovers_starts_the_full_scan() {
+    let mut index = Harness::new();
+    index.platform.fail_stream();
+    index.start();
+    wait_until("unavailable", || index.state() == IndexState::Unavailable);
+    index.platform.restore_stream();
+
+    assert_eq!(index.service().retry_folder_size_index(), Ok(()));
+
+    index.wait_state(IndexState::UpToDate);
+    let states: Vec<IndexState> = index
+        .statuses
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|status| status.state)
+        .collect();
+    assert!(states.contains(&IndexState::Indexing), "{states:?}");
+    assert!(index.service().folder_size_index_status().is_available);
+    assert_eq!(ready(&index, "a"), 110);
+    assert_eq!(index.service().retry_folder_size_index(), Ok(()));
+    assert_eq!(
+        index.platform.stream_starts().len(),
+        2,
+        "a running stream is kept"
+    );
+}
+
+#[test]
+fn try_again_resumes_from_the_saved_snapshot_when_it_is_resumable() {
+    let mut index = Harness::new();
+    index.start();
+    index.wait_state(IndexState::UpToDate);
+    index.stop();
+
+    index.platform.fail_stream();
+    index.start();
+    wait_until("unavailable", || index.state() == IndexState::Unavailable);
+    index.platform.restore_stream();
+    index.platform.set_event_id(300);
+    index.opened.lock().unwrap().clear();
+
+    assert_eq!(index.service().retry_folder_size_index(), Ok(()));
+
+    index.wait_state(IndexState::Updating);
+    assert_eq!(index.platform.stream_starts().last(), Some(&Some(100)));
+    index.platform.emit(vec![RawEvent {
+        path: index.path(""),
+        id: 300,
+        flags: ChangeFlags::default(),
+        history_done: true,
+    }]);
+    index.wait_state(IndexState::UpToDate);
+    assert!(!index.opened(""), "no full rescan");
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, type KeyboardEvent, type RefObject } from 'react'
+import { useEffect, useMemo, useState, type KeyboardEvent, type RefObject } from 'react'
 import { favouriteLabel } from '@/components/tree/FavouriteTreeRow'
 import { isSearchEverywhereShortcut } from '@/lib/keymap'
 import { handleKeyByTable, hasPrimaryModifier, type KeyHandlerTable } from '@/lib/key-table'
@@ -8,7 +8,7 @@ import {
   searchActivationForEvent,
   type SearchActivation,
 } from '@/lib/search-actions'
-import type { CommandId, SearchHit, Shortcut } from '@/lib/types/ipc'
+import type { CommandId, FolderSizeIndexStatus, SearchHit, Shortcut } from '@/lib/types/ipc'
 import { useElementVirtualizer } from '@/lib/use-element-virtualizer'
 import { virtualRowsOrFallback } from '@/lib/virtual-rows'
 import { clamp } from '@/lib/numbers'
@@ -17,7 +17,7 @@ import { useKeymapStore } from '@/stores/keymap-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { useRecentFoldersStore } from '@/stores/recent-folders-store'
 import { useSearchPaletteStore } from '@/stores/search-palette-store'
-import { folderRow, withTrailingSeparator } from './search-palette-model'
+import { folderRow, indexAnnouncementAfter, withTrailingSeparator } from './search-palette-model'
 
 export const SEARCH_ROW_HEIGHT = 44
 export const SEARCH_PAGE_ROWS = 8
@@ -73,6 +73,20 @@ export function useFolderShortcutRows() {
     [favourites, recentFolders],
   )
   return { favouriteRows, recentRows }
+}
+
+type TrackedIndexAnnouncement = {
+  status: FolderSizeIndexStatus | null
+  announcement: string
+}
+
+export function useIndexAnnouncement(status: FolderSizeIndexStatus | null) {
+  const [tracked, setTracked] = useState<TrackedIndexAnnouncement>({ status, announcement: '' })
+  if (tracked.status !== status) {
+    const announcement = indexAnnouncementAfter(tracked.status, status, tracked.announcement)
+    setTracked({ status, announcement })
+  }
+  return tracked.announcement
 }
 
 export function useSearchVirtualRows(rowCount: number, listRef: RefObject<HTMLDivElement | null>) {

@@ -30,11 +30,7 @@ function readySize(sizeState: DirectorySizeState) {
   if (!sizeState.isLowerBound) {
     return <span>{formatBytes(sizeState.sizeBytes)}</span>
   }
-  return (
-    <span title={lowerBoundTitle(sizeState.skippedRoots ?? [], sizeState.skippedMore ?? 0)}>
-      ≥ {formatBytes(sizeState.sizeBytes)}
-    </span>
-  )
+  return <span title={lowerBoundTitle(sizeState)}>≥ {formatBytes(sizeState.sizeBytes)}</span>
 }
 
 function unavailableSize(sizeState: DirectorySizeState) {
@@ -66,16 +62,53 @@ export function SizeValue({ entry }: SizeValueProps) {
   return <span>{entry.sizeBytes === null ? EMPTY_VALUE : formatBytes(entry.sizeBytes)}</span>
 }
 
-function lowerBoundTitle(names: string[], more: number) {
+const SINGLE_ITEM = 1
+const NO_MORE = 0
+const LIST_SEPARATOR = ', '
+const SENTENCE_SEPARATOR = ' '
+
+function withMore(names: string[], more: number) {
+  return more > NO_MORE ? [...names, `${more} more`] : names
+}
+
+function joinedList(items: string[]) {
+  if (items.length === SINGLE_ITEM) {
+    return items[0]
+  }
+  return `${items.slice(0, -1).join(LIST_SEPARATOR)} and ${items[items.length - 1]}`
+}
+
+function privacySkippedSentence(names: string[], more: number) {
   if (names.length === 0) {
     return "Doesn't include folders macOS blocked access to."
   }
-  const items = more > 0 ? [...names, `${more} more`] : names
-  const list =
-    items.length === 1
-      ? items[0]
-      : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
-  return items.length === 1
+  const items = withMore(names, more)
+  const list = joinedList(items)
+  return items.length === SINGLE_ITEM
     ? `Doesn't include ${list}. Open it to include it.`
     : `Doesn't include ${list}. Open them to include them.`
+}
+
+function userExcludedSentence(names: string[], more: number) {
+  const items = withMore(names, more)
+  const list = joinedList(items)
+  return items.length === SINGLE_ITEM
+    ? `Doesn't include ${list}, which is excluded in Search index settings.`
+    : `Doesn't include ${list}, which are excluded in Search index settings.`
+}
+
+function lowerBoundTitle(sizeState: DirectorySizeState) {
+  const privacySkipped = sizeState.skippedRoots ?? []
+  const userExcluded = sizeState.excludedRoots ?? []
+  const more = sizeState.skippedMore ?? NO_MORE
+  if (userExcluded.length === 0) {
+    return privacySkippedSentence(privacySkipped, more)
+  }
+  if (privacySkipped.length === 0) {
+    return userExcludedSentence(userExcluded, more)
+  }
+  return [
+    privacySkippedSentence(privacySkipped, more),
+    userExcludedSentence(userExcluded, NO_MORE),
+  ].join(SENTENCE_SEPARATOR)
 }

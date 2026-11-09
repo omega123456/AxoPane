@@ -1,4 +1,9 @@
+use std::path::{Path, PathBuf};
+
 use serde::{Deserialize, Serialize};
+
+use crate::size::index::exclusions::{ExclusionVerdict, PathVerdict};
+use crate::size::IndexUnsupported;
 
 pub use crate::app_picker::types::{
     GetDefaultApplicationRequest, GetDefaultApplicationResponse, ListApplicationsResponse, MacApp,
@@ -124,7 +129,126 @@ pub struct SizeStateEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skipped_roots: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub excluded_roots: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skipped_more: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AddIndexExclusionRequest {
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveIndexExclusionRequest {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum IndexExclusionOutcomeKind {
+    Added,
+    Duplicate,
+    InsideExisting,
+    MergedChildren,
+    AlwaysSkipped,
+    RootRejected,
+    HomeWarning,
+    NotFound,
+    NotAFolder,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexExclusionOutcome {
+    pub path: String,
+    pub outcome: IndexExclusionOutcomeKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merged_count: Option<usize>,
+}
+
+impl From<PathVerdict> for IndexExclusionOutcome {
+    fn from(outcome: PathVerdict) -> Self {
+        Self {
+            path: path_string(&outcome.path),
+            outcome: outcome_kind(&outcome.verdict),
+            detail: outcome_detail(&outcome.verdict),
+            merged_count: merged_count(&outcome.verdict),
+        }
+    }
+}
+
+fn outcome_detail(verdict: &ExclusionVerdict) -> Option<String> {
+    match verdict {
+        ExclusionVerdict::Duplicate(existing) | ExclusionVerdict::InsideExisting(existing) => {
+            Some(path_string(existing))
+        }
+        _ => None,
+    }
+}
+
+fn merged_count(verdict: &ExclusionVerdict) -> Option<usize> {
+    match verdict {
+        ExclusionVerdict::MergedChildren(children) => Some(children.len()),
+        _ => None,
+    }
+}
+
+fn outcome_kind(verdict: &ExclusionVerdict) -> IndexExclusionOutcomeKind {
+    match verdict {
+        ExclusionVerdict::Added => IndexExclusionOutcomeKind::Added,
+        ExclusionVerdict::HomeWarning => IndexExclusionOutcomeKind::HomeWarning,
+        ExclusionVerdict::MergedChildren(_) => IndexExclusionOutcomeKind::MergedChildren,
+        ExclusionVerdict::Duplicate(_) => IndexExclusionOutcomeKind::Duplicate,
+        ExclusionVerdict::InsideExisting(_) => IndexExclusionOutcomeKind::InsideExisting,
+        ExclusionVerdict::AlwaysSkipped => IndexExclusionOutcomeKind::AlwaysSkipped,
+        ExclusionVerdict::RootRejected => IndexExclusionOutcomeKind::RootRejected,
+        ExclusionVerdict::NotFound => IndexExclusionOutcomeKind::NotFound,
+        ExclusionVerdict::NotAFolder => IndexExclusionOutcomeKind::NotAFolder,
+    }
+}
+
+pub fn path_string(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+pub fn path_strings(paths: &[PathBuf]) -> Vec<String> {
+    paths.iter().map(|path| path_string(path)).collect()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AddIndexExclusionResponse {
+    pub exclusions: Vec<String>,
+    pub outcomes: Vec<IndexExclusionOutcome>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexExclusionsResponse {
+    pub exclusions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PickIndexExclusionsResponse {
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum IndexCommandError {
+    Unsupported,
+}
+
+impl From<IndexUnsupported> for IndexCommandError {
+    fn from(_: IndexUnsupported) -> Self {
+        Self::Unsupported
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

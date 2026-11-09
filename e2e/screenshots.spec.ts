@@ -14,6 +14,7 @@ import {
   macIndexStatuses,
   noFolderSizeBackend,
 } from '../src/tests/playwright-fixtures/states'
+import { searchIndexTypedInsideExisting } from '../src/tests/playwright-fixtures/search-index'
 import {
   deletingQueueFinalProgressEvent,
   expandedQueueFinalProgressEvent,
@@ -307,6 +308,42 @@ for (const mode of ['light', 'dark'] as const) {
       scenario: 'searchMacIndexing',
       query: 'photo',
       expectText: 'Photo Booth Library',
+    },
+    {
+      name: 'macos-complete',
+      scenario: 'searchMacComplete',
+      query: 'photo',
+      expectText: 'Files and folders on this Mac · 6 results',
+    },
+    {
+      name: 'macos-updating',
+      scenario: 'searchMacUpdating',
+      query: 'photo',
+      expectText: 'Updating index… · 6 results',
+    },
+    {
+      name: 'macos-paused',
+      scenario: 'searchMacPaused',
+      query: 'photo',
+      expectText: 'Results may be incomplete until indexing resumes.',
+    },
+    {
+      name: 'macos-indexing-no-results',
+      scenario: 'searchMacIndexingNoResults',
+      query: 'taxes 2019',
+      expectText: 'No results yet for “taxes 2019”',
+    },
+    {
+      name: 'macos-fallback-no-results',
+      scenario: 'searchMacFallbackNoResults',
+      query: 'taxes 2019',
+      expectText: 'No folders match “taxes 2019”',
+    },
+    {
+      name: 'macos-unavailable',
+      scenario: 'searchMacUnavailable',
+      query: 'photo',
+      expectText: 'Search is unavailable',
     },
     {
       name: 'loading-more',
@@ -753,7 +790,7 @@ for (const mode of ['light', 'dark'] as const) {
           folder_size_index_status: status,
         },
       })
-      await openSettingsSection(page, 'layout')
+      await openSettingsSection(page, 'searchIndex')
       const row = page
         .getByText('Automatically calculate folder sizes', { exact: true })
         .locator('xpath=../..')
@@ -770,6 +807,69 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(expander).toHaveAttribute('aria-expanded', 'true')
     await expect(page.getByRole('button', { name: 'Reset', exact: true })).toBeVisible()
     await expect(page.locator('main')).toHaveScreenshot(`settings-reset-expander-${mode}.png`)
+  })
+
+  test(`settings reset expander macOS index ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.searchIndexEmpty[mode])
+    await openSettingsSection(page, 'dates')
+    const expander = page.getByRole('button', { name: /Reset to defaults/ })
+    await expander.click()
+    await expect(expander).toHaveAttribute('aria-expanded', 'true')
+    await expect(expander).toContainText('Search index exclusions stay as they are.')
+    await expect(page.locator('main')).toHaveScreenshot(
+      `settings-reset-expander-macos-index-${mode}.png`,
+    )
+  })
+
+  test(`settings search index empty ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.searchIndexEmpty[mode])
+    await openSettingsSection(page, 'searchIndex')
+    await expect(page.getByText('Everything is indexed')).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`settings-search-index-empty-${mode}.png`)
+  })
+
+  test(`settings search index validation message ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.searchIndexValidation[mode])
+    await openSettingsSection(page, 'searchIndex')
+    const field = page.getByRole('textbox', { name: 'Folder to exclude' })
+    await field.fill(searchIndexTypedInsideExisting)
+    await field.press('Enter')
+    await expect(
+      page.locator('li[data-tone]').filter({ hasText: /Already inside node_modules/ }),
+    ).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(
+      `settings-search-index-validation-${mode}.png`,
+    )
+  })
+
+  test(`settings search index after removal ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.searchIndexAfterRemoval[mode])
+    await openSettingsSection(page, 'searchIndex')
+    await page
+      .getByRole('button', { name: 'Remove exclusion for /Users/alex/Projects/app/build-cache' })
+      .click()
+    await expect(
+      page
+        .locator('li[data-tone]')
+        .filter({ hasText: 'Removed build-cache. Updating the index in the background.' }),
+    ).toBeVisible()
+    await expect(
+      page.getByRole('button', {
+        name: 'Remove exclusion for /Users/alex/Projects/web/node_modules',
+      }),
+    ).toBeFocused()
+    await expect(page.locator('main')).toHaveScreenshot(
+      `settings-search-index-after-removal-${mode}.png`,
+    )
+  })
+
+  test(`settings search index unavailable ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.searchIndexUnavailable[mode])
+    await openSettingsSection(page, 'searchIndex')
+    await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(
+      `settings-search-index-unavailable-${mode}.png`,
+    )
   })
 
   test(`settings dates ${mode}`, async ({ page }) => {

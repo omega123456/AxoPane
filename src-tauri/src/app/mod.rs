@@ -57,6 +57,10 @@ macro_rules! registered_commands {
             commands::sort_active_items,
             commands::cancel_size,
             commands::cancel_sizes,
+            commands::add_index_exclusion,
+            commands::remove_index_exclusion,
+            commands::pick_index_exclusions,
+            commands::retry_folder_size_index,
             commands::set_tab_watch,
             commands::load_config,
             commands::save_config,
@@ -93,6 +97,7 @@ pub fn run() {
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .on_window_event(window_events::on_window_event)
         .setup(setup::setup)

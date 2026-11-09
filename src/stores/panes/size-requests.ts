@@ -113,6 +113,7 @@ function freshEntrySizeState(event: SizeStateEvent): EntrySizeState {
     naReason: event.naReason,
     isLowerBound: event.isLowerBound,
     skippedRoots: event.skippedRoots,
+    excludedRoots: event.excludedRoots,
     skippedMore: event.skippedMore,
   }
 }

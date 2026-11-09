@@ -1,15 +1,10 @@
-import { compactCount, folderSizeStatusLabel } from '@/lib/folder-size-status'
 import {
-  CheckCircleIcon,
   Columns2Icon,
   ContrastIcon,
   EyeOffIcon,
   HistoryIcon,
   LayersIcon,
   LayoutGridIcon,
-  LoaderCircleIcon,
-  PauseIcon,
-  PieChartIcon,
   ZoomInIcon,
 } from '@/components/icons'
 import {
@@ -22,46 +17,14 @@ import {
 import type { FolderSizeIndexStatus } from '@/lib/types/ipc'
 import { zoomLevels } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
+import { AutoFolderSizeRow } from './AutoFolderSizeRow'
 import { SETTINGS_ICON_CLASS as iconClass, type SectionProps } from './section-props'
 
-const STATUS_ICON_CLASS = 'h-3.5 w-3.5 shrink-0'
+const EVERYTHING_FOLDER_SIZE_COPY =
+  'Uses the Everything index to size folders while browsing. Only available on Windows with Everything installed and indexed.'
 
-function FolderSizeStatusIcon({ state }: { state: FolderSizeIndexStatus['state'] }) {
-  if (state === 'upToDate') {
-    return <CheckCircleIcon className={STATUS_ICON_CLASS} />
-  }
-  if (state === 'paused') {
-    return <PauseIcon className={STATUS_ICON_CLASS} />
-  }
-  return <LoaderCircleIcon className={`${STATUS_ICON_CLASS} animate-spin`} />
-}
-
-function scannedItemsSuffix(status: FolderSizeIndexStatus) {
-  if (status.state !== 'indexing') {
-    return ''
-  }
-  if (status.itemsScanned === undefined) {
-    return ''
-  }
-  return ` ${compactCount.format(status.itemsScanned)} items`
-}
-
-function FolderSizeStatusLine({ status }: { status: FolderSizeIndexStatus }) {
-  const label = folderSizeStatusLabel(status)
-  const count = scannedItemsSuffix(status)
-
-  return (
-    <span className="mt-1 flex items-center gap-1">
-      <FolderSizeStatusIcon state={status.state} />
-      <span aria-hidden="true">
-        {label}
-        {count}
-      </span>
-      <span role="status" className="sr-only">
-        {label}
-      </span>
-    </span>
-  )
+function showsEverythingToggle(status: FolderSizeIndexStatus | null) {
+  return status?.isAvailable === true && status.backend === 'everything'
 }
 
 export function LayoutSection(props: SectionProps) {
@@ -210,34 +173,10 @@ function SessionSettings({ draft, updateDraft, updateLayout }: SectionProps) {
   )
 }
 
-function AutoFolderSizeSetting({ draft, updateDraft }: SectionProps) {
+function AutoFolderSizeSetting(props: SectionProps) {
   const folderSizeStatus = usePanesStore((state) => state.folderSizeIndexStatus)
-  const showsAutoFolderSize =
-    folderSizeStatus?.isAvailable === true && folderSizeStatus.backend !== 'none'
-  if (!showsAutoFolderSize) {
+  if (!showsEverythingToggle(folderSizeStatus)) {
     return null
   }
-  return (
-    <SettingRow
-      icon={<PieChartIcon className={iconClass} />}
-      title="Automatically calculate folder sizes"
-      description={
-        folderSizeStatus.backend === 'macIndex' ? (
-          <>
-            Sizes folders in the background as you browse. Folders you open are sized right away.
-            <FolderSizeStatusLine status={folderSizeStatus} />
-          </>
-        ) : (
-          'Uses the Everything index to size folders while browsing. Only available on Windows with Everything installed and indexed.'
-        )
-      }
-      control={
-        <ToggleSwitch
-          label="Automatically calculate folder sizes"
-          checked={draft.autoFolderSize}
-          onChange={(value) => updateDraft((current) => ({ ...current, autoFolderSize: value }))}
-        />
-      }
-    />
-  )
+  return <AutoFolderSizeRow {...props} description={EVERYTHING_FOLDER_SIZE_COPY} />
 }

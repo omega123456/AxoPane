@@ -9,8 +9,9 @@ use std::time::{Duration, Instant};
 use file_explorer_lib::fs::{SortDirection, SortKey};
 use file_explorer_lib::ipc::commands;
 use file_explorer_lib::ipc::types::{
-    CancelSizeRequest, CancelSizesRequest, CreateEntryRequest, LogFrontendRequest, OpIdRequest,
-    OpenPathRequest, ReorderOpsRequest, ResolveConflictRequest, SaveConfigRequest,
+    AddIndexExclusionRequest, CancelSizeRequest, CancelSizesRequest, CreateEntryRequest,
+    IndexCommandError, LogFrontendRequest, OpIdRequest, OpenPathRequest,
+    RemoveIndexExclusionRequest, ReorderOpsRequest, ResolveConflictRequest, SaveConfigRequest,
     SaveSessionRequest, SetTabWatchRequest, TrashEntriesRequest,
 };
 use file_explorer_lib::ops::{
@@ -40,7 +41,7 @@ fn write_file(path: &Path, contents: &[u8]) {
     fs::write(path, contents).expect("write");
 }
 
-fn as_state<'a, T: Send + Sync + 'static>(value: &'a T) -> tauri::State<'a, T> {
+pub(crate) fn as_state<'a, T: Send + Sync + 'static>(value: &'a T) -> tauri::State<'a, T> {
     // Safety: tauri::State is a transparent wrapper over an immutable reference
     // and these tests keep the borrowed values alive for the full call.
     unsafe { std::mem::transmute::<&'a T, tauri::State<'a, T>>(value) }
@@ -583,4 +584,60 @@ fn commands_retry_failed_and_resume_paused_operations() {
     });
     commands::resume_op(op_request(&paused_id), as_state(&service));
     wait_for_status(&service, &paused_id, OpStatus::Completed);
+}
+
+#[test]
+fn save_config_keeps_the_rust_held_index_exclusions() {
+    let config_dir = tempdir().expect("config dir");
+    let persistence = PersistenceState::load(config_dir.path()).expect("persistence");
+    let held = vec!["/Users/alex/Projects/app/build-cache".to_string()];
+    persistence.config.replace(Config {
+        index_exclusions: held.clone(),
+        ..persistence.config.current()
+    });
+    let stale = Config {
+        theme: "dark".to_string(),
+        index_exclusions: Vec::new(),
+        ..Config::default()
+    };
+
+    let saved = commands::save_config(SaveConfigRequest { config: stale }, as_state(&persistence));
+
+    assert_eq!(saved.index_exclusions, held);
+    assert_eq!(saved.theme, "dark");
+    assert_eq!(persistence.config.current().index_exclusions, held);
+}
+
+#[test]
+fn index_exclusion_commands_are_unsupported_without_a_macos_index() {
+    let config_dir = tempdir().expect("config dir");
+    let persistence = PersistenceState::load(config_dir.path()).expect("persistence");
+    let size_service = SizeService::default();
+
+    let added = commands::add_index_exclusion(
+        AddIndexExclusionRequest {
+            paths: vec![path_text(config_dir.path())],
+        },
+        as_state(&size_service),
+        as_state(&persistence),
+    );
+    let removed = commands::remove_index_exclusion(
+        RemoveIndexExclusionRequest {
+            path: path_text(config_dir.path()),
+        },
+        as_state(&size_service),
+        as_state(&persistence),
+    );
+
+    assert_eq!(added.map(|_| ()), Err(IndexCommandError::Unsupported));
+    assert_eq!(removed.map(|_| ()), Err(IndexCommandError::Unsupported));
+    assert_eq!(
+        commands::pick_index_exclusions(as_state(&size_service)).map(|_| ()),
+        Err(IndexCommandError::Unsupported)
+    );
+    assert_eq!(
+        commands::retry_folder_size_index(as_state(&size_service)),
+        Err(IndexCommandError::Unsupported)
+    );
+    assert!(persistence.config.current().index_exclusions.is_empty());
 }

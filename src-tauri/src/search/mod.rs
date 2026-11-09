@@ -1,5 +1,6 @@
 pub mod everything_plan;
 pub mod everything_strategy;
+pub mod file_scan;
 pub mod matcher;
 pub mod path_style;
 pub mod query;

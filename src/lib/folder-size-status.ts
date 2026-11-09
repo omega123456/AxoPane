@@ -7,10 +7,14 @@ export const compactCount = new Intl.NumberFormat('en', {
 
 const PREPARING_LABEL = 'Preparing…'
 
+export const INDEX_UNAVAILABLE_LABEL = "The index couldn't start"
+
+export function pauseLabel(pauseReason: FolderSizeIndexStatus['pauseReason']) {
+  return pauseReason === 'thermal' ? 'Paused to keep your Mac cool' : 'Paused in Low Power Mode'
+}
+
 function pausedLabel(status: FolderSizeIndexStatus) {
-  return status.pauseReason === 'thermal'
-    ? 'Paused to keep your Mac cool'
-    : 'Paused in Low Power Mode'
+  return pauseLabel(status.pauseReason)
 }
 
 const statusLabels: Record<
@@ -21,7 +25,7 @@ const statusLabels: Record<
   paused: pausedLabel,
   indexing: () => 'Indexing…',
   updating: () => 'Updating…',
-  unavailable: () => PREPARING_LABEL,
+  unavailable: () => INDEX_UNAVAILABLE_LABEL,
   notReady: () => PREPARING_LABEL,
 }
 
@@ -30,4 +34,8 @@ export function folderSizeStatusLabel(status: FolderSizeIndexStatus) {
     | ((status: FolderSizeIndexStatus) => string)
     | undefined
   return label ? label(status) : PREPARING_LABEL
+}
+
+export function isIndexUnavailable(status: FolderSizeIndexStatus) {
+  return status.state === 'unavailable'
 }

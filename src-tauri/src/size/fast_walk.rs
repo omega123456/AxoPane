@@ -11,6 +11,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Instant;
 
+use super::index::names::PackedNames;
 use super::index::platform::DATA_VOLUME_PREFIX;
 use super::manual::ManualSizeError;
 
@@ -49,6 +50,7 @@ pub struct DirRecord {
     pub file_count: u64,
     pub subdirs: Vec<OsString>,
     pub denied: bool,
+    pub file_names: Option<PackedNames>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -57,6 +59,27 @@ pub struct DirListing {
     pub file_count: u64,
     pub subdirs: Vec<OsString>,
     pub denied: bool,
+    pub file_names: Option<PackedNames>,
+}
+
+impl DirListing {
+    fn for_options(options: &WalkOptions) -> Self {
+        Self {
+            file_names: options.collect_file_names.then(PackedNames::default),
+            ..Self::default()
+        }
+    }
+
+    fn add_file(&mut self, file: ListedFile<'_>) {
+        self.direct_bytes = self.direct_bytes.saturating_add(file.length);
+        self.file_count += 1;
+        let Some(names) = &mut self.file_names else {
+            return;
+        };
+        if let Some(name) = file.name {
+            names.push(name);
+        }
+    }
 }
 
 #[cfg(feature = "test-utils")]
@@ -90,6 +113,7 @@ pub struct WalkOptions {
     pub qos: Qos,
     pub excluded: HashSet<PathBuf>,
     pub stay_on_device: bool,
+    pub collect_file_names: bool,
     #[cfg(feature = "test-utils")]
     pub hooks: TestHooks,
 }
@@ -103,6 +127,7 @@ impl WalkOptions {
             qos: Qos::UserInitiated,
             excluded: HashSet::new(),
             stay_on_device: false,
+            collect_file_names: false,
             #[cfg(feature = "test-utils")]
             hooks: TestHooks::default(),
         }
@@ -316,6 +341,7 @@ impl Walk<'_> {
             file_count: listing.file_count,
             subdirs: listing.subdirs,
             denied: listing.denied,
+            file_names: listing.file_names,
         });
         Ok(subdirs)
     }
@@ -375,7 +401,7 @@ fn read_dir(
         allowed_devs,
     } = scope;
     before_dir_open(options, dir);
-    let mut listing = DirListing::default();
+    let mut listing = DirListing::for_options(options);
     let file = match OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
@@ -451,10 +477,7 @@ fn absorb_entries(
 
 fn absorb_entry(entry: Entry<'_>, listing: &mut DirListing) -> Result<(), ManualSizeError> {
     match entry {
-        Entry::File(length) => {
-            listing.direct_bytes = listing.direct_bytes.saturating_add(length);
-            listing.file_count += 1;
-        }
+        Entry::File(file) => listing.add_file(file),
         Entry::Dir(name) => listing.subdirs.push(OsStr::from_bytes(name).to_os_string()),
         Entry::Skip => {}
         Entry::Error(errno) => {
@@ -464,8 +487,13 @@ fn absorb_entry(entry: Entry<'_>, listing: &mut DirListing) -> Result<(), Manual
     Ok(())
 }
 
+struct ListedFile<'a> {
+    length: u64,
+    name: Option<&'a [u8]>,
+}
+
 enum Entry<'a> {
-    File(u64),
+    File(ListedFile<'a>),
     Dir(&'a [u8]),
     Skip,
     Error(i32),
@@ -482,20 +510,30 @@ fn parse_entry(entry: &[u8]) -> Option<Entry<'_>> {
     }
     match read_u32(entry, ENTRY_TYPE)? {
         VDIR => {
-            let start = ENTRY_NAME.checked_add_signed(read_i32(entry, ENTRY_NAME)? as isize)?;
-            let length = read_u32(entry, ENTRY_NAME + size_of::<i32>())? as usize;
-            let name = entry.get(start..start.checked_add(length)?)?;
-            let name = name.strip_suffix(&[0]).unwrap_or(name);
-            let unsafe_name =
-                name.is_empty() || name == b"." || name == b".." || name.contains(&b'/');
-            (!unsafe_name).then_some(Entry::Dir(name))
+            let name = entry_name(entry)?;
+            is_listable_name(name).then_some(Entry::Dir(name))
         }
         VLNK => Some(Entry::Skip),
         _ if read_u32(entry, RETURNED_FILE)? & libc::ATTR_FILE_DATALENGTH != 0 => {
-            Some(Entry::File(read_u64(entry, ENTRY_DATA_LENGTH)?))
+            Some(Entry::File(ListedFile {
+                length: read_u64(entry, ENTRY_DATA_LENGTH)?,
+                name: entry_name(entry).filter(|name| is_listable_name(name)),
+            }))
         }
         _ => Some(Entry::Skip),
     }
+}
+
+fn entry_name(entry: &[u8]) -> Option<&[u8]> {
+    let start = ENTRY_NAME.checked_add_signed(read_i32(entry, ENTRY_NAME)? as isize)?;
+    let length = read_u32(entry, ENTRY_NAME + size_of::<i32>())? as usize;
+    let name = entry.get(start..start.checked_add(length)?)?;
+    Some(name.strip_suffix(&[0]).unwrap_or(name))
+}
+
+fn is_listable_name(name: &[u8]) -> bool {
+    let unsafe_name = name.is_empty() || name == b"." || name == b".." || name.contains(&b'/');
+    !unsafe_name
 }
 
 fn absorb(error: io::Error, listing: &mut DirListing) -> Result<bool, ManualSizeError> {

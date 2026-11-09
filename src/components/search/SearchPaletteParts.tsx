@@ -8,7 +8,7 @@ import type { SearchActivation } from '@/lib/search-actions'
 import type { SearchHit, SearchRejection, SearchScope, Shortcut } from '@/lib/types/ipc'
 import type { SearchStatus } from '@/stores/search-palette-store'
 import { TEXT_SECONDARY, HOVER_ON_POINTER } from '@/lib/class-names'
-import type { SearchBackend } from './search-palette-model'
+import type { PalettePhase, SearchBackend } from './search-palette-model'
 
 const SEARCH_LISTBOX_ID = 'search-everywhere-results'
 const LOAD_MORE_ROW_KEY = 'more'
@@ -31,14 +31,14 @@ export function SearchListMessage({
   backend,
   total,
   query,
-  foldersOnly,
+  phase,
 }: {
   status: SearchStatus
   error: SearchRejection | null
   backend: SearchBackend
   total: number
   query: string
-  foldersOnly: boolean
+  phase: PalettePhase
 }) {
   const rejection = status === 'error' ? error : null
   if (rejection) {
@@ -46,7 +46,7 @@ export function SearchListMessage({
   }
   const foundNothing = status === 'ready' && total === 0
   if (foundNothing) {
-    return <SearchNoResults query={query} foldersOnly={foldersOnly} />
+    return <SearchNoResults query={query} phase={phase} />
   }
   return null
 }
@@ -230,12 +230,17 @@ export function SearchResultsList(props: SearchResultsListProps) {
   )
 }
 
+export type SearchPaletteAnnouncements = {
+  results: string
+  index: string
+}
+
 export function SearchPaletteFooter({
   footer,
-  announcement,
+  announcements,
 }: {
   footer: string
-  announcement: string
+  announcements: SearchPaletteAnnouncements
 }) {
   return (
     <>
@@ -248,7 +253,10 @@ export function SearchPaletteFooter({
         </span>
       </div>
       <span role="status" aria-live="polite" className="sr-only">
-        {announcement}
+        {announcements.results}
+      </span>
+      <span role="status" aria-live="polite" className="sr-only">
+        {announcements.index}
       </span>
     </>
   )

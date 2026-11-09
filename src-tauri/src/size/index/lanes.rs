@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use crossbeam_channel::Sender;
 
+use super::exclusions;
 use super::platform;
 use crate::resource_coordinator::{JobClass, JobHandle, JobSpec};
 use crate::size::fast_walk::{self, DirRecord, Qos, WalkOptions, MAX_JOB_THREADS};
@@ -17,13 +18,36 @@ use super::service::{Shared, SizeEmitter, WalkTuning, READMIT_EVERY_DIRS, RECORD
 pub(super) struct Lanes {
     pub(super) background: VecDeque<ScanJob>,
     pub(super) boosts: VecDeque<BoostJob>,
-    pub(super) running_background: Option<Arc<AtomicBool>>,
+    pub(super) running_background: Option<RunningWalk>,
     pub(super) running_boost: Option<(String, Arc<AtomicBool>)>,
     pub(super) power_paused: bool,
     pub(super) shutdown: bool,
 }
 
+pub(super) struct RunningWalk {
+    pub(super) root: PathBuf,
+    pub(super) cancel: Arc<AtomicBool>,
+}
+
 impl Lanes {
+    pub(super) fn cancel_running_within(&self, excluded: &Path) {
+        let background = self
+            .running_background
+            .as_ref()
+            .filter(|running| exclusions::is_within(&running.root, excluded))
+            .map(|running| &running.cancel);
+        let boost = self
+            .running_boost
+            .as_ref()
+            .filter(|(path, _)| {
+                exclusions::is_within(&platform::normalize(Path::new(path)), excluded)
+            })
+            .map(|(_, cancel)| cancel);
+        for cancel in background.into_iter().chain(boost) {
+            cancel.store(true, Ordering::Relaxed);
+        }
+    }
+
     pub(super) fn background_must_wait(&self) -> bool {
         self.power_paused || !self.boosts.is_empty() || self.running_boost.is_some()
     }
@@ -38,7 +62,10 @@ impl Lanes {
         }
         let job = self.background.pop_front()?;
         let cancel = Arc::new(AtomicBool::new(false));
-        self.running_background = Some(Arc::clone(&cancel));
+        self.running_background = Some(RunningWalk {
+            root: job.root.clone(),
+            cancel: Arc::clone(&cancel),
+        });
         Some(ClaimedJob { job, cancel })
     }
 
@@ -189,6 +216,9 @@ impl Lane {
 }
 
 fn narrow_walk(shared: &Shared, root: &Path, plan: &mut WalkPlan) -> bool {
+    if shared.user_excludes(root) {
+        return false;
+    }
     let view = shared.view();
     if shared.privacy_blocked(&view, root) {
         return false;

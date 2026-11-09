@@ -80,7 +80,7 @@ impl View {
 
     fn block_protected_root(&mut self, root: &Path) {
         if self.tree.total(root).is_some_and(|total| total.scanned) {
-            self.tree.prune(root);
+            self.prune_folder(root);
         }
         if root.symlink_metadata().is_ok_and(|meta| meta.is_dir()) {
             self.tree.set_skipped(root, true);

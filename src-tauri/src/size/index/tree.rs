@@ -81,6 +81,7 @@ impl Delta {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LowerBound {
     pub skipped_names: Vec<String>,
+    pub skipped_paths: Vec<PathBuf>,
     pub skipped_more: u32,
     pub denied_count: u32,
 }
@@ -93,6 +94,12 @@ pub struct FolderTotal {
     pub denied: bool,
     pub skipped: bool,
     pub lower_bound: Option<LowerBound>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExcludedFolder {
+    pub slot: u32,
+    pub changed: bool,
 }
 
 pub struct DirectoryListing<'listing, S> {
@@ -151,6 +158,12 @@ struct UnscannedTopsWalk {
     stack: Vec<NodeId>,
 }
 
+#[derive(Clone, Copy)]
+struct DepthFirstVisit {
+    id: NodeId,
+    parent_order: u32,
+}
+
 pub(crate) struct LiveNode<'tree> {
     pub(crate) name: &'tree str,
     pub(crate) parent: Option<u32>,
@@ -162,7 +175,9 @@ pub struct FolderSizeTree {
     free: Vec<NodeId>,
     roots: Vec<NodeId>,
     changed: Vec<NodeId>,
+    removed: Vec<NodeId>,
     dirty: bool,
+    structure_changed: bool,
 }
 
 impl FolderSizeTree {
@@ -197,16 +212,34 @@ impl FolderSizeTree {
         self.dirty = false;
     }
 
+    pub fn structure_changed(&self) -> bool {
+        self.structure_changed
+    }
+
+    pub fn mark_structure_saved(&mut self) {
+        self.structure_changed = false;
+    }
+
+    pub fn take_removed_slots(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.removed)
+    }
+
     pub fn merge_record<S: AsRef<OsStr>>(
         &mut self,
         path: &Path,
         listing: DirectoryListing<'_, S>,
     ) -> bool {
-        let Some(id) = self.ensure(path) else {
-            return false;
-        };
+        self.merge_record_slot(path, listing).is_some()
+    }
+
+    pub fn merge_record_slot<S: AsRef<OsStr>>(
+        &mut self,
+        path: &Path,
+        listing: DirectoryListing<'_, S>,
+    ) -> Option<u32> {
+        let id = self.ensure(path)?;
         self.set_listing(id, listing);
-        true
+        Some(id)
     }
 
     pub fn apply_listing<S: AsRef<OsStr>>(
@@ -299,6 +332,7 @@ impl FolderSizeTree {
         self.attach(parent, id);
         self.bump(parent, moved);
         self.mark_dirty(id);
+        self.structure_changed = true;
         true
     }
 
@@ -319,6 +353,51 @@ impl FolderSizeTree {
             flags: with_skipped_flag(node.flags, skipped),
         };
         self.set_own(id, own);
+        true
+    }
+
+    pub fn exclude_subtree(&mut self, path: &Path) -> Option<ExcludedFolder> {
+        let id = self.find(path)?;
+        let node = self.node(id);
+        let already_skipped_leaf =
+            node.children.is_empty() && node.direct == 0 && node.flags & PERSISTED_FLAGS == SKIPPED;
+        if already_skipped_leaf {
+            return Some(ExcludedFolder {
+                slot: id,
+                changed: false,
+            });
+        }
+        for child in node.children.clone() {
+            self.remove(child);
+        }
+        self.set_own(
+            id,
+            OwnSize {
+                direct: 0,
+                flags: SKIPPED,
+            },
+        );
+        Some(ExcludedFolder {
+            slot: id,
+            changed: true,
+        })
+    }
+
+    pub fn include_subtree(&mut self, path: &Path) -> bool {
+        let Some(id) = self.find(path) else {
+            return false;
+        };
+        let is_skipped = self.node(id).flags & SKIPPED != 0;
+        if !is_skipped {
+            return false;
+        }
+        self.set_own(
+            id,
+            OwnSize {
+                direct: 0,
+                flags: NO_FLAGS,
+            },
+        );
         true
     }
 
@@ -378,11 +457,18 @@ impl FolderSizeTree {
         let skipped_below = node.skipped - own.skipped as u32;
         let denied_below = node.denied - own.denied as u32;
         let lower_bound = (skipped_below > 0 || denied_below > 0).then(|| {
-            let mut skipped_names = Vec::new();
-            self.collect_skipped_names(id, &mut skipped_names);
+            let mut skipped = Vec::new();
+            self.collect_skipped(id, &mut skipped);
             LowerBound {
-                skipped_more: skipped_below - skipped_names.len() as u32,
-                skipped_names,
+                skipped_more: skipped_below - skipped.len() as u32,
+                skipped_names: skipped
+                    .iter()
+                    .map(|&skipped_id| self.node(skipped_id).name.to_string())
+                    .collect(),
+                skipped_paths: skipped
+                    .iter()
+                    .map(|&skipped_id| self.path_of(skipped_id))
+                    .collect(),
                 denied_count: denied_below,
             }
         });
@@ -528,6 +614,7 @@ impl FolderSizeTree {
             name,
             ..Node::default()
         };
+        self.structure_changed = true;
         match self.free.pop() {
             Some(id) => {
                 self.nodes[id as usize] = node;
@@ -567,8 +654,10 @@ impl FolderSizeTree {
             let node = std::mem::take(self.node_mut(next));
             stack.extend(node.children);
             self.free.push(next);
+            self.removed.push(next);
         }
         self.dirty = true;
+        self.structure_changed = true;
     }
 
     fn set_own(&mut self, id: NodeId, own: OwnSize) {
@@ -628,15 +717,15 @@ impl FolderSizeTree {
         names.into_iter().rev().collect()
     }
 
-    fn collect_skipped_names(&self, id: NodeId, names: &mut Vec<String>) {
+    fn collect_skipped(&self, id: NodeId, skipped: &mut Vec<NodeId>) {
         for &child in &self.node(id).children {
-            self.collect_skipped_names_from_child(child, names);
+            self.collect_skipped_from_child(child, skipped);
         }
     }
 
-    fn collect_skipped_names_from_child(&self, child: NodeId, names: &mut Vec<String>) {
+    fn collect_skipped_from_child(&self, child: NodeId, skipped: &mut Vec<NodeId>) {
         let node = self.node(child);
-        let has_room = names.len() < MAX_SKIPPED_NAMES;
+        let has_room = skipped.len() < MAX_SKIPPED_NAMES;
         if !has_room {
             return;
         }
@@ -644,9 +733,9 @@ impl FolderSizeTree {
             return;
         }
         if node.flags & SKIPPED != 0 {
-            names.push(node.name.to_string());
+            skipped.push(child);
         }
-        self.collect_skipped_names(child, names);
+        self.collect_skipped(child, skipped);
     }
 
     pub(crate) fn slot_len(&self) -> usize {
@@ -664,8 +753,21 @@ impl FolderSizeTree {
         })
     }
 
-    pub(crate) fn lookup(&self, path: &Path) -> Option<u32> {
+    pub fn lookup(&self, path: &Path) -> Option<u32> {
         self.find(path)
+    }
+
+    pub fn subtree_slots(&self, id: u32) -> Vec<u32> {
+        let mut slots = Vec::new();
+        if self.live_node(id).is_none() {
+            return slots;
+        }
+        let mut stack = vec![id];
+        while let Some(next) = stack.pop() {
+            slots.push(next);
+            stack.extend(self.node(next).children.iter().rev());
+        }
+        slots
     }
 
     pub(crate) fn child_ids(&self, id: u32) -> &[u32] {
@@ -683,18 +785,41 @@ impl FolderSizeTree {
     }
 
     pub(crate) fn export(&self, mut visit: impl FnMut(u32, &str, u64, u8)) {
-        let mut order = 0_u32;
-        let mut stack: Vec<(NodeId, u32)> =
-            self.roots.iter().rev().map(|&root| (root, NONE)).collect();
-        while let Some((id, parent_order)) = stack.pop() {
-            let node = self.node(id);
+        self.visit_depth_first(|visited| {
+            let node = self.node(visited.id);
             visit(
-                parent_order,
+                visited.parent_order,
                 &node.name,
                 node.direct,
                 node.flags & PERSISTED_FLAGS,
             );
-            stack.extend(node.children.iter().rev().map(|&child| (child, order)));
+        });
+    }
+
+    pub fn export_slots(&self) -> Vec<u32> {
+        let mut slots = Vec::with_capacity(self.node_count());
+        self.visit_depth_first(|visited| slots.push(visited.id));
+        slots
+    }
+
+    fn visit_depth_first(&self, mut visit: impl FnMut(DepthFirstVisit)) {
+        let mut order = 0_u32;
+        let mut stack: Vec<DepthFirstVisit> = self
+            .roots
+            .iter()
+            .rev()
+            .map(|&root| DepthFirstVisit {
+                id: root,
+                parent_order: NONE,
+            })
+            .collect();
+        while let Some(visited) = stack.pop() {
+            let children = self.node(visited.id).children.iter().rev();
+            stack.extend(children.map(|&child| DepthFirstVisit {
+                id: child,
+                parent_order: order,
+            }));
+            visit(visited);
             order += 1;
         }
     }

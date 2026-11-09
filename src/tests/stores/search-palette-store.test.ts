@@ -69,6 +69,7 @@ describe('search palette store', () => {
       isAvailable: true,
       state: 'indexing',
       itemsScanned: 10,
+      fileNamesAvailable: true,
     })
     store().open()
     expect(store().isOpen).toBe(true)

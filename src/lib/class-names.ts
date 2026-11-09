@@ -55,3 +55,9 @@ export function flippedChevronClass(isFlipped: boolean) {
 export function spinningClass(isSpinning: boolean) {
   return isSpinning ? SPINNING : NO_CLASS
 }
+
+export const TEXT_TERTIARY = 'text-light-text-tertiary dark:text-dark-text-tertiary'
+
+export const WARNING_TEXT = 'text-light-warning dark:text-dark-warning'
+
+export const DANGER_TEXT = 'text-light-danger dark:text-dark-danger'

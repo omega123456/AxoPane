@@ -57,7 +57,14 @@ impl Machine {
             _ if background => IndexState::Updating,
             _ => IndexState::UpToDate,
         };
+        status.file_names_available = self.shared.view().names.is_available();
         status
+    }
+
+    pub(super) fn republish_status(&mut self) {
+        let current = self.compute_status();
+        *self.shared.status.lock().expect("index status lock") = current.clone();
+        (self.emit_status)(current);
     }
 
     pub(super) fn publish_status(&mut self) {

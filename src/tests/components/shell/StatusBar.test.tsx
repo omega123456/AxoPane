@@ -63,6 +63,7 @@ function selectAll(indexAvailable: boolean) {
         backend: 'everything',
         isAvailable: indexAvailable,
         state: indexAvailable ? 'upToDate' : 'unavailable',
+        fileNamesAvailable: false,
       },
       sizeStates: {
         [docsEntry.path]: { state: 'ready', source: 'everything', sizeBytes: 2048 },

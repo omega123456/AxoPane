@@ -1,11 +1,18 @@
 import { create } from 'zustand'
 
-type Section = 'keybindings' | 'columns' | 'layout' | 'dates' | 'updates' | 'logs'
+export type SettingsSection =
+  | 'keybindings'
+  | 'columns'
+  | 'layout'
+  | 'searchIndex'
+  | 'dates'
+  | 'updates'
+  | 'logs'
 
 type SettingsStore = {
   isOpen: boolean
-  section: Section
-  open: (section?: Section) => void
+  section: SettingsSection
+  open: (section?: SettingsSection) => void
   close: () => void
 }
 

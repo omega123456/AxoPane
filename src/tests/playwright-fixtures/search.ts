@@ -74,32 +74,81 @@ export const searchMoreResults = windowsPage(
   60,
 )
 
-/** `photo` on a Mac: folder names only. */
-export const searchMacResults: SearchPage = {
-  queryId: 1,
-  offset: 0,
-  total: 4,
-  truncated: false,
-  capabilities: { backend: 'macIndex', foldersOnly: true },
-  items: [
+const macFilesAndFolders = { backend: 'macIndex', foldersOnly: false } as const
+const macFoldersOnly = { backend: 'macIndex', foldersOnly: true } as const
+
+function macPage(items: SearchHit[], capabilities: SearchPage['capabilities']): SearchPage {
+  return { queryId: 1, offset: 0, total: items.length, truncated: false, items, capabilities }
+}
+
+/** `photo` on a Mac: files and folders from the file-name index. */
+export const searchMacResults = macPage(
+  [
     hit('/Users/alex/Desktop', 'photo-exports', true, '2025-11-04T18:20:00Z', [[0, 5]]),
+    hit('/Users/alex/Pictures/2025', 'photo-0412.heic', false, '2025-11-03T09:12:00Z', [[0, 5]]),
     hit('/Users/alex/Documents/Hobbies', 'Photography', true, '2025-11-01T10:00:00Z', [[0, 5]]),
     hit('/Users/alex/Pictures', 'Photo Booth Library', true, '2025-10-22T13:30:00Z', [[0, 5]]),
+    hit('/Users/alex/Documents', 'photo-release.pdf', false, '2025-10-14T16:05:00Z', [[0, 5]]),
     hit('/Users/alex/Projects/site/public', 'photos', true, '2025-10-09T17:45:00Z', [[0, 5]]),
   ],
-}
+  macFilesAndFolders,
+)
+
+export const searchMacNoResults = macPage([], macFilesAndFolders)
+
+export const searchMacFoldersOnlyNoResults = macPage([], macFoldersOnly)
 
 export const searchMacIndexing: FolderSizeIndexStatus = {
   backend: 'macIndex',
   isAvailable: true,
   state: 'indexing',
   itemsScanned: 1_204_388,
+  fileNamesAvailable: true,
+}
+
+export const searchMacUpToDate: FolderSizeIndexStatus = {
+  backend: 'macIndex',
+  isAvailable: true,
+  state: 'upToDate',
+  fileNamesAvailable: true,
+}
+
+export const searchMacUpdating: FolderSizeIndexStatus = {
+  backend: 'macIndex',
+  isAvailable: true,
+  state: 'updating',
+  fileNamesAvailable: true,
+}
+
+export const searchMacPaused: FolderSizeIndexStatus = {
+  backend: 'macIndex',
+  isAvailable: true,
+  state: 'paused',
+  pauseReason: 'lowPowerMode',
+  fileNamesAvailable: true,
+}
+
+/** File names could not be read, so the palette falls back to folders. */
+export const searchMacNamesUnavailable: FolderSizeIndexStatus = {
+  backend: 'macIndex',
+  isAvailable: true,
+  state: 'upToDate',
+  fileNamesAvailable: false,
+}
+
+/** The FSEvents stream failed to start. */
+export const searchMacIndexUnavailable: FolderSizeIndexStatus = {
+  backend: 'macIndex',
+  isAvailable: false,
+  state: 'unavailable',
+  fileNamesAvailable: false,
 }
 
 export const everythingNotRunning: FolderSizeIndexStatus = {
   backend: 'everything',
   isAvailable: false,
   state: 'notReady',
+  fileNamesAvailable: false,
 }
 
 export const searchFavourites = ['C:\\Users\\alex\\Desktop', 'C:\\Users\\alex\\Downloads']

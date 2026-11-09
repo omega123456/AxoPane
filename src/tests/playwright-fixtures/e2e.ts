@@ -25,11 +25,26 @@ import { itemsSortPendingListDir, itemsSortPendingSession } from './item-counts'
 import { relativeDatesListDir } from './relative-dates'
 import { capacityLevelVolumes, ejectRefused, everythingUnavailable } from './states'
 import {
+  searchIndexAfterRemovingBuildCache,
+  searchIndexExclusions,
+  searchIndexInsideExisting,
+  searchIndexUnavailable,
+  searchIndexUpdating,
+  searchIndexUpToDate,
+} from './search-index'
+import {
   everythingNotRunning,
   searchBrowseResults,
   searchFavourites,
+  searchMacFoldersOnlyNoResults,
   searchMacIndexing,
+  searchMacIndexUnavailable,
+  searchMacNamesUnavailable,
+  searchMacNoResults,
+  searchMacPaused,
   searchMacResults,
+  searchMacUpdating,
+  searchMacUpToDate,
   searchMoreResults,
   searchNameResults,
   searchNoResults,
@@ -98,6 +113,7 @@ const lightConfig: AppConfig = {
   favourites: [],
   favouriteNames: {},
   favouritesCollapsed: false,
+  indexExclusions: [],
   keybindings: {},
   columns: [
     { key: 'name', visible: true },
@@ -333,7 +349,12 @@ function searchScenario(
 ): { light: PlaywrightScenario; dark: PlaywrightScenario } {
   const shared: CommandMap = {
     queue_snapshot: emptyQueueSnapshot,
-    folder_size_index_status: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+    folder_size_index_status: {
+      backend: 'everything',
+      isAvailable: true,
+      state: 'upToDate',
+      fileNamesAvailable: false,
+    },
     load_session: { ...rootSession, recentFolders: searchRecentFolders },
     ...commands,
   }
@@ -349,6 +370,35 @@ function searchScenario(
       ...extra,
     },
   }
+}
+
+const macSearchSession = {
+  activePane: 'left',
+  leftPath: '/Users/alex',
+  rightPath: '/Users/alex',
+} as const
+
+function macSearchScenario(
+  commands: CommandMap,
+  extra: Pick<PlaywrightScenario, 'commandErrors' | 'delaysMs'> = {},
+) {
+  return searchScenario({ load_session: macSearchSession, ...commands }, 'macos', extra)
+}
+
+/** Settings on a Mac with the folder-size index, per theme. */
+function searchIndexScenario(
+  config: Partial<AppConfig>,
+  commands: CommandMap,
+): { light: PlaywrightScenario; dark: PlaywrightScenario } {
+  const scenario = (base: AppConfig): PlaywrightScenario => ({
+    commands: {
+      load_config: { ...base, ...config },
+      queue_snapshot: emptyQueueSnapshot,
+      ...commands,
+    },
+    platform: 'macos',
+  })
+  return { light: scenario(lightConfig), dark: scenario(darkConfig) }
 }
 
 const overflowFavourites = [
@@ -1046,13 +1096,52 @@ export const screenshotScenarios = {
     'windows',
     { commandErrors: { search_query: { kind: 'notReady' } } },
   ),
-  searchMacIndexing: searchScenario(
+  searchIndexEmpty: searchIndexScenario({}, { folder_size_index_status: searchIndexUpToDate }),
+  searchIndexValidation: searchIndexScenario(
+    { indexExclusions: searchIndexExclusions },
     {
-      folder_size_index_status: searchMacIndexing,
-      load_session: { activePane: 'left', leftPath: '/Users/alex', rightPath: '/Users/alex' },
-      search_query: searchMacResults,
+      folder_size_index_status: searchIndexUpToDate,
+      add_index_exclusion: searchIndexInsideExisting,
     },
-    'macos',
+  ),
+  searchIndexAfterRemoval: searchIndexScenario(
+    { indexExclusions: searchIndexExclusions },
+    {
+      folder_size_index_status: searchIndexUpdating,
+      remove_index_exclusion: searchIndexAfterRemovingBuildCache,
+    },
+  ),
+  searchIndexUnavailable: searchIndexScenario(
+    {},
+    { folder_size_index_status: searchIndexUnavailable },
+  ),
+  searchMacIndexing: macSearchScenario({
+    folder_size_index_status: searchMacIndexing,
+    search_query: searchMacResults,
+  }),
+  searchMacComplete: macSearchScenario({
+    folder_size_index_status: searchMacUpToDate,
+    search_query: searchMacResults,
+  }),
+  searchMacUpdating: macSearchScenario({
+    folder_size_index_status: searchMacUpdating,
+    search_query: searchMacResults,
+  }),
+  searchMacPaused: macSearchScenario({
+    folder_size_index_status: searchMacPaused,
+    search_query: searchMacResults,
+  }),
+  searchMacIndexingNoResults: macSearchScenario({
+    folder_size_index_status: searchMacIndexing,
+    search_query: searchMacNoResults,
+  }),
+  searchMacFallbackNoResults: macSearchScenario({
+    folder_size_index_status: searchMacNamesUnavailable,
+    search_query: searchMacFoldersOnlyNoResults,
+  }),
+  searchMacUnavailable: macSearchScenario(
+    { folder_size_index_status: searchMacIndexUnavailable },
+    { commandErrors: { search_query: { kind: 'unavailable' } } },
   ),
   searchLoadingMore: searchScenario({ search_query: searchMoreResults }, 'windows', {
     delaysMs: { search_page: 30_000 },

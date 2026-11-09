@@ -119,7 +119,12 @@ describe('CommandBar', () => {
   it('shows the size action when sizing is unavailable and opens its confirmation', async () => {
     const user = userEvent.setup()
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: false,
+        state: 'unavailable',
+        fileNamesAvailable: false,
+      },
     })
     renderBar()
 
@@ -135,7 +140,12 @@ describe('CommandBar', () => {
 
   it('uses availability, configuration and the folder threshold for the size action', () => {
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'macIndex', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'macIndex',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: true,
+      },
     })
     act(() => useConfigStore.setState({ autoFolderSize: true }))
     seedPane('left', { entries: folderEntries(500) })
@@ -152,7 +162,12 @@ describe('CommandBar', () => {
 
   it('shows the size action when automatic sizing left a folder unknown', () => {
     usePanesStore.setState({
-      folderSizeIndexStatus: { backend: 'macIndex', isAvailable: true, state: 'upToDate' },
+      folderSizeIndexStatus: {
+        backend: 'macIndex',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: true,
+      },
     })
     const entries = folderEntries(2)
     seedPane('left', { entries })
@@ -176,7 +191,12 @@ describe('CommandBar', () => {
 
     act(() => {
       usePanesStore.setState({
-        folderSizeIndexStatus: { backend: 'everything', isAvailable: true, state: 'upToDate' },
+        folderSizeIndexStatus: {
+          backend: 'everything',
+          isAvailable: true,
+          state: 'upToDate',
+          fileNamesAvailable: false,
+        },
       })
     })
     const button = screen.getByRole('button', { name: 'Search everywhere' })

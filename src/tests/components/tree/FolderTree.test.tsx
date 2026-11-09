@@ -50,7 +50,12 @@ function seedVolumes() {
   usePanesStore.getState().initialize({
     session: { activePane: 'left', leftPath: '.', rightPath: '.' },
     showHiddenFiles: false,
-    folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+    folderSizeIndexStatus: {
+      backend: 'everything',
+      isAvailable: false,
+      state: 'unavailable',
+      fileNamesAvailable: false,
+    },
     volumes: [
       {
         mountRoot: 'C:\\',
@@ -84,7 +89,12 @@ function seedMacVolumes() {
   usePanesStore.getState().initialize({
     session: { activePane: 'left', leftPath: '/', rightPath: '/' },
     showHiddenFiles: false,
-    folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+    folderSizeIndexStatus: {
+      backend: 'everything',
+      isAvailable: false,
+      state: 'unavailable',
+      fileNamesAvailable: false,
+    },
     volumes: [
       {
         mountRoot: '/',
@@ -187,7 +197,12 @@ describe('FolderTree', () => {
     usePanesStore.getState().initialize({
       session: { activePane: 'left', leftPath: '.', rightPath: '.' },
       showHiddenFiles: false,
-      folderSizeIndexStatus: { backend: 'everything', isAvailable: false, state: 'unavailable' },
+      folderSizeIndexStatus: {
+        backend: 'everything',
+        isAvailable: false,
+        state: 'unavailable',
+        fileNamesAvailable: false,
+      },
       volumes: [
         {
           mountRoot: 'C:\\',

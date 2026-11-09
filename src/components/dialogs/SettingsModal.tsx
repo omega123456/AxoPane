@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } 
 import {
   CalendarIcon,
   ChevronDownIcon,
+  DatabaseIcon,
   DownloadIcon,
   FileTextIcon,
   KeyboardIcon,
@@ -13,8 +14,9 @@ import {
 } from '@/components/icons'
 import { Button, SelectionPill } from '@/components/controls'
 import { captureShortcut, detectPlatformOs } from '@/lib/keymap'
-import type { CommandId, LayoutConfig } from '@/lib/types/ipc'
-import { useSettingsStore } from '@/stores/settings-store'
+import type { CommandId, FolderSizeIndexStatus, LayoutConfig } from '@/lib/types/ipc'
+import { usePanesStore } from '@/stores/panes-store'
+import { useSettingsStore, type SettingsSection as Section } from '@/stores/settings-store'
 import { FOCUS_RING, FOCUS_RING_INSET } from '@/lib/focus-ring'
 import {
   flippedChevronClass,
@@ -27,6 +29,7 @@ import {
 import { useAppVersion } from '@/lib/use-app-version'
 import { KeybindingsSection } from './settings/KeybindingsSection'
 import { LayoutSection } from './settings/LayoutSection'
+import { SearchIndexSection } from './settings/SearchIndexSection'
 import {
   ColumnsSection,
   DatesSection,
@@ -43,10 +46,9 @@ import {
   type DraftUpdater,
 } from './settings/settings-draft'
 
-type Section = 'layout' | 'columns' | 'keybindings' | 'dates' | 'updates' | 'logs'
-
 const sectionNav: { key: Section; label: string; Icon: typeof SettingsIcon }[] = [
   { key: 'layout', label: 'View and layout', Icon: LayoutListIcon },
+  { key: 'searchIndex', label: 'Search index', Icon: DatabaseIcon },
   { key: 'columns', label: 'Columns', Icon: PanelsTopLeftIcon },
   { key: 'dates', label: 'Dates', Icon: CalendarIcon },
   { key: 'keybindings', label: 'Keybindings', Icon: KeyboardIcon },
@@ -56,11 +58,34 @@ const sectionNav: { key: Section; label: string; Icon: typeof SettingsIcon }[] =
 
 const sectionComponents: Record<Section, (props: SectionProps) => ReactNode> = {
   layout: LayoutSection,
+  searchIndex: SearchIndexSection,
   columns: ColumnsSection,
   dates: DatesSection,
   keybindings: KeybindingsSection,
   updates: UpdatesSection,
   logs: LogsSection,
+}
+
+const MAC_INDEX_ONLY_SECTIONS: ReadonlySet<Section> = new Set(['searchIndex'])
+
+const DEFAULT_RESET_DESCRIPTION = 'Restore every setting to how AxoPane ships'
+
+const MAC_INDEX_RESET_DESCRIPTION =
+  'Restore every setting to how AxoPane ships. Search index exclusions stay as they are.'
+
+function usesMacIndex(status: FolderSizeIndexStatus | null) {
+  return status?.backend === 'macIndex'
+}
+
+function visibleSectionNav(status: FolderSizeIndexStatus | null) {
+  if (usesMacIndex(status)) {
+    return sectionNav
+  }
+  return sectionNav.filter((item) => !MAC_INDEX_ONLY_SECTIONS.has(item.key))
+}
+
+function resetDescription(status: FolderSizeIndexStatus | null) {
+  return usesMacIndex(status) ? MAC_INDEX_RESET_DESCRIPTION : DEFAULT_RESET_DESCRIPTION
 }
 
 export function SettingsModal() {
@@ -136,6 +161,7 @@ function SettingsModalContent() {
   const [search, setSearch] = useState('')
   const conflicts = useMemo(() => shortcutConflictsByCommand(draft.bindings), [draft.bindings])
   const SectionContent = sectionComponents[section]
+  const folderSizeStatus = usePanesStore((state) => state.folderSizeIndexStatus)
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-scrim p-10">
@@ -147,7 +173,7 @@ function SettingsModalContent() {
       >
         <SettingsHeader onClose={close} />
         <div className="flex min-h-0 flex-1">
-          <SettingsNav section={section} />
+          <SettingsNav section={section} items={visibleSectionNav(folderSizeStatus)} />
           <div className={`min-h-0 flex-1 overflow-auto pb-7 pl-3 pr-7 pt-1 ${SCROLLBAR_THIN}`}>
             <div className="mx-auto grid w-full max-w-settings-content content-start gap-1">
               <h2 className="mb-3.5 font-display text-title font-semibold">
@@ -164,7 +190,11 @@ function SettingsModalContent() {
                 conflicts={conflicts}
                 platform={detectPlatformOs()}
               />
-              <ResetExpander key={section} onReset={resetDraft} />
+              <ResetExpander
+                key={section}
+                onReset={resetDraft}
+                description={resetDescription(folderSizeStatus)}
+              />
             </div>
           </div>
         </div>
@@ -195,7 +225,7 @@ function navItemStateClass(active: boolean) {
   return active ? HOVER_FILL : HOVER_AND_PRESS_ON_POINTER
 }
 
-function SettingsNav({ section }: { section: Section }) {
+function SettingsNav({ section, items }: { section: Section; items: typeof sectionNav }) {
   const open = useSettingsStore((state) => state.open)
   const appVersion = useAppVersion()
   return (
@@ -203,7 +233,7 @@ function SettingsNav({ section }: { section: Section }) {
       aria-label="Settings sections"
       className="flex w-settings-nav flex-none flex-col gap-0.5 px-2 pb-4 pt-1"
     >
-      {sectionNav.map(({ key, label, Icon }) => {
+      {items.map(({ key, label, Icon }) => {
         const active = key === section
         return (
           <button
@@ -226,7 +256,7 @@ function SettingsNav({ section }: { section: Section }) {
   )
 }
 
-function ResetExpander({ onReset }: { onReset: () => void }) {
+function ResetExpander({ onReset, description }: { onReset: () => void; description: string }) {
   const [expanded, setExpanded] = useState(false)
   return (
     <div className="mt-4.5 rounded-card border border-light-stroke bg-light-card dark:border-dark-stroke dark:bg-dark-card">
@@ -239,9 +269,7 @@ function ResetExpander({ onReset }: { onReset: () => void }) {
         <RotateCcwIcon className={iconClass} />
         <span className="grid min-w-0 flex-1">
           <span className="text-body">Reset to defaults</span>
-          <span className={`text-caption ${TEXT_SECONDARY}`}>
-            Restore every setting to how AxoPane ships
-          </span>
+          <span className={`text-caption ${TEXT_SECONDARY}`}>{description}</span>
         </span>
         <ChevronDownIcon className={`size-3 ${TEXT_SECONDARY} ${flippedChevronClass(expanded)}`} />
       </button>

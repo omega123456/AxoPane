@@ -4,10 +4,13 @@ use std::path::{Path, PathBuf};
 
 use super::tree::{FolderSizeTree, ImportedNode};
 
-pub const FORMAT_VERSION: u32 = 2;
+pub const FORMAT_VERSION: u32 = 3;
 const MAGIC: &[u8; 8] = b"AXOSIZE\0";
 const MAX_STRING_BYTES: usize = 64 * 1024;
 const MAX_VISITED_ROOTS: u32 = 1024;
+const MAX_EXCLUSIONS: u32 = 1024;
+const TEMP_EXTENSION: &str = "tmp";
+pub const NO_PAIR: u64 = 0;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SnapshotMeta {
@@ -16,6 +19,8 @@ pub struct SnapshotMeta {
     pub event_id: u64,
     pub last_full_scan_secs: u64,
     pub visited_roots: Vec<PathBuf>,
+    pub pair_token: u64,
+    pub exclusions: Vec<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -31,10 +36,9 @@ pub fn encode(meta: &SnapshotMeta, tree: &FolderSizeTree) -> Vec<u8> {
     put_str(&mut out, &meta.os_build);
     out.extend_from_slice(&meta.event_id.to_le_bytes());
     out.extend_from_slice(&meta.last_full_scan_secs.to_le_bytes());
-    out.extend_from_slice(&(meta.visited_roots.len() as u32).to_le_bytes());
-    for root in &meta.visited_roots {
-        put_str(&mut out, &root.to_string_lossy());
-    }
+    put_paths(&mut out, &meta.visited_roots);
+    out.extend_from_slice(&meta.pair_token.to_le_bytes());
+    put_paths(&mut out, &meta.exclusions);
     let count_at = out.len();
     out.extend_from_slice(&0_u32.to_le_bytes());
     let mut count = 0_u32;
@@ -70,13 +74,9 @@ pub fn decode(bytes: &[u8]) -> Option<Snapshot> {
     let os_build = reader.string()?;
     let event_id = reader.u64()?;
     let last_full_scan_secs = reader.u64()?;
-    let visited = reader.u32()?;
-    if visited > MAX_VISITED_ROOTS {
-        return None;
-    }
-    let visited_roots = (0..visited)
-        .map(|_| reader.string().map(PathBuf::from))
-        .collect::<Option<_>>()?;
+    let visited_roots = reader.paths(MAX_VISITED_ROOTS)?;
+    let pair_token = reader.u64()?;
+    let exclusions = reader.paths(MAX_EXCLUSIONS)?;
     let mut tree = FolderSizeTree::default();
     for _ in 0..reader.u32()? {
         let parent = reader.u32()?;
@@ -101,30 +101,56 @@ pub fn decode(bytes: &[u8]) -> Option<Snapshot> {
             event_id,
             last_full_scan_secs,
             visited_roots,
+            pair_token,
+            exclusions,
         },
         tree,
     })
 }
 
 pub fn save(path: &Path, meta: &SnapshotMeta, tree: &FolderSizeTree) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let temp = path.with_extension("tmp");
-    let mut file = fs::File::create(&temp)?;
-    file.write_all(&encode(meta, tree))?;
-    sync(&file)?;
-    drop(file);
+    save_encoded(path, &encode(meta, tree))
+}
+
+pub fn save_encoded(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let temp = write_temp(path, bytes)?;
     fs::rename(&temp, path)
 }
 
+pub fn write_temp(path: &Path, bytes: &[u8]) -> io::Result<PathBuf> {
+    let mut temp = TempFile::create(path)?;
+    temp.file.write_all(bytes)?;
+    sync(&temp.file)?;
+    Ok(temp.path)
+}
+
+pub fn temp_path(path: &Path) -> PathBuf {
+    path.with_extension(TEMP_EXTENSION)
+}
+
+pub(crate) struct TempFile {
+    pub(crate) file: fs::File,
+    pub(crate) path: PathBuf,
+}
+
+impl TempFile {
+    pub(crate) fn create(final_path: &Path) -> io::Result<Self> {
+        if let Some(parent) = final_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let path = temp_path(final_path);
+        let file = fs::File::create(&path)?;
+        Ok(Self { file, path })
+    }
+}
+
 #[cfg(not(feature = "test-utils"))]
-fn sync(file: &fs::File) -> io::Result<()> {
+pub(crate) fn sync(file: &fs::File) -> io::Result<()> {
     file.sync_all()
 }
 
 #[cfg(feature = "test-utils")]
-fn sync(_file: &fs::File) -> io::Result<()> {
+pub(crate) fn sync(_file: &fs::File) -> io::Result<()> {
     Ok(())
 }
 
@@ -231,6 +257,13 @@ fn outermost(mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
     kept
 }
 
+fn put_paths(out: &mut Vec<u8>, paths: &[PathBuf]) {
+    out.extend_from_slice(&(paths.len() as u32).to_le_bytes());
+    for path in paths {
+        put_str(out, &path.to_string_lossy());
+    }
+}
+
 fn put_str(out: &mut Vec<u8>, value: &str) {
     out.extend_from_slice(&(value.len() as u32).to_le_bytes());
     out.extend_from_slice(value.as_bytes());
@@ -245,36 +278,46 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     })
 }
 
-struct Reader<'a>(&'a [u8]);
+pub(crate) struct Reader<'a>(pub(crate) &'a [u8]);
 
 impl<'a> Reader<'a> {
-    fn is_exhausted(&self) -> bool {
+    pub(crate) fn is_exhausted(&self) -> bool {
         self.0.is_empty()
     }
 
-    fn take(&mut self, byte_count: usize) -> Option<&'a [u8]> {
+    pub(crate) fn take(&mut self, byte_count: usize) -> Option<&'a [u8]> {
         let (head, rest) = self.0.split_at_checked(byte_count)?;
         self.0 = rest;
         Some(head)
     }
 
-    fn u32(&mut self) -> Option<u32> {
+    pub(crate) fn u32(&mut self) -> Option<u32> {
         Some(u32::from_le_bytes(
             self.take(size_of::<u32>())?.try_into().ok()?,
         ))
     }
 
-    fn u64(&mut self) -> Option<u64> {
+    pub(crate) fn u64(&mut self) -> Option<u64> {
         Some(u64::from_le_bytes(
             self.take(size_of::<u64>())?.try_into().ok()?,
         ))
     }
 
-    fn string(&mut self) -> Option<String> {
+    pub(crate) fn string(&mut self) -> Option<String> {
         let byte_count = self.u32()? as usize;
         if byte_count > MAX_STRING_BYTES {
             return None;
         }
         String::from_utf8(self.take(byte_count)?.to_vec()).ok()
+    }
+
+    fn paths(&mut self, max_count: u32) -> Option<Vec<PathBuf>> {
+        let count = self.u32()?;
+        if count > max_count {
+            return None;
+        }
+        (0..count)
+            .map(|_| self.string().map(PathBuf::from))
+            .collect()
     }
 }

@@ -16,7 +16,7 @@ A **super-fast, lightweight, dual-pane cross-OS (Windows + macOS) file explorer*
 - **The folder tree follows pane patches.** The tree must not create its own recursive watcher or polling loop. Loaded tree nodes are updated from accepted pane `dir://patch` events for the same path: directory additions are inserted into that node's child list, directory removals prune the cached subtree, and file-only patches leave the tree cache untouched.
 - **Tree fetching stays lazy.** `list_tree_children` is for first expansion/reveal (and explicit reload-style paths), not for every watcher patch. If a tree node is not loaded, leave it alone; it will fetch when expanded. If a pane skips a patch because it is stale, path-mismatched, or typing-filter state is in progress, the tree should skip it too.
 - **Keep Windows/macOS path behavior in mind.** Watch events and tree nodes may use drive roots, UNC roots, POSIX roots, or canonicalized macOS paths; compare exact paths first and only use case-insensitive matching as a compatibility fallback.
-- **The macOS folder-size index owns one recursive, directory-level FSEvents stream used only for size bookkeeping.** It never emits `dir://patch` and never drives pane or tree refresh. Pane watches stay non-recursive, and the tree still has no watcher of its own.
+- **The macOS folder-size index owns one recursive, directory-level FSEvents stream used only for size and file-name bookkeeping.** It never emits `dir://patch` and never drives pane or tree refresh. Pane watches stay non-recursive, and the tree still has no watcher of its own.
 
 ## Critical Rules for Agents
 

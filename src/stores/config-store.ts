@@ -26,6 +26,7 @@ export type ConfigSnapshot = {
   favourites: string[]
   favouriteNames: Record<string, string>
   favouritesCollapsed: boolean
+  indexExclusions: string[]
 }
 
 type ConfigStore = ConfigSnapshot & {
@@ -48,6 +49,7 @@ type ConfigStore = ConfigSnapshot & {
   setRenamingFavourite: (path: string | null) => void
   renameFavourite: (path: string, name: string) => Promise<void>
   setFavouritesCollapsed: (favouritesCollapsed: boolean) => Promise<void>
+  setIndexExclusions: (indexExclusions: string[]) => void
   reset: () => void
 }
 
@@ -67,6 +69,7 @@ export function defaultConfigSnapshot(): ConfigSnapshot {
     favourites: [],
     favouriteNames: {},
     favouritesCollapsed: false,
+    indexExclusions: [],
   }
 }
 
@@ -118,6 +121,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => {
     setAutoFolderSize: persistField('autoFolderSize'),
     setAutoExpandActiveQueueToasts: persistField('autoExpandActiveQueueToasts'),
     setFavouritesCollapsed: persistField('favouritesCollapsed'),
+    setIndexExclusions: (indexExclusions) => set({ indexExclusions }),
     setLogLevel: async (logLevel) => {
       set({ logLevel })
       await applyAndPersistBackendLogLevel(logLevel)

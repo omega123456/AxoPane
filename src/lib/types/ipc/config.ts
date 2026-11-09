@@ -53,6 +53,7 @@ export type AppConfig = {
   favourites: string[]
   favouriteNames: Record<string, string>
   favouritesCollapsed: boolean
+  indexExclusions: string[]
 }
 
 export type SessionTab = {

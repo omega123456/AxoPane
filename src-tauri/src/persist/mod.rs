@@ -47,6 +47,8 @@ pub struct Config {
     pub favourite_names: HashMap<String, String>,
     #[serde(default)]
     pub favourites_collapsed: bool,
+    #[serde(default)]
+    pub index_exclusions: Vec<String>,
 }
 
 pub fn default_true() -> bool {
@@ -188,6 +190,7 @@ impl Default for Config {
             favourites: Vec::new(),
             favourite_names: HashMap::new(),
             favourites_collapsed: false,
+            index_exclusions: Vec::new(),
         }
     }
 }

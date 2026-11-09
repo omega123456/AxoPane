@@ -2,6 +2,7 @@ import type { IpcCommandMap } from '@/lib/types/ipc'
 import { fixtures } from '../fixtures'
 import { contextMenuFixtures } from './context-menu'
 import { itemsSortReadyResponse } from './item-counts'
+import { searchIndexCommandFixtures } from './search-index'
 import { shellFixtures } from './shell'
 
 export { resolveThumbnailFixtureBatch, thumbnailFixture } from './pane-views'
@@ -11,6 +12,7 @@ const registry: Partial<{
 }> = {
   ...fixtures,
   ...shellFixtures,
+  ...searchIndexCommandFixtures,
   request_visible_item_counts: undefined,
   sort_active_items: itemsSortReadyResponse,
   load_native_menu: contextMenuFixtures.emptyNativeExtras,
