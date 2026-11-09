@@ -1,5 +1,6 @@
 use crate::common;
 
+use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -13,6 +14,8 @@ use file_explorer_lib::native_menu::provider::{
 use file_explorer_lib::native_menu::shell_executor::ShellExecutor;
 use file_explorer_lib::native_menu::types::{NativeMenuIcon, NativeMenuIconKind};
 use file_explorer_lib::native_menu::NativeMenuService;
+
+const OVERSIZED_MENU_LABEL_BYTES: usize = 17 * 1024 * 1024;
 
 fn plain_item(id: &str, label: &str, verb: &str) -> ProviderNativeMenuItem {
     ProviderNativeMenuItem {
@@ -236,6 +239,36 @@ fn cache_helpers_report_population() {
     assert!(cache
         .get(&file_request("req", "C:\\two\\other.png"))
         .is_none());
+}
+
+#[test]
+fn a_panicking_load_does_not_wedge_later_loads_of_the_same_file_type() {
+    let cache = MenuCache::default();
+    let request = file_request("req", "C:\\one\\report.txt");
+
+    let panicked = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        cache.get_or_load(&request, || panic!("provider enumeration failed"))
+    }));
+    assert!(panicked.is_err());
+
+    let retried = cache.get_or_load(&request, || vec![plain_item("open", "Open", "open")]);
+    assert!(retried.loaded);
+    assert_eq!(retried.items.len(), 1);
+}
+
+#[test]
+fn a_menu_too_heavy_to_cache_is_still_returned_to_the_loader() {
+    let cache = MenuCache::default();
+    let request = file_request("req", "C:\\one\\report.txt");
+    let oversized_label = "x".repeat(OVERSIZED_MENU_LABEL_BYTES);
+
+    let loaded = cache.get_or_load(&request, || {
+        vec![plain_item("open", &oversized_label, "open")]
+    });
+
+    assert!(loaded.loaded);
+    assert_eq!(loaded.items.len(), 1);
+    assert!(!cache.contains(&request));
 }
 
 fn file_request(request_id: &str, path: &str) -> LoadNativeMenuRequest {

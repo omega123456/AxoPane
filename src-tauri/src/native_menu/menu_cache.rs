@@ -50,12 +50,43 @@ impl CacheFlight {
         self.ready.notify_all();
     }
 
+    fn publish_empty_if_unpublished(&self) {
+        self.result
+            .lock()
+            .expect("menu cache flight result lock")
+            .get_or_insert_with(Vec::new);
+        self.ready.notify_all();
+    }
+
     fn read_when_ready<R>(&self, read: impl FnOnce(&[ProviderNativeMenuItem]) -> R) -> R {
         let mut result = self.result.lock().expect("menu cache flight result lock");
         while result.is_none() {
             result = self.ready.wait(result).expect("menu cache flight wait");
         }
         read(result.as_ref().expect("menu cache flight result"))
+    }
+}
+
+struct LeadingFlight<'flight> {
+    cache: &'flight MenuCache,
+    flight: &'flight CacheFlight,
+    key: &'flight String,
+}
+
+impl LeadingFlight<'_> {
+    fn publish_loaded<F>(&self, request: &LoadNativeMenuRequest, load: F)
+    where
+        F: FnOnce() -> Vec<ProviderNativeMenuItem>,
+    {
+        self.flight
+            .publish(self.cache.load_structure(request, load));
+    }
+}
+
+impl Drop for LeadingFlight<'_> {
+    fn drop(&mut self) {
+        self.flight.publish_empty_if_unpublished();
+        self.cache.finish_flight(self.key);
     }
 }
 
@@ -114,8 +145,12 @@ impl MenuCache {
         let key = cache_key(request);
         let flight = self.join_flight(&key);
         if flight.is_leader() {
-            flight.shared().publish(self.load_structure(request, load));
-            self.finish_flight(&key);
+            let leading = LeadingFlight {
+                cache: self,
+                flight: flight.shared(),
+                key: &key,
+            };
+            leading.publish_loaded(request, load);
         }
         let items = flight
             .shared()
@@ -146,12 +181,7 @@ impl MenuCache {
     {
         let fresh = load();
         self.insert(request, &fresh);
-        self.entries
-            .lock()
-            .expect("menu cache lock")
-            .get(&cache_key(request))
-            .expect("fresh native menu cache entry")
-            .to_vec()
+        structuralize_items(&fresh)
     }
 
     fn finish_flight(&self, key: &String) {

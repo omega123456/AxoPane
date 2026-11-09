@@ -39,11 +39,19 @@ describe('applyIconStates', () => {
     expect(cachedMissForUnlistedPath()).toBeUndefined()
   })
 
-  it('follows the shared platform detection for platforms that are not macOS', () => {
+  it('drops a missed icon right away on platforms other than Windows', () => {
     setPlatform('Linux x86_64')
 
     applyIconStates([MISSED_ICON])
 
-    expect(cachedMissForUnlistedPath()).toBeNull()
+    expect(cachedMissForUnlistedPath()).toBeUndefined()
+  })
+
+  it('drops a missed icon right away when the platform is unknown', () => {
+    setPlatform('')
+
+    applyIconStates([MISSED_ICON])
+
+    expect(cachedMissForUnlistedPath()).toBeUndefined()
   })
 })

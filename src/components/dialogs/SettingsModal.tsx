@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   CalendarIcon,
   ChevronDownIcon,
@@ -74,9 +74,11 @@ export function SettingsModal() {
 
 function useSettingsDraft() {
   const [draft, setDraft] = useState<DraftState>(() => cloneDraft())
+  const latestDraft = useRef(draft)
 
   const updateDraft: DraftUpdater = (updater) => {
-    const next = updater(draft)
+    const next = updater(latestDraft.current)
+    latestDraft.current = next
     setDraft(next)
     void commitDraft(next)
   }

@@ -16,9 +16,9 @@
 //!   block ids.
 //! - The `DSDB` block holds `(root_node_id, internal_levels, record_count,
 //!   block_count, 0x1000)`, pointing at the root of the actual B-tree.
-//! - B-tree nodes: `mode` (`0` = leaf) + `count`, then either `count` records
-//!   (leaf) or `count` `(child_block_id, record)` pairs (internal node,
-//!   walked in order — there is no trailing child beyond the last pair).
+//! - B-tree nodes: `rightmost_child` (`0` = leaf) + `count`, then either
+//!   `count` records (leaf) or `count` `(child_block_id, record)` pairs
+//!   followed by the `rightmost_child` subtree (internal node, walked in order).
 //! - Records: a UTF-16BE filename, a 4-byte struct id (e.g. `"ptbL"`), a
 //!   4-byte data type (e.g. `"ustr"`), then a type-specific value.
 
@@ -39,9 +39,9 @@ const BLOCK_OFFSET_BASE: usize = 4;
 const ADDRESS_TABLE_PREAMBLE_BYTES: usize = 8;
 /// The low five bits of an address-table entry encode the block size.
 const BLOCK_SIZE_BITS_MASK: u32 = 0x1F;
-/// `mode` plus `count` at the start of every B-tree node.
+/// `rightmost_child` plus `count` at the start of every B-tree node.
 const NODE_HEADER_BYTES: usize = 8;
-const LEAF_NODE_MODE: u32 = 0;
+const LEAF_NODE_MARKER: u32 = 0;
 const BOOL_VALUE_BYTES: usize = 1;
 const TIMESTAMP_VALUE_BYTES: usize = 8;
 const PRINTABLE_ASCII: RangeInclusive<u8> = 0x20..=0x7e;
@@ -244,13 +244,16 @@ struct NodeTree<'tree> {
 impl NodeTree<'_> {
     fn walk(&mut self, block_id: u32) -> Option<()> {
         let position = *self.blocks.get(&block_id)?;
-        let mode = self.reader.u32(position)?;
+        let rightmost_child = self.reader.u32(position)?;
         let count = self.reader.u32(position + U32_BYTES)?;
         let mut cursor = position + NODE_HEADER_BYTES;
 
-        let is_internal_node = mode != LEAF_NODE_MODE;
+        let is_internal_node = rightmost_child != LEAF_NODE_MARKER;
         for _ in 0..count {
             cursor = self.walk_entry(cursor, is_internal_node)?;
+        }
+        if is_internal_node {
+            self.walk(rightmost_child)?;
         }
 
         Some(())

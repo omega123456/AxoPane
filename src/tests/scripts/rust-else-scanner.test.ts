@@ -1,4 +1,4 @@
-import { findIfElseLines } from '../../../scripts/check-rust-else.mjs'
+import { findIfElseLines } from '../../../scripts/rust-else-scanner.mjs'
 
 function rustSource(lines: string[]) {
   return lines.join('\n')
