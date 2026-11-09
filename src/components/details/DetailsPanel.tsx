@@ -8,6 +8,7 @@ import type { PaneId } from '@/types/pane'
 import { FOCUS_RING } from '@/lib/focus-ring'
 import { SCROLLBAR_THIN } from '@/lib/class-names'
 import { TEXT_SECONDARY } from '@/lib/class-names'
+import { EMPTY_VALUE } from '@/lib/format'
 
 type DetailsPanelProps = {
   paneId: PaneId
@@ -46,8 +47,8 @@ export function DetailsPanel({ paneId }: DetailsPanelProps) {
         <dl className="mt-4 space-y-2 text-row">
           <DetailRow label="Type" value={entry.typeLabel} />
           <DetailRow label="Path" value={entry.path} />
-          <DetailRow label="Modified" value={entry.modifiedAt ?? '—'} />
-          <DetailRow label="Created" value={entry.createdAt ?? '—'} />
+          <DetailRow label="Modified" value={entry.modifiedAt ?? EMPTY_VALUE} />
+          <DetailRow label="Created" value={entry.createdAt ?? EMPTY_VALUE} />
         </dl>
       </div>
       <div className="grid grid-cols-3 gap-2 border-t border-light-divider p-3 dark:border-dark-divider">

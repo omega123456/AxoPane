@@ -5,6 +5,7 @@ import { insertSorted, sortEntries, sortSpecFor, type SortSpec } from '@/stores/
 import { hydrateEntryIcon } from '@/stores/panes/icon-requests'
 import { itemCountContext, withoutPatchedItemCountRequests } from '@/stores/panes/item-counts'
 import {
+  isHiddenFromView,
   retainedFocusId,
   withPane,
   type PaneState,
@@ -43,8 +44,7 @@ function affectedPatchPaths(event: DirPatchEvent) {
 }
 
 function entryMatchesPane(entry: DirectoryEntry, pane: PaneState, showHiddenFiles: boolean) {
-  const hiddenFromPane = !showHiddenFiles && (entry.isHidden || entry.isSystem)
-  if (hiddenFromPane) {
+  if (isHiddenFromView(entry, showHiddenFiles)) {
     return false
   }
   return (

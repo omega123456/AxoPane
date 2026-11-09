@@ -18,7 +18,7 @@ function withKeysFlagged(
   return next
 }
 
-function withoutKeys<Value>(
+export function withoutKeys<Value>(
   record: Readonly<Record<string, Value>>,
   keys: readonly string[],
 ): Record<string, Value> {

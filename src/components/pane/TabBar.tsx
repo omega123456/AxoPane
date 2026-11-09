@@ -14,7 +14,7 @@ import { tabLabel, useTabsStore, type TabState } from '@/stores/tabs-store'
 import { isMiddleButton } from '@/lib/mouse-buttons'
 import type { PaneId } from '@/types/pane'
 import { FOCUS_RING } from '@/lib/focus-ring'
-import { NO_CLASS, TEXT_SECONDARY } from '@/lib/class-names'
+import { NO_CLASS, TEXT_SECONDARY, HOVER_ON_POINTER } from '@/lib/class-names'
 
 type TabBarProps = {
   paneId: PaneId
@@ -29,7 +29,7 @@ function invalidDropCursorClass(isInvalid: boolean) {
 function tabStateClass(isActive: boolean) {
   return isActive
     ? 'z-10 border-light-stroke bg-light-layer font-semibold text-light-text dark:border-dark-stroke dark:bg-dark-layer dark:text-dark-text'
-    : `border-transparent ${TEXT_SECONDARY} hover:bg-light-hover dark:hover:bg-dark-hover`
+    : `border-transparent ${TEXT_SECONDARY} ${HOVER_ON_POINTER}`
 }
 
 function closeButtonVisibilityClass(isActive: boolean) {

@@ -13,7 +13,7 @@ import { useLayoutStore } from '@/stores/layout-store'
 import { BOTH_SIDES } from '@/lib/numbers'
 import type { VisibleRange } from '@/types/pane'
 import { documentZoom } from '@/components/menus/menu-geometry'
-import { virtualListHeight, virtualRowsOrFallback } from '@/lib/virtual-rows'
+import { virtualListHeight, virtualRowsOrFallback, visibleRowCount } from '@/lib/virtual-rows'
 import { paneContentWidth } from './HeaderRow'
 import type { DetailsViewHandle } from './DetailsView'
 
@@ -159,8 +159,7 @@ export function useDetailsHandle(
     ref,
     () => ({
       scrollToRow: (index) => scrollToIndex(index),
-      getVisibleRowCount: () =>
-        Math.max(1, Math.floor((parentRef.current?.clientHeight ?? 0) / rowHeightPx)),
+      getVisibleRowCount: () => visibleRowCount(parentRef.current, rowHeightPx),
       contentPoint: (clientX, clientY) => {
         const container = parentRef.current
         if (!container) return null

@@ -26,14 +26,15 @@ import { PaneViewMenu } from '@/components/pane/PaneViewMenu'
 import { FOCUS_RING } from '@/lib/focus-ring'
 import { detectPlatformOs, formatShortcutLabel } from '@/lib/keymap'
 import { forwardPaneFilterKey } from '@/lib/pane-filter-keys'
-import { TEXT_SECONDARY } from '@/lib/class-names'
+import { TEXT_SECONDARY, HOVER_AND_PRESS_ON_POINTER } from '@/lib/class-names'
+import { ESCAPE_KEY } from '@/lib/key-table'
 
 type CommandBarProps = {
   theme: ThemeMode
   setTheme: (theme: ThemeMode) => void
 }
 
-const BUTTON_CLASS_NAME = `inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-control hover:bg-light-hover active:bg-light-press disabled:cursor-default disabled:bg-transparent disabled:text-light-text-disabled dark:hover:bg-dark-hover dark:active:bg-dark-press dark:disabled:text-dark-text-disabled ${FOCUS_RING}`
+const BUTTON_CLASS_NAME = `inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-control ${HOVER_AND_PRESS_ON_POINTER} disabled:cursor-default disabled:bg-transparent disabled:text-light-text-disabled dark:disabled:text-dark-text-disabled ${FOCUS_RING}`
 
 function CommandButton({
   label,
@@ -252,7 +253,7 @@ function PaneFilterField({ paneId, pane }: ActivePaneProps) {
   const clearFilter = usePanesStore((state) => state.clearFilter)
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key === 'Escape') {
+    if (event.key === ESCAPE_KEY) {
       event.preventDefault()
       clearFilter(paneId)
       document.querySelector<HTMLElement>(`[data-pane-id="${paneId}"]`)?.focus()

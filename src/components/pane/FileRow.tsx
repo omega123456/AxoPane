@@ -12,9 +12,10 @@ import { cutFadeClass, rowDropTargetClass, rowHighlightClass } from './entry-cla
 
 import type { DragEvent, MouseEvent, ReactNode, RefObject } from 'react'
 import { memo, useEffect, useMemo, useRef } from 'react'
-import { isMiddleClickOpen } from '@/lib/mouse-buttons'
+import { entryInteractionProps } from './entry-interaction'
 import { TEXT_SECONDARY } from '@/lib/class-names'
 import type { InlineRenameDraft } from '@/stores/inline-rename-store'
+import { EMPTY_VALUE } from '@/lib/format'
 
 /**
  * Stable, id-keyed handler dispatcher for a pane's rows.
@@ -98,7 +99,7 @@ function DateCellText({ value, dateDisplay }: { value: string | null; dateDispla
 function ItemCountCellText({ entry }: { entry: DirectoryEntry }) {
   return (
     <span className={`font-mono text-caption ${TEXT_SECONDARY}`}>
-      {entry.isDir ? (entry.itemCount ?? '—') : '—'}
+      {entry.isDir ? (entry.itemCount ?? EMPTY_VALUE) : EMPTY_VALUE}
     </span>
   )
 }
@@ -229,38 +230,12 @@ function FileRowImpl({
       role="row"
       data-entry-id={entry.id}
       draggable={draggable}
-      {...rowInteractionProps(entry, actions)}
+      {...entryInteractionProps(entry, actions)}
       className={`${rowClassName} cursor-pointer select-none ${rowDropTargetClass(isDropTarget)}`}
     >
       {cells}
     </div>
   )
-}
-
-// A non-focusable div (not a <button>) so mousedown never steals keyboard
-// focus away from the pane <section>; that lets us skip the mousedown
-// preventDefault a <button> needed, which would otherwise suppress the
-// native `dragstart` and break drag-and-drop entirely.
-function rowInteractionProps(entry: DirectoryEntry, actions: FileRowActions) {
-  return {
-    onDragStart: (event: DragEvent<HTMLDivElement>) => actions.onDragStart(entry.id, event),
-    onDragEnd: actions.onDragEnd,
-    onDragEnter: (event: DragEvent<HTMLDivElement>) => actions.onDragEnter(entry.id, event),
-    onDragOver: (event: DragEvent<HTMLDivElement>) => actions.onDragOver(entry.id, event),
-    onDragLeave: () => actions.onDragLeave(entry.id),
-    onDrop: (event: DragEvent<HTMLDivElement>) => actions.onDrop(entry.id, event),
-    onMouseDown: actions.onPointerDown,
-    onDoubleClick: (event: MouseEvent<HTMLDivElement>) =>
-      actions.onActivate(entry.id, event.detail, event.timeStamp),
-    onClick: (event: MouseEvent<HTMLDivElement>) => actions.onClick(entry.id, event),
-    onContextMenu: (event: MouseEvent<HTMLDivElement>) => actions.onContextMenu(entry.id, event),
-    onAuxClick: (event: MouseEvent<HTMLDivElement>) => {
-      if (isMiddleClickOpen(event, entry)) {
-        event.preventDefault()
-        actions.onMiddleClick(entry.id)
-      }
-    },
-  }
 }
 
 /**

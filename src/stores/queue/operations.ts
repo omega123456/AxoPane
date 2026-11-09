@@ -25,8 +25,12 @@ export function isTerminal(status: OpProgress['status']): boolean {
   return TERMINAL.has(status)
 }
 
+function emptyQueueEntries(): QueueEntries {
+  return { operations: {}, order: [], throughput: {}, conflicts: {} }
+}
+
 export function defaultQueueData(): QueueData {
-  return { operations: {}, order: [], throughput: {}, conflicts: {}, expanded: false }
+  return { ...emptyQueueEntries(), expanded: false }
 }
 
 function withOperationId(order: string[], operationId: string) {
@@ -49,7 +53,7 @@ function conflictsAfterProgress(conflicts: Record<string, ConflictInfo>, progres
 }
 
 export function hydratedQueue(state: QueueData, snapshots: OpSnapshot[]): QueueEntries {
-  const hydrated: QueueEntries = { operations: {}, order: [], throughput: {}, conflicts: {} }
+  const hydrated = emptyQueueEntries()
   for (const { progress, conflict } of snapshots) {
     const id = progress.operationId
     hydrated.operations[id] = progress

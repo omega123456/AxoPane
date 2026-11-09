@@ -1,3 +1,10 @@
+const PARENT_ROW_COUNT = 1
+const NO_PARENT_ROW = 0
+
+export function parentRowOffset(hasParent: boolean) {
+  return hasParent ? PARENT_ROW_COUNT : NO_PARENT_ROW
+}
+
 export type PaneBodyState = 'skeleton' | 'permissionDenied' | 'error' | 'empty' | 'listing'
 
 const PERMISSION_ERROR_PATTERN = /permission|denied|forbidden|access is denied/i

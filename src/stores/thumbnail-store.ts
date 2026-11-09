@@ -40,14 +40,19 @@ type ThumbnailStore = {
   reset: () => void
 }
 
+const KEY_FIELD_SEPARATOR = '\u0000'
+const SIGNATURE_ENTRY_SEPARATOR = '\u0001'
+
 function scopeKey(paneId: string, tabId: string) {
-  return `${paneId}\u0000${tabId}`
+  return [paneId, tabId].join(KEY_FIELD_SEPARATOR)
 }
 
 export function thumbnailFingerprintKey(
   candidate: Pick<ThumbnailCandidateRequest, 'path' | 'modifiedUnixSeconds' | 'sizeBytes'>,
 ) {
-  return `${candidate.path}\u0000${candidate.modifiedUnixSeconds}\u0000${candidate.sizeBytes}`
+  return [candidate.path, candidate.modifiedUnixSeconds, candidate.sizeBytes].join(
+    KEY_FIELD_SEPARATOR,
+  )
 }
 
 function fileCandidates(candidates: ThumbnailCandidateRequest[]) {
@@ -55,13 +60,15 @@ function fileCandidates(candidates: ThumbnailCandidateRequest[]) {
 }
 
 function candidateSignatureEntry(candidate: ThumbnailCandidateRequest) {
-  return `${thumbnailFingerprintKey(candidate)}\u0000${candidate.priority}\u0000${candidate.order}`
+  return [thumbnailFingerprintKey(candidate), candidate.priority, candidate.order].join(
+    KEY_FIELD_SEPARATOR,
+  )
 }
 
 function candidateSignature(candidates: ThumbnailCandidateRequest[]) {
   const signatureEntries = fileCandidates(candidates).map(candidateSignatureEntry)
   const uniqueSignatureEntries = Array.from(new Set(signatureEntries))
-  return uniqueSignatureEntries.sort().join('\u0001')
+  return uniqueSignatureEntries.sort().join(SIGNATURE_ENTRY_SEPARATOR)
 }
 
 function visibleCandidateKeys(scope: ActiveThumbnailScope) {

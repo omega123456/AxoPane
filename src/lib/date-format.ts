@@ -7,6 +7,7 @@ import {
   millisecondsInWeek,
 } from 'date-fns/constants'
 import { TEXT_SECONDARY } from '@/lib/class-names'
+import { EMPTY_VALUE } from '@/lib/format'
 
 /**
  * Date formatting for directory listings and the properties dialog.
@@ -87,7 +88,7 @@ export const dateToneClassName: Record<DateTone, string> = {
   default: TEXT_SECONDARY,
 }
 
-const EMPTY: FormattedDate = { text: '—', tone: 'default' }
+const EMPTY: FormattedDate = { text: EMPTY_VALUE, tone: 'default' }
 
 /**
  * Absolute-format results are pure functions of `value|pattern` (no volatile

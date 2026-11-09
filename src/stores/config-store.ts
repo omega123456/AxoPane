@@ -82,11 +82,23 @@ export function pickConfigSnapshot(source: Partial<ConfigSnapshot>): ConfigSnaps
   ) as ConfigSnapshot
 }
 
+export function configFieldPatch<Field extends keyof ConfigSnapshot>(
+  field: Field,
+  value: ConfigSnapshot[Field],
+): Pick<ConfigSnapshot, Field> {
+  return { [field]: value } as Pick<ConfigSnapshot, Field>
+}
+
 export const useConfigStore = create<ConfigStore>((set, get) => {
   const setAndPersist = async (patch: Partial<ConfigStore>) => {
     set(patch)
     await persistAppConfig()
   }
+
+  const persistField =
+    <Field extends keyof ConfigSnapshot>(field: Field) =>
+    (value: ConfigSnapshot[Field]) =>
+      setAndPersist(configFieldPatch(field, value))
 
   const commitChange = async (patch: Partial<ConfigStore> | null) => {
     if (!patch) {
@@ -99,17 +111,16 @@ export const useConfigStore = create<ConfigStore>((set, get) => {
     ...defaultConfigSnapshot(),
     renamingFavourite: null,
     hydrate: (config) => set(config),
-    setThemePreference: (theme) => setAndPersist({ theme }),
-    setShowHiddenFiles: (showHiddenFiles) => setAndPersist({ showHiddenFiles }),
-    setUpdateCheckInterval: (updateCheckInterval) => setAndPersist({ updateCheckInterval }),
-    setDateFormat: (dateFormat) => setAndPersist({ dateFormat }),
-    setShowTime: (showTime) => setAndPersist({ showTime }),
-    setShowSeconds: (showSeconds) => setAndPersist({ showSeconds }),
-    setRelativeDates: (relativeDates) => setAndPersist({ relativeDates }),
-    setAutoFolderSize: (autoFolderSize) => setAndPersist({ autoFolderSize }),
-    setAutoExpandActiveQueueToasts: (autoExpandActiveQueueToasts) =>
-      setAndPersist({ autoExpandActiveQueueToasts }),
-    setFavouritesCollapsed: (favouritesCollapsed) => setAndPersist({ favouritesCollapsed }),
+    setThemePreference: persistField('theme'),
+    setShowHiddenFiles: persistField('showHiddenFiles'),
+    setUpdateCheckInterval: persistField('updateCheckInterval'),
+    setDateFormat: persistField('dateFormat'),
+    setShowTime: persistField('showTime'),
+    setShowSeconds: persistField('showSeconds'),
+    setRelativeDates: persistField('relativeDates'),
+    setAutoFolderSize: persistField('autoFolderSize'),
+    setAutoExpandActiveQueueToasts: persistField('autoExpandActiveQueueToasts'),
+    setFavouritesCollapsed: persistField('favouritesCollapsed'),
     setLogLevel: async (logLevel) => {
       set({ logLevel })
       await applyAndPersistBackendLogLevel(logLevel)

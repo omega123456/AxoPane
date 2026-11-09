@@ -9,6 +9,7 @@ import {
 } from '@/stores/panes/icon-requests'
 import { cacheNow } from '@/stores/weighted-cache'
 import type { PaneId } from '@/types/pane'
+import { runMarkingPending } from '@/stores/panes/pending-request'
 
 export async function requestVisibleIcons(paneId: PaneId, paths: string[]) {
   const pending = collectPendingIconRequests(
@@ -20,13 +21,11 @@ export async function requestVisibleIcons(paneId: PaneId, paths: string[]) {
     return
   }
 
-  panesStore().setState((state) => withPendingIconRequests(state, pending, true))
-  try {
-    await requestIcons({ paths: pending })
-  } catch (error) {
-    panesStore().setState((state) => withPendingIconRequests(state, pending, false))
-    throw error
-  }
+  await runMarkingPending({
+    markPending: (isPending) =>
+      panesStore().setState((state) => withPendingIconRequests(state, pending, isPending)),
+    request: () => requestIcons({ paths: pending }),
+  })
 }
 
 export function applyIconStates(events: IconStateEvent[]) {

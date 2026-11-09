@@ -1,6 +1,6 @@
 import { pathsMatch } from '@/lib/path-compare'
 import { clamp } from '@/lib/numbers'
-import { moveItem } from '@/lib/collections'
+import { moveItem, withoutKey } from '@/lib/collections'
 
 export type FavouritesState = {
   favourites: string[]
@@ -38,7 +38,8 @@ export function withRenamedFavourite(
   name: string,
 ): Pick<FavouritesState, 'favouriteNames'> | null {
   const trimmed = name.trim()
-  const { [path]: previous, ...rest } = state.favouriteNames
+  const previous = state.favouriteNames[path]
+  const rest = withoutKey(state.favouriteNames, path)
   const nextName = trimmed || undefined
   if (nextName === previous) {
     return null

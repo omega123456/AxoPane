@@ -6,7 +6,7 @@ import type { SortKey } from '@/lib/types/ipc'
 import type { PaneState } from '@/types/pane'
 import { usePanesStore } from '@/stores/panes-store'
 import { FOCUS_RING } from '@/lib/focus-ring'
-import { TEXT_SECONDARY } from '@/lib/class-names'
+import { TEXT_SECONDARY, HOVER_ON_POINTER } from '@/lib/class-names'
 
 const sortKeys: SortKey[] = ['name', 'size', 'items', 'type', 'modified', 'created']
 
@@ -36,7 +36,7 @@ function SortTrigger({
       aria-controls={controls}
       onClick={toggle}
       onKeyDown={onTriggerKeyDown}
-      className={`inline-flex items-center gap-1 rounded-control px-2 py-1 hover:bg-light-hover dark:hover:bg-dark-hover ${FOCUS_RING}`}
+      className={`inline-flex items-center gap-1 rounded-control px-2 py-1 ${HOVER_ON_POINTER} ${FOCUS_RING}`}
     >
       {label}
       <ChevronDownIcon className="size-3" />

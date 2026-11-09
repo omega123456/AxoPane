@@ -537,27 +537,45 @@ fn build_entry_from_path_with_options(
     let Some(name) = OsStr::to_str(file_name) else {
         return Err(FsError::InvalidFileName(path.to_path_buf()));
     };
-    let name = name.to_string();
     let is_dir = metadata.is_dir();
-    let attributes = collect_attributes(path, &metadata);
+    Ok(entry_from_metadata(EntrySource {
+        path,
+        name: name.to_string(),
+        metadata: &metadata,
+        is_dir,
+        item_count: requested_item_count(path, is_dir, include_item_count),
+    }))
+}
+
+struct EntrySource<'a> {
+    path: &'a Path,
+    name: String,
+    metadata: &'a Metadata,
+    is_dir: bool,
+    item_count: Option<u64>,
+}
+
+fn entry_from_metadata(source: EntrySource<'_>) -> DirectoryEntry {
+    let attributes = collect_attributes(source.path, source.metadata);
     let is_hidden = has_attribute(&attributes, HIDDEN_ATTRIBUTE);
     let is_system = has_attribute(&attributes, SYSTEM_ATTRIBUTE);
+    let display_path = display_path_from_path(source.path);
 
-    Ok(DirectoryEntry {
-        id: display_path_from_path(path),
-        name: name.clone(),
-        path: display_path_from_path(path),
-        is_dir,
+    DirectoryEntry {
+        id: display_path.clone(),
+        type_label: infer_type_label(&source.name, source.is_dir),
+        name: source.name,
+        path: display_path,
+        is_dir: source.is_dir,
         icon_data_url: None,
-        size_bytes: (!is_dir).then_some(metadata.len()),
-        item_count: requested_item_count(path, is_dir, include_item_count),
-        type_label: infer_type_label(&name, is_dir),
-        modified_at: system_time_to_rfc3339(metadata.modified().ok()),
-        created_at: system_time_to_rfc3339(metadata.created().ok()),
+        size_bytes: (!source.is_dir).then_some(source.metadata.len()),
+        item_count: source.item_count,
+        modified_at: system_time_to_rfc3339(source.metadata.modified().ok()),
+        created_at: system_time_to_rfc3339(source.metadata.created().ok()),
         attributes,
         is_hidden,
         is_system,
-    })
+    }
 }
 
 pub fn directory_entry_from_path(path: &Path) -> Result<DirectoryEntry, FsError> {
@@ -578,25 +596,13 @@ fn build_entry(entry: &DirEntry) -> Result<DirectoryEntry, FsError> {
         Err(_) => return Err(FsError::InvalidFileName(path.clone())),
     };
     let is_dir = resolve_is_dir(&path, &metadata);
-    let attributes = collect_attributes(&path, &metadata);
-    let is_hidden = has_attribute(&attributes, HIDDEN_ATTRIBUTE);
-    let is_system = has_attribute(&attributes, SYSTEM_ATTRIBUTE);
-
-    Ok(DirectoryEntry {
-        id: display_path_from_path(&path),
-        name: name.clone(),
-        path: display_path_from_path(&path),
+    Ok(entry_from_metadata(EntrySource {
+        path: &path,
+        name,
+        metadata: &metadata,
         is_dir,
-        icon_data_url: None,
-        size_bytes: (!is_dir).then_some(metadata.len()),
         item_count: None,
-        type_label: infer_type_label(&name, is_dir),
-        modified_at: system_time_to_rfc3339(metadata.modified().ok()),
-        created_at: system_time_to_rfc3339(metadata.created().ok()),
-        attributes,
-        is_hidden,
-        is_system,
-    })
+    }))
 }
 
 const ITEM_COUNT_POOL_THREADS: usize = 4;

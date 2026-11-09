@@ -1,4 +1,4 @@
-import { virtualListHeight, virtualRowsOrFallback } from '@/lib/virtual-rows'
+import { virtualListHeight, virtualRowsOrFallback, visibleRowCount } from '@/lib/virtual-rows'
 
 const ROW_HEIGHT = 10
 const FALLBACK_LIMIT = 3
@@ -59,5 +59,22 @@ describe('virtualListHeight', () => {
 
   it('falls back to the estimate while unmeasured', () => {
     expect(virtualListHeight({ measuredHeight: 0, rowCount: 2, estimated: 20 })).toBe(20)
+  })
+})
+
+describe('visibleRowCount', () => {
+  function scrollElementWithHeight(clientHeight: number) {
+    const element = document.createElement('div')
+    Object.defineProperty(element, 'clientHeight', { value: clientHeight })
+    return element
+  }
+
+  it('counts the whole rows that fit in the viewport', () => {
+    expect(visibleRowCount(scrollElementWithHeight(95), ROW_HEIGHT)).toBe(9)
+  })
+
+  it('never reports fewer than one row', () => {
+    expect(visibleRowCount(scrollElementWithHeight(4), ROW_HEIGHT)).toBe(1)
+    expect(visibleRowCount(null, ROW_HEIGHT)).toBe(1)
   })
 })

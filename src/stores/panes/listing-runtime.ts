@@ -74,8 +74,12 @@ async function loadSessionPage(
     () =>
       !stillCurrent() || collection.isPageLoaded(pageIndex) || session.currentStatus === 'error',
   )
+  throwIfSessionFailed(session, FAILED_RANGE_MESSAGE)
+}
+
+export function throwIfSessionFailed(session: ListingSession, fallbackMessage: string) {
   if (session.currentStatus === 'error') {
-    throw new Error(session.currentError ?? FAILED_RANGE_MESSAGE)
+    throw new Error(session.currentError ?? fallbackMessage)
   }
 }
 

@@ -175,20 +175,49 @@ function withMovedColumn(
   return { columns: moveItem(columns, fromIndex, toIndex) }
 }
 
+export function hydratedLayout(layout: LayoutConfig, columns: ColumnConfig[]) {
+  return {
+    ...layout,
+    treeWidthPx: clampTreeWidth(layout.treeWidthPx),
+    favouritesHeightPx: clampFavouritesHeight(layout.favouritesHeightPx),
+    paneSplit: clampPaneSplit(layout.paneSplit),
+    columnWidths: normalizeColumnWidths(layout.columnWidths),
+    defaultViewMode: resolvePaneViewMode(layout.defaultViewMode, defaultLayout.defaultViewMode),
+    columns: normalizeColumns(columns),
+  }
+}
+
+export type ColumnWidthChange = { key: ColumnKey; width: number }
+
+export function withColumnWidth(
+  state: Pick<LayoutConfig, 'columnWidths'>,
+  { key, width }: ColumnWidthChange,
+) {
+  return {
+    columnWidths: {
+      ...state.columnWidths,
+      [key]: clampColumnWidth(width),
+    },
+  }
+}
+
+function toggledColumnIfKey(column: ColumnConfig, key: ColumnKey) {
+  if (column.key !== key) {
+    return column
+  }
+  return { ...column, visible: !column.visible }
+}
+
+export function withToggledColumn(state: Pick<LayoutStore, 'columns'>, key: ColumnKey) {
+  return { columns: state.columns.map((column) => toggledColumnIfKey(column, key)) }
+}
+
 export const useLayoutStore = create<LayoutStore>((set) => ({
   ...defaultLayout,
   columns: defaultColumns,
   hydrate: (layout, columns) => {
     applyZoom(layout.zoom)
-    set({
-      ...layout,
-      treeWidthPx: clampTreeWidth(layout.treeWidthPx),
-      favouritesHeightPx: clampFavouritesHeight(layout.favouritesHeightPx),
-      paneSplit: clampPaneSplit(layout.paneSplit),
-      columnWidths: normalizeColumnWidths(layout.columnWidths),
-      defaultViewMode: resolvePaneViewMode(layout.defaultViewMode, defaultLayout.defaultViewMode),
-      columns: normalizeColumns(columns),
-    })
+    set(hydratedLayout(layout, columns))
   },
   setDetailsVisible: (detailsVisible) => set({ detailsVisible }),
   setTreeWidthPx: (width) => set({ treeWidthPx: clampTreeWidth(width) }),
@@ -201,22 +230,11 @@ export const useLayoutStore = create<LayoutStore>((set) => ({
     applyZoom(zoom)
     set({ zoom })
   },
-  setColumnWidth: (key, width) =>
-    set((state) => ({
-      columnWidths: {
-        ...state.columnWidths,
-        [key]: clampColumnWidth(width),
-      },
-    })),
+  setColumnWidth: (key, width) => set((state) => withColumnWidth(state, { key, width })),
   setColumns: (columns) => set({ columns: normalizeColumns(columns) }),
   moveColumn: (fromKey, toKey) =>
     set((state) => withMovedColumn(state.columns, fromKey, toKey) ?? state),
-  toggleColumn: (key) =>
-    set((state) => ({
-      columns: state.columns.map((column) =>
-        column.key === key ? { ...column, visible: !column.visible } : column,
-      ),
-    })),
+  toggleColumn: (key) => set((state) => withToggledColumn(state, key)),
   reset: () => {
     applyZoom(defaultLayout.zoom)
     set({ ...defaultLayout, columns: defaultColumns })

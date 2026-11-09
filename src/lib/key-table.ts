@@ -1,5 +1,9 @@
 import { lookupOwnProperty } from '@/lib/collections'
 
+export const ENTER_KEY = 'Enter'
+
+export const ESCAPE_KEY = 'Escape'
+
 export type KeyHandlerTable = Partial<Record<string, () => void>>
 
 type KeyEventLike = { key: string; preventDefault: () => void }

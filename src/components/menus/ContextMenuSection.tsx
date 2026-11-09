@@ -10,7 +10,7 @@ import {
   placeSubmenuBesideAnchor,
   toZoomedGeometry,
 } from '@/components/menus/menu-geometry'
-import { NO_CLASS, SCROLLBAR_THIN } from '@/lib/class-names'
+import { NO_CLASS, SCROLLBAR_THIN, FLYOUT_SURFACE } from '@/lib/class-names'
 
 type NativeSectionState = {
   loading: boolean
@@ -131,7 +131,7 @@ function ContextSubmenu({
       ref={submenuRef}
       role="menu"
       aria-label={item.label}
-      className="fixed z-10 flex w-menu flex-col overflow-hidden rounded-overlay border border-light-flyout-stroke bg-light-card p-1 shadow-light-flyout dark:border-dark-flyout-stroke dark:bg-dark-card dark:shadow-dark-flyout"
+      className={`fixed z-10 flex w-menu flex-col overflow-hidden p-1 ${FLYOUT_SURFACE}`}
       style={submenuStyle(position)}
     >
       <div

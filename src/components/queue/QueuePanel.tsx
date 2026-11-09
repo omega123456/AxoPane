@@ -17,8 +17,7 @@ import { useQueueStore } from '@/stores/queue-store'
 import { withReorderedPending } from '@/stores/queue/operations'
 import { throughputTrackOf } from '@/stores/queue/throughput'
 import { clampPercent } from '@/lib/numbers'
-import { SCROLLBAR_THIN } from '@/lib/class-names'
-import { TEXT_SECONDARY } from '@/lib/class-names'
+import { FLYOUT_SURFACE, PRIMARY_TEXT, SCROLLBAR_THIN, TEXT_SECONDARY } from '@/lib/class-names'
 import { useOrderedOperations } from './use-ordered-operations'
 
 function movePendingOperation(operations: OpProgress[], id: string, delta: number) {
@@ -245,7 +244,7 @@ export function QueuePanel() {
     <section
       role="region"
       aria-label="Job queue"
-      className="flex max-h-queue-list w-queue flex-col overflow-hidden rounded-overlay border border-light-flyout-stroke bg-light-card text-light-text shadow-light-flyout dark:border-dark-flyout-stroke dark:bg-dark-card dark:text-dark-text dark:shadow-dark-flyout"
+      className={`flex max-h-queue-list w-queue flex-col overflow-hidden ${PRIMARY_TEXT} ${FLYOUT_SURFACE}`}
     >
       <header className="flex h-11 flex-none items-center justify-between gap-2 border-b border-light-divider pl-4 pr-2 dark:border-dark-divider">
         <span className="text-body font-semibold">{jobsLabel}</span>

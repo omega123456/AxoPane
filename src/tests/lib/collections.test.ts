@@ -1,4 +1,10 @@
-import { lookupOwnProperty, moveItem, withKeyFlags } from '@/lib/collections'
+import {
+  lookupOwnProperty,
+  moveItem,
+  withKeyFlags,
+  withoutKey,
+  withoutKeys,
+} from '@/lib/collections'
 
 describe('withKeyFlags', () => {
   it('adds flagged keys and removes unflagged ones without mutating the input', () => {
@@ -28,5 +34,14 @@ describe('lookupOwnProperty', () => {
     expect(lookupOwnProperty(table, 'answer')).toBe(42)
     expect(lookupOwnProperty(table, 'missing')).toBeUndefined()
     expect(lookupOwnProperty(table, 'constructor')).toBeUndefined()
+  })
+})
+
+describe('withoutKey / withoutKeys', () => {
+  it('drops the named keys from a copy', () => {
+    const original = { first: 1, second: 2, third: 3 }
+    expect(withoutKey(original, 'second')).toEqual({ first: 1, third: 3 })
+    expect(withoutKeys(original, ['first', 'third', 'missing'])).toEqual({ second: 2 })
+    expect(original).toEqual({ first: 1, second: 2, third: 3 })
   })
 })

@@ -100,6 +100,9 @@ const legacyKeymapMigrations: KeymapMigration[] = [
   },
 ]
 
+const SHORTCUT_PART_SEPARATOR = '+'
+const MAC_LABEL_PART_SEPARATOR = ''
+
 const modifierOrder = ['Ctrl', 'Meta', 'Alt', 'Shift'] as const
 type Modifier = (typeof modifierOrder)[number]
 
@@ -186,7 +189,7 @@ function normalizeKeyName(part: string) {
 export function normalizeShortcut(value: string): Shortcut {
   const platform = detectPlatformOs()
   const parts = value
-    .split('+')
+    .split(SHORTCUT_PART_SEPARATOR)
     .map((part) => part.trim())
     .filter(Boolean)
 
@@ -207,7 +210,7 @@ export function normalizeShortcut(value: string): Shortcut {
   }
 
   const ordered = modifierOrder.filter((modifier) => modifiers.has(modifier))
-  return [...ordered, key].filter(Boolean).join('+')
+  return [...ordered, key].filter(Boolean).join(SHORTCUT_PART_SEPARATOR)
 }
 
 function isModifierOnly(value: string): value is Modifier {
@@ -254,12 +257,12 @@ export function captureShortcut(event: KeyboardEvent): Shortcut | null {
   }
 
   const parts = eventModifierParts(event, platform)
-  return normalizeShortcut([...parts, key].join('+'))
+  return normalizeShortcut([...parts, key].join(SHORTCUT_PART_SEPARATOR))
 }
 
 export function parseShortcut(shortcut: Shortcut): ShortcutParts {
   const normalized = normalizeShortcut(shortcut)
-  const parts = normalized.split('+').filter(Boolean)
+  const parts = normalized.split(SHORTCUT_PART_SEPARATOR).filter(Boolean)
   const key = parts.find((part) => !isModifierOnly(part)) ?? ''
 
   return {
@@ -276,10 +279,10 @@ export function eventMatchesShortcut(event: KeyboardEvent, shortcut: Shortcut) {
 }
 
 export function formatShortcutLabel(shortcut: Shortcut, platform: PlatformOs) {
-  const parts = normalizeShortcut(shortcut).split('+').filter(Boolean)
+  const parts = normalizeShortcut(shortcut).split(SHORTCUT_PART_SEPARATOR).filter(Boolean)
   return parts
     .map((part) => (isModifierOnly(part) ? modifierLabels[platform][part] : part))
-    .join(platform === 'macos' ? '' : '+')
+    .join(platform === 'macos' ? MAC_LABEL_PART_SEPARATOR : SHORTCUT_PART_SEPARATOR)
 }
 
 export function mergeKeymap(overrides: Partial<Record<CommandId, Shortcut[]>>) {

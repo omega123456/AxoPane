@@ -1,6 +1,14 @@
 const EXTENDED_UNC_PREFIX = '\\\\?\\UNC\\'
 const EXTENDED_PATH_PREFIX = '\\\\?\\'
 export const UNC_PREFIX = '\\\\'
+export const WINDOWS_SEPARATOR = '\\'
+export const POSIX_SEPARATOR = '/'
+export const POSIX_ROOT = '/'
+export const CURRENT_DIRECTORY = '.'
+export const ANY_SEPARATOR = /[\\/]/
+export const TRAILING_SEPARATORS = /[\\/]+$/
+export const UNC_SHARE_PREFIX = /^\\\\([^\\/]+)[\\/]([^\\/]+)[\\/]?/
+export const DRIVE_PREFIX = /^([A-Za-z]:)[\\/]?/
 /** Length of a Windows drive designator such as `C:`. */
 export const WINDOWS_DRIVE_PREFIX_LENGTH = 2
 const extendedDrivePathPattern = /^\\\\\?\\[A-Za-z]:[\\/]/
@@ -18,7 +26,7 @@ export function normalizeWindowsCompatibilityPath(path: string) {
 }
 
 function isWindowsStylePath(path: string) {
-  return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\')
+  return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith(UNC_PREFIX)
 }
 
 export type PathComparisonPlatform = 'windows' | 'macos' | 'case-sensitive'

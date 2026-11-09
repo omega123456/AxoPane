@@ -17,7 +17,7 @@ import {
   listApplications,
 } from '@/lib/app-picker-commands'
 import { dateToneClassName, type DateFormat, formatEntryDate } from '@/lib/date-format'
-import { formatBytes, formatCount } from '@/lib/format'
+import { EMPTY_VALUE, formatBytes, formatCount, formatItemCount } from '@/lib/format'
 import { useConfigStore } from '@/stores/config-store'
 import { useDefaultAppDialogStore } from '@/stores/default-app-dialog-store'
 import {
@@ -39,13 +39,13 @@ function formatItemSize(sizeBytes: number | null, itemCount: number | null, isDi
 
 function formatContains(itemCount: number | null, isDir: boolean) {
   if (!isDir) {
-    return '—'
+    return EMPTY_VALUE
   }
   if (typeof itemCount !== 'number') {
-    return '—'
+    return EMPTY_VALUE
   }
 
-  return `${formatCount(itemCount)} ${itemCount === 1 ? 'item' : 'items'}`
+  return formatItemCount(itemCount)
 }
 
 type DefaultAppState = {
@@ -153,7 +153,7 @@ function propertiesSummary(dialog: PropertiesDialogState | null) {
   const singleItem = isSingleItem ? dialog.items[0] : null
   return {
     heading: singleItem ? singleItem.name : `${formatCount(itemCount)} items selected`,
-    itemCountLabel: `${formatCount(itemCount)} ${isSingleItem ? 'item' : 'items'}`,
+    itemCountLabel: formatItemCount(itemCount),
     singleItem,
   }
 }
@@ -275,7 +275,7 @@ function yesOrNo(flag: boolean) {
 }
 
 function formatAttributes(attributes: string[]) {
-  return attributes.length > 0 ? attributes.join(', ') : '—'
+  return attributes.length > 0 ? attributes.join(', ') : EMPTY_VALUE
 }
 
 function SingleItemProperties({

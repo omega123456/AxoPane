@@ -16,7 +16,14 @@ import { captureShortcut, detectPlatformOs } from '@/lib/keymap'
 import type { CommandId, LayoutConfig } from '@/lib/types/ipc'
 import { useSettingsStore } from '@/stores/settings-store'
 import { FOCUS_RING, FOCUS_RING_INSET } from '@/lib/focus-ring'
-import { flippedChevronClass, HOVER_FILL, SCROLLBAR_THIN, TEXT_SECONDARY } from '@/lib/class-names'
+import {
+  flippedChevronClass,
+  HOVER_FILL,
+  SCROLLBAR_THIN,
+  TEXT_SECONDARY,
+  HOVER_AND_PRESS_ON_POINTER,
+  HOVER_ON_POINTER,
+} from '@/lib/class-names'
 import { useAppVersion } from '@/lib/use-app-version'
 import { KeybindingsSection } from './settings/KeybindingsSection'
 import { LayoutSection } from './settings/LayoutSection'
@@ -182,11 +189,8 @@ function SettingsHeader({ onClose }: { onClose: () => void }) {
   )
 }
 
-const INACTIVE_NAV_ITEM_CLASS =
-  'hover:bg-light-hover active:bg-light-press dark:hover:bg-dark-hover dark:active:bg-dark-press'
-
 function navItemStateClass(active: boolean) {
-  return active ? HOVER_FILL : INACTIVE_NAV_ITEM_CLASS
+  return active ? HOVER_FILL : HOVER_AND_PRESS_ON_POINTER
 }
 
 function SettingsNav({ section }: { section: Section }) {
@@ -232,7 +236,7 @@ function ResetExpander({ onReset }: { onReset: () => void }) {
         type="button"
         aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
-        className={`flex min-h-16 w-full cursor-pointer items-center gap-4 rounded-card px-4 py-2.5 text-left hover:bg-light-hover dark:hover:bg-dark-hover ${FOCUS_RING}`}
+        className={`flex min-h-16 w-full cursor-pointer items-center gap-4 rounded-card px-4 py-2.5 text-left ${HOVER_ON_POINTER} ${FOCUS_RING}`}
       >
         <RotateCcwIcon className={iconClass} />
         <span className="grid min-w-0 flex-1">

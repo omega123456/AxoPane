@@ -1,4 +1,12 @@
-import { createContext, type ReactNode, useContext, useMemo, useRef, useState } from 'react'
+import {
+  createContext,
+  type ReactNode,
+  type RefObject,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import {
   DragDropProvider,
   PointerSensor,
@@ -11,18 +19,25 @@ import { useSortable } from '@dnd-kit/react/sortable'
 import { usePanesStore } from '@/stores/panes-store'
 import { useTabsStore, type TabMoveResult } from '@/stores/tabs-store'
 import type { PaneId } from '@/types/pane'
+import { lookupOwnProperty } from '@/lib/collections'
 import {
   focusTabLabel,
   paneIdAtPoint,
   paneIdFromEntity,
   resolveTabDrop,
   validDestination,
+  type TabDragEndEvent,
   type TabDrop,
+  type TabIdsByPane,
 } from './tab-drop'
 
 const TAB_DRAG_ACTIVATION_DISTANCE_PX = 5
 
 const TAB_TYPE = 'tab'
+
+const DND_DRAGGING_ATTRIBUTE = 'data-dnd-dragging'
+
+const DND_PLACEHOLDER_SELECTOR = '[data-dnd-placeholder]'
 
 type TabDragState = {
   sourcePaneId: PaneId | null
@@ -44,28 +59,35 @@ type SourceDomPosition = {
   nextSibling: Element | null
 }
 
+type PointerEventHandler = (event: PointerEvent) => void
+
 class MouseDistanceConstraint {
   private start: { x: number; y: number } | null = null
-  private activateDrag: ((event: PointerEvent) => void) | null = null
+  private activateDrag: PointerEventHandler | null = null
 
-  set controller(controller: { activate: (event: PointerEvent) => void }) {
+  private readonly handlersByEventType: Partial<Record<string, PointerEventHandler>> = {
+    pointerdown: (event) => this.recordStart(event),
+    pointerup: () => this.abort(),
+    pointermove: (event) => this.activateWhenFarEnough(event),
+  }
+
+  set controller(controller: { activate: PointerEventHandler }) {
     this.activateDrag = controller.activate.bind(controller)
   }
 
   onEvent(event: PointerEvent) {
-    if (event.type === 'pointerdown') {
-      this.start = { x: event.clientX, y: event.clientY }
-      return
-    }
+    lookupOwnProperty(this.handlersByEventType, event.type)?.(event)
+  }
 
-    if (event.type === 'pointerup') {
-      this.abort()
-      return
-    }
+  abort() {
+    this.start = null
+  }
 
-    if (event.type !== 'pointermove') {
-      return
-    }
+  private recordStart(event: PointerEvent) {
+    this.start = { x: event.clientX, y: event.clientY }
+  }
+
+  private activateWhenFarEnough(event: PointerEvent) {
     if (!this.start) {
       return
     }
@@ -73,10 +95,6 @@ class MouseDistanceConstraint {
     if (distance >= TAB_DRAG_ACTIVATION_DISTANCE_PX) {
       this.activateDrag?.(event)
     }
-  }
-
-  abort() {
-    this.start = null
   }
 }
 
@@ -104,13 +122,13 @@ function compensateDragZoom(element: HTMLElement) {
   const previousZoom = element.style.zoom
   element.style.zoom = String(1 / zoom)
   const observer = new MutationObserver(() => {
-    if (!element.hasAttribute('data-dnd-dragging')) restore()
+    if (!element.hasAttribute(DND_DRAGGING_ATTRIBUTE)) restore()
   })
   const restore = () => {
     observer.disconnect()
     element.style.zoom = previousZoom
   }
-  observer.observe(element, { attributes: true, attributeFilter: ['data-dnd-dragging'] })
+  observer.observe(element, { attributes: true, attributeFilter: [DND_DRAGGING_ATTRIBUTE] })
   return restore
 }
 
@@ -169,13 +187,13 @@ function domPositionOf(element: HTMLElement | null): SourceDomPosition | null {
 }
 
 function isStillDragging(position: SourceDomPosition | null) {
-  return position?.element.hasAttribute('data-dnd-dragging') === true
+  return position?.element.hasAttribute(DND_DRAGGING_ATTRIBUTE) === true
 }
 
 function restoreDomPosition(position: SourceDomPosition | null) {
   if (!position) return
 
-  const placeholder = document.querySelector<HTMLElement>('[data-dnd-placeholder]')
+  const placeholder = document.querySelector<HTMLElement>(DND_PLACEHOLDER_SELECTOR)
   const siblingStillInParent = position.nextSibling?.parentElement === position.parent
   const anchor = siblingStillInParent ? position.nextSibling : null
   position.parent.insertBefore(position.element, anchor)
@@ -229,31 +247,71 @@ function sourceTabElement(sourceTabId: string | null) {
   return document.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(sourceTabId)}"]`)
 }
 
-function useTabDragSession() {
+function restoreSourceLabelFocus(dragRecord: RefObject<TabDragRecord>) {
+  const tabId = dragRecord.current.sourceTabId
+  if (tabId) {
+    focusTabLabel(tabId)
+  }
+}
+
+function focusAfterMove(result: TabMoveResult, dragRecord: RefObject<TabDragRecord>) {
+  if (result.kind === 'transfer') {
+    requestAnimationFrame(() => focusTabLabel(result.destinationTabId))
+    return
+  }
+  if (result.kind === 'none') {
+    restoreSourceLabelFocus(dragRecord)
+  }
+}
+
+function dragFeedbackHandlers(setDragState: (state: TabDragState) => void) {
+  return {
+    move: (event: DragMoveEvent) => {
+      const invalidState = invalidMoveState(event)
+      if (invalidState) {
+        setDragState(invalidState)
+      }
+    },
+    over: (event: DragOverEvent) => {
+      const nextState = dragOverState(event)
+      setDragState(nextState)
+      if (nextState.isInvalid) {
+        event.preventDefault()
+      }
+    },
+  }
+}
+
+function useTabDragSession(tabIds: TabIdsByPane) {
   const moveTab = usePanesStore((state) => state.moveTab)
   const [dragState, setDragState] = useState<TabDragState>(IDLE_DRAG_STATE)
   const dragRecord = useRef<TabDragRecord>(NO_TAB_DRAG_RECORD)
 
-  const restoreSourceLabelFocus = () => {
-    const tabId = dragRecord.current.sourceTabId
-    if (tabId) {
-      focusTabLabel(tabId)
-    }
-  }
-
-  const handleMoveResult = (result: TabMoveResult) => {
-    if (result.kind === 'transfer') {
-      requestAnimationFrame(() => focusTabLabel(result.destinationTabId))
+  const finish = (drop: TabDrop | null) => {
+    if (!drop) {
+      restoreSourceLabelFocus(dragRecord)
       return
     }
-    if (result.kind === 'none') {
-      restoreSourceLabelFocus()
+    if (drop.sourcePaneId !== drop.destinationPaneId) {
+      restoreDomPosition(dragRecord.current.sourceDomPosition)
     }
+    const { sourcePaneId, sourceTabId, destinationPaneId, destinationIndex } = drop
+    void moveTab({ sourcePaneId, tabId: sourceTabId, destinationPaneId, destinationIndex }).then(
+      (result) => focusAfterMove(result, dragRecord),
+    )
+  }
+
+  const reset = () => {
+    const record = dragRecord.current
+    if (!isStillDragging(record.sourceDomPosition)) {
+      record.restoreDragZoom?.()
+    }
+    dragRecord.current = releasedDragRecord(record)
+    setDragState(IDLE_DRAG_STATE)
   }
 
   return {
     dragState,
-    setDragState,
     start: (event: DragStartEvent) => {
       const sourcePaneId = paneIdFromEntity(event.operation.source)
       const sourceTabId = sourceTabIdOf(event)
@@ -267,33 +325,16 @@ function useTabDragSession() {
       })
       setDragState({ sourcePaneId, destinationPaneId: sourcePaneId, isInvalid: false })
     },
-    finish: (drop: TabDrop | null) => {
-      if (!drop) {
-        restoreSourceLabelFocus()
-        return
-      }
-      if (drop.sourcePaneId !== drop.destinationPaneId) {
-        restoreDomPosition(dragRecord.current.sourceDomPosition)
-      }
-      const { sourcePaneId, sourceTabId, destinationPaneId, destinationIndex } = drop
-      void moveTab({ sourcePaneId, tabId: sourceTabId, destinationPaneId, destinationIndex }).then(
-        handleMoveResult,
-      )
-    },
-    reset: () => {
-      const record = dragRecord.current
-      if (!isStillDragging(record.sourceDomPosition)) {
-        record.restoreDragZoom?.()
-      }
-      dragRecord.current = releasedDragRecord(record)
-      setDragState(IDLE_DRAG_STATE)
+    ...dragFeedbackHandlers(setDragState),
+    end: (event: TabDragEndEvent) => {
+      finish(resolveTabDrop(event, tabIds))
+      reset()
     },
   }
 }
 
 export function TabDragDropProvider({ children }: TabDragDropProviderProps) {
   const tabs = useTabsStore((state) => state.panes)
-  const session = useTabDragSession()
   const tabIds = useMemo(
     () => ({
       left: tabs.left.tabs.map((tab) => tab.id),
@@ -301,28 +342,15 @@ export function TabDragDropProvider({ children }: TabDragDropProviderProps) {
     }),
     [tabs.left.tabs, tabs.right.tabs],
   )
+  const session = useTabDragSession(tabIds)
 
   return (
     <DragDropProvider
       sensors={[mouseSensor]}
       onDragStart={session.start}
-      onDragMove={(event) => {
-        const invalidState = invalidMoveState(event)
-        if (invalidState) {
-          session.setDragState(invalidState)
-        }
-      }}
-      onDragOver={(event) => {
-        const nextState = dragOverState(event)
-        session.setDragState(nextState)
-        if (nextState.isInvalid) {
-          event.preventDefault()
-        }
-      }}
-      onDragEnd={(event) => {
-        session.finish(resolveTabDrop(event, tabIds))
-        session.reset()
-      }}
+      onDragMove={session.move}
+      onDragOver={session.over}
+      onDragEnd={session.end}
     >
       <TabDragContext.Provider value={session.dragState}>{children}</TabDragContext.Provider>
     </DragDropProvider>

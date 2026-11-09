@@ -18,7 +18,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use super::VolumeInfo;
-use crate::path_text::{strip_unc_prefix, VERBATIM_UNC_PREFIX};
+use crate::path_text::{strip_unc_prefix, PATH_SEPARATORS, POSIX_ROOT, VERBATIM_UNC_PREFIX};
 
 #[cfg(not(feature = "test-utils"))]
 use tauri::{AppHandle, Emitter};
@@ -671,7 +671,7 @@ fn parse_unc_share(path: &str) -> Option<UncShare> {
     let after_prefix = strip_unc_prefix(trimmed)?;
 
     let mut parts = after_prefix
-        .split(['\\', '/'])
+        .split(PATH_SEPARATORS)
         .filter(|part| !part.is_empty());
     let server = parts.next()?;
     let share = parts.next()?;
@@ -682,10 +682,10 @@ fn parse_unc_share(path: &str) -> Option<UncShare> {
 }
 
 fn normalize_root_for_key(mount_root: &str) -> String {
-    if mount_root == "/" {
+    if mount_root == POSIX_ROOT {
         return mount_root.to_string();
     }
-    mount_root.trim_end_matches(['\\', '/']).to_string()
+    mount_root.trim_end_matches(PATH_SEPARATORS).to_string()
 }
 
 #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]

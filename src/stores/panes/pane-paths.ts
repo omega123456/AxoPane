@@ -1,13 +1,15 @@
-import { normalizeWindowsCompatibilityPath } from '@/lib/path-compare'
+import {
+  normalizeWindowsCompatibilityPath,
+  POSIX_ROOT,
+  POSIX_SEPARATOR,
+  TRAILING_SEPARATORS,
+  WINDOWS_SEPARATOR,
+} from '@/lib/path-compare'
 
 const UNC_SERVER_ROOT = /^\\\\[^\\/]+[\\/]?$/
 const UNC_SHARE_ROOT = /^\\\\[^\\/]+[\\/][^\\/]+[\\/]?$/
 const DRIVE_ROOT = /^[A-Za-z]:[\\/]?$/
 const DRIVE_PREFIX = /^([A-Za-z]:)[\\/]/
-const TRAILING_SEPARATORS = /[\\/]+$/
-const POSIX_ROOT = '/'
-const WINDOWS_SEPARATOR = '\\'
-const POSIX_SEPARATOR = '/'
 const NO_SEPARATOR = -1
 const POSIX_ROOT_SEPARATOR_INDEX = 0
 const DRIVE_LETTER_GROUP = 1

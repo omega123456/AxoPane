@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Button, TextField } from '@/components/controls'
 import {
   DialogError,
@@ -27,41 +27,35 @@ import { ArchiveConfirmDialog, TransferConfirmDialog } from './action-dialog/Tra
 import { useFocusOnMount, useSelectWhen } from '@/lib/use-focus-on-mount'
 import { useActionDialogSubmit } from './action-dialog/use-action-dialog-submit'
 
+type ActionDialogKind = ActionDialogState['kind']
+
+type DialogOfKind<Kind extends ActionDialogKind> = Extract<ActionDialogState, { kind: Kind }>
+
+type DialogRenderer<Kind extends ActionDialogKind> = (dialog: DialogOfKind<Kind>) => ReactNode
+
+const dialogRenderers: { [Kind in ActionDialogKind]: DialogRenderer<Kind> } = {
+  delete: (dialog) => <DeleteDialog dialog={dialog} />,
+  emptyTrash: (dialog) => <EmptyTrashDialog dialog={dialog} />,
+  calculateAllSizes: (dialog) => <CalculateAllSizesDialog dialog={dialog} />,
+  deleteFromTrash: (dialog) => <DeleteFromTrashDialog dialog={dialog} />,
+  adminRequired: (dialog) => <AdminRequiredDialog dialog={dialog} />,
+  transferConfirm: (dialog) => <TransferConfirmDialog dialog={dialog} />,
+  archiveConfirm: (dialog) => <ArchiveConfirmDialog dialog={dialog} />,
+  newFolder: (dialog) => <PromptDialog dialog={dialog} />,
+  newFile: (dialog) => <PromptDialog dialog={dialog} />,
+}
+
+function renderActionDialog<Kind extends ActionDialogKind>(dialog: DialogOfKind<Kind>) {
+  const render = dialogRenderers[dialog.kind] as DialogRenderer<Kind>
+  return render(dialog)
+}
+
 export function ActionDialog() {
   const dialog = useActionDialogStore((state) => state.dialog)
   if (!dialog) {
     return null
   }
-
-  if (dialog.kind === 'delete') {
-    return <DeleteDialog dialog={dialog} />
-  }
-
-  if (dialog.kind === 'emptyTrash') {
-    return <EmptyTrashDialog dialog={dialog} />
-  }
-
-  if (dialog.kind === 'calculateAllSizes') {
-    return <CalculateAllSizesDialog dialog={dialog} />
-  }
-
-  if (dialog.kind === 'deleteFromTrash') {
-    return <DeleteFromTrashDialog dialog={dialog} />
-  }
-
-  if (dialog.kind === 'adminRequired') {
-    return <AdminRequiredDialog dialog={dialog} />
-  }
-
-  if (dialog.kind === 'transferConfirm') {
-    return <TransferConfirmDialog dialog={dialog} />
-  }
-
-  if (dialog.kind === 'archiveConfirm') {
-    return <ArchiveConfirmDialog dialog={dialog} />
-  }
-
-  return <PromptDialog dialog={dialog} />
+  return renderActionDialog(dialog)
 }
 
 const promptCopy = {

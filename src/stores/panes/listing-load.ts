@@ -19,17 +19,16 @@ import {
   listingSessions,
   nextListRequestId,
   nextRevealScrollRequestId,
+  throwIfSessionFailed,
 } from '@/stores/panes/listing-runtime'
 import type { ListingSession } from '@/stores/panes/listing-session'
-import type { PaneState } from '@/stores/panes/pane-state'
+import { FAILED_LISTING_MESSAGE, type PaneState } from '@/stores/panes/pane-state'
 import { reportSizeSubscriptions } from '@/stores/panes/size-actions'
 import { schedulePersistSession } from '@/stores/panes/session-persistence'
 import { useRecentFoldersStore } from '@/stores/recent-folders-store'
 import { singleEntrySelection, useSelectionStore } from '@/stores/selection-store'
 import { activeTab, isActiveTabShowingPath, useTabsStore, type TabPath } from '@/stores/tabs-store'
 import type { PaneId } from '@/types/pane'
-
-const FAILED_LISTING_MESSAGE = 'Failed to load directory'
 
 export type ListingAttempt = {
   paneId: PaneId
@@ -65,12 +64,6 @@ function revisesActiveSession(session: ListingSession, paneId: PaneId, expected:
     return false
   }
   return isActiveTabShowingPath(paneId, sessionPath, expected)
-}
-
-function throwIfSessionFailed(session: ListingSession) {
-  if (session.currentStatus === 'error') {
-    throw new Error(session.currentError ?? FAILED_LISTING_MESSAGE)
-  }
 }
 
 export function syncActiveTabWithPane(paneId: PaneId) {
@@ -130,7 +123,7 @@ export async function loadDirectoryListing(
   if (isListingAttemptStale(attempt)) {
     return false
   }
-  throwIfSessionFailed(session)
+  throwIfSessionFailed(session, FAILED_LISTING_MESSAGE)
 
   await ensureSessionFullyLoaded(paneId, session)
   if (isMaterializedListingStale(attempt, session)) {

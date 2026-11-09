@@ -1,6 +1,12 @@
 import type { VolumeCategory, VolumeGroup, VolumeInfo } from '@/lib/types/ipc'
-import { normalizeWindowsCompatibilityPath, pathKey } from '@/lib/path-compare'
+import {
+  normalizeWindowsCompatibilityPath,
+  pathKey,
+  POSIX_SEPARATOR,
+  WINDOWS_SEPARATOR,
+} from '@/lib/path-compare'
 import { clamp } from '@/lib/numbers'
+import { compareNaturally } from '@/lib/natural-order'
 
 const windowsDriveRootPattern = /^([A-Za-z]:)[\\/]?$/
 
@@ -23,11 +29,11 @@ export function isPathInsideVolume(path: string, mountRoot: string) {
 }
 
 function endsWithSeparator(path: string) {
-  return path.endsWith('\\') || path.endsWith('/')
+  return path.endsWith(WINDOWS_SEPARATOR) || path.endsWith(POSIX_SEPARATOR)
 }
 
 function startsWithSeparator(path: string) {
-  return path.startsWith('\\') || path.startsWith('/')
+  return path.startsWith(WINDOWS_SEPARATOR) || path.startsWith(POSIX_SEPARATOR)
 }
 
 function isDeeperMount(candidate: VolumeInfo, current: VolumeInfo | null) {
@@ -83,12 +89,7 @@ export function isVolumeRoot(path: string, volume: VolumeInfo) {
 }
 
 export function sortVolumesForTree(volumes: VolumeInfo[]) {
-  return [...volumes].sort((left, right) =>
-    left.mountRoot.localeCompare(right.mountRoot, undefined, {
-      numeric: true,
-      sensitivity: 'base',
-    }),
-  )
+  return [...volumes].sort((left, right) => compareNaturally(left.mountRoot, right.mountRoot))
 }
 
 // Network mounts win over the removable flag (a mapped network drive can report

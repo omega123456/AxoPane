@@ -3,7 +3,6 @@ import {
   copyPathsContextAction,
   extractContextAction,
   openWithContextAction,
-  propertiesContextAction,
 } from '@/lib/context-menu/context-menu-actions'
 import { createPathPropertiesDialogItem, toPropertiesDialogItem } from '@/lib/properties-commands'
 import type {
@@ -26,6 +25,7 @@ import {
   fileSystemStrip,
   isTrashPane,
   isZipArchiveEntry,
+  propertiesRow,
   section,
 } from '@/lib/context-menu/menu-rows'
 
@@ -151,11 +151,9 @@ export function buildFileOrFolderContent(
       entryPrimarySection(target, platform),
       entrySecondarySection(paneId, target, platform),
       section('footer', [
-        customRow({
+        propertiesRow({
           id: `properties-${target.entry.id}`,
-          label: 'Properties',
-          action: propertiesContextAction([targetItem]),
-          icon: { kind: 'app', name: 'properties' },
+          items: [targetItem],
         }),
       ]),
     ],
@@ -221,12 +219,10 @@ export function buildMultiContent(paneId: PaneId, platform: PlatformOs): Context
     sections: [
       selectionSection(paneId, selectedEntries, platform),
       section('footer', [
-        customRow({
+        propertiesRow({
           id: 'properties-selection',
-          label: 'Properties',
-          action: propertiesContextAction(selectedEntries.map(toPropertiesDialogItem)),
+          items: selectedEntries.map(toPropertiesDialogItem),
           disabled: nothingSelected,
-          icon: { kind: 'app', name: 'properties' },
         }),
       ]),
     ],
@@ -256,11 +252,9 @@ export function buildEmptyContent(paneId: PaneId, platform: PlatformOs): Context
         }),
       ]),
       section('properties', [
-        customRow({
+        propertiesRow({
           id: `properties-empty-${pane.path}`,
-          label: 'Properties',
-          action: propertiesContextAction([createPathPropertiesDialogItem(pane.path)]),
-          icon: { kind: 'app', name: 'properties' },
+          items: [createPathPropertiesDialogItem(pane.path)],
         }),
       ]),
     ],

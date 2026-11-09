@@ -1,4 +1,11 @@
-import { normalizeWindowsCompatibilityPath, pathKey, pathsMatch } from '@/lib/path-compare'
+import {
+  DRIVE_PREFIX,
+  normalizeWindowsCompatibilityPath,
+  pathKey,
+  pathsMatch,
+  TRAILING_SEPARATORS,
+  UNC_SHARE_PREFIX,
+} from '@/lib/path-compare'
 
 describe('pathsMatch', () => {
   it('matches exact paths first', () => {
@@ -51,5 +58,24 @@ describe('normalizeWindowsCompatibilityPath', () => {
     ['\\\\?\\Volume{abc}\\', '\\\\?\\Volume{abc}\\'],
   ])('normalizes %s to %s', (input, expected) => {
     expect(normalizeWindowsCompatibilityPath(input)).toBe(expected)
+  })
+})
+
+describe('path patterns', () => {
+  it('captures the server and share of a UNC prefix', () => {
+    expect('\\\\server\\share\\folder'.match(UNC_SHARE_PREFIX)?.slice(1)).toEqual([
+      'server',
+      'share',
+    ])
+    expect('C:\\folder'.match(UNC_SHARE_PREFIX)).toBeNull()
+  })
+
+  it('captures the drive designator of a drive path', () => {
+    expect('D:\\folder'.match(DRIVE_PREFIX)?.[1]).toBe('D:')
+    expect('/Users'.match(DRIVE_PREFIX)).toBeNull()
+  })
+
+  it('strips any run of trailing separators', () => {
+    expect('/a/b\\/'.replace(TRAILING_SEPARATORS, '')).toBe('/a/b')
   })
 })

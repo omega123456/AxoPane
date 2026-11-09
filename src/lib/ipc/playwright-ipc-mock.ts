@@ -72,9 +72,13 @@ function readTreeChildrenOverride(path: string, treeChildrenByPath: TreeChildren
   return treeChildrenByPath[path]
 }
 
+function overriddenOrFixture<CommandName extends keyof IpcCommandMap>(command: CommandName) {
+  const override = readCommandOverride(command)
+  return override.found ? override.value : getFixtureResponse(command)
+}
+
 function listVolumesFixture() {
-  const override = readCommandOverride('list_volumes')
-  return override.found ? override.value : getFixtureResponse('list_volumes')
+  return overriddenOrFixture('list_volumes')
 }
 
 function isVolumeRoot(path: string) {
@@ -84,8 +88,7 @@ function isVolumeRoot(path: string) {
 }
 
 function loadSessionFixture() {
-  const override = readCommandOverride('load_session')
-  return override.found ? override.value : getFixtureResponse('load_session')
+  return overriddenOrFixture('load_session')
 }
 
 function rootForPath(path: string) {
@@ -176,8 +179,7 @@ function treeChildrenResponse({ path }: CommandRequest<'list_tree_children'>) {
 function directorySessionResponse(
   payload: Pick<CommandRequest<'begin_directory_session'>, 'paneId' | 'tabId'>,
 ): CommandResponse<'begin_directory_session'> {
-  const listOverride = readCommandOverride('list_dir')
-  const listing = listOverride.found ? listOverride.value : getFixtureResponse('list_dir')
+  const listing = overriddenOrFixture('list_dir')
   v2SessionIdCounter += 1
   return {
     paneId: payload.paneId,

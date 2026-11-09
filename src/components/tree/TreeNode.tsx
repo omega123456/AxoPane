@@ -18,7 +18,13 @@ import type { VolumeInfo } from '@/lib/types/ipc'
 import type { TreeNodeState } from '@/stores/panes-store'
 import { useDragStore } from '@/stores/drag-store'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
-import { disclosureChevronClass, dropTargetRing } from '@/lib/class-names'
+import {
+  disclosureChevronClass,
+  dropTargetRing,
+  HOVER_FILL,
+  HOVER_ON_POINTER,
+} from '@/lib/class-names'
+import { middleClickOpenProps } from './middle-click-open'
 
 /**
  * Stable, path-keyed handler dispatcher for the tree's rows.
@@ -53,8 +59,7 @@ type TreeNodeProps = {
   actions: TreeRowActions
 }
 
-const INLINE_HOVER = 'hover:bg-light-hover dark:hover:bg-dark-hover'
-const INLINE_CURRENT_FILL = `${INLINE_HOVER} bg-light-hover dark:bg-dark-hover`
+const INLINE_CURRENT_FILL = `${HOVER_ON_POINTER} ${HOVER_FILL}`
 const PINNED_CURRENT_FILL =
   'hover:bg-light-tree-current-hover dark:hover:bg-dark-tree-current-hover bg-light-tree-current dark:bg-dark-tree-current'
 const PINNED_FILL =
@@ -67,7 +72,7 @@ function treeRowFillClass(isCurrent: boolean, isPinned: boolean) {
   if (isPinned) {
     return isCurrent ? PINNED_CURRENT_FILL : PINNED_FILL
   }
-  return isCurrent ? INLINE_CURRENT_FILL : INLINE_HOVER
+  return isCurrent ? INLINE_CURRENT_FILL : HOVER_ON_POINTER
 }
 
 function treeRowHeightClass(usedFraction: number | null) {
@@ -154,7 +159,7 @@ function TreeToggleButton({ node, actions }: TreeNodeButtonProps) {
       type="button"
       aria-label={`Toggle ${node.name}`}
       onClick={() => actions.onToggle(node.path)}
-      className={`-mx-1 inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-control text-light-text-tertiary hover:bg-light-hover dark:text-dark-text-tertiary dark:hover:bg-dark-hover ${FOCUS_RING_INSET}`}
+      className={`-mx-1 inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-control text-light-text-tertiary dark:text-dark-text-tertiary ${HOVER_ON_POINTER} ${FOCUS_RING_INSET}`}
     >
       <ChevronRightIcon className={`size-3 ${disclosureChevronClass(node.expanded)}`} />
     </button>
@@ -176,17 +181,7 @@ function TreeNavigateButton({
       type="button"
       aria-label={node.name}
       onClick={() => actions.onNavigate(node.path)}
-      onMouseDown={(event) => {
-        if (event.button === 1) {
-          event.preventDefault()
-        }
-      }}
-      onAuxClick={(event) => {
-        if (event.button === 1) {
-          event.preventDefault()
-          actions.onOpenTab(node.path)
-        }
-      }}
+      {...middleClickOpenProps(() => actions.onOpenTab(node.path))}
       className={`flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-control text-left ${FOCUS_RING_INSET}`}
     >
       {children}

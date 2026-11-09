@@ -7,10 +7,19 @@ use super::matcher::{Pattern, Token, FUZZY_MIN_CHARS};
 use super::path_style::PathStyle;
 use super::query::{ParsedQuery, Segment};
 use super::{Candidate, SearchOptions, SearchScope};
-use crate::path_text::is_drive_designator;
+use crate::path_text::{is_drive_designator, WINDOWS_SEPARATOR};
 use crate::size::everything::{
     filetime_to_system_time, EverythingRow, EVERYTHING_BATCH_CHUNK_SIZE,
 };
+
+const PATH_FILTER: &str = "path:";
+const STARTS_WITH_FILTER: &str = "startwith:";
+const PARENT_FILTER: &str = "parent:";
+const FOLDERS_ONLY_FILTER: &str = "folder:";
+const FILES_ONLY_FILTER: &str = "file:";
+const EXCLUDE_HIDDEN_FILTER: &str = "!attrib:H";
+const TERM_SEPARATOR: &str = " ";
+const OR_SEPARATOR: &str = " | ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EverythingPass {
@@ -47,9 +56,9 @@ pub fn passes(query: &ParsedQuery, options: &SearchOptions) -> Vec<EverythingPas
         }
         if let Some(anchor) = &query.anchor {
             let prefix = with_trailing_separator(&anchor.path(PathStyle::Windows));
-            terms.push(format!("path:{}", quote(&prefix)));
+            terms.push(format!("{PATH_FILTER}{}", quote(&prefix)));
         }
-        let search = terms.join(" ");
+        let search = terms.join(TERM_SEPARATOR);
         if out.iter().all(|existing| existing.search != search) {
             out.push(EverythingPass {
                 search,
@@ -69,10 +78,10 @@ pub fn browse_children_queries(parents: &[String], options: &SearchOptions) -> V
                 .iter()
                 .flat_map(|parent| parent_terms(parent))
                 .collect::<Vec<_>>()
-                .join(" | ");
+                .join(OR_SEPARATOR);
             let mut terms = filters(options);
             terms.push(format!("<{group}>"));
-            terms.join(" ")
+            terms.join(TERM_SEPARATOR)
         })
         .collect()
 }
@@ -99,9 +108,10 @@ pub fn row_to_candidate(row: EverythingRow) -> Option<Candidate> {
 
 fn name_terms(segment: &Segment, pass: Pass) -> Option<Vec<String>> {
     match (pass, segment.tokens()) {
-        (Pass::Prefix, [Token::Literal(pattern)]) => {
-            Some(vec![format!("startwith:{}", quote(&pattern.as_string()))])
-        }
+        (Pass::Prefix, [Token::Literal(pattern)]) => Some(vec![format!(
+            "{STARTS_WITH_FILTER}{}",
+            quote(&pattern.as_string())
+        )]),
         (Pass::Prefix, _) => None,
         (_, tokens) => Some(
             tokens
@@ -119,9 +129,13 @@ fn folder_terms(segment: &Segment, pass: Pass) -> Vec<String> {
         .map(|token| match token {
             // A path-wide wildcard that needs one component to match.
             Token::Glob(pattern) => {
-                format!("path:{}", quote(&format!("*\\{}\\*", pattern.as_string())))
+                let component_wildcard = format!(
+                    "*{WINDOWS_SEPARATOR}{}{WINDOWS_SEPARATOR}*",
+                    pattern.as_string()
+                );
+                format!("{PATH_FILTER}{}", quote(&component_wildcard))
             }
-            Token::Literal(_) => format!("path:{}", quote(&token_text(token, pass))),
+            Token::Literal(_) => format!("{PATH_FILTER}{}", quote(&token_text(token, pass))),
         })
         .collect()
 }
@@ -152,11 +166,11 @@ fn filters(options: &SearchOptions) -> Vec<String> {
     let mut terms = Vec::new();
     match options.scope {
         SearchScope::All => {}
-        SearchScope::Folders => terms.push("folder:".to_owned()),
-        SearchScope::Files => terms.push("file:".to_owned()),
+        SearchScope::Folders => terms.push(FOLDERS_ONLY_FILTER.to_owned()),
+        SearchScope::Files => terms.push(FILES_ONLY_FILTER.to_owned()),
     }
     if !options.include_hidden {
-        terms.push("!attrib:H".to_owned());
+        terms.push(EXCLUDE_HIDDEN_FILTER.to_owned());
     }
     terms
 }
@@ -164,21 +178,25 @@ fn filters(options: &SearchOptions) -> Vec<String> {
 /// Drive roots are spelled both ways: Everything reports their children's
 /// parent as `C:`.
 fn parent_terms(parent: &str) -> Vec<String> {
-    let trimmed = parent.trim_end_matches('\\');
+    let trimmed = parent.trim_end_matches(WINDOWS_SEPARATOR);
     if is_drive_designator(trimmed) {
         return vec![
-            format!("parent:{}", quote(trimmed)),
-            format!("parent:{}", quote(&format!("{trimmed}\\"))),
+            parent_term(trimmed),
+            parent_term(&format!("{trimmed}{WINDOWS_SEPARATOR}")),
         ];
     }
-    vec![format!("parent:{}", quote(trimmed))]
+    vec![parent_term(trimmed)]
+}
+
+fn parent_term(parent: &str) -> String {
+    format!("{PARENT_FILTER}{}", quote(parent))
 }
 
 fn with_trailing_separator(path: &str) -> String {
-    if path.ends_with('\\') {
+    if path.ends_with(WINDOWS_SEPARATOR) {
         return path.to_owned();
     }
-    format!("{path}\\")
+    format!("{path}{WINDOWS_SEPARATOR}")
 }
 
 /// Windows names cannot contain `"`, so dropping it is lossless.

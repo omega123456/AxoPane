@@ -4,7 +4,7 @@ import { FolderTree } from '@/components/tree/FolderTree'
 import { ResizeHandle } from '@/components/shell/ResizeHandle'
 import { TabDragDropProvider } from '@/components/pane/TabDragDropProvider'
 import { TabBar } from '@/components/pane/TabBar'
-import { persistAppConfig } from '@/lib/app-config'
+import { commitLayout, useDragResize } from '@/components/shell/use-drag-resize'
 import {
   PANE_SPLIT_MAX,
   PANE_SPLIT_MIN,
@@ -20,16 +20,14 @@ import { fractionToPercent } from '@/lib/numbers'
 const TREE_STEP_PX = 16
 const SPLIT_STEP = 0.02
 
-function commitLayout() {
-  void persistAppConfig()
-}
-
 function TreeResizeHandle() {
   const treeWidthPx = useLayoutStore((state) => state.treeWidthPx)
   const setTreeWidthPx = useLayoutStore((state) => state.setTreeWidthPx)
-  // Sizes captured when a drag starts, so movement is applied relative to the
-  // grab point and the divider never jumps to the cursor.
-  const dragStartTree = useRef(treeWidthPx)
+  const resizeCallbacks = useDragResize({
+    value: treeWidthPx,
+    stepSize: TREE_STEP_PX,
+    setValue: setTreeWidthPx,
+  })
   return (
     <ResizeHandle
       ariaLabel="Resize folder tree"
@@ -37,12 +35,7 @@ function TreeResizeHandle() {
       min={TREE_WIDTH_MIN}
       max={TREE_WIDTH_MAX}
       showRestLine={false}
-      onDragStart={() => {
-        dragStartTree.current = treeWidthPx
-      }}
-      onResize={(deltaX) => setTreeWidthPx(dragStartTree.current + deltaX)}
-      onStep={(delta) => setTreeWidthPx(treeWidthPx + delta * TREE_STEP_PX)}
-      onCommit={commitLayout}
+      {...resizeCallbacks}
     />
   )
 }

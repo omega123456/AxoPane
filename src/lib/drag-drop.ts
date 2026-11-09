@@ -1,6 +1,11 @@
 import type { PaneId } from '@/types/pane'
 import { detectPlatformOs, type PlatformOs } from '@/lib/keymap'
-import { UNC_PREFIX, WINDOWS_DRIVE_PREFIX_LENGTH } from '@/lib/path-compare'
+import {
+  UNC_PREFIX,
+  WINDOWS_DRIVE_PREFIX_LENGTH,
+  POSIX_SEPARATOR,
+  WINDOWS_SEPARATOR,
+} from '@/lib/path-compare'
 import { startOp } from '@/lib/queue-commands'
 import type { OpKind } from '@/lib/types/ipc'
 
@@ -39,7 +44,7 @@ export type DropModifiers = {
 // comparisons are lowercased. Trailing separators are stripped so `C:\a\` and
 // `C:\a` compare equal.
 function separatorFor(platform: PlatformOs) {
-  return platform === 'windows' ? '\\' : '/'
+  return platform === 'windows' ? WINDOWS_SEPARATOR : POSIX_SEPARATOR
 }
 
 function normalizePath(path: string, platform: PlatformOs) {
@@ -92,8 +97,8 @@ function volumeKey(path: string, platform: PlatformOs) {
   if (platform === 'windows') {
     // UNC path: key on \\server\share; otherwise on the drive letter.
     if (normalized.startsWith(UNC_PREFIX)) {
-      const parts = normalized.slice(UNC_PREFIX.length).split('\\')
-      return `${UNC_PREFIX}${parts[0] ?? ''}\\${parts[1] ?? ''}`
+      const parts = normalized.slice(UNC_PREFIX.length).split(WINDOWS_SEPARATOR)
+      return `${UNC_PREFIX}${parts[0] ?? ''}${WINDOWS_SEPARATOR}${parts[1] ?? ''}`
     }
     return normalized.slice(0, WINDOWS_DRIVE_PREFIX_LENGTH)
   }

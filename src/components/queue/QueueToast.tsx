@@ -16,7 +16,7 @@ import { isTerminal, useQueueStore } from '@/stores/queue-store'
 import { FOCUS_RING } from '@/lib/focus-ring'
 import { fractionToPercent } from '@/lib/numbers'
 import { operationVerbs } from '@/lib/queue-format'
-import { TEXT_SECONDARY } from '@/lib/class-names'
+import { TEXT_SECONDARY, FLYOUT_SURFACE, PRIMARY_TEXT } from '@/lib/class-names'
 import { useOrderedOperations } from './use-ordered-operations'
 
 const kindIcons: Record<OpKind, typeof CopyIcon> = {
@@ -145,7 +145,7 @@ export function QueueToast() {
   }
 
   return (
-    <div className="grid w-queue-mini gap-2 rounded-overlay border border-light-flyout-stroke bg-light-card pl-3.5 pr-2 pt-2.5 text-light-text shadow-light-flyout dark:border-dark-flyout-stroke dark:bg-dark-card dark:text-dark-text dark:shadow-dark-flyout">
+    <div className={`grid w-queue-mini gap-2 pl-3.5 pr-2 pt-2.5 ${PRIMARY_TEXT} ${FLYOUT_SURFACE}`}>
       <div className="flex items-center gap-2.5 text-row">
         <SummaryIcon summary={summary} />
         <button

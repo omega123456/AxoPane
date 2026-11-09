@@ -1,6 +1,7 @@
 import {
   commandContextAction,
   addFavouriteContextAction,
+  propertiesContextAction,
   removeFavouriteContextAction,
 } from '@/lib/context-menu/context-menu-actions'
 import { getFileCategory } from '@/lib/file-type'
@@ -19,6 +20,7 @@ import { useConfigStore } from '@/stores/config-store'
 import type { CommandId, DirectoryEntry } from '@/lib/types/ipc'
 import type { PaneId } from '@/types/pane'
 import { pathsMatch } from '@/lib/path-compare'
+import type { PropertiesDialogItem } from '@/stores/properties-dialog-store'
 
 export function favouriteRow(path: string, remove = false): ContextMenuActionRow {
   const isFavourite = useConfigStore.getState().favourites.some((item) => pathsMatch(item, path))
@@ -130,6 +132,26 @@ export function customRow(spec: CustomRowSpec): ContextMenuActionRow {
     icon: spec.icon,
     action: spec.action,
   }
+}
+
+const PROPERTIES_LABEL = 'Properties'
+
+const PROPERTIES_ICON: ContextMenuIcon = { kind: 'app', name: 'properties' }
+
+export type PropertiesRowSpec = {
+  id: string
+  items: PropertiesDialogItem[]
+  disabled?: boolean
+}
+
+export function propertiesRow(spec: PropertiesRowSpec): ContextMenuActionRow {
+  return customRow({
+    id: spec.id,
+    label: PROPERTIES_LABEL,
+    action: propertiesContextAction(spec.items),
+    disabled: spec.disabled,
+    icon: PROPERTIES_ICON,
+  })
 }
 
 export function section(id: string, rows: ContextMenuRowItem[]): ContextMenuSection {

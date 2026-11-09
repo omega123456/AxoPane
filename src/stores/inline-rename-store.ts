@@ -23,6 +23,18 @@ export function renameDraftForEntry(
   return rename
 }
 
+type RenameHolder = { rename: InlineRenameState | null }
+
+export function withRenameDraft(
+  state: RenameHolder,
+  draft: Partial<InlineRenameDraft>,
+): RenameHolder {
+  if (!state.rename) {
+    return { rename: null }
+  }
+  return { rename: { ...state.rename, ...draft } }
+}
+
 type BeginRenamePayload = {
   paneId: PaneId
   entryId: string
@@ -51,33 +63,9 @@ export const useInlineRenameStore = create<InlineRenameStore>((set) => ({
         error: null,
       },
     }),
-  setValue: (value) =>
-    set((state) => ({
-      rename: state.rename
-        ? {
-            ...state.rename,
-            value,
-          }
-        : null,
-    })),
-  setBusy: (busy) =>
-    set((state) => ({
-      rename: state.rename
-        ? {
-            ...state.rename,
-            busy,
-          }
-        : null,
-    })),
-  setError: (error) =>
-    set((state) => ({
-      rename: state.rename
-        ? {
-            ...state.rename,
-            error,
-          }
-        : null,
-    })),
+  setValue: (value) => set((state) => withRenameDraft(state, { value })),
+  setBusy: (busy) => set((state) => withRenameDraft(state, { busy })),
+  setError: (error) => set((state) => withRenameDraft(state, { error })),
   cancelRename: () => set({ rename: null }),
   reset: () => set({ rename: null }),
 }))

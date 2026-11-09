@@ -17,6 +17,11 @@ import {
 } from '@/stores/tabs-store'
 import type { PaneId } from '@/types/pane'
 
+async function reloadWithFreshSession(paneId: PaneId) {
+  void listingSessions[paneId].release()
+  await panesStore().getState().reloadPane(paneId)
+}
+
 export async function openTabFromPath(
   paneId: PaneId,
   path: string,
@@ -32,8 +37,7 @@ export async function openTabFromPath(
     ...paneResetForTab(state, paneId, tab),
   }))
 
-  void listingSessions[paneId].release()
-  await panesStore().getState().reloadPane(paneId)
+  await reloadWithFreshSession(paneId)
 }
 
 export async function closeTab(paneId: PaneId, tabId: string) {
@@ -54,8 +58,7 @@ export async function closeTab(paneId: PaneId, tabId: string) {
 
   void reportSizeSubscriptions(paneId, null, [])
   resetPaneForActiveTab(paneId)
-  void listingSessions[paneId].release()
-  await panesStore().getState().reloadPane(paneId)
+  await reloadWithFreshSession(paneId)
 }
 
 export async function closeTabsBeside(paneId: PaneId, tabId: string, side: 'left' | 'right') {
@@ -102,10 +105,7 @@ export async function moveTab(request: TabMoveRequest): Promise<TabMoveResult> {
   }
   panesStore().setState({ activePaneId: result.destinationPaneId })
 
-  for (const paneId of resetPaneIds) {
-    void listingSessions[paneId].release()
-  }
-  await Promise.all(resetPaneIds.map((paneId) => panesStore().getState().reloadPane(paneId)))
+  await Promise.all(resetPaneIds.map(reloadWithFreshSession))
   return result
 }
 
@@ -125,6 +125,5 @@ export async function switchTab(paneId: PaneId, tabId: string) {
     activePaneId: paneId,
     ...paneResetForTab(state, paneId, tab),
   }))
-  void listingSessions[paneId].release()
-  await panesStore().getState().reloadPane(paneId)
+  await reloadWithFreshSession(paneId)
 }

@@ -42,7 +42,17 @@ export function formatEta(seconds: number): string {
 
 export const DETAIL_SEPARATOR = ' · '
 
+export const EMPTY_VALUE = '—'
+
 /** Integer with thousands separators, e.g. `1,248`. */
 export function formatCount(value: number): string {
   return value.toLocaleString('en-US')
+}
+
+export function itemNoun(count: number) {
+  return count === 1 ? 'item' : 'items'
+}
+
+export function formatItemCount(count: number) {
+  return `${formatCount(count)} ${itemNoun(count)}`
 }

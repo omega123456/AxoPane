@@ -3,8 +3,9 @@ import { ArrowUpIcon, FolderGlyph } from '@/components/icons'
 import { columnCellClassName } from '@/lib/columns'
 import { useLayoutStore } from '@/stores/layout-store'
 import { columnFlexStyle } from './HeaderRow'
-import { NO_CLASS, TEXT_SECONDARY } from '@/lib/class-names'
+import { NO_CLASS, TEXT_SECONDARY, HOVER_ON_POINTER } from '@/lib/class-names'
 import type { ColumnConfig } from '@/lib/types/ipc'
+import { ENTER_KEY } from '@/lib/key-table'
 
 type ParentRowProps = {
   isActivePane: boolean
@@ -75,12 +76,12 @@ export function ParentRow({
         }
       }}
       onKeyDown={(event) => {
-        if (event.key === 'Enter') {
+        if (event.key === ENTER_KEY) {
           event.preventDefault()
           onActivate()
         }
       }}
-      className={`group flex h-row w-full cursor-pointer items-center rounded-control px-2 text-row text-left focus-visible:outline-none ${parentRowFocusRing(showsFocusRing)} hover:bg-light-hover dark:hover:bg-dark-hover`}
+      className={`group flex h-row w-full cursor-pointer items-center rounded-control px-2 text-row text-left focus-visible:outline-none ${parentRowFocusRing(showsFocusRing)} ${HOVER_ON_POINTER}`}
     >
       {visibleColumns.map((column) => (
         <span

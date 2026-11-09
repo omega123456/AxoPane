@@ -1,6 +1,6 @@
 import { beforeEach, vi } from 'vitest'
 import { ipc } from '@/tests/ipc-mock'
-import { useConfigStore } from '@/stores/config-store'
+import { configFieldPatch, useConfigStore } from '@/stores/config-store'
 
 beforeEach(() => {
   ipc.install()
@@ -306,5 +306,12 @@ describe('config-store', () => {
         }),
       }),
     )
+  })
+})
+
+describe('configFieldPatch', () => {
+  it('builds a patch holding only the named field', () => {
+    expect(configFieldPatch('showTime', true)).toEqual({ showTime: true })
+    expect(configFieldPatch('theme', 'dark')).toEqual({ theme: 'dark' })
   })
 })

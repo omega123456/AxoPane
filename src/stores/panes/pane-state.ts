@@ -8,6 +8,7 @@ import type {
 } from '@/lib/types/ipc'
 import type { PaneId } from '@/types/pane'
 import type { LazyTreeNode } from '@/stores/panes/tree-cache'
+import { CURRENT_DIRECTORY } from '@/lib/path-compare'
 
 export type SizeStateKind = SizeStateEvent['state']
 
@@ -92,13 +93,33 @@ export type PanesData = {
 
 export type PanesPatch = Pick<PanesData, 'panes'>
 
+export const DEFAULT_SESSION_PATH = CURRENT_DIRECTORY
+
+export const UNSEEDED_HISTORY_INDEX = -1
+
+export const FAILED_LISTING_MESSAGE = 'Failed to load directory'
+
+export const PANE_TITLES: Record<PaneId, string> = {
+  left: 'Left pane',
+  right: 'Right pane',
+}
+
+type HideableEntry = Pick<DirectoryEntry, 'isHidden' | 'isSystem'>
+
+export function isHiddenFromView(entry: HideableEntry, showHiddenFiles: boolean) {
+  if (showHiddenFiles) {
+    return false
+  }
+  return entry.isHidden || entry.isSystem
+}
+
 export const CLOSED_TREE_FOLD: TreeFoldReveals = {
   leaf: null,
   revealedSiblings: [],
   showHiddenLevels: false,
 }
 
-export function createPane(id: PaneId, title: string, path = '.'): PaneState {
+export function createPane(id: PaneId, title: string, path = DEFAULT_SESSION_PATH): PaneState {
   return {
     id,
     title,
@@ -120,7 +141,7 @@ export function createPane(id: PaneId, title: string, path = '.'): PaneState {
     listingComplete: true,
     scrollPositions: {},
     history: [],
-    historyIndex: -1,
+    historyIndex: UNSEEDED_HISTORY_INDEX,
   }
 }
 
@@ -130,8 +151,8 @@ export function defaultPanesData(): PanesData {
     focusRequestId: 0,
     focusRequestPaneId: null,
     panes: {
-      left: createPane('left', 'Left pane'),
-      right: createPane('right', 'Right pane'),
+      left: createPane('left', PANE_TITLES.left),
+      right: createPane('right', PANE_TITLES.right),
     },
     showHiddenFiles: false,
     folderSizeIndexStatus: null,

@@ -5,7 +5,14 @@ import { readLogs } from '@/lib/ipc/commands'
 import { log } from '@/lib/app-log-commands'
 import type { LogDisplayFilter, LogEntry } from '@/lib/types/ipc'
 import { formatUtcLogTimestamp } from '@/lib/date-format'
-import { activeFillClass, SCROLLBAR_THIN, spinningClass, TEXT_SECONDARY } from '@/lib/class-names'
+import {
+  activeFillClass,
+  NO_CLASS,
+  SCROLLBAR_THIN,
+  spinningClass,
+  TEXT_SECONDARY,
+} from '@/lib/class-names'
+import { lookupOwnProperty } from '@/lib/collections'
 
 const PAGE_SIZE = 20
 const AUTO_REFRESH_MS = 5000
@@ -58,11 +65,13 @@ function LogLevelBadge({ level }: { level: string }) {
   )
 }
 
+const ROW_TONES: Partial<Record<string, string>> = {
+  error: 'bg-light-danger/5 dark:bg-dark-danger/5',
+  warn: 'bg-light-warning/5 dark:bg-dark-warning/5',
+}
+
 function rowTone(level: string): string {
-  const normalized = level.toLowerCase()
-  if (normalized === 'error') return 'bg-light-danger/5 dark:bg-dark-danger/5'
-  if (normalized === 'warn') return 'bg-light-warning/5 dark:bg-dark-warning/5'
-  return ''
+  return lookupOwnProperty(ROW_TONES, level.toLowerCase()) ?? NO_CLASS
 }
 
 type LogLoadState = {

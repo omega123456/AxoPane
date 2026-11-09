@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { formatBytes, formatCount, formatEta, formatRate } from '@/lib/format'
+import {
+  EMPTY_VALUE,
+  formatBytes,
+  formatCount,
+  formatEta,
+  formatItemCount,
+  formatRate,
+  itemNoun,
+} from '@/lib/format'
 
 describe('format helpers', () => {
   it('formats byte sizes with units', () => {
@@ -22,5 +30,22 @@ describe('format helpers', () => {
 
   it('formats counts with separators', () => {
     expect(formatCount(1248)).toBe('1,248')
+  })
+})
+
+describe('item counts', () => {
+  it('uses the singular noun only for exactly one item', () => {
+    expect(itemNoun(1)).toBe('item')
+    expect(itemNoun(0)).toBe('items')
+    expect(itemNoun(2)).toBe('items')
+  })
+
+  it('formats a count with thousands separators and its noun', () => {
+    expect(formatItemCount(1)).toBe('1 item')
+    expect(formatItemCount(1248)).toBe('1,248 items')
+  })
+
+  it('shows an em dash for an empty value', () => {
+    expect(EMPTY_VALUE).toBe('—')
   })
 })

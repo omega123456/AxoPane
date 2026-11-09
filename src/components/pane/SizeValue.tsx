@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import { LoaderCircleIcon } from '@/components/icons'
 import { usePanesStore } from '@/stores/panes-store'
-import { formatBytes } from '@/lib/format'
+import { EMPTY_VALUE, formatBytes } from '@/lib/format'
 
 type SizeValueProps = {
   entry: DirectoryEntry
@@ -63,7 +63,7 @@ export function SizeValue({ entry }: SizeValueProps) {
     return <DirectorySize sizeState={sizeState} />
   }
 
-  return <span>{entry.sizeBytes === null ? '—' : formatBytes(entry.sizeBytes)}</span>
+  return <span>{entry.sizeBytes === null ? EMPTY_VALUE : formatBytes(entry.sizeBytes)}</span>
 }
 
 /** "Doesn't include Documents, Desktop, Downloads and 2 more. Open them to include them." */

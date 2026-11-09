@@ -1,7 +1,7 @@
 import { memo, useMemo } from 'react'
 import { getUnixTime, parseISO } from 'date-fns'
-import type { DragEvent, MouseEvent, ReactNode, RefObject } from 'react'
-import { isMiddleClickOpen } from '@/lib/mouse-buttons'
+import type { ReactNode, RefObject } from 'react'
+import { entryInteractionProps } from './entry-interaction'
 import { EntryIcon } from '@/components/icons/EntryIcon'
 import { useRenameInputFocus, type FileRowActions } from './FileRow'
 import { SizeValue } from './SizeValue'
@@ -127,23 +127,7 @@ function cardInteractionProps(
   return {
     'data-entry-id': entry.id,
     draggable: position.draggable,
-    onDragStart: (event: DragEvent<HTMLDivElement>) => actions.onDragStart(entry.id, event),
-    onDragEnd: actions.onDragEnd,
-    onDragEnter: (event: DragEvent<HTMLDivElement>) => actions.onDragEnter(entry.id, event),
-    onDragOver: (event: DragEvent<HTMLDivElement>) => actions.onDragOver(entry.id, event),
-    onDragLeave: () => actions.onDragLeave(entry.id),
-    onDrop: (event: DragEvent<HTMLDivElement>) => actions.onDrop(entry.id, event),
-    onMouseDown: actions.onPointerDown,
-    onDoubleClick: (event: MouseEvent<HTMLDivElement>) =>
-      actions.onActivate(entry.id, event.detail, event.timeStamp),
-    onClick: (event: MouseEvent<HTMLDivElement>) => actions.onClick(entry.id, event),
-    onContextMenu: (event: MouseEvent<HTMLDivElement>) => actions.onContextMenu(entry.id, event),
-    onAuxClick: (event: MouseEvent<HTMLDivElement>) => {
-      if (isMiddleClickOpen(event, entry)) {
-        event.preventDefault()
-        actions.onMiddleClick(entry.id)
-      }
-    },
+    ...entryInteractionProps(entry, actions),
     role: 'gridcell' as const,
     'aria-rowindex': position.rowIndex,
     'aria-colindex': position.columnIndex,

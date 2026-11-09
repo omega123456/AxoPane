@@ -15,6 +15,7 @@ import {
   useVisibleContentWidth,
   useVisibleRangeReport,
 } from './use-details-view'
+import { parentRowOffset } from './pane-body-state'
 
 const PARENT_ROW_ID = '..'
 export { DETAILS_LIST_INSET_PX, DETAILS_ROW_HEIGHT_PX } from './use-details-view'
@@ -245,7 +246,7 @@ export const DetailsView = forwardRef<DetailsViewHandle, DetailsViewProps>(
     const { pane, hasParent, usesDetachedMacScrollbars, onScroll } = props
     const internalParentRef = useRef<HTMLDivElement | null>(null)
     const parentRef = props.scrollContainerRef ?? internalParentRef
-    const parentOffset = hasParent ? 1 : 0
+    const parentOffset = parentRowOffset(hasParent)
     const { scrollToIndex, itemsToRender, totalHeight } = useDetailsRows(
       pane.entries.length + parentOffset,
       parentRef,

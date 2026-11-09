@@ -2,9 +2,11 @@ import { memo, useRef, useState, type DragEvent, type MouseEvent } from 'react'
 import { EntryIcon } from '@/components/icons/EntryIcon'
 import { useDragStore } from '@/stores/drag-store'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
-import { activeFillClass, dropTargetRing } from '@/lib/class-names'
+import { activeFillClass, dropTargetRing, HOVER_ON_POINTER, PRIMARY_TEXT } from '@/lib/class-names'
 import { SelectionPill } from '@/components/controls/SelectionPill'
 import { canDropOnFavourite, dropOntoFavourite } from './favourite-drop'
+import { middleClickOpenProps } from './middle-click-open'
+import { ENTER_KEY, ESCAPE_KEY } from '@/lib/key-table'
 
 export function favouriteLabel(path: string) {
   const trimmed = path.replace(/[\\/]+$/, '')
@@ -55,12 +57,12 @@ function FavouriteRenameInput({ path, label, actions }: FavouriteViewProps) {
         }}
         onKeyDown={(event) => {
           event.stopPropagation()
-          if (event.key === 'Enter') {
+          if (event.key === ENTER_KEY) {
             event.preventDefault()
             event.currentTarget.blur()
             return
           }
-          if (event.key === 'Escape') {
+          if (event.key === ESCAPE_KEY) {
             event.preventDefault()
             renameCancelled.current = true
             actions.onRenameCancel()
@@ -78,13 +80,7 @@ function FavouriteLink({ path, name, label, actions }: FavouriteViewProps & { na
       type="button"
       title={name ? path : undefined}
       onClick={() => actions.onNavigate(path)}
-      onMouseDown={(event) => event.button === 1 && event.preventDefault()}
-      onAuxClick={(event) => {
-        if (event.button === 1) {
-          event.preventDefault()
-          actions.onOpenTab(path)
-        }
-      }}
+      {...middleClickOpenProps(() => actions.onOpenTab(path))}
       className={`flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-control text-left ${FOCUS_RING_INSET}`}
     >
       <EntryIcon entry={{ name: favouriteLabel(path), isDir: true }} />
@@ -126,7 +122,7 @@ function FavouriteTreeRowImpl({ path, name, index, isCurrent, isRenaming, action
       onDragLeave={() => setIsDropTarget(false)}
       onDrop={(event) => void handleDrop(event)}
       onContextMenu={(event) => actions.onContextMenu(path, event)}
-      className={`relative flex h-tree-row items-center gap-2 rounded-control pl-2 pr-2 text-row text-light-text hover:bg-light-hover dark:text-dark-text dark:hover:bg-dark-hover ${activeFillClass(isCurrent)} ${dropTargetRing(isDropTarget)}`}
+      className={`relative flex h-tree-row items-center gap-2 rounded-control pl-2 pr-2 text-row ${PRIMARY_TEXT} ${HOVER_ON_POINTER} ${activeFillClass(isCurrent)} ${dropTargetRing(isDropTarget)}`}
     >
       {isCurrent ? <SelectionPill /> : null}
       <span className="w-3 flex-none" aria-hidden="true" />

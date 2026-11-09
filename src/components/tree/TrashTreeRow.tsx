@@ -3,7 +3,8 @@ import { Trash2Icon } from '@/components/icons'
 import { isWindowsPlatform } from '@/lib/keymap'
 import { SelectionPill } from '@/components/controls/SelectionPill'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
-import { activeFillClass, TEXT_SECONDARY } from '@/lib/class-names'
+import { activeFillClass, TEXT_SECONDARY, HOVER_ON_POINTER, PRIMARY_TEXT } from '@/lib/class-names'
+import { middleClickOpenProps } from './middle-click-open'
 
 type TrashTreeRowProps = {
   isCurrent: boolean
@@ -20,24 +21,14 @@ function TrashTreeRowImpl({ isCurrent, onNavigate, onOpenTab, onContextMenu }: T
       role="treeitem"
       data-tree-row="trash"
       onContextMenu={onContextMenu}
-      className={`relative flex h-tree-row items-center gap-2 rounded-control pl-2 pr-2 text-row text-light-text hover:bg-light-hover dark:text-dark-text dark:hover:bg-dark-hover ${activeFillClass(isCurrent)}`}
+      className={`relative flex h-tree-row items-center gap-2 rounded-control pl-2 pr-2 text-row ${PRIMARY_TEXT} ${HOVER_ON_POINTER} ${activeFillClass(isCurrent)}`}
     >
       {isCurrent ? <SelectionPill /> : null}
       <span className="w-3 flex-none" aria-hidden="true" />
       <button
         type="button"
         onClick={onNavigate}
-        onMouseDown={(event) => {
-          if (event.button === 1) {
-            event.preventDefault()
-          }
-        }}
-        onAuxClick={(event) => {
-          if (event.button === 1) {
-            event.preventDefault()
-            onOpenTab()
-          }
-        }}
+        {...middleClickOpenProps(onOpenTab)}
         className={`flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-control ${FOCUS_RING_INSET}`}
       >
         <Trash2Icon className={`size-4 flex-none ${TEXT_SECONDARY}`} />

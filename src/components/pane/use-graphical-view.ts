@@ -19,7 +19,7 @@ import { useElementVirtualizer } from '@/lib/use-element-virtualizer'
 import type { PaneViewMode } from '@/lib/pane-view'
 import { BOTH_SIDES } from '@/lib/numbers'
 import type { VisibleRange } from '@/types/pane'
-import { virtualListHeight, virtualRowsOrFallback } from '@/lib/virtual-rows'
+import { virtualListHeight, virtualRowsOrFallback, visibleRowCount } from '@/lib/virtual-rows'
 import type { GraphicalThumbnailRange } from '@/lib/thumbnail-candidates'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 
@@ -87,10 +87,6 @@ export function useGraphicalRows({ mode, entryCount, scrollRef, width }: Graphic
   return { grid, rowCount, rowVirtualizer, rowsToRender, totalHeight }
 }
 
-function visibleGridRows(scrollRef: ScrollRef, rowPitch: number) {
-  return Math.max(1, Math.floor((scrollRef.current?.clientHeight ?? 0) / rowPitch))
-}
-
 type GraphicalFocusOptions = {
   entries: DirectoryEntry[]
   focusedEntryId: string | null
@@ -113,7 +109,7 @@ export function useGraphicalFocus(options: GraphicalFocusOptions) {
         index: focusedIndex < 0 ? 0 : focusedIndex,
         entryCount: entries.length,
         columns: grid.columns,
-        visibleRows: visibleGridRows(scrollRef, grid.rowPitch),
+        visibleRows: visibleRowCount(scrollRef.current, grid.rowPitch),
         movement,
       })
       if (next === null) return
@@ -182,7 +178,7 @@ export function useGraphicalHandle(
     () => ({
       scrollToEntry: (index) => scrollToIndex(Math.floor(index / grid.columns)),
       moveFocus,
-      getVisibleRowCount: () => visibleGridRows(scrollRef, grid.rowPitch),
+      getVisibleRowCount: () => visibleRowCount(scrollRef.current, grid.rowPitch),
       getEntriesIntersectingRect: (rect) =>
         entriesIntersectingRect({
           entries,

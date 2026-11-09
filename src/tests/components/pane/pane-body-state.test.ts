@@ -1,4 +1,8 @@
-import { isPermissionError, paneBodyState } from '@/components/pane/pane-body-state'
+import {
+  isPermissionError,
+  paneBodyState,
+  parentRowOffset,
+} from '@/components/pane/pane-body-state'
 
 const LOADED = { showSkeleton: false, loading: false, error: null, rowCount: 3 }
 
@@ -25,5 +29,12 @@ describe('paneBodyState', () => {
     expect(paneBodyState({ ...LOADED, rowCount: 0 })).toBe('empty')
     expect(paneBodyState({ ...LOADED, rowCount: 0, loading: true })).toBe('listing')
     expect(paneBodyState(LOADED)).toBe('listing')
+  })
+})
+
+describe('parentRowOffset', () => {
+  it('reserves one row for the parent entry only when a parent exists', () => {
+    expect(parentRowOffset(true)).toBe(1)
+    expect(parentRowOffset(false)).toBe(0)
   })
 })

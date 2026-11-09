@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { canDropOnFavourite, dropOntoFavourite } from '@/components/tree/favourite-drop'
+import {
+  canDropOnFavourite,
+  dropAtFavouritesEnd,
+  dropOntoFavourite,
+} from '@/components/tree/favourite-drop'
 import { useConfigStore } from '@/stores/config-store'
 
 const SLOT = { path: '/fav', index: 2 }
@@ -48,6 +52,29 @@ describe('favourite drop', () => {
     expect(addFavourite.mock.calls).toEqual([
       ['/one', 2],
       ['/two', 3],
+    ])
+  })
+
+  it('moves a dragged favourite to the end of the list', async () => {
+    const reorderFavourite = vi.fn(async () => undefined)
+    useConfigStore.setState({ favourites: ['/a', '/b', '/c'], reorderFavourite })
+    await dropAtFavouritesEnd({ kind: 'favourite', path: '/a' })
+    expect(reorderFavourite).toHaveBeenCalledWith('/a', 3)
+  })
+
+  it('appends dropped folders in order after the existing favourites', async () => {
+    const addFavourite = vi.fn(async () => undefined)
+    useConfigStore.setState({ favourites: ['/a'], addFavourite })
+    const drag = fileTransfer([
+      { path: '/one', isDir: true },
+      { path: '/file', isDir: false },
+      { path: '/two', isDir: true },
+    ])
+    await dropAtFavouritesEnd(drag)
+    await dropAtFavouritesEnd(null)
+    expect(addFavourite.mock.calls).toEqual([
+      ['/one', 1],
+      ['/two', 2],
     ])
   })
 })

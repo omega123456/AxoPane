@@ -28,6 +28,7 @@ import {
   useSearchPaletteView,
   useSearchVirtualRows,
 } from './use-search-palette'
+import { FLYOUT_SURFACE, PRIMARY_TEXT } from '@/lib/class-names'
 
 type SearchPaletteView = ReturnType<typeof useSearchPaletteView>
 type SearchVirtualizer = ReturnType<typeof useSearchVirtualRows>['virtualizer']
@@ -78,7 +79,7 @@ function SearchPaletteFrame({
         ref={panelRef}
         role="dialog"
         aria-label="Search everywhere"
-        className="pointer-events-auto flex w-palette max-w-full flex-col overflow-hidden rounded-overlay border border-light-flyout-stroke bg-light-card text-light-text shadow-light-flyout dark:border-dark-flyout-stroke dark:bg-dark-card dark:text-dark-text dark:shadow-dark-flyout"
+        className={`pointer-events-auto flex w-palette max-w-full flex-col overflow-hidden ${PRIMARY_TEXT} ${FLYOUT_SURFACE}`}
       >
         {children}
       </div>

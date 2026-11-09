@@ -3,6 +3,8 @@ pub mod registry;
 
 use serde::{Deserialize, Serialize};
 
+use crate::path_text::{PATH_SEPARATORS, POSIX_ROOT};
+
 #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
 use std::ffi::CStr;
 
@@ -300,10 +302,10 @@ pub fn add_network_mount_if_missing(volumes: &mut Vec<VolumeInfo>, mount: &Mount
 
 fn normalize_supplemental_mount_root(mount_root: &str) -> String {
     let trimmed = mount_root.trim();
-    if trimmed == "/" {
+    if trimmed == POSIX_ROOT {
         return trimmed.to_string();
     }
-    trimmed.trim_end_matches(['\\', '/']).to_string()
+    trimmed.trim_end_matches(PATH_SEPARATORS).to_string()
 }
 
 fn mount_roots_match(left: &str, right: &str) -> bool {
@@ -311,13 +313,13 @@ fn mount_roots_match(left: &str, right: &str) -> bool {
 }
 
 fn label_for_mount_root(mount_root: &str) -> String {
-    let trimmed = mount_root.trim_end_matches(['\\', '/']);
+    let trimmed = mount_root.trim_end_matches(PATH_SEPARATORS);
     if trimmed.is_empty() {
         return mount_root.to_string();
     }
 
     trimmed
-        .rsplit(['\\', '/'])
+        .rsplit(PATH_SEPARATORS)
         .find(|part| !part.is_empty())
         .unwrap_or(trimmed)
         .to_string()
@@ -693,14 +695,14 @@ fn normalize_network_mount_root(local_name: &str, remote_name: &str) -> Option<S
         return Some(local_root);
     }
 
-    let trimmed = remote_name.trim().trim_end_matches(['\\', '/']);
+    let trimmed = remote_name.trim().trim_end_matches(PATH_SEPARATORS);
     if !trimmed.starts_with("\\\\") {
         return None;
     }
 
     let parts: Vec<_> = trimmed
         .trim_start_matches('\\')
-        .split(['\\', '/'])
+        .split(PATH_SEPARATORS)
         .filter(|part| !part.is_empty())
         .collect();
 
@@ -713,7 +715,7 @@ fn normalize_network_mount_root(local_name: &str, remote_name: &str) -> Option<S
 
 #[cfg(all(not(feature = "test-utils"), windows))]
 fn normalize_drive_root(value: &str) -> Option<String> {
-    let trimmed = value.trim().trim_end_matches(['\\', '/']);
+    let trimmed = value.trim().trim_end_matches(PATH_SEPARATORS);
     let mut chars = trimmed.chars();
     let drive = chars.next()?;
     let colon = chars.next()?;

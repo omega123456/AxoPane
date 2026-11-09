@@ -1,5 +1,12 @@
 type PositionedRow = { index: number; start: number }
 
+const MINIMUM_VISIBLE_ROWS = 1
+
+export function visibleRowCount(scrollElement: HTMLElement | null, rowPitch: number) {
+  const viewportHeight = scrollElement?.clientHeight ?? 0
+  return Math.max(MINIMUM_VISIBLE_ROWS, Math.floor(viewportHeight / rowPitch))
+}
+
 export type FallbackVirtualRow = { key: string; index: number; start: number }
 
 /**

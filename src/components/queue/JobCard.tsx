@@ -2,7 +2,7 @@ import { useId, useState, type ReactNode } from 'react'
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from '@/components/icons'
 import { Button, ProgressBar } from '@/components/controls'
 import { ThroughputChart } from '@/components/queue/ThroughputChart'
-import { DETAIL_SEPARATOR, formatCount, formatRate } from '@/lib/format'
+import { DETAIL_SEPARATOR, EMPTY_VALUE, formatCount, formatRate } from '@/lib/format'
 import { formatItemPreview, formatJobTitle, jobFlags, type JobFlags } from '@/lib/queue-format'
 import type { OpProgress, ThroughputSample } from '@/lib/types/ipc'
 import { clampPercent } from '@/lib/numbers'
@@ -138,7 +138,7 @@ function JobProgress({
       >
         <span className="min-w-0 truncate">{summary}</span>
         {flags.showsTransferRate ? (
-          <span className="shrink-0">{flags.isPaused ? '—' : formatRate(rate)}</span>
+          <span className="shrink-0">{flags.isPaused ? EMPTY_VALUE : formatRate(rate)}</span>
         ) : null}
       </div>
     </>

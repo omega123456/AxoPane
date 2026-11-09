@@ -4,9 +4,9 @@ import { activeTab, toSessionPane } from '@/stores/tabs-store'
 import { useRecentFoldersStore } from '@/stores/recent-folders-store'
 import { DEFAULT_TAB_VIEW } from '@/stores/panes/listing-transitions'
 import type { PaneId } from '@/types/pane'
+import { DEFAULT_SESSION_PATH } from '@/stores/panes/pane-state'
 
 const SESSION_PERSIST_DELAY_MILLISECONDS = 200
-const DEFAULT_SESSION_PATH = '.'
 
 let sessionPersistTimer: number | undefined
 

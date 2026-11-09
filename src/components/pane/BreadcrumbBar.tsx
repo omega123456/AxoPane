@@ -14,8 +14,18 @@ import { computeBreadcrumbLayout, createBreadcrumbMeasurer } from '@/lib/breadcr
 import { useElementWidth } from '@/lib/use-element-width'
 import { usePanesStore } from '@/stores/panes-store'
 import { FOCUS_RING } from '@/lib/focus-ring'
-import { normalizeWindowsCompatibilityPath } from '@/lib/path-compare'
-import { TEXT_SECONDARY } from '@/lib/class-names'
+import {
+  ANY_SEPARATOR,
+  CURRENT_DIRECTORY,
+  DRIVE_PREFIX,
+  normalizeWindowsCompatibilityPath,
+  POSIX_ROOT,
+  POSIX_SEPARATOR,
+  UNC_PREFIX,
+  UNC_SHARE_PREFIX,
+  WINDOWS_SEPARATOR,
+} from '@/lib/path-compare'
+import { TEXT_SECONDARY, HOVER_AND_PRESS_ON_POINTER, HOVER_ON_POINTER } from '@/lib/class-names'
 import { handleKeyByTable } from '@/lib/key-table'
 import { useSelectWhen } from '@/lib/use-focus-on-mount'
 
@@ -183,7 +193,7 @@ function BreadcrumbTrail({ pane, onStartEdit }: { pane: PaneState; onStartEdit: 
     // Flat at rest; the hover fill shows the row is clickable. Double-click
     // its empty part (or right-click anywhere) to type a path.
     <div
-      className="ml-0.75 flex h-8 min-w-0 flex-1 cursor-text items-center overflow-hidden rounded-control pl-1.5 pr-1 hover:bg-light-hover dark:hover:bg-dark-hover"
+      className={`ml-0.75 flex h-8 min-w-0 flex-1 cursor-text items-center overflow-hidden rounded-control pl-1.5 pr-1 ${HOVER_ON_POINTER}`}
       onDoubleClick={startEditOnEmptyArea}
     >
       <FolderGlyph className="mr-1 size-4 shrink-0" />
@@ -219,7 +229,7 @@ function BreadcrumbTrail({ pane, onStartEdit }: { pane: PaneState; onStartEdit: 
 function crumbStateClass(isCurrent: boolean) {
   return isCurrent
     ? 'cursor-default font-semibold text-light-text dark:text-dark-text'
-    : `cursor-pointer ${TEXT_SECONDARY} hover:bg-light-hover active:bg-light-press dark:hover:bg-dark-hover dark:active:bg-dark-press`
+    : `cursor-pointer ${TEXT_SECONDARY} ${HOVER_AND_PRESS_ON_POINTER}`
 }
 
 function Crumb({
@@ -267,10 +277,10 @@ type Segment = { label: string; path: string }
  */
 export function withRootVolumeLabel(segments: Segment[], volumes: VolumeInfo[]): Segment[] {
   const [root, ...rest] = segments
-  if (root?.path !== '/') {
+  if (root?.path !== POSIX_ROOT) {
     return segments
   }
-  const label = volumes.find((volume) => volume.mountRoot === '/')?.label.trim()
+  const label = volumes.find((volume) => volume.mountRoot === POSIX_ROOT)?.label.trim()
   return label ? [{ ...root, label }, ...rest] : segments
 }
 
@@ -280,44 +290,67 @@ export function withRootVolumeLabel(segments: Segment[], volumes: VolumeInfo[]):
  */
 export function splitPath(path: string): Segment[] {
   if (!path) {
-    return [{ label: '.', path: '.' }]
+    return [{ label: CURRENT_DIRECTORY, path: CURRENT_DIRECTORY }]
   }
 
   const displayPath = normalizeWindowsCompatibilityPath(path)
+  const crumbRoot =
+    uncCrumbRoot(displayPath) ?? driveCrumbRoot(displayPath) ?? posixCrumbRoot(displayPath)
+  return cumulativeSegments(crumbRoot)
+}
 
-  const uncRoot = displayPath.match(/^\\\\([^\\/]+)[\\/]([^\\/]+)[\\/]?/)
-  if (uncRoot) {
-    const rootPath = `\\\\${uncRoot[1]}\\${uncRoot[2]}`
-    const segments: Segment[] = [{ label: rootPath, path: rootPath }]
-    const rest = displayPath.slice(uncRoot[0].length).split(/[\\/]/).filter(Boolean)
-    let current = rootPath
-    for (const part of rest) {
-      current = `${current}\\${part}`
-      segments.push({ label: part, path: current })
-    }
-    return segments
+type CrumbRoot = {
+  root: Segment
+  joinBase: string
+  separator: string
+  remainder: string
+}
+
+const POSIX_JOIN_BASE = ''
+
+function uncCrumbRoot(displayPath: string): CrumbRoot | null {
+  const uncRoot = displayPath.match(UNC_SHARE_PREFIX)
+  if (!uncRoot) {
+    return null
   }
-
-  const windowsRoot = displayPath.match(/^([A-Za-z]:)[\\/]?/)
-  if (windowsRoot) {
-    const drive = windowsRoot[1]
-    const rootPath = `${drive}\\`
-    const segments: Segment[] = [{ label: drive, path: rootPath }]
-
-    const rest = displayPath.slice(windowsRoot[0].length).split(/[\\/]/).filter(Boolean)
-    let current = drive
-    for (const part of rest) {
-      current = `${current}\\${part}`
-      segments.push({ label: part, path: current })
-    }
-    return segments
+  const rootPath = `${UNC_PREFIX}${uncRoot[1]}${WINDOWS_SEPARATOR}${uncRoot[2]}`
+  return {
+    root: { label: rootPath, path: rootPath },
+    joinBase: rootPath,
+    separator: WINDOWS_SEPARATOR,
+    remainder: displayPath.slice(uncRoot[0].length),
   }
+}
 
-  const parts = displayPath.split(/[\\/]/).filter(Boolean)
-  const segments: Segment[] = [{ label: '/', path: '/' }]
-  let current = ''
+function driveCrumbRoot(displayPath: string): CrumbRoot | null {
+  const windowsRoot = displayPath.match(DRIVE_PREFIX)
+  if (!windowsRoot) {
+    return null
+  }
+  const drive = windowsRoot[1]
+  return {
+    root: { label: drive, path: `${drive}${WINDOWS_SEPARATOR}` },
+    joinBase: drive,
+    separator: WINDOWS_SEPARATOR,
+    remainder: displayPath.slice(windowsRoot[0].length),
+  }
+}
+
+function posixCrumbRoot(displayPath: string): CrumbRoot {
+  return {
+    root: { label: POSIX_ROOT, path: POSIX_ROOT },
+    joinBase: POSIX_JOIN_BASE,
+    separator: POSIX_SEPARATOR,
+    remainder: displayPath,
+  }
+}
+
+function cumulativeSegments(crumbRoot: CrumbRoot): Segment[] {
+  const segments: Segment[] = [crumbRoot.root]
+  const parts = crumbRoot.remainder.split(ANY_SEPARATOR).filter(Boolean)
+  let current = crumbRoot.joinBase
   for (const part of parts) {
-    current = `${current}/${part}`
+    current = `${current}${crumbRoot.separator}${part}`
     segments.push({ label: part, path: current })
   }
   return segments

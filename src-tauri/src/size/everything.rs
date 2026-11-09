@@ -139,7 +139,9 @@ pub fn normalize_result_path(path: &str) -> String {
         let mut normalized = crate::path_text::strip_verbatim_prefix(&path.replace('/', "\\"));
 
         if !is_windows_root_like(&normalized) {
-            normalized = normalized.trim_end_matches(['\\', '/']).to_string();
+            normalized = normalized
+                .trim_end_matches(crate::path_text::PATH_SEPARATORS)
+                .to_string();
         }
 
         normalized.to_lowercase()
@@ -200,7 +202,7 @@ const UNC_SHARE_ROOT_MAX_SEPARATORS: usize = 3;
 
 #[cfg(windows)]
 fn is_windows_root_like(path: &str) -> bool {
-    let trimmed = path.trim_end_matches(['\\', '/']);
+    let trimmed = path.trim_end_matches(crate::path_text::PATH_SEPARATORS);
     crate::path_text::is_drive_designator(trimmed)
         || (trimmed.starts_with(crate::path_text::UNC_PREFIX)
             && trimmed.matches('\\').count() <= UNC_SHARE_ROOT_MAX_SEPARATORS)

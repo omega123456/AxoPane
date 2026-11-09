@@ -4,7 +4,8 @@ import { resolveCommandForEvent } from '@/lib/keymap'
 import type { CommandId, SearchHit, Shortcut } from '@/lib/types/ipc'
 import { getParentPath, usePanesStore } from '@/stores/panes-store'
 import { otherPane } from '@/lib/pane-id'
-import { hasPrimaryModifier } from '@/lib/key-table'
+import { hasPrimaryModifier, ENTER_KEY } from '@/lib/key-table'
+import { POSIX_SEPARATOR, WINDOWS_SEPARATOR } from '@/lib/path-compare'
 
 /** `open` launches a file; everything else opens in a new tab in a pane. */
 export type SearchActivation = 'default' | 'open' | 'newTab' | 'otherPane'
@@ -37,7 +38,7 @@ const activationByCommand: Partial<Record<CommandId, SearchActivation>> = {
 }
 
 function isPlainShiftEnter(event: KeyboardEvent) {
-  return event.key === 'Enter' && event.shiftKey && !hasPrimaryModifier(event)
+  return event.key === ENTER_KEY && event.shiftKey && !hasPrimaryModifier(event)
 }
 
 /**
@@ -57,7 +58,7 @@ export function searchActivationForEvent(
 
 /** Tab completion: the folder's name replaces the last segment, plus a separator to list its children. */
 export function completeSearchQuery(query: string, hit: SearchHit) {
-  const cut = Math.max(query.lastIndexOf('/'), query.lastIndexOf('\\'))
-  const separator = cut >= 0 ? query[cut] : '/'
+  const cut = Math.max(query.lastIndexOf(POSIX_SEPARATOR), query.lastIndexOf(WINDOWS_SEPARATOR))
+  const separator = cut >= 0 ? query[cut] : POSIX_SEPARATOR
   return `${query.slice(0, cut + 1)}${hit.name}${separator}`
 }

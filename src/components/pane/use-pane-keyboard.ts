@@ -6,13 +6,11 @@ import {
   resolveCommandForEvent,
   SEARCH_EVERYWHERE_COMMAND,
 } from '@/lib/keymap'
-import { handleKeyByTable, type KeyHandlerTable } from '@/lib/key-table'
+import { handleKeyByTable, type KeyHandlerTable, ENTER_KEY } from '@/lib/key-table'
 import { isEditableTarget } from '@/lib/editable-target'
 import { focusFilterInput, registerPaneFilterKeys } from '@/lib/pane-filter-keys'
 import type { PaneId } from '@/types/pane'
 import { isTypeaheadKey } from './pane-keyboard'
-
-const ENTER_KEY = 'Enter'
 
 type PaneKeyboardOptions = {
   paneId: PaneId

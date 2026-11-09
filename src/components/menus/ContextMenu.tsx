@@ -12,7 +12,7 @@ import {
   placeMenuAtPoint,
   toZoomedGeometry,
 } from '@/components/menus/menu-geometry'
-import { SCROLLBAR_THIN } from '@/lib/class-names'
+import { SCROLLBAR_THIN, FLYOUT_SURFACE } from '@/lib/class-names'
 import { handleKeyByTable, type KeyHandlerTable } from '@/lib/key-table'
 
 type MenuSections = {
@@ -169,7 +169,7 @@ export function ContextMenu() {
         role="menu"
         aria-label={menu.title}
         tabIndex={-1}
-        className="absolute flex w-menu max-h-full flex-col overflow-hidden rounded-overlay border border-light-flyout-stroke bg-light-card py-1 shadow-light-flyout focus-visible:outline-none dark:border-dark-flyout-stroke dark:bg-dark-card dark:shadow-dark-flyout"
+        className={`absolute flex w-menu max-h-full flex-col overflow-hidden py-1 focus-visible:outline-none ${FLYOUT_SURFACE}`}
         // Styling-constraint exception: runtime geometry only. The menu is
         // positioned at the cursor (continuous px coords) and clamped into the
         // viewport by the layout effect above, which no static utility or

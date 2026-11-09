@@ -18,7 +18,7 @@ import type { SharedPaneViewProps } from './FilePaneViews'
 import { DETAILS_LIST_INSET_PX, DETAILS_ROW_HEIGHT_PX } from './DetailsView'
 import { selectionForClick } from './click-selection'
 import { detailsEntryIdsInRect } from './marquee-selection'
-import { paneBodyState } from './pane-body-state'
+import { paneBodyState, parentRowOffset } from './pane-body-state'
 import { gridMovementKeyTable, rowNavigationKeyTable } from './pane-keyboard'
 import { usePaneFocus, type PaneRowLayout } from './use-pane-focus'
 import { usePaneKeyboard } from './use-pane-keyboard'
@@ -45,7 +45,7 @@ export type PaneContext = {
 
 function paneRowLayout(pane: PaneState): PaneRowLayout {
   const hasParent = getParentPath(pane.path) !== null
-  const parentOffset = hasParent ? 1 : 0
+  const parentOffset = parentRowOffset(hasParent)
   return { hasParent, parentOffset, rowCount: pane.entries.length + parentOffset }
 }
 

@@ -1,8 +1,14 @@
 import type { DirectoryEntry, DirPatchEvent } from '@/lib/types/ipc'
 import { pathsMatch } from '@/lib/path-compare'
 import { basenameFromPath } from '@/stores/panes/pane-paths'
-import type { PanesData, TreeNodeState, TreeNodes } from '@/stores/panes/pane-state'
-import { NATURAL_NAME_ORDER, UNKNOWN_EXPANDABILITY } from '@/stores/panes/tree-state'
+import {
+  isHiddenFromView,
+  type PanesData,
+  type TreeNodeState,
+  type TreeNodes,
+} from '@/stores/panes/pane-state'
+import { UNKNOWN_EXPANDABILITY } from '@/stores/panes/tree-state'
+import { compareNaturally } from '@/lib/natural-order'
 
 function treeNodeKeyForPath(treeNodes: TreeNodes, path: string) {
   if (treeNodes[path]) {
@@ -33,15 +39,14 @@ function collectTreeSubtreePaths(treeNodes: TreeNodes, path: string, collected: 
 function compareTreeChildPaths(treeNodes: TreeNodes, leftPath: string, rightPath: string) {
   const leftName = treeNodes[leftPath]?.name ?? basenameFromPath(leftPath)
   const rightName = treeNodes[rightPath]?.name ?? basenameFromPath(rightPath)
-  return leftName.localeCompare(rightName, undefined, NATURAL_NAME_ORDER)
+  return compareNaturally(leftName, rightName)
 }
 
 function visibleDirectory(entry: DirectoryEntry | null, showHiddenFiles: boolean) {
   if (!entry?.isDir) {
     return null
   }
-  const hiddenFromTree = !showHiddenFiles && (entry.isHidden || entry.isSystem)
-  return hiddenFromTree ? null : entry
+  return isHiddenFromView(entry, showHiddenFiles) ? null : entry
 }
 
 function inheritedExpandability(

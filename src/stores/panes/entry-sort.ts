@@ -10,6 +10,7 @@ import {
   type PanesPatch,
   type SizeStates,
 } from '@/stores/panes/pane-state'
+import { compareNaturally } from '@/lib/natural-order'
 
 export type SortSpec = {
   sortKey: SortKey
@@ -57,10 +58,7 @@ function isKnownSize(entry: DirectoryEntry, sizeState: EntrySizeState | undefine
 }
 
 function compareEntryNames(left: DirectoryEntry, right: DirectoryEntry) {
-  return left.name.localeCompare(right.name, undefined, {
-    numeric: true,
-    sensitivity: 'base',
-  })
+  return compareNaturally(left.name, right.name)
 }
 
 function compareSizeKnowledge(

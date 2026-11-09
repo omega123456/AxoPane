@@ -7,7 +7,7 @@ import { formatShortcutLabel, type PlatformOs } from '@/lib/keymap'
 import type { SearchActivation } from '@/lib/search-actions'
 import type { SearchHit, SearchRejection, SearchScope, Shortcut } from '@/lib/types/ipc'
 import type { SearchStatus } from '@/stores/search-palette-store'
-import { TEXT_SECONDARY } from '@/lib/class-names'
+import { TEXT_SECONDARY, HOVER_ON_POINTER } from '@/lib/class-names'
 import type { SearchBackend } from './search-palette-model'
 
 const SEARCH_LISTBOX_ID = 'search-everywhere-results'
@@ -19,7 +19,7 @@ const SCOPES: { scope: SearchScope; label: string }[] = [
 ]
 const SELECTED_SCOPE_CLASS =
   'bg-light-card font-semibold text-light-text shadow-thumb dark:bg-dark-card dark:text-dark-text'
-const UNSELECTED_SCOPE_CLASS = `${TEXT_SECONDARY} hover:bg-light-hover dark:hover:bg-dark-hover`
+const UNSELECTED_SCOPE_CLASS = `${TEXT_SECONDARY} ${HOVER_ON_POINTER}`
 
 function scopeOptionStateClass(isSelected: boolean) {
   return isSelected ? SELECTED_SCOPE_CLASS : UNSELECTED_SCOPE_CLASS

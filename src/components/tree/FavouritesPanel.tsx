@@ -1,11 +1,11 @@
-import { useRef, type DragEvent, type MouseEvent } from 'react'
+import type { DragEvent, MouseEvent } from 'react'
 import { ChevronRightIcon } from '@/components/icons'
 import { ResizeHandle } from '@/components/shell/ResizeHandle'
 import { FavouriteTreeRow, favouriteLabel, type FavouriteRowActions } from './FavouriteTreeRow'
 import { buildContextMenuContent } from '@/components/menus/menu-definitions'
 import { detectPlatformOs } from '@/lib/keymap'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
-import { persistAppConfig } from '@/lib/app-config'
+import { useDragResize } from '@/components/shell/use-drag-resize'
 import { pathsMatch } from '@/lib/path-compare'
 import { TREE_ROW_HEIGHT_PX } from '@/lib/tree-flat'
 import { useConfigStore } from '@/stores/config-store'
@@ -14,34 +14,21 @@ import { useDragStore } from '@/stores/drag-store'
 import { FAVOURITES_HEIGHT_MAX, FAVOURITES_HEIGHT_MIN, useLayoutStore } from '@/stores/layout-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { disclosureChevronClass, SCROLLBAR_THIN } from '@/lib/class-names'
-
-function canDropOnFavourites() {
-  const drag = useDragStore.getState().drag
-  return drag?.kind === 'favourite' || drag?.items.some((item) => item.isDir) === true
-}
+import { canDropOnFavourite, dropAtFavouritesEnd } from './favourite-drop'
 
 function handleFavouritesDragOver(event: DragEvent<HTMLElement>) {
-  if (!canDropOnFavourites()) return
+  if (!canDropOnFavourite(useDragStore.getState().drag)) return
   event.preventDefault()
   event.dataTransfer.dropEffect = 'move'
 }
 
 /** Drops onto the heading or the empty row append to the end of the list. */
 async function handleFavouritesDrop(event: DragEvent<HTMLElement>) {
-  if (!canDropOnFavourites()) return
-  event.preventDefault()
   const drag = useDragStore.getState().drag
+  if (!canDropOnFavourite(drag)) return
+  event.preventDefault()
   useDragStore.getState().end()
-  const config = useConfigStore.getState()
-  if (drag?.kind === 'favourite') {
-    await config.reorderFavourite(drag.path, config.favourites.length)
-    return
-  }
-  if (drag?.kind !== 'file-transfer') return
-  const folders = drag.items.filter((item) => item.isDir)
-  for (const folder of folders) {
-    await config.addFavourite(folder.path)
-  }
+  await dropAtFavouritesEnd(drag)
 }
 
 function navigateActivePane(path: string) {
@@ -141,7 +128,11 @@ function FavouritesList({ favourites, heightPx }: { favourites: string[]; height
 function FavouritesResizeHandle({ heightPx, count }: { heightPx: number; count: number }) {
   const setHeightPx = useLayoutStore((state) => state.setFavouritesHeightPx)
   const shownHeightPx = Math.min(heightPx, count * TREE_ROW_HEIGHT_PX)
-  const dragStartHeight = useRef(shownHeightPx)
+  const resizeCallbacks = useDragResize({
+    value: shownHeightPx,
+    stepSize: TREE_ROW_HEIGHT_PX,
+    setValue: setHeightPx,
+  })
   return (
     <ResizeHandle
       orientation="horizontal"
@@ -150,12 +141,7 @@ function FavouritesResizeHandle({ heightPx, count }: { heightPx: number; count: 
       min={FAVOURITES_HEIGHT_MIN}
       max={FAVOURITES_HEIGHT_MAX}
       showRestLine={false}
-      onDragStart={() => {
-        dragStartHeight.current = shownHeightPx
-      }}
-      onResize={(deltaY) => setHeightPx(dragStartHeight.current + deltaY)}
-      onStep={(delta) => setHeightPx(shownHeightPx + delta * TREE_ROW_HEIGHT_PX)}
-      onCommit={() => void persistAppConfig()}
+      {...resizeCallbacks}
     />
   )
 }

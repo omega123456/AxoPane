@@ -1,5 +1,6 @@
+import { HOVER_ON_POINTER } from '@/lib/class-names'
+import { EMPTY_VALUE, itemNoun } from '@/lib/format'
 const FOCUS_CURSOR_RING = 'ring-1 ring-inset ring-light-accent dark:ring-dark-accent'
-const HOVER_FILL = 'hover:bg-light-hover dark:hover:bg-dark-hover'
 const ACTIVE_SELECTION_FILL = 'bg-light-tint dark:bg-dark-tint'
 const INACTIVE_SELECTION_FILL = 'bg-light-neutral-selection dark:bg-dark-neutral-selection'
 
@@ -20,7 +21,7 @@ function focusCursorClass(showCursor: boolean) {
 
 function rowFillClass({ isActivePane, isSelected }: EntryHighlight) {
   if (!isSelected) {
-    return HOVER_FILL
+    return HOVER_ON_POINTER
   }
   return isActivePane ? ACTIVE_SELECTION_FILL : INACTIVE_SELECTION_FILL
 }
@@ -46,14 +47,14 @@ export function cardHighlightClass(highlight: EntryHighlight & { isDropTarget: b
   const filled = highlight.isSelected || highlight.isDropTarget
   const fill = filled
     ? cardSelectionClass(highlight.isActivePane)
-    : `border-transparent ${HOVER_FILL}`
+    : `border-transparent ${HOVER_ON_POINTER}`
   const showCursor = highlight.isFocused && highlight.isActivePane && !highlight.isSelected
   return `rounded-overlay border ${fill} ${focusCursorClass(showCursor)}`
 }
 
 export function itemCountLabel(itemCount: number | null) {
   if (itemCount === null) {
-    return '—'
+    return EMPTY_VALUE
   }
-  return `${itemCount} ${itemCount === 1 ? 'item' : 'items'}`
+  return `${itemCount} ${itemNoun(itemCount)}`
 }

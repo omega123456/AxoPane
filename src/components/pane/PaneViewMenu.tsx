@@ -4,7 +4,7 @@ import { paneViewMetadata, paneViewModes } from '@/lib/pane-view'
 import type { PaneId } from '@/types/pane'
 import { useTabsStore } from '@/stores/tabs-store'
 import { FOCUS_RING } from '@/lib/focus-ring'
-import { TEXT_SECONDARY } from '@/lib/class-names'
+import { TEXT_SECONDARY, HOVER_AND_PRESS_ON_POINTER, PRIMARY_TEXT } from '@/lib/class-names'
 
 const modeIcons = { details: ListIcon, icons: Grid2X2Icon, thumbnails: ImagesIcon } as const
 
@@ -42,7 +42,7 @@ export function PaneViewMenu({ paneId }: { paneId: PaneId }) {
           onClick={toggle}
           onKeyDown={onTriggerKeyDown}
           title="View"
-          className={`inline-flex h-8 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-control px-2 text-row text-light-text hover:bg-light-hover active:bg-light-press dark:text-dark-text dark:hover:bg-dark-hover dark:active:bg-dark-press ${FOCUS_RING}`}
+          className={`inline-flex h-8 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-control px-2 text-row ${PRIMARY_TEXT} ${HOVER_AND_PRESS_ON_POINTER} ${FOCUS_RING}`}
         >
           <Icon className="size-4" />
           <span>{paneViewMetadata[viewMode].label}</span>

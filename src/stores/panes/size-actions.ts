@@ -24,6 +24,7 @@ import {
   type SizeEventBatchSummary,
 } from '@/stores/panes/size-requests'
 import type { PaneId } from '@/types/pane'
+import { runMarkingPending } from '@/stores/panes/pending-request'
 
 const STALE_SIZE_LOG_SAMPLE_LIMIT = 3
 const SIZE_EVENT_LOG_INTERVAL = 2000
@@ -97,13 +98,11 @@ export function releaseSizesOnLeave(paneId: PaneId, destinationPath: string) {
 }
 
 async function requestSizesMarkingPending(paths: string[], request: () => Promise<unknown>) {
-  panesStore().setState((state) => withPendingSizeRequests(state, paths, true))
-  try {
-    await request()
-  } catch (error) {
-    panesStore().setState((state) => withPendingSizeRequests(state, paths, false))
-    throw error
-  }
+  await runMarkingPending({
+    markPending: (isPending) =>
+      panesStore().setState((state) => withPendingSizeRequests(state, paths, isPending)),
+    request,
+  })
 }
 
 function eagerSizingEnabledNow() {

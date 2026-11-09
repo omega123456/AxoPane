@@ -11,7 +11,21 @@ type ListedChildNode = { nodePath: string; node: TreeNodeState }
 
 export const UNKNOWN_EXPANDABILITY = 'unknown' as const
 
-export const NATURAL_NAME_ORDER: Intl.CollatorOptions = { numeric: true, sensitivity: 'base' }
+type UnloadedTreeNodeSpec = Pick<TreeNodeState, 'path' | 'name' | 'parentPath' | 'expandability'>
+
+function unloadedTreeNode(spec: UnloadedTreeNodeSpec): TreeNodeState {
+  return {
+    id: spec.path,
+    name: spec.name,
+    path: spec.path,
+    parentPath: spec.parentPath,
+    children: [],
+    expanded: false,
+    loaded: false,
+    expandability: spec.expandability,
+    lastAccess: Date.now(),
+  }
+}
 
 export function treeRootForPath(treeRoots: string[], path: string) {
   return (
@@ -127,17 +141,12 @@ function listedChildNode(
   }
   return {
     nodePath,
-    node: {
-      id: nodePath,
-      name: entry.name,
+    node: unloadedTreeNode({
       path: nodePath,
+      name: entry.name,
       parentPath: listedParentPath,
-      children: [],
-      expanded: false,
-      loaded: false,
       expandability: expandabilityOf(entry),
-      lastAccess: Date.now(),
-    },
+    }),
   }
 }
 
@@ -241,17 +250,13 @@ export function revealedTree(
   return { treeNodes, treeFold }
 }
 
-function placeholderTreeNode(path: string): Omit<TreeNodeState, 'expanded'> {
-  return {
-    id: path,
-    name: basenameFromPath(path),
+function placeholderTreeNode(path: string): TreeNodeState {
+  return unloadedTreeNode({
     path,
+    name: basenameFromPath(path),
     parentPath: getParentPath(path),
-    children: [],
-    loaded: false,
     expandability: UNKNOWN_EXPANDABILITY,
-    lastAccess: Date.now(),
-  }
+  })
 }
 
 export function toggledTreeNode(

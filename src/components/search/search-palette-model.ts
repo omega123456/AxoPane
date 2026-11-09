@@ -3,10 +3,9 @@ import { compactCount, folderSizeStatusLabel } from '@/lib/folder-size-status'
 import type { FolderSizeIndexStatus, SearchCapabilities, SearchHit } from '@/lib/types/ipc'
 import { getParentPath } from '@/stores/panes-store'
 import { isSearchable, type SearchStatus } from '@/stores/search-palette-store'
+import { POSIX_SEPARATOR, WINDOWS_SEPARATOR } from '@/lib/path-compare'
 
 const TRAILING_SEPARATOR_PATTERN = /[\\/]$/
-const WINDOWS_SEPARATOR = '\\'
-const POSIX_SEPARATOR = '/'
 
 export type SearchBackend = SearchCapabilities['backend']
 

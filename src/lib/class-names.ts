@@ -17,6 +17,14 @@ export const HOVER_FILL = 'bg-light-hover dark:bg-dark-hover'
 
 export const HOVER_ON_POINTER = 'hover:bg-light-hover dark:hover:bg-dark-hover'
 
+export const HOVER_AND_PRESS_ON_POINTER =
+  'hover:bg-light-hover active:bg-light-press dark:hover:bg-dark-hover dark:active:bg-dark-press'
+
+export const FLYOUT_SURFACE =
+  'rounded-overlay border border-light-flyout-stroke bg-light-card shadow-light-flyout dark:border-dark-flyout-stroke dark:bg-dark-card dark:shadow-dark-flyout'
+
+export const PRIMARY_TEXT = 'text-light-text dark:text-dark-text'
+
 const DROP_TARGET_RING = 'ring-2 ring-inset ring-light-accent dark:ring-dark-accent'
 
 const QUARTER_TURN = 'rotate-90'

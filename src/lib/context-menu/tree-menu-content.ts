@@ -4,7 +4,6 @@ import {
   navigateContextAction,
   openPathInExplicitPaneContextAction,
   openPathInNewTabContextAction,
-  propertiesContextAction,
   requestFolderSizeContextAction,
   renameFavouriteContextAction,
 } from '@/lib/context-menu/context-menu-actions'
@@ -29,6 +28,7 @@ import {
   commandRow,
   customRow,
   favouriteRow,
+  propertiesRow,
   section,
   shortcutFor,
 } from '@/lib/context-menu/menu-rows'
@@ -39,11 +39,9 @@ function buildTrashTreeContent(platform: PlatformOs): ContextMenuContent {
     sections: [
       section('primary', [commandRow('emptyTrash', platform, { danger: true, strong: true })]),
       section('properties', [
-        customRow({
+        propertiesRow({
           id: 'properties-tree-trash',
-          label: 'Properties',
-          action: propertiesContextAction([createTrashPropertiesDialogItem(platform)]),
-          icon: { kind: 'app', name: 'properties' },
+          items: [createTrashPropertiesDialogItem(platform)],
         }),
       ]),
     ],
@@ -179,11 +177,9 @@ export function buildTreeContent(target: TreeTarget, platform: PlatformOs): Cont
       treeFooterSection(target, platform),
       ...ejectSections(target, platform),
       section('properties', [
-        customRow({
+        propertiesRow({
           id: `properties-tree-${target.path}`,
-          label: 'Properties',
-          action: propertiesContextAction([createPathPropertiesDialogItem(target.path)]),
-          icon: { kind: 'app', name: 'properties' },
+          items: [createPathPropertiesDialogItem(target.path)],
         }),
       ]),
     ],

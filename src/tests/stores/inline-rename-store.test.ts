@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { renameDraftForEntry, type InlineRenameState } from '@/stores/inline-rename-store'
+import {
+  renameDraftForEntry,
+  withRenameDraft,
+  type InlineRenameState,
+} from '@/stores/inline-rename-store'
 
 const rename: InlineRenameState = {
   paneId: 'left',
@@ -20,5 +24,17 @@ describe('renameDraftForEntry', () => {
     })
     expect(renameDraftForEntry(rename, 'Beta')).toBeUndefined()
     expect(renameDraftForEntry(null, 'Alpha')).toBeUndefined()
+  })
+})
+
+describe('withRenameDraft', () => {
+  it('merges the draft fields into an active rename', () => {
+    expect(withRenameDraft({ rename }, { value: 'Beta', error: null })).toEqual({
+      rename: { ...rename, value: 'Beta', error: null },
+    })
+  })
+
+  it('keeps no rename when none is active', () => {
+    expect(withRenameDraft({ rename: null }, { busy: true })).toEqual({ rename: null })
   })
 })

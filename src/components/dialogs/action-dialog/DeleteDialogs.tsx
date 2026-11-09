@@ -8,6 +8,7 @@ import { ConfirmDialogShell } from './ConfirmDialogShell'
 import { itemCountLabel, targetSummary } from './action-dialog-paths'
 import { useFocusOnMount } from '@/lib/use-focus-on-mount'
 import { useActionDialogSubmit } from './use-action-dialog-submit'
+import { itemNoun } from '@/lib/format'
 
 const DELETE_HAS_NO_DESTINATION_DIR = ''
 const UNKNOWN_SIZE_BYTES = 0
@@ -114,8 +115,7 @@ export function DeleteFromTrashDialog({
       onClose={close}
     >
       <DialogText>
-        This permanently deletes the selected {count === 1 ? 'item' : 'items'} from the trash. You
-        can't undo this.
+        This permanently deletes the selected {itemNoun(count)} from the trash. You can't undo this.
       </DialogText>
       <DialogList items={targetSummary(dialog.targets)} />
     </ConfirmDialogShell>

@@ -3,7 +3,8 @@
 //! (instead of `std::path`) keeps both testable on every OS.
 
 use crate::path_text::{
-    starts_with_drive_designator, strip_verbatim_prefix, DRIVE_DESIGNATOR_LEN, UNC_PREFIX,
+    starts_with_drive_designator, strip_verbatim_prefix, DRIVE_DESIGNATOR_LEN, PATH_SEPARATORS,
+    UNC_PREFIX,
 };
 
 /// A UNC root splits into server, share and the remaining path.
@@ -121,14 +122,14 @@ impl<'path> RootSplit<'path> {
 
 fn windows_root(path: &str) -> RootSplit<'_> {
     if starts_with_drive_designator(path) {
-        let rest = path[DRIVE_DESIGNATOR_LEN..].trim_start_matches(['\\', '/']);
+        let rest = path[DRIVE_DESIGNATOR_LEN..].trim_start_matches(PATH_SEPARATORS);
         return RootSplit::new(format!("{}\\", &path[..DRIVE_DESIGNATOR_LEN]), rest);
     }
     let unc = path
         .strip_prefix(UNC_PREFIX)
         .or_else(|| path.strip_prefix("//"));
     if let Some(unc) = unc {
-        let mut parts = unc.splitn(UNC_ROOT_PARTS, ['\\', '/']);
+        let mut parts = unc.splitn(UNC_ROOT_PARTS, PATH_SEPARATORS);
         let server = parts.next().unwrap_or_default();
         let share = parts.next().unwrap_or_default();
         let has_share_root = !server.is_empty() && !share.is_empty();

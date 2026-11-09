@@ -20,6 +20,7 @@ import {
   type TabPatch,
   type TabState,
 } from '@/stores/tabs/tab-transitions'
+import { DEFAULT_SESSION_PATH } from '@/stores/panes/pane-state'
 
 export type { PaneTabs, TabMoveRequest, TabMoveResult, TabState }
 
@@ -85,8 +86,8 @@ function singleTabPane(path: string): PaneTabs {
 function defaultState() {
   return {
     panes: {
-      left: singleTabPane('.'),
-      right: singleTabPane('.'),
+      left: singleTabPane(DEFAULT_SESSION_PATH),
+      right: singleTabPane(DEFAULT_SESSION_PATH),
     },
   }
 }
@@ -110,7 +111,7 @@ export const useTabsStore = create<TabsStore>((set, get) => ({
     set((state) => ({
       panes: withHydratedPane(state.panes, paneId, {
         pane,
-        fallbackTabs: () => singleTabPane('.').tabs,
+        fallbackTabs: () => singleTabPane(DEFAULT_SESSION_PATH).tabs,
       }),
     })),
   addTab: (paneId, tab, options) => {

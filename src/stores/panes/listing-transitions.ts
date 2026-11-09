@@ -11,16 +11,17 @@ import { getParentPath } from '@/stores/panes/pane-paths'
 import { withResolvedIcons } from '@/stores/panes/icon-requests'
 import { clearPassiveItemCountRequestsForPane } from '@/stores/panes/item-counts'
 import {
+  FAILED_LISTING_MESSAGE,
   findMatchingEntryId,
+  PANE_TITLES,
+  UNSEEDED_HISTORY_INDEX,
   withPane,
   type PaneState,
   type PanesData,
   type PanesPatch,
   type TreeNodes,
 } from '@/stores/panes/pane-state'
-
-const FAILED_LISTING_MESSAGE = 'Failed to load directory'
-const UNSEEDED_HISTORY_INDEX = -1
+import { withoutKey } from '@/lib/collections'
 
 export type TabView = {
   path: string
@@ -134,8 +135,8 @@ export function initializedPanes(state: PanesData, initial: InitialPanes): Parti
     folderSizeIndexStatus: state.folderSizeIndexStatus ?? initial.folderSizeIndexStatus,
     volumes: initial.volumes,
     panes: {
-      left: initializedPane(state.panes.left, initial.leftTab, 'Left pane'),
-      right: initializedPane(state.panes.right, initial.rightTab, 'Right pane'),
+      left: initializedPane(state.panes.left, initial.leftTab, PANE_TITLES.left),
+      right: initializedPane(state.panes.right, initial.rightTab, PANE_TITLES.right),
     },
     treeRoots: initial.treeRoots,
     treeNodes: initial.treeNodes,
@@ -236,12 +237,6 @@ function historyAfterNavigation(pane: PaneState, path: string) {
   return { history, historyIndex: history.length - 1 }
 }
 
-function withoutScrollPosition(scrollPositions: Record<string, number>, path: string) {
-  return Object.fromEntries(
-    Object.entries(scrollPositions).filter(([storedPath]) => storedPath !== path),
-  )
-}
-
 export type PaneNavigation = {
   path: string
   viaHistory: boolean
@@ -264,7 +259,7 @@ export function navigatedPanes(
       filterApplied: '',
       typing: false,
       ...historyAfterNavigation(pane, path),
-      scrollPositions: withoutScrollPosition(pane.scrollPositions, path),
+      scrollPositions: withoutKey(pane.scrollPositions, path),
     }),
     filterTimers: { ...state.filterTimers, [paneId]: undefined },
   }

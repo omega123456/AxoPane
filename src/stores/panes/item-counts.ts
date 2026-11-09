@@ -20,6 +20,7 @@ import {
   type PanesPatch,
   type PendingRequests,
 } from '@/stores/panes/pane-state'
+import { withoutKeys } from '@/lib/collections'
 
 export const AUTO_VISIBLE_ITEM_COUNT_LIMIT = 200
 const ITEM_COUNT_KEY_SEPARATOR = '::'
@@ -355,7 +356,5 @@ export function withoutPatchedItemCountRequests(
   if (invalidatedKeys.size === 0) {
     return state.passiveItemCountRequests
   }
-  return Object.fromEntries(
-    Object.entries(state.passiveItemCountRequests).filter(([key]) => !invalidatedKeys.has(key)),
-  ) as PendingRequests
+  return withoutKeys(state.passiveItemCountRequests, [...invalidatedKeys])
 }

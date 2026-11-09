@@ -4,6 +4,9 @@
 pub const VERBATIM_PREFIX: &str = r"\\?\";
 pub const VERBATIM_UNC_PREFIX: &str = r"\\?\UNC\";
 pub const UNC_PREFIX: &str = r"\\";
+pub const WINDOWS_SEPARATOR: char = '\\';
+pub const PATH_SEPARATORS: [char; 2] = ['\\', '/'];
+pub const POSIX_ROOT: &str = "/";
 /// Length of a drive designator such as `C:`.
 pub const DRIVE_DESIGNATOR_LEN: usize = 2;
 

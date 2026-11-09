@@ -11,10 +11,10 @@ async function reorderOntoFavourite(drag: FavouriteDragPayload, slot: FavouriteS
   await useConfigStore.getState().reorderFavourite(drag.path, slot.index)
 }
 
-async function addFoldersAtFavourite(drag: FileTransferDragPayload, slot: FavouriteSlot) {
+async function addFoldersAtIndex(drag: FileTransferDragPayload, firstIndex: number) {
   const folders = drag.items.filter((item) => item.isDir)
   for (const [offset, folder] of folders.entries()) {
-    await useConfigStore.getState().addFavourite(folder.path, slot.index + offset)
+    await useConfigStore.getState().addFavourite(folder.path, firstIndex + offset)
   }
 }
 
@@ -31,6 +31,17 @@ export async function dropOntoFavourite(drag: DragPayload | null, slot: Favourit
     return
   }
   if (drag?.kind === 'file-transfer') {
-    await addFoldersAtFavourite(drag, slot)
+    await addFoldersAtIndex(drag, slot.index)
+  }
+}
+
+export async function dropAtFavouritesEnd(drag: DragPayload | null) {
+  const endIndex = useConfigStore.getState().favourites.length
+  if (drag?.kind === 'favourite') {
+    await useConfigStore.getState().reorderFavourite(drag.path, endIndex)
+    return
+  }
+  if (drag?.kind === 'file-transfer') {
+    await addFoldersAtIndex(drag, endIndex)
   }
 }
