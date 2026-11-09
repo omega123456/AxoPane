@@ -72,7 +72,7 @@ Keep every test in a dedicated file under the appropriate test root (`src/tests/
 ### Playwright (E2E + Visual Regression)
 
 - Specs live in `e2e/`. `pnpm test:e2e` (and therefore `pnpm test:all`) always includes `screenshots.spec.ts`.
-- **Every new component / visible UI state needs screenshot coverage for both light and dark themes** in `e2e/screenshots.spec.ts`.
+- **Keep visual regression lean.** Each component gets **at most one** representative screenshot scenario in `e2e/screenshots.spec.ts`, run in both light and dark themes, plus **at most two** full-window (`main`) scenarios. Scope every other screenshot to the component's own locator (pane region, dialog, menu, toolbar, sidebar), not `main`. When a component gains a new state, fold it into that component's existing scenario if it can be shown together; otherwise cover it with functional assertions in a non-screenshot spec (`e2e/*-states.spec.ts`, run once, no theme loop) instead of adding another baseline.
 - **Do not increase Playwright screenshot pixel tolerance** (or any visual diff threshold in `playwright.config.mjs`) to make tests pass — fix the UI/regression or intentionally update baselines instead.
 - Update the `VITE_PLAYWRIGHT` mock for any new IPC command called from the UI. **Never embed fixture data or domain logic inline in `playwright-ipc-mock.ts`** — all fixture data belongs in `src/tests/playwright-fixtures/` (one file per domain) and must be wired through the registry in `src/tests/playwright-fixtures/index.ts` so it can be looked up and overridden per-test without touching the mock router.
 - After intentional visual changes, regenerate baselines: `pnpm test:e2e --update-snapshots` and commit the updated snapshot files.

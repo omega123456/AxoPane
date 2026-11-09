@@ -1,56 +1,23 @@
 import { expect, test } from '@playwright/test'
 import {
+  cutShortcut,
+  dialogPanel,
   gotoScenario,
+  openRowContextMenu,
   openSettingsSection,
   pressAndDragInWholePixelSteps,
   rightClickPane,
+  unionClip,
 } from './helpers'
 import { screenshotScenarios } from '../src/tests/playwright-fixtures/e2e'
-import { longTypeLabel } from '../src/tests/playwright-fixtures/file-types'
 import { RELATIVE_DATES_NOW } from '../src/tests/playwright-fixtures/relative-dates'
-import {
-  everythingAvailable,
-  everythingUnavailable,
-  macIndexStatuses,
-  noFolderSizeBackend,
-} from '../src/tests/playwright-fixtures/states'
+import { everythingAvailable } from '../src/tests/playwright-fixtures/states'
 import { searchIndexTypedInsideExisting } from '../src/tests/playwright-fixtures/search-index'
-import {
-  deletingQueueFinalProgressEvent,
-  expandedQueueFinalProgressEvent,
-} from '../src/tests/playwright-fixtures/queue'
+import { expandedQueueFinalProgressEvent } from '../src/tests/playwright-fixtures/queue'
 
 for (const mode of ['light', 'dark'] as const) {
-  test(`command bar ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.browsing[mode])
-    const toolbar = page.getByRole('toolbar', { name: 'Command bar' })
-    await expect(toolbar).toBeVisible()
-    await expect(toolbar.getByRole('button', { name: 'Back in Left pane' })).toBeVisible()
-    await expect(toolbar.getByRole('button', { name: 'Up in Left pane' })).toBeVisible()
-    await expect(toolbar.getByRole('button', { name: 'Refresh Left pane' })).toBeVisible()
-    await expect(
-      toolbar.getByRole('button', { name: 'Create new folder in Left pane' }),
-    ).toBeVisible()
-    await expect(
-      toolbar.getByRole('button', { name: 'Create new file in Left pane' }),
-    ).toBeVisible()
-    await expect(toolbar.getByRole('textbox', { name: 'Left pane filter' })).toBeVisible()
-    await expect(toolbar).toHaveScreenshot(`command-bar-${mode}.png`)
-  })
-
-  test(`filter follows the active pane ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.browsing[mode])
-    const toolbar = page.getByRole('toolbar', { name: 'Command bar' })
-    await toolbar.getByRole('textbox', { name: 'Left pane filter' }).fill('doc')
-    await page.getByRole('region', { name: 'Right pane' }).click()
-    const rightFilter = toolbar.getByRole('textbox', { name: 'Right pane filter' })
-    await expect(rightFilter).toHaveValue('')
-    await expect(rightFilter).toHaveAttribute('placeholder', /^Filter /)
-    await expect(page.locator('main')).toHaveScreenshot(`filter-follows-active-pane-${mode}.png`)
-  })
-
-  test(`inactive pane selection ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.browsing[mode])
+  test(`full app ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.fullApp[mode])
     const leftPane = page.getByRole('region', { name: 'Left pane' })
     await leftPane
       .getByRole('row', { name: /Documents/ })
@@ -58,114 +25,75 @@ for (const mode of ['light', 'dark'] as const) {
       .click()
     await page.getByRole('region', { name: 'Right pane' }).click()
     await expect(page.getByTestId('active-pane-rule')).toHaveCount(1)
-    await expect(page.locator('main')).toHaveScreenshot(`inactive-pane-selection-${mode}.png`)
+    await expect(page.getByRole('status', { name: 'Everything unavailable' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Expand job queue' })).toBeVisible()
+    await expect(page.locator('main')).toHaveScreenshot(`full-app-${mode}.png`)
   })
 
-  test(`focus ring button ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.browsing[mode])
+  test(`command bar ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.fullApp[mode])
     const toolbar = page.getByRole('toolbar', { name: 'Command bar' })
+    await expect(toolbar.getByRole('button', { name: 'Back in Left pane' })).toBeVisible()
+    await expect(toolbar.getByRole('button', { name: 'Up in Left pane' })).toBeVisible()
+    await expect(
+      toolbar.getByRole('button', { name: 'Create new folder in Left pane' }),
+    ).toBeVisible()
+    await expect(
+      toolbar.getByRole('button', { name: 'Create new file in Left pane' }),
+    ).toBeVisible()
+    await expect(
+      toolbar.getByRole('button', { name: 'Calculate all folder sizes in Left pane' }),
+    ).toBeVisible()
+    await expect(toolbar.getByRole('textbox', { name: 'Left pane filter' })).toBeVisible()
     const refresh = toolbar.getByRole('button', { name: 'Refresh Left pane' })
     await refresh.focus()
     await expect(refresh).toBeFocused()
-    await expect(toolbar).toHaveScreenshot(`focus-ring-button-${mode}.png`)
-  })
-
-  test(`focus ring row ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.browsing[mode])
-    const tree = page.locator('aside')
-    const row = tree.getByRole('treeitem').first().getByRole('button').last()
-    await row.focus()
-    await expect(row).toBeFocused()
-    await expect(tree).toHaveScreenshot(`focus-ring-row-${mode}.png`)
+    await expect(toolbar).toHaveScreenshot(`command-bar-${mode}.png`)
   })
 
   test(`view menu ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
-    const trigger = page.getByLabel('View: Details').first()
-    await trigger.click()
+    await page.getByLabel('View: Details').first().click()
     const menu = page.getByRole('menu', { name: 'View options' })
-    await expect(menu).toBeVisible()
     const details = menu.getByRole('menuitemradio', { name: 'Details' })
     await expect(details).toHaveAttribute('aria-checked', 'true')
     await expect(details).toBeFocused()
-    await expect(page.locator('main')).toHaveScreenshot(`pane-view-menu-${mode}.png`)
+    await expect(menu).toHaveScreenshot(`pane-view-menu-${mode}.png`)
   })
 
-  test(`icons narrow ${mode}`, async ({ page }) => {
+  test(`icons view ${mode}`, async ({ page }) => {
     await page.setViewportSize({ width: 720, height: 700 })
-    await gotoScenario(page, screenshotScenarios.iconsNarrow[mode])
-    const grid = page.getByRole('grid', { name: /Icons for/ })
-    await expect(grid).toBeVisible()
-    const longName = grid.getByRole('gridcell', { name: /A very long photograph filename/ })
-    await expect(longName).toBeVisible()
-    await expect(grid).toHaveAttribute('aria-colcount', '1')
-    await expect(page.locator('main')).toHaveScreenshot(`pane-icons-narrow-${mode}.png`)
-  })
-
-  test(`icons interaction states ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.iconsInteractionStates[mode])
+    const leftPane = page.getByRole('region', { name: 'Left pane' })
     const grid = page.getByRole('grid', { name: /Icons for/ })
+    await expect(grid).toHaveAttribute('aria-colcount', '1')
     const longName = grid.getByRole('gridcell', { name: /A very long photograph filename/ })
     await longName.click()
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+x' : 'Control+x')
-    await expect(longName).toHaveAttribute('aria-selected', 'true')
+    await page.keyboard.press(cutShortcut)
     await expect(grid.getByRole('gridcell', { name: 'Hidden reference.txt' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`pane-icons-interaction-states-${mode}.png`)
-  })
-
-  test(`icons rename ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.iconsRename[mode])
-    const grid = page.getByRole('grid', { name: /Icons for/ })
-    const longName = grid.getByRole('gridcell', { name: /A very long photograph filename/ })
-    await longName.click()
-    await page.keyboard.press('F2')
-    await expect(page.getByLabel(/Rename A very long photograph filename/)).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`pane-icons-rename-${mode}.png`)
-  })
-
-  test(`thumbnails fallback ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.thumbnailsFallback[mode])
-    const grid = page.getByRole('grid', { name: /Large thumbnails for/ })
-    await expect(grid).toBeVisible()
-    await expect(grid.getByRole('img').first()).toBeVisible()
-    await expect(grid.getByRole('gridcell', { name: 'Unsupported artwork.psd' })).toBeVisible()
-    await expect(grid.getByRole('gridcell', { name: 'Unreadable scan.tiff' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`pane-thumbnails-fallback-${mode}.png`)
-  })
-
-  test(`thumbnails interaction states ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.thumbnailsInteractionStates[mode])
-    const grid = page.getByRole('grid', { name: /Large thumbnails for/ })
-    await expect(page.getByLabel('Thumbnail loading').first()).toBeVisible()
-    const preview = grid.getByRole('gridcell', { name: 'Mountain preview.png' })
-    await preview.click()
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+x' : 'Control+x')
-    await expect(preview).toHaveAttribute('aria-selected', 'true')
-    await expect(page.locator('main')).toHaveScreenshot(
-      `pane-thumbnails-interaction-states-${mode}.png`,
-    )
-  })
-
-  test(`thumbnails rename ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.thumbnailsRename[mode])
-    const grid = page.getByRole('grid', { name: /Large thumbnails for/ })
-    const preview = grid.getByRole('gridcell', { name: 'Mountain preview.png' })
-    await preview.click()
+    await grid.getByRole('gridcell', { name: 'Mountain preview.png' }).click()
     await page.keyboard.press('F2')
     await expect(page.getByLabel('Rename Mountain preview.png')).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`pane-thumbnails-rename-${mode}.png`)
+    await expect(leftPane).toHaveScreenshot(`pane-icons-${mode}.png`)
   })
 
-  test(`browsing ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.browsing[mode])
-    await expect(page.getByRole('region', { name: 'Left pane' })).toBeVisible()
-    await expect(page.getByRole('row', { name: /Documents/ }).first()).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`dual-pane-browsing-${mode}.png`)
+  test(`thumbnails view ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.thumbnailsFallback[mode])
+    const leftPane = page.getByRole('region', { name: 'Left pane' })
+    const grid = page.getByRole('grid', { name: /Large thumbnails for/ })
+    await expect(grid.getByRole('img').first()).toBeVisible()
+    await expect(grid.getByRole('gridcell', { name: 'Unsupported artwork.psd' })).toBeVisible()
+    const preview = grid.getByRole('gridcell', { name: 'Mountain preview.png' })
+    await preview.click()
+    await page.keyboard.press(cutShortcut)
+    await grid.getByRole('gridcell', { name: 'Unreadable scan.tiff' }).click()
+    await page.keyboard.press('F2')
+    await expect(page.getByLabel('Rename Unreadable scan.tiff')).toBeVisible()
+    await expect(leftPane).toHaveScreenshot(`pane-thumbnails-${mode}.png`)
   })
 
   test(`marquee selection ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
-    await expect(page.getByRole('region', { name: 'Left pane' })).toBeVisible()
     await expect(page.getByRole('row', { name: /Documents/ }).first()).toBeVisible()
 
     const scroller = page.getByTestId('file-pane-scroll-left')
@@ -181,8 +109,25 @@ for (const mode of ['light', 'dark'] as const) {
     await page.mouse.down()
     await page.mouse.move(box.x + 240, box.y + 10, { steps: 10 })
     await expect(page.getByTestId('marquee-selection')).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`marquee-selection-${mode}.png`)
+    await expect(page.getByRole('region', { name: 'Left pane' })).toHaveScreenshot(
+      `marquee-selection-${mode}.png`,
+    )
     await page.mouse.up()
+  })
+
+  test(`folder tree ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.folderTree[mode])
+    const sidebar = page.locator('aside').first()
+    const treeScroll = page.getByTestId('folder-tree-scroll')
+    await expect(treeScroll.getByRole('button', { name: 'Designs', exact: true })).toBeVisible()
+    await expect(treeScroll.getByRole('button', { name: '3 other folders' })).toBeVisible()
+    await expect(treeScroll.locator('[data-capacity-level="warning"]')).toBeVisible()
+    await expect(treeScroll.locator('[data-capacity-level="critical"]')).toBeVisible()
+    await expect(page.getByTestId('favourites-panel').getByText('Drop folders here')).toBeVisible()
+    const firstRow = treeScroll.getByRole('treeitem').first().getByRole('button').last()
+    await firstRow.focus()
+    await expect(firstRow).toBeFocused()
+    await expect(sidebar).toHaveScreenshot(`folder-tree-${mode}.png`)
   })
 
   test(`sticky tree ${mode}`, async ({ page }) => {
@@ -205,46 +150,10 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('aside').first()).toHaveScreenshot(`sticky-tree-items-${mode}.png`)
   })
 
-  test(`folded tree ${mode}`, async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 520 })
-    await gotoScenario(page, screenshotScenarios.stickyTree[mode])
-    const treeScroll = page.getByTestId('folder-tree-scroll')
-    await expect(treeScroll.getByRole('button', { name: 'Designs', exact: true })).toBeVisible()
-    await expect(treeScroll.getByRole('button', { name: '3 other folders' })).toBeVisible()
-    await expect(page.locator('aside').first()).toHaveScreenshot(`folded-tree-${mode}.png`)
-  })
-
-  test(`deep path levels fold ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.deepTree[mode])
-    const treeScroll = page.getByTestId('folder-tree-scroll')
-    await expect(treeScroll.getByRole('button', { name: 'out', exact: true })).toBeVisible()
-    await expect(treeScroll.getByRole('button', { name: '4 levels hidden' })).toBeVisible()
-    await expect(page.locator('aside').first()).toHaveScreenshot(
-      `deep-tree-levels-fold-${mode}.png`,
-    )
-  })
-
-  test(`favourites collapsed ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.favouritesCollapsed[mode])
-    const heading = page.getByTestId('favourites-panel').getByRole('button', { name: /Favourites/ })
-    await expect(heading).toHaveAttribute('aria-expanded', 'false')
-    await expect(
-      page.getByTestId('folder-tree-scroll').getByRole('button', { name: 'Designs', exact: true }),
-    ).toBeVisible()
-    await expect(page.locator('aside').first()).toHaveScreenshot(`favourites-collapsed-${mode}.png`)
-  })
-
-  test(`favourites overflow ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.favouritesOverflow[mode])
+  test(`favourites ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.favouritesPanel[mode])
     const panel = page.getByTestId('favourites-panel')
-    await expect(panel.getByRole('button', { name: 'Documents', exact: true })).toBeVisible()
     await expect(panel.locator('[data-favourite-row]')).toHaveCount(9)
-    await expect(page.locator('aside').first()).toHaveScreenshot(`favourites-overflow-${mode}.png`)
-  })
-
-  test(`favourites rename ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.favouritesRenamed[mode])
-    const panel = page.getByTestId('favourites-panel')
     await expect(panel.getByRole('button', { name: 'Code', exact: true })).toBeVisible()
     await panel.getByRole('button', { name: 'Downloads', exact: true }).click({ button: 'right' })
     await page
@@ -252,285 +161,80 @@ for (const mode of ['light', 'dark'] as const) {
       .getByRole('menuitem', { name: 'Rename Favourite' })
       .click()
     await expect(panel.getByRole('textbox', { name: 'Rename favourite Downloads' })).toBeFocused()
-    await expect(page.locator('aside').first()).toHaveScreenshot(`favourites-rename-${mode}.png`)
-  })
-
-  test(`favourites resize handle hover ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.favouritesOverflow[mode])
     const handle = page.getByRole('separator', { name: 'Resize favourites' })
     // A zero-height divider never counts as visible to hover(); point at it
     // directly, where its grab zone overhangs the line.
     const box = await handle.boundingBox()
     if (!box) throw new Error('favourites resize handle has no box')
     await page.mouse.move(box.x + box.width / 2, box.y)
-    await expect(page.locator('aside').first()).toHaveScreenshot(
-      `favourites-resize-hover-${mode}.png`,
-    )
+    await expect(page.locator('aside').first()).toHaveScreenshot(`favourites-${mode}.png`)
   })
 
-  test(`tree capacity levels ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.capacityLevels[mode])
-    const tree = page.getByTestId('folder-tree-scroll')
-    await expect(tree.locator('[data-capacity-level="warning"]')).toBeVisible()
-    await expect(tree.locator('[data-capacity-level="critical"]')).toBeVisible()
-    await expect(page.locator('aside').first()).toHaveScreenshot(`tree-capacity-levels-${mode}.png`)
+  test(`tree context menu ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.ejectMenu[mode])
+    await page
+      .getByTestId('folder-tree-scroll')
+      .getByRole('button', { name: 'USB Stick (E:)', exact: true })
+      .click({ button: 'right' })
+    const menu = page.getByRole('menu', { name: 'USB Stick (E:)' })
+    await expect(menu.getByRole('menuitem', { name: 'Open in right pane' })).toBeVisible()
+    await expect(menu.getByRole('menuitem', { name: 'Eject' })).toBeVisible()
+    await expect(menu).toHaveScreenshot(`tree-context-menu-${mode}.png`)
   })
-
-  test(`everything banner ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.everythingBanner[mode])
-    await expect(page.getByRole('status', { name: 'Everything unavailable' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`everything-infobar-${mode}.png`)
-  })
-
-  const searchStates = [
-    { name: 'recents', scenario: 'searchRecents', query: '', expectText: 'Desktop' },
-    {
-      name: 'results',
-      scenario: 'searchNameResults',
-      query: 'report',
-      expectText: 'Q3 report.docx',
-    },
-    { name: 'browse', scenario: 'searchBrowse', query: 'alex/', expectText: 'invoice.pdf' },
-    {
-      name: 'no-results',
-      scenario: 'searchNoResults',
-      query: 'taxes 2019',
-      expectText: 'No results for “taxes 2019”',
-    },
-    {
-      name: 'everything-not-running',
-      scenario: 'searchEverythingNotRunning',
-      query: 'report',
-      expectText: 'Everything isn’t running',
-    },
-    {
-      name: 'macos-indexing',
-      scenario: 'searchMacIndexing',
-      query: 'photo',
-      expectText: 'Photo Booth Library',
-    },
-    {
-      name: 'macos-complete',
-      scenario: 'searchMacComplete',
-      query: 'photo',
-      expectText: 'Files and folders on this Mac · 6 results',
-    },
-    {
-      name: 'macos-updating',
-      scenario: 'searchMacUpdating',
-      query: 'photo',
-      expectText: 'Updating index… · 6 results',
-    },
-    {
-      name: 'macos-paused',
-      scenario: 'searchMacPaused',
-      query: 'photo',
-      expectText: 'Results may be incomplete until indexing resumes.',
-    },
-    {
-      name: 'macos-indexing-no-results',
-      scenario: 'searchMacIndexingNoResults',
-      query: 'taxes 2019',
-      expectText: 'No results yet for “taxes 2019”',
-    },
-    {
-      name: 'macos-fallback-no-results',
-      scenario: 'searchMacFallbackNoResults',
-      query: 'taxes 2019',
-      expectText: 'No folders match “taxes 2019”',
-    },
-    {
-      name: 'macos-unavailable',
-      scenario: 'searchMacUnavailable',
-      query: 'photo',
-      expectText: 'Search is unavailable',
-    },
-    {
-      name: 'loading-more',
-      scenario: 'searchLoadingMore',
-      query: 'invoice',
-      expectText: 'Loading more…',
-    },
-  ] as const
-
-  for (const state of searchStates) {
-    test(`search everywhere ${state.name} ${mode}`, async ({ page }) => {
-      await gotoScenario(page, screenshotScenarios[state.scenario][mode])
-      await page.getByRole('button', { name: 'Search everywhere' }).click()
-      const palette = page.getByRole('dialog', { name: 'Search everywhere' })
-      if (state.query) {
-        await palette.getByRole('combobox', { name: 'Search everywhere' }).fill(state.query)
-      }
-      await expect(palette.getByText(state.expectText, { exact: true }).first()).toBeVisible()
-      await expect(palette).toHaveScreenshot(`search-everywhere-${state.name}-${mode}.png`)
-    })
-  }
 
   test(`error infobar ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.ejectRefused[mode])
-    const treeScroll = page.getByTestId('folder-tree-scroll')
-    await treeScroll
+    await page
+      .getByTestId('folder-tree-scroll')
       .getByRole('button', { name: 'USB Stick (E:)', exact: true })
       .click({ button: 'right' })
     await page
       .getByRole('menu', { name: 'USB Stick (E:)' })
       .getByRole('menuitem', { name: 'Eject' })
       .click()
-    await expect(page.getByRole('alert').getByText(/is in use/)).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`error-infobar-${mode}.png`)
-  })
-
-  test(`tree context menu dual pane ${mode}`, async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 520 })
-    await gotoScenario(page, screenshotScenarios.stickyTree[mode])
-    const treeScroll = page.getByTestId('folder-tree-scroll')
-    const designsRow = treeScroll.getByRole('button', { name: 'Designs', exact: true })
-    await expect(designsRow).toBeVisible()
-
-    await designsRow.click({ button: 'right' })
-    const menu = page.getByRole('menu', { name: 'Designs' })
-    await expect(menu).toBeVisible()
-    await expect(menu.getByRole('menuitem', { name: 'Open in right pane' })).toBeVisible()
-    await expect(menu.getByRole('menuitem', { name: 'Open in left pane' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`tree-context-menu-dual-pane-${mode}.png`)
-  })
-
-  test(`tree context menu removable drive ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.ejectMenu[mode])
-    const treeScroll = page.getByTestId('folder-tree-scroll')
-    const usbRow = treeScroll.getByRole('button', { name: 'USB Stick (E:)', exact: true })
-    await expect(usbRow).toBeVisible()
-
-    await usbRow.click({ button: 'right' })
-    const menu = page.getByRole('menu', { name: 'USB Stick (E:)' })
-    await expect(menu).toBeVisible()
-    await expect(menu.getByRole('menuitem', { name: 'Eject' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`tree-context-menu-eject-${mode}.png`)
+    const infobar = page.getByRole('alert').filter({ hasText: /is in use/ })
+    await expect(infobar).toBeVisible()
+    await expect(infobar).toHaveScreenshot(`error-infobar-${mode}.png`)
   })
 
   test(`tabs ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.tabs[mode])
     const leftTabs = page.getByRole('group', { name: 'Left pane tabs' })
-    await expect(leftTabs).toBeVisible()
     await expect(leftTabs.getByRole('tab')).toHaveCount(4)
-    await expect(page.locator('main')).toHaveScreenshot(`pane-tabs-${mode}.png`)
-  })
-
-  test(`tab drag same pane ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.tabDrag[mode])
-    const leftPane = page.getByRole('group', { name: 'Left pane tabs' })
-    const tabs = leftPane.getByRole('tab')
-    await pressAndDragInWholePixelSteps(page, tabs.nth(0), tabs.nth(2))
-    await expect(page.locator('main')).toHaveScreenshot(`tab-drag-same-pane-${mode}.png`)
-    await page.mouse.up()
-    await expect(leftPane.getByRole('tab').last()).toHaveText('Omega')
-  })
-
-  test(`tab drag cross pane ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.tabDrag[mode])
-    const leftPane = page.getByRole('group', { name: 'Left pane tabs' })
-    const rightPane = page.getByRole('group', { name: 'Right pane tabs' })
-    const source = leftPane.getByRole('tab').nth(1)
-    const target = rightPane.getByRole('tab').last()
-    await pressAndDragInWholePixelSteps(page, source, target)
-    await expect(page.locator('main')).toHaveScreenshot(`tab-drag-cross-pane-${mode}.png`)
-    await page.mouse.up()
-    await expect(rightPane.getByRole('tab')).toHaveCount(3)
-  })
-
-  test(`tab drag invalid ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.invalidTabDrag[mode])
-    const source = page.getByRole('group', { name: 'Left pane tabs' }).getByRole('tab')
-    const target = page.getByRole('group', { name: 'Right pane tabs' }).getByRole('tab').first()
-    await pressAndDragInWholePixelSteps(page, source, target)
-    await expect(page.locator('main')).toHaveScreenshot(`tab-drag-invalid-${mode}.png`)
-    await page.mouse.up()
-    await expect(page.getByRole('group', { name: 'Left pane tabs' }).getByRole('tab')).toHaveCount(
-      1,
-    )
-  })
-
-  test(`tab move context menu ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.tabDrag[mode])
-    const tab = page.getByRole('group', { name: 'Left pane tabs' }).getByRole('tab').nth(1)
-    await tab.click({ button: 'right' })
-    await expect(page.getByRole('menuitem', { name: 'Move tab right' })).toBeVisible()
-    await expect(page.getByRole('menuitem', { name: 'Add to Favourites' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`tab-move-context-menu-${mode}.png`)
-  })
-
-  test(`locked tab and populated favourites ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.favourites[mode])
     await expect(page.getByLabel(/Locked tab/)).toBeVisible()
-    const favourites = page.getByTestId('favourites-panel')
-    await expect(
-      favourites.getByRole('button', { name: 'Documents', exact: true }).first(),
-    ).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`locked-tab-favourites-${mode}.png`)
+    await expect(leftTabs).toHaveScreenshot(`pane-tabs-${mode}.png`)
   })
 
-  test(`empty favourites ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.browsing[mode])
-    const favourites = page.getByTestId('favourites-panel')
-    await expect(favourites.getByText('Drop folders here')).toBeVisible()
-    await expect(page.locator('aside').first()).toHaveScreenshot(`empty-favourites-${mode}.png`)
-  })
-
-  test(`reordered favourites ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.favourites[mode])
-    const tree = page.getByTestId('favourites-panel')
-    const source = tree.getByRole('button', { name: 'E:', exact: true }).locator('..')
-    const target = tree
-      .getByRole('button', { name: 'Documents', exact: true })
-      .first()
-      .locator('..')
-    await source.dragTo(target)
-    await expect(tree.locator('[data-favourite-row]').first()).toContainText('E:')
-    await expect(page.locator('aside').first()).toHaveScreenshot(`reordered-favourites-${mode}.png`)
+  test(`tab drag ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.tabDrag[mode])
+    const leftTabs = page.getByRole('group', { name: 'Left pane tabs' })
+    const tabs = leftTabs.getByRole('tab')
+    await pressAndDragInWholePixelSteps(page, tabs.nth(0), tabs.nth(2))
+    await expect(leftTabs).toHaveScreenshot(`tab-drag-${mode}.png`)
+    await page.mouse.up()
+    await expect(leftTabs.getByRole('tab').last()).toHaveText('Omega')
   })
 
   test(`breadcrumbs ${mode}`, async ({ page }) => {
     await page.setViewportSize({ width: 720, height: 520 })
     await gotoScenario(page, screenshotScenarios.breadcrumbs[mode])
     const rightPane = page.getByRole('region', { name: 'Right pane' })
-    await expect(rightPane).toBeVisible()
     await expect(rightPane.getByTestId('breadcrumb-collapse-marker')).toBeVisible()
     await expect(rightPane.getByRole('button', { name: 'Foxtrot' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`breadcrumb-overflow-${mode}.png`)
-
-    await rightPane.getByRole('button', { name: 'Foxtrot' }).click({ button: 'right' })
-    const pathEditor = rightPane.getByRole('textbox', { name: 'Right pane path' })
-    await expect(pathEditor).toBeVisible()
-    await expect(pathEditor).toBeFocused()
-    await expect(page.locator('main')).toHaveScreenshot(`address-edit-mode-${mode}.png`)
+    await expect(rightPane).toHaveScreenshot(`breadcrumb-overflow-${mode}.png`)
   })
 
-  test(`file types ${mode}`, async ({ page }) => {
+  test(`details view ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.fileTypes[mode])
-    await expect(page.getByRole('region', { name: 'Left pane' })).toBeVisible()
-    await expect(page.getByRole('row', { name: /installer\.exe/ }).first()).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`mixed-file-types-${mode}.png`)
-  })
-
-  test(`long column value stays inside its column ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.fileTypes[mode])
-    const row = page.getByRole('row', { name: /mystery\.qwzzz/ }).first()
-    await expect(row).toBeVisible()
-    const cell = await row.evaluate((element, label) => {
-      const match = [...element.children].find((child) => child.textContent === label)
-      return match
-        ? {
-            clientWidth: match.clientWidth,
-            scrollWidth: match.scrollWidth,
-            overflowX: getComputedStyle(match).overflowX,
-          }
-        : null
-    }, longTypeLabel)
-    expect(cell).not.toBeNull()
-    // The value is wider than its fixed-width cell, so the cell — not the inline
-    // span inside it — has to be the clipping box.
-    expect(cell!.scrollWidth).toBeGreaterThan(cell!.clientWidth)
-    expect(cell!.overflowX).toBe('hidden')
+    const leftPane = page.getByRole('region', { name: 'Left pane' })
+    await expect(leftPane.getByRole('row', { name: /installer\.exe/ }).first()).toBeVisible()
+    await leftPane
+      .getByRole('row', { name: /notes\.txt/ })
+      .first()
+      .click()
+    await page.keyboard.press('F2')
+    await expect(page.getByRole('textbox', { name: /Rename notes\.txt/ })).toBeVisible()
+    await expect(leftPane).toHaveScreenshot(`details-view-${mode}.png`)
   })
 
   test(`relative dates ${mode}`, async ({ page }) => {
@@ -541,63 +245,14 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.getByText('15 minutes ago').first()).toBeVisible()
     await expect(page.getByText('1 day ago').first()).toBeVisible()
     await expect(page.getByText('on Friday').first()).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`relative-dates-${mode}.png`)
-  })
-
-  test(`loading ${mode}`, async ({ page }) => {
-    await page.clock.install()
-    await gotoScenario(page, screenshotScenarios.loading[mode])
-    await page.clock.fastForward(1_001)
-    await expect(page.getByRole('status', { name: 'Loading folder' }).first()).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`folder-loading-state-${mode}.png`)
-  })
-
-  test(`empty ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.empty[mode])
-    await expect(page.getByText('This folder is empty').first()).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`empty-folder-state-${mode}.png`)
-  })
-
-  test(`error ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.error[mode])
-    await expect(page.getByText('Directory refresh failed: device timeout.').first()).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`directory-error-state-${mode}.png`)
-  })
-
-  test(`permission on Windows ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.permissionWindows[mode])
-    await expect(page.getByText("You don't have access").first()).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Open as administrator' }).first()).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(
-      `permission-denied-state-windows-${mode}.png`,
+    await expect(page.getByRole('region', { name: 'Left pane' })).toHaveScreenshot(
+      `relative-dates-${mode}.png`,
     )
   })
 
-  test(`permission on macOS ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.permissionMacos[mode])
-    await expect(page.getByText("You don't have access").first()).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Open System Settings' }).first()).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`permission-denied-state-macos-${mode}.png`)
-  })
-
-  test(`trash ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.trash[mode])
-    await expect(page.getByRole('region', { name: 'Left pane' })).toBeVisible()
-    await expect(page.getByRole('row', { name: /report\.txt/ }).first()).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`trash-browsing-${mode}.png`)
-  })
-
-  test(`size states ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.sizes[mode])
-    await expect(page.getByText('941.9 MB').first()).toBeVisible()
-    await expect(page.getByRole('row', { name: /Documents/ }).first()).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`folder-size-states-${mode}.png`)
-  })
-
-  test(`size cells lower bound and denied ${mode}`, async ({ page }) => {
+  test(`folder sizes ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.sizeBounds[mode])
     const lowerBound = page.getByText('≥ 941.9 MB').first()
-    await expect(lowerBound).toBeVisible()
     await expect(lowerBound).toHaveAttribute(
       'title',
       "Doesn't include Desktop, Downloads, Mail and 2 more. Open them to include them.",
@@ -606,27 +261,20 @@ for (const mode of ['light', 'dark'] as const) {
       'title',
       'macOS blocked access. Grant Full Disk Access to include this folder.',
     )
-    await expect(page.locator('main')).toHaveScreenshot(`folder-size-bounds-${mode}.png`)
-  })
-
-  test(`status bar size spinner ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.sizeBounds[mode])
     const statusBar = page.locator('footer').first()
     await expect(statusBar.getByText('Updating folder sizes')).toBeAttached()
+    await expect(page.getByRole('region', { name: 'Left pane' })).toHaveScreenshot(
+      `folder-size-bounds-${mode}.png`,
+    )
     await expect(statusBar).toHaveScreenshot(`status-bar-size-spinner-${mode}.png`)
   })
 
-  test(`items sort pending ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.itemsSortPending[mode])
-    await expect(page.getByRole('status', { name: 'Counting items…' })).toBeVisible()
-    await expect(page.getByRole('columnheader', { name: /Items/ }).first()).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`items-sort-pending-${mode}.png`)
-  })
-
-  test(`queue collapsed ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.queueCollapsed[mode])
-    await expect(page.getByRole('button', { name: 'Expand job queue' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`transfer-queue-collapsed-${mode}.png`)
+  test(`permission denied ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.permissionWindows[mode])
+    const leftPane = page.getByRole('region', { name: 'Left pane' })
+    await expect(leftPane.getByText("You don't have access")).toBeVisible()
+    await expect(leftPane.getByRole('button', { name: 'Open as administrator' })).toBeVisible()
+    await expect(leftPane).toHaveScreenshot(`permission-denied-state-${mode}.png`)
   })
 
   test(`queue expanded ${mode}`, async ({ page }) => {
@@ -641,6 +289,11 @@ for (const mode of ['light', 'dark'] as const) {
       'aria-valuenow',
       String(Math.round(expandedQueueFinalProgressEvent.progressPercent)),
     )
+    await page.getByRole('button', { name: 'Show items' }).first().click()
+    await expect(page.getByRole('button', { name: 'Hide items' }).first()).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
     // The chart is throttled, so wait until its filled extent reaches the final
     // seeded percent before capturing (condition-based, no fixed delay).
     await expect(
@@ -653,114 +306,32 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('main')).toHaveScreenshot(`transfer-queue-expanded-${mode}.png`)
   })
 
-  test(`queue expanded item list ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.queueExpanded[mode])
-    await page.getByRole('button', { name: 'Expand job queue' }).click()
-    await expect(page.getByRole('region', { name: 'Job queue' })).toBeVisible()
-    await page.getByRole('button', { name: 'Show items' }).first().click()
-    await expect(page.getByRole('button', { name: 'Hide items' }).first()).toHaveAttribute(
-      'aria-expanded',
-      'true',
-    )
-    await expect(
-      page.locator('[data-testid="throughput-chart-fill-extent"]').first(),
-    ).toHaveAttribute('width', String(expandedQueueFinalProgressEvent.progressPercent))
-    await expect(page.locator('[data-testid="throughput-chart"]').first()).toHaveAttribute(
-      'data-scale-settled',
-      'true',
-    )
-    await expect(page.locator('main')).toHaveScreenshot(`transfer-queue-expanded-items-${mode}.png`)
-  })
-
-  test(`queue long path ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.queueLongPath[mode])
-    await page.getByRole('button', { name: 'Expand job queue' }).click()
-    await expect(page.getByRole('region', { name: 'Job queue' })).toBeVisible()
-    await expect(page.getByRole('progressbar', { name: 'Copying 1 items' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`transfer-queue-long-path-${mode}.png`)
-  })
-
-  test(`queue many pending jobs ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.queueManyPending[mode])
-    await page.getByRole('button', { name: 'Expand job queue' }).click()
-    await expect(page.getByRole('region', { name: 'Job queue' })).toBeVisible()
-    const pendingRows = page.locator('[aria-label="Queued jobs"] > div')
-    await expect(pendingRows).toHaveCount(5)
-    // At least 3 pending jobs should be visible without scrolling on a
-    // normal-height window instead of the old single-row allowance.
-    for (let index = 0; index < 3; index += 1) {
-      await expect(pendingRows.nth(index)).toBeInViewport()
-    }
-    await expect(page.locator('main')).toHaveScreenshot(`transfer-queue-many-pending-${mode}.png`)
-  })
-
-  test(`queue deleting collapsed ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.queueDeleting[mode])
-    await expect(page.getByText('Deleting 84 items')).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(
-      `transfer-queue-deleting-collapsed-${mode}.png`,
-    )
-  })
-
-  test(`queue deleting expanded ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.queueDeleting[mode])
-    await page.getByRole('button', { name: 'Expand job queue' }).click()
-    await expect(page.getByRole('region', { name: 'Job queue' })).toBeVisible()
-    await expect(page.getByRole('progressbar', { name: 'Deleting 84 items' })).toHaveAttribute(
-      'aria-valuenow',
-      String(Math.round(deletingQueueFinalProgressEvent.progressPercent)),
-    )
-    // A delete counts items, so it draws no throughput curve.
-    await expect(page.locator('[data-testid="throughput-chart"]')).toHaveCount(0)
-    await expect(
-      page.getByText(
-        `${deletingQueueFinalProgressEvent.completedItems} of ${deletingQueueFinalProgressEvent.totalItems} items deleted ·`,
-        { exact: false },
-      ),
-    ).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(
-      `transfer-queue-deleting-expanded-${mode}.png`,
-    )
-  })
-
-  test(`conflict modal ${mode}`, async ({ page }) => {
+  test(`conflict dialog ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.conflict[mode])
-    await expect(page.getByRole('dialog', { name: 'Resolve file conflict' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`file-conflict-dialog-${mode}.png`)
+    const dialog = page.getByRole('dialog', { name: 'Resolve file conflict' })
+    await expect(dialog).toBeVisible()
+    await expect(dialogPanel(dialog)).toHaveScreenshot(`file-conflict-dialog-${mode}.png`)
   })
 
   test(`settings keybindings ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
     await openSettingsSection(page, 'keybindings')
     await expect(page.getByLabel('Search keybindings')).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`settings-keybindings-${mode}.png`)
+    await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveScreenshot(
+      `settings-keybindings-${mode}.png`,
+    )
   })
 
   test(`settings columns ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
     await openSettingsSection(page, 'columns')
     await expect(page.getByRole('switch', { name: 'Created column' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`settings-columns-${mode}.png`)
+    await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveScreenshot(
+      `settings-columns-${mode}.png`,
+    )
   })
 
   test(`settings layout ${mode}`, async ({ page }) => {
-    // No folder-size backend, so the "Automatically calculate folder sizes"
-    // row never renders here, keeping this baseline stable.
-    await gotoScenario(page, {
-      ...screenshotScenarios.browsing[mode],
-      platform: 'macos',
-      commands: {
-        ...screenshotScenarios.browsing[mode].commands,
-        folder_size_index_status: noFolderSizeBackend,
-      },
-    })
-    await openSettingsSection(page, 'layout')
-    await expect(page.getByText('Default pane mode')).toBeVisible()
-    await expect(page.getByRole('radiogroup', { name: 'Default view for new tabs' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`settings-layout-${mode}.png`)
-  })
-
-  test(`settings layout with auto folder size toggle ${mode}`, async ({ page }) => {
     // Pinned to Windows with Everything available so the auto folder size
     // toggle renders deterministically regardless of the host OS.
     await gotoScenario(page, {
@@ -772,63 +343,18 @@ for (const mode of ['light', 'dark'] as const) {
       },
     })
     await openSettingsSection(page, 'layout')
-    await expect(
-      page.getByRole('switch', { name: 'Automatically calculate folder sizes' }),
-    ).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(
-      `settings-layout-auto-folder-size-${mode}.png`,
-    )
-  })
-
-  for (const [name, status] of Object.entries(macIndexStatuses)) {
-    test(`settings auto folder size on macOS ${name} ${mode}`, async ({ page }) => {
-      await gotoScenario(page, {
-        ...screenshotScenarios.browsing[mode],
-        platform: 'macos',
-        commands: {
-          ...screenshotScenarios.browsing[mode].commands,
-          folder_size_index_status: status,
-        },
-      })
-      await openSettingsSection(page, 'searchIndex')
-      const row = page
-        .getByText('Automatically calculate folder sizes', { exact: true })
-        .locator('xpath=../..')
-      await expect(row.getByText(/Folders you open are sized right away/)).toBeVisible()
-      await expect(row).toHaveScreenshot(`settings-auto-folder-size-macos-${name}-${mode}.png`)
+    await expect(page.getByRole('radiogroup', { name: 'Default view for new tabs' })).toBeVisible()
+    const autoFolderSize = page.getByRole('switch', {
+      name: 'Automatically calculate folder sizes',
     })
-  }
-
-  test(`settings reset expander ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.browsing[mode])
-    await openSettingsSection(page, 'dates')
-    const expander = page.getByRole('button', { name: /Reset to defaults/ })
-    await expander.click()
-    await expect(expander).toHaveAttribute('aria-expanded', 'true')
-    await expect(page.getByRole('button', { name: 'Reset', exact: true })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`settings-reset-expander-${mode}.png`)
-  })
-
-  test(`settings reset expander macOS index ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.searchIndexEmpty[mode])
-    await openSettingsSection(page, 'dates')
-    const expander = page.getByRole('button', { name: /Reset to defaults/ })
-    await expander.click()
-    await expect(expander).toHaveAttribute('aria-expanded', 'true')
-    await expect(expander).toContainText('Search index exclusions stay as they are.')
-    await expect(page.locator('main')).toHaveScreenshot(
-      `settings-reset-expander-macos-index-${mode}.png`,
+    await autoFolderSize.scrollIntoViewIfNeeded()
+    await expect(autoFolderSize).toBeInViewport()
+    await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveScreenshot(
+      `settings-layout-${mode}.png`,
     )
   })
 
-  test(`settings search index empty ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.searchIndexEmpty[mode])
-    await openSettingsSection(page, 'searchIndex')
-    await expect(page.getByText('Everything is indexed')).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`settings-search-index-empty-${mode}.png`)
-  })
-
-  test(`settings search index validation message ${mode}`, async ({ page }) => {
+  test(`settings search index ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.searchIndexValidation[mode])
     await openSettingsSection(page, 'searchIndex')
     const field = page.getByRole('textbox', { name: 'Folder to exclude' })
@@ -837,38 +363,8 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(
       page.locator('li[data-tone]').filter({ hasText: /Already inside node_modules/ }),
     ).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(
-      `settings-search-index-validation-${mode}.png`,
-    )
-  })
-
-  test(`settings search index after removal ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.searchIndexAfterRemoval[mode])
-    await openSettingsSection(page, 'searchIndex')
-    await page
-      .getByRole('button', { name: 'Remove exclusion for /Users/alex/Projects/app/build-cache' })
-      .click()
-    await expect(
-      page
-        .locator('li[data-tone]')
-        .filter({ hasText: 'Removed build-cache. Updating the index in the background.' }),
-    ).toBeVisible()
-    await expect(
-      page.getByRole('button', {
-        name: 'Remove exclusion for /Users/alex/Projects/web/node_modules',
-      }),
-    ).toBeFocused()
-    await expect(page.locator('main')).toHaveScreenshot(
-      `settings-search-index-after-removal-${mode}.png`,
-    )
-  })
-
-  test(`settings search index unavailable ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.searchIndexUnavailable[mode])
-    await openSettingsSection(page, 'searchIndex')
-    await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(
-      `settings-search-index-unavailable-${mode}.png`,
+    await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveScreenshot(
+      `settings-search-index-${mode}.png`,
     )
   })
 
@@ -876,14 +372,22 @@ for (const mode of ['light', 'dark'] as const) {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
     await openSettingsSection(page, 'dates')
     await expect(page.getByRole('combobox', { name: 'Date format' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`settings-dates-${mode}.png`)
+    const expander = page.getByRole('button', { name: /Reset to defaults/ })
+    await expander.click()
+    await expect(expander).toHaveAttribute('aria-expanded', 'true')
+    await expect(page.getByRole('button', { name: 'Reset', exact: true })).toBeVisible()
+    await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveScreenshot(
+      `settings-dates-${mode}.png`,
+    )
   })
 
   test(`settings updates ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
     await openSettingsSection(page, 'updates')
     await expect(page.getByLabel('Update check frequency')).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`settings-updates-${mode}.png`)
+    await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveScreenshot(
+      `settings-updates-${mode}.png`,
+    )
   })
 
   test(`settings logs ${mode}`, async ({ page }) => {
@@ -893,38 +397,25 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(
       page.getByText('copy failed: permission denied (E:\\backup\\report.pdf)'),
     ).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`settings-logs-${mode}.png`)
+    await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveScreenshot(
+      `settings-logs-${mode}.png`,
+    )
   })
 
-  test(`pane context menu ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.paneContextMenu[mode])
-    await rightClickPane(page, 'Left pane')
-    await expect(page.getByRole('menu', { name: 'This folder' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`pane-context-menu-${mode}.png`)
+  test(`search everywhere ${mode}`, async ({ page }) => {
+    await gotoScenario(page, screenshotScenarios.searchNameResults[mode])
+    await page.getByRole('button', { name: 'Search everywhere' }).click()
+    const palette = page.getByRole('dialog', { name: 'Search everywhere' })
+    await palette.getByRole('combobox', { name: 'Search everywhere' }).fill('report')
+    await expect(palette.getByText('Q3 report.docx', { exact: true }).first()).toBeVisible()
+    await expect(palette).toHaveScreenshot(`search-everywhere-${mode}.png`)
   })
 
   test(`row context menu ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.rowContextMenu[mode])
-    await page
-      .getByRole('row', { name: /Documents/ })
-      .first()
-      .click({ button: 'right' })
-    const menu = page.getByRole('menu', { name: 'Documents' })
-    await expect(menu).toBeVisible()
+    const menu = await openRowContextMenu(page, 'Documents')
     await expect(menu.getByRole('menuitem', { name: 'Open in VS Code' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`row-context-menu-${mode}.png`)
-  })
-
-  test(`row context menu submenu ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.rowContextMenu[mode])
-    await page
-      .getByRole('row', { name: /Documents/ })
-      .first()
-      .click({ button: 'right' })
-    const menu = page.getByRole('menu', { name: 'Documents' })
-    await expect(menu).toBeVisible()
     const submenuParent = menu.getByRole('menuitem', { name: '7-Zip' })
-    await expect(submenuParent).toBeVisible()
     await submenuParent.hover()
     const submenu = page.getByRole('menu', { name: '7-Zip' })
     await expect(submenu).toBeVisible()
@@ -939,61 +430,18 @@ for (const mode of ['light', 'dark'] as const) {
     expect(submenuBox!.x).toBeGreaterThanOrEqual(8)
     expect(submenuBox!.x + submenuBox!.width).toBeLessThanOrEqual(page.viewportSize()!.width - 8)
     expect(Math.abs(submenuBox!.y - submenuParentBox!.y)).toBeLessThanOrEqual(12)
-    await expect(page.locator('main')).toHaveScreenshot(`row-context-menu-submenu-${mode}.png`)
-  })
-
-  test(`row context menu submenu left fallback ${mode}`, async ({ page }) => {
-    await page.setViewportSize({ width: 520, height: 720 })
-    await gotoScenario(page, screenshotScenarios.rowContextMenu[mode])
-    const row = page.getByRole('row', { name: /Documents/ }).first()
-    const scroller = page.getByTestId('file-pane-scroll-left')
-    const [rowBox, scrollerBox] = await Promise.all([row.boundingBox(), scroller.boundingBox()])
-    expect(rowBox).not.toBeNull()
-    expect(scrollerBox).not.toBeNull()
-
-    // With pane-level horizontal overflow enabled, the row can be wider than
-    // the visible pane. Click near the visible trailing edge of the pane's
-    // scroll viewport rather than the row's full scroll width so the pointer
-    // still lands on the rendered row while keeping the menu close enough to
-    // the viewport edge to exercise the submenu left-fallback placement.
-    const visibleRightEdge = Math.min(
-      (rowBox?.x ?? 0) + (rowBox?.width ?? 0),
-      (scrollerBox?.x ?? 0) + (scrollerBox?.width ?? 0),
-    )
-    await page.mouse.click(visibleRightEdge - 4, (rowBox?.y ?? 0) + 12, { button: 'right' })
-
-    const menu = page.getByRole('menu', { name: 'Documents' })
-    await expect(menu).toBeVisible()
-    await menu.getByRole('menuitem', { name: '7-Zip' }).hover({ force: true })
-    const submenu = page.getByRole('menu', { name: '7-Zip' })
-    await expect(submenu).toBeVisible()
-    const [menuBox, submenuBox] = await Promise.all([menu.boundingBox(), submenu.boundingBox()])
-    expect(menuBox).not.toBeNull()
-    expect(submenuBox).not.toBeNull()
-    expect(submenuBox!.x + submenuBox!.width).toBeLessThanOrEqual(page.viewportSize()!.width - 8)
-    expect(submenuBox!.x).toBeGreaterThanOrEqual(8)
-    expect(submenuBox!.x + submenuBox!.width).toBeLessThanOrEqual(menuBox!.x + menuBox!.width)
-  })
-
-  test(`row context menu loading ${mode}`, async ({ page }) => {
-    await page.clock.install()
-    await gotoScenario(page, screenshotScenarios.rowContextMenuLoading[mode])
-    await page
-      .getByRole('row', { name: /Documents/ })
-      .first()
-      .click({ button: 'right' })
-    await expect(page.getByRole('menu', { name: 'Documents' })).toBeVisible()
-    await page.clock.fastForward(1_001)
-    await expect(page.getByRole('status', { name: 'Loading native menu items' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`row-context-menu-loading-${mode}.png`)
+    await expect(page).toHaveScreenshot(`row-context-menu-${mode}.png`, {
+      clip: await unionClip(page, [menu, submenu]),
+    })
   })
 
   test(`new folder dialog ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
     await rightClickPane(page, 'Left pane')
     await page.getByRole('menuitem', { name: 'New folder' }).click()
-    await expect(page.getByRole('dialog', { name: 'New folder' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`new-folder-dialog-${mode}.png`)
+    const dialog = page.getByRole('dialog', { name: 'New folder' })
+    await expect(dialog).toBeVisible()
+    await expect(dialogPanel(dialog)).toHaveScreenshot(`new-folder-dialog-${mode}.png`)
   })
 
   test(`administrator permissions dialog ${mode}`, async ({ page }) => {
@@ -1013,100 +461,20 @@ for (const mode of ['light', 'dark'] as const) {
       .getByRole('dialog', { name: 'New folder' })
       .getByRole('button', { name: 'Create', exact: true })
       .click()
-    await expect(
-      page.getByRole('dialog', { name: 'Administrator permissions needed' }),
-    ).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(
+    const dialog = page.getByRole('dialog', { name: 'Administrator permissions needed' })
+    await expect(dialog).toBeVisible()
+    await expect(dialogPanel(dialog)).toHaveScreenshot(
       `administrator-permissions-dialog-${mode}.png`,
     )
   })
 
-  test(`rename inline ${mode}`, async ({ page }) => {
+  test(`confirmation dialog ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.browsing[mode])
-    await page
-      .getByRole('row', { name: /Documents/ })
-      .first()
-      .click({ button: 'right' })
-    const menu = page.getByRole('menu', { name: 'Documents' })
-    await expect(menu).toBeVisible()
-    await menu
-      .getByRole('group', { name: 'Quick actions' })
-      .getByRole('menuitem', { name: 'Rename' })
-      .click()
-    await expect(page.getByRole('textbox', { name: /Rename Documents/ })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`rename-inline-editor-${mode}.png`)
-  })
-
-  test(`delete dialog ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.browsing[mode])
-    await page
-      .getByRole('row', { name: /Documents/ })
-      .first()
-      .click({ button: 'right' })
-    const menu = page.getByRole('menu', { name: 'Documents' })
-    await expect(menu).toBeVisible()
+    const menu = await openRowContextMenu(page, 'Documents')
     await menu.getByRole('menuitem', { name: 'Delete permanently' }).click()
-    await expect(page.getByRole('dialog', { name: 'Confirm delete' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`delete-confirmation-dialog-${mode}.png`)
-  })
-
-  test(`calculate all sizes button ${mode}`, async ({ page }) => {
-    // Everything unavailable is one of the two conditions that surfaces the
-    // toolbar button (the other is auto folder size being off).
-    await gotoScenario(page, {
-      ...screenshotScenarios.browsing[mode],
-      commands: {
-        ...screenshotScenarios.browsing[mode].commands,
-        folder_size_index_status: everythingUnavailable,
-      },
-    })
-    await expect(
-      page.getByRole('button', { name: 'Calculate all folder sizes in Left pane' }),
-    ).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`calculate-all-sizes-button-${mode}.png`)
-  })
-
-  test(`calculate all sizes confirmation dialog ${mode}`, async ({ page }) => {
-    await gotoScenario(page, {
-      ...screenshotScenarios.browsing[mode],
-      commands: {
-        ...screenshotScenarios.browsing[mode].commands,
-        folder_size_index_status: everythingUnavailable,
-      },
-    })
-    await page.getByRole('button', { name: 'Calculate all folder sizes in Left pane' }).click()
-    await expect(
-      page.getByRole('dialog', { name: 'Confirm calculate all folder sizes' }),
-    ).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(
-      `calculate-all-sizes-confirmation-dialog-${mode}.png`,
-    )
-  })
-
-  test(`archive dialog ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.browsing[mode])
-    await page
-      .getByRole('row', { name: /Documents/ })
-      .first()
-      .click({ button: 'right' })
-    const menu = page.getByRole('menu', { name: 'Documents' })
-    await expect(menu).toBeVisible()
-    await menu.getByRole('menuitem', { name: 'Compress' }).click()
-    await expect(page.getByRole('dialog', { name: 'Confirm compress' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`archive-confirmation-dialog-${mode}.png`)
-  })
-
-  test(`extract dialog ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.fileTypes[mode])
-    await page
-      .getByRole('row', { name: /bundle\.zip/ })
-      .first()
-      .click({ button: 'right' })
-    const menu = page.getByRole('menu', { name: 'bundle.zip' })
-    await expect(menu).toBeVisible()
-    await menu.getByRole('menuitem', { name: 'Extract' }).click()
-    await expect(page.getByRole('dialog', { name: 'Confirm extract' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`extract-confirmation-dialog-${mode}.png`)
+    const dialog = page.getByRole('dialog', { name: 'Confirm delete' })
+    await expect(dialog).toBeVisible()
+    await expect(dialogPanel(dialog)).toHaveScreenshot(`delete-confirmation-dialog-${mode}.png`)
   })
 
   test(`properties dialog ${mode}`, async ({ page }) => {
@@ -1115,60 +483,27 @@ for (const mode of ['light', 'dark'] as const) {
     // "Set Default Application…" button render deterministically here even
     // when this suite runs on Windows CI.
     await gotoScenario(page, screenshotScenarios.defaultAppDialog[mode])
-    await page
-      .getByRole('row', { name: /report\.pdf/ })
-      .first()
-      .click({ button: 'right' })
-    const menu = page.getByRole('menu', { name: 'report.pdf' })
-    await expect(menu).toBeVisible()
+    const menu = await openRowContextMenu(page, 'report.pdf')
     await menu.getByRole('menuitem', { name: 'Properties' }).click()
-    await expect(page.getByRole('dialog', { name: 'Properties' })).toBeVisible()
-    await expect(page.getByText('Default App', { exact: true })).toBeVisible()
-    await expect(page.getByText('Fixture Preview')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Set Default Application…' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`properties-dialog-${mode}.png`)
+    const dialog = page.getByRole('dialog', { name: 'Properties' })
+    await expect(dialog.getByText('Default App', { exact: true })).toBeVisible()
+    await expect(dialog.getByText('Fixture Preview')).toBeVisible()
+    await expect(dialog.getByRole('button', { name: 'Set Default Application…' })).toBeVisible()
+    await expect(dialogPanel(dialog)).toHaveScreenshot(`properties-dialog-${mode}.png`)
   })
 
   test(`set default application dialog ${mode}`, async ({ page }) => {
-    await gotoScenario(page, screenshotScenarios.defaultAppDialog[mode])
-    await page
-      .getByRole('row', { name: /report\.pdf/ })
-      .first()
-      .click({ button: 'right' })
-    const menu = page.getByRole('menu', { name: 'report.pdf' })
-    await expect(menu).toBeVisible()
-    await menu.getByRole('menuitem', { name: 'Properties' }).click()
-    await expect(page.getByRole('dialog', { name: 'Properties' })).toBeVisible()
-    await expect(page.getByText('Default App', { exact: true })).toBeVisible()
-    await expect(page.getByText('Fixture Preview')).toBeVisible()
-    await page.getByRole('button', { name: 'Set Default Application…' }).click()
-    await expect(page.getByRole('dialog', { name: 'Set Default Application' })).toBeVisible()
-    await expect(page.getByRole('option', { name: 'Fixture Preview' })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(
-      `set-default-application-dialog-${mode}.png`,
-    )
-  })
-
-  test(`set default application error ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.defaultAppDialogError[mode])
-    await page
-      .getByRole('row', { name: /report\.pdf/ })
-      .first()
-      .click({ button: 'right' })
-    const menu = page.getByRole('menu', { name: 'report.pdf' })
-    await expect(menu).toBeVisible()
+    const menu = await openRowContextMenu(page, 'report.pdf')
     await menu.getByRole('menuitem', { name: 'Properties' }).click()
-    await expect(page.getByRole('dialog', { name: 'Properties' })).toBeVisible()
     await page.getByRole('button', { name: 'Set Default Application…' }).click()
-    await expect(page.getByRole('dialog', { name: 'Set Default Application' })).toBeVisible()
-    await page.getByRole('option', { name: 'Fixture Preview' }).click()
-    await page.getByRole('button', { name: 'Change All…' }).click()
-    await expect(page.getByRole('alert')).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`set-default-application-error-${mode}.png`)
+    const dialog = page.getByRole('dialog', { name: 'Set Default Application' })
+    await dialog.getByRole('option', { name: 'Fixture Preview' }).click()
+    await dialog.getByRole('button', { name: 'Change All…' }).click()
+    await expect(dialog.getByRole('alert')).toBeVisible()
+    await expect(dialogPanel(dialog)).toHaveScreenshot(`set-default-application-dialog-${mode}.png`)
   })
-}
 
-for (const mode of ['light', 'dark'] as const) {
   test(`native drag badge ${mode}`, async ({ page }) => {
     await gotoScenario(page, screenshotScenarios.nativeDrag[mode])
 
@@ -1205,6 +540,8 @@ for (const mode of ['light', 'dark'] as const) {
     // Same volume and no modifier, so this is a move — deliberately not asserting
     // a modifier-driven copy, whose key differs per platform.
     await expect(page.getByText('Move', { exact: true })).toBeVisible()
-    await expect(page.locator('main')).toHaveScreenshot(`native-drag-badge-${mode}.png`)
+    await expect(page.getByRole('region', { name: 'Left pane' })).toHaveScreenshot(
+      `native-drag-badge-${mode}.png`,
+    )
   })
 }

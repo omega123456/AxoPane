@@ -6,10 +6,7 @@ const baseURL = `http://127.0.0.1:${port}`
 
 const availableCpus = Math.max(1, os.availableParallelism?.() ?? os.cpus().length)
 const isCI = !!process.env.CI
-// Cap local concurrency at 2 workers (1 on CI) so parallel webServer-backed
-// runs don't oversubscribe the machine. Without this, fullyParallel spins up
-// one worker per CPU core.
-const workers = isCI ? 1 : Math.min(4, availableCpus)
+const workers = Math.min(isCI ? 2 : 9, availableCpus)
 
 export default defineConfig({
   testDir: './e2e',

@@ -431,6 +431,15 @@ function favouritesTreeScenario(config: Partial<AppConfig>): {
 }
 
 export const screenshotScenarios = {
+  // The full-window baseline: Everything down on Windows (banner plus the
+  // calculate-all toolbar button) with a running job in the collapsed queue.
+  fullApp: scenarioByTheme(
+    {
+      queue_snapshot: expandedQueueSnapshot,
+      folder_size_index_status: everythingUnavailable,
+    },
+    'windows',
+  ),
   browsing: {
     light: {
       commands: {
@@ -468,11 +477,6 @@ export const screenshotScenarios = {
       },
     },
   },
-  iconsRename: scenarioByTheme({
-    load_session: iconsSession,
-    list_dir: paneViewListDir,
-    queue_snapshot: emptyQueueSnapshot,
-  }),
   thumbnailsFallback: {
     light: {
       commands: {
@@ -498,26 +502,6 @@ export const screenshotScenarios = {
     list_dir: paneViewListDir,
     queue_snapshot: emptyQueueSnapshot,
   }),
-  thumbnailsRename: {
-    light: {
-      commands: {
-        load_config: lightConfig,
-        load_session: thumbnailsSession,
-        list_dir: paneViewListDir,
-        queue_snapshot: emptyQueueSnapshot,
-      },
-      thumbnailFixture,
-    },
-    dark: {
-      commands: {
-        load_config: darkConfig,
-        load_session: thumbnailsSession,
-        list_dir: paneViewListDir,
-        queue_snapshot: emptyQueueSnapshot,
-      },
-      thumbnailFixture,
-    },
-  },
   stickyTree: {
     light: {
       commands: {
@@ -533,6 +517,28 @@ export const screenshotScenarios = {
         load_config: darkConfig,
         load_session: stickyTreeSession,
         list_dir: stickyTreeListDir,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+      treeChildrenByPath: stickyTreeChildrenByPath,
+    },
+  },
+  folderTree: {
+    light: {
+      commands: {
+        load_config: lightConfig,
+        load_session: stickyTreeSession,
+        list_dir: stickyTreeListDir,
+        list_volumes: capacityLevelVolumes,
+        queue_snapshot: emptyQueueSnapshot,
+      },
+      treeChildrenByPath: stickyTreeChildrenByPath,
+    },
+    dark: {
+      commands: {
+        load_config: darkConfig,
+        load_session: stickyTreeSession,
+        list_dir: stickyTreeListDir,
+        list_volumes: capacityLevelVolumes,
         queue_snapshot: emptyQueueSnapshot,
       },
       treeChildrenByPath: stickyTreeChildrenByPath,
@@ -624,9 +630,8 @@ export const screenshotScenarios = {
     favourites: overflowFavourites.slice(0, 3),
     favouritesCollapsed: true,
   }),
-  favouritesOverflow: favouritesTreeScenario({ favourites: overflowFavourites }),
-  favouritesRenamed: favouritesTreeScenario({
-    favourites: overflowFavourites.slice(0, 4),
+  favouritesPanel: favouritesTreeScenario({
+    favourites: overflowFavourites,
     favouriteNames: { 'D:\\projects': 'Code' },
   }),
   breadcrumbs: {
@@ -1076,10 +1081,6 @@ export const screenshotScenarios = {
     },
     'macos',
   ),
-  capacityLevels: scenarioByTheme({
-    queue_snapshot: emptyQueueSnapshot,
-    list_volumes: capacityLevelVolumes,
-  }),
   everythingBanner: scenarioByTheme(
     {
       queue_snapshot: emptyQueueSnapshot,
