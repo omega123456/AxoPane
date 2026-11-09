@@ -3,15 +3,17 @@ use std::io::{self, BufWriter, Seek, SeekFrom, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, PoisonError};
 
 use memmap2::Mmap;
 
 use super::block::{self, BlockSpan, NamesCorrupt, StoredBlock};
+use super::codec::NamesEncoder;
 use super::{is_packed_list_or_empty, NamesScratch};
 use crate::size::index::persist::{self, Reader, TempFile};
 
 pub const NAMES_FILE: &str = "file-names.bin";
-pub const NAMES_FORMAT_VERSION: u32 = 1;
+pub const NAMES_FORMAT_VERSION: u32 = 2;
 pub const SPILL_SUFFIX: &str = ".building";
 
 const MAGIC: &[u8; 8] = b"AXONAME\0";
@@ -341,6 +343,7 @@ pub struct SpillFile {
     file: File,
     path: PathBuf,
     length: AtomicU64,
+    encoder: Mutex<NamesEncoder>,
 }
 
 impl SpillFile {
@@ -358,6 +361,7 @@ impl SpillFile {
             file,
             path: path.to_path_buf(),
             length: AtomicU64::new(0),
+            encoder: Mutex::new(NamesEncoder::new()?),
         })
     }
 
@@ -371,7 +375,7 @@ impl SpillFile {
 
     pub fn append(&self, names: &[u8]) -> io::Result<SpillLocation> {
         let mut chunk = (names.len() as u32).to_le_bytes().to_vec();
-        chunk.extend_from_slice(&lz4_flex::block::compress(names));
+        chunk.extend_from_slice(&self.compress(names)?);
         (&self.file).write_all(&chunk)?;
         let offset = self.length.fetch_add(chunk.len() as u64, Ordering::AcqRel);
         Ok(SpillLocation {
@@ -380,12 +384,17 @@ impl SpillFile {
         })
     }
 
+    fn compress(&self, names: &[u8]) -> io::Result<Vec<u8>> {
+        let mut encoder = self.encoder.lock().unwrap_or_else(PoisonError::into_inner);
+        encoder.compress(names)
+    }
+
     pub fn read<'scratch>(
         &self,
         location: SpillLocation,
         scratch: &'scratch mut NamesScratch,
     ) -> Result<&'scratch [u8], NamesCorrupt> {
-        let NamesScratch { compressed, raw } = scratch;
+        let NamesScratch { compressed, decode } = scratch;
         compressed.clear();
         compressed.resize(location.length as usize, 0);
         read_exact_at(&self.file, compressed, location.offset).map_err(|_| NamesCorrupt)?;
@@ -396,11 +405,10 @@ impl SpillFile {
         if raw_len > MAX_BLOCK_RAW_BYTES {
             return Err(NamesCorrupt);
         }
-        raw.clear();
-        raw.resize(raw_len as usize, 0);
-        let written = lz4_flex::block::decompress_into(body, raw).map_err(|_| NamesCorrupt)?;
-        let complete = written == raw.len() && is_packed_list_or_empty(raw);
-        complete.then_some(raw.as_slice()).ok_or(NamesCorrupt)
+        let raw = decode.decompress(body, raw_len as usize)?;
+        is_packed_list_or_empty(raw)
+            .then_some(raw)
+            .ok_or(NamesCorrupt)
     }
 
     pub fn close_and_remove(self) -> io::Result<()> {

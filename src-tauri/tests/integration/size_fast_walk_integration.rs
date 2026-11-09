@@ -335,18 +335,16 @@ fn single_directory_listing_reports_bytes_subdirs_and_denial() {
     assert!(!by_path.contains_key(&root.join("a/b/c")));
 }
 
-fn sorted_names(names: Option<&PackedNames>) -> Vec<String> {
-    let mut listed: Vec<String> = names
+fn listed_names(names: Option<&PackedNames>) -> Vec<String> {
+    names
         .expect("names collected")
         .names()
         .map(|name| String::from_utf8_lossy(name).into_owned())
-        .collect();
-    listed.sort();
-    listed
+        .collect()
 }
 
 #[test]
-fn file_names_are_collected_only_for_index_walks_and_never_list_symlinks() {
+fn file_names_are_collected_sorted_only_for_index_walks_and_never_list_symlinks() {
     let fixture = tempdir().expect("temp dir");
     let root = fixture.path();
     seed_tree(root);
@@ -364,26 +362,27 @@ fn file_names_are_collected_only_for_index_walks_and_never_list_symlinks() {
     collecting.collect_file_names = true;
     let by_path = records(root, &collecting);
     assert_eq!(
-        sorted_names(by_path[root].file_names.as_ref()),
+        listed_names(by_path[root].file_names.as_ref()),
         [".hidden", "top.bin"],
         "symlinks to files and folders are not listed"
     );
     assert_eq!(
-        sorted_names(by_path[&root.join("a")].file_names.as_ref()),
+        listed_names(by_path[&root.join("a")].file_names.as_ref()),
         ["one.bin", "zero.bin"]
     );
-    assert!(sorted_names(by_path[&root.join("empty")].file_names.as_ref()).is_empty());
-    let wide = sorted_names(by_path[&root.join("wide")].file_names.as_ref());
+    assert!(listed_names(by_path[&root.join("empty")].file_names.as_ref()).is_empty());
+    let wide = listed_names(by_path[&root.join("wide")].file_names.as_ref());
     assert_eq!(
         wide.len(),
         WIDE_FILES,
         "every buffer fill contributes names"
     );
     assert_eq!(wide.first().map(String::as_str), Some("file-00.bin"));
+    assert!(wide.is_sorted(), "names arrive sorted within their folder");
 
     let listing = list_dir(&root.join("a"), &collecting).expect("listing");
     assert_eq!(
-        sorted_names(listing.file_names.as_ref()),
+        listed_names(listing.file_names.as_ref()),
         ["one.bin", "zero.bin"]
     );
     assert_eq!(listing.file_count, 2);

@@ -123,6 +123,20 @@ fn packed_names_keep_hidden_and_unicode_names_and_skip_impossible_ones() {
 }
 
 #[test]
+fn sorting_packed_names_orders_them_bytewise_and_keeps_every_name() {
+    let mut names = packed(&["b.txt", "Zeta", "a.txt", ".env", "a.txt", "Ünïcödé"]);
+    names.sort();
+    assert_eq!(
+        strings(&names),
+        [".env", "Zeta", "a.txt", "a.txt", "b.txt", "Ünïcödé"]
+    );
+
+    let mut empty = PackedNames::default();
+    empty.sort();
+    assert!(empty.is_empty());
+}
+
+#[test]
 fn a_fresh_store_has_no_names_until_a_file_or_spill_exists() {
     let fixture = Fixture::new();
     let store = FileNameStore::new(fixture.path.clone());

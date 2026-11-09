@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use super::block::{self, BlockBuilder, BlockSpan, EntryRange, StoredBlock};
+use super::codec::{DecodeScratch, NamesEncoder};
 use super::file::{MappedNames, NamesFileWriter, NamesHeader, SpillFile, SpillLocation};
 use super::{MappedState, NamesScratch, Overlay, Spill};
 
@@ -69,6 +70,7 @@ pub fn write_names(capture: PairCapture, stamp: PairStamp) -> Result<WrittenName
         reader: NameReader::default(),
         output: BlockOutput {
             writer: NamesFileWriter::create(&capture.path)?,
+            encoder: NamesEncoder::new()?,
             open: None,
             block_target: capture.block_target,
             deadline: stamp.deadline,
@@ -211,7 +213,7 @@ struct LoadedBlock {
 
 #[derive(Default)]
 struct NameReader {
-    block_scratch: NamesScratch,
+    block_scratch: DecodeScratch,
     spill_scratch: NamesScratch,
     loaded: Option<LoadedBlock>,
 }
@@ -258,14 +260,14 @@ impl NameReader {
             .binary_search_by_key(&relative_id, |entry| entry.relative_id)
             .ok()
             .map(|position| loaded.entries[position].names.clone());
-        Ok(found.map_or(&[], |range| &self.block_scratch.raw[range]))
+        Ok(found.map_or(&[], |range| &self.block_scratch.raw()[range]))
     }
 
     fn load(&mut self, file: &MappedNames, index: usize) -> Result<(), RewriteError> {
         self.loaded = None;
         let stored = file.block(index).ok_or(RewriteError::Unreadable)?;
-        let decoded = block::decode(stored, &mut self.block_scratch.raw)
-            .map_err(|_| RewriteError::Unreadable)?;
+        let decoded =
+            block::decode(stored, &mut self.block_scratch).map_err(|_| RewriteError::Unreadable)?;
         self.loaded = Some(LoadedBlock {
             index,
             span: decoded.span,
@@ -277,6 +279,7 @@ impl NameReader {
 
 struct BlockOutput {
     writer: NamesFileWriter,
+    encoder: NamesEncoder,
     open: Option<BlockBuilder>,
     block_target: usize,
     deadline: Option<Instant>,
@@ -315,7 +318,7 @@ impl BlockOutput {
         if is_past(self.deadline) {
             return Err(RewriteError::DeadlinePassed);
         }
-        let encoded = builder.finish();
+        let encoded = builder.finish(&mut self.encoder)?;
         self.writer
             .append(encoded.stored(), encoded.span.first_ordinal)?;
         self.open_blocks -= 1;

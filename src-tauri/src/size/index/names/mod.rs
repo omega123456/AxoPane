@@ -1,4 +1,5 @@
 pub mod block;
+pub mod codec;
 pub mod file;
 pub mod writer;
 
@@ -11,6 +12,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use block::{BlockSpan, DecodedBlock, NamesCorrupt, BLOCK_TARGET_BYTES};
+use codec::DecodeScratch;
 use file::{remove_if_present, spill_path, MappedNames, NamesHeader, SpillFile, SpillLocation};
 use writer::{PairCapture, RewriteStats, WrittenNames};
 
@@ -38,6 +40,13 @@ impl PackedNames {
         }
         self.0.extend_from_slice(name);
         self.0.push(NAME_TERMINATOR);
+    }
+
+    pub fn sort(&mut self) {
+        let mut names: Vec<&[u8]> = self.names().collect();
+        names.sort_unstable();
+        let sorted = Self::from_names(names);
+        *self = sorted;
     }
 
     pub fn as_bytes(&self) -> &[u8] {
@@ -94,7 +103,7 @@ pub struct NamesUnreadable;
 #[derive(Debug, Default)]
 pub struct NamesScratch {
     pub(crate) compressed: Vec<u8>,
-    pub(crate) raw: Vec<u8>,
+    pub(crate) decode: DecodeScratch,
 }
 
 pub struct SpillRead<'read> {
@@ -417,7 +426,7 @@ impl FileNameStore {
         index: usize,
         scratch: &'read mut NamesScratch,
     ) -> Result<BlockNames<'read>, NamesUnreadable> {
-        let decoded = self.decode_block(index, &mut scratch.raw)?;
+        let decoded = self.decode_block(index, &mut scratch.decode)?;
         Ok(BlockNames {
             store: self,
             decoded,
@@ -427,7 +436,7 @@ impl FileNameStore {
     fn decode_block<'raw>(
         &self,
         index: usize,
-        raw: &'raw mut Vec<u8>,
+        scratch: &'raw mut DecodeScratch,
     ) -> Result<DecodedBlock<'raw>, NamesUnreadable> {
         let stored = self
             .mapped
@@ -435,7 +444,7 @@ impl FileNameStore {
             .and_then(|mapped| mapped.file.block(index))
             .ok_or(NamesUnreadable)?;
         self.blocks_decompressed.fetch_add(1, Ordering::Relaxed);
-        block::decode(stored, raw).map_err(|corrupt| self.unreadable(corrupt))
+        block::decode(stored, scratch).map_err(|corrupt| self.unreadable(corrupt))
     }
 
     fn unreadable(&self, _corrupt: NamesCorrupt) -> NamesUnreadable {
@@ -532,7 +541,7 @@ impl FileNameStore {
             return Ok(None);
         };
         let index = self.blocks_covering(ordinal..ordinal + 1).start;
-        let decoded = self.decode_block(index, &mut scratch.raw)?;
+        let decoded = self.decode_block(index, &mut scratch.decode)?;
         let packed = decoded.names_of(ordinal).unwrap_or_default();
         Ok(Some(PackedNames(packed.to_vec())))
     }

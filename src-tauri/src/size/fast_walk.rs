@@ -70,6 +70,13 @@ impl DirListing {
         }
     }
 
+    fn with_sorted_names(mut self) -> Self {
+        if let Some(names) = &mut self.file_names {
+            names.sort();
+        }
+        self
+    }
+
     fn add_file(&mut self, file: ListedFile<'_>) {
         self.direct_bytes = self.direct_bytes.saturating_add(file.length);
         self.file_count += 1;
@@ -392,6 +399,15 @@ fn check_stop(options: &WalkOptions) -> Result<(), ManualSizeError> {
 }
 
 fn read_dir(
+    dir: &Path,
+    scope: ReadScope<'_>,
+    buffer: &mut [u8],
+) -> Result<Option<DirListing>, ManualSizeError> {
+    let listing = read_unsorted_dir(dir, scope, buffer)?;
+    Ok(listing.map(DirListing::with_sorted_names))
+}
+
+fn read_unsorted_dir(
     dir: &Path,
     scope: ReadScope<'_>,
     buffer: &mut [u8],

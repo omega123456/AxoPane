@@ -2,10 +2,21 @@ use file_explorer_lib::size::index::names::block::{
     checksum, decode, BlockBuilder, BlockEntry, BlockSpan, EncodedBlock, NamesCorrupt,
     BLOCK_TARGET_BYTES,
 };
+use file_explorer_lib::size::index::names::codec::{
+    DecodeScratch, NamesEncoder, COMPRESSION_LEVEL,
+};
 use file_explorer_lib::size::index::names::PackedNames;
 
 fn packed(names: &[&str]) -> PackedNames {
     PackedNames::from_names(names.iter().map(|name| name.as_bytes()))
+}
+
+fn encoder() -> NamesEncoder {
+    NamesEncoder::new().expect("encoder")
+}
+
+fn finished(builder: BlockBuilder) -> EncodedBlock {
+    builder.finish(&mut encoder()).expect("compresses")
 }
 
 /// Folders 10..16 where 11, 13 and 15 hold no files.
@@ -16,7 +27,7 @@ fn sample_block() -> EncodedBlock {
     builder.push(12, packed(&["invoice.pdf"]).as_bytes());
     builder.push(14, packed(&["Ünïcödé.md", "b"]).as_bytes());
     builder.push(15, &[]);
-    builder.finish()
+    finished(builder)
 }
 
 fn raw_entry(relative_id: u32, names: &[u8]) -> Vec<u8> {
@@ -28,7 +39,7 @@ fn raw_entry(relative_id: u32, names: &[u8]) -> Vec<u8> {
 
 /// A block with a valid checksum over arbitrary raw content.
 fn crafted(raw: &[u8], folder_count: u32) -> EncodedBlock {
-    let compressed = lz4_flex::block::compress(raw);
+    let compressed = encoder().compress(raw).expect("compresses");
     EncodedBlock {
         span: BlockSpan {
             first_ordinal: 0,
@@ -41,7 +52,7 @@ fn crafted(raw: &[u8], folder_count: u32) -> EncodedBlock {
 }
 
 fn decodes(block: &EncodedBlock) -> bool {
-    let mut scratch = Vec::new();
+    let mut scratch = DecodeScratch::default();
     decode(block.stored(), &mut scratch).is_ok()
 }
 
@@ -58,7 +69,7 @@ fn a_block_round_trips_with_ids_relative_to_its_first_folder() {
     assert_eq!(block.span.end(), 16);
     assert_eq!(block.span.ordinals(), 10..16);
 
-    let mut scratch = Vec::new();
+    let mut scratch = DecodeScratch::default();
     let decoded = decode(block.stored(), &mut scratch).expect("decodes");
     let entries: Vec<BlockEntry<'_>> = decoded.entries().collect();
     assert_eq!(
@@ -93,7 +104,7 @@ fn a_block_copied_to_another_position_keeps_its_bytes() {
         },
         ..block.clone()
     };
-    let mut scratch = Vec::new();
+    let mut scratch = DecodeScratch::default();
     let decoded = decode(moved.stored(), &mut scratch).expect("decodes");
     assert_eq!(
         decoded.names_of(502),
@@ -107,7 +118,7 @@ fn checksum_and_decode_failures_are_rejected() {
     assert!(decodes(&block));
     let mut flipped = block.clone();
     flipped.compressed[0] ^= 0x41;
-    let mut scratch = Vec::new();
+    let mut scratch = DecodeScratch::default();
     assert_eq!(
         decode(flipped.stored(), &mut scratch).map(|_| ()),
         Err(NamesCorrupt)
@@ -116,11 +127,52 @@ fn checksum_and_decode_failures_are_rejected() {
     let mut garbage = block.clone();
     garbage.compressed = vec![0xF0; 4];
     garbage.checksum = checksum(&garbage.compressed);
-    assert!(!decodes(&garbage), "not an LZ4 block");
+    assert!(!decodes(&garbage), "not a zstd frame");
 
     let mut short = block.clone();
     short.raw_len += 7;
     assert!(!decodes(&short), "fewer bytes than the directory promised");
+
+    let mut long = block.clone();
+    long.raw_len -= 1;
+    assert!(!decodes(&long), "more bytes than the directory promised");
+}
+
+#[test]
+fn one_scratch_decodes_many_blocks_and_recovers_after_a_failure() {
+    let block = sample_block();
+    let mut garbage = block.clone();
+    garbage.compressed = vec![0xF0; 4];
+    garbage.checksum = checksum(&garbage.compressed);
+    let mut scratch = DecodeScratch::default();
+    assert!(decode(block.stored(), &mut scratch).is_ok());
+    assert!(decode(garbage.stored(), &mut scratch).is_err());
+    let decoded = decode(block.stored(), &mut scratch).expect("decodes again");
+    assert_eq!(
+        decoded.names_of(12),
+        Some(packed(&["invoice.pdf"]).as_bytes())
+    );
+    assert_eq!(scratch.raw().len(), block.raw_len as usize);
+    assert!(format!("{scratch:?}").contains("DecodeScratch"));
+}
+
+#[test]
+fn blocks_use_fast_zstd_and_shrink_repetitive_names() {
+    assert_eq!(COMPRESSION_LEVEL, 1);
+    let mut encoder = encoder();
+    assert!(format!("{encoder:?}").contains("NamesEncoder"));
+    let names: Vec<String> = (0..500)
+        .map(|index| format!("thumbnail-{index}.thumb"))
+        .collect();
+    let mut builder = BlockBuilder::new(0);
+    builder.push(0, PackedNames::from_names(&names).as_bytes());
+    let raw_len = builder.raw_len();
+    let block = builder.finish(&mut encoder).expect("compresses");
+    assert!(
+        block.compressed.len() * 3 < raw_len,
+        "zstd shrinks repetitive names"
+    );
+    assert!(decodes(&block));
 }
 
 #[test]

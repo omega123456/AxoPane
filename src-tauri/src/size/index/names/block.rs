@@ -1,5 +1,7 @@
+use std::io;
 use std::ops::Range;
 
+use super::codec::{DecodeScratch, NamesEncoder};
 use super::is_packed_list_or_empty;
 
 pub const BLOCK_TARGET_BYTES: usize = 256 * 1024;
@@ -145,35 +147,28 @@ impl BlockBuilder {
         self.raw.extend_from_slice(names);
     }
 
-    pub fn finish(self) -> EncodedBlock {
-        let compressed = lz4_flex::block::compress(&self.raw);
-        EncodedBlock {
+    pub fn finish(self, encoder: &mut NamesEncoder) -> io::Result<EncodedBlock> {
+        let compressed = encoder.compress(&self.raw)?;
+        Ok(EncodedBlock {
             span: self.span,
             raw_len: self.raw.len() as u32,
             checksum: checksum(&compressed),
             compressed,
-        }
+        })
     }
 }
 
 pub fn decode<'raw>(
     stored: StoredBlock<'_>,
-    scratch: &'raw mut Vec<u8>,
+    scratch: &'raw mut DecodeScratch,
 ) -> Result<DecodedBlock<'raw>, NamesCorrupt> {
     if checksum(stored.compressed) != stored.checksum {
         return Err(NamesCorrupt);
     }
-    let raw_len = stored.raw_len as usize;
-    scratch.clear();
-    scratch.resize(raw_len, 0);
-    let written =
-        lz4_flex::block::decompress_into(stored.compressed, scratch).map_err(|_| NamesCorrupt)?;
-    if written != raw_len {
-        return Err(NamesCorrupt);
-    }
+    let raw = scratch.decompress(stored.compressed, stored.raw_len as usize)?;
     let decoded = DecodedBlock {
         span: stored.span,
-        raw: scratch.as_slice(),
+        raw,
     };
     validate(&decoded)?;
     Ok(decoded)

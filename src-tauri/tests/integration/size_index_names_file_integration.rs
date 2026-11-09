@@ -3,6 +3,7 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use file_explorer_lib::size::index::names::block::{checksum, decode, BlockBuilder, EncodedBlock};
+use file_explorer_lib::size::index::names::codec::{DecodeScratch, NamesEncoder};
 use file_explorer_lib::size::index::names::file::{
     remove_if_present, spill_path, MappedNames, NamesFileWriter, NamesHeader, SpillFile,
     NAMES_FILE, NAMES_FORMAT_VERSION, SPILL_SUFFIX,
@@ -18,6 +19,11 @@ fn packed(names: &[&str]) -> PackedNames {
     PackedNames::from_names(names.iter().map(|name| name.as_bytes()))
 }
 
+fn finished(builder: BlockBuilder) -> EncodedBlock {
+    let mut encoder = NamesEncoder::new().expect("encoder");
+    builder.finish(&mut encoder).expect("compresses")
+}
+
 /// One block per folder range: 0..2, 2..5, 5..6.
 fn blocks() -> Vec<EncodedBlock> {
     let mut first = BlockBuilder::new(0);
@@ -28,7 +34,7 @@ fn blocks() -> Vec<EncodedBlock> {
     second.push(4, packed(&["deep.rs"]).as_bytes());
     let mut third = BlockBuilder::new(5);
     third.push(5, packed(&["last"]).as_bytes());
-    vec![first.finish(), second.finish(), third.finish()]
+    vec![finished(first), finished(second), finished(third)]
 }
 
 const HEADER: NamesHeader = NamesHeader {
@@ -62,7 +68,7 @@ fn write_file(path: &Path, blocks: &[EncodedBlock], header: NamesHeader) {
 
 fn names_at(file: &MappedNames, ordinal: u32) -> Option<Vec<u8>> {
     let index = file.blocks_covering(ordinal..ordinal + 1).start;
-    let mut scratch = Vec::new();
+    let mut scratch = DecodeScratch::default();
     let decoded = decode(file.block(index)?, &mut scratch).expect("decodes");
     decoded.names_of(ordinal).map(<[u8]>::to_vec)
 }
@@ -162,7 +168,7 @@ fn a_corrupt_block_still_maps_but_fails_its_own_checksum() {
     file.write_all(&[0xEE]).expect("corrupt block byte");
     drop(file);
     let mapped = MappedNames::open(&fixture.path).expect("header still valid");
-    let mut scratch = Vec::new();
+    let mut scratch = DecodeScratch::default();
     assert!(decode(mapped.block(0).expect("block"), &mut scratch).is_err());
     assert!(decode(mapped.block(1).expect("block"), &mut scratch).is_ok());
 }
@@ -187,7 +193,7 @@ fn one_block() -> EncodedBlock {
     let mut builder = BlockBuilder::new(0);
     builder.push(0, packed(&["x"]).as_bytes());
     builder.push(1, &[]);
-    builder.finish()
+    finished(builder)
 }
 
 fn valid_crafted() -> Crafted {
@@ -259,6 +265,7 @@ fn with_entry(edit: impl FnOnce(&mut CraftedEntry)) -> Crafted {
 fn header_violations_are_rejected_even_with_a_valid_checksum() {
     assert!(crafted_opens(&valid_crafted()), "control");
     assert_eq!(DIRECTORY_ENTRY_BYTES, 32);
+    assert_eq!(NAMES_FORMAT_VERSION, 2, "zstd blocks");
     let rejected = [
         (
             Crafted {
@@ -273,6 +280,13 @@ fn header_violations_are_rejected_even_with_a_valid_checksum() {
                 ..valid_crafted()
             },
             "newer version",
+        ),
+        (
+            Crafted {
+                version: NAMES_FORMAT_VERSION - 1,
+                ..valid_crafted()
+            },
+            "older LZ4 version",
         ),
         (
             Crafted {
