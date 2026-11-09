@@ -39,7 +39,7 @@ function App() {
   useAppEventSubscriptions()
 
   return (
-    <main className="flex h-full select-none flex-col overflow-hidden overscroll-x-none bg-light-base font-ui text-light-text dark:bg-dark-base dark:text-dark-text mica:bg-transparent">
+    <main className="flex h-full select-none flex-col overflow-hidden bg-light-base font-ui text-light-text dark:bg-dark-base dark:text-dark-text mica:bg-transparent">
       <AppFrame
         infoBars={
           <>
