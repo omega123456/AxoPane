@@ -8,12 +8,10 @@ import { usePanesStore } from '@/stores/panes-store'
 export const SEARCH_DEBOUNCE_MS = 100
 export const MIN_SEARCH_CHARS = 3
 
-/** `idle`: nothing to search yet (favourites and recent folders show). */
 export type SearchStatus = 'idle' | 'loading' | 'ready' | 'error'
 
 type SearchPaletteState = {
   isOpen: boolean
-  /** Bumped by every `open`, so the palette refocuses its input. */
   focusRequest: number
   query: string
   scope: SearchScope
@@ -31,7 +29,6 @@ type SearchPaletteState = {
   setQuery: (query: string) => void
   setScope: (scope: SearchScope) => void
   setActiveIndex: (index: number) => void
-  /** Moves through the results, loading the next page past the last row. */
   moveActive: (delta: number) => void
   loadMore: () => Promise<void>
   reset: () => void
@@ -49,13 +46,8 @@ const cleared = {
 }
 
 let debounceTimer: ReturnType<typeof setTimeout> | undefined
-// Replies to anything but the latest request are dropped.
 let latestRequestSequence = 0
 
-/**
- * Mirrors the Rust rule: three non-space characters, or an anchored listing
- * such as `~/`, `/` or `C:\`.
- */
 export function isSearchable(query: string) {
   const trimmed = query.trim()
   if (trimmed.replace(/\s/g, '').length >= MIN_SEARCH_CHARS) {
@@ -123,7 +115,6 @@ async function runQuery(set: PaletteSet, get: PaletteGet) {
 
 function openPalette(set: PaletteSet) {
   set((state) => ({ isOpen: true, focusRequest: state.focusRequest + 1 }))
-  // Everything's state is pull-only on Windows; refresh it for the palette.
   void folderSizeIndexStatus()
     .then((status) => usePanesStore.getState().setFolderSizeIndexStatus(status))
     .catch((error: unknown) => {
@@ -187,7 +178,6 @@ async function loadMore(set: PaletteSet, get: PaletteGet) {
       loadingMore: false,
     }))
   } catch {
-    // A stale page means a newer query is replacing these results.
     if (get().queryId === queryId) {
       set({ loadingMore: false })
     }
@@ -213,7 +203,6 @@ export const useSearchPaletteStore = create<SearchPaletteState>((set, get) => ({
       set({ query, ...cleared })
       return
     }
-    // Earlier results stay visible until the new ones arrive.
     set({ query, status: 'loading' })
     debounceTimer = setTimeout(() => void runQuery(set, get), SEARCH_DEBOUNCE_MS)
   },

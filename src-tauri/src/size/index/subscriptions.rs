@@ -5,8 +5,6 @@ use crate::size::SizeUpdate;
 
 use super::machine::Machine;
 
-/// A subscribed folder's display path and the normalized path its total
-/// lives at.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SubscribedFolder {
     pub(crate) path: String,
@@ -32,8 +30,6 @@ impl Machine {
         self.subscriptions.insert(pane, folders);
     }
 
-    /// Replaces a pane's set; newly subscribed folders get their current
-    /// indexed totals, so a revisited folder is never stale.
     pub(super) fn subscribe(&mut self, pane: String, folders: Vec<SubscribedFolder>) {
         let before: HashSet<String> = self
             .subscribed()
@@ -54,8 +50,6 @@ impl Machine {
         }
     }
 
-    /// After every message: emit changed subscribed totals (coalesced per
-    /// batch) and the status.
     pub(super) fn after_change(&mut self) {
         let subscribed = self.subscribed();
         let updates = self.changed_subscribed_updates(&subscribed);

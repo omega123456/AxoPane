@@ -25,15 +25,11 @@ use super::{
 };
 
 const TCC_DATABASE: &str = "/Library/Application Support/com.apple.TCC/TCC.db";
-/// Directory-level events, coalesced for about a second (D3).
 const LATENCY_SECS: f64 = 1.0;
-/// `FSEventStreamSetExclusionPaths` accepts at most eight paths.
 const MAX_EXCLUSIONS: usize = 8;
-/// Room for a volume UUID or an OS build string plus its NUL.
 const SHORT_STRING_BUFFER_LEN: usize = 64;
 
 extern "C" {
-    /// Declared in `<CoreServices/FSEvents.h>`; `fsevent-sys` omits it.
     fn FSEventsCopyUUIDForDevice(dev: libc::dev_t) -> *const c_void;
 }
 
@@ -96,7 +92,6 @@ impl IndexPlatform for MacPlatform {
                 0,
             )
         };
-        // SAFETY: on success `buffer` holds a NUL-terminated string.
         (status == 0).then(|| {
             unsafe { CStr::from_ptr(buffer.as_ptr()) }
                 .to_string_lossy()
@@ -188,8 +183,6 @@ struct PowerObservation<'name> {
     signal: Option<PowerSignal>,
 }
 
-/// Forwards the observed notification to `sink` as its signal, or as fresh
-/// conditions.
 fn observe(center: &NSNotificationCenter, observation: PowerObservation<'_>, sink: &PowerSink) {
     let PowerObservation { name, signal } = observation;
     let sink = Arc::clone(sink);
@@ -201,12 +194,9 @@ fn observe(center: &NSNotificationCenter, observation: PowerObservation<'_>, sin
     let token = unsafe {
         center.addObserverForName_object_queue_usingBlock(Some(name), None, None, &block)
     };
-    // One index per app, observing for the process lifetime, so the
-    // observer is deliberately never removed.
     std::mem::forget(token);
 }
 
-/// The stream's run-loop thread; dropping stops the loop and joins.
 struct Stream {
     run_loop: usize,
     stopped: Arc<AtomicBool>,
@@ -321,7 +311,6 @@ unsafe fn schedule_and_pump_stream(
         return;
     }
     let _ = started.send(Some(run_loop as usize));
-    // A stop that lands before the loop runs leaves the loop's stop flag set, so `CFRunLoopRun` returns at once.
     while !stopped.load(Ordering::SeqCst) {
         cf::CFRunLoopRun();
     }

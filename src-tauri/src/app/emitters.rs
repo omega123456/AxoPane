@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use tauri::{AppHandle, Emitter};
 
-/// A callback that forwards each payload to the webview as `event`.
 pub(super) fn frontend_emitter<Payload>(
     handle: &AppHandle,
     event: &'static str,
@@ -16,7 +15,6 @@ where
     })
 }
 
-/// Live folder-size updates, converted to the `size://state` event shape.
 #[cfg(target_os = "macos")]
 pub(super) fn size_state_emitter(handle: &AppHandle) -> crate::size::index::SizeEmitter {
     let handle = handle.clone();

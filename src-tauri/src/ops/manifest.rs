@@ -1,9 +1,3 @@
-//! Progressive transfer manifests.
-//!
-//! A manifest is deliberately discovered while a fallback copy runs: moves
-//! that can be renamed must not pay for a recursive pre-scan merely to make a
-//! progress denominator exact.
-
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -9,10 +9,6 @@ export function visibleRowCount(scrollElement: HTMLElement | null, rowPitch: num
 
 export type FallbackVirtualRow = { key: string; index: number; start: number }
 
-/**
- * The virtualizer's measured rows, or — before it has measured its scroll
- * element — a bounded first screen so the list never renders an empty frame.
- */
 export function virtualRowsOrFallback<Row extends PositionedRow>({
   measuredRows,
   rowCount,

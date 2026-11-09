@@ -13,11 +13,6 @@ export function isPermissionError(message: string | null) {
   return message ? PERMISSION_ERROR_PATTERN.test(message) : false
 }
 
-/**
- * Which placeholder replaces the listing, if any. An empty folder still shows
- * the synthetic ".." row when a parent exists, so `empty` only applies when
- * there is genuinely nothing to render (an empty folder at a filesystem root).
- */
 export function paneBodyState({
   showSkeleton,
   loading,

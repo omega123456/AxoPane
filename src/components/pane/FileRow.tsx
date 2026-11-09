@@ -17,16 +17,6 @@ import { TEXT_SECONDARY } from '@/lib/class-names'
 import type { InlineRenameDraft } from '@/stores/inline-rename-store'
 import { EMPTY_VALUE } from '@/lib/format'
 
-/**
- * Stable, id-keyed handler dispatcher for a pane's rows.
- *
- * `FilePane` builds exactly one of these per pane (memoized so its identity
- * never changes across renders) and every `FileRow` binds `entry.id` itself
- * when calling into it. Keeping this a single stable prop — instead of ~9-13
- * fresh per-row arrow-function props recreated on every `FilePane` render —
- * is what lets `React.memo` below actually skip re-rendering rows whose own
- * props (entry/selection/focus/...) didn't change.
- */
 export type FileRowActions = {
   onPointerDown: () => void
   onActivate: (entryId: string, clickCount: number, eventTimeStamp: number) => void
@@ -183,7 +173,6 @@ type FileRowProps = {
   actions: FileRowActions
   isCut?: boolean
   rename?: InlineRenameDraft
-  /** True while a valid internal drag is hovering this (directory) row. */
   isDropTarget?: boolean
   draggable?: boolean
 }
@@ -238,12 +227,4 @@ function FileRowImpl({
   )
 }
 
-/**
- * Memoized so a pane holding hundreds/thousands of rows only re-renders the
- * rows whose own props actually changed (e.g. the previous and next focused
- * row on an arrow-key move) rather than every visible row on every keystroke.
- * This only helps because `actions` (see `FileRowActions` above) and
- * `isSelected` (a `Set`-backed membership check in `FilePane`) are stable /
- * cheap to recompute — see `FilePane.tsx`.
- */
 export const FileRow = memo(FileRowImpl)

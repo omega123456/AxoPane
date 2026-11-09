@@ -6,7 +6,6 @@ export type DialogStore<DialogState> = {
   close: () => void
 }
 
-/** A store holding one optional dialog payload with `open`/`close` actions. */
 export function createDialogStore<DialogState>() {
   return create<DialogStore<DialogState>>((set) => ({
     dialog: null,

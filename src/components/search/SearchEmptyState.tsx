@@ -10,7 +10,6 @@ function stateTileToneClass(warning: boolean) {
     : `bg-light-hover ${TEXT_SECONDARY} dark:bg-dark-hover`
 }
 
-/** The StatePanel layout, sized for the palette and allowing a link action. */
 function PaletteState({
   icon,
   warning = false,
@@ -40,7 +39,6 @@ function PaletteState({
   )
 }
 
-/** Why the backend cannot search, with the way out where there is one. */
 export function SearchUnavailableState({
   backend,
   rejection,
@@ -66,7 +64,6 @@ export function SearchUnavailableState({
         title="Everything isn’t running"
         message="Search uses Everything to find files and folders instantly. Start Everything, or install it, and your search runs as soon as it’s ready."
         action={
-          // A link, not a button: it opens the download page in the browser.
           <a
             href="https://www.voidtools.com/downloads/"
             target="_blank"
@@ -94,7 +91,6 @@ export function SearchUnavailableState({
   )
 }
 
-/** A query that ran and matched nothing. */
 export function SearchNoResults({ query, foldersOnly }: { query: string; foldersOnly: boolean }) {
   return (
     <div role="status" className="grid gap-1 px-3.5 py-4">

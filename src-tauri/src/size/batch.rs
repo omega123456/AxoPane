@@ -11,8 +11,6 @@ use super::{
 };
 use crate::resource_coordinator::{JobClass, JobSpec, ResourceCoordinator};
 
-/// Everything has process-global mutable query state.  This one gate is the
-/// service's sole worker ownership boundary: no batch can query concurrently.
 fn everything_worker_gate() -> &'static Mutex<()> {
     static GATE: OnceLock<Mutex<()>> = OnceLock::new();
     GATE.get_or_init(|| Mutex::new(()))
@@ -31,10 +29,6 @@ struct EverythingBatch {
 }
 
 impl SizeService {
-    /// A path `register_job` could not schedule (the scheduler is at
-    /// capacity) is excluded from the query and reported as a terminal
-    /// `Error` at once, the same "reject, don't fabricate a phantom token"
-    /// rule `enqueue_manual_job` applies for manual jobs.
     pub(super) fn spawn_everything_batch(&self, paths: Vec<String>, emitter: UpdateEmitter) {
         let Some(handle) = self.everything_handle() else {
             let updates = paths
@@ -70,8 +64,6 @@ impl SizeService {
 }
 
 impl EverythingBatch {
-    /// Everything itself is metadata/latency work. The process-global gate
-    /// is intentionally acquired only after admission.
     fn run(self, coordinator: &ResourceCoordinator) {
         let _admission = coordinator.submit(JobSpec::new(
             [JobClass::Latency],
@@ -102,16 +94,12 @@ impl EverythingBatch {
             .collect()
     }
 
-    /// The whole batch is abandoned once every one of its jobs has been
-    /// cancelled (navigating away cancels them all at once).
     fn all_cancelled(&self) -> bool {
         self.jobs
             .iter()
             .all(|job| job.cancel.load(Ordering::Relaxed))
     }
 
-    /// Announces the paths about to be queried, stopping the instant the
-    /// batch is cancelled instead of emitting for every path.
     fn announce_calculating(&self, requestable: &[String]) {
         let calculating_updates = requestable
             .iter()
@@ -133,8 +121,6 @@ impl EverythingBatch {
         }
     }
 
-    /// Completes every job, returning the terminal updates of those still
-    /// wanted.
     fn finish_jobs(&self, terminal_update: impl Fn(&str) -> SizeUpdate) -> Vec<SizeUpdate> {
         self.jobs
             .iter()

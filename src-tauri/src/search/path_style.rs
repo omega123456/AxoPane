@@ -1,26 +1,18 @@
-//! Host-independent path handling for search. Everything reports Windows
-//! paths and the macOS index POSIX ones; parsing them by an explicit style
-//! (instead of `std::path`) keeps both testable on every OS.
-
 use crate::path_text::{
     starts_with_drive_designator, strip_verbatim_prefix, DRIVE_DESIGNATOR_LEN, PATH_SEPARATORS,
     UNC_PREFIX,
 };
 
-/// A UNC root splits into server, share and the remaining path.
 const UNC_ROOT_PARTS: usize = 3;
 
-/// Which path convention a backend's paths follow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathStyle {
     Windows,
     Posix,
 }
 
-/// A path split into its root and its named components.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PathParts<'a> {
-    /// `C:\`, `\\server\share\` or `/`; empty for a relative path.
     pub root: String,
     pub components: Vec<&'a str>,
 }
@@ -40,7 +32,6 @@ impl PathStyle {
         }
     }
 
-    /// Drops the Windows verbatim prefixes `\\?\` and `\\?\UNC\`.
     pub fn strip_verbatim(self, path: &str) -> String {
         if self == Self::Posix {
             return path.to_owned();
@@ -59,8 +50,6 @@ impl PathStyle {
         }
     }
 
-    /// Appends `name` to `base`, adding a separator unless `base` already
-    /// ends with one (as roots do).
     pub fn join(self, base: &str, name: &str) -> String {
         let base_needs_no_separator =
             base.is_empty() || base.ends_with(|character| self.is_separator(character));
@@ -70,15 +59,12 @@ impl PathStyle {
         format!("{base}{}{name}", self.separator())
     }
 
-    /// Rebuilds a path from a root and components with this style's
-    /// separator.
     pub fn compose(self, root: &str, components: &[&str]) -> String {
         components
             .iter()
             .fold(root.to_owned(), |path, name| self.join(&path, name))
     }
 
-    /// The containing folder, or `None` for a root or a bare name.
     pub fn parent(self, path: &str) -> Option<String> {
         let parts = self.split(path);
         let (_, ancestors) = parts.components.split_last()?;

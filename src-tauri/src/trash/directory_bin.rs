@@ -1,7 +1,3 @@
-//! Trash browsing over a plain directory (`~/.Trash` on macOS, the fake trash
-//! under `test-utils`). Each backend supplies the [`TrashIndex`] that records
-//! where trashed items came from.
-
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -21,12 +17,9 @@ impl From<manifest::ManifestEntry> for OriginalLocation {
     }
 }
 
-/// Original-location bookkeeping loaded once per trash command.
 pub trait TrashIndex: Sized {
     fn load(trash_dir: &Path) -> Result<Self, String>;
-    /// The original path of a trashed item and, when recorded, when it was trashed.
     fn original_location(&self, id: &str) -> Option<OriginalLocation>;
-    /// When the index has no deletion time, the backend's best guess from metadata.
     fn fallback_deleted_at(metadata: &fs::Metadata) -> Option<i64>;
     fn manifest(&mut self) -> &mut manifest::Transaction;
     fn commit_restores(&mut self) -> Result<(), String>;
@@ -166,9 +159,6 @@ pub fn delete_from_trash_in<Index: TrashIndex>(
         }
         remove_entry(&path)?;
     }
-    // Purging does not need provenance to remove an item. Preserve that
-    // behavior if a corrupt manifest is discovered only after the filesystem
-    // mutations, then perform one sidecar transaction for the whole command.
     let mut index = Index::load(trash_dir)?;
     for id in ids {
         index.manifest().remove(id);

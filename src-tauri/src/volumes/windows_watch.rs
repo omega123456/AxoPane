@@ -1,9 +1,3 @@
-//! Windows volume-change watcher: a dedicated thread owning a message-only
-//! window registered for shell change notifications
-//! (`SHChangeNotifyRegister`). `GetMessageW` blocks with zero idle wakeups
-//! until the shell posts a notification, covering local, removable and
-//! network drives — the same set the previous 1s poll loop covered.
-
 use std::ptr;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
@@ -29,9 +23,6 @@ use super::registry::RegistryReconcileBridge;
 const WINDOW_CLASS_NAME_STR: &str = "AxoPaneVolumeMonitorWindow";
 const CHANGE_MESSAGE_NAME: &str = "AxoPaneVolumeMonitorChanged";
 
-/// Owns the message-only-window thread. Dropping posts `WM_QUIT` into the
-/// thread's message queue (breaking the blocking `GetMessageW` loop), then
-/// joins it once the thread has deregistered and torn down its window.
 pub struct Watcher {
     thread_id: u32,
     handle: Option<JoinHandle<()>>,
@@ -43,9 +34,6 @@ struct ThreadContext {
 }
 
 impl Watcher {
-    /// Starts the message-only-window thread that calls back into the
-    /// volume registry on shell change notifications. `bridge` is kept
-    /// alive for the watcher's lifetime by this thread's `ThreadContext`.
     pub fn start_for_registry(bridge: Arc<RegistryReconcileBridge>) -> Result<Self, String> {
         let (ready_sender, ready_receiver) = std::sync::mpsc::channel::<Result<u32, String>>();
 
@@ -126,8 +114,6 @@ struct WindowRegistration {
     context: *mut ThreadContext,
 }
 
-/// # Safety
-/// `class_name` must stay valid for the duration of the call.
 unsafe fn create_message_window(class_name: PCWSTR) -> Result<HWND, String> {
     let class = WNDCLASSEXW {
         cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
@@ -158,10 +144,6 @@ unsafe fn create_message_window(class_name: PCWSTR) -> Result<HWND, String> {
     .map_err(|error| error.to_string())
 }
 
-/// Returns the registration id, or 0 when the shell refused it.
-///
-/// # Safety
-/// `hwnd` must be a live message window owned by the calling thread.
 unsafe fn register_volume_notifications(hwnd: HWND, change_message: u32) -> u32 {
     let entry = SHChangeNotifyEntry {
         pidl: ptr::null_mut(),
@@ -186,9 +168,6 @@ unsafe fn register_volume_notifications(hwnd: HWND, change_message: u32) -> u32 
     )
 }
 
-/// # Safety
-/// Must be called at most once, before any message loop for the created
-/// window is running.
 unsafe fn setup_window_and_registration(
     bridge: Arc<RegistryReconcileBridge>,
 ) -> Result<WindowRegistration, String> {

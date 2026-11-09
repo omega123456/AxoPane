@@ -5,11 +5,6 @@ import { singleEntrySelection, useSelectionStore } from '@/stores/selection-stor
 import type { PaneId } from '@/types/pane'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 
-/**
- * The shared post-mutation step: apply the same incremental patch shape used by
- * the filesystem watcher so simple create/rename/delete actions do not force a
- * full pane reload.
- */
 function patchAndFocus(
   paneId: PaneId,
   options: {

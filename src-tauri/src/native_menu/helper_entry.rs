@@ -1,6 +1,3 @@
-//! Child-process entry point. It stays alive for one supervised role; a poisoned
-//! shell extension still dies with this process, never the UI process.
-
 use std::io::{self, BufReader, BufWriter, Read, Write};
 
 use super::helper_protocol::{

@@ -16,10 +16,6 @@ use crate::ipc::types::{
 };
 use tauri::State;
 
-/// LaunchServices may keep its OS-owned confirmation UI open for longer than
-/// the normal short IPC deadline. The macOS adapter still has its own
-/// completion safeguard, so this is a margin for scheduling/serialization
-/// rather than unbounded work.
 #[cfg(not(feature = "test-utils"))]
 const SET_DEFAULT_APPLICATION_DEADLINE: Duration = Duration::from_secs(15);
 
@@ -115,10 +111,6 @@ pub fn open_with(
     state.open_with(payload)
 }
 
-/// Background, cache-only warming of the native context-menu cache for a
-/// batch of representative single-item requests. Fire-and-forget: enumerates
-/// on a dedicated warm pool/executor so a live right-click is never delayed,
-/// never touches the invoke-token store, and emits no events.
 #[cfg(not(feature = "test-utils"))]
 #[tauri::command]
 pub fn warm_native_menus(
@@ -146,11 +138,6 @@ pub fn warm_native_menus(
     });
 }
 
-/// Synchronous, `test-utils`-only variant of [`warm_native_menus`]: warms
-/// each request through the same shared handle the production command uses
-/// (exercising the handle's constructor/`Clone`/`warm` in the covered
-/// coverage build), against the in-memory fake provider, and returns the
-/// newly-inserted cache keys for assertions.
 #[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn warm_native_menus(
@@ -194,10 +181,6 @@ pub async fn list_applications() -> ListApplicationsResponse {
     app_picker::list_applications()
 }
 
-/// LaunchServices has an asynchronous completion callback and may involve a
-/// system confirmation dialog. The named app-picker executor owns admission,
-/// caller deadline, and cooperative cancellation; the platform request itself
-/// is deliberately not force-killed once issued.
 #[cfg(not(feature = "test-utils"))]
 #[tauri::command]
 pub async fn set_default_application(
@@ -218,7 +201,6 @@ pub async fn set_default_application(
 #[cfg(feature = "test-utils")]
 #[tauri::command]
 pub async fn set_default_application(payload: SetDefaultApplicationRequest) -> MenuActionStatus {
-    // The deterministic fake has no platform work to enqueue.
     app_picker::set_default_application(payload).await
 }
 

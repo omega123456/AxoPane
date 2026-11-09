@@ -19,7 +19,6 @@ pub(super) struct Lanes {
     pub(super) boosts: VecDeque<BoostJob>,
     pub(super) running_background: Option<Arc<AtomicBool>>,
     pub(super) running_boost: Option<(String, Arc<AtomicBool>)>,
-    /// Sleep, Low Power Mode or thermal pressure.
     pub(super) power_paused: bool,
     pub(super) shutdown: bool,
 }
@@ -56,7 +55,6 @@ struct ClaimedJob<Job> {
     cancel: Arc<AtomicBool>,
 }
 
-/// Blocks until `claim` hands out a job; `None` once the index shuts down.
 fn wait_for_job<Job>(
     shared: &Shared,
     claim: impl Fn(&mut Lanes) -> Option<ClaimedJob<Job>>,
@@ -75,7 +73,6 @@ fn wait_for_job<Job>(
 
 pub(super) struct ScanJob {
     pub(super) root: PathBuf,
-    /// Part of a cold or full rescan (counts toward progress).
     pub(super) full: bool,
 }
 
@@ -87,7 +84,6 @@ pub(super) struct BoostJob {
 
 pub(super) enum WalkOutcome {
     Walked,
-    /// Nothing to walk: privacy-blocked or already indexed.
     Skipped,
     Failed(ManualSizeError),
 }
@@ -153,16 +149,12 @@ fn admitted_boost_walk(
 
 #[derive(Clone, Copy)]
 pub(super) enum Lane {
-    /// Gentle: one thread, background QoS. `full` counts as indexing.
     Background { full: bool },
-    /// Four threads, user-initiated QoS. Unless refreshing, subtrees the
-    /// index already covers are skipped.
     Boost { refresh: bool },
 }
 
 struct WalkPlan {
     options: WalkOptions,
-    /// Part of a cold or full rescan (counts toward progress).
     full: bool,
     skip_indexed: bool,
 }
@@ -196,8 +188,6 @@ impl Lane {
     }
 }
 
-/// Excludes what the walk must not read or need not re-read; `false` when
-/// nothing under `root` is left to walk.
 fn narrow_walk(shared: &Shared, root: &Path, plan: &mut WalkPlan) -> bool {
     let view = shared.view();
     if shared.privacy_blocked(&view, root) {
@@ -224,7 +214,6 @@ fn narrow_walk(shared: &Shared, root: &Path, plan: &mut WalkPlan) -> bool {
     true
 }
 
-/// Walks `root`, streaming record batches to the coordination thread.
 pub(super) fn walk(context: LaneContext<'_>, lane_walk: LaneWalk<'_>) -> WalkOutcome {
     let LaneContext { shared, sender } = context;
     let LaneWalk { root, lane, cancel } = lane_walk;
@@ -269,9 +258,6 @@ pub(super) struct BackgroundTurn<'turn> {
     pub(super) cancel: &'turn AtomicBool,
 }
 
-/// Background-walk manners: hold Throughput admission for at most
-/// [`READMIT_EVERY_DIRS`] directories, and step aside (releasing it)
-/// while the power gate is closed or a boost waits.
 pub(super) struct Gentle {
     pub(super) admission: Option<JobHandle>,
     pub(super) since_admitted: u64,

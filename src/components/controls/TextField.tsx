@@ -1,10 +1,5 @@
 import type { InputHTMLAttributes, Ref } from 'react'
 
-/**
- * Fluent text box: 32px, control fill, a boundary-coloured bottom stroke that
- * becomes a 2px accent underline on a card fill while focused. The underline is
- * the focus indicator, as in Windows.
- */
 export function TextField({
   className = '',
   ref,

@@ -77,7 +77,6 @@ function togglePalette() {
   palette.open()
 }
 
-/** Opens Search everywhere; hidden when no backend can search. */
 function SearchEverywhereButton() {
   const backend = usePanesStore((state) => state.folderSizeIndexStatus?.backend ?? 'none')
   const isOpen = useSearchPaletteStore((state) => state.isOpen)
@@ -89,7 +88,6 @@ function SearchEverywhereButton() {
     ? `Search everywhere (${formatShortcutLabel(shortcut, detectPlatformOs())})`
     : 'Search everywhere'
   return (
-    // The palette's light dismiss ignores its trigger, so a click toggles it.
     <span data-search-trigger="" className="contents">
       <CommandButton
         label="Search everywhere"
@@ -166,8 +164,6 @@ function useShowsCalculateAllSizes(pane: PaneState) {
   const autoSizingAvailable = usePanesStore(
     (state) => state.folderSizeIndexStatus?.isAvailable ?? false,
   )
-  // Folders automatic sizing could not answer: outside the macOS index or an
-  // unvisited protected folder.
   const hasUnknownFolder = usePanesStore((state) =>
     pane.entries.some((entry) => entry.isDir && state.sizeStates[entry.path]?.state === 'unknown'),
   )
@@ -283,10 +279,6 @@ function PaneFilterField({ paneId, pane }: ActivePaneProps) {
   )
 }
 
-/**
- * The one command bar over both panes. Every command acts on the active pane,
- * and the single filter field edits that pane's own filter text.
- */
 export function CommandBar({ theme, setTheme }: CommandBarProps) {
   const activePaneId = usePanesStore((state) => state.activePaneId)
   const pane = usePanesStore((state) => state.panes[state.activePaneId])

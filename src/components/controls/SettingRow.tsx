@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
 import { TEXT_SECONDARY } from '@/lib/class-names'
 
-/** Windows Settings card: icon, title and one-line description, control on the right. */
 export function SettingRow({
   icon,
   title,

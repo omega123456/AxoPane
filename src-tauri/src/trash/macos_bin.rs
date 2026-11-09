@@ -1,10 +1,3 @@
-//! macOS Trash browsing.
-//!
-//! `~/.Trash` is a plain directory, but macOS records no original-location
-//! metadata we can read back generically, so we maintain our own
-//! [`manifest`](super::manifest) alongside it, written whenever this app
-//! moves something to the trash.
-
 use std::collections::HashMap;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
@@ -13,17 +6,12 @@ use std::path::{Path, PathBuf};
 use super::directory_bin::{self, OriginalLocation, TrashIndex};
 use super::{dsstore, manifest, TrashEntry};
 
-/// Loads and parses `trash_dir/.DS_Store` once per operation, for the
-/// [`dsstore`] fallback used when an item has no manifest entry (e.g. it was
-/// trashed via Finder directly, not through this app). Best-effort: any
-/// read/parse failure yields an empty map rather than failing the caller.
 fn put_back_index(trash_dir: &Path) -> HashMap<String, dsstore::PutBack> {
     fs::read(trash_dir.join(".DS_Store"))
         .map(|bytes| dsstore::parse_put_back(&bytes))
         .unwrap_or_default()
 }
 
-/// Metadata loaded once for the lifetime of one public Trash command.
 struct CommandIndexes {
     manifest: manifest::Transaction,
     put_back: HashMap<String, dsstore::PutBack>,

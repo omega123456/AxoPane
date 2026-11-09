@@ -26,16 +26,6 @@ import {
 } from '@/lib/class-names'
 import { middleClickOpenProps } from './middle-click-open'
 
-/**
- * Stable, path-keyed handler dispatcher for the tree's rows.
- *
- * `FolderTree` builds exactly one of these (memoized so its identity never
- * changes across renders) and every `TreeNode` passes its own path when calling
- * in. Keeping this a single stable prop — instead of fresh per-row closures — is
- * what lets `React.memo` below skip re-rendering rows whose own props are
- * unchanged, and it moves every panes-store subscription out of the (formerly
- * ~8×-per-row) rows and up into the single `FolderTree` parent.
- */
 export type TreeRowActions = {
   onToggle: (path: string) => void
   onNavigate: (path: string) => void
@@ -46,15 +36,8 @@ export type TreeRowActions = {
 type TreeNodeProps = {
   node: TreeNodeState
   depth: number
-  /** Set for volume roots; switches the row glyph from a folder to a drive icon. */
   volume?: VolumeInfo
-  /** True when this node is the active pane's current folder. */
   isCurrent: boolean
-  /**
-   * True when this is a copy rendered in the pinned ancestor overlay. Pinned
-   * rows use opaque background tokens so rows scrolling underneath them don't
-   * bleed through the (otherwise translucent) selection tint.
-   */
   isPinned?: boolean
   actions: TreeRowActions
 }
@@ -65,9 +48,6 @@ const PINNED_CURRENT_FILL =
 const PINNED_FILL =
   'hover:bg-light-tree-hover dark:hover:bg-dark-tree-hover bg-light-base dark:bg-dark-base'
 
-// The current folder gets the subtle fill plus an accent pill. That fill is
-// translucent; on a pinned row it would let scrolled-under rows show through,
-// so pinned rows use the opaque *-tree-* stand-ins instead.
 function treeRowFillClass(isCurrent: boolean, isPinned: boolean) {
   if (isPinned) {
     return isCurrent ? PINNED_CURRENT_FILL : PINNED_FILL
@@ -103,7 +83,6 @@ function TreeNodeLabel({
   )
 }
 
-/** Drop-target state and handlers for dragging files onto a tree folder. */
 function useTreeDropTarget(path: string) {
   const [isDropTarget, setIsDropTarget] = useState(false)
   const platform = detectPlatformOs()
@@ -152,7 +131,6 @@ type TreeNodeButtonProps = {
   actions: TreeRowActions
 }
 
-/** A 12px chevron column with a wider, overhanging hit area. */
 function TreeToggleButton({ node, actions }: TreeNodeButtonProps) {
   return (
     <button
@@ -166,11 +144,6 @@ function TreeToggleButton({ node, actions }: TreeNodeButtonProps) {
   )
 }
 
-/**
- * Named by the folder alone; the capacity bar inside is a visual aid. Middle
- * mouse-down suppresses the browser's autoscroll, which would otherwise
- * swallow the auxclick that opens the folder in a new tab.
- */
 function TreeNavigateButton({
   node,
   actions,
@@ -210,7 +183,6 @@ function TreeNodeImpl({
       onDrop={(event) => void handleDrop(event)}
       onContextMenu={(event) => actions.onContextMenu(node, event)}
       className={`relative flex ${treeRowHeightClass(usedFraction)} items-center gap-2 rounded-control pr-2 text-row text-light-text dark:text-dark-text ${treeRowFillClass(isCurrent, isPinned)} ${dropTargetRing(isDropTarget)}`}
-      // Indentation is a function of the tree depth, so it cannot be a static token.
       style={{ paddingLeft: `${treeIndentPx(depth)}px` }}
     >
       {isCurrent ? <SelectionPill /> : null}
@@ -222,10 +194,4 @@ function TreeNodeImpl({
   )
 }
 
-/**
- * Memoized so scrolling / unrelated store updates only re-render the handful of
- * rows whose own props actually change. This works because `actions` is a
- * single stable object (see `TreeRowActions`) rather than fresh per-row
- * closures — mirroring `FileRow` in the main pane.
- */
 export const TreeNode = memo(TreeNodeImpl)

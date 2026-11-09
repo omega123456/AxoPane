@@ -72,8 +72,6 @@ function useQueueEventSubscriptions() {
   useEffect(() => {
     const unlistenProgress = onQueueProgress((event) => {
       applyProgress(event)
-      // A job the OS refused for lack of permissions cannot be retried in
-      // place. Offer the elevated restart instead of a red line in the card.
       if (event.status !== 'failed') return
       if (event.errorMessage) {
         openAdminRestartDialog(event.errorMessage)
@@ -89,8 +87,6 @@ function useQueueEventSubscriptions() {
   }, [applyConflict, applyProgress, removeOperation])
 }
 
-// Queue keyboard model. Active only while the panel is expanded and no
-// conflict modal is open (the modal owns its own keys).
 function useQueueKeyboard(hasConflict: boolean, expanded: boolean) {
   const setExpanded = useQueueStore((state) => state.setExpanded)
   const pause = useQueueStore((state) => state.pause)
@@ -136,11 +132,6 @@ function useAutoExpandOnActiveWork(operations: OpProgress[], expanded: boolean) 
   }, [autoExpandActiveQueueToasts, expanded, hasActiveWork, setExpanded])
 }
 
-/**
- * Bottom-right job queue surface: a collapsed toast that expands into the
- * TransferCard-faithful panel. Owns the
- * `queue://*` event wiring and the queue keyboard model.
- */
 export function QueueOverlay() {
   const conflict = useFirstConflict()
   const operations = useOrderedOperations()

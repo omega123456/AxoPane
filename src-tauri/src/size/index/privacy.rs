@@ -5,8 +5,6 @@ use super::machine::{Machine, Phase};
 use super::service::{View, WEEK};
 
 impl Machine {
-    /// Startup privacy state: unvisited protected roots are skipped (and
-    /// stale data under them dropped) unless Full Disk Access is granted.
     pub(super) fn apply_privacy(&mut self) {
         let mut view = self.shared.view_mut();
         for root in &self.shared.protected {
@@ -14,8 +12,6 @@ impl Machine {
         }
     }
 
-    /// A protected root that appeared in a listing while unvisited is
-    /// skipped, so walks never reach it and ancestors report a bound.
     pub(super) fn reskip_protected(&mut self) {
         let mut view = self.shared.view_mut();
         if view.full_disk_access {
@@ -50,7 +46,6 @@ impl Machine {
         }
     }
 
-    /// Returns the protected roots a fresh grant opens up.
     fn update_full_disk_access(&self, granted: bool) -> Vec<PathBuf> {
         let mut view = self.shared.view_mut();
         let newly_granted = granted && !view.full_disk_access;

@@ -48,8 +48,6 @@ pub(super) fn load_menu_impl(request: &LoadNativeMenuRequest) -> Vec<ProviderNat
         }
     };
 
-    // Append Windows 11 modern (IExplorerCommand) items; the shared dedupe in
-    // `provider::dedupe_provider_items` removes any classic/app duplicates.
     items.extend(crate::native_menu::windows_modern::enumerate_modern_items(
         request,
     ));
@@ -546,7 +544,6 @@ fn open_with_rundll32(path: &str) -> windows::core::Result<()> {
     })
 }
 
-/// A shell context menu covers items of one folder only.
 fn sibling_pidl(
     path: &str,
     expected_parent: Option<&std::path::Path>,
@@ -630,13 +627,6 @@ fn build_menu_request_for_paths(paths: &[String]) -> Option<LoadNativeMenuReques
     }
 
     let first_path_buf = PathBuf::from(first_path);
-    // Roots (drive letters like `D:\`, UNC shares like `\\server\share`) have
-    // no parent per `Path::parent`. `folder_path` is only consulted by
-    // `MenuBinding::from_request`'s background branch, which this
-    // item-targeted request never takes, so a missing parent must not abort
-    // the whole canonical-action attempt (that used to skip straight past
-    // the real COM properties dialog to the less reliable ShellExecuteW
-    // fallback for every drive/share root).
     let folder_path = parent_directory(first_path);
     let target_kind = target_kind_for_paths(paths, &first_path_buf);
 

@@ -1,5 +1,3 @@
-//! Stable, scheduler-independent thumbnail identities.
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -14,7 +12,6 @@ pub const MAX_DATA_URL_BYTES: usize = 350 * 1024;
 
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 const PNG_IHDR_TYPE: &[u8] = b"IHDR";
-/// The IHDR chunk follows the signature and the chunk's 4-byte length.
 const PNG_IHDR_TYPE_RANGE: std::ops::Range<usize> = 12..16;
 const PNG_WIDTH_RANGE: std::ops::Range<usize> = 16..20;
 const PNG_HEIGHT_RANGE: std::ops::Range<usize> = 20..24;
@@ -52,8 +49,6 @@ impl ThumbnailCandidate {
         }
     }
 
-    /// Re-reads the listing identity once before native generation. Cache hits
-    /// trust the watched directory listing and do not touch the filesystem.
     pub fn matches_current_metadata(&self) -> bool {
         let Ok(metadata) = std::fs::metadata(&self.fingerprint.path) else {
             return false;
@@ -125,9 +120,6 @@ pub fn is_within_preview_bounds(width: u32, height: u32) -> bool {
     is_valid_preview_axis(width) && is_valid_preview_axis(height) && fits_area
 }
 
-/// Accepts only the transport format and hard payload cap used by the UI.
-/// Native providers must call this after bounded raster conversion and PNG
-/// encoding, before handing a preview to the cache or scheduler.
 pub fn validated_png_data_url(data_url: String) -> Result<ThumbnailState, ThumbnailState> {
     let Some(encoded) = data_url.strip_prefix("data:image/png;base64,") else {
         return Err(ThumbnailState::Failed);

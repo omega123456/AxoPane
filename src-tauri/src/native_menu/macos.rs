@@ -7,11 +7,6 @@ pub fn open_with(path: &str) -> MenuActionStatus {
         return MenuActionStatus::unsupported("unsupported");
     }
 
-    // We ask for the chosen app `as alias` to get a real file reference to the
-    // `.app` bundle, then resolve its POSIX path and launch via the `open -a`
-    // CLI. Driving Finder's `open ... using (POSIX file ...)` instead fails with
-    // `-1728` ("Can't get POSIX file …"), particularly for paths with spaces, so
-    // we bypass Finder entirely and let `open` handle the file path.
     let script = r#"
 on run argv
   set targetPath to item 1 of argv

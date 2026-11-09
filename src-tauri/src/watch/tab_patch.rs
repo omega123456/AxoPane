@@ -105,21 +105,6 @@ pub(super) fn snapshot_for_watch_baseline(
     Ok(snapshot_from_entries_for_watch(target, response.entries))
 }
 
-/// Builds a snapshot map keyed by entry path from an already-fetched entries
-/// list, avoiding a second directory enumeration when the caller (e.g. the
-/// frontend's `list_dir` response) has already produced the listing.
-///
-/// `icon_data_url` is normalized to `None` regardless of what the caller
-/// supplies: `list_dir` (and therefore every subsequent re-diff snapshot)
-/// always reports entries with `icon_data_url: None` — icons are resolved
-/// separately and asynchronously by the frontend and are never part of the
-/// filesystem listing itself. The frontend, however, seeds this baseline from
-/// entries that may already carry a resolved `iconDataUrl` (from its own
-/// icon cache). Without this normalization those icon-bearing entries would
-/// never compare equal to a subsequent `list_dir`-sourced snapshot, so the
-/// very first diff after arming would spuriously report every such entry as
-/// "changed" even though nothing changed on disk. Normalizing here keeps the
-/// guarantee that the first diff after seeding is empty.
 pub(super) fn snapshot_from_entries_for_watch(
     target: &WatchTarget,
     entries: Vec<DirectoryEntry>,
@@ -158,7 +143,6 @@ fn list_dir_for_snapshot(options: &ListDirOptions) -> Result<ListDirResponse, St
     fs::list_dir(options).stringify_err()
 }
 
-/// Resnapshots `watched`, stores the new baseline and emits the difference.
 pub(super) fn resnapshot_tab(watched: &mut WatchedTab, reason: &str, emitters: &WatchEmitters) {
     let next_snapshot = match snapshot_for_watch_baseline(&watched.target) {
         Ok(next_snapshot) => next_snapshot,

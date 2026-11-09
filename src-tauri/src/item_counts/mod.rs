@@ -16,8 +16,6 @@ use cache::{CountResolution, ItemCountCache, ItemCountState};
 pub const AUTO_ITEM_COUNT_LIMIT: usize = 200;
 pub const ITEM_COUNT_BATCH_SIZE: usize = 64;
 pub const MAX_AUTOMATIC_ITEM_COUNT_WORKERS: usize = 2;
-/// Bound queued viewport plans as well as workers: stale scroll/navigation
-/// requests must not become an unbounded backlog while I/O is busy.
 pub const MAX_AUTOMATIC_ITEM_COUNT_QUEUE: usize = 16;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -86,9 +84,6 @@ pub struct AutomaticCountPlan {
     scope_key: String,
     token: u64,
     context: ItemCountRequestContext,
-    /// The active parent session's watch revision when available.  Counts are
-    /// keyed by the generation that observed their parent directory, so
-    /// viewport counting and an Items sort of that same session share entries.
     generation: u64,
     paths: Vec<String>,
 }
@@ -158,16 +153,11 @@ impl ItemCountService {
             .retain(|plan| plan.context.tab_id != tab_id);
     }
 
-    /// Queues bounded automatic work. Returns true only when a worker should
-    /// be started; callers therefore never create an unbounded thread per IPC.
     pub fn enqueue_automatic_request(&self, plan: AutomaticCountPlan) -> bool {
         if plan.is_empty() {
             return false;
         }
         let mut queue = self.automatic_queue.lock().expect("item-count queue lock");
-        // Only the newest viewport plan for a pane/tab can still be useful.
-        // `plan_automatic_request` carries its outstanding paths forward, so
-        // replacing a queued plan preserves required visible-count progress.
         queue.retain(|queued| queued.scope_key != plan.scope_key);
         while queue.len() >= MAX_AUTOMATIC_ITEM_COUNT_QUEUE {
             queue.pop_front();
@@ -189,9 +179,6 @@ impl ItemCountService {
         true
     }
 
-    /// An enqueue can race the empty pop while all workers are winding down.
-    /// Reclaims this thread when work appeared; otherwise a later enqueue
-    /// observes the released slot and starts a bounded replacement worker.
     fn reclaim_worker_for_raced_work(&self) -> bool {
         *self
             .automatic_workers
@@ -238,9 +225,6 @@ impl ItemCountService {
         self.plan_automatic_request_with_generation(request, request.context.request_id)
     }
 
-    /// Plans viewport count work using the owning directory session's
-    /// mutation-driven generation. Callers without a session retain the
-    /// legacy request-id fallback, keeping this API safe for stale v1 flows.
     pub fn plan_automatic_request_with_generation(
         &self,
         request: &VisibleItemCountsRequest,
@@ -263,9 +247,6 @@ impl ItemCountService {
         state.active_token = Some(token);
         state.active_context = Some(request.context.clone());
 
-        // A new viewport supersedes the old plan. Carry reservations forward
-        // into the replacement plan so removing its queued predecessor cannot
-        // strand required unknown counts.
         let carried = state.requested_paths.clone();
         let remaining = AUTO_ITEM_COUNT_LIMIT.saturating_sub(carried.len());
         let selected = select_uncarried_paths(&request.paths, &carried, remaining);
@@ -350,8 +331,6 @@ impl ItemCountService {
         ControlFlow::Continue(())
     }
 
-    /// A cached exact or unavailable count is reused; equivalent in-flight
-    /// work that owns the key is left to finish instead of recounting.
     fn resolve_item_count(&self, path: &str, generation: u64) -> ItemCountState {
         let mut cache = self.cache.lock().expect("item-count cache lock");
         let current = cache.state(path, generation);
@@ -384,10 +363,6 @@ impl ItemCountService {
             return;
         };
 
-        // A superseded plan never produces a terminal event for the frontend.
-        // Remove its reservations so a later viewport request can retry its
-        // still-unknown directories. Newer-plan paths are distinct because
-        // planning occurred while these reservations were still present.
         state
             .requested_paths
             .retain(|path| !contains_path(&plan.paths, path));
@@ -400,22 +375,6 @@ impl ItemCountService {
         self.sort_active_items_with_session(request, None)
     }
 
-    /// Same contract as [`Self::sort_active_items`], but when `sessions` is
-    /// supplied and the requesting pane has an active
-    /// [`crate::directory_session::DirectorySessionService`] session whose
-    /// current path matches `request.context.path`, the sorted/filtered
-    /// result is derived from that session's already-in-memory unfiltered
-    /// snapshot instead of re-reading the directory from disk. Item counts
-    /// for that derived path are resolved through [`ItemCountCache`] using
-    /// the same state()/begin()/resolve() pattern `process_automatic_request`
-    /// uses, so a directory whose count is already cached at the current
-    /// generation is never recomputed.
-    ///
-    /// Falls back to the original full-read path (byte-for-byte, including
-    /// eager `include_item_counts` population via `fs::list_dir_with_cancellation`)
-    /// whenever there is no matching session — this never regresses
-    /// correctness, it only skips the redundant work when the snapshot is
-    /// provably current for the requested path.
     pub fn sort_active_items_with_session(
         &self,
         request: &ActiveItemsSortRequest,
@@ -460,16 +419,6 @@ impl ItemCountService {
         }
     }
 
-    /// Derives an `ActiveItemsSortResponse` from an already-in-memory session
-    /// snapshot: filters/sorts it with the exact same semantics
-    /// `directory_session::view::SessionView::derive` uses (reused directly,
-    /// so a session-derived Items sort and a session-derived Name/Size/etc.
-    /// sort never visibly disagree on filter/hidden-file rules), then fills
-    /// in each directory entry's `item_count` from `ItemCountCache`,
-    /// computing on a cache miss via the same non-batch `fs::read_item_count`
-    /// call `process_automatic_request` uses (never the eager thread-pool
-    /// `fs::populate_item_counts_with_cancellation` path, since that would
-    /// reintroduce the redundant-recount cost this method exists to avoid).
     fn sort_from_snapshot(
         &self,
         sort: ExplicitSort<'_>,
@@ -502,10 +451,6 @@ impl ItemCountService {
             return Ok(superseded_sort_response(request));
         }
 
-        // Re-sort now that item counts (the active sort key's field) may
-        // have been filled in above — SessionView::derive sorted using
-        // whatever counts the snapshot already carried, which is frequently
-        // `None` for entries never previously counted.
         let items_order = fs::SortOrder {
             key: SortKey::Items,
             direction: request.sort_direction,
@@ -541,8 +486,6 @@ impl ItemCountService {
         ControlFlow::Continue(())
     }
 
-    /// Called by watch/session owners after an accepted direct-child patch.
-    /// The directory itself is the only count whose generation becomes stale.
     pub fn invalidate_directory_generation(&self, path: &str, generation: u64) {
         self.cache
             .lock()

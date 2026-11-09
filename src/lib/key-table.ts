@@ -14,7 +14,6 @@ export function hasPrimaryModifier(event: ModifierKeyState) {
   return event.ctrlKey || event.metaKey
 }
 
-/** Runs the handler mapped to `event.key`, preventing the default when one exists. */
 export function handleKeyByTable(event: KeyEventLike, table: KeyHandlerTable): boolean {
   const handler = lookupOwnProperty(table, event.key)
   if (!handler) {

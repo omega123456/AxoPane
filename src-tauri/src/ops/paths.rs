@@ -13,8 +13,6 @@ pub(super) fn is_real_directory_type(file_type: fs::FileType) -> bool {
     file_type.is_dir() && !file_type.is_symlink()
 }
 
-/// `Path::exists` follows links and misses dangling symlinks, so the directory
-/// entry itself is inspected as well.
 pub(super) fn path_entry_exists(path: &Path) -> bool {
     path.exists() || fs::symlink_metadata(path).is_ok()
 }
@@ -68,8 +66,6 @@ pub fn parent_dir(path: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Resolve which mount root a path belongs to, falling back to the longest-prefix
-/// match against the known volume table.
 pub fn volume_root_for(path: &Path, volumes: &[VolumeInfo]) -> String {
     let path_text = path.to_string_lossy().to_ascii_lowercase();
 
@@ -88,8 +84,6 @@ pub fn volume_root_for(path: &Path, volumes: &[VolumeInfo]) -> String {
         return volume.mount_root.to_ascii_lowercase();
     }
 
-    // Fallback: derive a root from the path itself so disjoint test paths still
-    // serialize sensibly (drive letter on Windows, first component otherwise).
     fallback_root(&path_text)
 }
 

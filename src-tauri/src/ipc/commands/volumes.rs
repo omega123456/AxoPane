@@ -8,12 +8,6 @@ use super::latency_filesystem;
 use crate::ipc::types::{EjectVolumeRequest, MenuActionStatus, VolumeInfo};
 use tauri::State;
 
-/// Reads the registry's current snapshot; performs no platform volume
-/// discovery on this path. The registry itself keeps the snapshot current
-/// via its long-lived native registrations and the window-focus reconcile
-/// safety net (see `lib.rs`), so a plain command invocation here is always a
-/// read of already-owned state, matching the IPC execution matrix's "bounded
-/// reads of already-owned immutable memory" carve-out.
 #[cfg(not(feature = "test-utils"))]
 #[tauri::command]
 pub fn list_volumes(
@@ -22,12 +16,6 @@ pub fn list_volumes(
     Ok(registry.snapshot().to_volume_infos())
 }
 
-/// Under `test-utils`, no `VolumeRegistry` is managed as Tauri state (the
-/// registry's `test-utils` variant is exercised directly by
-/// `volume_registry_integration.rs`, not through IPC state management), so
-/// this keeps the previous direct-enumeration behavior — reading the same
-/// deterministic fixture inventory `volumes::list_volumes()` always returns
-/// under `test-utils`.
 #[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn list_volumes() -> Result<Vec<VolumeInfo>, String> {
@@ -47,9 +35,6 @@ pub async fn eject_volume(
     })
     .await?;
     if status.handled {
-        // A successful eject changes the mounted inventory; ask the
-        // registry to re-enumerate and publish (bounded by its own refresh
-        // deadline) rather than reading/emitting a one-off snapshot here.
         registry.refresh();
     }
     Ok(status)

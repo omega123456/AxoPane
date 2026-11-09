@@ -1,10 +1,3 @@
-//! Windows Shell thumbnail provider.
-//!
-//! Shell and GDI objects never leave the two provider-owned MTA workers. The
-//! synchronous provider boundary is intentional: the scheduler submits work to
-//! this already-bounded executor instead of creating another pool or putting
-//! COM work on a Tauri worker.
-
 use super::provider::{ProviderCapability, ThumbnailPreviewCallback, ThumbnailProvider};
 use super::types::{
     validated_png_data_url, ThumbnailCandidate, ThumbnailState, MAX_PNG_BYTES,
@@ -130,9 +123,6 @@ impl ThumbnailProvider for WindowsThumbnailProvider {
             return;
         };
         drop(workers.sender);
-        // `IShellItemImageFactory::GetImage` has no cancellation API and a
-        // third-party shell extension can block indefinitely. Dropping the
-        // handles lets healthy workers exit normally without hanging app exit.
         drop(workers.joins);
     }
 }

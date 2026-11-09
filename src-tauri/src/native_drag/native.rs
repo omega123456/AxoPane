@@ -2,16 +2,10 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::oneshot;
 
-/// The app icon doubles as the drag preview. `drag` requires an image and this
-/// one is already in the source tree, so embedding it avoids resolving a
-/// bundled resource at runtime (which differs per platform and per installer).
 fn drag_image() -> drag::Image {
     drag::Image::Raw(include_bytes!("../../icons/32x32.png").to_vec())
 }
 
-/// `drag`'s completion callback is `Fn`, so the one-shot sender lives behind a
-/// mutex and is consumed by whichever path fires first: the drag finishing, or
-/// the session failing to start at all.
 fn signal(sender: &Mutex<Option<oneshot::Sender<()>>>) {
     if let Ok(mut slot) = sender.lock() {
         if let Some(sender) = slot.take() {
@@ -40,8 +34,6 @@ fn run_session(
             signal(&finished)
         },
         drag::Options {
-            // External targets always receive a copy: a `Move` the OS
-            // honours would delete the file out from under the pane.
             mode: drag::DragMode::Copy,
             ..Default::default()
         },
@@ -77,10 +69,6 @@ fn start_windows_drag(
         System::Threading::AttachThreadInput, UI::WindowsAndMessaging::GetWindowThreadProcessId,
     };
 
-    // `drag` initializes OLE behind a process-wide `Once`, so every Windows
-    // session must use the same STA. Keeping `DoDragDrop` off Tauri's UI
-    // thread lets its event loop deliver the live cursor stream and repaint
-    // the frontend badge while the modal OLE loop is running.
     static WORKER: OnceLock<Result<WindowsDragWorker, String>> = OnceLock::new();
     let worker = WORKER
         .get_or_init(spawn_windows_drag_worker)
@@ -124,8 +112,6 @@ fn spawn_windows_drag_worker() -> Result<WindowsDragWorker, String> {
     Ok(WindowsDragWorker { sender, thread_id })
 }
 
-/// Both threads need message queues before Win32 can share their mouse
-/// capture and input state.
 #[cfg(windows)]
 fn run_windows_drag_worker(
     receiver: &std::sync::mpsc::Receiver<WindowsDragJob>,
@@ -168,21 +154,12 @@ pub async fn start(
     #[cfg(windows)]
     start_windows_drag(drag_window, paths, sender)?;
 
-    // WKWebView does not deliver a self-originated drag session back to the page
-    // as DOM drag events, so the webview is blind for the whole gesture. Streaming
-    // the cursor position is what lets the frontend light up drop targets and
-    // resolve the drop itself; see `native-drag-bridge.ts`.
     let mut receiver = receiver;
     let mut streamed = 0_u32;
     loop {
         match tokio::time::timeout(CURSOR_POLL_INTERVAL, &mut receiver).await {
-            // The session ended. One last position first, so the drop lands where
-            // the pointer actually stopped rather than one tick behind it.
             Ok(ended) => {
                 emit_position(&window);
-                // In-app drops depend entirely on this stream, and a stream that
-                // never ran looks exactly like a drag that hit nothing. One line
-                // per gesture makes the difference visible without a debug build.
                 log::info!("native drag: session ended after {streamed} positions");
                 return ended.map_err(|_| "native drag ended unexpectedly".to_string());
             }
@@ -194,19 +171,12 @@ pub async fn start(
     }
 }
 
-/// ~250 Hz keeps the badge current on 240 Hz displays. This only runs during
-/// an active drag; lower-rate displays naturally coalesce the extra paints.
 const CURSOR_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(4);
 
-/// Reads the modifier keys currently held. Polled alongside the cursor rather
-/// than sampled at drag start, so pressing (or releasing) a modifier mid-drag
-/// changes copy-vs-move exactly as it does for a webview drag.
 #[cfg(target_os = "macos")]
 fn modifiers() -> super::DragModifiers {
     use objc2_app_kit::{NSEvent, NSEventModifierFlags};
 
-    // A class method with no `MainThreadMarker` argument: readable from this
-    // polling thread while the main thread is busy running the drag session.
     let flags = NSEvent::modifierFlags_class();
     super::DragModifiers {
         ctrl_key: flags.contains(NSEventModifierFlags::Control),
@@ -222,9 +192,6 @@ fn modifiers() -> super::DragModifiers {
         GetAsyncKeyState, VK_CONTROL, VK_LWIN, VK_MENU, VK_SHIFT,
     };
 
-    // `GetAsyncKeyState` reads global key state, unlike `GetKeyState`, which is
-    // scoped to the calling thread's input queue — and `DoDragDrop` is holding
-    // the main thread's queue for the whole gesture.
     fn held(key: i32) -> bool {
         (unsafe { GetAsyncKeyState(key) } as u16 & 0x8000) != 0
     }
@@ -237,10 +204,6 @@ fn modifiers() -> super::DragModifiers {
     }
 }
 
-/// Reports the cursor in CSS pixels relative to the webview's top-left, which is
-/// the coordinate space `document.elementFromPoint` expects. A cursor outside the
-/// window simply lands outside the viewport, and the frontend hit-test misses —
-/// which is exactly right for a drop into another application.
 fn emit_position(window: &tauri::WebviewWindow) {
     let (Ok(cursor), Ok(origin), Ok(frame)) = (
         window.cursor_position(),
@@ -253,10 +216,6 @@ fn emit_position(window: &tauri::WebviewWindow) {
         window,
         "drag://position",
         super::DragPositionEvent {
-            // Relative to the window frame; the frontend removes the chrome.
-            // Deliberately not derived from `window.screenX/screenY` either:
-            // WKWebView reports a stale origin there (measured 0,1890 for a
-            // window actually at 1052,418), yielding negative coordinates.
             cursor_x: cursor.x - f64::from(origin.x),
             cursor_y: cursor.y - f64::from(origin.y),
             frame_width: f64::from(frame.width),

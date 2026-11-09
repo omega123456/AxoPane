@@ -1,17 +1,3 @@
-//! macOS folder-size walker built on `getattrlistbulk(2)`.
-//!
-//! One bulk call returns the type and logical length of many directory entries
-//! at once, replacing the shared serial walker's `lstat` per entry. A job walks
-//! on its own thread plus up to `MAX_JOB_THREADS - 1` helper threads, and every
-//! job draws its helpers from one process-wide budget of
-//! [`MAX_HELPER_THREADS`], so concurrent jobs can never multiply the thread
-//! count. A job that gets no helpers simply walks on its own thread.
-//!
-//! Sizes match the previous implementation exactly: logical file length,
-//! symlinks are neither followed nor counted, and directories contribute 0
-//! bytes themselves. Entries that vanish mid-walk are skipped; directories the
-//! OS refuses to read are reported as denied.
-
 use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
 use std::fs::OpenOptions;
@@ -28,27 +14,16 @@ use std::time::Instant;
 use super::index::platform::DATA_VOLUME_PREFIX;
 use super::manual::ManualSizeError;
 
-/// Helper threads shared by every concurrent fast-walk job in the process.
 pub const MAX_HELPER_THREADS: usize = 8;
-/// Threads one job walks with: its own thread plus up to three helpers.
 pub const MAX_JOB_THREADS: usize = 4;
-/// Paths an index walk never descends into (see [`WalkOptions::with_index_boundaries`]):
-/// other volumes, the second view of the Data volume (and Preboot, VM, …)
-/// under `/System/Volumes`, and devfs.
 pub const INDEX_EXCLUDED_ROOTS: [&str; 3] = ["/System/Volumes", "/Volumes", "/dev"];
 
 const BUFFER_SIZE: usize = 128 * 1024;
 
-/// `ATTR_CMN_ERROR` from `<sys/attr.h>`; `libc` does not declare it.
 const ATTR_CMN_ERROR: libc::attrgroup_t = 0x2000_0000;
-/// `enum vtype` values from `<sys/vnode.h>`, as reported by `ATTR_CMN_OBJTYPE`.
 const VDIR: u32 = 2;
 const VLNK: u32 = 5;
 
-// Entry layout. With `FSOPT_PACK_INVAL_ATTRS` every requested attribute is
-// packed (zero-filled when invalid), so offsets are fixed: length,
-// returned `attribute_set_t`, `ATTR_CMN_ERROR` (always right after the
-// returned set), name `attrreference_t`, object type, then file data length.
 const ENTRY_LENGTH: usize = 0;
 const RETURNED_COMMON: usize = 4;
 const RETURNED_FILE: usize = 16;
@@ -61,17 +36,12 @@ static HELPERS_IN_USE: AtomicUsize = AtomicUsize::new(0);
 #[cfg(feature = "test-utils")]
 static PEAK_HELPERS: AtomicUsize = AtomicUsize::new(0);
 
-/// Thread QoS a walk runs at: user-initiated for size jobs and boosts,
-/// background for gentle index scans.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Qos {
     UserInitiated,
     Background,
 }
 
-/// One walked directory: the bytes and count of its direct files (symlinks
-/// excluded), its subdirectory names, and whether the OS refused to read it
-/// (then all of these cover only what was read).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirRecord {
     pub path: PathBuf,
@@ -81,7 +51,6 @@ pub struct DirRecord {
     pub denied: bool,
 }
 
-/// A single directory's contents, as read by [`list_dir`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DirListing {
     pub direct_bytes: u64,
@@ -95,15 +64,11 @@ pub type DirHook = Arc<dyn Fn(&Path) + Send + Sync>;
 #[cfg(feature = "test-utils")]
 pub type DeviceHook = Arc<dyn Fn(&Path, u64) -> u64 + Send + Sync>;
 
-/// Deterministic test seams; never compiled into release builds.
 #[cfg(feature = "test-utils")]
 #[derive(Clone)]
 pub struct TestHooks {
-    /// `getattrlistbulk` buffer size; small values force multi-fill reads.
     pub buffer_size: usize,
-    /// Runs just before a directory is opened, e.g. to make it vanish.
     pub before_dir_open: Option<DirHook>,
-    /// Maps a directory's real `st_dev`, to fake a device boundary.
     pub device_of: Option<DeviceHook>,
 }
 
@@ -120,15 +85,10 @@ impl Default for TestHooks {
 
 pub struct WalkOptions {
     pub cancel: Arc<AtomicBool>,
-    /// `None` walks without a time limit (index background scans).
     pub deadline: Option<Instant>,
-    /// Threads for this job, clamped to `1..=MAX_JOB_THREADS`.
     pub threads: usize,
     pub qos: Qos,
-    /// Directories never opened or descended into.
     pub excluded: HashSet<PathBuf>,
-    /// Stop at directories on a device other than the root's or the Data
-    /// volume's (on macOS 10.15–13 `/` and the Data volume differ).
     pub stay_on_device: bool,
     #[cfg(feature = "test-utils")]
     pub hooks: TestHooks,
@@ -148,8 +108,6 @@ impl WalkOptions {
         }
     }
 
-    /// Index mode: never enter [`INDEX_EXCLUDED_ROOTS`] and never cross
-    /// onto a device other than the root's or the Data volume's.
     pub fn with_index_boundaries(mut self) -> Self {
         self.excluded
             .extend(INDEX_EXCLUDED_ROOTS.iter().map(PathBuf::from));
@@ -158,7 +116,6 @@ impl WalkOptions {
     }
 }
 
-/// Total logical bytes under `root`. A denied directory fails the walk.
 pub fn subtree_total(root: &Path, options: &WalkOptions) -> Result<u64, ManualSizeError> {
     let total = AtomicU64::new(0);
     let sink = RecordSink {
@@ -171,9 +128,6 @@ pub fn subtree_total(root: &Path, options: &WalkOptions) -> Result<u64, ManualSi
     Ok(total.into_inner())
 }
 
-/// Calls `on_record` once per directory under `root` (from any walk thread).
-/// Denied directories are reported, not fatal. Excluded, off-device and
-/// vanished directories produce no record.
 pub fn subtree_records(
     root: &Path,
     options: &WalkOptions,
@@ -186,8 +140,6 @@ pub fn subtree_records(
     walk(root, options, sink)
 }
 
-/// Reads one directory. Ignores exclusions and device boundaries; a missing
-/// directory is a `NotFound` I/O error.
 pub fn list_dir(dir: &Path, options: &WalkOptions) -> Result<DirListing, ManualSizeError> {
     let mut buffer = vec![0_u8; buffer_size(options)];
     let scope = ReadScope {
@@ -198,7 +150,6 @@ pub fn list_dir(dir: &Path, options: &WalkOptions) -> Result<DirListing, ManualS
         .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound).into())
 }
 
-/// Current and peak helper threads in use across the process.
 #[cfg(feature = "test-utils")]
 pub fn helper_threads_for_tests() -> HelperThreadCounts {
     HelperThreadCounts {
@@ -292,8 +243,6 @@ fn walk(root: &Path, options: &WalkOptions, sink: RecordSink<'_>) -> Result<(), 
         for _ in 0..helpers {
             let permit = HelperPermit;
             let walk = &walk;
-            // A helper that fails to spawn drops its permit with the closure;
-            // the remaining threads still finish the walk.
             let _ = thread::Builder::new()
                 .name("fast-walk".to_string())
                 .spawn_scoped(scope, move || run_helper(permit, walk));
@@ -333,8 +282,6 @@ impl Walk<'_> {
         }
     }
 
-    /// Claims the next pending directory, or `None` once the walk is done
-    /// (nothing pending and nobody busy) or has failed.
     fn next(&self) -> Option<PathBuf> {
         let mut queue = self.queue.lock().expect("fast walk queue");
         while queue.is_waiting_for_work() {
@@ -374,9 +321,6 @@ impl Walk<'_> {
     }
 }
 
-/// A directory being visited. Dropping it (normally or while unwinding)
-/// queues its subdirectories, records any failure and wakes idle workers, so
-/// a panicking `on_record` stops the walk instead of leaving it hung.
 struct Claim<'a> {
     walk: &'a Walk<'a>,
     subdirs: Vec<PathBuf>,
@@ -421,8 +365,6 @@ fn check_stop(options: &WalkOptions) -> Result<(), ManualSizeError> {
     Ok(())
 }
 
-/// Reads `dir` with `getattrlistbulk`. `Ok(None)` means it vanished or lies
-/// on a device outside `allowed_devs`.
 fn read_dir(
     dir: &Path,
     scope: ReadScope<'_>,
@@ -489,7 +431,6 @@ fn bulk_attributes() -> libc::attrlist {
     }
 }
 
-/// Folds the `count` packed entries `getattrlistbulk` wrote into `buffer`.
 fn absorb_entries(
     buffer: &[u8],
     count: libc::c_int,
@@ -530,7 +471,6 @@ enum Entry<'a> {
     Error(i32),
 }
 
-/// Decodes one bounds-checked entry; `None` means it is malformed.
 fn parse_entry(entry: &[u8]) -> Option<Entry<'_>> {
     let error = read_u32(entry, ENTRY_ERROR)?;
     if error != 0 {
@@ -542,8 +482,6 @@ fn parse_entry(entry: &[u8]) -> Option<Entry<'_>> {
     }
     match read_u32(entry, ENTRY_TYPE)? {
         VDIR => {
-            // The name offset is relative to the `attrreference_t` itself and
-            // its length includes the trailing NUL.
             let start = ENTRY_NAME.checked_add_signed(read_i32(entry, ENTRY_NAME)? as isize)?;
             let length = read_u32(entry, ENTRY_NAME + size_of::<i32>())? as usize;
             let name = entry.get(start..start.checked_add(length)?)?;
@@ -560,9 +498,6 @@ fn parse_entry(entry: &[u8]) -> Option<Entry<'_>> {
     }
 }
 
-/// Folds an OS failure into `listing`: a vanished object yields `Ok(false)`,
-/// a refused one marks the listing denied and yields `Ok(true)`, anything else
-/// is a real error.
 fn absorb(error: io::Error, listing: &mut DirListing) -> Result<bool, ManualSizeError> {
     match error.raw_os_error() {
         Some(libc::ENOENT | libc::ENOTDIR | libc::ELOOP) => Ok(false),
@@ -609,7 +544,6 @@ fn read_u64(bytes: &[u8], offset: usize) -> Option<u64> {
     ))
 }
 
-/// Reserves up to `wanted` helpers from the process-wide budget.
 fn acquire_helpers(wanted: usize) -> usize {
     let Ok(previous) = HELPERS_IN_USE.fetch_update(Ordering::AcqRel, Ordering::Acquire, |in_use| {
         let granted = wanted.min(MAX_HELPER_THREADS.saturating_sub(in_use));
@@ -623,7 +557,6 @@ fn acquire_helpers(wanted: usize) -> usize {
     granted
 }
 
-/// One reserved helper slot, returned when the helper thread ends.
 struct HelperPermit;
 
 impl Drop for HelperPermit {
@@ -645,7 +578,6 @@ fn apply_qos(qos: Qos) {
     }
 }
 
-/// QoS is process-scheduling state; tests never change it.
 #[cfg(feature = "test-utils")]
 fn apply_qos(_qos: Qos) {}
 

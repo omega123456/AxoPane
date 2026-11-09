@@ -1,8 +1,3 @@
-//! Small deterministic LRU storage shared by metadata services.
-//!
-//! Domain modules own their key validity and invalidation policy; this type
-//! only enforces entry and optional weight limits.
-
 use std::collections::HashMap;
 use std::hash::Hash;
 

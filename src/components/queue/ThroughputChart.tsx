@@ -21,12 +21,6 @@ import {
 type ThroughputChartProps = {
   samples: ThroughputSample[]
   currentPercent: number
-  /**
-   * The frozen Y-axis maximum: the highest averaged speed seen so far this
-   * transfer (non-decreasing). Like the Windows copy dialog, the scale is set
-   * by the early burst and never recalculated downward — the line simply
-   * descends as speed drops, so the chart never rescales/jumps under the curve.
-   */
   peakRate: number
 }
 
@@ -35,20 +29,8 @@ const VIEWBOX_HEIGHT = 48
 const BASELINE_INSET = 2
 const BASELINE_Y = VIEWBOX_HEIGHT - BASELINE_INSET
 const CEILING_Y = 8
-/**
- * Draw the trace as soon as there are two committed points (plus the left
- * anchor). With finer progress buckets in the store this lands within the first
- * ~1% of a transfer, so a huge copy shows a speed line almost immediately rather
- * than sitting on the baseline until several buckets have filled.
- */
 const MIN_CURVE_SAMPLES = 2
-/**
- * Leave generous room above the measured peak. The chart should feel like a
- * transfer progress surface, not a live oscilloscope that rescales whenever
- * the backend reports a slightly better burst.
- */
 const CEILING_HEADROOM = 1.35
-/** Rounded mantissas the ceiling snaps up to within each power of ten. */
 const SCALE_STEPS: readonly number[] = scaleSteps
 const DECIMAL_BASE = 10
 const COORDINATE_PRECISION_DIGITS = 3
@@ -56,19 +38,7 @@ const CLIP_ID_PERCENT_PRECISION = 100
 const SCALE_SETTLED_TOLERANCE = 0.5
 const SECOND_TO_LAST_INDEX = -2
 const CHART_ANIMATION_MS = 900
-/**
- * Duration of the subtle "draw-in" when a new committed point appends. Only the
- * new tail segment eases from the previous point to its final spot; every point
- * behind it stays frozen, so this refines the append without re-introducing the
- * wandering leading point.
- */
 const APPEND_ANIMATION_MS = 480
-/**
- * Duration of the progress-edge ease — the fill extent and the leading vertical
- * line glide toward the live percent over this window instead of teleporting, so
- * a big speed/progress jump sweeps across rather than snapping. Matches the tail
- * draw-in so the fill reveals the curve as it is drawn.
- */
 const PROGRESS_EASE_MS = 480
 
 function normalizeCoordinate(value: number) {
@@ -234,21 +204,13 @@ function useThroughputChartModel({ samples, currentPercent, peakRate }: Throughp
     () => normalizeSamples(samples, clampedCurrentPercent),
     [clampedCurrentPercent, samples],
   )
-  // Committed samples: passed buckets are frozen, so the trace only ever grows a
-  // new segment to the right and never bends behind the leading edge.
   const committedSamples = useMemo(
     () => buildChartSamples(samples, clampedCurrentPercent),
     [clampedCurrentPercent, samples],
   )
-  // Ease each freshly committed point into place; everything behind it is frozen.
   const { samples: chartSamples, settled: tailSettled } = useAppendedTail(committedSamples)
-  // Frozen, banded ceiling from the non-decreasing session peak. The store
-  // keeps the peak from dropping; this component rounds upward into stable
-  // bands so small new highs do not suddenly compress the whole curve.
   const ceilingRate = niceCeilingRate(peakRate)
   const displayedCeilingRate = useEasedScalar(ceilingRate, CHART_ANIMATION_MS, easeInOutCubic)
-  // Ease the progress edge so a jump sweeps the fill/leading line rather than
-  // teleporting; the trace behind it still holds still.
   const displayedCurrentPercent = useEasedScalar(
     clampedCurrentPercent,
     PROGRESS_EASE_MS,
@@ -262,19 +224,13 @@ function useThroughputChartModel({ samples, currentPercent, peakRate }: Throughp
     domain: [0, displayedCeilingRate],
     range: [BASELINE_Y, CEILING_Y],
   })
-  // Defensive: a reading above the frozen ceiling pegs the top rather than
-  // forcing a rescale (the ceiling only ever ratchets up between renders).
   const scaleRate = (rate: number) => yScale(Math.min(rate, displayedCeilingRate))
   const showCurve = normalizedSamples.length >= MIN_CURVE_SAMPLES
   const clipId = `throughput-chart-fill-${committedSamples.length}-${Math.round(
     clampedCurrentPercent * CLIP_ID_PERCENT_PRECISION,
   )}-${Math.round(committedSamples.at(-1)?.rate ?? 0)}`
-  // The progress fill and leading edge follow the eased percent, so the edge
-  // glides while the committed trace behind it holds still.
   const currentX = normalizeCoordinate(xScale(displayedCurrentPercent))
   const unfilledWidth = normalizeCoordinate(VIEWBOX_WIDTH - currentX)
-  // Settled only once the rescale *and* the tail draw-in have finished, so a
-  // screenshot wait lands on a stable frame.
   const chartSettled =
     Math.abs(displayedCeilingRate - ceilingRate) < SCALE_SETTLED_TOLERANCE && tailSettled
   return {

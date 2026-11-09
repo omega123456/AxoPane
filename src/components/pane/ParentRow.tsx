@@ -37,14 +37,6 @@ function ParentRowCell({ columnKey }: { columnKey: ColumnConfig['key'] }) {
   return <span className={`font-mono text-caption ${TEXT_SECONDARY}`}>—</span>
 }
 
-/**
- * Synthetic ".." row rendered at the top of a pane's listing whenever the
- * current folder has a parent. Activating it (Enter / double-click) navigates
- * to the parent directory. Double-clicks are detected by pairing raw click
- * timestamps in FilePane rather than via dblclick, whose click counting is
- * unreliable across consecutive up-navigations. It is intentionally never
- * selectable for copy/move or folder-size operations — it carries no entry id.
- */
 export function ParentRow({
   isActivePane,
   isFocused,
@@ -69,8 +61,6 @@ export function ParentRow({
       }}
       onClick={(event) => {
         onFocus()
-        // detail 0 = keyboard-synthesized click (Space on the button); only
-        // real pointer clicks participate in double-click pairing.
         if (event.detail > 0) {
           onActivate(event.timeStamp)
         }

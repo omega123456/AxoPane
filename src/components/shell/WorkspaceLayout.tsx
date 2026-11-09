@@ -16,7 +16,6 @@ import { usePanesStore } from '@/stores/panes-store'
 import type { PaneId } from '@/types/pane'
 import { fractionToPercent } from '@/lib/numbers'
 
-// Keyboard nudge granularity for each divider.
 const TREE_STEP_PX = 16
 const SPLIT_STEP = 0.02
 
@@ -56,7 +55,6 @@ function PaneSplitDivider({ panesRef }: { panesRef: RefObject<HTMLDivElement | n
   return (
     <div
       className="pointer-events-none absolute inset-y-0 z-20"
-      // Centre the divider in the gutter between the two cards.
       style={{
         left: `calc((100% - var(--spacing-gutter)) * ${paneSplit} + var(--spacing-gutter) / 2)`,
       }}
@@ -84,7 +82,7 @@ function PaneCell({ paneId, showsActiveRule }: { paneId: PaneId; showsActiveRule
   return (
     <div className="relative min-h-0 min-w-0">
       <FilePane paneId={paneId} />
-      {/* The active pane's marker: a 2px accent rule on the card's top edge. */}
+
       {showsActiveRule ? (
         <span
           aria-hidden="true"
@@ -97,9 +95,6 @@ function PaneCell({ paneId, showsActiveRule }: { paneId: PaneId; showsActiveRule
 }
 
 function splitColumnStyle(paneCount: number, paneSplit: number) {
-  // Styling-constraint exception: runtime geometry only. The user-dragged split
-  // ratio is continuous, so the tab row and the pane row share it as an inline
-  // column template; every other value is a token utility.
   return {
     gridTemplateColumns:
       paneCount === 1
@@ -108,12 +103,6 @@ function splitColumnStyle(paneCount: number, paneSplit: number) {
   }
 }
 
-/**
- * The resizable workspace: the full-height folder tree, a draggable divider,
- * then each pane's tabs, the shared command bar and the pane cards. In dual
- * mode a second divider splits the two panes. Both sizes are stored in the
- * layout store and persisted so they survive a restart.
- */
 export function WorkspaceLayout({ commandBar }: { commandBar?: ReactNode }) {
   const paneSplit = useLayoutStore((state) => state.paneSplit)
   const defaultPaneMode = useLayoutStore((state) => state.defaultPaneMode)
@@ -129,11 +118,6 @@ export function WorkspaceLayout({ commandBar }: { commandBar?: ReactNode }) {
       <TreeResizeHandle />
       <TabDragDropProvider>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col px-gutter">
-          {/*
-            Each pane's tabs sit straight on the window base. The strip's bottom
-            line doubles as the command bar's top edge; each selected tab covers
-            it, so tab and bar read as one shape.
-          */}
           <div className="relative grid h-tabs shrink-0 gap-x-gutter" style={columnStyle}>
             <span
               aria-hidden="true"

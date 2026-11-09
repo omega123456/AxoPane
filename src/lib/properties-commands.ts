@@ -6,9 +6,6 @@ import type { DirectoryEntry } from '@/lib/types/ipc'
 import type { PropertiesDialogItem } from '@/stores/properties-dialog-store'
 import type { PlatformOs } from '@/lib/keymap'
 
-// Windows resolves this well-known Explorer namespace URI to the real
-// Recycle Bin shell item, letting the native Properties COM flow work even
-// though the app's trash browser has no real filesystem path backing it.
 const WINDOWS_RECYCLE_BIN_SHELL_PATH = 'shell:RecycleBinFolder'
 
 function shouldAttemptNativeProperties(items: PropertiesDialogItem[]) {

@@ -30,8 +30,6 @@ type ComputeBreadcrumbLayoutArgs = {
 
 const DEFAULT_MIN_CHARS = 2
 const COLLAPSE_MARKER_LABEL = '…'
-// Matches the address row: 6px padding either side of each crumb and a 12px
-// chevron between crumbs.
 const BREADCRUMB_BUTTON_PADDING_PX = 12
 const BREADCRUMB_CHEVRON_WIDTH_PX = 12
 const BREADCRUMB_SEGMENT_CHROME_PX = BREADCRUMB_BUTTON_PADDING_PX + BREADCRUMB_CHEVRON_WIDTH_PX
@@ -181,7 +179,6 @@ export function createBreadcrumbMeasurer(navElement: HTMLElement | null): Breadc
 
   const style = window.getComputedStyle(navElement)
   const font = style.font
-  // The current crumb is semibold, so it is measured in the bolder weight.
   const currentFont = `600 ${style.fontSize} ${style.fontFamily}`
   const measure = (label: string, weightFont: string) => {
     if (weightFont) {
@@ -316,7 +313,6 @@ function expandLabelsToFillAvailableWidth({
   }
 }
 
-/** Reveals one more character of a truncated label when the row still fits. */
 type LabelSlot = {
   fullLabel: string
   index: number

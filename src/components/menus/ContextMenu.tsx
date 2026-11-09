@@ -112,11 +112,6 @@ function useMenuFocusAndPlacement(
     ref.current?.focus()
   }, [menu, failed, loading, placeholderVisible, locked])
 
-  // Anchor the menu at the cursor, then clamp it into the viewport so a
-  // right-click near the right/bottom edge keeps the menu attached to the
-  // pointer instead of overflowing off-screen. Writing the clamped geometry
-  // straight to the node (rather than via state) keeps this a pure DOM-sync
-  // effect with no extra render.
   useLayoutEffect(() => {
     const node = ref.current
     if (!menu) {
@@ -126,14 +121,9 @@ function useMenuFocusAndPlacement(
       return
     }
 
-    // Measure from the menu's natural content height every time. Otherwise a
-    // previously clamped explicit height can get "stuck" after native rows
-    // load, leaving the body scroll-cut even when the viewport has room.
     node.style.height = ''
     node.style.maxHeight = ''
 
-    // Flipping around the cursor keeps a corner pinned to the pointer instead
-    // of detaching toward the viewport edge.
     const geometry = placeMenuAtPoint(menu.x, menu.y, node.getBoundingClientRect())
     applyMenuGeometry(node, toZoomedGeometry(geometry, documentZoom()))
   }, [menu, failed, loading, placeholderVisible, locked])
@@ -170,11 +160,6 @@ export function ContextMenu() {
         aria-label={menu.title}
         tabIndex={-1}
         className={`absolute flex w-menu max-h-full flex-col overflow-hidden py-1 focus-visible:outline-none ${FLYOUT_SURFACE}`}
-        // Styling-constraint exception: runtime geometry only. The menu is
-        // positioned at the cursor (continuous px coords) and clamped into the
-        // viewport by the layout effect above, which no static utility or
-        // @theme token can express. All design-system values
-        // (color/spacing/typography/radii) above remain pure Tailwind utilities.
         style={{ left: `${menu.x}px`, top: `${menu.y}px` }}
         onMouseDown={(event) => event.stopPropagation()}
         onKeyDown={(event) => handleKeyByTable(event, menuKeyTable(openSubmenuId))}

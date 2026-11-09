@@ -11,10 +11,6 @@ pub struct BundleMeta {
     pub icon_path: Option<PathBuf>,
 }
 
-/// Derives display metadata for an app bundle from its already-parsed
-/// `Info.plist` JSON (see `macos::read_info_plist_json`, which shells out to
-/// `plutil -convert json` so this function never has to deal with binary vs.
-/// XML plist encoding itself).
 pub fn parse_bundle_metadata(info_plist_json: &Value, bundle_dir: &Path) -> BundleMeta {
     let name = info_plist_json
         .get("CFBundleDisplayName")

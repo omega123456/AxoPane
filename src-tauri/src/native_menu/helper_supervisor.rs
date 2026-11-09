@@ -1,5 +1,3 @@
-//! Supervision boundary for untrusted Windows shell extensions.
-
 use std::time::Duration;
 
 #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
@@ -40,9 +38,6 @@ pub enum HelperFailure {
     Malformed,
 }
 
-/// One lazily-created helper per role. Calls for the same role are serialized
-/// because shell extensions are apartment-bound; warm and interactive roles
-/// have independent processes and therefore cannot starve one another.
 #[derive(Default)]
 pub struct HelperSupervisor {
     #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
@@ -53,9 +48,6 @@ pub struct HelperSupervisor {
     warm: Mutex<Option<PersistentHelper>>,
 }
 
-/// The app-wide Windows shell boundary. Keeping this singleton means every
-/// native-menu command uses the same two persistent, independently supervised
-/// helpers instead of accidentally creating a one-shot supervisor per call.
 #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
 pub fn shared() -> &'static HelperSupervisor {
     static SUPERVISOR: OnceLock<HelperSupervisor> = OnceLock::new();
@@ -103,9 +95,6 @@ impl HelperSupervisor {
             deadline,
         );
         if outcome.is_err() {
-            // A deadline, protocol error, or child crash contaminates
-            // only this role. The next request lazily creates a fresh
-            // helper while the other role remains untouched.
             helper.take();
         }
         outcome
@@ -186,7 +175,6 @@ fn forward_requests(
     }
 }
 
-/// Stops after the first malformed frame, once it has been reported.
 #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
 fn forward_responses(
     response_sender: &mpsc::SyncSender<Result<HelperResponse, HelperFailure>>,

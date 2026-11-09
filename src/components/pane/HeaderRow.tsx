@@ -15,7 +15,6 @@ import { flippedChevronClass, NO_CLASS, TEXT_SECONDARY } from '@/lib/class-names
 const COLUMN_RESIZE_KEYBOARD_STEP_PX = 8
 
 const paneColumnGapPx = 0
-/** 3px list inset + 8px row padding on each side (the header uses 11px directly). */
 const paneRowHorizontalPaddingPx = 22
 
 const ariaSortByDirection: Record<SortDirection, 'ascending' | 'descending'> = {
@@ -183,7 +182,6 @@ function ColumnHeader({
         onKeyDown={(event) => handleKeyByTable(event, resize.keyTable(columnKey))}
         className={`absolute -right-1 top-0 h-full w-2 cursor-col-resize touch-none ${FOCUS_RING}`}
       >
-        {/* Column dividers appear while the header is hovered, as in Explorer. */}
         <span className="absolute inset-y-1 left-1 w-px bg-light-divider opacity-0 group-hover/header:opacity-100 dark:bg-dark-divider" />
       </div>
     </div>

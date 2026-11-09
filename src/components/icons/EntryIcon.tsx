@@ -29,7 +29,6 @@ type CategoryStyle = {
   colorClassName: string
 }
 
-/** Non-folder category → glyph + default color utility. */
 const CATEGORY_STYLES: Record<Exclude<FileCategory, 'folder'>, CategoryStyle> = {
   code: { Glyph: FileCode2Icon, colorClassName: 'text-file-code' },
   web: { Glyph: FileCode2Icon, colorClassName: 'text-file-web' },
@@ -54,16 +53,10 @@ const CATEGORY_STYLES: Record<Exclude<FileCategory, 'folder'>, CategoryStyle> = 
 type EntryIconProps = {
   entry: Pick<DirectoryEntry, 'name' | 'isDir' | 'iconDataUrl'> &
     Partial<Pick<DirectoryEntry, 'attributes'>>
-  /** Size / layout utilities. Defaults to a compact 16px square. */
   className?: string
-  /**
-   * Overrides a file category's default color utility. Pass `''` to inherit the
-   * surrounding `currentColor`. Folders always use the two-tone folder glyph.
-   */
   colorClassName?: string
 }
 
-/** Small corner badge marking a symlink/junction so it's visually distinct from a real folder or file. */
 function SymlinkBadge() {
   return (
     <CornerUpRightIcon
@@ -99,11 +92,6 @@ function usableNativeIconUrl(entry: EntryIconProps['entry'], nativeIconFailed: b
   return entry.iconDataUrl || null
 }
 
-/**
- * File-type-aware icon: distinct lucide glyph + token color per category, plus
- * the filled two-tone folder glyph for every folder.
- * Classification is pure name parsing — see {@link getFileCategory}.
- */
 export function EntryIcon({
   entry,
   className = 'h-4 w-4 shrink-0',

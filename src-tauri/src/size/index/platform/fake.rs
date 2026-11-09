@@ -5,8 +5,6 @@ use super::{
     EventSink, IndexPlatform, PowerSignal, PowerSink, RawEvent, StreamHandle, StreamRequest,
 };
 
-/// Scriptable platform: tests set IDs, the UUID, the OS build, Full Disk
-/// Access and power, and push event batches into the running stream.
 pub struct FakePlatform {
     state: Mutex<State>,
 }
@@ -69,7 +67,6 @@ impl FakePlatform {
         self.state().stream_fails = true;
     }
 
-    /// Conditions reported when observation starts.
     pub fn set_initial_conditions(&self, low_power: bool, thermal_pressure: bool) {
         self.state().conditions = PowerSignal::Conditions {
             low_power,
@@ -77,19 +74,16 @@ impl FakePlatform {
         };
     }
 
-    /// Delivers a batch to the running stream; false if none runs.
     pub fn emit(&self, events: Vec<RawEvent>) -> bool {
         let sink = self.state().events.clone();
         sink.map(|sink| sink(events)).is_some()
     }
 
-    /// Delivers a power signal; false before observation starts.
     pub fn signal(&self, signal: PowerSignal) -> bool {
         let sink = self.state().power.clone();
         sink.map(|sink| sink(signal)).is_some()
     }
 
-    /// The `since` argument of every stream start, in order.
     pub fn stream_starts(&self) -> Vec<Option<u64>> {
         self.state().stream_starts.clone()
     }

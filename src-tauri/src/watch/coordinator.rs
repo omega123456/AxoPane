@@ -1,28 +1,3 @@
-//! Bounded watch traffic coordinator.
-//!
-//! Platform `notify` callbacks push raw events into a fixed-capacity lane
-//! ([`RAW_LANE_CAPACITY`]) using non-blocking [`crossbeam_channel::Sender::try_send`]
-//! semantics — the OS callback thread must never block waiting on an
-//! application consumer. Control messages (unwatch/replace/shutdown/explicit
-//! refresh) travel on a separate, smaller bounded lane
-//! ([`CONTROL_LANE_CAPACITY`]) so they can never queue behind a burst of
-//! filesystem mutations.
-//!
-//! A background compactor thread drains both lanes, coalescing raw events by
-//! `(watch_id, child_path)` identity, and flushes a compacted batch for a
-//! given watch once either:
-//! - [`QUIET_WINDOW`] has elapsed since the last event for that watch, or
-//! - [`MAX_BATCH_AGE`] has elapsed since the first pending event for that
-//!   watch (whichever comes first) — so continuous traffic still flushes
-//!   periodically instead of waiting indefinitely for silence.
-//!
-//! Overflow protection: if the raw lane is full (a `try_send` failure) or a
-//! single watch accumulates more than [`MAX_PENDING_MUTATIONS_PER_WATCH`]
-//! distinct pending child paths, that watch's pending batch is discarded and
-//! replaced with a single revisioned "dirty" marker instructing the caller to
-//! perform one authoritative resnapshot — never growing the pending set
-//! without bound and never blocking.
-
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
@@ -32,47 +7,21 @@ use std::time::{Duration, Instant};
 
 use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender, TrySendError};
 
-/// Fixed capacity of the raw notification lane. A `try_send` that finds this
-/// lane full marks the affected watch dirty rather than blocking or growing
-/// without bound.
 pub const RAW_LANE_CAPACITY: usize = 4096;
 
-/// Fixed capacity of the priority control lane (unwatch/replace/shutdown/
-/// explicit refresh). Kept small and separate from the raw lane so control
-/// work is never starved behind bulk mutation traffic.
 pub const CONTROL_LANE_CAPACITY: usize = 64;
 
-/// More than this many distinct pending child-mutation paths for one watch
-/// converts that watch's pending batch into a single dirty/resnapshot
-/// instruction, discarding the detailed per-path history for that
-/// generation.
 pub const MAX_PENDING_MUTATIONS_PER_WATCH: usize = 2048;
 
-/// Compaction quiet window: a watch's pending batch flushes this long after
-/// its most recent event, provided no newer event has arrived since.
 pub const QUIET_WINDOW: Duration = Duration::from_millis(150);
 
-/// Compaction maximum age: a watch's pending batch flushes this long after
-/// its oldest still-pending event, even under continuous traffic that never
-/// goes quiet.
 pub const MAX_BATCH_AGE: Duration = Duration::from_millis(500);
 
-/// Bounds how long the thread can block without re-checking flush deadlines;
-/// kept well under `QUIET_WINDOW` so a batch that goes quiet is flushed close
-/// to on time rather than waiting for the next unrelated message.
 const POLL_TICK: Duration = Duration::from_millis(25);
 
-/// Opaque identity for one watch registration. The coordinator does not
-/// interpret this beyond using it as a compaction/grouping key; callers
-/// (typically [`crate::directory_session`] or the legacy [`crate::watch`]
-/// runtime) mint their own monotonic ids.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct WatchId(pub u64);
 
-/// One raw mutation observed for a watched child path. `kind` is a coarse
-/// classification sufficient for compaction; the authoritative content is
-/// always re-read from disk when a batch is flushed (or a resnapshot is
-/// triggered), so this never needs to carry a full [`crate::fs::DirectoryEntry`].
 #[derive(Debug, Clone)]
 pub struct RawMutation {
     pub watch_id: WatchId,
@@ -84,48 +33,30 @@ pub struct RawMutation {
 pub enum MutationKind {
     Changed,
     Removed,
-    /// The event could not be resolved into a definite child identity
-    /// (need_rescan, `Any`/`Other`, or an unresolvable rename) — this alone
-    /// is enough to force the affected watch dirty regardless of the
-    /// pending-mutation count.
     Unresolved,
 }
 
-/// A control-lane instruction. Always processed ahead of any pending raw
-/// mutation batch for the same watch.
 #[derive(Debug, Clone)]
 pub enum ControlMessage {
-    /// Stop tracking `watch_id` entirely; drops any pending compaction state.
     Unwatch(WatchId),
-    /// Replace `watch_id`'s pending state with a clean slate (e.g. the
-    /// watched path changed under the same logical watch).
     Replace(WatchId),
-    /// Force an authoritative resnapshot for `watch_id` on the next drain,
-    /// regardless of pending mutation state (explicit user refresh).
     ForceResnapshot(WatchId),
-    /// Stop the compactor thread.
     Shutdown,
 }
 
-/// What the compactor decided for one watch when its batch is ready to
-/// flush.
 #[derive(Debug, Clone)]
 pub enum CompactedBatch {
-    /// A bounded, precise set of child-path mutations.
     Targeted {
         watch_id: WatchId,
         changed: Vec<PathBuf>,
         removed: Vec<PathBuf>,
     },
-    /// Overflow (raw-lane-full or too-many-pending-mutations) or an
-    /// unresolved event: the caller must resnapshot this watch
-    /// authoritatively. Carries a fresh dirty generation so a caller can
-    /// tell distinct overflow episodes apart.
-    Dirty { watch_id: WatchId, generation: u64 },
+    Dirty {
+        watch_id: WatchId,
+        generation: u64,
+    },
 }
 
-/// Bounded sender handle callbacks (platform `notify` closures) hold. Cloning
-/// is cheap (an `Arc`-backed `crossbeam_channel::Sender` clone).
 #[derive(Clone)]
 pub struct RawLaneSender {
     sender: Sender<RawMutation>,
@@ -133,9 +64,6 @@ pub struct RawLaneSender {
 }
 
 impl RawLaneSender {
-    /// Non-blocking push. Never blocks the calling (platform callback)
-    /// thread: a full lane marks the affected watch dirty and drops the
-    /// event instead of waiting for capacity.
     pub fn push(&self, mutation: RawMutation) {
         let watch_id = mutation.watch_id;
         if let Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) =
@@ -220,11 +148,6 @@ impl PendingWatchState {
     }
 }
 
-/// The bounded watch coordinator: owns the raw/control lanes and a
-/// background compactor thread that emits [`CompactedBatch`] values through
-/// `on_batch`. Constructing this does not itself register any platform
-/// watcher — callers push [`RawMutation`]s via [`WatchCoordinator::raw_sender`]
-/// from their own `notify` callback.
 pub struct WatchCoordinator {
     raw_sender: Sender<RawMutation>,
     control_sender: Sender<ControlMessage>,
@@ -233,9 +156,6 @@ pub struct WatchCoordinator {
 }
 
 impl WatchCoordinator {
-    /// Spawns the compactor thread. `on_batch` is invoked from the
-    /// compactor thread whenever a watch's pending state is ready to flush;
-    /// it must not block on further coordinator work.
     pub fn spawn(on_batch: Arc<dyn Fn(CompactedBatch) + Send + Sync>) -> Self {
         let (raw_sender, raw_receiver) = bounded::<RawMutation>(RAW_LANE_CAPACITY);
         let (control_sender, control_receiver) = bounded::<ControlMessage>(CONTROL_LANE_CAPACITY);
@@ -262,8 +182,6 @@ impl WatchCoordinator {
         }
     }
 
-    /// A cloneable, non-blocking sender handle for platform callbacks to
-    /// push [`RawMutation`]s through.
     pub fn raw_sender(&self) -> RawLaneSender {
         RawLaneSender {
             sender: self.raw_sender.clone(),
@@ -271,26 +189,15 @@ impl WatchCoordinator {
         }
     }
 
-    /// Sends a control message. Control messages use their own bounded lane
-    /// and are drained ahead of any pending raw-mutation batch, so this
-    /// completes promptly even while the raw lane is saturated. Returns
-    /// `false` if the control lane itself is full (should never happen in
-    /// practice at 64 capacity, but callers get an explicit signal rather
-    /// than a silent block) or the coordinator has shut down.
     pub fn send_control(&self, message: ControlMessage) -> bool {
         self.control_sender.try_send(message).is_ok()
     }
 
-    /// Shuts the compactor thread down deterministically. Safe to call more
-    /// than once.
     pub fn shutdown(&self) {
         let mut guard = self.thread.lock().expect("watch coordinator thread lock");
         let Some(handle) = guard.take() else {
             return;
         };
-        // Shutdown travels the control lane so it is never stuck behind
-        // queued mutation batches and completes promptly under mutation
-        // saturation.
         let _ = self.control_sender.send(ControlMessage::Shutdown);
         let _ = handle.join();
     }
@@ -312,26 +219,15 @@ struct Compactor {
 }
 
 impl Compactor {
-    /// Compactor thread body: repeatedly drains whatever is available (control
-    /// messages first, then raw mutations), updates per-watch pending state, and
-    /// checks every watch with pending state for flush-readiness on each wake
-    /// (either a new message arriving or a bounded poll tick so quiet-window/
-    /// max-age deadlines are honored even without new traffic).
     fn run(mut self) {
         while self.run_cycle().is_continue() {}
     }
 
     fn run_cycle(&mut self) -> ControlFlow<()> {
-        // Control lane is always drained first and completely, ahead of any
-        // raw-mutation processing, so control work can never be starved by
-        // mutation volume.
         let shutting_down = self.drain_control_lane();
         if shutting_down {
             return ControlFlow::Break(());
         }
-        // Overflow-marked watches (raw lane was full when a callback tried
-        // to push) become dirty regardless of what detailed state we may
-        // still hold for them.
         for watch_id in self.overflow.take_dirty() {
             self.mark_dirty(watch_id);
         }
@@ -383,9 +279,6 @@ impl Compactor {
         ControlFlow::Continue(())
     }
 
-    /// Drains everything else immediately available without blocking, so a
-    /// burst arriving together is compacted in one pass rather than one wake
-    /// per event.
     fn record_burst(&mut self, first: &RawMutation, now: Instant) {
         self.record(first, now);
         while let Ok(next) = self.raw_receiver.try_recv() {

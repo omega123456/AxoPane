@@ -59,13 +59,6 @@ export type LoadNativeMenuResponse = {
   items: NativeMenuItem[]
 }
 
-/**
- * Batch of representative single-item native menu requests used to
- * proactively warm the backend's native-menu cache in the background. Each
- * element is a full `LoadNativeMenuRequest` (not the context-menu module's
- * `Omit<LoadNativeMenuRequest, 'requestId'>` request type) so it can carry a
- * throwaway `requestId`.
- */
 export type WarmNativeMenusRequest = {
   requests: LoadNativeMenuRequest[]
 }

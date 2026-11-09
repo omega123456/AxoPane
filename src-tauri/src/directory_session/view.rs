@@ -1,26 +1,13 @@
-//! Rust-owned view derivation: turns a session's immutable unfiltered
-//! snapshot plus [`ViewParams`] into an ordered projection, without ever
-//! re-enumerating the filesystem. Filtering and sorting are *view* changes
-//! over the same snapshot, never new snapshots.
-
 use crate::fs::{compare_entries, DirectoryEntry, SortOrder};
 
 use super::model::ViewParams;
 
-/// The ordered, filtered projection of a session's snapshot for one set of
-/// [`ViewParams`]. Holds owned clones of the matching entries in their final
-/// display order — cheap relative to re-enumerating, and exactly what
-/// `directory_session::paging` slices into pages.
 #[derive(Debug, Clone)]
 pub struct SessionView {
     ordered: Vec<DirectoryEntry>,
 }
 
 impl SessionView {
-    /// Builds a view by filtering `snapshot` per `params` and sorting the
-    /// result with the same ordering rules `fs::list_dir` uses, so v2 session
-    /// listings and the legacy v1 chunk listings never visibly disagree on
-    /// ordering for equivalent inputs.
     pub fn derive(snapshot: &[DirectoryEntry], params: &ViewParams) -> Self {
         let normalized_filter = params.filter.to_lowercase();
         let mut ordered: Vec<DirectoryEntry> = snapshot
@@ -42,21 +29,10 @@ impl SessionView {
         self.ordered.len() as u64
     }
 
-    /// The complete ordered/filtered row list. Used by watch-mutation
-    /// reconciliation to diff the previous and next views and
-    /// classify the smallest applicable [`crate::watch::patch::SessionPatch`].
-    /// Not the hot paging path — [`SessionView::page`] stays the primary
-    /// accessor for ordinary range requests.
     pub fn rows(&self) -> &[DirectoryEntry] {
         &self.ordered
     }
 
-    /// Returns the `[start, end)` slice of ordered entries for `page_index`
-    /// at `page_size`, or `None` if `page_index` has no rows (out of range).
-    /// An empty-but-valid final page (exactly at the boundary) still returns
-    /// `Some(&[])` only when `page_index == 0` and the view itself is empty;
-    /// any other out-of-range page index is `None` so callers can distinguish
-    /// "valid empty view" from "asked for a page past the end".
     pub fn page(&self, page_index: u64, page_size: usize) -> Option<&[DirectoryEntry]> {
         if self.ordered.is_empty() {
             return (page_index == 0).then_some(&self.ordered[..]);

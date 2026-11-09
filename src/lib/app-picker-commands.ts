@@ -8,12 +8,6 @@ import {
 import type { MacApp, MenuActionStatus } from '@/lib/types/ipc'
 import type { PropertiesDialogItem } from '@/stores/properties-dialog-store'
 
-/**
- * "Set Default Application…" is macOS-only (Windows already covers this via
- * the native Open With dialog's "always use" checkbox) and only meaningful
- * for a single, non-folder selection that actually has a file extension to
- * key the association on.
- */
 export function canSetDefaultApplication(items: PropertiesDialogItem[]): boolean {
   if (!isMacPlatform()) {
     return false

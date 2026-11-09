@@ -43,7 +43,6 @@ pub struct Config {
     pub auto_expand_active_queue_toasts: bool,
     #[serde(default)]
     pub favourites: Vec<String>,
-    /// Custom display names for favourites, keyed by the favourite's path.
     #[serde(default)]
     pub favourite_names: HashMap<String, String>,
     #[serde(default)]
@@ -203,8 +202,6 @@ pub struct SessionTab {
     pub sort_direction: String,
     #[serde(default)]
     pub filter: String,
-    /// Raw optional text keeps older sessions distinguishable from an explicit
-    /// Details mode and lets the frontend resolve unknown future values.
     #[serde(default)]
     pub view_mode: Option<String>,
     #[serde(default)]
@@ -234,14 +231,10 @@ pub struct Session {
     pub active_pane: String,
     pub left_path: String,
     pub right_path: String,
-    /// Optional richer per-pane tab state. Absent in legacy sessions, in which
-    /// case the flat `left_path`/`right_path` fields are used to rebuild a
-    /// single tab per pane on the frontend.
     #[serde(default)]
     pub left: Option<SessionPane>,
     #[serde(default)]
     pub right: Option<SessionPane>,
-    /// Recently visited folders, most recent first (Search everywhere).
     #[serde(default)]
     pub recent_folders: Vec<String>,
 }
@@ -295,8 +288,6 @@ impl From<serde_json::Error> for PersistError {
 pub struct PersistedStore<T> {
     path: PathBuf,
     value: Arc<Mutex<T>>,
-    /// One coalescing wake slot owned by the store's dedicated persistence
-    /// worker.
     flush_wake: Sender<()>,
     _marker: PhantomData<T>,
 }
@@ -350,8 +341,6 @@ where
     }
 
     fn schedule_flush(&self) {
-        // Full means the worker already has an outstanding debounce wake;
-        // it always snapshots the latest value after its quiet interval.
         let _ = self.flush_wake.try_send(());
     }
 }
@@ -453,9 +442,6 @@ fn replace_file_atomic(source: &Path, target: &Path) -> Result<(), PersistError>
     Ok(())
 }
 
-/// One worker per durable store, with a one-message wake queue. A burst
-/// resets the debounce window without creating threads or retaining an
-/// unbounded series of writes.
 struct FlushWorker<T> {
     receiver: Receiver<()>,
     debounce: Duration,
@@ -479,7 +465,6 @@ impl<T: Serialize + Clone> FlushWorker<T> {
         self.receiver.recv().is_ok() && self.wait_for_quiet_period()
     }
 
-    /// Returns `false` once the store has been dropped.
     fn wait_for_quiet_period(&self) -> bool {
         loop {
             match self.receiver.recv_timeout(self.debounce) {

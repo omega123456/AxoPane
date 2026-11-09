@@ -34,10 +34,6 @@ pub fn icon_data_url_for_path(path: &Path, is_dir: bool) -> Option<String> {
     }
 }
 
-/// Resolves the best available icon for a file: a real per-file extraction
-/// first, falling back to the fast per-type icon (resolved from the
-/// extension alone, without opening the file) when real extraction yields
-/// nothing.
 pub fn resolve_icon(path: &Path, is_dir: bool) -> Option<String> {
     if !has_native_icon(path, is_dir) {
         return None;
@@ -96,9 +92,6 @@ mod windows_impl {
         )
     }
 
-    /// Resolves an icon by extension alone (`SHGFI_USEFILEATTRIBUTES`), never
-    /// opening the underlying file. Used as a fast fallback when real
-    /// per-file extraction fails or is too slow to run inline.
     pub(super) fn icon_data_url_for_type(path: &Path) -> Option<String> {
         small_shell_icon(
             path,

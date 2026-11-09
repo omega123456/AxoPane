@@ -9,20 +9,6 @@ import {
 import { TEXT_SECONDARY } from '@/lib/class-names'
 import { EMPTY_VALUE } from '@/lib/format'
 
-/**
- * Date formatting for directory listings and the properties dialog.
- *
- * Backend timestamps arrive as RFC3339 strings. Absolute values are rendered in
- * the user's local timezone via `date-fns` (the `format` helper localises the
- * instant and supplies ordinals through the `do` token). The time portion is
- * appended only when `showTime` is set — with seconds only when `showSeconds`
- * is also set — so it composes with any date format rather than multiplying the
- * catalogue. The optional relative mode replaces the absolute value with
- * phrases like `15 minutes ago`, keeps `1/2/3 days ago` for the first few day
- * buckets, then switches to weekday labels like `on Tuesday` for older items
- * from the past week before falling back to the chosen absolute format.
- */
-
 export const DATE_FORMATS = ['ymd', 'dmy', 'mdy', 'med', 'dme', 'lmd', 'dml', 'dly'] as const
 
 export type DateFormat = (typeof DATE_FORMATS)[number]
@@ -33,7 +19,6 @@ export function isDateFormat(value: string): value is DateFormat {
   return (DATE_FORMATS as readonly string[]).includes(value)
 }
 
-/** `date-fns` pattern per format (date portion only). */
 const datePatterns: Record<DateFormat, string> = {
   ymd: 'yyyy-MM-dd',
   dmy: 'dd/MM/yyyy',
@@ -45,7 +30,6 @@ const datePatterns: Record<DateFormat, string> = {
   dly: 'do MMMM yy',
 }
 
-/** Example-driven labels shown in the settings dropdown (date portion only). */
 export const dateFormatLabels: Record<DateFormat, string> = {
   ymd: '2026-06-30',
   dmy: '30/06/2026',
@@ -57,10 +41,6 @@ export const dateFormatLabels: Record<DateFormat, string> = {
   dly: '30th June 26',
 }
 
-/**
- * Recency tone for the dynamic/relative display. `default` is the un-coloured
- * tone used for absolute values (relative mode off, or beyond the cutoff).
- */
 export type DateTone = 'recent' | 'today' | 'yesterday' | 'default'
 
 export type FormattedDate = {
@@ -70,17 +50,12 @@ export type FormattedDate = {
 
 export type FormatDateOptions = {
   format: DateFormat
-  /** Append the local 24-hour time (`HH:mm`) to the absolute value. */
   showTime: boolean
-  /** Include seconds in the appended time (`HH:mm:ss`). Only applies when `showTime`. */
   showSeconds: boolean
-  /** Render recent timestamps as relative phrases. */
   relative: boolean
-  /** Reference epoch (injectable for deterministic tests). */
   now?: number
 }
 
-/** Tailwind colour utilities per tone (paired light/dark). */
 export const dateToneClassName: Record<DateTone, string> = {
   recent: 'text-light-success dark:text-dark-success',
   today: 'text-light-accent dark:text-dark-accent',
@@ -90,14 +65,6 @@ export const dateToneClassName: Record<DateTone, string> = {
 
 const EMPTY: FormattedDate = { text: EMPTY_VALUE, tone: 'default' }
 
-/**
- * Absolute-format results are pure functions of `value|pattern` (no volatile
- * "now" input), so repeated cells sharing a value/format — the common case
- * while scrolling a folder without touching the clock — reuse the same
- * formatted result instead of re-running `date-fns` `format` every render.
- * Capped so a session that pages through many distinct folders can't grow
- * this unbounded.
- */
 const ABSOLUTE_FORMAT_CACHE_LIMIT = 2000
 const absoluteFormatCache = new Map<string, FormattedDate>()
 
@@ -114,8 +81,6 @@ function cachedAbsoluteFormat(
 
   const result = compute()
   if (absoluteFormatCache.size >= ABSOLUTE_FORMAT_CACHE_LIMIT) {
-    // Evict the oldest inserted entry (Map preserves insertion order) rather
-    // than tracking recency — simple and good enough for a soft size cap.
     const oldestKey = absoluteFormatCache.keys().next().value
     if (oldestKey !== undefined) {
       absoluteFormatCache.delete(oldestKey)
@@ -130,7 +95,6 @@ const HOUR = millisecondsInHour
 const DAY = millisecondsInDay
 const RELATIVE_DAY_PRIORITY_CUTOFF_DAYS = 4
 const RELATIVE_DAY_PRIORITY_CUTOFF = RELATIVE_DAY_PRIORITY_CUTOFF_DAYS * DAY
-/** Beyond this age the relative phrasing is dropped for the absolute format. */
 const RELATIVE_CUTOFF = millisecondsInWeek
 
 function absolutePattern(format: DateFormat, showTime: boolean, showSeconds: boolean): string {
@@ -155,7 +119,6 @@ function formatRelative(
   ageMs: number,
   { showTime, showSeconds }: TimeDisplay,
 ): FormattedDate | null {
-  // Clamp clock-skewed "future" timestamps to the present.
   const age = ageMs < 0 ? 0 : ageMs
   if (age >= RELATIVE_CUTOFF) {
     return null
@@ -178,12 +141,6 @@ function formatRelative(
   return { text: format(value, relativeWeekdayPattern(showTime, showSeconds)), tone: 'default' }
 }
 
-/**
- * Format a backend timestamp for display.
- *
- * @param value RFC3339 timestamp (or `null` for a missing value).
- * @param options Format, time, and relative-mode preferences.
- */
 export function formatEntryDate(
   value: string | null | undefined,
   options: FormatDateOptions,
@@ -199,8 +156,6 @@ export function formatEntryDate(
   if (options.relative) {
     const phrase = formatRelative(date, (options.now ?? Date.now()) - timestamp, options)
     if (phrase) {
-      // Relative phrases are a function of "now", which advances outside of
-      // any cache key we could construct — never cache these.
       return phrase
     }
   }
@@ -213,7 +168,6 @@ export function formatEntryDate(
 
 const LOG_TIMESTAMP_PATTERN = 'MMM dd HH:mm:ss'
 
-/** An ISO timestamp as `Jun 30 12:00:00` in UTC, or the input when unparseable. */
 export function formatUtcLogTimestamp(iso: string): string {
   const date = new UTCDate(iso)
   return isValid(date) ? format(date, LOG_TIMESTAMP_PATTERN) : iso

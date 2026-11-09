@@ -21,8 +21,6 @@ export function ColorSwatches({
             aria-pressed={selected}
             onClick={() => onChange(color)}
             className={`flex size-swatch items-center justify-center rounded-control ${FOCUS_RING}`}
-            // Styling exception: a swatch's fill is user palette data, not a
-            // design-system token, so it can only be expressed at runtime.
             style={{ backgroundColor: color }}
           >
             {selected ? (

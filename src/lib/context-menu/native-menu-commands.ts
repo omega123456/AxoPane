@@ -43,7 +43,6 @@ function archiveItems(paths: string[]) {
   return paths.map((sourcePath) => ({
     sourcePath,
     name: sourcePath.replace(/\\/g, '/').split('/').filter(Boolean).at(-1) || 'Archive',
-    // The queue discovers archive sizes progressively; callers must not scan.
     sizeBytes: 0,
   }))
 }

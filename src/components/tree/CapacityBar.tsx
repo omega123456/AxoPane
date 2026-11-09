@@ -7,7 +7,6 @@ const FILL_CLASS_NAME = {
   critical: 'bg-light-danger dark:bg-dark-danger',
 } as const
 
-/** A drive's used space as a 3px bar under its name in the navigation pane. */
 export function CapacityBar({ usedFraction }: { usedFraction: number }) {
   const level = capacityLevel(usedFraction)
   return (
@@ -22,7 +21,6 @@ export function CapacityBar({ usedFraction }: { usedFraction: number }) {
     >
       <span
         className={`block h-full rounded-full ${FILL_CLASS_NAME[level]}`}
-        // Styling-constraint exception: runtime geometry only (the used share).
         style={{ width: `${fractionToPercent(usedFraction)}%` }}
       />
     </span>

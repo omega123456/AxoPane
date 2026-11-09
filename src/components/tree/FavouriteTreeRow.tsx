@@ -23,7 +23,6 @@ export type FavouriteRowActions = {
 
 type Props = {
   path: string
-  /** Custom display name, when the user renamed this favourite. */
   name?: string
   index: number
   isCurrent: boolean
@@ -38,7 +37,6 @@ type FavouriteViewProps = {
 }
 
 function FavouriteRenameInput({ path, label, actions }: FavouriteViewProps) {
-  // Escape unmounts the input, which can still fire blur; that blur must not commit.
   const renameCancelled = useRef(false)
   return (
     <span className="flex h-full min-w-0 flex-1 items-center gap-2">

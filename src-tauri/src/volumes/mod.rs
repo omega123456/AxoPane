@@ -49,7 +49,6 @@ use windows_sys::Win32::Storage::FileSystem::{
 const DRIVE_LETTER_COUNT: u32 = 26;
 #[cfg(all(not(feature = "test-utils"), windows))]
 const NETWORK_ENUM_BUFFER_BYTES: usize = 16 * 1024;
-/// The longest path the Unicode file APIs accept, in UTF-16 units.
 #[cfg(all(not(feature = "test-utils"), windows))]
 const MAX_EXTENDED_PATH_UNITS: usize = 32_768;
 #[cfg(all(not(feature = "test-utils"), windows))]
@@ -87,13 +86,6 @@ struct VolumeIdentity {
     is_removable: bool,
 }
 
-// Native mount/unmount registration lives entirely behind `VolumeRegistry`
-// now (see `registry.rs`): the registry constructs and owns exactly one
-// long-lived `disk_arbitration::Session` (macOS) or `windows_watch::Watcher`
-// (Windows) for the process lifetime and routes their callbacks through
-// `registry::RegistryReconcileBridge::reconcile`, rather than a separate
-// `VolumeMonitorService` re-deriving the same registration on every
-// `list_volumes` call.
 #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
 mod disk_arbitration;
 

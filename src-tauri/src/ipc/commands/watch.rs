@@ -19,18 +19,6 @@ pub fn noop_dir_patch(_: crate::watch::DirPatch) {}
 #[inline(never)]
 pub fn noop_watch_error(_: String, _: String) {}
 
-/// Folds a legacy [`crate::watch::DirPatch`] into the v2
-/// `DirectorySessionService`, if the reporting tab has an active v2 session
-/// for the corresponding pane. Reuses `WatchService`'s
-/// already-tested long-lived per-tab watch as the mutation source rather than
-/// standing up a second independent long-lived watcher; the v2 session only
-/// consumes the *result*, computing its own Rust-authoritative
-/// [`SessionPatch`] rather than trusting the legacy patch's already-applied
-/// v1 ordering. Returns `None` when there is no active v2 session for the
-/// pane, the path does not match, or nothing changed in the derived view —
-/// all silent no-ops, matching "stale/path-mismatched patches affect neither
-/// pane nor tree" (this function only ever *adds* a session patch on top of
-/// the legacy patch, never suppresses it).
 pub fn fold_dir_patch_into_session(
     session_state: &crate::directory_session::DirectorySessionService,
     item_count_state: &ItemCountService,
@@ -39,10 +27,6 @@ pub fn fold_dir_patch_into_session(
     fold_dir_patch_into_session_core(session_state, item_count_state, patch)
 }
 
-/// Cfg-agnostic core shared by the real (non-`test-utils`) `set_tab_watch`
-/// callback and [`fold_dir_patch_into_session_for_tests`], so the fold ->
-/// invalidate pipeline is exercised identically by both — see
-/// [`fold_dir_patch_into_session`]'s docs for the full contract.
 fn fold_dir_patch_into_session_core(
     session_state: &crate::directory_session::DirectorySessionService,
     item_count_state: &ItemCountService,
@@ -78,30 +62,6 @@ fn fold_dir_patch_into_session_core(
     Some(session_patch)
 }
 
-/// Matches invalidation breadth to a folded [`crate::ipc::types::SessionPatch`]:
-/// an unambiguous `Delta` (single direct-child add/remove/update) only makes
-/// the mutated directory's own item count stale (its child count changed by
-/// exactly one), so only that directory is invalidated. A `ReplaceView`
-/// (multiple or order-ambiguous changes) additionally invalidates every
-/// changed *directory* row itself, since a broader/ambiguous batch cannot
-/// prove those child directories' own cached counts are still accurate
-/// (e.g. a rename-in-place can carry a different identity than the cache
-/// key remembers). `MetadataOnly` patches never touch child membership, so
-/// they are intentionally left alone (Items counts are unaffected by a
-/// field-only update).
-///
-/// The generation key is each patch's post-mutation `watch_revision` — a
-/// per-session, mutation-driven counter that only advances when
-/// `apply_watch_mutation`/`resnapshot` actually changes the session's
-/// derived view (see `directory_session::mod`'s `ActiveSession::baseline`).
-/// Unlike `process_automatic_request`'s `request_id` (a frontend-supplied
-/// per-request counter that happens to always be "fresh" because every
-/// viewport request gets a new one), `watch_revision` is the only signal in
-/// this codebase that actually represents "this directory's on-disk content
-/// generation as last observed by the owning session" — exactly the
-/// invariant `ItemCountCache::invalidate_generation` needs to drop stale
-/// counts without needing every viewport request to also relitigate
-/// freshness.
 fn invalidate_item_counts_for_patch(
     item_count_state: &ItemCountService,
     patch: &crate::ipc::types::SessionPatch,
@@ -132,15 +92,6 @@ fn invalidate_item_counts_for_patch(
     }
 }
 
-/// Test-only entry point that exercises the exact same watch-patch ->
-/// session-fold -> item-count-invalidation pipeline as the real (non-
-/// `test-utils`) `set_tab_watch` callback above, without requiring a live
-/// `AppHandle`/event emission. `fold_dir_patch_into_session` itself stays
-/// `#[cfg(not(feature = "test-utils"))]`-gated because it is only ever
-/// reached through the real Tauri command in production; this wrapper lets
-/// integration tests prove the invalidation-breadth contract
-/// (`invalidate_item_counts_for_patch`) against a real folded
-/// [`crate::watch::patch::SessionPatch`] instead of constructing one by hand.
 #[cfg(feature = "test-utils")]
 pub fn fold_dir_patch_into_session_for_tests(
     session_state: &crate::directory_session::DirectorySessionService,

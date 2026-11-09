@@ -91,8 +91,6 @@ pub struct EverythingHandle {
     get_result_date_modified: GetResultDateModified,
 }
 
-/// # Safety
-/// `T` must match the exported symbol's real signature.
 unsafe fn symbol<T: Copy>(library: &Library, name: &[u8]) -> Result<T, EverythingError> {
     library
         .get::<T>(name)
@@ -153,12 +151,6 @@ impl EverythingHandle {
             .map(|sizes| sizes.get(&requested[0]).copied().flatten())
     }
 
-    /// Queries folder sizes for `paths` in bounded chunks. `should_cancel`
-    /// is checked before each chunk, so a batch abandoned mid-flight (e.g.
-    /// the pane navigated away from a folder with tens of thousands of
-    /// subfolders) stops issuing further Everything IPC queries instead of
-    /// grinding through every remaining chunk. Any unqueried paths are left
-    /// as `None`; the caller discards cancelled results anyway.
     pub fn query_folder_sizes(
         &self,
         paths: &[String],
@@ -213,7 +205,6 @@ impl EverythingHandle {
         Ok(map_everything_result_sizes(chunk, &results))
     }
 
-    /// Runs one search query (names, paths, folder flags, modified times).
     pub fn run_query(
         &self,
         query: &EverythingQuery,
@@ -229,9 +220,6 @@ impl EverythingHandle {
         )
     }
 
-    /// The SDK keeps one process-wide query state, so each call sets all
-    /// of it under the lock: a search must never leave match-path, sort or
-    /// offset settings behind for a folder-size query, or the reverse.
     fn execute(
         &self,
         query: &EverythingQuery,
@@ -266,8 +254,6 @@ impl EverythingHandle {
         }
     }
 
-    /// Reads one row of the query just run under `query_lock`; rows
-    /// without a path or name are skipped.
     fn result_row(&self, index: u32, flags: u32) -> Option<EverythingRow> {
         unsafe {
             let path = crate::win32::string_from_wide_ptr((self.get_result_path_w)(index))?;

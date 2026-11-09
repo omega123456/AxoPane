@@ -35,17 +35,10 @@ export const commandLabels: Record<CommandId, string> = {
   searchEverywhere: 'Search everywhere',
 }
 
-// MacBook keyboards have no forward-delete key (the labelled "delete" key emits
-// Backspace, already bound to Go up), so macOS defaults to F8 / Shift+F8 while
-// still listening to the physical Delete keys present on full-size keyboards.
-// Windows keeps the conventional Delete / Shift+Delete. The platform-primary
-// binding is listed first so the Settings UI surfaces the right one.
 const deleteDefaults: { delete: Shortcut[]; deletePermanent: Shortcut[] } = isMacPlatform()
   ? { delete: ['F8', 'Delete'], deletePermanent: ['Shift+F8', 'Shift+Delete'] }
   : { delete: ['Delete'], deletePermanent: ['Shift+Delete'] }
 
-// F4 is a media/Spotlight key on most Mac keyboards unless Fn is held, so
-// macOS also gets ⌘⇧F ("Ctrl" renders as ⌘ there) for Search everywhere.
 const searchEverywhereDefaults: Shortcut[] = isMacPlatform() ? ['F4', 'Ctrl+Shift+F'] : ['F4']
 
 export const defaultKeymap: Record<CommandId, Shortcut[]> = {
@@ -73,11 +66,6 @@ export const defaultKeymap: Record<CommandId, Shortcut[]> = {
   searchEverywhere: searchEverywhereDefaults,
 }
 
-// Clipboard commands are bound to the platform's native editing shortcuts
-// (Ctrl/⌘+C/X/V) and are intentionally NOT remappable. Treating them as the OS
-// default keeps them off the conflict checker (they previously surfaced spurious
-// "Conflict" badges when a stale persisted override shadowed them) and stops the
-// Settings UI from offering a rebind that would fight the platform.
 export const reservedCommands: ReadonlySet<CommandId> = new Set(['copy', 'cut', 'paste'])
 
 export function isReservedCommand(commandId: CommandId) {
@@ -92,8 +80,6 @@ type KeymapMigration = {
 
 const legacyKeymapMigrations: KeymapMigration[] = [
   {
-    // Earlier builds used F5 for refresh. Once cross-pane copy moved onto F5,
-    // persisted configs could shadow the new default indefinitely.
     commandId: 'refresh',
     from: ['F5'],
     to: defaultKeymap.refresh,
@@ -114,9 +100,6 @@ const modifierLabels: Record<PlatformOs, Record<Modifier, string>> = {
     Shift: 'Shift',
   },
   macos: {
-    // Shortcuts are stored with `Ctrl` as the single source-of-truth primary
-    // modifier. On macOS the primary modifier is Command, so render `Ctrl` as
-    // ⌘ (and the literal Meta key, never used in defaults, as ⌃).
     Ctrl: '⌘',
     Meta: '⌃',
     Alt: '⌥',
@@ -289,8 +272,6 @@ export function mergeKeymap(overrides: Partial<Record<CommandId, Shortcut[]>>) {
   return Object.fromEntries(
     Object.entries(defaultKeymap).map(([commandId, defaults]) => [
       commandId,
-      // Reserved commands always use their OS default, ignoring any persisted
-      // override so they can never be rebound or shadowed.
       (isReservedCommand(commandId as CommandId)
         ? defaults
         : (overrides[commandId as CommandId] ?? defaults)

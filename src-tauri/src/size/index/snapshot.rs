@@ -19,9 +19,6 @@ impl Machine {
         self.last_applied_id
     }
 
-    /// Writes the snapshot if anything changed. The saved event ID
-    /// is the pre-scan one while a full scan runs, and stays put while
-    /// subtree scans are in flight, so a relaunch replays what they cover.
     pub(super) fn save_snapshot(&mut self) {
         if self.stream.is_none() {
             return;

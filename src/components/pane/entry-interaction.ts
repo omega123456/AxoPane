@@ -3,10 +3,6 @@ import { isMiddleClickOpen } from '@/lib/mouse-buttons'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import type { FileRowActions } from './FileRow'
 
-// A non-focusable div (not a <button>) so mousedown never steals keyboard
-// focus away from the pane <section>; that lets us skip the mousedown
-// preventDefault a <button> needed, which would otherwise suppress the
-// native `dragstart` and break drag-and-drop entirely.
 export function entryInteractionProps(entry: DirectoryEntry, actions: FileRowActions) {
   return {
     onDragStart: (event: DragEvent<HTMLDivElement>) => actions.onDragStart(entry.id, event),

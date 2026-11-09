@@ -1,6 +1,3 @@
-//! The only backend calls search makes. Everything above these traits is
-//! shared code; tests implement them directly.
-
 use std::path::PathBuf;
 
 use super::SearchError;
@@ -24,8 +21,6 @@ impl EverythingSource for EverythingHandle {
 }
 
 pub trait FolderTreeSource: Send + Sync {
-    /// Runs `read` once under the tree's lock, with the protected roots
-    /// whose contents must stay hidden. Keep each call short.
     fn read(&self, read: &mut dyn FnMut(&FolderSizeTree, &[PathBuf])) -> Result<(), SearchError>;
 }
 

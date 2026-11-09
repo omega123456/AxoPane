@@ -1,9 +1,3 @@
-//! Capability-gated file-copy selection.
-//!
-//! Platform adapters only describe a native implementation when every fact it
-//! relies on is confirmed. The actual byte transfer remains the portable,
-//! cancellation-aware adapter under `test-utils`.
-
 pub mod macos;
 pub mod portable;
 pub mod windows;

@@ -1,4 +1,3 @@
-/** The 3px accent pill marking the current item in a Fluent navigation list. */
 export function SelectionPill() {
   return (
     <span

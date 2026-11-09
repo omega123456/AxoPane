@@ -1,4 +1,3 @@
-/** A new record with `keys` set to `true` when `flagged`, or removed when not. */
 export function withKeyFlags(
   record: Readonly<Record<string, true>>,
   keys: readonly string[],
@@ -38,7 +37,6 @@ export function withoutKey<Value>(
   return next
 }
 
-/** A copy of `items` with the item at `fromIndex` moved to `toIndex`. */
 export function moveItem<Item>(items: readonly Item[], fromIndex: number, toIndex: number): Item[] {
   const next = [...items]
   const [moved] = next.splice(fromIndex, 1)

@@ -4,8 +4,6 @@ import { readFileClipboard } from '@/lib/ipc/commands'
 import type { FileClipboardMode, ReadFileClipboardResponse } from '@/lib/types/ipc'
 import type { PaneId } from '@/types/pane'
 
-/** The subset of a listing row that a paste needs. External clipboard items
- * carry no listing identity, so the store keeps only these fields. */
 export type ClipboardEntry = {
   path: string
   name: string
@@ -22,7 +20,6 @@ type ClipboardStore = {
   snapshot: ClipboardSnapshot | null
   setClipboard: (snapshot: ClipboardSnapshot) => void
   clearClipboard: () => void
-  /** Adopt what another application put on the OS clipboard. */
   syncFromOs: () => Promise<void>
 }
 
@@ -73,9 +70,6 @@ export const useClipboardStore = create<ClipboardStore>((set, get) => ({
       return
     }
 
-    // The app writes its own copy/cut to the OS clipboard, so the same paths
-    // mean this is our own entry. Keep it: it knows the source pane, and macOS
-    // reports every file list as a copy.
     if (samePaths(clipboardEntries(get().snapshot), clipboard.items)) {
       return
     }

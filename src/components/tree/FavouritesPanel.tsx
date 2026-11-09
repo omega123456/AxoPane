@@ -22,7 +22,6 @@ function handleFavouritesDragOver(event: DragEvent<HTMLElement>) {
   event.dataTransfer.dropEffect = 'move'
 }
 
-/** Drops onto the heading or the empty row append to the end of the list. */
 async function handleFavouritesDrop(event: DragEvent<HTMLElement>) {
   const drag = useDragStore.getState().drag
   if (!canDropOnFavourite(drag)) return
@@ -54,7 +53,6 @@ function openFavouriteContextMenu(path: string, event: MouseEvent) {
   })
 }
 
-/** Stable for the memoized rows; every handler reads current store state. */
 const favouriteRowActions: FavouriteRowActions = {
   onNavigate: navigateActivePane,
   onOpenTab: openTabInActivePane,
@@ -101,7 +99,6 @@ function FavouritesList({ favourites, heightPx }: { favourites: string[]; height
   const activePath = usePanesStore((state) => state.panes[state.activePaneId].path)
   return (
     <div
-      // Height is user-draggable runtime geometry; no static token can express it.
       style={{ maxHeight: `${heightPx}px` }}
       className={`overflow-x-hidden overflow-y-auto overscroll-contain ${SCROLLBAR_THIN}`}
     >
@@ -120,11 +117,6 @@ function FavouritesList({ favourites, heightPx }: { favourites: string[]; height
   )
 }
 
-/**
- * Rows are fixed-height, so the list's rendered height is the stored cap or
- * its content, whichever is smaller. Resizing starts from that, so a short
- * list reacts to the first pixel of an upward drag.
- */
 function FavouritesResizeHandle({ heightPx, count }: { heightPx: number; count: number }) {
   const setHeightPx = useLayoutStore((state) => state.setFavouritesHeightPx)
   const shownHeightPx = Math.min(heightPx, count * TREE_ROW_HEIGHT_PX)
@@ -158,12 +150,6 @@ function FavouritesBody({ favourites, heightPx }: { favourites: string[]; height
   )
 }
 
-/**
- * Favourites, fixed above the folder tree so they stay on screen however deep
- * the tree is expanded. The list grows to a user-draggable (persisted) height,
- * then scrolls inside its own area; the heading collapses it to a single row
- * with a count.
- */
 export function FavouritesPanel() {
   const favourites = useConfigStore((state) => state.favourites)
   const collapsed = useConfigStore((state) => state.favouritesCollapsed)

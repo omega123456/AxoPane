@@ -14,15 +14,10 @@ use super::{
 use crate::volumes;
 use crate::volumes::VolumeInfo;
 
-/// How a macOS size request is routed, resolved once at request time.
 #[cfg(target_os = "macos")]
 pub(crate) enum Route {
-    /// By the requested path itself: already canonical, or missing.
     AsIs,
-    /// By this canonical directory: the requested path runs through a
-    /// symlink (walks themselves never follow one).
     Target(PathBuf),
-    /// Not a directory: a file, a link to one, or a dangling or looping link.
     NotDir,
 }
 
@@ -45,7 +40,6 @@ fn request_route(requested: &Path, volumes: &[VolumeInfo]) -> Route {
     route_of(requested)
 }
 
-/// The path a request is sized by, plus (on macOS) how it was routed.
 struct RequestTarget {
     sized: PathBuf,
     #[cfg(target_os = "macos")]
@@ -53,7 +47,6 @@ struct RequestTarget {
 }
 
 impl RequestTarget {
-    /// Network paths stay `na` without touching the share.
     #[cfg(target_os = "macos")]
     fn resolve(path: &str, volumes: &[VolumeInfo]) -> Self {
         let requested = Path::new(path);
@@ -77,7 +70,6 @@ impl RequestTarget {
 #[derive(Default)]
 struct IndexRequests {
     plain: Vec<String>,
-    /// Requested paths with the symlink target their total lives at.
     linked: Vec<(String, PathBuf)>,
 }
 
@@ -106,17 +98,12 @@ struct RoutingPass<'pass> {
 #[derive(Default)]
 struct RoutedRequests {
     everything: Vec<String>,
-    /// Answered at once without any work.
     immediate: Vec<SizeUpdate>,
     #[cfg(target_os = "macos")]
     index: IndexRequests,
 }
 
 impl SizeService {
-    /// Routes each path: network → Everything → index → manual. On macOS an
-    /// `auto` request outside the index is answered `unknown` without work,
-    /// and a path through a symlink is routed (and sized) by its resolved
-    /// target while its updates keep the requested path.
     pub fn request_paths_with_mode(
         &self,
         routed_request: SizeRequestWithVolumes,
@@ -183,7 +170,6 @@ impl SizeService {
         }
     }
 
-    /// Files and dangling or looping links are never index paths.
     fn backend_for(&self, request: &RequestTarget, volumes: &[VolumeInfo]) -> SizeBackend {
         let backend = self.choose_backend_for_path(&request.sized, volumes);
         #[cfg(target_os = "macos")]
@@ -217,7 +203,6 @@ impl SizeService {
     }
 }
 
-/// Forwards updates to `emitter` under the requested `path`.
 #[cfg(target_os = "macos")]
 fn reported_as(path: String, emitter: UpdateEmitter) -> UpdateEmitter {
     Arc::new(move |updates: Vec<SizeUpdate>| {

@@ -43,8 +43,6 @@ export function withUpdaterStatus(
   return { ...outcome, status, error }
 }
 
-// How long a manual "you're up to date" acknowledgement lingers before the
-// status quietly returns to idle.
 const UP_TO_DATE_RESET_MS = 4_000
 
 let periodicTimer: ReturnType<typeof setInterval> | null = null
@@ -161,8 +159,7 @@ async function downloadAndInstall(set: UpdaterSet, get: UpdaterGet) {
     const latestOutcome = availableOutcome(latestUpdate, summarizeUpdate(latestUpdate))
     set({ outcome: withUpdaterStatus(latestOutcome, 'installing') })
     await downloadAndInstallAppUpdate(latestUpdate)
-    // On Windows the NSIS passive installer relaunches the app, so reaching
-    // this point usually means the process is on its way out.
+    // On Windows the NSIS passive installer relaunches the app, so the process is exiting here.
   } catch (cause) {
     const message = errorMessage(cause)
     log.error('app update install failed', { error: message })
@@ -190,7 +187,6 @@ export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
   startPeriodicCheck: () => {
     clearPeriodicTimer()
 
-    // Always check once on launch, regardless of the configured cadence.
     void get().checkForUpdate(false)
 
     const interval = useConfigStore.getState().updateCheckInterval as UpdateInterval

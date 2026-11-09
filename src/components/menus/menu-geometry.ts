@@ -14,13 +14,6 @@ export type MenuGeometry = {
   maxHeight?: number
 }
 
-/**
- * The app zooms the UI via CSS `zoom` on <html> (see layout-store). Pointer
- * coordinates, `getBoundingClientRect()` and `innerWidth/Height` are in real
- * viewport pixels, but `left`/`top` written on a node inside the zoomed root
- * are multiplied by the zoom factor, so geometry is computed in real pixels
- * and divided by this factor before it is written.
- */
 export function documentZoom() {
   return Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1
 }
@@ -29,7 +22,6 @@ export function menuAvailableHeight() {
   return Math.max(window.innerHeight - MENU_VIEWPORT_MARGIN_PX * BOTH_SIDES, 0)
 }
 
-/** Flips the menu around the point when it would overflow, then clamps it into the viewport. */
 export function placeMenuAtPoint(pointX: number, pointY: number, size: Size): MenuGeometry {
   const margin = MENU_VIEWPORT_MARGIN_PX
   const availableHeight = menuAvailableHeight()
@@ -46,7 +38,6 @@ export function placeMenuAtPoint(pointX: number, pointY: number, size: Size): Me
   }
 }
 
-/** Opens to the anchor's right, or its left when that would overflow. */
 export function placeSubmenuBesideAnchor(anchor: AnchorRect, size: Size): MenuGeometry {
   const margin = MENU_VIEWPORT_MARGIN_PX
   const availableHeight = menuAvailableHeight()
@@ -65,7 +56,6 @@ export function placeSubmenuBesideAnchor(anchor: AnchorRect, size: Size): MenuGe
   }
 }
 
-/** Drops below the trigger, or above it when there is no room below. */
 export function placePopoverAtTrigger(trigger: AnchorRect, size: Size): MenuGeometry {
   const margin = MENU_VIEWPORT_MARGIN_PX
   const fitsBelow = trigger.bottom + size.height <= window.innerHeight - margin

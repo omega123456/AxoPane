@@ -67,8 +67,6 @@ pub fn write_paths(mode: ClipboardMode, paths: &[String]) -> Result<(), Clipboar
     }
 }
 
-/// Read the file paths another application (or this one) put on the OS
-/// clipboard. An empty list means that the clipboard holds no files.
 pub fn read_paths() -> Result<ClipboardFiles, ClipboardError> {
     #[cfg(not(feature = "test-utils"))]
     {
@@ -107,8 +105,6 @@ mod read_impl {
         let context =
             ClipboardContext::new().map_err(|error| ClipboardError::new(error.to_string()))?;
 
-        // Every platform reports "the clipboard holds no files" as an error.
-        // That is an empty clipboard, not a failure.
         let paths = context.get_files().unwrap_or_default();
         if paths.is_empty() {
             return Ok(ClipboardFiles::empty());
@@ -125,8 +121,6 @@ mod read_impl {
         super::windows_impl::read_preferred_effect()
     }
 
-    // macOS and Linux file clipboards carry no move hint. A cut inside the app
-    // keeps its own mode in the app clipboard store.
     #[cfg(not(windows))]
     fn read_mode() -> ClipboardMode {
         ClipboardMode::Copy
@@ -141,10 +135,6 @@ mod cross_platform_impl {
     pub(super) fn write_paths(mode: ClipboardMode, paths: &[String]) -> Result<(), ClipboardError> {
         let _ = mode;
 
-        // macOS/Linux file clipboards are represented as file lists. The app's
-        // own clipboard store still tracks move-vs-copy so cut highlighting and
-        // in-app paste behavior remain correct even where the OS clipboard does
-        // not expose a separate move hint the same way Windows does.
         ClipboardContext::new()
             .map_err(clipboard_error)?
             .set_files(paths.to_vec())

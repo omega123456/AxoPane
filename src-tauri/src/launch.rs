@@ -41,28 +41,20 @@ pub fn open_path(path: &Path) -> Result<(), OpenPathError> {
     platform::open_path(&resolved)
 }
 
-/// `ShellExecuteW` reports failure as a status code of 32 or less.
 const SHELL_EXECUTE_SUCCESS_FLOOR: isize = 32;
-/// `SE_ERR_ASSOCINCOMPLETE`: the association exists but is unusable.
 const SE_ERR_ASSOCINCOMPLETE: isize = 27;
-/// `SE_ERR_NOASSOC`: no application is associated with the extension.
 const SE_ERR_NOASSOC: isize = 31;
 
-/// `SE_ERR_ACCESSDENIED`: for a "runas" launch this is the refused UAC prompt.
 const SE_ERR_ACCESSDENIED: isize = 5;
 
-/// Verb that raises the shell's "Open with" picker.
 pub const OPEN_WITH_VERB: &str = "openas";
 
-/// Verb that relaunches a program elevated. The shell raises the UAC prompt.
 pub const RUNAS_VERB: &str = "runas";
 
 pub fn shell_execute_succeeded(status: isize) -> bool {
     status > SHELL_EXECUTE_SUCCESS_FLOOR
 }
 
-/// Explorer falls back to the "Open with" picker for types it cannot resolve;
-/// erroring out instead would leave the user no way to open them at all.
 pub fn should_prompt_open_with(status: isize) -> bool {
     matches!(status, SE_ERR_ASSOCINCOMPLETE | SE_ERR_NOASSOC)
 }
@@ -71,8 +63,6 @@ pub fn launch_failure_detail(status: isize) -> String {
     format!("ShellExecuteW returned status code {status}")
 }
 
-/// A refused UAC prompt is a user decision, not a defect. Report it in words
-/// instead of a raw shell status code.
 pub fn elevation_failure_detail(status: isize) -> String {
     if status == SE_ERR_ACCESSDENIED {
         return "the administrator permission request was refused".to_string();
@@ -81,11 +71,6 @@ pub fn elevation_failure_detail(status: isize) -> String {
     launch_failure_detail(status)
 }
 
-/// Restarts this application with administrator permissions.
-///
-/// Windows only. The other platforms have no equivalent one-click elevation,
-/// so they report `Unsupported` and the caller tells the user to restart the
-/// application manually.
 pub fn restart_as_admin() -> Result<(), OpenPathError> {
     let executable = std::env::current_exe().map_err(|source| OpenPathError::Io {
         path: PathBuf::new(),
@@ -95,18 +80,13 @@ pub fn restart_as_admin() -> Result<(), OpenPathError> {
     platform::restart_as_admin(&executable)
 }
 
-/// System Settings > Privacy & Security > Full Disk Access.
 pub const FULL_DISK_ACCESS_SETTINGS_URL: &str =
     "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
 
-/// Opens the macOS Full Disk Access settings pane, the fix for a folder macOS
-/// blocks. The other platforms have no such pane and report `Unsupported`.
 pub fn open_full_disk_access_settings() -> Result<(), OpenPathError> {
     platform::open_full_disk_access_settings()
 }
 
-/// Matches Explorer-style launches: scripts and associated apps start in the
-/// clicked item's containing folder, not the file explorer process directory.
 pub fn launch_directory(path: &Path) -> Option<PathBuf> {
     path.parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -151,10 +131,6 @@ mod platform {
             directory: directory.as_deref().map(Path::as_os_str),
         };
 
-        // A null verb makes the shell pick the file type's *default* verb, which
-        // is what a double-click in Explorer does. Hard-coding "open" breaks
-        // every type whose default verb is something else — `.iso` registers
-        // `mount`, so "open" failed with SE_ERR_NOASSOC instead of mounting.
         let status = shell_execute(&open_default);
         if super::shell_execute_succeeded(status) {
             return Ok(());
@@ -181,8 +157,6 @@ mod platform {
     }
 
     pub fn restart_as_admin(executable: &Path) -> Result<(), OpenPathError> {
-        // An elevated process cannot elevate again. Report it instead of
-        // closing the window and gaining nothing.
         if unsafe { IsUserAnAdmin() }.as_bool() {
             return Err(OpenPathError::LaunchFailed {
                 path: executable.to_path_buf(),
@@ -207,7 +181,6 @@ mod platform {
         })
     }
 
-    /// Full Disk Access is a macOS setting; Windows blocks folders through ACLs.
     pub fn open_full_disk_access_settings() -> Result<(), OpenPathError> {
         Err(OpenPathError::Unsupported)
     }
@@ -236,8 +209,6 @@ mod platform {
             })
     }
 
-    /// Only Windows has a one-click elevated relaunch. macOS asks the user to
-    /// start the application again with the permissions it needs.
     pub fn restart_as_admin(_executable: &Path) -> Result<(), OpenPathError> {
         Err(OpenPathError::Unsupported)
     }

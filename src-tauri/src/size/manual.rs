@@ -57,8 +57,6 @@ pub fn calculate(
     };
     let metadata = std::fs::symlink_metadata(path)?;
 
-    // macOS sizes a symlink as its target, resolved once here (a dangling or
-    // looping link is an I/O error); the walk itself never follows links.
     #[cfg(target_os = "macos")]
     if metadata.file_type().is_symlink() {
         let target = std::fs::canonicalize(path)?;
@@ -75,7 +73,6 @@ pub fn calculate(
     subtree_total(path, &stop)
 }
 
-/// macOS totals come from the parallel `getattrlistbulk` walker.
 #[cfg(target_os = "macos")]
 fn subtree_total(path: &Path, stop: &StopConditions<'_>) -> Result<u64, ManualSizeError> {
     let StopConditions {

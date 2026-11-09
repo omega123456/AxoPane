@@ -31,9 +31,6 @@ use super::{
     RateSample, RemovedEmitter,
 };
 
-/// Cloneable bundle of the emitters and timing config a worker thread needs.
-/// Bundling keeps `run_operation` / `release_and_reschedule` signatures small
-/// (no `too_many_arguments`), mirroring how [`WorkerContext`] bundles per-item state.
 #[derive(Clone)]
 pub(super) struct WorkerRuntime {
     pub(super) progress: Option<ProgressEmitter>,
@@ -45,8 +42,6 @@ pub(super) struct WorkerRuntime {
     pub(super) coordinator: Arc<crate::resource_coordinator::ResourceCoordinator>,
 }
 
-/// Shared context threaded through the copy/move worker helpers. Bundling these
-/// fields keeps the recursive copy signatures small (no `too_many_arguments`).
 pub struct WorkerContext<'a> {
     pub shared_operation: &'a Arc<Mutex<OpState>>,
     pub resolver: &'a Arc<Condvar>,
@@ -80,8 +75,6 @@ pub(super) struct ItemTransfer<'item> {
     pub(super) source_is_real_directory: bool,
 }
 
-/// Run a single operation to completion / failure / cancel. Blocks the worker
-/// thread; conflicts park here on the condvar until resolved.
 pub(super) fn run_operation(id: String, inner: &Arc<Mutex<Inner>>, runtime: &WorkerRuntime) {
     let Some(OperationHandles {
         shared_operation,
@@ -274,9 +267,6 @@ fn record_nested_target_failure(shared_operation: &Arc<Mutex<OpState>>, transfer
     ));
 }
 
-/// Totals for zero-sized (folder) items were already measured up front by
-/// `measure_totals_up_front`, so the walk never needs to grow the denominator
-/// mid-flight — only `copied_bytes` moves.
 fn run_transfer(
     transfer: &ItemTransfer,
     target: &TransferTarget,
@@ -361,9 +351,6 @@ fn advance_unless_cancelled(context: &WorkerContext<'_>, item: &OpItem) {
     }
 }
 
-/// Record a transfer failure with the context that turns an opaque OS error
-/// into an actionable log entry. The queue keeps a concise version for the UI,
-/// while the error log retains the operation id and both filesystem paths.
 pub(super) struct TransferFailure<'failure> {
     pub(super) kind: OpKind,
     pub(super) source: &'failure Path,
@@ -400,9 +387,6 @@ pub(super) fn record_transfer_failure(
     ));
 }
 
-/// `true` when the operation backing `context` has been cancelled. Small helper
-/// so both the top-of-function check and the per-entry check inside the
-/// directory walk loop stay in sync.
 pub(super) fn is_operation_cancelled(context: &WorkerContext<'_>) -> bool {
     context
         .shared_operation

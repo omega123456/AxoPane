@@ -33,7 +33,6 @@ pub use runtime::{
 pub use tab_patch::{diff_entries, snapshot_for_target, PatchLabel};
 use tab_patch::{snapshot_for_watch_baseline, snapshot_from_entries_for_watch};
 
-/// A paired rename event carries the old path and then the new one.
 const RENAME_EVENT_PATH_COUNT: usize = 2;
 
 fn is_paired_rename(event: &notify::Event) -> bool {
@@ -72,9 +71,6 @@ pub struct WatchTarget {
     pub sort_direction: SortDirection,
     pub filter: String,
     pub show_hidden: bool,
-    /// Whether the watcher should ask `list_dir` to count child-directory contents
-    /// (mirrors the Items column visibility). When `false`, snapshots/resnapshots
-    /// skip opening subdirectories purely to count their entries.
     pub include_item_counts: bool,
 }
 
@@ -132,13 +128,6 @@ struct WatchedTab {
 }
 
 impl WatchService {
-    /// Arms (or disarms) the watch for a tab.
-    ///
-    /// When `entries` is `Some`, the baseline snapshot is seeded directly from
-    /// those entries (the listing the frontend already fetched) instead of
-    /// re-reading the directory, eliminating a redundant enumeration. The
-    /// entries supplied must be the post-filter/sort listing for `target.path`
-    /// so the first diff against subsequent filesystem events is empty.
     pub fn set_tab_watch(&self, arm: TabWatchArm, emitters: WatchEmitters) -> Result<(), String> {
         let TabWatchArm {
             target,
@@ -168,9 +157,6 @@ impl WatchService {
         guard.as_ref().map(|runtime| Arc::clone(&runtime.tabs))
     }
 
-    /// Rechecks every currently watched tab and emits a patch only for paths
-    /// whose snapshot changed. Used as a window-focus reliability net for OS
-    /// watcher events that may have been dropped while the app was inactive.
     pub fn reconcile(&self, emitters: WatchEmitters) {
         let Some(tabs) = self.watched_tabs() else {
             return;
@@ -220,12 +206,6 @@ fn arm_tab_watch(
     for (stale_tab_id, _) in pane.stale_siblings {
         tabs.remove(&stale_tab_id);
     }
-    // This is a brand-new generation, so it cannot have coordinator
-    // state to clear. Do not enqueue `Replace(watch_id)` here: the
-    // native watch is already armed, and a child event can reach the
-    // raw lane before that control message is drained. Clearing the
-    // new ID afterward would discard the first real create/delete
-    // batch and leave the pane stale until an explicit refresh.
     tabs.insert(
         target.tab_id.clone(),
         WatchedTab {
@@ -283,9 +263,6 @@ pub fn insert_tab_for_tests(
     watch_id
 }
 
-/// Returns the current baseline snapshot stored for `tab_id`, or `None` if the
-/// tab isn't (or is no longer) watched. Lets tests assert on `set_tab_watch`'s
-/// seeded baseline directly, without forcing a synchronous re-diff.
 #[cfg(feature = "test-utils")]
 pub fn tab_snapshot_for_tests(
     service: &WatchService,

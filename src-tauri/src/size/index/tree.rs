@@ -1,22 +1,13 @@
-//! Folder-only size tree for the macOS index: one node per directory with
-//! its direct-file bytes and rolled-up subtree totals. Pure: no I/O and no
-//! platform code, so it compiles and is tested on every OS.
-
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 
 type NodeId = u32;
 const NONE: NodeId = NodeId::MAX;
 
-/// This directory's own listing is known.
 const SCANNED: u8 = 1;
-/// The OS refused to read this directory.
 const DENIED: u8 = 2;
-/// An unvisited protected root: never read, size unknown.
 const SKIPPED: u8 = 4;
-/// The bits a snapshot stores.
 pub(crate) const PERSISTED_FLAGS: u8 = SCANNED | DENIED | SKIPPED;
-/// Totals changed since the last [`FolderSizeTree::drain_changed`].
 const DIRTY: u8 = 8;
 
 const NO_FLAGS: u8 = 0;
@@ -37,26 +28,19 @@ fn with_skipped_flag(flags: u8, skipped: bool) -> u8 {
     flags & !SKIPPED
 }
 
-/// 80 bytes inline; with the name allocation and the parent's 4-byte child
-/// slot, about 100 bytes per folder.
 #[derive(Debug, Default)]
 struct Node {
     parent: NodeId,
-    /// A single component, or the full path for a root.
     name: Box<str>,
-    /// Sorted by name for binary-search lookup.
     children: Vec<NodeId>,
     direct: u64,
-    /// The aggregates below cover this node and every descendant.
     total: u64,
-    /// Nodes neither scanned nor skipped.
     pending: u32,
     skipped: u32,
     denied: u32,
     flags: u8,
 }
 
-/// A signed change to a node's aggregates, applied to it and every ancestor.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct Delta {
     bytes: i64,
@@ -94,26 +78,17 @@ impl Delta {
     }
 }
 
-/// Why a total is only a lower bound: skipped protected roots or denied
-/// directories somewhere strictly below the queried folder.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LowerBound {
-    /// Display names of up to three skipped roots, in name order.
     pub skipped_names: Vec<String>,
-    /// Skipped roots beyond `skipped_names`.
     pub skipped_more: u32,
-    /// Denied directories below the folder.
     pub denied_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FolderTotal {
     pub bytes: u64,
-    /// No directory in the subtree is still waiting for a scan, so the
-    /// index can answer without filesystem work.
     pub fully_indexed: bool,
-    /// This directory's own listing is known (live events for unscanned
-    /// directories are left to the scan).
     pub scanned: bool,
     pub denied: bool,
     pub skipped: bool,
@@ -181,13 +156,11 @@ pub(crate) struct LiveNode<'tree> {
     pub(crate) parent: Option<u32>,
 }
 
-/// Arena of folder nodes with u32 indices; freed slots are reused.
 #[derive(Debug, Default)]
 pub struct FolderSizeTree {
     nodes: Vec<Node>,
     free: Vec<NodeId>,
     roots: Vec<NodeId>,
-    /// Nodes carrying the `DIRTY` bit.
     changed: Vec<NodeId>,
     dirty: bool,
 }
@@ -199,8 +172,6 @@ impl FolderSizeTree {
             .any(|&root| Path::new(&*self.node(root).name) == path)
     }
 
-    /// Adds an index root such as `/Users`; returns false if it exists or
-    /// is empty (an empty name marks a freed slot).
     pub fn add_root(&mut self, path: &Path) -> bool {
         if path.as_os_str().is_empty() {
             return false;
@@ -214,12 +185,10 @@ impl FolderSizeTree {
         true
     }
 
-    /// Live nodes, roots included.
     pub fn node_count(&self) -> usize {
         self.nodes.len() - self.free.len()
     }
 
-    /// Whether anything changed since [`Self::mark_clean`] (snapshot writes).
     pub fn is_dirty(&self) -> bool {
         self.dirty
     }
@@ -228,10 +197,6 @@ impl FolderSizeTree {
         self.dirty = false;
     }
 
-    /// Merges one scanned directory as an authoritative listing: sets its
-    /// direct bytes and denied state, prunes children no longer listed and
-    /// adds new ones as not yet scanned. Missing ancestors are created as not
-    /// yet scanned. Returns false for paths outside every root.
     pub fn merge_record<S: AsRef<OsStr>>(
         &mut self,
         path: &Path,
@@ -244,9 +209,6 @@ impl FolderSizeTree {
         true
     }
 
-    /// Applies a single-directory re-read like [`Self::merge_record`], but
-    /// only to a directory already in the tree. Returns the added children's
-    /// paths (to be scanned), or `None` if the directory is not in the tree.
     pub fn apply_listing<S: AsRef<OsStr>>(
         &mut self,
         path: &Path,
@@ -305,15 +267,10 @@ impl FolderSizeTree {
         added
     }
 
-    /// Removes a directory and its subtree, subtracting its totals from the
-    /// ancestors once. Returns false if it is not in the tree.
     pub fn prune(&mut self, path: &Path) -> bool {
         self.find(path).map(|id| self.remove(id)).is_some()
     }
 
-    /// Moves a directory (and its subtree) to `to`, replacing any existing
-    /// node there. Returns false if `from` is missing or a root, `to`'s
-    /// parent is not in the tree, or `to` lies inside `from`.
     pub fn rename(&mut self, from: &Path, to: &Path) -> bool {
         let Some(id) = self.find(from) else {
             return false;
@@ -329,8 +286,6 @@ impl FolderSizeTree {
         if is_root || moves_into_itself {
             return false;
         }
-        // Exact only: a case-insensitive hit may be a distinct sibling on a
-        // case-sensitive volume.
         let replaced = self.resolve(to, false).filter(|&existing| existing != id);
         if replaced.is_some_and(|existing| self.is_within(id, existing)) {
             return false;
@@ -354,8 +309,6 @@ impl FolderSizeTree {
         self.find(path)
     }
 
-    /// Marks or clears an unvisited protected root. Marking creates the node
-    /// (and missing ancestors); clearing leaves it waiting for a scan.
     pub fn set_skipped(&mut self, path: &Path, skipped: bool) -> bool {
         let Some(id) = self.skip_target(path, skipped) else {
             return false;
@@ -369,10 +322,6 @@ impl FolderSizeTree {
         true
     }
 
-    /// After a completed walk of `path`: removes every directory at or below
-    /// it (index roots excepted) that is still waiting for a scan. The walk
-    /// refused those (vanished, excluded or on another device), so they would
-    /// otherwise stay pending forever.
     pub fn prune_unscanned(&mut self, path: &Path) -> bool {
         let Some(id) = self.find(path) else {
             return false;
@@ -398,8 +347,6 @@ impl FolderSizeTree {
         node.children.clone()
     }
 
-    /// The topmost directories still waiting for a scan, e.g. after loading
-    /// a snapshot written mid-scan.
     pub fn unscanned_tops(&self) -> Vec<PathBuf> {
         let mut walk = UnscannedTopsWalk {
             tops: Vec::new(),
@@ -424,7 +371,6 @@ impl FolderSizeTree {
         stack.extend_from_slice(&node.children);
     }
 
-    /// The indexed total for a folder, or `None` if it is not in the tree.
     pub fn total(&self, path: &Path) -> Option<FolderTotal> {
         let id = self.find(path)?;
         let node = self.node(id);
@@ -450,8 +396,6 @@ impl FolderSizeTree {
         })
     }
 
-    /// The largest fully indexed subtrees strictly below `path`; a boost
-    /// excludes these from its walk.
     pub fn indexed_subtrees_under(&self, path: &Path) -> Vec<PathBuf> {
         let Some(id) = self.find(path) else {
             return Vec::new();
@@ -471,8 +415,6 @@ impl FolderSizeTree {
         out
     }
 
-    /// Returns the subscribed paths whose totals changed since the last
-    /// call, then resets change tracking. Call once per applied batch.
     pub fn drain_changed<P: AsRef<Path>>(
         &mut self,
         subscribed: impl IntoIterator<Item = P>,
@@ -491,8 +433,6 @@ impl FolderSizeTree {
         hits
     }
 
-    /// Exact match first; only if that fails, a case-insensitive match
-    /// (still preferring exact per component).
     fn find(&self, path: &Path) -> Option<NodeId> {
         self.resolve(path, false)
             .or_else(|| self.resolve(path, true))
@@ -536,7 +476,6 @@ impl FolderSizeTree {
         })
     }
 
-    /// Finds `path` (exact match), creating missing nodes below its root.
     fn ensure(&mut self, path: &Path) -> Option<NodeId> {
         let RootedRest { root, rest } = [false, true]
             .into_iter()
@@ -611,8 +550,6 @@ impl FolderSizeTree {
         self.node_mut(parent).children.insert(slot, id);
     }
 
-    /// Unlinks `id` from its parent (or the roots) and subtracts `subtree`
-    /// from the ancestors.
     fn detach(&mut self, id: NodeId, subtree: Delta) {
         let parent = self.node(id).parent;
         if parent == NONE {
@@ -644,7 +581,6 @@ impl FolderSizeTree {
         self.bump(id, delta);
     }
 
-    /// Applies `delta` to `id` and every ancestor, marking each changed.
     fn bump(&mut self, mut id: NodeId, delta: Delta) {
         if delta == Delta::default() {
             return;
@@ -670,7 +606,6 @@ impl FolderSizeTree {
         self.dirty = true;
     }
 
-    /// Whether `id` is `ancestor` or below it.
     fn is_within(&self, id: NodeId, ancestor: NodeId) -> bool {
         self.self_and_ancestors(id)
             .any(|current| current == ancestor)
@@ -714,13 +649,10 @@ impl FolderSizeTree {
         self.collect_skipped_names(child, names);
     }
 
-    /// Arena slots, live or freed: node ids run `0..slot_len()`.
     pub(crate) fn slot_len(&self) -> usize {
         self.nodes.len()
     }
 
-    /// A live node's name and parent (`None` for a root); `None` for a freed
-    /// or out-of-range slot.
     pub(crate) fn live_node(&self, id: u32) -> Option<LiveNode<'_>> {
         let node = self.nodes.get(id as usize)?;
         if node.name.is_empty() {
@@ -750,9 +682,6 @@ impl FolderSizeTree {
         &mut self.nodes[id as usize]
     }
 
-    /// Visits live nodes parents-first, each with its parent's position in
-    /// the visit order (`u32::MAX` for roots). Children come in name order,
-    /// so the sequence is deterministic.
     pub(crate) fn export(&self, mut visit: impl FnMut(u32, &str, u64, u8)) {
         let mut order = 0_u32;
         let mut stack: Vec<(NodeId, u32)> =
@@ -770,8 +699,6 @@ impl FolderSizeTree {
         }
     }
 
-    /// Appends one exported node; `None` rejects invalid input (forward
-    /// parent, bad flags, empty or duplicate name).
     pub(crate) fn import_node(&mut self, imported: ImportedNode) -> Option<()> {
         let ImportedNode {
             parent,
@@ -818,7 +745,6 @@ impl FolderSizeTree {
         Some(())
     }
 
-    /// Recomputes every aggregate after [`Self::import_node`] calls.
     pub(crate) fn finish_import(&mut self) {
         for node in &mut self.nodes {
             let own = Delta::own(node.direct, node.flags);
@@ -848,7 +774,6 @@ impl FolderSizeTree {
     }
 }
 
-/// The components of `path` after `root`, if `root` is a prefix of it.
 fn strip_root<'a>(
     path: &'a Path,
     root: &Path,

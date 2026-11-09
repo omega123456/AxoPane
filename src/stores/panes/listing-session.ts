@@ -1,26 +1,3 @@
-/**
- * `ListingSession`: per-pane orchestration for the v2 seekable directory
- * session.
- *
- * Owns:
- *  - Issuing `getDirectorySessionRange` page requests against a
- *    `PaneEntryCollection`, admitting at most `MAX_IN_FLIGHT_REQUESTS` (2)
- *    concurrent range requests per pane.
- *  - Discarding stale responses: a response is only installed into the
- *    collection if its `baseline` still exactly matches the session's
- *    current baseline at the time the response arrives (not at the time the
- *    request was issued) — a view/navigation change that happened while the
- *    request was in flight makes the response a no-op.
- *  - Explicit release orchestration: `release()` calls
- *    `releaseDirectorySession` for the current baseline and is safe to call
- *    more than once (idempotent on the Rust side too).
- *
- * Does not touch React state directly — `panes-store.ts` drives one
- * `ListingSession` per pane and mirrors its `PaneEntryCollection` into
- * whatever store shape the UI reads. This keeps the sparse-collection
- * mechanics testable in complete isolation from Zustand/React.
- */
-
 import {
   beginDirectorySession,
   getDirectorySessionRange,
@@ -40,7 +17,6 @@ import type {
 } from '@/lib/types/ipc'
 import { MAX_RETAINED_PAGES, PaneEntryCollection, pageIndexForRow } from './entry-collection'
 
-/** At most this many `getDirectorySessionRange` requests may be in flight per pane at once. */
 export const MAX_IN_FLIGHT_REQUESTS = 2
 
 export type ListingSessionStatus = 'idle' | 'initializing' | 'ready' | 'error' | 'releasing'
@@ -58,18 +34,6 @@ function baselinesMatch(left: SessionBaseline, right: SessionBaseline): boolean 
   )
 }
 
-/**
- * Whether `candidate` represents the same or later lifecycle state than
- * `current`. A strictly newer `sessionId` always wins outright (a new
- * navigation supersedes any prior session's view/watch state entirely).
- * For the *same* session, `reviseView` keeps `sessionId` fixed but bumps
- * `viewRevision` (and `begin`/watch reconciliation can bump
- * `navigationRevision`/`watchRevision`); two overlapping `reviseView` calls
- * (e.g. a rapid sort change followed by a filter change) can have their
- * responses arrive out of order, so adopting a same-session response must
- * reject one whose revisions are behind what is already installed rather
- * than only comparing `sessionId`.
- */
 function baselineIsAtLeastAsAdvanced(
   current: SessionBaseline,
   candidate: SessionBaseline,
@@ -88,11 +52,6 @@ function isPageIndexInRange(pageIndex: number, lastPageIndex: number) {
   return pageIndex >= 0 && pageIndex <= lastPageIndex
 }
 
-/**
- * Pages to keep pinned (never evicted) for a given viewport page: the
- * viewport itself plus one page of prefetch on either side, matching the
- * plan's "pins the viewport plus adjacent prefetch pages" retention rule.
- */
 export function prefetchPageIndexes(viewportPageIndex: number, lastPageIndex: number): number[] {
   const pages = new Set<number>()
   for (let offset = -1; offset <= 1; offset += 1) {
@@ -132,7 +91,6 @@ function emptyPendingPages(): PendingPages {
 }
 
 export type ListingSessionCallbacks = {
-  /** Called after any state change that should cause the owning store to re-derive its public pane snapshot. */
   onChange: () => void
 }
 
@@ -145,11 +103,6 @@ export class ListingSession {
   private lifecycle: SessionLifecycle = lifecycleIn('idle')
   private pending: PendingPages = emptyPendingPages()
   private callbacks: ListingSessionCallbacks
-  /**
-   * Fences every asynchronous lifecycle operation. A late begin/release/range
-   * completion belongs to the token that created it and must not alter a
-   * newer navigation's status, page bookkeeping, or notifications.
-   */
   private lifecycleToken = 0
 
   constructor(paneId: string, tabId: string, callbacks: ListingSessionCallbacks) {
@@ -194,13 +147,6 @@ export class ListingSession {
     return this.lifecycleToken === token
   }
 
-  /**
-   * Begins a brand-new session for `path` on this pane/tab, replacing any
-   * previously active session (the Rust side already retires the prior
-   * session for the pane inside `begin_navigation`; this call additionally
-   * discards this session's own local sparse state and in-flight bookkeeping
-   * so a stale response from the old session can never be installed).
-   */
   async begin(tabId: string, path: string, view: SessionViewParams): Promise<void> {
     const lifecycleToken = this.nextLifecycleToken()
     this.tabId = tabId
@@ -226,12 +172,6 @@ export class ListingSession {
     }
   }
 
-  /**
-   * Revises the view (sort/filter/show-hidden) for the already-active
-   * session without a fresh `begin_directory_session` round trip. Every
-   * sparse page is invalidated (the Rust view revision has changed, so any
-   * unloaded/loaded page index may now contain entirely different rows).
-   */
   async reviseView(view: SessionViewParams): Promise<void> {
     if (!this.active) {
       return
@@ -255,9 +195,6 @@ export class ListingSession {
         return
       }
       if (isSessionRejection(error)) {
-        // The session was superseded (e.g. a newer navigation) while this
-        // revise was in flight — silently drop it rather than surfacing an
-        // error for a request that is no longer relevant.
         log.debug('ListingSession.reviseView superseded', {
           paneId: this.paneId,
           kind: error.kind,
@@ -270,11 +207,6 @@ export class ListingSession {
     }
   }
 
-  /**
-   * Accepts only a patch for this exact session/tab baseline.  Patches can
-   * reorder rows across page boundaries, so replacing the sparse view and
-   * pulling page zero is deliberately preferred to renderer-side reordering.
-   */
   applyPatch(patch: SessionPatchEvent): boolean {
     const active = this.active
     if (!active) {
@@ -328,11 +260,6 @@ export class ListingSession {
     response: BeginNavigationResponse,
     lifecycleToken: number,
   ) {
-    // A later `begin`/`reviseView` call may have already superseded this one
-    // by the time the response arrives (e.g. rapid double-navigation, or two
-    // overlapping `reviseView` calls for the same session whose responses
-    // arrive out of order); only adopt it if this is still the tab we issued
-    // the request for and it is not behind the baseline already installed.
     if (!this.isStillAdoptable(tabId, lifecycleToken)) {
       return
     }
@@ -344,8 +271,6 @@ export class ListingSession {
     this.lifecycle = lifecycleIn('ready')
     this.collection.invalidateAll()
     this.collection.setTotalRows(response.totalRows)
-    // An empty view (`totalRows === 0`) must produce zero loaded pages, not a
-    // phantom page 0 record with an empty entries array.
     if (response.totalRows > 0) {
       this.collection.installPage(response.firstPage.pageIndex, response.firstPage.entries)
       this.pinViewportPages(response.firstPage.pageIndex)
@@ -353,7 +278,6 @@ export class ListingSession {
     this.callbacks.onChange()
   }
 
-  /** Pins the viewport page and its immediate prefetch neighbors so eviction never targets them. */
   pinViewportPages(viewportPageIndex: number): void {
     if (this.collection.totalRows === 0) {
       this.collection.setPinnedPages([])
@@ -363,12 +287,6 @@ export class ListingSession {
     this.collection.setPinnedPages(prefetchPageIndexes(viewportPageIndex, lastPageIndex))
   }
 
-  /**
-   * Ensures `pageIndex` is loaded (or already in flight / queued), pinning
-   * it and its prefetch neighbors first. At most `MAX_IN_FLIGHT_REQUESTS`
-   * requests run concurrently for this pane; further requests queue and are
-   * drained as in-flight requests complete.
-   */
   ensurePageLoaded(pageIndex: number): void {
     if (!this.isReadyWithBaseline()) {
       return
@@ -492,16 +410,10 @@ export class ListingSession {
     }
   }
 
-  /** All entries currently loaded for the active view, sorted by row index (convenience for full-collection consumers; not the hot rendering path). */
   loadedEntries(): DirectoryEntry[] {
     return this.collection.loadedEntries()
   }
 
-  /**
-   * Idempotent release: tells Rust to retire the active session (safe to
-   * call when there is no active session, or more than once). Always safe to
-   * call during navigation-away, tab close, or app teardown.
-   */
   async release(): Promise<void> {
     const lifecycleToken = this.nextLifecycleToken()
     const baseline = this.currentBaseline
@@ -526,7 +438,6 @@ export class ListingSession {
       if (!this.isCurrentLifecycle(lifecycleToken)) {
         return
       }
-      // Release is best-effort: teardown/navigation-away must not throw.
       log.error('ListingSession.release failed', { paneId: this.paneId, error })
     }
     if (this.isCurrentLifecycle(lifecycleToken)) {

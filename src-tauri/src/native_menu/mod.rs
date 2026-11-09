@@ -42,9 +42,6 @@ pub struct NativeMenuService {
     executor: ShellExecutor,
     token_store: NativeMenuTokenStore,
     cache: Arc<MenuCache>,
-    /// A second, dedicated COM-apartment executor for background cache
-    /// warming. Kept separate from `executor` so a live right-click's
-    /// enumeration never queues behind in-flight warm work.
     warm_executor: ShellExecutor,
 }
 
@@ -65,10 +62,6 @@ impl NativeMenuService {
         }
     }
 
-    /// Returns a cheap, `Clone`-able handle that background warm workers use
-    /// to populate the shared cache without borrowing the Tauri `State`. The
-    /// handle shares the provider and cache with the interactive path but
-    /// enumerates through the dedicated warm executor.
     pub fn warm_handle(&self) -> NativeMenuWarmHandle {
         NativeMenuWarmHandle {
             provider: Arc::clone(&self.provider),
@@ -81,10 +74,6 @@ impl NativeMenuService {
         self.token_store.clear_all();
         self.token_store.replace_request(&request.request_id);
 
-        // Per-file-type, in-memory cache: the first load of a given file type
-        // pays the full shell-enumeration cost; subsequent loads reuse the cached
-        // structure with their paths rebound. Fresh invoke tokens are still
-        // issued per request below, so cache hits never replay stale tokens.
         let items = self
             .cache
             .get_or_load(&request, || {
@@ -123,8 +112,6 @@ impl NativeMenuService {
     pub fn show_properties(&self, request: ShowPropertiesRequest) -> MenuActionStatus {
         #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
         {
-            // Must run in the UI process: the shell property sheet is owned by
-            // the calling process, and the helper child has no message pump.
             windows::show_properties(&request)
         }
 
@@ -137,8 +124,6 @@ impl NativeMenuService {
     pub fn open_with(&self, request: OpenWithRequest) -> MenuActionStatus {
         #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
         {
-            // Same process requirement as `show_properties`: SHOpenWithDialog is
-            // modal and dies with the helper child.
             windows::open_with(&request)
         }
 
@@ -183,10 +168,6 @@ impl NativeMenuService {
     }
 }
 
-/// Background-warming handle: shares the provider and cache with
-/// [`NativeMenuService`] but carries its own dedicated warm [`ShellExecutor`]
-/// so background enumeration never delays a live right-click on the
-/// interactive executor. Cheap to `Clone` (every field is `Arc`-backed).
 #[derive(Clone)]
 pub struct NativeMenuWarmHandle {
     provider: Arc<dyn NativeMenuProvider>,
@@ -195,13 +176,6 @@ pub struct NativeMenuWarmHandle {
 }
 
 impl NativeMenuWarmHandle {
-    /// Cache-only warm for a single representative request: if the request's
-    /// type is already cached this is a cheap no-op (`None`); otherwise it
-    /// enumerates through the dedicated warm executor, dedupes, and inserts
-    /// into the shared cache, returning the newly-populated cache key.
-    ///
-    /// This never touches the invoke-token store and never normalizes or
-    /// issues tokens — it produces no render payload, only a cache entry.
     pub fn warm(&self, request: &LoadNativeMenuRequest) -> Option<String> {
         let cache_key = menu_cache::cache_key(request);
         let cache_load = self.cache.get_or_load(request, || {

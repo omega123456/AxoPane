@@ -52,10 +52,6 @@ function openTabInActivePane(path: string) {
   void panes.openTabFromPath(panes.activePaneId, path)
 }
 
-/**
- * `TreeNode`/`TrashTreeRow` are memoized; these stable handler objects are
- * what let them skip re-rendering. Every handler reads current store state.
- */
 const treeRowActions: TreeRowActions = {
   onToggle: (path) => void usePanesStore.getState().toggleTreeNode(path),
   onNavigate: navigateActivePane,
@@ -77,12 +73,6 @@ const ROW_LAYER_CLASS_NAME =
 
 type PinnedRow = { path: string; chainIndex: number; top: number }
 
-/**
- * One flat, virtualization-ready model spanning every category, volume subtree
- * and the trash row. The ancestor chain (volume root -> active node) drives both
- * the folding of the tree along the active path and the pinned breadcrumb
- * overlay, which pins the capped chain as the user scrolls past each ancestor.
- */
 function useTreeModel(activePath: string) {
   const volumes = usePanesStore((state) => state.volumes)
   const treeNodes = usePanesStore((state) => state.treeNodes)
@@ -111,11 +101,6 @@ function useTreeModel(activePath: string) {
   return { ...model, treeNodes, pinnedChain, isMacOs: platform === 'macos' }
 }
 
-/**
- * jsdom (unit tests) has no layout, so the virtualizer reports no items - fall
- * back to rendering every row, matching the main pane. Real runs always take
- * the virtualized path.
- */
 function useTreeVirtualRows(
   rows: TreeFlatRow[],
   offsets: number[],
@@ -136,10 +121,6 @@ function useTreeVirtualRows(
   return { rowVirtualizer, itemsToRender, totalHeight }
 }
 
-/**
- * Tracks the active folder: expands its ancestor chain so its row exists in the
- * model, then scrolls that row into view once it does.
- */
 function useRevealActiveFolder(
   activePath: string,
   indexByPath: Map<string, number>,
@@ -164,13 +145,6 @@ function useRevealActiveFolder(
   }, [activeIndex, scrollToIndex])
 }
 
-/**
- * Ancestors scrolled up past their stacked slot are drawn in an opaque overlay
- * pinned to the top; ancestors still in their natural position render normally.
- * Slots stack by each ancestor's own height (a drive root is taller than the
- * folder rows pinned beneath it), and `top` is in viewport space so it never
- * lags the native scroll.
- */
 type PinnedRowLayout = {
   pinnedChain: string[]
   indexByPath: Map<string, number>
@@ -270,13 +244,6 @@ function pinnedOverlayRightInsetClass(isMacOs: boolean) {
   return isMacOs ? 'right-3' : 'right-1'
 }
 
-/**
- * Lives outside the scroll container so it never inherits the container's
- * scroll offset: its rows sit in viewport space at a fixed `top`. The wrapper is
- * zero-height so it never intercepts pointer events; each pinned row re-enables
- * them. The rows are visual copies of rows still in the tree, so the overlay is
- * hidden from assistive tech and kept out of the tab order.
- */
 function PinnedAncestors({
   pinnedRows,
   rows,
@@ -339,7 +306,6 @@ function TreeRows({ items, rows, treeNodes, activePath, totalHeight }: TreeRowsP
     <div
       role="tree"
       aria-label="Folders"
-      // Runtime geometry from @tanstack/react-virtual; no static token can express it.
       style={{ height: `${totalHeight}px`, position: 'relative' }}
       className="mx-1 min-h-full"
     >
@@ -367,8 +333,6 @@ export function FolderTree() {
   const activePath = usePanesStore((state) => state.panes[activePaneId].path)
   const treeWidthPx = useLayoutStore((state) => state.treeWidthPx)
   const scrollRef = useRef<HTMLDivElement | null>(null)
-  // Live scroll offset in state because the pinned-ancestor overlay must
-  // re-render as it changes; only the visible window of rows is mounted.
   const [scrollTop, setScrollTop] = useState(0)
   const { rows, offsets, indexByPath, treeNodes, pinnedChain, isMacOs } = useTreeModel(activePath)
   const { rowVirtualizer, itemsToRender, totalHeight } = useTreeVirtualRows(
@@ -388,7 +352,6 @@ export function FolderTree() {
 
   return (
     <aside
-      // Width is user-draggable runtime geometry; no static token can express it.
       style={{ width: `${treeWidthPx}px` }}
       className="relative flex min-h-0 shrink-0 flex-col bg-light-base dark:bg-dark-base mica:bg-transparent"
     >

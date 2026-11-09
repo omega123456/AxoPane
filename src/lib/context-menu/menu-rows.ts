@@ -202,11 +202,6 @@ export function fileSystemStrip(
   ]
 }
 
-/**
- * "Calculate size" shows when automatic sizing is unavailable or off, or when
- * the folder's size is `unknown`. A folder with no size state yet
- * (e.g. a pane over the auto-size cap, or a tree node) counts as `unknown`.
- */
 export function calculateSizeHidden(path: string) {
   const { folderSizeIndexStatus, sizeStates } = usePanesStore.getState()
   return (

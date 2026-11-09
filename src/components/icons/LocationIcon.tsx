@@ -16,19 +16,11 @@ function lastSegment(path: string) {
 }
 
 type LocationIconProps = {
-  /** The location the tab points at — a drive root, network share, or folder. */
   path: string
   volumes: VolumeInfo[]
-  /** Size / layout utilities. Defaults to a compact icon. */
   className?: string
 }
 
-/**
- * Picks the glyph that best represents a tab's current location, reusing the
- * folder-tree icons so colors match exactly: a drive-type glyph (fixed /
- * removable / network) when the path is a volume root, otherwise a folder glyph
- * with special-folder polish (downloads / git / modules).
- */
 export function LocationIcon({
   path,
   volumes,

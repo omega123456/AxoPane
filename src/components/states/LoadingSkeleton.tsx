@@ -1,4 +1,3 @@
-// Name-bar widths, as fractions of the name column.
 const skeletonWidths = [
   'w-7/10',
   'w-11/20',
@@ -12,7 +11,6 @@ const skeletonWidths = [
   'w-2/5',
 ]
 
-/** Static placeholder rows (no shimmer, so an idle pane costs nothing). */
 export function LoadingSkeleton() {
   return (
     <div aria-label="Loading folder" role="status" className="grid gap-2.5 p-3">

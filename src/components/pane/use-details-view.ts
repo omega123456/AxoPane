@@ -17,11 +17,9 @@ import { virtualListHeight, virtualRowsOrFallback, visibleRowCount } from '@/lib
 import { paneContentWidth } from './HeaderRow'
 import type { DetailsViewHandle } from './DetailsView'
 
-/** Rows rendered before the virtualizer has measured its scroll element. */
 const UNMEASURED_FALLBACK_ROWS = 30
 const FALLBACK_ROW_KEY_PREFIX = 'row'
 export const DETAILS_ROW_HEIGHT_PX = 28
-/** Blank band above the first row and below the last, matching the 3px side inset. */
 export const DETAILS_LIST_INSET_PX = 3
 const rowHeightPx = DETAILS_ROW_HEIGHT_PX
 

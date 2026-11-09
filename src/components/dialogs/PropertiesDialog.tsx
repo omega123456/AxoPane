@@ -76,9 +76,6 @@ function useDefaultApplication(dialog: PropertiesDialogState | null) {
   const [prevDialogForDefaultApp, setPrevDialogForDefaultApp] =
     useState<PropertiesDialogState | null>(dialog)
 
-  // Reset render-derived state synchronously when Properties re-opens for a
-  // different selection, rather than in an effect (avoids a cascading-render
-  // setState-in-effect, since this only fires when `dialog` identity changes).
   if (dialog !== prevDialogForDefaultApp) {
     setPrevDialogForDefaultApp(dialog)
     setDefaultApp(INITIAL_DEFAULT_APP_STATE)
@@ -91,9 +88,6 @@ function useDefaultApplication(dialog: PropertiesDialogState | null) {
 
     closeRef.current?.focus()
 
-    // Cancel any in-flight "Set Default Application…" app-list fetch when
-    // Properties closes or re-opens for a different selection, matching the
-    // cancelled-flag pattern used below for the default-app lookup.
     return () => {
       if (defaultAppPickerGuardRef.current) {
         defaultAppPickerGuardRef.current.cancelled = true
@@ -120,9 +114,6 @@ function useDefaultApplication(dialog: PropertiesDialogState | null) {
     return () => {
       cancelled = true
     }
-    // Re-run when the Set Default Application picker closes so a freshly
-    // chosen app is reflected here without requiring the user to reopen
-    // Properties.
   }, [dialog, defaultAppDialogClosed])
 
   async function openDefaultAppDialog(item: PropertiesDialogItem) {
@@ -390,7 +381,6 @@ function DatePropertyRow({
     showSeconds,
     relative: false,
   })
-  // The default (un-coloured) tone keeps the dialog's standard value styling.
   const valueClassName =
     formatted.tone === 'default' ? undefined : dateToneClassName[formatted.tone]
   return <PropertyRow label={label} value={formatted.text} valueClassName={valueClassName} />

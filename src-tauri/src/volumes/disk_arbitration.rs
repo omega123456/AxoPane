@@ -1,13 +1,3 @@
-//! Minimal raw FFI shim over macOS's DiskArbitration framework.
-//!
-//! There is no maintained high-level DiskArbitration crate, so this binds
-//! just the handful of C entry points needed to learn about mount/unmount
-//! and volume-relabel events without polling: `DASessionCreate`, the three
-//! `DARegister*Callback` functions, and `DASessionSetDispatchQueue`. Driving
-//! the session off a `dispatch2` serial queue means the callbacks run on a
-//! GCD-owned thread that blocks until the kernel has something to report —
-//! zero idle wakeups while the app is otherwise idle.
-
 use std::ffi::c_void;
 use std::ptr;
 
@@ -76,16 +66,9 @@ extern "C" fn disk_description_changed(_disk: DADiskRef, _keys: CFArrayRef, cont
     unsafe { &*(context as *const RegistryReconcileBridge) }.reconcile();
 }
 
-/// Owns the Disk Arbitration session and the serial dispatch queue driving
-/// it. Dropping this unschedules the queue, releases the session, and drops
-/// the reconcile bridge's `Arc` ownership taken by `start_for_registry`.
 pub struct Session {
     session: DASessionRef,
-    // Kept alive so the queue backing the session isn't deallocated out from
-    // under DiskArbitration while the session is live.
     _queue: DispatchRetained<DispatchQueue>,
-    // Owning pointer taken via `Arc::into_raw` in `start_for_registry`;
-    // reconstructed and dropped in `Drop` to release the `Arc` cleanly.
     context: *const RegistryReconcileBridge,
 }
 
@@ -96,11 +79,6 @@ pub struct Session {
 unsafe impl Send for Session {}
 
 impl Session {
-    /// Starts a Disk Arbitration session that calls back into the volume
-    /// registry on mount/unmount/description-change events. `bridge` is
-    /// kept alive for the session's lifetime by the caller
-    /// (`VolumeRegistry` holds both the `Session` and, transitively via
-    /// `Arc`, the registry the bridge points back to).
     pub fn start_for_registry(
         bridge: std::sync::Arc<RegistryReconcileBridge>,
     ) -> Result<Self, String> {

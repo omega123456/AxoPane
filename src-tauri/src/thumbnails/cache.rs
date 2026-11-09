@@ -1,6 +1,3 @@
-//! Bounded in-memory thumbnail cache. It deliberately has no visible-entry
-//! protection; the renderer owns that presentation policy.
-
 use super::types::{ThumbnailCacheKey, ThumbnailState};
 use crate::bounded_cache::{BoundedCache, Weighted};
 use crate::ipc::types::ThumbnailQuality;
@@ -128,7 +125,6 @@ impl ThumbnailCache {
 enum InsertDecision {
     Replace,
     KeepExisting,
-    /// Keep the low-quality preview, but retry a better one only later.
     DeferRetry(CacheRecord),
 }
 

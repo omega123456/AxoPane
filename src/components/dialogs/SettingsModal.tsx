@@ -226,10 +226,6 @@ function SettingsNav({ section }: { section: Section }) {
   )
 }
 
-/**
- * "Reset to defaults" at the foot of every settings page: a card that expands
- * to confirm, so a stray click can't wipe the configuration.
- */
 function ResetExpander({ onReset }: { onReset: () => void }) {
   const [expanded, setExpanded] = useState(false)
   return (

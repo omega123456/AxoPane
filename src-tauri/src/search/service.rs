@@ -1,7 +1,3 @@
-//! The search service behind the IPC commands: picks the backend, runs the
-//! latest query (a new one cancels the previous), keeps its ranked hits and
-//! serves them in pages.
-
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -18,10 +14,7 @@ use super::{
 use crate::ipc::executor::Cancellation;
 use crate::size::SizeService;
 
-/// Collection stops after this and returns what it found, marked truncated.
 pub const SEARCH_BUDGET: Duration = Duration::from_millis(1_500);
-/// The IPC deadline for one search request; longer than the budget so a
-/// budget-limited search still answers.
 pub const SEARCH_DEADLINE: Duration = Duration::from_secs(3);
 
 pub enum SearchBackend {
@@ -31,8 +24,6 @@ pub enum SearchBackend {
 }
 
 impl SearchBackend {
-    /// Shares the size service's backends: its Everything handle when one is
-    /// loaded, else the macOS folder-size index.
     pub fn from_sizes(sizes: &SizeService) -> Self {
         if let Some(handle) = sizes.everything_handle() {
             return Self::Everything(handle);
@@ -72,7 +63,6 @@ pub enum SearchBackendKind {
 #[serde(rename_all = "camelCase")]
 pub struct SearchCapabilities {
     pub backend: SearchBackendKind,
-    /// The backend knows folder names only (the macOS index).
     pub folders_only: bool,
 }
 
@@ -96,9 +86,7 @@ pub struct SearchPageRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchHit {
-    /// The backend's path; every action uses it.
     pub path: String,
-    /// NFC display name and parent; the ranges are UTF-16 offsets into them.
     pub name: String,
     pub parent_path: String,
     pub is_dir: bool,
@@ -113,7 +101,6 @@ pub struct SearchPage {
     pub query_id: u64,
     pub offset: usize,
     pub total: usize,
-    /// The backend had more matches than were ranked.
     pub truncated: bool,
     pub items: Vec<SearchHit>,
     pub capabilities: SearchCapabilities,
@@ -122,19 +109,14 @@ pub struct SearchPage {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum SearchRejection {
-    /// A newer query superseded this one, or its results were dropped.
     Stale,
-    /// Fewer than three characters (and not an anchored browse).
     TooShort,
     NotReady,
     Unavailable,
-    Failed {
-        message: String,
-    },
+    Failed { message: String },
 }
 
 impl SearchRejection {
-    /// Maps an IPC executor failure: cancellation means superseded.
     pub fn from_executor(message: String) -> Self {
         if message.contains("cancelled") {
             return Self::Stale;
@@ -154,7 +136,6 @@ impl From<SearchError> for SearchRejection {
     }
 }
 
-/// Issued by [`SearchService::begin`] for one query.
 pub struct SearchTicket {
     pub generation: u64,
     pub cancellation: Cancellation,
@@ -200,8 +181,6 @@ impl SearchService {
         }
     }
 
-    /// Starts a query: cancels the running one and drops its results. Call
-    /// before enqueueing, so a superseded query never starts its work.
     pub fn begin(&self) -> SearchTicket {
         let mut state = self.state();
         state.generation += 1;
@@ -289,7 +268,6 @@ impl SearchService {
         Ok(self.page_of(&results, request.offset))
     }
 
-    /// The palette closed: stop the running query and free its results.
     pub fn close(&self) {
         let mut state = self.state();
         state.generation += 1;
@@ -313,8 +291,6 @@ impl SearchService {
     }
 }
 
-/// The index stores no modified times, so a page's hits are stat-ed when
-/// served (at most one page at a time).
 fn to_hit(hit: &Scored) -> SearchHit {
     let modified = hit.modified.or_else(|| {
         std::fs::symlink_metadata(&hit.path)

@@ -45,10 +45,6 @@ export function buildAppConfig(): AppConfig {
   }
 }
 
-// Earlier builds folded the full time (`HH:MM:SS`) into the format key (e.g.
-// `ymd_his`). Split those legacy values into a base format plus the standalone
-// `showTime`/`showSeconds` flags so the user's preference survives the move to
-// separate toggles.
 function migrateDateSettings(config: AppConfig): {
   dateFormat: DateFormat
   showTime: boolean

@@ -12,9 +12,7 @@ export type DirectoryEntry = {
   attributes: string[]
   isHidden: boolean
   isSystem: boolean
-  /** Set only for rows synthesized from a trash listing: the opaque id used to restore/purge this item. */
   trashId?: string
-  /** Set only for rows synthesized from a trash listing, when the original location is known. */
   originalPath?: string | null
 }
 

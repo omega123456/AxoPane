@@ -12,7 +12,6 @@ use crate::pixels::{
 
 const BGRA_BITS_PER_PIXEL: u16 = 32;
 
-/// Destroys an owned `HICON` on drop.
 pub struct IconGuard(pub HICON);
 
 impl Drop for IconGuard {
@@ -23,7 +22,6 @@ impl Drop for IconGuard {
     }
 }
 
-/// Deletes an owned `HBITMAP` on drop.
 pub struct BitmapGuard(pub HBITMAP);
 
 impl Drop for BitmapGuard {
@@ -34,7 +32,6 @@ impl Drop for BitmapGuard {
     }
 }
 
-/// Deletes an owned memory device context on drop.
 pub struct DeviceContextGuard(pub HDC);
 
 impl Drop for DeviceContextGuard {
@@ -43,7 +40,6 @@ impl Drop for DeviceContextGuard {
     }
 }
 
-/// Which bitmap of an icon to render when it has no color bitmap.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum IconBitmapFallback {
     Mask,
@@ -78,8 +74,6 @@ fn bitmap_dimensions(bitmap: HBITMAP) -> Option<BitmapSize> {
     (width != 0 && height != 0).then_some(BitmapSize { width, height })
 }
 
-/// Renders a bitmap as premultiplied top-down BGRA. `accept` can reject the
-/// dimensions before any pixel buffer is allocated.
 fn read_bgra(bitmap: HBITMAP, accept: impl Fn(u32, u32) -> bool) -> Option<BgraBitmap> {
     let size = bitmap_dimensions(bitmap)?;
     let BitmapSize { width, height } = size;
@@ -121,7 +115,6 @@ fn read_bgra(bitmap: HBITMAP, accept: impl Fn(u32, u32) -> bool) -> Option<BgraB
     (scan_lines != 0).then_some(BgraBitmap { size, pixels })
 }
 
-/// Encodes a premultiplied 32bpp bitmap as PNG, after `accept` approves its size.
 pub fn bitmap_to_png_bytes(bitmap: HBITMAP, accept: impl Fn(u32, u32) -> bool) -> Option<Vec<u8>> {
     let bgra = read_bgra(bitmap, accept)?;
     let rgba = premultiplied_bgra_to_rgba(&bgra.pixels)?;
@@ -136,8 +129,6 @@ pub fn bitmap_to_data_url(bitmap: HBITMAP) -> Option<String> {
     bitmap_to_png_bytes(bitmap, accept_any_size).map(|bytes| png_data_url(&bytes))
 }
 
-/// Renders an icon's color bitmap (or, with [`IconBitmapFallback::Mask`], its
-/// mask when it has no color bitmap) to a PNG `data:` URL.
 pub fn hicon_to_data_url(icon: HICON, fallback: IconBitmapFallback) -> Option<String> {
     let mut info = ICONINFO::default();
     if unsafe { GetIconInfo(icon, &mut info) }.is_err() {

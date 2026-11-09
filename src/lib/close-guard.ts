@@ -7,7 +7,6 @@ export type GuardableWindow = {
   destroy: () => Promise<void>
 }
 
-/** Resolve the real Tauri window, or `null` outside the desktop app. */
 async function defaultAcquireWindow(): Promise<GuardableWindow | null> {
   if (!globalThis.__TAURI_IPC__) {
     return null
@@ -20,7 +19,6 @@ async function defaultAcquireWindow(): Promise<GuardableWindow | null> {
       destroy: () => appWindow.destroy(),
     }
   } catch {
-    // No real Tauri runtime (web build / test env): nothing to guard.
     return null
   }
 }
@@ -33,11 +31,6 @@ function defaultConfirm(message: string): boolean {
   return canConfirm() ? window.confirm(message) : true
 }
 
-/**
- * Install a guard that prevents the window from closing while queue jobs are
- * active or pending, requiring an explicit confirmation. Returns an unlisten
- * function. `acquireWindow` and `confirmClose` are injectable for testing.
- */
 export async function installCloseGuard(
   acquireWindow: () => Promise<GuardableWindow | null> = defaultAcquireWindow,
   confirmClose: (message: string) => boolean = defaultConfirm,

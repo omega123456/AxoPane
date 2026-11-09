@@ -23,10 +23,6 @@ import type { PaneId } from '@/types/pane'
 
 const PARENT_ROW_ID = '..'
 
-// The trash browser has no real filesystem entries backing it (see
-// `trashEntryToDirectoryEntry`), so most file commands (rename, cut/copy,
-// paste, new folder/file, open, calculate size, …) can't act on it. Only
-// these make sense there.
 const trashPaneCommands = new Set<CommandId>([
   'restore',
   'emptyTrash',
@@ -193,9 +189,6 @@ function hasEffectiveEntries(context: CommandContext) {
   return context.effectiveEntries.length > 0
 }
 
-// Items already in the trash have nowhere softer to go, and network volumes
-// have no reliable recycle bin, so both confirm a permanent delete exactly
-// like Shift+Delete. Everything else moves to the OS trash without a prompt.
 function deleteEntries(context: CommandContext) {
   if (!hasEffectiveEntries(context)) {
     return

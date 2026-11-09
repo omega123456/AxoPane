@@ -1,7 +1,3 @@
-//! Collects Everything candidates for a query: strict passes, a fuzzy pass
-//! only when they found little, and a two-step child listing for
-//! `folder/` queries.
-
 use std::collections::HashSet;
 
 use super::everything_plan::{self as plan, EverythingPass};
@@ -12,7 +8,6 @@ use super::source::EverythingSource;
 use super::{CandidateBatch, Control, SearchError, SearchOptions, SearchRun, SearchScope};
 use crate::size::everything::{EverythingQuery, EverythingSort};
 
-/// The fuzzy pass runs only while fewer candidates than this were found.
 pub const FUZZY_PASS_THRESHOLD: usize = 200;
 
 pub type EverythingSearchRun<'run> = SearchRun<'run, dyn EverythingSource>;
@@ -38,7 +33,6 @@ pub fn candidates(
     collect(run.source, &listings, run.control)
 }
 
-/// The best-ranked folders matching the query's folder segments.
 fn browse_parents(
     run: &EverythingSearchRun<'_>,
     parent_query: &ParsedQuery,

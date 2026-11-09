@@ -9,20 +9,8 @@ import {
 } from '@/components/queue/job-view-state'
 
 const LIVE_REGION_THROTTLE_MS = 5000
-/**
- * Cadence the visible metrics refresh at. The backend reports a jittery
- * instantaneous rate many times a second; sampling it on a calm interval keeps
- * the numbers readable (and roughly in step with the averaged chart) instead of
- * flickering on every progress event. The same tick decides whether the backend
- * is still discovering bytes, by comparing successive totals.
- */
 const METRICS_REFRESH_MS = 500
 
-/**
- * While a job is working through its queue, "N completed" reads as "item 0 of
- * 2" for the whole time the first item copies, so show the item being worked on
- * (like Windows' "item 1 of 2"). A stopped job shows the true completed count.
- */
 function displayedItemNumber(operation: OpProgress, isFinished: boolean) {
   if (isFinished) {
     return operation.completedItems
@@ -115,7 +103,6 @@ function useThrottledAnnouncement(announcement: string) {
   return liveAnnouncement
 }
 
-/** The chart's smoothed leading-edge rate, so the number matches the curve; the raw rate before any history. */
 function currentRate(throughputHistory: ThroughputSample[], operation: OpProgress) {
   return throughputHistory.at(-1)?.rate ?? operation.bytesPerSecond
 }

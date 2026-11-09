@@ -14,7 +14,6 @@ import { HOVER_ON_POINTER, SCROLLBAR_THIN } from '@/lib/class-names'
 import { TEXT_SECONDARY } from '@/lib/class-names'
 import { handleKeyByTable } from '@/lib/key-table'
 
-/** Extracts the extension (without the leading dot) from a file name, e.g. "sql" for "query.sql". */
 function extensionFromFileName(fileName: string): string {
   const dotIndex = fileName.lastIndexOf('.')
   return dotIndex > 0 ? fileName.slice(dotIndex + 1) : ''
@@ -86,9 +85,6 @@ function useDefaultAppChoice(dialog: DefaultAppDialogState | null, close: () => 
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [prevDialog, setPrevDialog] = useState<DefaultAppDialogState | null>(dialog)
 
-  // Reset render-derived state synchronously when the dialog re-opens for a
-  // different target, rather than in an effect (avoids a cascading-render
-  // setState-in-effect, since this only fires when `dialog` identity changes).
   if (dialog !== prevDialog) {
     setPrevDialog(dialog)
     if (dialog) {
@@ -158,9 +154,6 @@ export function DefaultAppDialog() {
     return null
   }
 
-  // The app list is preloaded by the caller (see PropertiesDialog) before
-  // this dialog is opened, so it can render fully populated immediately
-  // instead of showing its own internal loading flash.
   const apps = dialog.apps
   const loadState: LoadState = apps.length > 0 ? 'loaded' : 'error'
 

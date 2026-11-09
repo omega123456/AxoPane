@@ -1,5 +1,3 @@
-//! Bounded stdio protocol used by the Windows native-menu helper.
-
 use std::io::{self, Read, Write};
 
 use serde::{Deserialize, Serialize};
@@ -8,7 +6,6 @@ use super::provider::{ProviderInvocation, ProviderNativeMenuItem};
 use super::types::LoadNativeMenuRequest;
 use crate::ipc::types::{MenuActionStatus, OpenWithRequest, ShowPropertiesRequest};
 
-/// A deliberately small upper bound: native menu data is metadata, never a file payload.
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -31,9 +31,6 @@ pub fn request_visible_item_counts(
     }
     let executor = Arc::clone(services.executor.inner());
     tauri::async_runtime::spawn(async move {
-        // `enqueue_automatic_request` grants at most two drainers; every
-        // drainer itself runs in the fixed IPC owner rather than a new OS
-        // thread per viewport request.
         let _ = executor
             .latency("item-counts".into(), move || {
                 drain_automatic_item_counts(&app);

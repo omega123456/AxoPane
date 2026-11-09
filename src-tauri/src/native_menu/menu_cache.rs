@@ -13,15 +13,6 @@ pub struct CacheLoad {
     pub loaded: bool,
 }
 
-/// In-memory, per-file-type cache for the (expensive) native shell-menu
-/// enumeration. Entries are keyed on the menu's *structure inputs* — the target
-/// kind plus the set of file extensions in the selection — never on the concrete
-/// paths. The cached menu structure is reused across files of the same type;
-/// only the path-bound parts of each invocation are rebound to the live request
-/// on retrieval (see [`rebind_items`]).
-///
-/// The cache lives for the lifetime of the [`super::NativeMenuService`], which is
-/// a single app-managed instance, so it is naturally discarded on app restart.
 pub struct MenuCache {
     entries: Mutex<BoundedCache<String, Vec<ProviderNativeMenuItem>>>,
     in_flight: Mutex<HashMap<String, Arc<CacheFlight>>>,
@@ -112,15 +103,12 @@ impl Default for MenuCache {
 }
 
 impl MenuCache {
-    /// Returns the cached menu for the request's file type, with each
-    /// invocation rebound to the request's live paths, or `None` on a miss.
     pub fn get(&self, request: &LoadNativeMenuRequest) -> Option<Vec<ProviderNativeMenuItem>> {
         let key = cache_key(request);
         let mut entries = self.entries.lock().expect("menu cache lock");
         entries.get(&key).map(|items| rebind_items(items, request))
     }
 
-    /// Stores the (already deduped) menu structure for the request's file type.
     pub fn insert(&self, request: &LoadNativeMenuRequest, items: &[ProviderNativeMenuItem]) {
         let key = cache_key(request);
         let mut entries = self.entries.lock().expect("menu cache lock");
@@ -199,9 +187,6 @@ impl MenuCache {
         self.len() == 0
     }
 
-    /// Cheap membership check on the request's cache key — no path-rebind
-    /// work. Used by the background warm path to skip a type that is already
-    /// cached without paying `get`'s per-item clone/rebind cost.
     pub fn contains(&self, request: &LoadNativeMenuRequest) -> bool {
         let key = cache_key(request);
         self.entries
@@ -247,9 +232,6 @@ fn target_kind_key(kind: &NativeMenuTargetKind) -> &'static str {
     }
 }
 
-/// Builds a stable, path-independent signature from the selection: the sorted,
-/// de-duplicated, lowercased extensions of the selected paths. Two selections of
-/// the same file type(s) share a signature regardless of their concrete paths.
 fn type_signature(selected_paths: &[String]) -> String {
     let mut extensions: Vec<String> = selected_paths
         .iter()
@@ -260,9 +242,6 @@ fn type_signature(selected_paths: &[String]) -> String {
     extensions.join("|")
 }
 
-/// Extracts the lowercased extension of a path's final component, or an empty
-/// string when there is none. Leading-dot names (e.g. `.gitignore`) and paths
-/// with no dot are treated as extensionless.
 fn extension_of(path: &str) -> String {
     let file_name = path.rsplit(['/', '\\']).next().unwrap_or(path);
 
@@ -359,9 +338,6 @@ fn rebind_item(
     }
 }
 
-/// Rebinds the path-bound `request` of a cached invocation to the live request,
-/// preserving the structure-bound parts (`command_path`, `clsid`, `packaged`).
-/// Path-independent invocations (the test `Fake` provider) are cloned verbatim.
 fn rebind_invocation(
     invocation: &ProviderInvocation,
     request: &LoadNativeMenuRequest,

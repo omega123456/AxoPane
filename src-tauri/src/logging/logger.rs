@@ -1,5 +1,3 @@
-//! The file-backed [`log::Log`] implementation and its global install.
-
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -18,8 +16,6 @@ struct OpenLogFile {
     file: File,
 }
 
-/// Append-only writer that keeps one open file per calendar day and rolls over
-/// (pruning stale files) when the day changes.
 struct DailyWriter {
     dir: PathBuf,
     open: Option<OpenLogFile>,
@@ -58,17 +54,12 @@ impl DailyWriter {
     }
 }
 
-/// A `log::Log` sink that writes to a daily file and to stdout, with a
-/// runtime-adjustable minimum level.
 pub struct FileLogger {
     level: AtomicU8,
     writer: Mutex<DailyWriter>,
 }
 
 impl FileLogger {
-    /// Create the logger, ensuring the log directory exists and pruning any
-    /// already-stale daily files. The returned handle can be shared (one copy
-    /// installed globally, one kept in [`super::LoggingState`]).
     pub fn new(dir: &Path, level: LogLevel) -> std::io::Result<Arc<Self>> {
         std::fs::create_dir_all(dir)?;
         prune_old_logs(dir, current_local_date(), RETENTION_DAYS);
@@ -78,25 +69,19 @@ impl FileLogger {
         }))
     }
 
-    /// The current minimum capture level.
     pub fn level(&self) -> LogLevel {
         LogLevel::from_index(self.level.load(Ordering::Relaxed))
     }
 
-    /// Change the minimum capture level; takes effect immediately for both the
-    /// file sink and the global `log` filter.
     pub fn set_level(&self, level: LogLevel) {
         self.level.store(level as u8, Ordering::Relaxed);
         log::set_max_level(level.to_level_filter());
     }
 
-    /// Whether a record at `level` passes the current filter.
     pub fn enabled_for(&self, level: log::Level) -> bool {
         LogLevel::from_log_level(level) <= self.level()
     }
 
-    /// Write a single entry with an injected timestamp (the deterministic core
-    /// used by tests and by [`FileLogger::write_record`]).
     pub fn write_entry(&self, at: OffsetDateTime, record: LogMessage<'_>) {
         let line = format_log_line(&format_timestamp(at), record);
         if let Ok(mut writer) = self.writer.lock() {
@@ -105,7 +90,6 @@ impl FileLogger {
         println!("{line}");
     }
 
-    /// Extract and write a `log::Record` using the wall clock.
     pub fn write_record(&self, record: &log::Record<'_>) {
         let message = record.args().to_string();
         let entry = LogMessage {
@@ -135,11 +119,6 @@ impl log::Log for FileLogger {
     }
 }
 
-/// Install `logger` as the process-global `log` sink and set the initial filter.
-///
-/// This is the single process-global side effect of the logging stack, so it is
-/// excluded from the test build (which never installs a global logger), matching
-/// the `lib::run` entrypoint carve-out.
 #[cfg(not(feature = "test-utils"))]
 pub fn install_global(logger: Arc<FileLogger>, level: LogLevel) {
     struct Global(Arc<FileLogger>);

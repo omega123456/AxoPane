@@ -1,8 +1,3 @@
-//! Turns a parsed query into Everything search strings. Everything only
-//! narrows the candidates: its results are a superset our matcher re-checks,
-//! so these strings stay loose and never depend on the user's Everything
-//! settings (whole-filename wildcards, literal operators).
-
 use super::matcher::{Pattern, Token, FUZZY_MIN_CHARS};
 use super::path_style::PathStyle;
 use super::query::{ParsedQuery, Segment};
@@ -24,22 +19,16 @@ const OR_SEPARATOR: &str = " | ";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EverythingPass {
     pub search: String,
-    /// Run only when the strict passes found few candidates.
     pub fuzzy: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Pass {
-    /// Name starts with the text: covers the exact and prefix tiers, so
-    /// they survive the candidate cap.
     Prefix,
     Contains,
-    /// Letters in order, as a per-character wildcard.
     Fuzzy,
 }
 
-/// The passes for a name search (with optional folder segments or anchor),
-/// strictest first and without duplicates.
 pub fn passes(query: &ParsedQuery, options: &SearchOptions) -> Vec<EverythingPass> {
     let Some(name) = &query.name_seg else {
         return Vec::new();
@@ -69,7 +58,6 @@ pub fn passes(query: &ParsedQuery, options: &SearchOptions) -> Vec<EverythingPas
     out
 }
 
-/// Lists the direct children of `parents`, in OR-chunks.
 pub fn browse_children_queries(parents: &[String], options: &SearchOptions) -> Vec<String> {
     parents
         .chunks(EVERYTHING_BATCH_CHUNK_SIZE)
@@ -93,8 +81,6 @@ fn is_cleanly_decoded(row: &EverythingRow) -> bool {
     has_name && lossless
 }
 
-/// A row as a candidate; rows whose UTF-16 names did not decode cleanly are
-/// dropped because the path could not be opened.
 pub fn row_to_candidate(row: EverythingRow) -> Option<Candidate> {
     if !is_cleanly_decoded(&row) {
         return None;
@@ -127,7 +113,6 @@ fn folder_terms(segment: &Segment, pass: Pass) -> Vec<String> {
         .tokens()
         .iter()
         .map(|token| match token {
-            // A path-wide wildcard that needs one component to match.
             Token::Glob(pattern) => {
                 let component_wildcard = format!(
                     "*{WINDOWS_SEPARATOR}{}{WINDOWS_SEPARATOR}*",
@@ -175,8 +160,6 @@ fn filters(options: &SearchOptions) -> Vec<String> {
     terms
 }
 
-/// Drive roots are spelled both ways: Everything reports their children's
-/// parent as `C:`.
 fn parent_terms(parent: &str) -> Vec<String> {
     let trimmed = parent.trim_end_matches(WINDOWS_SEPARATOR);
     if is_drive_designator(trimmed) {
@@ -199,7 +182,6 @@ fn with_trailing_separator(path: &str) -> String {
     format!("{path}{WINDOWS_SEPARATOR}")
 }
 
-/// Windows names cannot contain `"`, so dropping it is lossless.
 fn quote(text: &str) -> String {
     format!("\"{}\"", text.replace('"', ""))
 }

@@ -13,13 +13,9 @@ export type ColumnWidths = Partial<Record<ColumnKey, number>>
 
 export type LayoutConfig = {
   detailsVisible: boolean
-  /** Folder-tree sidebar width in pixels (user-draggable). */
   treeWidthPx: number
-  /** Favourites list max height in pixels (user-draggable). */
   favouritesHeightPx: number
-  /** Fraction of the dual-pane area allotted to the left pane (0..1, user-draggable). */
   paneSplit: number
-  /** Per-column widths in CSS pixels. Missing keys fall back to app defaults. */
   columnWidths: ColumnWidths
   defaultPaneMode: PaneMode
   defaultViewMode: PaneViewMode
@@ -55,7 +51,6 @@ export type AppConfig = {
   autoFolderSize: boolean
   autoExpandActiveQueueToasts: boolean
   favourites: string[]
-  /** Custom display names for favourites, keyed by the favourite's path. */
   favouriteNames: Record<string, string>
   favouritesCollapsed: boolean
 }
@@ -65,7 +60,6 @@ export type SessionTab = {
   sortKey: SortKey
   sortDirection: SortDirection
   filter: string
-  /** Optional so older saved sessions remain distinguishable during migration. */
   viewMode?: string | null
   locked?: boolean
 }
@@ -81,7 +75,6 @@ export type SessionState = {
   rightPath: string
   left?: SessionPane | null
   right?: SessionPane | null
-  /** Recently visited folders, most recent first (Search everywhere). */
   recentFolders?: string[]
 }
 

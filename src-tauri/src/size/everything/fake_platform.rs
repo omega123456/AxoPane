@@ -30,9 +30,6 @@ pub struct EverythingHandle {
 }
 
 impl EverythingHandle {
-    /// On Windows the fake loader succeeds but reports the service as
-    /// unavailable, so no test path can ever observe a real Everything
-    /// result; elsewhere Everything does not exist.
     pub fn load() -> Result<Self, EverythingError> {
         if !cfg!(windows) {
             return Err(EverythingError::Unsupported);
@@ -54,7 +51,6 @@ impl EverythingHandle {
         }
     }
 
-    /// An available handle whose search queries `responder` answers.
     pub fn test_with_responder(responder: EverythingResponder) -> Self {
         Self {
             availability: EverythingAvailability::Available,
@@ -64,12 +60,10 @@ impl EverythingHandle {
         }
     }
 
-    /// Every search query run so far, oldest first.
     pub fn recorded_queries(&self) -> Vec<EverythingQuery> {
         self.search.recorded()
     }
 
-    /// A handle whose service is installed but not answering yet.
     pub fn test_not_ready() -> Self {
         Self {
             availability: EverythingAvailability::NotReady,

@@ -143,11 +143,6 @@ function ejectableVolumeAt(path: string, platform: PlatformOs) {
   return isVolumeRoot(path, volume) ? volume : null
 }
 
-/**
- * Eject is macOS-only: on Windows a safe removal isn't possible from here (an
- * in-use volume can only be force-dismounted), so Windows users use the native
- * "Eject" entry in the shell context menu instead.
- */
 function ejectSections(target: TreeTarget, platform: PlatformOs): ContextMenuSection[] {
   const volume = ejectableVolumeAt(target.path, platform)
   if (!volume) {

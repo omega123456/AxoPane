@@ -60,7 +60,6 @@ impl ItemCountCache {
             .cloned()
             .unwrap_or(ItemCountState::Unknown)
     }
-    /// Returns true only for the caller that transitioned an unknown entry to pending.
     pub fn begin(&mut self, path: &str, generation: u64) -> bool {
         let key = key(path, generation);
         if matches!(self.entries.get(&key), Some(ItemCountState::Pending)) {
@@ -85,7 +84,6 @@ impl ItemCountCache {
         self.entries
             .insert(key(path, generation), single_entry(state));
     }
-    /// A direct-child mutation changes only this directory's observable generation.
     pub fn invalidate_generation(&mut self, path: &str, generation: u64) {
         self.entries
             .retain(|entry, _| !(same_path(&entry.path, path) && entry.generation <= generation));
@@ -109,10 +107,6 @@ fn single_entry(state: ItemCountState) -> Weighted<ItemCountState> {
 
 fn key(path: &str, generation: u64) -> ItemCountKey {
     ItemCountKey {
-        // Cache identity must survive equivalent display forms (notably
-        // macOS's /var -> /private/var spelling and Windows canonical drive
-        // forms), otherwise a viewport request and the session snapshot can
-        // recount the same directory under two keys.
         path: crate::fs::canonicalize_dir(Path::new(path))
             .map(|canonical| crate::fs::display_path_from_path(&canonical))
             .unwrap_or_else(|_| crate::fs::display_path_from_path(Path::new(path))),

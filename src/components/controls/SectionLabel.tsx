@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react'
 
-/** Settings group header, e.g. "View" or "Layout". */
 export function SectionLabel({
   children,
   className = '',

@@ -59,7 +59,6 @@ fn list_dir_impl(payload: ListDirRequest) -> Result<ListDirResponse, String> {
     fs::list_dir(&payload).map_err(|error| list_dir_failure(&payload.path, error))
 }
 
-/// Establishes (or replaces) the directory session for a pane.
 #[cfg(not(feature = "test-utils"))]
 #[tauri::command]
 pub async fn begin_directory_session(
@@ -96,13 +95,6 @@ pub fn begin_directory_session(
     services.sessions.begin_navigation(payload, admission)
 }
 
-/// Idempotent page-index range fetch for an established v2 directory
-/// session. Any valid page index may be retried for the same baseline; a
-/// stale baseline field is rejected (not served).
-///
-/// The error is the typed [`SessionRejection`] (not a stringified message) so
-/// the frontend can branch on `kind` (e.g. "stale, silently re-navigate" vs.
-/// "page out of range, a real bug") instead of string-matching.
 #[tauri::command]
 pub fn get_directory_session_range(
     payload: GetSessionRangeRequest,
@@ -111,12 +103,6 @@ pub fn get_directory_session_range(
     state.get_range(&payload)
 }
 
-/// Revises the sort/filter/show-hidden/item-count view of an already-active
-/// v2 directory session without re-enumerating the filesystem (the frontend
-/// calls this instead of re-running `begin_directory_session` for a plain
-/// sort/filter change on the same directory). Returns the same shape as
-/// `begin_directory_session` (a fresh baseline + first page) so callers can
-/// treat "new session" and "revised view" uniformly.
 #[tauri::command]
 pub fn revise_directory_session_view(
     payload: ReviseSessionViewRequest,
@@ -125,9 +111,6 @@ pub fn revise_directory_session_view(
     state.revise_view(payload)
 }
 
-/// Idempotent release of a v2 directory session. Safe to call more than once
-/// (e.g. tab close racing app teardown) — a release for an
-/// already-superseded/absent session simply reports `released: false`.
 #[tauri::command]
 pub fn release_directory_session(
     payload: ReleaseSessionRequest,

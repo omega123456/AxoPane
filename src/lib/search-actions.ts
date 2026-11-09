@@ -7,14 +7,8 @@ import { otherPane } from '@/lib/pane-id'
 import { hasPrimaryModifier, ENTER_KEY } from '@/lib/key-table'
 import { POSIX_SEPARATOR, WINDOWS_SEPARATOR } from '@/lib/path-compare'
 
-/** `open` launches a file; everything else opens in a new tab in a pane. */
 export type SearchActivation = 'default' | 'open' | 'newTab' | 'otherPane'
 
-/**
- * Acts on a Search everywhere hit: a folder opens in a new tab of the active
- * pane, and a file is revealed (selected in its folder) in a new tab of the
- * active pane unless `open` asks to launch it.
- */
 export async function activateSearchHit(hit: SearchHit, how: SearchActivation) {
   const panes = usePanesStore.getState()
   const paneId = panes.activePaneId
@@ -41,10 +35,6 @@ function isPlainShiftEnter(event: KeyboardEvent) {
   return event.key === ENTER_KEY && event.shiftKey && !hasPrimaryModifier(event)
 }
 
-/**
- * Enter opens or reveals, Shift+Enter launches a file, and the remappable
- * "Open in new tab" / "Open in other pane" bindings choose those targets.
- */
 export function searchActivationForEvent(
   event: KeyboardEvent,
   keymap: Record<CommandId, Shortcut[]>,
@@ -56,7 +46,6 @@ export function searchActivationForEvent(
   return commandId ? (activationByCommand[commandId] ?? null) : null
 }
 
-/** Tab completion: the folder's name replaces the last segment, plus a separator to list its children. */
 export function completeSearchQuery(query: string, hit: SearchHit) {
   const cut = Math.max(query.lastIndexOf(POSIX_SEPARATOR), query.lastIndexOf(WINDOWS_SEPARATOR))
   const separator = cut >= 0 ? query[cut] : POSIX_SEPARATOR

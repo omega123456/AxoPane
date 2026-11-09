@@ -1,14 +1,3 @@
-// Resource-aware copy/move queue engine.
-//
-// One operation is created per user action. The scheduler enforces a single
-// active operation per participating volume (the source and destination mount
-// roots), while operations on disjoint volume sets run in parallel. A conflict
-// pauses only the operation that hit it; sibling operations keep running.
-//
-// The engine performs ordinary filesystem copy/move work via `std::fs`, so it
-// is fully exercisable in integration tests against temp directories without
-// touching any machine-global API.
-
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -51,23 +40,14 @@ pub use progress::TransferThrottle;
 pub use service::{requested_pop, OpsService};
 use status::RunOutcome;
 
-/// How long a completed or cancelled operation lingers in the queue before being auto-removed.
 pub const DEFAULT_COMPLETED_RETENTION: Duration = Duration::from_secs(4);
-/// How often active operations recompute their short-window instantaneous rate.
 pub const DEFAULT_RATE_WINDOW: Duration = Duration::from_millis(250);
-/// Minimum spacing between progress emissions while deleting individual files,
-/// or while copying/moving the files nested inside a directory tree.
 const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(90);
 const COPY_BUFFER_BYTES: usize = 1024 * 1024;
 const PERCENT_SCALE: f64 = 100.0;
 
-/// Top-level item names carried on every `OpProgress`. Enough for the card's
-/// expandable selection list, small enough that a 500-item selection clones a
-/// bounded handful of short strings per tick rather than the whole selection.
 const ITEM_NAME_PREVIEW_LIMIT: usize = 24;
 
-/// Number of progress samples required before an ETA is considered stable enough
-/// to surface to the UI.
 const ETA_STABILIZATION_SAMPLES: u64 = 3;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -122,7 +102,6 @@ pub struct ConflictDecision {
     pub rename_to: Option<String>,
 }
 
-/// A single source item belonging to an operation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct OpItem {
@@ -131,7 +110,6 @@ pub struct OpItem {
     pub size_bytes: u64,
 }
 
-/// Request payload describing one user-initiated copy/move.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartOpRequest {
@@ -140,7 +118,6 @@ pub struct StartOpRequest {
     pub items: Vec<OpItem>,
 }
 
-/// A pending conflict awaiting user resolution.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ConflictInfo {
@@ -150,7 +127,6 @@ pub struct ConflictInfo {
     pub name: String,
 }
 
-/// Per-operation progress snapshot emitted to the UI.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct OpProgress {
@@ -166,7 +142,6 @@ pub struct OpProgress {
     pub copied_bytes: u64,
     pub progress_percent: f64,
     pub bytes_per_second: u64,
-    /// Estimated seconds remaining, or `None` until the rate stabilizes.
     pub eta_seconds: Option<u64>,
     pub current_file_name: Option<String>,
     pub current_file_copied_bytes: u64,
@@ -174,7 +149,6 @@ pub struct OpProgress {
     pub error_message: Option<String>,
 }
 
-/// Snapshot of one operation for queue listing / reorder.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct OpSnapshot {
@@ -184,7 +158,6 @@ pub struct OpSnapshot {
 
 type ProgressEmitter = Arc<dyn Fn(OpProgress) + Send + Sync>;
 type ConflictEmitter = Arc<dyn Fn(ConflictInfo) + Send + Sync>;
-/// Emits the id of an operation once it has been auto-removed from the queue.
 type RemovedEmitter = Arc<dyn Fn(String) + Send + Sync>;
 type InstantNow = Arc<dyn Fn() -> Instant + Send + Sync>;
 
@@ -198,20 +171,17 @@ impl LockOperation for Mutex<OpState> {
     }
 }
 
-/// Shared, mutable per-operation control + state.
 pub struct OpState {
     pub id: String,
     pub kind: OpKind,
     pub destination_dir: PathBuf,
     pub items: Vec<OpItem>,
-    /// Mount roots this operation touches (source + destination volumes).
     pub volumes: HashSet<String>,
     pub status: OpStatus,
     pub total_items: u64,
     pub total_bytes: u64,
     pub cancel: Arc<AtomicBool>,
     pub pause: Arc<AtomicBool>,
-    /// One-shot request to abandon the current top-level item while paused.
     pub skip: Arc<AtomicBool>,
     pub runtime: OpRuntime,
 }
@@ -280,13 +250,6 @@ impl OpState {
                 .first()
                 .map(|item| parent_dir(&item.source_path))
                 .unwrap_or_default(),
-            // Bounded preview: the collapsed card shows the first two names
-            // plus a "+K more" toggle, and expanding it lists what arrived
-            // here. `total_items` (verified == `items.len()` at all times)
-            // still carries the true count, so a selection larger than this
-            // cap reports the remainder rather than pretending the list is
-            // complete. Cloning every top-level name on every tick would be
-            // pure waste on large selections.
             item_names: self
                 .items
                 .iter()

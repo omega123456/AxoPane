@@ -1,7 +1,3 @@
-//! Name matching for search: NFC-normalized, case-insensitive, tiered
-//! exact / prefix / contains / fuzzy, plus `*` and `?` globs. Highlight
-//! ranges are UTF-16 offsets into the NFC display name, ready for JS.
-
 use std::borrow::Cow;
 
 use unicode_normalization::{is_nfc_quick, IsNormalized, UnicodeNormalization};
@@ -11,11 +7,8 @@ pub const PREFIX: u8 = 1;
 pub const CONTAINS: u8 = 2;
 pub const FUZZY: u8 = 3;
 
-/// Shorter literals never match fuzzily; one or two letters would match
-/// almost every name.
 pub const FUZZY_MIN_CHARS: usize = 3;
 
-/// `text` in NFC, borrowed when it already is (the common case).
 pub fn nfc(text: &str) -> Cow<'_, str> {
     let already_normalized = text.is_ascii() || is_nfc_quick(text.chars()) == IsNormalized::Yes;
     if already_normalized {
@@ -24,8 +17,6 @@ pub fn nfc(text: &str) -> Cow<'_, str> {
     Cow::Owned(text.nfc().collect())
 }
 
-/// Lowercases one char, keeping it as-is when lowercasing would change the
-/// char count (`İ`), so folded and display indices stay one-to-one.
 fn fold_char(character: char) -> char {
     let mut lower = character.to_lowercase();
     match (lower.next(), lower.next()) {
@@ -34,16 +25,13 @@ fn fold_char(character: char) -> char {
     }
 }
 
-/// A file or folder name prepared for matching.
 #[derive(Debug, Clone)]
 pub struct FoldedName {
     chars: Vec<char>,
-    /// UTF-16 offset of each char in the display name, plus the end.
     utf16: Vec<u32>,
 }
 
 impl FoldedName {
-    /// `display` must already be NFC (see [`nfc`]).
     pub fn new(display: &str) -> Self {
         let mut chars = Vec::with_capacity(display.len());
         let mut utf16 = Vec::with_capacity(display.len() + 1);
@@ -74,7 +62,6 @@ impl FoldedName {
     }
 }
 
-/// A query fragment, NFC-normalized and folded like [`FoldedName`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pattern {
     chars: Vec<char>,
@@ -99,8 +86,6 @@ impl Pattern {
         self.chars.iter().collect()
     }
 
-    /// Whether these chars (wildcards skipped) appear in order in an ASCII
-    /// `name`, case-insensitively. Allocation-free pre-check for scans.
     pub fn ascii_subsequence_of(&self, name: &str) -> bool {
         let mut lowered_name = name
             .bytes()
@@ -111,7 +96,6 @@ impl Pattern {
             .all(|wanted| lowered_name.any(|character| character == *wanted))
     }
 
-    /// Whole-name, case-insensitive equality.
     pub fn equals(&self, name: &FoldedName) -> bool {
         self.chars == name.chars
     }
@@ -119,11 +103,9 @@ impl Pattern {
 
 const GLOB_WILDCARDS: [char; 2] = ['*', '?'];
 
-/// One space-separated word of a query segment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
     Literal(Pattern),
-    /// Contains `*` or `?`; matches the whole name, never fuzzily.
     Glob(Pattern),
 }
 
@@ -160,7 +142,6 @@ impl NameKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Match {
     pub tier: u8,
-    /// UTF-16 `[start, end)` ranges in the display name, sorted.
     pub ranges: Vec<(u32, u32)>,
 }
 
@@ -180,9 +161,6 @@ pub fn match_token(token: &Token, name: &FoldedName, kind: NameKind) -> Option<M
     }
 }
 
-/// Matches a multi-word segment: the whole phrase first (never fuzzily),
-/// otherwise every word must match and the segment takes the worst word's
-/// tier, no better than contains.
 pub fn match_words(words: Words<'_>, name: &FoldedName, kind: NameKind) -> Option<Match> {
     let Words { phrase, tokens } = words;
     if let [token] = tokens {
@@ -264,8 +242,6 @@ fn match_literal(literal: LiteralPattern<'_>, name: &FoldedName, kind: NameKind)
     })
 }
 
-/// A file name without its extension; dotfiles keep their full name and
-/// folders never drop one.
 fn stem(chars: &[char], kind: NameKind) -> Option<&[char]> {
     if kind == NameKind::Folder {
         return None;
@@ -277,8 +253,6 @@ fn stem(chars: &[char], kind: NameKind) -> Option<&[char]> {
     Some(&chars[..extension_dot])
 }
 
-/// Positions of `pattern`'s chars in order within `text`, using the
-/// tightest window that ends at the earliest possible end.
 fn subsequence(pattern: &[char], text: &[char]) -> Option<Vec<usize>> {
     let end = earliest_subsequence_end(pattern, text)?;
     let start = latest_subsequence_start(pattern, text, end);
@@ -320,7 +294,6 @@ fn latest_subsequence_start(pattern: &[char], text: &[char], end: usize) -> usiz
     end
 }
 
-/// Whole-name glob match; returns the positions of the literal chars.
 fn glob(pattern: &[char], text: &[char]) -> Option<Vec<usize>> {
     let mut cursor = GlobCursor::new(pattern, text);
     while cursor.has_text_left() {

@@ -62,9 +62,7 @@ export type ActiveItemsSortResponse = ActiveItemsSortReady | ActiveItemsSortSupe
 
 export type SetTabWatchRequest = {
   target: WatchTarget | null
-  /** Reference to a completed Rust-owned listing snapshot that can seed the watcher baseline. */
   seedReference?: WatchSeedReference
-  /** Post-sort/filter entries already fetched for this listing, used to seed the watcher baseline. */
   entries?: DirectoryEntry[]
 }
 

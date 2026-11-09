@@ -43,17 +43,11 @@ function isDeeperMount(candidate: VolumeInfo, current: VolumeInfo | null) {
   return candidate.mountRoot.length > current.mountRoot.length
 }
 
-/** Strip trailing separators and apply OS-appropriate identity normalization. */
 function normalizeRoot(path: string) {
   const normalized = normalizeWindowsCompatibilityPath(path).replace(/[\\/]+$/, '')
   return /^[A-Za-z]:$/.test(normalized) ? normalized.toLowerCase() : pathKey(normalized)
 }
 
-/**
- * The volume a path lives in, or `null` when none match. When several volumes
- * contain the path (e.g. a mounted volume nested under another), the deepest
- * mount root wins.
- */
 export function findVolumeForPath(path: string, volumes: VolumeInfo[]): VolumeInfo | null {
   let match: VolumeInfo | null = null
   for (const volume of volumes) {
@@ -67,13 +61,6 @@ export function findVolumeForPath(path: string, volumes: VolumeInfo[]): VolumeIn
   return match
 }
 
-/**
- * Whether a path belongs to a network location. The volume inventory covers
- * mapped Windows drives and mounted network volumes on macOS. A UNC path is
- * unambiguously network-backed even if its share has not made it into the
- * current inventory yet, so keep that small fallback for freshly connected
- * shares and direct UNC navigation.
- */
 export function isNetworkPath(path: string, volumes: VolumeInfo[]): boolean {
   const volume = findVolumeForPath(path, volumes)
   if (volume) {
@@ -83,7 +70,6 @@ export function isNetworkPath(path: string, volumes: VolumeInfo[]): boolean {
   return normalizeWindowsCompatibilityPath(path).startsWith('\\\\')
 }
 
-/** True when `path` is itself a volume's mount root (not a folder inside it). */
 export function isVolumeRoot(path: string, volume: VolumeInfo) {
   return normalizeRoot(path) === normalizeRoot(volume.mountRoot)
 }
@@ -92,9 +78,6 @@ export function sortVolumesForTree(volumes: VolumeInfo[]) {
   return [...volumes].sort((left, right) => compareNaturally(left.mountRoot, right.mountRoot))
 }
 
-// Network mounts win over the removable flag (a mapped network drive can report
-// as removable on some systems but belongs under Network), so the order
-// of these checks matters.
 export function volumeCategory(volume: VolumeInfo): VolumeCategory {
   if (volume.isNetwork) {
     return 'network'
@@ -107,7 +90,6 @@ export function volumeCategory(volume: VolumeInfo): VolumeCategory {
   return 'fixed'
 }
 
-// Tree section order + headings. Only non-empty sections are rendered.
 const categoryOrder: { category: VolumeCategory; label: string }[] = [
   { category: 'fixed', label: 'Drives' },
   { category: 'removable', label: 'Removable' },
@@ -149,11 +131,6 @@ export function formatVolumeTreeName(volume: VolumeInfo) {
 
 export type CapacityLevel = 'normal' | 'warning' | 'critical'
 
-/**
- * Used-space fraction for a local volume's capacity bar, or `null` when no bar
- * applies: network shares report unreliable totals, and a zero total means the
- * OS gave no capacity at all.
- */
 export function volumeUsedFraction(volume: VolumeInfo): number | null {
   if (volume.isNetwork) {
     return null

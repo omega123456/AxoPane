@@ -6,8 +6,6 @@ use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
 use super::wide_nul;
 
-/// One `ShellExecuteW` call. A `None` verb lets the shell pick the file
-/// type's default verb, which is what a double-click in Explorer does.
 #[derive(Default)]
 pub struct ShellExecuteRequest<'a> {
     pub verb: Option<&'a OsStr>,
@@ -16,7 +14,6 @@ pub struct ShellExecuteRequest<'a> {
     pub directory: Option<&'a OsStr>,
 }
 
-/// Runs the request and returns the raw `ShellExecuteW` status code.
 pub fn shell_execute(request: &ShellExecuteRequest<'_>) -> isize {
     let verb = request.verb.map(wide_nul);
     let file = wide_nul(request.file);

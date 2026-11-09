@@ -49,12 +49,6 @@ export function listDir(payload: ListDirRequest) {
   return invokeCommand({ command: 'list_dir', payload })
 }
 
-/**
- * v2 seekable directory-session commands. `getDirectorySessionRange` and `reviseDirectorySessionView`
- * reject with the typed `SessionRejection` shape (see `lib/types/ipc.ts`),
- * not a plain string — callers should branch on `error.kind` rather than
- * string-matching.
- */
 export function beginDirectorySession(payload: BeginNavigationRequest) {
   return invokeCommand({
     command: 'begin_directory_session',
@@ -126,11 +120,6 @@ export function openPath(payload: OpenPathRequest) {
   return invokeCommand({ command: 'open_path', payload })
 }
 
-/**
- * Relaunches the application with administrator permissions (Windows only).
- * The current process quits only after the elevated one starts, so a refused
- * UAC prompt rejects and leaves the window open.
- */
 export function restartAsAdmin() {
   return invokeCommand({ command: 'restart_as_admin' })
 }
@@ -147,11 +136,6 @@ export function openFullDiskAccessSettings() {
   return invokeCommand({ command: 'open_full_disk_access_settings' })
 }
 
-/**
- * Hands the given absolute paths to the OS as a native drag session. Resolves
- * when the drag ends (dropped or cancelled) — the webview's HTML5 drag is
- * cancelled in favour of this, so there is no `dragend` event to wait on.
- */
 export function startNativeDrag(payload: StartNativeDragRequest) {
   return invokeCommand({ command: 'start_native_drag', payload })
 }

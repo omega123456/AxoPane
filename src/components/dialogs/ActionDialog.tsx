@@ -123,11 +123,6 @@ function PromptDialog({ dialog }: { dialog: PromptDialogState }) {
   )
 }
 
-/**
- * Windows refuses writes outside the user's own folders to a process that is
- * not elevated. The operation cannot be retried in place, so offer the only
- * fix: relaunch the application through the UAC prompt.
- */
 function AdminRequiredDialog({
   dialog,
 }: {
@@ -145,8 +140,6 @@ function AdminRequiredDialog({
     setBusy(true)
     setError(null)
     try {
-      // Resolves only if the elevated instance started; this window is then
-      // closed by the backend. A refused UAC prompt rejects instead.
       await restartAsAdmin()
     } catch (cause) {
       const message = errorMessage(cause)

@@ -2,7 +2,6 @@ import type { KeyboardEvent, ReactNode } from 'react'
 import { AlertTriangleIcon } from '@/components/icons'
 import { TEXT_SECONDARY } from '@/lib/class-names'
 
-/** ContentDialog bands hold two buttons, or three with a secondary action. */
 type FooterColumnCount = 2 | 3
 
 const footerGridClasses: Record<FooterColumnCount, string> = {
@@ -10,11 +9,6 @@ const footerGridClasses: Record<FooterColumnCount, string> = {
   3: 'grid-cols-3',
 }
 
-/**
- * Windows ContentDialog: a 420px card over a 40% scrim with a 20px semibold
- * title, a 14px body and a button band on the base colour. Footer buttons
- * share the band's width equally, primary first.
- */
 export function DialogShell({
   children,
   label,
@@ -68,7 +62,6 @@ export function DialogText({ children }: { children: ReactNode }) {
   return <p className="text-body">{children}</p>
 }
 
-/** Item list under the body text, in caption secondary. */
 export function DialogList({ items }: { items: string[] }) {
   return (
     <ul className={`grid gap-0.5 text-caption ${TEXT_SECONDARY}`}>
@@ -90,7 +83,6 @@ export function DialogError({ message }: { message: string | null }) {
   ) : null
 }
 
-/** Caption label over a field, e.g. "Folder name". */
 export function DialogField({
   label,
   htmlFor,

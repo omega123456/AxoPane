@@ -100,7 +100,6 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building file explorer application")
         .run(|app, event| {
-            // Last snapshot write; the index thread does the I/O.
             if let tauri::RunEvent::Exit = event {
                 flush_size_index(app);
             }
@@ -113,16 +112,6 @@ fn flush_size_index(app: &tauri::AppHandle) {
     }
 }
 
-// WebView2 bakes `scrollBarStyle` into the profile it was first created with
-// and refuses to start if a later launch requests a different value (see the
-// ScrollBarStyle docs: "must be given the same value for all webviews that
-// target the same data directory"). We switched from the auto-hiding
-// `fluentOverlay` style to the always-visible default, so upgraders whose
-// existing `EBWebView` profile was created under `fluentOverlay` would hit a
-// mismatch and the window would close instantly on launch. Move them onto a
-// fresh profile folder by overriding the data directory once. Bump the suffix
-// if a profile-baked browser argument ever changes again. Windows-only:
-// WKWebView (macOS) has no such invariant.
 #[cfg(target_os = "windows")]
 fn use_fresh_webview2_profile() {
     if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_some() {
@@ -147,11 +136,6 @@ fn prevent_default_flags() -> tauri_plugin_prevent_default::Flags {
     blocked_everywhere
 }
 
-// Disables default browser behaviours (native right-click menu, text selection,
-// drag-and-drop of links/images, browser accelerator keys, reload/zoom, etc.) so
-// the webview behaves like a native desktop app rather than a web page. Our own
-// React `onContextMenu` handlers still fire — only the built-in webview menu is
-// suppressed.
 fn prevent_default_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     let flags = prevent_default_flags();
 
@@ -165,8 +149,6 @@ fn prevent_default_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
                 PlatformOptions::new()
                     .general_autofill(false)
                     .password_autosave(false)
-                    // WebView2 disables F12/Ctrl+Shift+I when false; keep enabled in
-                    // debug so DevTools stay reachable under `tauri dev`.
                     .browser_accelerator_keys(cfg!(debug_assertions)),
             )
             .build()

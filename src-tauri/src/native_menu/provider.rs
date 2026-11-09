@@ -41,9 +41,6 @@ const APP_OWNED_NORMALIZED_VERBS: &[&str] = &[
     "selectall",
 ];
 
-/// Windows-native menu labels that we always suppress when they appear in the
-/// shell-provided menu. Extend this list as we discover more commands that do
-/// not fit the in-app experience.
 const ALWAYS_EXCLUDED_NORMALIZED_LABELS: &[&str] = &[
     "copytofolder",
     "movetofolder",
@@ -61,11 +58,6 @@ pub enum ProviderInvocation {
         request: LoadNativeMenuRequest,
         command_path: Vec<u32>,
     },
-    /// A Windows 11 modern (`IExplorerCommand`) shell extension command. The
-    /// `clsid` identifies the handler to re-instantiate at invoke time (stored
-    /// as a `u128` so the enum stays `Eq`/`Clone`); `packaged` records whether
-    /// it came from a packaged (sparse-MSIX) registration; `command_path` is the
-    /// index path used to walk `EnumSubCommands` back down to the leaf command.
     WindowsModern {
         clsid: u128,
         packaged: bool,
@@ -178,10 +170,6 @@ fn is_app_owned_duplicate(item: &ProviderNativeMenuItem) -> bool {
 }
 
 fn dedupe_key(item: &ProviderNativeMenuItem) -> String {
-    // Key on the visible label (not the verb): the same command surfaced by both
-    // the classic `IContextMenu` and modern `IExplorerCommand` paths (e.g.
-    // "Edit with Notepad++") carries different verbs but an identical label, and
-    // is a duplicate from the user's perspective.
     format!(
         "{}:{}:{}",
         item.canonical_action_kind

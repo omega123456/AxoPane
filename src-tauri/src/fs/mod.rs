@@ -86,14 +86,9 @@ pub struct TreeChildEntry {
     pub name: String,
     pub path: String,
     pub expandability: TreeExpandability,
-    /// Compatibility field. A false value means
-    /// "not proven non-empty", not that the directory is empty.
     pub has_children: bool,
 }
 
-/// The lazy tree contract deliberately distinguishes a directory we have not
-/// opened from one we have opened and found empty.  Listing a parent must not
-/// open every child merely to manufacture an expander boolean.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum TreeExpandability {
@@ -151,13 +146,6 @@ pub enum ListDirOutcome {
     Cancelled,
 }
 
-/// Canonicalizes a user-supplied path into an absolute, real path.
-///
-/// Uses `dunce::canonicalize` so Windows results stay in the familiar
-/// `C:\Users\...` form instead of the extended-length `\\?\C:\Users\...`
-/// prefix that `std::fs::canonicalize` returns. The result is the absolute
-/// location the OS actually resolves, which is what every later navigation,
-/// breadcrumb, and watcher operation depends on.
 pub fn canonicalize_dir(path: &Path) -> Result<PathBuf, FsError> {
     Ok(dunce::canonicalize(expand_home_path(path))?)
 }
@@ -178,9 +166,6 @@ pub fn display_path_from_text(path: &str) -> String {
     }
 }
 
-/// The directory the app should open into on a fresh session: the user's home
-/// directory when known, otherwise the first available volume root, falling
-/// back to the platform filesystem root (`C:\` on Windows, `/` elsewhere).
 pub fn default_start_dir() -> PathBuf {
     if let Some(home) = home_dir() {
         if home.is_dir() {
@@ -232,12 +217,6 @@ pub fn expand_home_path(path: &Path) -> PathBuf {
     expand_home_path_with(&text, home_dir().as_deref())
 }
 
-/// Expands Windows-style `%NAME%` references with `lookup`.
-///
-/// Windows shells resolve `%APPDATA%` and friends before a path reaches the
-/// filesystem, so the address bar must do the same. An unknown name stays as
-/// typed, which keeps the failure message readable. Environment names on
-/// Windows are case-insensitive, so `%appdata%` resolves too.
 pub fn expand_env_vars_with(path: &str, lookup: impl Fn(&str) -> Option<String>) -> String {
     let mut out = String::with_capacity(path.len());
     let mut rest = path;
@@ -284,11 +263,6 @@ pub fn expand_home_path_with(path: &str, home: Option<&Path>) -> PathBuf {
     home.join(rest)
 }
 
-/// Test-only call counter for [`list_dir_with_cancellation`]. Lets
-/// integration tests prove a full directory relisting was (or was not)
-/// performed — e.g. `ItemCountService::sort_active_items` deriving its
-/// result from an existing `DirectorySessionService` snapshot must never
-/// bump this counter, while its no-matching-session fallback must.
 #[cfg(feature = "test-utils")]
 static LIST_DIR_CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -297,9 +271,6 @@ pub fn list_dir_calls_for_tests() -> u64 {
     LIST_DIR_CALLS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Test-only call counter for [`read_item_count`]. Lets integration tests
-/// prove a directory's item count was actually recomputed from disk (a
-/// cache miss) rather than served from [`crate::item_counts::cache::ItemCountCache`].
 #[cfg(feature = "test-utils")]
 static READ_ITEM_COUNT_CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -415,9 +386,6 @@ pub fn list_tree_children(
         children.push(TreeChildEntry {
             name,
             path: display_path_from_path(&path),
-            // Do not probe every child directory here: that was an N+1 tree
-            // listing. The child request establishes Empty/NonEmpty when it
-            // is expanded; until then the state is explicitly unknown.
             expandability: TreeExpandability::Unknown,
             has_children: false,
         });
@@ -431,9 +399,6 @@ pub fn list_tree_children(
     })
 }
 
-/// Validates a single user-supplied file/folder name. Names must be non-empty,
-/// must not be the special `.`/`..` entries, and must not contain a path
-/// separator or NUL (which would let a "name" escape its parent directory).
 pub fn validate_name(name: &str) -> Result<(), FsError> {
     let trimmed = name.trim();
     if is_invalid_name(trimmed) {
@@ -447,7 +412,6 @@ fn is_invalid_name(trimmed: &str) -> bool {
     RESERVED_NAMES.contains(&trimmed) || trimmed.contains(FORBIDDEN_NAME_CHARACTERS)
 }
 
-/// Creates a new directory named `name` inside `parent` and returns its entry.
 pub fn create_directory(parent: &str, name: &str) -> Result<DirectoryEntry, FsError> {
     validate_name(name)?;
     let directory = canonicalize_dir(Path::new(parent))?;
@@ -461,7 +425,6 @@ pub fn create_directory(parent: &str, name: &str) -> Result<DirectoryEntry, FsEr
     build_entry_from_path(&target)
 }
 
-/// Creates a new empty file named `name` inside `parent` and returns its entry.
 pub fn create_file(parent: &str, name: &str) -> Result<DirectoryEntry, FsError> {
     validate_name(name)?;
     let directory = canonicalize_dir(Path::new(parent))?;
@@ -470,8 +433,6 @@ pub fn create_file(parent: &str, name: &str) -> Result<DirectoryEntry, FsError> 
         return Err(FsError::AlreadyExists(target));
     }
 
-    // create_new fails if the file already exists, closing the check-then-create
-    // race left open by the `exists()` guard above.
     fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -480,8 +441,6 @@ pub fn create_file(parent: &str, name: &str) -> Result<DirectoryEntry, FsError> 
     build_entry_from_path(&target)
 }
 
-/// Renames the item at `path` to `new_name` within its current directory and
-/// returns the resulting entry.
 pub fn rename_entry(path: &str, new_name: &str) -> Result<DirectoryEntry, FsError> {
     validate_name(new_name)?;
     let source = Path::new(path);
@@ -491,8 +450,6 @@ pub fn rename_entry(path: &str, new_name: &str) -> Result<DirectoryEntry, FsErro
     };
     let target = parent.join(new_name.trim());
 
-    // A no-op rename to the same name is allowed; otherwise refuse to clobber an
-    // existing item.
     let clobbers_other_item = target != source && target.exists();
     if clobbers_other_item {
         return Err(FsError::AlreadyExists(target));
@@ -503,9 +460,6 @@ pub fn rename_entry(path: &str, new_name: &str) -> Result<DirectoryEntry, FsErro
     build_entry_from_path(&target)
 }
 
-/// Builds a [`DirectoryEntry`] from an absolute path (used after a mutating
-/// operation produces a new/renamed item). Mirrors [`build_entry`] but reads
-/// metadata directly from the path rather than a [`DirEntry`].
 fn build_entry_from_path(path: &Path) -> Result<DirectoryEntry, FsError> {
     build_entry_from_path_with_options(path, true)
 }
@@ -643,13 +597,6 @@ where
     }
 }
 
-/// Counts the immediate children of a directory for the "Items" column.
-///
-/// This deliberately never propagates an error: drive roots and home folders
-/// routinely contain entries we cannot open (`System Volume Information`,
-/// `$RECYCLE.BIN`, legacy access-denied junctions like `Application Data`).
-/// A failure to count one child must not abort the entire parent listing, so an
-/// unreadable directory simply reports an unknown count (`None`).
 pub fn read_item_count(path: &Path) -> Option<u64> {
     #[cfg(feature = "test-utils")]
     READ_ITEM_COUNT_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -696,10 +643,6 @@ pub fn compare_entries(
     }
 
     if sort_key == SortKey::Items {
-        // Count work is deliberately asynchronous. Keep unresolved folders at
-        // the end for both directions so a pending result only moves its own
-        // row into the known-count region; it must not make the whole view
-        // jump ahead of known values while background work is still running.
         let count_order = match (left.item_count, right.item_count) {
             (Some(left), Some(right)) => match sort_direction {
                 SortDirection::Asc => left.cmp(&right),
@@ -783,15 +726,6 @@ pub fn system_time_to_rfc3339(value: Option<SystemTime>) -> Option<String> {
     value.and_then(|time| OffsetDateTime::from(time).format(&Rfc3339).ok())
 }
 
-/// Determines whether `path` should be treated as a directory, following
-/// symlinks/junctions when the raw entry metadata is a reparse point.
-///
-/// On Windows, `std::fs::Metadata::is_dir()` is `false` for *any* reparse
-/// point (symlink or junction) even when it targets a directory, because
-/// `is_dir()`/`is_symlink()` are mutually exclusive there. Without this, a
-/// symlinked folder (e.g. a `mklink /d` or junction) is reported as a file
-/// and the UI can't navigate into it. Following the link to check the
-/// target's real type keeps folder-symlinks navigable on both platforms.
 pub fn resolve_is_dir(path: &Path, metadata: &Metadata) -> bool {
     if metadata.is_dir() {
         return true;

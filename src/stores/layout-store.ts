@@ -20,12 +20,6 @@ function applyZoom(zoom: ZoomLevel) {
   const factor = percentToFraction(Number(zoom))
   const root = document.documentElement
   root.style.setProperty('zoom', String(factor))
-  // `zoom` scales rendered size but `100vh` still resolves to the unzoomed
-  // viewport, so a zoomed root would render taller than the window and scroll
-  // the whole page (pane/tree internal scrolling never engages). Counter-scale
-  // the root height so its rendered height (height * factor) stays exactly one
-  // viewport, then chain an explicit height through body/#root so the app shell
-  // fills it. Runtime geometry only — no static token can express 100/factor.
   root.style.height = `${PERCENT_SCALE / factor}vh`
   document.body.style.height = '100%'
   const appRoot = document.getElementById('root')
@@ -52,13 +46,10 @@ export const defaultColumnWidths: Record<ColumnKey, number> = {
   created: 128,
 }
 
-/** Folder-tree sidebar drag bounds, in pixels. */
 export const TREE_WIDTH_MIN = 160
 export const TREE_WIDTH_MAX = 480
-/** Favourites list drag bounds, in pixels: one row up to twenty. */
 export const FAVOURITES_HEIGHT_MIN = 28
 export const FAVOURITES_HEIGHT_MAX = 560
-/** Dual-pane split drag bounds, as the fraction allotted to the left pane. */
 export const PANE_SPLIT_MIN = 0.2
 export const PANE_SPLIT_MAX = 0.8
 export const COLUMN_WIDTH_MIN = 56
@@ -119,9 +110,6 @@ type LayoutStore = LayoutConfig & {
 }
 
 function normalizeColumns(columns: ColumnConfig[]) {
-  // Preserve the user-defined order as given, deduping by key, then append any
-  // schema columns that were missing (e.g. added in a newer version) so every
-  // column key is always present without discarding a saved reorder.
   const seen = new Set<ColumnKey>()
   const ordered: ColumnConfig[] = []
   for (const column of columns) {

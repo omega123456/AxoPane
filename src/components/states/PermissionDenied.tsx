@@ -4,7 +4,6 @@ import { openFullDiskAccessSettings, restartAsAdmin } from '@/lib/ipc/commands'
 import { isMacPlatform } from '@/lib/keymap'
 import { StatePanel } from './StatePanel'
 
-/** Offers the fix that matches the OS: elevation on Windows, Full Disk Access on macOS. */
 export function PermissionDenied() {
   const isMac = isMacPlatform()
 

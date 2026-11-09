@@ -1,5 +1,3 @@
-//! Transfer-worker planning helpers kept separate from the queue shell.
-
 use std::path::Path;
 
 #[cfg(feature = "test-utils")]
@@ -21,9 +19,6 @@ pub struct TransferPaths<'path> {
     pub target: &'path Path,
 }
 
-/// `rename` is attempted only for a known same resource. A non-cross-device
-/// error must be surfaced; treating permissions/conflicts as cross-volume can
-/// otherwise overwrite source data through an unnecessary fallback.
 pub fn rename_or_cross_device<F>(
     paths: TransferPaths<'_>,
     same_resource: bool,

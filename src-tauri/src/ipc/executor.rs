@@ -1,10 +1,3 @@
-//! Bounded owner for short, latency-sensitive IPC work.
-//!
-//! Tauri command handlers only validate and enqueue here.  The fixed workers
-//! acquire the process-wide `ResourceCoordinator` permit before touching the
-//! filesystem or a platform API, so the IPC dispatcher is never used as an
-//! unbounded blocking pool.
-
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -23,9 +16,6 @@ const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const REQUEST_CANCELLED: &str = "IPC latency request cancelled";
 const SHUTTING_DOWN_ERROR: &str = "IPC executor is shutting down";
 
-/// Cooperative cancellation shared with an owned IPC job. Platform helpers
-/// with hard-kill semantics retain their own owner; ordinary filesystem work
-/// observes this token at operation-defined checkpoints.
 #[derive(Clone, Default)]
 pub struct Cancellation(Arc<AtomicBool>);
 
@@ -68,19 +58,10 @@ enum Message {
     Run(Job),
 }
 
-/// A process-lifetime bounded executor for one-request IPC work.  Long work
-/// belongs to its domain owner (`OpsService`, size scheduler, native helper),
-/// never this queue.
 pub struct IpcExecutor {
     sender: Sender<Message>,
-    /// A local receiver clone lets shutdown drain work that no worker has
-    /// claimed yet. Keeping the sender alive for normal admission means a
-    /// sender-disconnect sentinel cannot be relied on for worker shutdown.
     receiver: Receiver<Message>,
     workers: Mutex<Vec<JoinHandle<()>>>,
-    /// Serializes the small check-and-enqueue admission window against
-    /// shutdown's flag-and-drain transition. No request can be stranded in
-    /// the queue after shutdown has completed its drain.
     lifecycle: Mutex<()>,
     coordinator: Arc<ResourceCoordinator>,
     shutting_down: Arc<AtomicBool>,
@@ -103,8 +84,6 @@ impl IpcExecutor {
         }
     }
 
-    /// Enqueues one bounded request.  A full queue is an explicit overload
-    /// response, rather than silently creating another thread/pool.
     pub async fn latency<T, F>(&self, resource_key: String, work: F) -> Result<T, String>
     where
         T: Send + 'static,
@@ -114,11 +93,6 @@ impl IpcExecutor {
             .await
     }
 
-    /// Runs one bounded request with the request's own completion deadline.
-    ///
-    /// Most IPC work uses [`IPC_DEADLINE`]. A platform API that presents an
-    /// OS-owned confirmation UI may need a longer, still finite deadline so
-    /// the executor does not report a failure while that UI is active.
     pub async fn latency_cancellable<T, F>(
         &self,
         request: LatencyRequest,
@@ -158,14 +132,6 @@ impl IpcExecutor {
         }
     }
 
-    /// Runs an asynchronous platform contract on the same named, bounded
-    /// owner as other latency IPC. This is intentionally distinct from merely
-    /// declaring a Tauri command `async`: the future is entered only after
-    /// queue admission, and its caller observes the executor deadline and
-    /// cooperative cancellation token. Native work that cannot be killed
-    /// (such as an already-issued LaunchServices request) may finish in the
-    /// background after the caller has timed out, but it can neither publish
-    /// a result nor start another request through this owner.
     pub async fn latency_async_cancellable<T, F, Fut>(
         &self,
         request: LatencyRequest,
@@ -206,25 +172,16 @@ impl IpcExecutor {
         if self.shutting_down.swap(true, Ordering::AcqRel) {
             return false;
         }
-        // Drop all not-yet-started jobs so their reply channels close
-        // promptly. This is intentionally independent of queue capacity:
-        // saturation cannot make shutdown lose a termination signal.
         while let Ok(message) = self.receiver.try_recv() {
             drop(message);
         }
         true
     }
 
-    /// Observable queue depth for deterministic integration coverage and
-    /// lightweight operational diagnostics. It is only a snapshot; admission
-    /// still relies exclusively on `try_send` above.
     pub fn queued_len(&self) -> usize {
         self.sender.len()
     }
 
-    /// Reports whether shutdown has crossed the admission boundary. This is
-    /// an instantaneous diagnostic snapshot; lifecycle synchronization still
-    /// belongs to [`Self::shutdown`] and request admission.
     pub fn is_shutting_down(&self) -> bool {
         self.shutting_down.load(Ordering::Acquire)
     }
@@ -252,10 +209,6 @@ fn run_worker_loop(receiver: &Receiver<Message>, shutting_down: &AtomicBool) {
         let Ok(message) = receiver.recv_timeout(SHUTDOWN_POLL_INTERVAL) else {
             continue;
         };
-        // Shutdown may begin after the loop condition is checked but
-        // before this worker receives a queued job. Do not start work
-        // across that boundary; dropping the message closes its reply
-        // channel and lets the waiting caller return an error.
         if shutting_down.load(Ordering::Acquire) {
             drop(message);
             break;
@@ -279,8 +232,6 @@ struct AdmittedJob<'job> {
     cancellation: &'job Cancellation,
 }
 
-/// Runs `work` under a Latency admission unless the request was cancelled
-/// before or while waiting for it.
 fn run_admitted<T>(
     job: AdmittedJob<'_>,
     work: impl FnOnce(&Cancellation) -> Result<T, String>,

@@ -132,9 +132,6 @@ const nativeMenuRequests: KindHandlers<
   tab: () => null,
 }
 
-// Trash entries have no real filesystem path (their `path` is an opaque
-// trash id), and the trash pane's own path isn't a real folder either, so
-// the native OS shell menu has nothing valid to operate on here.
 function targetsTrash(pane: PaneSnapshot, target: ContextMenuTarget) {
   if (isTrashPath(pane.path)) {
     return true

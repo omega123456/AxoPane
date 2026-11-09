@@ -33,33 +33,15 @@ function dividerLineClass(isDragging: boolean, showRestLine: boolean) {
 }
 
 type ResizeHandleProps = {
-  /**
-   * `vertical` (default) is a column divider dragged left/right; `horizontal` is
-   * a row divider dragged up/down.
-   */
   orientation?: ResizeOrientation
-  /** Accessible label describing what the divider resizes. */
   ariaLabel: string
-  /** Current value, exposed via `aria-valuenow` for assistive tech. */
   value: number
   min: number
   max: number
-  /**
-   * Whether to paint the 1px divider line at rest. The folder-tree handle sits
-   * on top of the tree's own `border-r`, so it stays transparent until hovered;
-   * the inter-pane handle is the only separator there, so it shows the line.
-   */
   showRestLine?: boolean
-  /** Snapshot the size to anchor the drag against (called on pointer down). */
   onDragStart: () => void
-  /**
-   * Reports how far (CSS px) the pointer has moved along the drag axis since the drag began. Drags
-   * are relative to the grab point, so the divider never jumps to the cursor.
-   */
   onResize: (deltaX: number) => void
-  /** Nudges the divider by `delta` notches via the keyboard (±1 per arrow; left/up is -1). */
   onStep: (delta: number) => void
-  /** Persist the final size once the drag (or keyboard nudge) settles. */
   onCommit: () => void
 }
 
@@ -95,8 +77,6 @@ function usePointerDrag(horizontal: boolean, callbacks: DragCallbacks) {
     if (pointerId.current === null) {
       return
     }
-    // The capture was taken on pointerdown for this exact pointer, so releasing
-    // it here is always valid.
     event.currentTarget.releasePointerCapture(event.pointerId)
     pointerId.current = null
     setDragging(false)
@@ -115,12 +95,6 @@ function stepKeyTable(horizontal: boolean, onStep: (delta: number) => void, onCo
   return { [back]: stepBy(-1), [forward]: stepBy(1) }
 }
 
-/**
- * A draggable divider that resizes its neighbouring panes. It occupies
- * a single pixel of layout (so it never disturbs the fixed design geometry) but
- * exposes a wider invisible hit area for grabbing. Pointer capture keeps the drag
- * alive when the cursor outruns the thin line; arrow keys give the same control.
- */
 export function ResizeHandle({
   orientation = 'vertical',
   ariaLabel,
@@ -151,14 +125,12 @@ export function ResizeHandle({
       onPointerUp={drag.endDrag}
       onPointerCancel={drag.endDrag}
       onKeyDown={(event) => handleKeyByTable(event, stepKeyTable(horizontal, onStep, onCommit))}
-      // Zero layout width keeps the fixed pane geometry pixel-exact; the line and
-      // grab zone are painted as absolute overlays around it.
       className={`group relative z-10 shrink-0 touch-none select-none ${orientationClasses.handle} ${FOCUS_RING}`}
     >
       <span
         className={`pointer-events-none absolute ${orientationClasses.line} group-hover:bg-light-accent dark:group-hover:bg-dark-accent ${dividerLineClass(drag.dragging, showRestLine)}`}
       />
-      {/* Invisible grab zone that overhangs the line on both sides. */}
+
       <span className={`absolute ${orientationClasses.grabZone}`} />
     </div>
   )

@@ -29,7 +29,6 @@ type JobCardProps = {
   onMoveDown?: () => void
 }
 
-/** Where the items go; a delete has no destination, so it names what it removes. */
 function jobDestination(operation: OpProgress) {
   const preview =
     formatItemPreview(operation.itemNames, operation.totalItems) ?? operation.sourceDir
@@ -282,9 +281,6 @@ function JobOverview({
         <JobItemList
           listId={itemListId}
           names={listedNames}
-          // The backend sends a bounded preview, so a very large selection can still
-          // have names beyond the ones it shipped. Say how many are unlisted rather
-          // than implying the list is complete.
           unlistedCount={Math.max(0, operation.totalItems - listedNames.length)}
           completedItems={completedItems}
           isFinished={flags.isFinished}

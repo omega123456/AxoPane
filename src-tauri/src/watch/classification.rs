@@ -102,11 +102,6 @@ pub(super) fn raw_mutations_for_event(
         _ if event.need_rescan() => MutationKind::Unresolved,
         _ => MutationKind::Changed,
     };
-    // macOS FSEvents can report a direct-child mutation as a modification of
-    // the watched directory itself. That path does not identify one child,
-    // so treating it as an ordinary changed path would filter it out below
-    // and silently lose the update. Mark it unresolved instead: the bounded
-    // coordinator will perform one authoritative non-recursive resnapshot.
     if event
         .paths
         .iter()
@@ -137,14 +132,6 @@ pub(super) fn raw_mutations_for_event(
         .collect()
 }
 
-/// Resolve a directory to its canonical, symlink-free form for comparison.
-///
-/// The OS watchers report event paths in canonical form (notably macOS FSEvents
-/// returns `/private/var/...` for a `/var/...` symlink), while a watched target
-/// path may still be the symlinked form the caller supplied. Canonicalizing both
-/// sides before comparing keeps parent-directory matching correct across
-/// platforms. Falls back to the lexical path when canonicalization fails (e.g. a
-/// directory that has since been removed).
 fn canonical_dir(path: &Path) -> PathBuf {
     match fs::canonicalize_dir(path) {
         Ok(path) => path,
@@ -268,9 +255,6 @@ pub(super) fn patch_for_events(
     })
 }
 
-/// Both the event path's parent and the watched parent are canonicalized so
-/// symlinked and canonical forms of the same directory compare equal across
-/// platforms (see [`canonical_dir`]).
 pub(super) fn is_direct_child(path: &Path, watched_parent: &Path) -> bool {
     match path.parent() {
         Some(parent) => canonical_dir(parent) == canonical_dir(watched_parent),
@@ -311,13 +295,6 @@ pub fn first_error_path_for_tests(error: &notify::Error) -> String {
     first_error_path(error)
 }
 
-/// Test-only wrapper around the private `raw_mutations_for_event` so
-/// coverage/behavior tests can exercise the real `notify::Event` ->
-/// `RawMutation` classification (Access/Remove/Unresolved/Changed, direct-
-/// child filtering, `need_rescan`) without needing a live OS watcher thread
-/// to deliver the event. `watch_id`/`target` are the same fields
-/// `WatchedTab` stores; this constructs one internally since `WatchedTab`
-/// itself is module-private.
 #[cfg(feature = "test-utils")]
 pub fn raw_mutations_for_event_for_tests(
     event: &notify::Event,

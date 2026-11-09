@@ -14,15 +14,11 @@ export type SizeStateEvent = {
   source: 'everything' | 'manual' | 'network' | 'index'
   sizeBytes: number | null
   naReason?: 'network' | 'timeout' | 'denied'
-  /** The total excludes skipped protected or unreadable folders below it. */
   isLowerBound?: boolean
-  /** Up to three skipped protected folders' names. */
   skippedRoots?: string[]
-  /** Skipped protected folders beyond `skippedRoots`. */
   skippedMore?: number
 }
 
-/** Backend-neutral folder-size capability and progress. */
 export type FolderSizeIndexStatus = {
   backend: 'everything' | 'macIndex' | 'none'
   isAvailable: boolean
@@ -30,7 +26,6 @@ export type FolderSizeIndexStatus = {
   itemsScanned?: number
   pauseReason?: 'lowPowerMode' | 'thermal'
 }
-/** `auto` = automatic sizing, `refresh` forces fresh work, `manual` is the default. */
 export type SizeRequestMode = 'auto' | 'manual' | 'refresh'
 
 export type FolderSizeRequest = {
@@ -43,7 +38,6 @@ export type FolderSizesRequest = {
   mode?: SizeRequestMode
 }
 
-/** One pane's live size-update set; no `currentPath` and no folders clears it. */
 export type SizeSubscriptionsRequest = {
   paneId: string
   currentPath: string | null
@@ -59,7 +53,6 @@ export type IconStateEvent = {
   iconDataUrl: string | null
 }
 
-/** A listing-derived identity for a file that may receive a native preview. */
 export type ThumbnailCandidateRequest = {
   path: string
   modifiedUnixSeconds: number
@@ -93,7 +86,6 @@ export type CancelThumbnailsRequest = {
 export type ThumbnailResultKind = 'ready' | 'unavailable' | 'failed'
 export type ThumbnailQuality = 'low' | 'high'
 
-/** A contextual result emitted in bounded batches on `thumbnail://state`. */
 export type ThumbnailResultEvent = {
   paneId: string
   tabId: string

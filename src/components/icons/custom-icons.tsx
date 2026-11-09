@@ -36,11 +36,6 @@ export function DualPaneIcon(props: IconProps) {
   )
 }
 
-/**
- * Filled two-tone folder, as in Windows 11 Explorer. The fills come from the
- * `folder` tokens, so the glyph ignores `currentColor` and reads the same in
- * both themes.
- */
 export function FolderGlyph(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" {...props}>
@@ -53,10 +48,6 @@ export function FolderGlyph(props: IconProps) {
   )
 }
 
-/**
- * Page outline with a filled "PDF" label, like the Acrobat/Explorer document
- * icon. Both the outline and the label follow `currentColor`.
- */
 export function PdfGlyph(props: IconProps) {
   return (
     <svg

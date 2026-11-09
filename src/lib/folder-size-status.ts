@@ -25,7 +25,6 @@ const statusLabels: Record<
   notReady: () => PREPARING_LABEL,
 }
 
-/** The macOS index's state in words (Settings and Search everywhere). */
 export function folderSizeStatusLabel(status: FolderSizeIndexStatus) {
   const label = statusLabels[status.state] as
     | ((status: FolderSizeIndexStatus) => string)

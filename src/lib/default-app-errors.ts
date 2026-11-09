@@ -1,32 +1,12 @@
-/**
- * Pure mapping from a backend `set_default_application` status code to
- * honest, user-facing inline-error copy.
- *
- * This module is intentionally dependency-free (no React, no IPC) so it can
- * be reused by `DefaultAppDialog` and trivially unit-tested. The backend
- * (see `src-tauri/src/app_picker/macos.rs`) owns the stable machine codes;
- * this module owns the interpolated human copy.
- */
-
 import { lookupOwnProperty } from '@/lib/collections'
 
-/** Context used to interpolate `{app}` / `{ext}` placeholders in copy. */
 export interface DefaultAppErrorContext {
-  /** Display name of the application the user selected, e.g. "Sublime Text". */
   appName: string
-  /** File extension without the leading dot, e.g. "sql". */
   extension: string
 }
 
 const GENERIC_FAILURE_MESSAGE = "Couldn't set the default application. Please try a different app."
 
-/**
- * Maps a backend status `message` code to user-facing inline-error copy.
- *
- * Unknown/missing codes (including `unsupported` and IPC-error fallbacks)
- * resolve to a safe, generic message so the dialog never renders a raw
- * machine code to the user.
- */
 type DefaultAppErrorCopy = (context: DefaultAppErrorContext) => string
 
 const unusableAppMessage: DefaultAppErrorCopy = ({ appName }) =>

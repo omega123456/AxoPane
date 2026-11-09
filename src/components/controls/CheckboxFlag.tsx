@@ -12,7 +12,6 @@ function checkboxBoxClass(checked: boolean) {
   return checked ? CHECKED_BOX_CLASS : UNCHECKED_BOX_CLASS
 }
 
-/** Fluent checkbox: an 18px box on the input boundary, solid accent when checked. */
 export function CheckboxFlag({
   checked,
   onChange,

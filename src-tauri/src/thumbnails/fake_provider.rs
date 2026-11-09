@@ -1,5 +1,3 @@
-//! Deterministic test provider. File names select outcomes without OS calls.
-
 use super::provider::{ProviderCapability, ThumbnailPreviewCallback, ThumbnailProvider};
 use super::types::{ThumbnailCandidate, ThumbnailState};
 

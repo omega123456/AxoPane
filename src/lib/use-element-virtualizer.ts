@@ -14,7 +14,6 @@ type ElementVirtualizerOptions = {
   estimateSize: (index: number) => number
   getScrollElement: () => HTMLDivElement | null
   overscan?: number
-  /** Blank space above the first and below the last item, in pixels. */
   padding?: number
   measurementKey?: string | number
 }
@@ -68,17 +67,6 @@ export function useElementVirtualizer(options: ElementVirtualizerOptions) {
   useLayoutEffect(() => {
     instance.measure()
   }, [instance, options.measurementKey])
-
-  // Do not call `measure()` for ordinary count changes: it clears the
-  // virtualizer's entire cached-size table (`itemSizeCache`), forcing every
-  // already-measured row to be re-measured from scratch. `setOptions` above
-  // already applies a changed `count` (e.g. a newly loaded sparse range page
-  // bumping total rows) and is enough for `getVirtualItems`/`getTotalSize` to
-  // reflect it on next read — for the fixed-height row estimators this app
-  // uses (`estimateSize: () => rowHeightPx` / `treeRowHeight`), there is
-  // nothing stale to correct. `measurementKey` is the narrow exception for a
-  // real fixed-height change such as Icons -> Thumbnails. A full remeasure on every row-count change was
-  // wasted work that scaled with total rendered rows on every page load.
 
   return instance
 }

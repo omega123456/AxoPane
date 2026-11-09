@@ -9,11 +9,6 @@ fn has_icns_header(bytes: &[u8]) -> bool {
     bytes.len() >= FILE_HEADER_LEN && bytes.starts_with(ICNS_MAGIC)
 }
 
-/// Walks an `.icns` file's chunk table (4-byte OSType + 4-byte big-endian
-/// length + payload) and returns the largest payload that is itself a raw
-/// embedded PNG (modern large-icon chunks like `ic07`-`ic14` embed PNG bytes
-/// directly). Older `.icns` files using legacy RLE-only chunks have no PNG
-/// payload and yield `None`, which callers treat as "no icon available".
 pub fn largest_embedded_png(bytes: &[u8]) -> Option<&[u8]> {
     if !has_icns_header(bytes) {
         return None;
@@ -48,9 +43,6 @@ pub fn largest_embedded_png(bytes: &[u8]) -> Option<&[u8]> {
     largest
 }
 
-/// Encodes the largest embedded PNG as a `data:image/png;base64,...` URL,
-/// matching the contract `file_icons.rs` and the frontend's `EntryIcon`
-/// already use for `iconDataUrl`.
 pub fn icns_to_data_url(bytes: &[u8]) -> Option<String> {
     let png = largest_embedded_png(bytes)?;
     Some(format!(

@@ -1,11 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Scans each root directory, and its `Utilities` subfolder if present, for
-/// top-level `.app` bundles. Roots are caller-supplied so real macOS code can
-/// pass `/Applications`, `/System/Applications`, `~/Applications` while tests
-/// pass a temp directory tree, keeping this fully deterministic and free of
-/// any dependency on the real filesystem layout.
 pub fn scan_app_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
     let mut apps = Vec::new();
     for root in roots {

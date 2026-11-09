@@ -23,19 +23,12 @@ pub(super) fn on_window_event(window: &Window, event: &WindowEvent) {
     }
 }
 
-/// The folder-size index reacts to focus changes: focus re-probes Full Disk
-/// Access and checks weekly verification, blur writes its snapshot. Both only
-/// post a message to the index thread.
 fn notify_size_index(app: &AppHandle, focused: bool) {
     if let Some(sizes) = app.try_state::<SizeService>() {
         sizes.window_focus_changed(focused);
     }
 }
 
-/// Reliability net for any native volume-change/watch event the OS dropped
-/// while the window was unfocused. This only *submits* work: the comparison
-/// runs on a coordinator-admitted thread, never on the Tauri event thread,
-/// and a stale generation's result is discarded rather than published.
 fn reconcile_after_focus(app: &AppHandle) {
     let reconcile = app.try_state::<Arc<ReconcileCoordinator>>();
     let coordinator = app.try_state::<Arc<ResourceCoordinator>>();
@@ -68,8 +61,6 @@ fn reconcile_volume_registry(
     );
 }
 
-/// The generation is re-checked immediately before publishing: a slower
-/// generation must never overwrite a newer one's result.
 fn reconcile_watches(
     app: &AppHandle,
     reconcile: &Arc<ReconcileCoordinator>,

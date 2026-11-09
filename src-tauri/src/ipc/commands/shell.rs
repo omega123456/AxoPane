@@ -59,8 +59,6 @@ pub fn open_path(payload: OpenPathRequest) -> Result<(), String> {
 #[tauri::command]
 pub fn restart_as_admin(app: AppHandle) -> Result<(), String> {
     restart_as_admin_impl()?;
-    // Only quit after the elevated instance started. A refused UAC prompt must
-    // leave the running application alone.
     app.exit(0);
     Ok(())
 }
@@ -77,7 +75,6 @@ pub fn open_full_disk_access_settings() -> Result<(), String> {
         .map_err(|error| logged_error(format!("Failed to open Full Disk Access settings: {error}")))
 }
 
-/// Keeps the native title bar in step with the app theme.
 #[tauri::command]
 pub fn set_window_theme<R: tauri::Runtime>(
     window: tauri::WebviewWindow<R>,
@@ -88,7 +85,6 @@ pub fn set_window_theme<R: tauri::Runtime>(
         .map_err(|error| format!("Failed to set the window theme: {error}"))
 }
 
-/// `mica` when the window got the Windows 11 backdrop, `solid` otherwise.
 #[tauri::command]
 pub fn get_window_backdrop() -> crate::window_chrome::WindowBackdrop {
     crate::window_chrome::current_backdrop()

@@ -58,7 +58,6 @@ export function SearchResultRow({
       title={hit.path}
       style={style}
       onMouseMove={() => onHover(index)}
-      // Keep focus in the input: the row is chosen through the combobox.
       onMouseDown={(event) => event.preventDefault()}
       onClick={(event) => onActivate(hit, activationForClick(event))}
       className={`absolute inset-x-0 top-0 flex h-search-row cursor-default items-center gap-2.5 rounded-control px-2.5 ${resultRowStateClass(active)}`}

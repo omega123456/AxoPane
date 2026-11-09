@@ -96,8 +96,6 @@ function useLogEntries() {
   const [autoRefresh, setAutoRefresh] = useState(true)
   const requestIdRef = useRef(0)
 
-  // State updates live in deferred promise callbacks (never synchronously), so
-  // this is safe to invoke from an effect.
   const load = useCallback(() => {
     const requestId = ++requestIdRef.current
     const isCurrent = () => requestId === requestIdRef.current

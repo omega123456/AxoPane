@@ -1,16 +1,9 @@
 import { fractionToPercent } from '@/lib/numbers'
 import { TEXT_SECONDARY } from '@/lib/class-names'
 
-// The two-tone focus ring (see lib/focus-ring), drawn on the thumb when the
-// transparent input above it has keyboard focus.
 const THUMB_FOCUS_RING =
   'peer-focus-visible:ring-2 peer-focus-visible:ring-light-focus-outer peer-focus-visible:ring-offset-1 peer-focus-visible:ring-offset-light-focus-inner dark:peer-focus-visible:ring-dark-focus-outer dark:peer-focus-visible:ring-offset-dark-focus-inner'
 
-/**
- * Fluent slider: a 4px track on the input boundary, accent fill, and a 20px
- * card thumb holding a 12px accent dot. A transparent native range input on
- * top keeps keyboard and pointer behaviour; the thumb shows its focus ring.
- */
 export function RangeSlider({
   value,
   min,
@@ -44,7 +37,7 @@ export function RangeSlider({
           className="peer absolute inset-0 z-10 m-0 w-full cursor-pointer opacity-0"
         />
         <span className="h-1 w-full rounded-full bg-light-boundary opacity-55 dark:bg-dark-boundary" />
-        {/* Runtime geometry: the fill and thumb follow the current value. */}
+
         <span
           className="absolute left-0 h-1 rounded-full bg-light-accent dark:bg-dark-accent"
           style={{ width: `${percent}%` }}

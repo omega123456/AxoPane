@@ -1,7 +1,5 @@
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT};
 
-/// Initializes COM on the current thread for its lifetime, uninitializing on
-/// drop only when this guard's initialization succeeded.
 pub struct ComApartment {
     initialized: bool,
 }

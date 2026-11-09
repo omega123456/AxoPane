@@ -9,10 +9,6 @@ use super::progress::{maybe_emit_delete, refresh_rate_locked_with_now, TransferT
 use super::LockOperation;
 use crate::error_text::StringifyError;
 
-/// Remove `source` (file or directory tree) reporting byte progress through the
-/// shared worker context, honoring pause/cancel. When `add_discovered_totals`
-/// is set (a directory whose size was not pre-measured), each removed file's
-/// bytes are folded into the operation total as they are discovered.
 pub fn delete_path_with_progress(
     source: &Path,
     add_discovered_totals: bool,
@@ -93,9 +89,6 @@ impl DeleteWalk<'_, '_> {
     }
 }
 
-/// Windows refuses to delete a read-only file or directory with "Access is
-/// denied" — even for an administrator — so clear the attribute and retry
-/// once. Unix deletion depends only on the parent directory's permissions.
 #[cfg(windows)]
 pub(super) fn remove_clearing_readonly(
     path: &Path,
@@ -134,16 +127,6 @@ pub(super) fn remove_clearing_readonly(
     remove(path)
 }
 
-/// Removes a file or symlink at `path`.
-///
-/// On Windows, `DeleteFileW` (which `fs::remove_file` uses) fails with
-/// "Access is denied" for a symlink/junction that points at a directory —
-/// those reparse points must go through `RemoveDirectoryW`
-/// (`fs::remove_dir`) instead, even though the link itself isn't recursed
-/// into. `FileTypeExt::is_symlink_dir` reads that distinction straight off
-/// the reparse point, so it works even for a broken/dangling symlink whose
-/// target no longer exists. Unix `unlink` has no such distinction, so
-/// `remove_file` always works there regardless of what the symlink targets.
 #[cfg(windows)]
 fn remove_file_or_symlink(path: &Path, link_metadata: &fs::Metadata) -> io::Result<()> {
     use std::os::windows::fs::FileTypeExt;
@@ -167,14 +150,6 @@ pub fn remove_source(source: &Path) -> Result<(), String> {
     remove_path(source).stringify_err()
 }
 
-/// Removes a file, symlink, or directory at `path`.
-///
-/// A dangling directory symlink/junction still reports as a reparse point
-/// rather than a real directory, so this checks `symlink_metadata` (which
-/// doesn't follow the link) instead of `Path::is_dir()` before deciding
-/// between `remove_dir_all` and [`remove_file_or_symlink`] — otherwise a
-/// broken directory symlink on Windows would hit `remove_file` and fail with
-/// access denied, same as the bug this guards against for live symlinks.
 fn remove_path(path: &Path) -> io::Result<()> {
     let link_metadata = fs::symlink_metadata(path)?;
     if is_real_directory_type(link_metadata.file_type()) {

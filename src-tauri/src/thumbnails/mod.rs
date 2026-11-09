@@ -1,5 +1,3 @@
-//! Native thumbnail capability, scheduling and contextual result delivery.
-
 pub mod cache;
 pub mod provider;
 pub mod request;
@@ -88,8 +86,6 @@ struct CacheVisit<'visit> {
     now_seconds: u64,
 }
 
-/// Application-owned thumbnail service. The scheduler never knows about
-/// Tauri; this boundary owns cache admission and result batching.
 pub struct ThumbnailService {
     cache: Arc<Mutex<ThumbnailCache>>,
     scheduler: ThumbnailScheduler,
@@ -516,7 +512,6 @@ fn exceeds_one_batch(events: &[ThumbnailResultEvent]) -> bool {
     events.len() >= MAX_RESULTS_PER_BATCH || total_bytes > MAX_RESULT_BYTES_PER_BATCH
 }
 
-/// How many leading events fit one batch; always at least one.
 fn full_batch_len(events: &[ThumbnailResultEvent]) -> usize {
     let mut batch_bytes = 0;
     let mut count = 0;

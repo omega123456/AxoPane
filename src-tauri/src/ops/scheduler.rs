@@ -8,15 +8,6 @@ use super::service::Inner;
 use super::{archive, worker, LockOperation, OpStatus, RemovedEmitter};
 use crate::resource_coordinator::JobSpec;
 
-/// Admits `id`'s declared resource keys through the shared resource
-/// coordinator before actually running it. Used by both the initial
-/// dispatch path (`spawn_worker`) and by `release_and_reschedule` once
-/// previously-blocked work becomes eligible, so a rescheduled run contends
-/// for the same global latency/throughput/CPU admission caps as a
-/// first-dispatch run rather than only the legacy per-volume
-/// `busy_volumes` gate. A denied admission (coordinator shut down or the
-/// job was cancelled while queued for admission) marks the operation
-/// cancelled instead of running it.
 pub(super) fn admit_and_run_operation(
     id: String,
     inner: &Arc<Mutex<Inner>>,
@@ -50,13 +41,9 @@ fn mark_admission_denied(id: &str, inner: &Arc<Mutex<Inner>>) {
         Some("Transfer admission was cancelled or shut down.".to_string());
 }
 
-/// Once a worker finishes, free its volumes and try to schedule waiting work.
 pub(super) fn release_and_reschedule(id: &str, inner: &Arc<Mutex<Inner>>, runtime: &WorkerRuntime) {
     inner.lock().expect("ops lock").release_volumes_of(id);
 
-    // Dispatch any newly-eligible pending operations. Each still contends
-    // for the shared resource coordinator's global admission caps, not just
-    // the legacy per-volume `busy_volumes` gate freed above.
     let to_start = collect_startable(inner);
     for next in to_start {
         let inner = inner.clone();
@@ -67,7 +54,6 @@ pub(super) fn release_and_reschedule(id: &str, inner: &Arc<Mutex<Inner>>, runtim
         });
     }
 
-    // Auto-remove completed/cancelled operations after the retention window.
     let removal = AutoRemoval {
         removed: runtime.removed.clone(),
         retention: runtime.retention,

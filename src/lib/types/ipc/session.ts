@@ -1,9 +1,5 @@
-// Mirrors `src-tauri/src/directory_session/model.rs` field-for-field; Rust
-// serializes every one of these with `#[serde(rename_all = "camelCase")]`.
-
 import type { DirectoryEntry, SortDirection, SortKey } from './listing'
 
-/** Row page size for every v2 range response. Matches Rust `SESSION_PAGE_SIZE`. */
 export const SESSION_PAGE_SIZE = 500
 
 export type SessionId = number
@@ -79,13 +75,6 @@ export type ReleaseSessionResponse = {
   released: boolean
 }
 
-/**
- * Typed rejection returned by `get_directory_session_range` and
- * `revise_directory_session_view` instead of a plain error string, mirroring
- * Rust's `#[serde(tag = "kind")] SessionRejection` enum exactly. Every
- * variant except `pageOutOfRange` means "this baseline/session is stale —
- * silently re-navigate/re-fetch", not a user-facing failure.
- */
 export type SessionRejection =
   | { kind: 'noActiveSession' }
   | { kind: 'staleSession' }
@@ -94,7 +83,6 @@ export type SessionRejection =
   | { kind: 'staleView' }
   | { kind: 'pageOutOfRange' }
 
-/** Rust-authored, revisioned watch update for an active directory session. */
 export type SessionRowDelta =
   | { kind: 'inserted'; rowIndex: number; entry: DirectoryEntry }
   | { kind: 'removed'; rowIndex: number; path: string }

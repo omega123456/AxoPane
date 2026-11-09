@@ -64,7 +64,6 @@ function finishedSummary(active: OpProgress[], operations: OpProgress[]) {
   }
 }
 
-/** One kind names the whole queue, by precedence; the icon and verb follow it. */
 function dominantKind(active: OpProgress[]): OpKind {
   return (
     (['delete', 'extract', 'compress', 'move'] as const).find((candidate) =>
@@ -94,7 +93,6 @@ function activeSummary(active: OpProgress[]) {
       active.length === 1
         ? `${verb} ${countLabel(active[0].totalItems, 'item')}`
         : `${verb} ${formatCount(active.length)} jobs`,
-    // Percent and time left answer "how much is left" without expanding.
     detail: [`${Math.round(percent)}%`, ...longestEta(active)].join(DETAIL_SEPARATOR),
     percent,
     dismissible: false,
@@ -129,7 +127,6 @@ function SummaryIcon({ summary }: { summary: QueueSummary }) {
   return <XCircleIcon className={`size-4 shrink-0 ${TEXT_SECONDARY}`} />
 }
 
-/** The collapsed queue: one line with a progress bar along its bottom edge. */
 export function QueueToast() {
   const operations = useOrderedOperations()
   const expand = useQueueStore((state) => state.setExpanded)

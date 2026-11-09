@@ -16,7 +16,6 @@ function switchThumbClass(checked: boolean) {
   return checked ? CHECKED_THUMB_CLASS : UNCHECKED_THUMB_CLASS
 }
 
-/** Fluent toggle: 40×20 on the input boundary, with an On/Off label to its left. */
 export function ToggleSwitch({
   checked,
   onChange,

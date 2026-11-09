@@ -51,7 +51,6 @@ function NativeLoadingPlaceholder({ visible }: { visible: boolean }) {
       aria-label={visible ? 'Loading native menu items' : undefined}
       className={`flex flex-col ${placeholderVisibilityClass(visible)}`}
     >
-      {/* Same 32px height as the rows that replace them, so nothing jumps. */}
       {['w-3/5', 'w-4/5', 'w-1/2'].map((width) => (
         <div key={width} className="flex h-8 items-center gap-3 px-3">
           <div className="size-4 rounded-control bg-light-skeleton dark:bg-dark-skeleton" />
@@ -97,8 +96,6 @@ function measureSubmenuPosition(anchor: HTMLElement, submenu: HTMLElement): Subm
   }
 }
 
-// Runtime submenu geometry uses viewport coordinates so nested panels are not
-// clipped by the scrolling body of the parent menu.
 function submenuStyle(position: SubmenuPosition | null) {
   if (!position) {
     return { visibility: 'hidden' as const }
@@ -232,7 +229,7 @@ export function ContextMenuSection({
   return (
     <div>
       {showDivider ? <div className="my-1 h-px bg-light-divider dark:bg-dark-divider" /> : null}
-      {/* The menu's 4px side padding lives here so dividers can span edge to edge. */}
+
       <div className="px-1">
         {nativePlaceholders[nativePlaceholder](Boolean(nativeState?.placeholderVisible))}
         {section.rows.map((item) => (

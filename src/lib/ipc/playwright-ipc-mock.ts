@@ -5,11 +5,6 @@ import { getFixtureResponse, resolveThumbnailFixtureBatch } from '@/tests/playwr
 import type { PlaywrightScenario } from '@/tests/playwright-fixtures/e2e'
 import type { TreeChildrenByPath } from '@/tests/playwright-fixtures/tree-states'
 
-/**
- * A monotonic session-id counter for the `begin_directory_session`/
- * `revise_directory_session_view` derivation below, so successive
- * navigations/view-revisions within one spec never collide on `sessionId: 1`.
- */
 let v2SessionIdCounter = 0
 
 type ListenerMap = {
@@ -42,13 +37,6 @@ function readScenario() {
     .__PLAYWRIGHT_IPC_SCENARIO__
 }
 
-/**
- * Per-test fixture overrides. A spec can set
- * `window.__PLAYWRIGHT_IPC_OVERRIDES__ = { command: response }` (via
- * `page.addInitScript`) to drive a specific UI state without embedding any
- * domain data inside this router — the override values still come from the
- * spec's chosen fixture.
- */
 function readCommandOverride<CommandName extends keyof IpcCommandMap>(command: CommandName) {
   const overrides = readScenario()?.commands
   if (!overrides) {
@@ -172,10 +160,6 @@ function treeChildrenResponse({ path }: CommandRequest<'list_tree_children'>) {
   return { path, children }
 }
 
-// The v2 session commands derive their response from whatever `list_dir` a
-// scenario provides, mirroring the normal listing fixture, so the live app's v2
-// navigation path is driven by the same per-spec fixtures without a separate v2
-// fixture to maintain.
 function directorySessionResponse(
   payload: Pick<CommandRequest<'begin_directory_session'>, 'paneId' | 'tabId'>,
 ): CommandResponse<'begin_directory_session'> {
@@ -197,8 +181,6 @@ function directorySessionResponse(
   }
 }
 
-// An unmocked page defaults to an empty page at whatever baseline the caller
-// already has; every e2e fixture listing resolves fully from `firstPage`.
 function emptySessionRange(request: CommandRequest<'get_directory_session_range'>) {
   return {
     baseline: request.baseline,
@@ -234,14 +216,9 @@ const responsesWhenNotOverridden: CommandRoutes = {
   begin_directory_session: directorySessionResponse,
   revise_directory_session_view: directorySessionResponse,
   get_directory_session_range: emptySessionRange,
-  // Explicit Items sorting reuses the shared fixture registry so a scenario can
-  // exercise the pending visual state with only a delay override.
   sort_active_items: () => getFixtureResponse('sort_active_items'),
 }
 
-// The live directory-session entrypoint inherits any scenario delay/error
-// configured for `list_dir` (loading, error, and permission-denied fixtures
-// still target `list_dir`).
 function inheritsListDirTiming(command: keyof IpcCommandMap) {
   return command === 'begin_directory_session'
 }
@@ -256,8 +233,6 @@ function scenarioFailure(command: keyof IpcCommandMap) {
   return readCommandError(command) ?? fallback
 }
 
-// A typed rejection (e.g. `{ kind: 'notReady' }`) reaches the caller as-is,
-// like a Rust command returning a serialized error enum.
 function throwScenarioFailure(command: keyof IpcCommandMap) {
   const failure = scenarioFailure(command)
   if (typeof failure === 'string') {
@@ -300,13 +275,6 @@ export async function invokePlaywrightCommand<CommandName extends keyof IpcComma
   return withLiveNativeRequestId(command, payload, getFixtureResponse(command))
 }
 
-/**
- * Lets a spec emit an event mid-test, for UI that only exists once something has
- * already happened in the page — the native-drag badge needs a drag started from
- * the DOM first, so scenario-scripted events (delivered at subscribe time) are
- * too early. Fixture data still belongs in `playwright-fixtures`; this is only
- * the trigger.
- */
 declare global {
   interface Window {
     __PLAYWRIGHT_IPC_EMIT__?: <EventName extends keyof IpcEventMap>(

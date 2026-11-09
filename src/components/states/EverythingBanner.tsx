@@ -30,7 +30,6 @@ export function EverythingBanner() {
       label="Everything unavailable"
       title="Folder sizes unavailable"
       action={
-        // A link, not a button: it opens the download page in the browser.
         <a
           href="https://www.voidtools.com/downloads/"
           target="_blank"

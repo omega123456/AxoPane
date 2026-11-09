@@ -27,17 +27,6 @@ use worker_pool::{spawn_manual_worker, QueuedWork};
 
 type UpdateEmitter = Arc<dyn Fn(Vec<SizeUpdate>) + Send + Sync>;
 
-/// Long-lived manual-size worker threads. A handful of workers pull queued
-/// jobs from the shared [`scheduler::SizeScheduler`] one at a time instead of
-/// a thread being spawned per requested path — that is what actually bounds
-/// how many OS threads a huge selection (or an "Items" sort over a folder
-/// with tens of thousands of children) can create. The coordinator's
-/// `Throughput` lane (see [`resource_coordinator::max_throughput_slots`])
-/// still gates how many of these workers can be doing filesystem work at
-/// once; this pool only bounds how many *threads exist*, not how many run
-/// concurrently. On macOS each job's traversal is itself parallel
-/// (`fast_walk`), but every job draws its extra threads from one
-/// process-wide helper cap, so total walk threads stay bounded.
 pub const DEFAULT_MANUAL_SIZE_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -59,7 +48,6 @@ pub enum SizeSource {
     Index,
 }
 
-/// Why a size is `na`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum NaReason {
@@ -68,8 +56,6 @@ pub enum NaReason {
     Denied,
 }
 
-/// `auto` comes from automatic sizing (macOS only sizes indexed paths for
-/// it), `refresh` forces fresh work, `manual` is an explicit request.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum RequestMode {
@@ -105,7 +91,6 @@ pub enum PauseReason {
     Thermal,
 }
 
-/// Backend-neutral folder-size capability and progress.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderSizeIndexStatus {
@@ -138,11 +123,8 @@ pub struct SizeUpdate {
     pub source: SizeSource,
     pub size_bytes: Option<u64>,
     pub na_reason: Option<NaReason>,
-    /// The total excludes skipped protected or denied folders below it.
     pub is_lower_bound: bool,
-    /// Up to three skipped protected folders' names.
     pub skipped_roots: Option<Vec<String>>,
-    /// Skipped protected folders beyond `skipped_roots`.
     pub skipped_more: Option<u32>,
 }
 
@@ -199,9 +181,6 @@ pub struct SizeRequestWithVolumes {
     pub volumes: Vec<VolumeInfo>,
 }
 
-/// One pane's live-update set: `folders` receive `size://state` whenever
-/// their indexed totals change, and `current_path` marks a protected folder
-/// as visited.
 pub struct PaneSubscriptions {
     pub pane_id: String,
     pub current_path: Option<String>,
@@ -228,9 +207,6 @@ pub struct SizeService {
     inner: Arc<Mutex<SizeServiceInner>>,
     timeout: Duration,
     coordinator: Arc<ResourceCoordinator>,
-    /// The bounded manual-size worker pool. Joined deterministically by
-    /// `Drop` once the scheduler is shut down (which wakes every worker
-    /// blocked in `scheduler.next()`).
     workers: Mutex<Vec<JoinHandle<()>>>,
 }
 
@@ -238,7 +214,6 @@ struct SizeServiceInner {
     jobs: HashMap<String, Arc<AtomicBool>>,
     scheduler: Arc<scheduler::SizeScheduler<QueuedWork>>,
     everything: Option<Arc<EverythingHandle>>,
-    /// Attached only by the explicit index constructors below.
     #[cfg(target_os = "macos")]
     index: Option<Arc<index::FolderSizeIndex>>,
 }
@@ -254,12 +229,6 @@ impl SizeService {
         Self::with_resource_coordinator(timeout, Arc::new(ResourceCoordinator::new()))
     }
 
-    /// Builds the service against the app-wide shared coordinator (mirrors
-    /// `OpsService::with_resource_coordinator`) instead of constructing a
-    /// private one. `lib.rs`'s setup constructs the shared coordinator once
-    /// and injects it into every subsystem that submits admission-gated
-    /// work, so folder-size traversal is fairly scheduled against the same
-    /// throughput/CPU/latency lanes as copy/move and everything else.
     pub fn with_resource_coordinator(
         timeout: Duration,
         coordinator: Arc<ResourceCoordinator>,
@@ -282,10 +251,6 @@ impl SizeService {
         )
     }
 
-    /// Test-only constructor that lets a test inject both a fake Everything
-    /// handle and a specific coordinator (e.g. the app-wide shared one, to
-    /// exercise fairness across subsystems), following the same convention
-    /// as `OpsService`'s test-utils constructors.
     #[cfg(feature = "test-utils")]
     pub fn with_everything_handle_and_coordinator(
         timeout: Duration,
@@ -300,11 +265,6 @@ impl SizeService {
         })
     }
 
-    /// Test-only constructor that additionally overrides the scheduler's
-    /// job-count capacity (production always uses
-    /// [`scheduler::MAX_SIZE_METADATA_ENTRIES`]), so a test can deterministically
-    /// exercise the "scheduler rejects a new job because it is full" branch
-    /// of `register_job` without needing to queue thousands of real paths.
     #[cfg(feature = "test-utils")]
     pub fn with_capacity_for_tests(
         timeout: Duration,
@@ -361,8 +321,6 @@ impl SizeService {
             .len()
     }
 
-    /// Production macOS constructor: attaches the folder-size index, whose
-    /// snapshot lives in `cache_dir`.
     #[cfg(all(target_os = "macos", not(feature = "test-utils")))]
     pub fn with_folder_size_index(
         timeout: Duration,
@@ -375,8 +333,6 @@ impl SizeService {
         service
     }
 
-    /// Test constructor attaching an index built from injected options
-    /// (temp roots, fake platform, clock); never touches real OS services.
     #[cfg(all(target_os = "macos", feature = "test-utils"))]
     pub fn with_folder_size_index_for_tests(
         timeout: Duration,
@@ -397,14 +353,11 @@ impl SizeService {
         self.inner.lock().expect("size service lock").index = Some(Arc::new(index));
     }
 
-    /// The macOS folder-size index, once attached.
     #[cfg(target_os = "macos")]
     pub fn folder_size_index(&self) -> Option<Arc<index::FolderSizeIndex>> {
         self.inner.lock().expect("size service lock").index.clone()
     }
 
-    /// The loaded Everything handle, shared so search reuses the same DLL
-    /// and query lock.
     pub fn everything_handle(&self) -> Option<Arc<EverythingHandle>> {
         self.inner
             .lock()
@@ -413,8 +366,6 @@ impl SizeService {
             .clone()
     }
 
-    /// The neutral folder-size capability: Everything when a handle is
-    /// loaded, else the macOS index, else none.
     pub fn folder_size_index_status(&self) -> FolderSizeIndexStatus {
         let availability = self
             .inner
@@ -485,7 +436,6 @@ impl SizeService {
         self.request_paths_with_mode(routed, Arc::new(emitter));
     }
 
-    /// Replaces one pane's live-update set.
     pub fn set_subscriptions(&self, subscriptions: PaneSubscriptions) {
         #[cfg(target_os = "macos")]
         if let Some(index) = self.folder_size_index() {
@@ -495,8 +445,6 @@ impl SizeService {
         let _ = subscriptions;
     }
 
-    /// Main-window focus changes: focus re-probes Full Disk Access and checks
-    /// weekly verification; blur writes the index snapshot.
     pub fn window_focus_changed(&self, focused: bool) {
         #[cfg(target_os = "macos")]
         if let Some(index) = self.folder_size_index() {
@@ -512,7 +460,6 @@ impl SizeService {
             .map(|index| index.lanes_for_tests())
     }
 
-    /// Writes the index snapshot before the app exits.
     pub fn flush_index(&self) {
         #[cfg(target_os = "macos")]
         if let Some(index) = self.folder_size_index() {
@@ -524,9 +471,6 @@ impl SizeService {
         self.cancel_many(&[path.to_string()]) > 0
     }
 
-    /// Cancels every in-flight job in `paths`, returning how many were actually
-    /// running. Used to abandon a folder's pending size jobs when the pane
-    /// navigates away, without disturbing jobs for any other path.
     pub fn cancel_many(&self, paths: &[String]) -> usize {
         let mut inner = self.inner.lock().expect("size service lock");
         let cancelled = paths
@@ -544,14 +488,6 @@ impl SizeService {
 
 impl Drop for SizeService {
     fn drop(&mut self) {
-        // Wakes every worker parked in `scheduler.next()` (it returns `None`
-        // once `shutdown` has been called and the queue is drained), so the
-        // pool below joins deterministically instead of leaking blocked
-        // threads. The shared `ResourceCoordinator` is intentionally left
-        // alone here — unlike `WatchRuntime`, which owns a private
-        // coordinator, `SizeService` only holds a reference to the app-wide
-        // shared one and must not shut it down out from under other
-        // subsystems still using it.
         {
             let inner = self.inner.lock().expect("size service lock");
             inner.scheduler.shutdown();
@@ -567,7 +503,6 @@ impl Drop for SizeService {
     }
 }
 
-/// No folder-size backend: macOS without an attached index.
 #[cfg(not(windows))]
 fn unsupported_status() -> FolderSizeIndexStatus {
     FolderSizeIndexStatus::new(IndexBackend::None, false, IndexState::Unavailable)

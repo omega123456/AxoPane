@@ -1,9 +1,3 @@
-//! Collects folder candidates from the macOS folder-size index tree. The
-//! tree is read in chunks of arena slots, so a search never holds the
-//! index's read lock long enough to stall its writer. The tree stores
-//! folders only, and paths are built as POSIX strings directly (the tree's
-//! own `PathBuf` joins would follow the host OS).
-
 use std::path::{Path, PathBuf};
 
 use super::matcher::{nfc, FoldedName, NameKind};
@@ -14,9 +8,7 @@ use super::source::FolderTreeSource;
 use super::{Candidate, CandidateBatch, SearchError, SearchOptions, SearchRun, SearchScope};
 use crate::size::index::tree::FolderSizeTree;
 
-/// Arena slots examined per read-lock hold.
 pub const SLOTS_PER_READ: usize = 32_768;
-/// Matches accumulate to twice the cap before being pruned to the best.
 const FOUND_PRUNE_THRESHOLD: usize = 2 * CANDIDATE_CAP;
 
 pub type TreeSearchRun<'run> = SearchRun<'run, dyn FolderTreeSource>;
@@ -28,7 +20,6 @@ pub fn candidates(
     candidates_in_chunks(run, query, SLOTS_PER_READ)
 }
 
-/// [`candidates`] with an explicit number of slots per read.
 pub fn candidates_in_chunks(
     run: &TreeSearchRun<'_>,
     query: &ParsedQuery,
@@ -38,8 +29,6 @@ pub fn candidates_in_chunks(
         return Ok(CandidateBatch::default());
     }
     match (&query.name_seg, &query.anchor) {
-        // Anchored name searches scan too; ranking keeps them inside the
-        // anchor, which bounds every lock hold.
         (Some(name), _) => scan(run, name, slots_per_read.max(1)),
         (None, Some(anchor)) => {
             list_children(run.source, &[anchor.path(PathStyle::Posix)], run.options)
@@ -64,8 +53,6 @@ struct TieredCandidate {
     candidate: Candidate,
 }
 
-/// Folders whose own name matches `name`. Past the cap, the best-tier
-/// matches are kept, so exact and prefix hits survive a broad query.
 fn scan(
     run: &TreeSearchRun<'_>,
     name: &Segment,
@@ -148,8 +135,6 @@ fn read_slot_chunk(
     Ok(read)
 }
 
-/// The match tier and candidate for a live, visible folder whose name
-/// matches `name`.
 fn folder_hit(visible: VisibleTree<'_>, id: u32, name: &Segment) -> Option<TieredCandidate> {
     let node = visible.tree.live_node(id)?;
     if !name.may_match(node.name) {
@@ -168,7 +153,6 @@ fn keep_best(found: &mut Vec<TieredCandidate>) {
     found.truncate(CANDIDATE_CAP);
 }
 
-/// The direct child folders of `parents`, in one read.
 fn list_children(
     source: &dyn FolderTreeSource,
     parents: &[String],
@@ -203,7 +187,6 @@ fn push_children_of_parents(
     }
 }
 
-/// Returns `false` once the batch is full.
 fn push_visible_children(
     visible: VisibleTree<'_>,
     parent_id: u32,
@@ -222,8 +205,6 @@ fn push_visible_children(
     true
 }
 
-/// The node's POSIX path, unless it is hidden (a dot-named component while
-/// hidden items are off) or inside a blocked protected root.
 fn visible_path(visible: VisibleTree<'_>, id: u32) -> Option<String> {
     let mut names = Vec::new();
     let mut cursor = Some(id);
@@ -232,7 +213,6 @@ fn visible_path(visible: VisibleTree<'_>, id: u32) -> Option<String> {
         names.push(node.name);
         cursor = node.parent;
     }
-    // Leaf first; the last entry is the root, which holds a full path.
     let (root, rest) = names.split_last()?;
     let components: Vec<&str> = rest.iter().rev().copied().collect();
     let has_hidden_component = components.iter().any(|name| name.starts_with('.'));
@@ -251,7 +231,6 @@ fn visible_path(visible: VisibleTree<'_>, id: u32) -> Option<String> {
     Some(path)
 }
 
-/// `root/` prefixes: a protected root stays visible, its contents do not.
 fn blocked_prefixes(blocked: &[PathBuf]) -> Vec<String> {
     blocked
         .iter()

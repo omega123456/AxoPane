@@ -1,8 +1,3 @@
-//! Archive operation helpers live under the queue owner.
-//!
-//! ZIP execution is intentionally dispatched by `OpsService`; this module is
-//! the stable home for archive-specific code.
-
 use std::fs;
 #[cfg(unix)]
 use std::io::Read;
@@ -54,8 +49,6 @@ pub(super) fn compress_item_with_progress(
         ));
     }
     let mut writer = open_archive_writer(archive_path, is_later_archive_item(item, context))?;
-    // One throttle shared across every member appended below (mirrors how
-    // `copy_dir_recursive` shares a single throttle through its recursion).
     let mut throttle = TransferThrottle::starting_now(context);
     let mut append = ArchiveAppend {
         writer: &mut writer,
@@ -68,8 +61,6 @@ pub(super) fn compress_item_with_progress(
     Ok(())
 }
 
-/// A multi-item compress builds one archive: the first item creates it and
-/// every later item appends to it.
 fn is_later_archive_item(item: &OpItem, context: &WorkerContext<'_>) -> bool {
     context
         .shared_operation
@@ -165,8 +156,6 @@ fn ensure_extract_destination(destination_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Directory modes are applied after every member is written so a read-only
-/// folder cannot block extraction of its own contents.
 struct Extraction<'walk, 'context> {
     output_root: PathBuf,
     wrapper_root: Option<String>,
@@ -208,8 +197,6 @@ impl Extraction<'_, '_> {
         self.extract_file(entry, &output_path)
     }
 
-    /// ZIP stores a link's target as its payload. `safe_destination` refuses
-    /// to write later members through any link created here.
     #[cfg(unix)]
     fn extract_symlink(
         &mut self,
@@ -242,7 +229,6 @@ impl Extraction<'_, '_> {
         Ok(())
     }
 
-    /// Deepest first: chmod on a child needs search permission on its parent.
     fn apply_directory_modes(&self) -> Result<(), String> {
         for (path, mode) in self.directory_modes.iter().rev() {
             apply_extracted_mode(path, *mode)?;
@@ -251,9 +237,6 @@ impl Extraction<'_, '_> {
     }
 }
 
-/// Restores an archived Unix mode on an extracted file or folder. Setuid,
-/// setgid and sticky bits are dropped (as `unzip` does by default). Windows
-/// has no mode bits, so only the read-only flag is honoured there.
 fn apply_extracted_mode(path: &Path, mode: Option<u32>) -> Result<(), String> {
     let Some(mode) = mode else {
         return Ok(());
@@ -272,10 +255,6 @@ fn apply_extracted_mode(path: &Path, mode: Option<u32>) -> Result<(), String> {
     fs::set_permissions(path, permissions).stringify_err()
 }
 
-/// Appends a file, a symlink, or a directory tree to `writer`. `throttle` is
-/// shared across the *whole* member loop of one compress operation so a
-/// many-small-member source tree does not re-flood by minting a fresh
-/// throttle per member.
 struct ArchiveAppend<'walk, 'context> {
     writer: &'walk mut ZipWriter<fs::File>,
     add_discovered_totals: bool,
@@ -284,9 +263,6 @@ struct ArchiveAppend<'walk, 'context> {
 }
 
 impl ArchiveAppend<'_, '_> {
-    /// Never follow a directory link while archiving. ZIP stores the link as a
-    /// link entry (its payload is the link target), so cycles and targets
-    /// outside the selected root cannot become archived content.
     fn append_path(&mut self, source: &Path, archive_path: &Path) -> Result<(), String> {
         wait_while_paused(self.context.shared_operation, self.context.resolver);
         if is_operation_cancelled(self.context) {
@@ -307,9 +283,6 @@ impl ArchiveAppend<'_, '_> {
         self.append_file(source, archive_path)
     }
 
-    /// Walks the subtree with the shared `crate::traversal::walk` service
-    /// (flat, bounded iteration). Archive member order is intentionally not a
-    /// contract, so the walk never materializes or sorts a wide directory.
     fn append_tree(
         &mut self,
         member: MemberPaths<'_>,
@@ -382,7 +355,6 @@ impl ArchiveAppend<'_, '_> {
             .stringify_err()
     }
 
-    /// Stores the link target as the entry's content (ZIP symlink convention).
     fn append_symlink(&mut self, source: &Path, archive_path: &Path) -> Result<(), String> {
         let target = fs::read_link(source).stringify_err()?;
         let target = target.to_string_lossy();
@@ -398,7 +370,6 @@ impl ArchiveAppend<'_, '_> {
             },
             self.throttle.as_deref_mut(),
         );
-        // `unix_permissions` masks to 0o777, so only `add_symlink` sets S_IFLNK.
         self.writer
             .add_symlink(
                 to_zip_path(archive_path)?,
@@ -587,9 +558,6 @@ fn zip_dir_options(metadata: &fs::Metadata) -> SimpleFileOptions {
         .unix_permissions(source_unix_mode(metadata, 0o755))
 }
 
-/// The permission bits to archive for a source entry. Windows has no mode
-/// bits, so `default` is used there with write bits cleared for read-only
-/// sources.
 #[cfg(unix)]
 fn source_unix_mode(metadata: &fs::Metadata, _default: u32) -> u32 {
     use std::os::unix::fs::PermissionsExt;

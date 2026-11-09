@@ -60,8 +60,6 @@ impl Machine {
         status
     }
 
-    /// Emits on every transition; item-count progress at most once per
-    /// [`PROGRESS_INTERVAL`] of the injected clock.
     pub(super) fn publish_status(&mut self) {
         let next = self.compute_status();
         let mut current = self.shared.status.lock().expect("index status lock");

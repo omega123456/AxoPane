@@ -55,7 +55,6 @@ pub(super) enum Message {
 }
 
 pub(super) struct FullScan {
-    /// The event ID captured before the scan.
     pub(super) captured_id: u64,
     pub(super) remaining: usize,
 }
@@ -202,11 +201,7 @@ impl Machine {
         self.power(conditions);
     }
 
-    /// Returns the event ID history replays from, or `None` when the index
-    /// must rescan.
     fn restore_snapshot(&mut self) -> Option<u64> {
-        // FSEvents history for user data lives on the Data volume; on
-        // macOS 10.15–13 `/` itself is the sealed system volume.
         let identity = SnapshotMeta {
             volume_uuid: self
                 .platform
@@ -253,8 +248,6 @@ impl Machine {
         self.meta.event_id
     }
 
-    /// Missing, corrupt, foreign, from another OS build or ahead: rescan,
-    /// keeping any old totals visible meanwhile.
     fn rescan_from(&mut self, stale: Option<Snapshot>, start: RescanStart) {
         let RescanStart {
             identity,
@@ -357,8 +350,6 @@ impl Machine {
         }
     }
 
-    /// Re-reads one reported directory. Directories a scan has
-    /// not reached yet, and unvisited protected ones, are left alone.
     pub(super) fn reread(&mut self, dir: &Path) {
         if !self.can_reread(dir) {
             return;
@@ -461,7 +452,6 @@ impl Machine {
         self.merge_records(&records);
         self.reskip_protected();
         if full {
-            // Items are folders plus their files.
             self.items_scanned += records
                 .iter()
                 .map(|record| 1 + record.file_count)
@@ -500,7 +490,6 @@ impl Machine {
 
     pub(super) fn finish_full_scan(&mut self) {
         if let Some(full) = self.full.take() {
-            // Saved as is, even if later events were applied.
             self.meta.event_id = full.captured_id;
             self.last_applied_id = full.captured_id;
             self.meta.last_full_scan_secs = unix_secs((self.clock)());
@@ -578,8 +567,6 @@ impl RawEventBatch {
             || flags.kernel_dropped
             || flags.event_ids_wrapped
             || flags.root_changed;
-        // Drops other volumes, devfs and the non-Data parts of
-        // `/System/Volumes`; Data-prefixed paths were normalized.
         let should_record = forces_full_rescan || shared.indexes(&path);
         if should_record {
             self.live.push(ChangeEvent { path, flags });

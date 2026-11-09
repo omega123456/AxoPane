@@ -43,8 +43,6 @@ pub(super) fn clear() -> Result<(), ClipboardError> {
     clipboard.empty()
 }
 
-/// Explorer marks a cut with the "Preferred DropEffect" format. If the
-/// format is absent or unreadable, the safe answer is a copy.
 pub(super) fn read_preferred_effect() -> ClipboardMode {
     let Ok(format) = register_preferred_drop_effect() else {
         return ClipboardMode::Copy;

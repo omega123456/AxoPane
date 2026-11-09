@@ -14,7 +14,6 @@ let dismissTimer: ReturnType<typeof setTimeout> | undefined
 export const useErrorToastStore = create<ErrorToastStore>((set) => ({
   message: null,
   show: (message) => {
-    // A permission refusal needs an action, not a toast that fades in 6 s.
     if (openAdminRestartDialog(message)) {
       return
     }

@@ -1,31 +1,3 @@
-//! Windows 11 modern (`IExplorerCommand`) context-menu enumeration and
-//! invocation.
-//!
-//! The classic `IContextMenu` path (`windows.rs`) cannot see modern shell
-//! extensions — both *packaged* (sparse-MSIX, e.g. PowerToys File Locksmith,
-//! WinRAR 7) and *unpackaged* (`shell\<verb>` keys with an
-//! `ExplorerCommandHandler` CLSID). This module discovers those handlers,
-//! enumerates them into the same [`ProviderNativeMenuItem`] shape the classic
-//! path produces, and invokes them on click.
-//!
-//! ## Discovery (verified empirically on Windows 11)
-//! * Candidate `IExplorerCommand` CLSIDs are listed in
-//!   `HKCU\Software\Microsoft\Windows\CurrentVersion\Shell Extensions\Cached`
-//!   as value names of the form `"{CLSID} {IID} 0xFFFF"`; we keep those whose
-//!   IID is [`IExplorerCommand::IID`].
-//! * Packaged handlers map to a package via
-//!   `HKLM\SOFTWARE\Classes\PackagedCom\ClassIndex\{CLSID}` (the single subkey
-//!   is the package full name). The CLSID activates through a normal
-//!   `CoCreateInstance` out-of-process surrogate.
-//! * A handler's file-type association is **not** in the registry — for
-//!   packaged handlers it lives in the package's `AppxManifest.xml`
-//!   (`windows.fileExplorerContextMenus`), which `BUILTIN\Users` can read
-//!   directly. For unpackaged handlers it is the `HKCR\<class>\shell\<verb>`
-//!   location.
-//!
-//! The discovered map is cached for the process lifetime so each right-click
-//! only instantiates the handful of handlers that match the current selection,
-//! keeping enumeration well under the menu's loading budget.
 #![cfg(all(not(feature = "test-utils"), target_os = "windows"))]
 
 use std::collections::{HashMap, HashSet};
@@ -63,13 +35,9 @@ use windows::Win32::UI::Shell::{
 };
 
 const MAX_SUBMENU_DEPTH: usize = 1;
-/// Registry key names are at most 255 characters plus the NUL.
 const REGISTRY_KEY_NAME_UNITS: usize = 256;
-/// Value names we read (CLSIDs and verbs) fit well inside this buffer.
 const REGISTRY_VALUE_NAME_UNITS: usize = 512;
 
-/// Fixed shell classes scanned (and cached) for unpackaged `IExplorerCommand`
-/// verb handlers. Extension/ProgID-specific classes are resolved per query.
 const FIXED_UNPACKAGED_CLASSES: &[&str] = &[
     "*",
     "AllFilesystemObjects",
@@ -79,9 +47,6 @@ const FIXED_UNPACKAGED_CLASSES: &[&str] = &[
     "Drive",
 ];
 
-/// A discovered modern context-menu handler and the lower-cased shell item
-/// types it applies to (e.g. `"*"`, `"directory"`, `"directory\\background"`,
-/// `".zip"`).
 #[derive(Clone)]
 struct HandlerRegistration {
     clsid: u128,
@@ -89,13 +54,8 @@ struct HandlerRegistration {
     item_types: HashSet<String>,
 }
 
-/// Process-lifetime cache of handlers discovered from fixed classes + packaged
-/// manifests. Per-extension unpackaged handlers are resolved per query and not
-/// cached here.
 static HANDLER_CACHE: OnceLock<Vec<HandlerRegistration>> = OnceLock::new();
 
-/// Enumerates modern context-menu items for the request's selection. Returns an
-/// empty vec on any failure so the classic items still render.
 pub fn enumerate_modern_items(request: &LoadNativeMenuRequest) -> Vec<ProviderNativeMenuItem> {
     if matches!(
         request.target_kind,
@@ -145,8 +105,6 @@ pub fn enumerate_modern_items(request: &LoadNativeMenuRequest) -> Vec<ProviderNa
     items
 }
 
-/// Invokes a modern command identified by its handler CLSID and the optional
-/// subcommand index path.
 pub fn invoke_modern(
     clsid: u128,
     request: &LoadNativeMenuRequest,
@@ -159,8 +117,6 @@ pub fn invoke_modern(
     unsafe { target.Invoke(&array.items, None) }
 }
 
-/// Walks `command_path` (subcommand indices below the top-level handler) to the
-/// leaf command that should be invoked.
 fn resolve_subcommand(
     command: &IExplorerCommand,
     array: &IShellItemArray,
@@ -226,7 +182,6 @@ impl CommandPosition {
     }
 }
 
-/// Builds a single menu item (and, to depth 1, its subcommands) from a command.
 fn build_item_for_command(
     command: &IExplorerCommand,
     context: ModernHandlerContext<'_>,
@@ -339,10 +294,6 @@ fn is_hidden(command: &IExplorerCommand, array: &IShellItemArray) -> bool {
         .unwrap_or(true)
 }
 
-// ----- shell item array ---------------------------------------------------------
-
-/// Holds the `IShellItemArray` for a selection together with the PIDLs that
-/// back it (kept alive for the duration of the array's use).
 struct ShellItemArray {
     items: IShellItemArray,
     _pidls: Vec<OwnedPidl>,
@@ -383,20 +334,10 @@ fn build_item_array(request: &LoadNativeMenuRequest) -> Option<ShellItemArray> {
     })
 }
 
-/// Activates an `IExplorerCommand` handler via the COM SCM.
-///
-/// This resolves unpackaged handlers and packaged classes that also carry a
-/// classic registration (e.g. WinRAR). It returns `None` (CLASSNOTREG) for
-/// *sparse-packaged* handlers whose COM server runs with package identity in a
-/// surrogate (e.g. PowerToys File Locksmith): those cannot be activated from an
-/// unpackaged process and require the host to run with package identity. See
-/// the module docs.
 fn create_command(clsid: u128) -> Option<IExplorerCommand> {
     let guid = GUID::from_u128(clsid);
     unsafe { CoCreateInstance::<_, IExplorerCommand>(&guid, None, CLSCTX_ALL) }.ok()
 }
-
-// ----- discovery + cache ---------------------------------------------------------
 
 fn cached_handlers() -> &'static Vec<HandlerRegistration> {
     HANDLER_CACHE.get_or_init(discover_handlers)
@@ -426,13 +367,6 @@ fn merge_handler(map: &mut HashMap<u128, HandlerRegistration>, handler: HandlerR
         .or_insert(handler);
 }
 
-/// Discovers packaged `IExplorerCommand` handlers: candidate CLSIDs come from
-/// the IExplorerCommand cache, are confirmed packaged via `PackagedCom`, and
-/// their item types are parsed from the package manifest.
-///
-/// Note: sparse-packaged handlers (e.g. File Locksmith) are still listed here,
-/// but `create_command` cannot activate them from an unpackaged process — see
-/// the module docs.
 fn discover_packaged_handlers() -> Vec<HandlerRegistration> {
     let candidates = iexplorer_command_cached_clsids();
     let mut manifest_cache: HashMap<String, HashMap<u128, HashSet<String>>> = HashMap::new();
@@ -467,8 +401,6 @@ fn package_associations(package_full_name: &str) -> HashMap<u128, HashSet<String
     }
 }
 
-/// Reads the value names of the IExplorerCommand cache key and returns the
-/// CLSIDs whose cached interface IID is `IExplorerCommand`.
 fn iexplorer_command_cached_clsids() -> Vec<u128> {
     let Some(key) = RegKey::open(
         HKEY_CURRENT_USER,
@@ -480,7 +412,6 @@ fn iexplorer_command_cached_clsids() -> Vec<u128> {
     let iexplorer_command_iid = IExplorerCommand::IID;
     let mut clsids = Vec::new();
     for name in key.value_names() {
-        // Format: "{CLSID} {IID} 0xFFFF".
         let mut parts = name.split_whitespace();
         let (Some(clsid_text), Some(iid_text)) = (parts.next(), parts.next()) else {
             continue;
@@ -497,7 +428,6 @@ fn iexplorer_command_cached_clsids() -> Vec<u128> {
     clsids
 }
 
-/// Returns the package full name that owns a packaged COM CLSID, if any.
 fn packaged_class_owner(clsid: u128) -> Option<String> {
     let key = RegKey::open(
         HKEY_LOCAL_MACHINE,
@@ -509,8 +439,6 @@ fn packaged_class_owner(clsid: u128) -> Option<String> {
     key.subkeys().into_iter().next()
 }
 
-/// Parses a package's `windows.fileExplorerContextMenus` associations into a
-/// map of handler CLSID to the (lower-cased) item types it registers for.
 fn parse_manifest_associations(manifest_path: &Path) -> HashMap<u128, HashSet<String>> {
     let mut associations: HashMap<u128, HashSet<String>> = HashMap::new();
 
@@ -547,7 +475,6 @@ fn parse_manifest_associations(manifest_path: &Path) -> HashMap<u128, HashSet<St
 fn package_install_path(package_full_name: &str) -> Option<PathBuf> {
     let wide = wide_nul(package_full_name);
     let mut length = 0u32;
-    // First call sizes the buffer (returns ERROR_INSUFFICIENT_BUFFER).
     let _ = unsafe { GetPackagePathByFullName(PCWSTR(wide.as_ptr()), &mut length, None) };
     if length == 0 {
         return None;
@@ -567,9 +494,6 @@ fn package_install_path(package_full_name: &str) -> Option<PathBuf> {
     Some(PathBuf::from(String::from_utf16_lossy(&buffer[..trimmed])))
 }
 
-/// Discovers unpackaged `IExplorerCommand` verb handlers registered under the
-/// given shell classes (`HKCR\<class>\shell\<verb>` carrying an
-/// `ExplorerCommandHandler` CLSID value).
 fn discover_unpackaged_handlers(classes: &[&str]) -> Vec<HandlerRegistration> {
     let mut handlers = Vec::new();
     for class in classes {
@@ -598,8 +522,6 @@ fn explorer_command_handlers_for_class(class: &str) -> Vec<u128> {
         .collect()
 }
 
-/// Resolves unpackaged handlers registered against the selection's specific
-/// file extensions (and their resolved ProgIDs) at query time.
 fn per_query_extension_handlers(request: &LoadNativeMenuRequest) -> Vec<HandlerRegistration> {
     if matches!(request.target_kind, NativeMenuTargetKind::Background) {
         return Vec::new();
@@ -649,8 +571,6 @@ unsafe fn take_pwstr(text: PWSTR) -> Option<String> {
     CoTaskMemFree(Some(text.0 as *const c_void));
     value
 }
-
-// ----- registry RAII -------------------------------------------------------------
 
 struct RegKey(HKEY);
 

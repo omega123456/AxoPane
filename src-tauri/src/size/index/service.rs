@@ -22,22 +22,17 @@ use super::subscriptions::SubscribedFolder;
 
 pub type SizeEmitter = Arc<dyn Fn(Vec<SizeUpdate>) + Send + Sync>;
 pub type StatusEmitter = Arc<dyn Fn(FolderSizeIndexStatus) + Send + Sync>;
-/// Wall-clock source; injected so tests control time.
 pub type Clock = Arc<dyn Fn() -> SystemTime + Send + Sync>;
 
 pub const SNAPSHOT_FILE: &str = "folder-size-index.bin";
-/// Background work re-requests Throughput admission this often.
 pub const READMIT_EVERY_DIRS: u64 = 1_000;
 pub(super) const RECORD_BATCH: usize = 256;
 pub(super) const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
 pub(super) const WEEK: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 pub(super) const FLUSH_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// Everything the index needs; `lib.rs` builds it with
-/// [`IndexOptions::for_this_mac`], tests inject their own.
 pub struct IndexOptions {
     pub roots: Vec<PathBuf>,
-    /// Paths inside the roots that are never indexed, walked or watched.
     pub excluded: Vec<PathBuf>,
     pub protected: Vec<PathBuf>,
     pub stream_excluded: Vec<PathBuf>,
@@ -45,24 +40,19 @@ pub struct IndexOptions {
     pub platform: Arc<dyn IndexPlatform>,
     pub clock: Clock,
     pub coordinator: Arc<ResourceCoordinator>,
-    /// Live `size://state` updates for subscribed folders.
     pub emit_sizes: SizeEmitter,
     pub emit_status: StatusEmitter,
     #[cfg(feature = "test-utils")]
     pub walk_hooks: fast_walk::TestHooks,
-    /// Runs each time a background walk parks for the power gate or a
-    /// waiting boost, just before it waits.
     #[cfg(feature = "test-utils")]
     pub on_background_parked: Arc<dyn Fn() + Send + Sync>,
 }
 
-/// The walk lanes at one instant, for tests.
 #[cfg(feature = "test-utils")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaneSnapshot {
     pub background_queued: usize,
     pub background_running: bool,
-    /// Queued boost paths, next to run first.
     pub boosts_queued: Vec<String>,
     pub boost_running: Option<String>,
     pub power_paused: bool,
@@ -108,12 +98,9 @@ impl IndexOptions {
     }
 }
 
-/// Why [`FolderSizeIndex::read_tree`] could not read the tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TreeUnavailable {
-    /// The snapshot has not loaded yet.
     NotReady,
-    /// The change stream failed to start.
     Unavailable,
 }
 
@@ -132,8 +119,6 @@ pub(super) struct Shared {
     pub(super) excluded: Vec<PathBuf>,
     pub(super) protected: Vec<PathBuf>,
     pub(super) coordinator: Arc<ResourceCoordinator>,
-    /// Set once the snapshot is loaded; earlier requests queue on the
-    /// coordination thread instead of walking an empty tree.
     pub(super) booted: AtomicBool,
     #[cfg(feature = "test-utils")]
     pub(super) walk_hooks: fast_walk::TestHooks,
@@ -145,7 +130,6 @@ pub(super) struct View {
     pub(super) tree: FolderSizeTree,
     pub(super) visited: HashSet<PathBuf>,
     pub(super) full_disk_access: bool,
-    /// False once the stream failed to start; everything routes manual.
     pub(super) available: bool,
 }
 
@@ -199,8 +183,6 @@ impl FolderSizeIndex {
         }
     }
 
-    /// Runs `read` under the shared read lock with the protected roots
-    /// whose contents must stay hidden (the folder-size privacy rule).
     pub fn read_tree<R>(
         &self,
         read: impl FnOnce(&FolderSizeTree, &[PathBuf]) -> R,
@@ -216,7 +198,6 @@ impl FolderSizeIndex {
         Ok(read(&view.tree, &blocked))
     }
 
-    /// Whether `path` lies inside an index root and outside the exclusions.
     pub fn contains(&self, path: &Path) -> bool {
         self.shared.view().available && self.shared.indexes(&platform::normalize(path))
     }
@@ -229,8 +210,6 @@ impl FolderSizeIndex {
             .clone()
     }
 
-    /// Answers indexed paths at once; the rest are boosted and
-    /// answered through `emitter` when their walk completes.
     pub fn request(&self, request: SizeRequest, emitter: SizeEmitter) {
         if !self.shared.is_booted() {
             let _ = self.sender.send(Message::Request { request, emitter });
@@ -239,8 +218,6 @@ impl FolderSizeIndex {
         self.shared.request(request, emitter);
     }
 
-    /// Drops queued boosts for `paths` and stops a running one; returns
-    /// how many were cancelled.
     pub fn cancel(&self, paths: &[String]) -> usize {
         let mut lanes = self.shared.lanes();
         let before = lanes.boosts.len();
@@ -259,10 +236,6 @@ impl FolderSizeIndex {
         cancelled
     }
 
-    /// Replaces `pane`'s subscription set; an empty set with no current
-    /// path clears it. A current path inside an unvisited protected root
-    /// marks it visited before any later request is answered. Indexed
-    /// paths through a symlink track their resolved target.
     pub fn set_subscriptions(&self, subscriptions: PaneSubscriptions) {
         let PaneSubscriptions {
             pane_id: pane,
@@ -284,8 +257,6 @@ impl FolderSizeIndex {
         let _ = self.sender.send(Message::Subscribe { pane, folders });
     }
 
-    /// The normalized path `path`'s total lives at. Only indexed paths
-    /// are resolved, so other volumes and shares are never touched.
     pub(super) fn tracked(&self, path: &Path) -> PathBuf {
         if !self.contains(path) {
             return platform::normalize(path);
@@ -312,7 +283,6 @@ impl FolderSizeIndex {
         }
     }
 
-    /// Writes the snapshot on the index thread and waits (bounded) for it.
     pub fn flush(&self) {
         let (ack, done) = bounded(1);
         if self.sender.send(Message::Flush(ack)).is_ok() {
@@ -391,7 +361,6 @@ impl Shared {
         self.lanes.lock().expect("index lanes lock")
     }
 
-    /// Inside a root and outside every exclusion (`path` normalized).
     pub(super) fn indexes(&self, path: &Path) -> bool {
         self.roots.iter().any(|root| within(path, root))
             && !self.excluded.iter().any(|excluded| within(path, excluded))
@@ -416,8 +385,6 @@ impl Shared {
             .collect()
     }
 
-    /// The indexed total of a subscribed folder, once it is complete and
-    /// readable.
     pub(super) fn settled_update(
         &self,
         view: &View,
@@ -430,7 +397,6 @@ impl Shared {
         (total.fully_indexed && !total.skipped).then(|| update_from_total(&folder.path, &total))
     }
 
-    /// Background and automatic work must not read `path`.
     pub(super) fn privacy_blocked(&self, view: &View, path: &Path) -> bool {
         !view.full_disk_access
             && self
@@ -438,14 +404,11 @@ impl Shared {
                 .is_some_and(|root| !view.visited.contains(root))
     }
 
-    /// Marks the protected root containing `path` visited; returns it if
-    /// it was not visited before.
     pub(super) fn visit(&self, path: &Path) -> Option<PathBuf> {
         let root = self.protected_root_of(&platform::normalize(path))?.clone();
         self.view_mut().visited.insert(root.clone()).then_some(root)
     }
 
-    /// `None` means the path needs a boosted walk.
     pub(super) fn answer(&self, query: ViewQuery<'_>, path: &str) -> Option<SizeUpdate> {
         let ViewQuery { view, mode } = query;
         let normalized = platform::normalize(Path::new(path));
@@ -480,7 +443,6 @@ impl Shared {
         self.wake.notify_all();
     }
 
-    /// Queues a gentle background walk; false if already queued.
     pub(super) fn queue_background(&self, root: PathBuf, full: bool) -> bool {
         let mut lanes = self.lanes();
         if lanes.background.iter().any(|job| job.root == root) {
@@ -522,7 +484,6 @@ pub(super) struct WalkTuning {
     pub(super) threads: usize,
 }
 
-/// Exact prefix first, then a case-insensitive one.
 pub(super) fn within(path: &Path, root: &Path) -> bool {
     path.starts_with(root) || lowercase(path).starts_with(lowercase(root))
 }

@@ -4,7 +4,6 @@ use std::time::{Duration, SystemTime};
 
 pub const EVERYTHING_BATCH_CHUNK_SIZE: usize = 64;
 
-/// Result orders the SDK can apply before `max` truncates a query.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EverythingSort {
     NameAscending,
@@ -12,7 +11,6 @@ pub enum EverythingSort {
 }
 
 impl EverythingSort {
-    /// The SDK's `EVERYTHING_SORT_*` value.
     pub fn code(self) -> u32 {
         match self {
             Self::NameAscending => EVERYTHING_SORT_NAME_ASCENDING,
@@ -21,8 +19,6 @@ impl EverythingSort {
     }
 }
 
-/// One Everything query. Every field is applied on every call, so no SDK
-/// state leaks between search and folder-size queries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EverythingQuery {
     pub search: String,
@@ -33,30 +29,25 @@ pub struct EverythingQuery {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EverythingRow {
-    /// The containing folder, as Everything reports it (`C:` for a drive).
     pub path: String,
     pub file_name: String,
     pub is_folder: bool,
     pub size: Option<u64>,
-    /// Windows FILETIME: 100 ns intervals since 1601-01-01 UTC.
     pub modified_filetime: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EverythingQueryResult {
     pub rows: Vec<EverythingRow>,
-    /// Matches before `offset` and `max` were applied.
     pub total: u32,
 }
 
-/// FILETIME ticks between 1601-01-01 and the Unix epoch.
 const FILETIME_UNIX_EPOCH: u64 = 116_444_736_000_000_000;
 const NANOS_PER_FILETIME_TICK: u64 = 100;
 const UNKNOWN_FILETIMES: [u64; 2] = [0, u64::MAX];
 const EVERYTHING_SORT_NAME_ASCENDING: u32 = 1;
 const EVERYTHING_SORT_DATE_MODIFIED_DESCENDING: u32 = 14;
 
-/// Converts a FILETIME; `0` and `u64::MAX` mean "unknown".
 pub fn filetime_to_system_time(filetime: u64) -> Option<SystemTime> {
     if UNKNOWN_FILETIMES.contains(&filetime) {
         return None;
@@ -71,13 +62,10 @@ pub fn filetime_to_system_time(filetime: u64) -> Option<SystemTime> {
     }
 }
 
-/// Canned search results for the in-memory handles. `None` fails the query.
 #[cfg(any(not(windows), feature = "test-utils"))]
 pub type EverythingResponder =
     std::sync::Arc<dyn Fn(&EverythingQuery) -> Option<EverythingQueryResult> + Send + Sync>;
 
-/// The search half of the in-memory handles: records each query and answers
-/// it from an optional responder.
 #[cfg(any(not(windows), feature = "test-utils"))]
 #[derive(Default)]
 struct FakeSearch {
@@ -196,7 +184,6 @@ pub fn join_everything_result_path(result_path: &str, file_name: &str) -> String
         .into_owned()
 }
 
-/// `\\server\share` holds three separators; anything deeper is a subfolder.
 #[cfg(windows)]
 const UNC_SHARE_ROOT_MAX_SEPARATORS: usize = 3;
 
@@ -215,11 +202,6 @@ mod platform;
 #[cfg(all(windows, not(feature = "test-utils")))]
 pub use platform::*;
 
-// Non-Windows targets never have Everything, and under `test-utils` Windows
-// builds must never load the real `Everything64.dll` or hit the Everything IPC
-// service. This stub mirrors the Windows API surface (including the unused
-// `Available` / `NotReady` variants) so `size::mod` compiles identically, and
-// always reports the safe unavailable fallback.
 #[cfg(any(not(windows), feature = "test-utils"))]
 #[path = "everything/fake_platform.rs"]
 mod platform;

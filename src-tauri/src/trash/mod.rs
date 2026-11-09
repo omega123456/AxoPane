@@ -1,19 +1,3 @@
-//! OS trash / Recycle Bin integration: moving items in, browsing what's
-//! there, restoring items, and emptying it.
-//!
-//! Moving items to the OS trash mutates machine-global state, so under
-//! `feature = "test-utils"` (and coverage) the real [`trash`] crate is never
-//! invoked. Instead each item is relocated into a fake-trash directory under
-//! the system temp dir, so tests observe the same effect (the source path is
-//! gone) without ever touching the real Recycle Bin / Trash.
-//!
-//! Browsing/restoring/emptying is platform-specific:
-//! - Windows: the `trash` crate's `os_limited` module, backed by the Shell
-//!   `IFileOperation` COM API, already tracks original locations.
-//! - macOS: `~/.Trash` carries no original-location metadata we can read
-//!   back, so [`manifest`] records it ourselves whenever this app deletes
-//!   something.
-
 use serde::{Deserialize, Serialize};
 
 #[cfg(any(feature = "test-utils", target_os = "macos"))]
@@ -25,8 +9,6 @@ mod directory_bin;
 #[cfg(any(feature = "test-utils", target_os = "macos"))]
 mod macos_adapter;
 
-// Available under `test-utils` (any OS) so its parsing logic is unit-testable
-// and counted toward coverage, even though it's only ever wired up on macOS.
 #[cfg(any(feature = "test-utils", target_os = "macos"))]
 mod dsstore;
 
@@ -36,33 +18,21 @@ mod windows_bin;
 #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
 mod macos_bin;
 
-/// A single item currently sitting in the OS trash / Recycle Bin.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TrashEntry {
-    /// Opaque identifier used to restore/purge this item. On Windows this is
-    /// the Shell's item id; elsewhere it's the item's file name inside the
-    /// trash directory.
     pub id: String,
     pub name: String,
-    /// `None` when the original location is unknown (e.g. something the user
-    /// trashed via Finder directly, outside of AxoPane, on macOS).
     pub original_path: Option<String>,
     pub size_bytes: Option<u64>,
     pub is_dir: bool,
-    /// Unix timestamp (seconds) the item was deleted at, when known.
     pub deleted_at: Option<i64>,
 }
 
-/// Move the given paths to the OS trash. Best-effort: the first failure aborts
-/// and is reported. An empty list is a no-op.
 pub fn move_to_trash(paths: &[String]) -> Result<(), String> {
     move_to_trash_cancellable(paths, || false)
 }
 
-/// Cooperative batch boundary for the latency IPC owner. Platform trash APIs
-/// can only cancel between calls, while the deterministic fake also checks
-/// between individual relocations.
 pub fn move_to_trash_cancellable<F>(paths: &[String], is_cancelled: F) -> Result<(), String>
 where
     F: Fn() -> bool,
@@ -88,9 +58,6 @@ fn move_to_trash_impl(paths: &[String]) -> Result<(), String> {
     trash::delete_all(paths).map_err(|error| error.to_string())
 }
 
-// `NsFileManager` is the macOS deletion authority. The adapter observes the
-// home Trash once before and once after the complete batch, preserving Finder
-// and third-party entries while avoiding per-item rescans.
 #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
 fn move_to_trash_impl(paths: &[String]) -> Result<(), String> {
     let mut adapter = macos_adapter::MacosSystemTrashAdapter::new();
@@ -101,14 +68,6 @@ fn move_to_trash_impl(paths: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// Directory the fake trash relocates items into during tests.
-///
-/// Tests that need to exercise `list_trash`/`restore_from_trash`/`empty_trash`
-/// through the IPC command layer (which, matching the real command
-/// signatures, take no directory parameter) can point this at a private
-/// directory via `AXOPANE_TEST_FAKE_TRASH_DIR` so a call to `empty_trash`
-/// never wipes another concurrently-running test's fixtures out of the
-/// otherwise-shared fake trash dir.
 #[cfg(feature = "test-utils")]
 pub fn fake_trash_dir() -> std::path::PathBuf {
     if let Some(override_dir) = std::env::var_os("AXOPANE_TEST_FAKE_TRASH_DIR") {
@@ -144,14 +103,11 @@ pub fn delete_batch_with_adapter_for_tests<A: SystemTrashAdapter>(
     macos_adapter::delete_batch(adapter, paths)
 }
 
-/// Exposes [`dsstore::parse_put_back`] to integration tests, which only see
-/// the crate's public API.
 #[cfg(feature = "test-utils")]
 pub fn parse_put_back_for_tests(bytes: &[u8]) -> std::collections::HashMap<String, PutBack> {
     dsstore::parse_put_back(bytes)
 }
 
-/// Exposes [`dsstore::resolve_original_path`] to integration tests.
 #[cfg(feature = "test-utils")]
 pub fn resolve_original_path_for_tests(
     volume_root: &std::path::Path,
@@ -201,7 +157,6 @@ where
             .file_name()
             .ok_or_else(|| format!("invalid path: {path}"))?;
 
-        // Resolve name collisions so repeated/parallel calls never fail.
         let mut target = trash_dir.join(file_name);
         let mut counter = 1;
         while target.exists() {
@@ -213,24 +168,17 @@ where
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| file_name.to_string_lossy().into_owned());
 
-        // The fake-trash directory is shared across parallel tests, so another
-        // test may remove it between the initial setup and this rename.
         ensure_fake_trash_dir(trash_dir)?;
         move_to_fake_trash_path(source, &target)?;
         let deleted_at = crate::epoch::now_since_epoch().as_secs() as i64;
         manifest_entries.push((target_name, path.to_string(), deleted_at));
     }
 
-    // Best-effort, matching the real macOS path: all successfully relocated
-    // items share one manifest read/modify/write transaction.
     let _ = manifest::record_batch(trash_dir, manifest_entries);
 
     Ok(())
 }
 
-/// Lets tests move items into an isolated trash directory (instead of the
-/// shared [`fake_trash_dir`]) so list/restore/empty assertions never race
-/// with other tests running concurrently in the same fake trash dir.
 #[cfg(feature = "test-utils")]
 pub fn move_to_trash_into_for_tests(
     paths: &[String],

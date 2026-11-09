@@ -2,7 +2,6 @@ import { formatBytes, formatCount, formatEta } from '@/lib/format'
 import type { OpKind, OpProgress, OpStatus } from '@/lib/types/ipc'
 import { isTerminal } from '@/stores/queue-store'
 
-/** Top-level item names shown before the "+K more" affordance takes over. */
 export const ITEM_PREVIEW_LIMIT = 2
 
 export const operationVerbs: Record<OpKind, string> = {
@@ -13,7 +12,6 @@ export const operationVerbs: Record<OpKind, string> = {
   extract: 'Extracting',
 }
 
-/** Present-participle verb for an operation's kind, e.g. `Copying` / `Deleting`. */
 export function verb(operation: OpProgress) {
   return operationVerbs[operation.kind]
 }
@@ -39,7 +37,6 @@ export type JobFlags = {
   isPending: boolean
   isFinished: boolean
   isUnderway: boolean
-  /** A delete is measured in items, so a transfer rate and curve do not apply. */
   showsTransferRate: boolean
 }
 
@@ -61,11 +58,6 @@ export function jobFlags(operation: OpProgress, hasConflict: boolean): JobFlags 
   }
 }
 
-/**
- * Joins up to the first two item names, appending a "+K more" suffix once
- * `totalItems` exceeds that preview — e.g. `"a.txt, b.txt, +3 more"`.
- * Returns `null` when there are no item names to preview.
- */
 export function formatItemPreview(itemNames: string[], totalItems: number): string | null {
   if (itemNames.length === 0) {
     return null
@@ -78,14 +70,6 @@ export function formatItemPreview(itemNames: string[], totalItems: number): stri
   )} more`
 }
 
-/**
- * The job's headline progress, as segments: how much of the whole job is done,
- * then how long is left. The card joins them with `·` and the live region joins
- * them with a comma, so both read the same facts.
- *
- * Deletes count items rather than bytes — a delete has no meaningful transfer
- * size, and the backend's byte totals for one are an implementation detail.
- */
 export function formatJobProgress(operation: OpProgress, options: { scanning: boolean }): string[] {
   const measured =
     operation.kind === 'delete'
@@ -94,9 +78,6 @@ export function formatJobProgress(operation: OpProgress, options: { scanning: bo
         )} of ${formatCount(operation.totalItems)} items deleted`
       : `${formatBytes(operation.copiedBytes)} of ${formatBytes(operation.totalBytes)}`
 
-  // Rust grows `total_bytes` while it walks the selected folders, so the total
-  // is still climbing here. Say so rather than printing a total that is wrong
-  // and an estimate derived from it.
   const totalStillGrowing = options.scanning && operation.kind !== 'delete'
   if (totalStillGrowing) {
     return [`${measured} (still scanning)`]

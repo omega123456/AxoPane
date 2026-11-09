@@ -2,7 +2,6 @@ import type { ReactNode } from 'react'
 
 type AppFrameProps = {
   children: ReactNode
-  /** App-wide InfoBars (update ready, folder sizes unavailable) above the workspace. */
   infoBars?: ReactNode
   statusBar: ReactNode
   overlay?: ReactNode

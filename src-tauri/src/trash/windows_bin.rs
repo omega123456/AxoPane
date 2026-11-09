@@ -1,8 +1,3 @@
-//! Windows Recycle Bin browsing, backed by the `trash` crate's
-//! `os_limited` module, which itself drives the Shell `IFileOperation` COM
-//! API. No bookkeeping of our own is required: Windows already tracks each
-//! item's original location.
-
 use std::collections::HashSet;
 
 use super::TrashEntry;

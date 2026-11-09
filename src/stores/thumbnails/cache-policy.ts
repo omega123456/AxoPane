@@ -24,7 +24,6 @@ export function isThumbnailCacheRecordUsable(record: ThumbnailCacheRecord, now: 
   return now - record.touched < ttl
 }
 
-/** Expires negatives first, then evicts oldest-first, protected records last. */
 export function pruneThumbnailCache(
   cache: Record<string, ThumbnailCacheRecord>,
   protectedKeys: ReadonlySet<string>,

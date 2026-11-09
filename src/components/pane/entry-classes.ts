@@ -10,7 +10,6 @@ type EntryHighlight = {
   isFocused: boolean
 }
 
-/** Cut items fade their contents, not the selection fill behind them. */
 export function cutFadeClass(isCut: boolean) {
   return isCut ? 'opacity-50' : ''
 }

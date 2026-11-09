@@ -2,7 +2,6 @@ import { millisecondsInMinute } from 'date-fns/constants'
 import { BYTES_PER_MEBIBYTE } from '@/lib/numbers'
 import { pruneWeightedCache, type WeightedCacheRecord } from '@/stores/weighted-cache'
 
-/** Deterministic bounded metadata cache policies used by pane state. */
 export const MAX_SIZE_CACHE_ENTRIES = 10_000
 export const MAX_ICON_CACHE_ENTRIES = 4_096
 const MAX_ICON_CACHE_MEBIBYTES = 32
@@ -12,7 +11,6 @@ export const ICON_NEGATIVE_TTL_MS = ICON_NEGATIVE_TTL_MINUTES * millisecondsInMi
 
 export type IconCacheRecord = WeightedCacheRecord & { value: string | null }
 
-/** Negative records expire first, then the oldest unprotected records go. */
 export type IconCacheClock = {
   now: number
   nativeIconsSupported: boolean

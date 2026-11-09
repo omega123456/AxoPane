@@ -4,7 +4,6 @@ use std::sync::Arc;
 use crate::ipc::types::{SearchPage, SearchPageRequest, SearchQueryRequest, SearchRejection};
 use tauri::State;
 
-/// Runs a search everywhere query; a newer query supersedes it (`stale`).
 #[cfg(not(feature = "test-utils"))]
 #[tauri::command]
 pub async fn search_query(
@@ -44,7 +43,6 @@ pub fn search_query(
     search.run(run_ticket, &payload)
 }
 
-/// Serves another page of the latest query's results.
 #[cfg(not(feature = "test-utils"))]
 #[tauri::command]
 pub async fn search_page(

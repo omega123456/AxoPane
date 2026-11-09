@@ -1,14 +1,7 @@
-//! Parses the palette's query grammar: `/` and `\` mean "inside", a
-//! trailing separator lists a folder's direct children, `~/`, `/` and `C:\`
-//! anchor to a real path, `*`/`?` are per-segment globs and a space means
-//! AND within one name.
-
 use super::matcher::{self, FoldedName, Match, NameKind, Pattern, Token};
 use super::path_style::PathStyle;
 use crate::path_text::strip_home_prefix;
 
-/// Searches start at this many non-space characters (anchored browses
-/// like `~/` are exempt).
 pub const MIN_QUERY_CHARS: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,11 +10,9 @@ pub enum ParseError {
     TooShort,
 }
 
-/// One `/`-separated part of the query.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Segment {
     pub raw: String,
-    /// The whole multi-word phrase, tried before matching word by word.
     phrase: Option<Pattern>,
     tokens: Vec<Token>,
 }
@@ -49,8 +40,6 @@ impl Segment {
         matcher::match_words(words, name, kind)
     }
 
-    /// Cheap pre-check for large scans: `false` only when `name` cannot
-    /// match. Non-ASCII names always pass, since they may need NFC.
     pub fn may_match(&self, name: &str) -> bool {
         !name.is_ascii()
             || self
@@ -60,7 +49,6 @@ impl Segment {
     }
 }
 
-/// The real folder an anchored query starts from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Anchor {
     pub root: String,
@@ -74,8 +62,6 @@ impl Anchor {
         style.compose(&self.root, &names)
     }
 
-    /// Whether a path with this `root` and these (NFC) ancestor names lies
-    /// inside the anchor, compared case-insensitively.
     pub fn contains(&self, root: &str, ancestors: &[&str]) -> bool {
         Pattern::new(root).equals(&FoldedName::new(&matcher::nfc(&self.root)))
             && ancestors.len() >= self.folded.len()
@@ -90,17 +76,12 @@ impl Anchor {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedQuery {
     pub anchor: Option<Anchor>,
-    /// Folder segments, outermost first.
     pub folder_segs: Vec<Segment>,
-    /// The last segment, matched against the item's own name; `None` when
-    /// listing a folder's children.
     pub name_seg: Option<Segment>,
     pub browse: bool,
 }
 
 impl ParsedQuery {
-    /// For `alex/`: the query that finds the folders whose children to list
-    /// (the last folder segment becomes the name).
     pub fn browse_parents(&self) -> ParsedQuery {
         let mut folder_segs = self.folder_segs.clone();
         let name_seg = folder_segs.pop();
@@ -118,7 +99,6 @@ pub fn parse(raw: &str, style: PathStyle, home: Option<&str>) -> Result<ParsedQu
     if typed.is_empty() {
         return Err(ParseError::Empty);
     }
-    // Both separators work everywhere in queries.
     let text = match style {
         PathStyle::Posix => typed.replace('\\', "/"),
         PathStyle::Windows => typed.to_owned(),

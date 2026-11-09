@@ -32,10 +32,6 @@ pub mod window_chrome;
 
 use std::path::{Path, PathBuf};
 
-/// Directory for config/session persistence.
-///
-/// Debug builds use a sibling `{identifier}-dev` folder so development and
-/// release installs do not read or write the same state.
 pub fn resolved_app_config_dir(base: &Path) -> PathBuf {
     #[cfg(debug_assertions)]
     {

@@ -15,7 +15,6 @@ export type LazyTreeNode = {
   lastAccess: number
 }
 
-/** Shares equivalent node loads while allowing a later completed load to start afresh. */
 export class TreeSingleFlight {
   private readonly flights = new Map<string, Promise<void>>()
 
@@ -56,7 +55,6 @@ export function pruneTreeCache<T extends LazyTreeNode>(
   return next
 }
 
-/** Removes a cached node and every cached descendant, without touching an unloaded branch. */
 export function pruneCachedSubtree<T extends Pick<LazyTreeNode, 'children'>>(
   nodes: Record<string, T>,
   path: string,

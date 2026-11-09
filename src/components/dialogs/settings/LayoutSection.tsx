@@ -46,12 +46,10 @@ function scannedItemsSuffix(status: FolderSizeIndexStatus) {
   return ` ${compactCount.format(status.itemsScanned)} items`
 }
 
-/** The macOS index's state, shown under the auto folder size description. */
 function FolderSizeStatusLine({ status }: { status: FolderSizeIndexStatus }) {
   const label = folderSizeStatusLabel(status)
   const count = scannedItemsSuffix(status)
 
-  // The status region announces state transitions only, not count ticks.
   return (
     <span className="mt-1 flex items-center gap-1">
       <FolderSizeStatusIcon state={status.state} />

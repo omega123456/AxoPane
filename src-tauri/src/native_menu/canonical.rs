@@ -86,8 +86,6 @@ const CANONICAL_ACTIONS: [CanonicalActionNames; 15] = [
 
 const OPEN_WITH_LABEL_PREFIX: &str = "openwith";
 
-/// Lower-cased, alphanumeric-only form of a verb/label used for canonical
-/// classification and de-duplication.
 pub fn normalize_verb(value: &str) -> String {
     value
         .chars()
@@ -115,8 +113,6 @@ fn action_for_label(label: &str) -> Option<NativeMenuCanonicalActionKind> {
         .map(|names| names.action.clone())
 }
 
-/// Maps a shell verb (and, as a fallback, the label) to an app-owned canonical
-/// action so the existing dedupe can drop duplicates of our own rows.
 pub fn classify_canonical_action(
     normalized_verb: Option<&str>,
     label: &str,

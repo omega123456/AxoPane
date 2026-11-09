@@ -1,10 +1,3 @@
-//! Batch-safe boundary around macOS system Trash deletion.
-//!
-//! The system deletion authority stays `trash`/`NsFileManager`.  This module
-//! only observes the browsable home Trash directory before and after a batch,
-//! then writes proven correlations in one manifest transaction.  It never
-//! guesses the origin of an externally-created or ambiguous entry.
-
 use std::collections::HashSet;
 #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
 use std::fs;
@@ -48,8 +41,6 @@ pub struct BatchDeletionResult {
     pub failures: Vec<(String, String)>,
 }
 
-/// Injectable boundary so tests cannot reach `NsFileManager`, the real home
-/// Trash, `.DS_Store`, or the system clock.
 pub trait SystemTrashAdapter {
     fn home_trash_root(&mut self) -> Result<Option<PathBuf>, String>;
     fn snapshot(&mut self, root: &Path) -> Result<Vec<TrashSnapshotEntry>, String>;
@@ -65,10 +56,6 @@ pub struct ManifestBatch<'batch> {
     pub deleted_at: i64,
 }
 
-/// Deletes a batch using exactly one before and one after snapshot when the
-/// current home Trash root is observable.  A deletion can still succeed when
-/// the item lands in another volume's system Trash; it simply remains unknown
-/// to this home-root manifest instead of receiving fabricated provenance.
 pub fn delete_batch<A: SystemTrashAdapter>(
     adapter: &mut A,
     paths: &[String],
@@ -117,8 +104,6 @@ pub fn delete_batch<A: SystemTrashAdapter>(
             deleted_at: adapter.now_seconds(),
         };
         if let Err(error) = adapter.record_manifest(&root, batch) {
-            // Deletions remain successful; making their origin unknown is
-            // safer than reporting a failed delete after NsFileManager moved it.
             result
                 .unknown_sources
                 .extend(result.correlated.drain(..).map(|item| item.original_path));
@@ -142,10 +127,6 @@ fn delete_without_observable_root<A: SystemTrashAdapter>(
     result
 }
 
-/// Correlates only entries created during this batch.  Stable identity wins;
-/// the weaker metadata key is accepted only when it identifies exactly one
-/// source and exactly one candidate.  Used candidates are consumed, making
-/// every returned association one-to-one.
 pub fn correlate(
     before: &[TrashSnapshotEntry],
     after: &[TrashSnapshotEntry],
@@ -219,8 +200,6 @@ fn compatible(source: &TrashFacts, candidate: &TrashFacts) -> bool {
         && source.modified_at == candidate.modified_at
 }
 
-/// Production adapter.  It is intentionally private to this macOS module;
-/// tests always supply their own fake adapter.
 #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
 pub struct MacosSystemTrashAdapter {
     context: trash::TrashContext,

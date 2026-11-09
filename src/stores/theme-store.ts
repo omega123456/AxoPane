@@ -39,15 +39,12 @@ function syncTheme(preference: ThemePreference) {
   return { preference, theme }
 }
 
-/** Applies the theme to the document and the native title bar. */
 function commitTheme(preference: ThemePreference) {
   void syncNativeTheme(preference)
   return syncTheme(preference)
 }
 
 export const useThemeStore = create<ThemeStore>((set, get) => ({
-  // The initial state only touches the DOM; `initializeTheme` syncs the title
-  // bar once IPC is available.
   ...syncTheme(useConfigStore.getState().theme),
   setTheme: (theme) => {
     set(commitTheme(theme))
@@ -60,7 +57,6 @@ export const useThemeStore = create<ThemeStore>((set, get) => ({
 
 let systemListenerInstalled = false
 
-/** Re-resolves `system` when the OS switches between light and dark. */
 function followSystemTheme() {
   if (systemListenerInstalled) {
     return

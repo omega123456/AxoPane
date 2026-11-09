@@ -38,11 +38,6 @@ pub fn create_runtime(emitters: WatchEmitters) -> Result<WatchRuntime, String> {
     })
 }
 
-/// Forwards a notify callback through the bounded coordinator. The callback
-/// takes a short registration snapshot before classifying events, then drops
-/// the tabs lock before touching the coordinator. This deliberately waits for
-/// that brief snapshot rather than using `try_lock`: losing an OS mutation is
-/// worse than briefly delaying a callback, and tab locks never cover I/O.
 pub(super) fn forward_notify_result(
     tabs: &WatchedTabs,
     raw_sender: &coordinator::RawLaneSender,
@@ -97,9 +92,6 @@ fn forward_event(
     }
 }
 
-/// An unresolvable notify error has no stable child identity; mark every
-/// active watch dirty so the bounded coordinator schedules authoritative
-/// recovery instead of retaining it.
 fn mark_registrations_unresolved(
     registrations: Vec<(WatchId, WatchTarget)>,
     raw_sender: &coordinator::RawLaneSender,
@@ -172,7 +164,6 @@ fn snapshot_with_targeted_changes(
     Ok(draft.next)
 }
 
-/// Returns `false` when the tab was unwatched while its batch was processed.
 fn store_snapshot(
     tabs: &WatchedTabs,
     watch_id: WatchId,
@@ -235,11 +226,6 @@ fn unwatch_path(watcher: &mut notify::RecommendedWatcher, path: &Path) -> Result
     watcher.unwatch(path).stringify_err()
 }
 
-/// Test-only wrapper around the private `process_compacted_batch`, driving
-/// it against a real [`WatchRuntime`]'s tab map so coverage/behavior tests
-/// can exercise targeted-patch application, dirty-resnapshot, and the
-/// unknown-watch-id no-op branch without a live OS watcher thread producing
-/// the [`CompactedBatch`].
 #[cfg(feature = "test-utils")]
 pub fn process_compacted_batch_for_tests(
     runtime: &WatchRuntime,
@@ -249,9 +235,6 @@ pub fn process_compacted_batch_for_tests(
     process_compacted_batch(&runtime.tabs, batch, &emitters);
 }
 
-/// Drives the same callback forwarding path used by `notify`, allowing
-/// integration tests to verify that a callback is retained until it can take
-/// the brief registration snapshot.
 #[cfg(feature = "test-utils")]
 pub fn forward_notify_result_for_tests(
     runtime: &WatchRuntime,

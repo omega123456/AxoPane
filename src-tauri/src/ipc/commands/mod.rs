@@ -30,13 +30,6 @@ pub use trash::*;
 pub use volumes::*;
 pub use watch::*;
 
-/// Runs bounded, single-request filesystem work through the owned IPC
-/// latency executor. Command handlers only validate/capture payloads before
-/// entering this boundary; the executor has a fixed queue/workers, shared
-/// coordinator admission, deadline, and deterministic shutdown contract.
-///
-/// Long-running transfers deliberately do not use this helper; they belong to
-/// `OpsService`, which owns cancellation, progress and shutdown instead.
 #[cfg(not(feature = "test-utils"))]
 async fn latency_filesystem<T: Send + 'static>(
     executor: &crate::ipc::executor::IpcExecutor,
@@ -46,8 +39,6 @@ async fn latency_filesystem<T: Send + 'static>(
     executor.latency(resource_key, move || Ok(work())).await
 }
 
-/// Variant for bounded mutations that can observe cancellation before they
-/// touch an OS API and at their own safe internal checkpoints.
 #[cfg(not(feature = "test-utils"))]
 async fn latency_filesystem_cancellable<T: Send + 'static>(
     executor: &crate::ipc::executor::IpcExecutor,
@@ -68,9 +59,6 @@ struct CancellableMutation {
     cancelled_message: &'static str,
 }
 
-/// Runs `work` through the latency executor unless the request was
-/// cancelled before it reached a worker, in which case it fails with
-/// `cancelled_message`.
 #[cfg(not(feature = "test-utils"))]
 async fn latency_filesystem_unless_cancelled<T: Send + 'static>(
     executor: &crate::ipc::executor::IpcExecutor,
@@ -90,7 +78,6 @@ async fn latency_filesystem_unless_cancelled<T: Send + 'static>(
     .await
 }
 
-/// Logs `message` as an error and hands it back for the IPC response.
 fn logged_error(message: String) -> String {
     log::error!("{message}");
     message

@@ -10,7 +10,6 @@ function radioRingClass(selected: boolean) {
   return selected ? SELECTED_RING_CLASS : UNSELECTED_RING_CLASS
 }
 
-/** Fluent radio: a 20px ring on the input boundary; selected is a 5px accent ring. */
 export function RadioGroup<T extends string>({
   value,
   onChange,

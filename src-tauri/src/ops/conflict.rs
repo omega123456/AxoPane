@@ -24,8 +24,6 @@ impl TransferTarget {
     }
 }
 
-/// Picks where an item lands. `None` means the item needs no transfer: it was
-/// skipped, failed while clearing the way, or was cancelled while parked.
 pub(super) struct ConflictCandidate<'candidate> {
     pub(super) item: &'candidate OpItem,
     pub(super) target: &'candidate Path,
@@ -88,9 +86,6 @@ fn skip_conflicting_item(context: &WorkerContext<'_>, item: &OpItem) {
     advance_item(context, item);
 }
 
-/// Replacing an item with itself would delete the source, so that case is a
-/// skip. Folder onto folder merges (Explorer semantics); the copy/move walk
-/// overwrites conflicting children and keeps the rest.
 fn replace_target(
     context: &WorkerContext<'_>,
     transfer: &ItemTransfer,
@@ -124,7 +119,6 @@ fn replace_target(
     Some(TransferTarget::separate(target))
 }
 
-/// Surface a conflict and block until the user resolves it (or it is cancelled).
 pub(super) fn resolve_or_park(
     context: &WorkerContext<'_>,
     candidate: ConflictCandidate<'_>,

@@ -25,15 +25,9 @@ use super::worker::{self, TransferPaths};
 use super::COPY_BUFFER_BYTES;
 use crate::error_text::StringifyError;
 
-/// Test-only hook proving the capability-adapter selection genuinely
-/// executes along the real copy path. `select_adapter` is `test-utils`-gated
-/// to always resolve to `Portable(UnsupportedPlatform)`, so this counter is
-/// the only way an integration test can distinguish "the decision ran" from
-/// "the decision was skipped".
 #[cfg(feature = "test-utils")]
 static ADAPTER_SELECTION_CALLS: AtomicU64 = AtomicU64::new(0);
 
-/// Number of times a real file transfer has invoked [`worker::select_adapter`].
 #[cfg(feature = "test-utils")]
 pub fn adapter_selection_calls_for_tests() -> u64 {
     ADAPTER_SELECTION_CALLS.load(Ordering::Relaxed)
@@ -211,9 +205,6 @@ impl TreeCopy<'_, '_> {
     }
 }
 
-/// Recreate a symlink without dereferencing it. This preserves relative,
-/// dangling, and directory links, so a copied tree has the same topology as
-/// its source and does not accidentally walk outside the selected folder.
 fn copy_symlink_with_total_discovery(
     paths: TransferPaths<'_>,
     transfer: FileTransfer<'_, '_>,
@@ -318,17 +309,10 @@ pub(super) fn move_path_with_total_discovery(
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).stringify_err()?;
     }
-    // `same_resource: true` preserves current behavior: rename is always
-    // attempted first regardless of resource identity, and only an
-    // OS-confirmed cross-device error falls back to copy+delete.
     let renamed = worker::rename_or_cross_device(paths, true, |src, dst| fs::rename(src, dst))?;
     if renamed {
         return Ok(());
     }
-    // The progressive copy path grows totals while it discovers files, and
-    // source removal happens only after destination completion. A fresh
-    // manifest records every file discovered along this fallback walk so the
-    // cross-device copy leaves a real, inspectable transfer record behind.
     let mut manifest = ProgressiveManifest::default();
     let discovery = TotalDiscovery {
         add_discovered_totals,
@@ -341,9 +325,6 @@ pub(super) fn move_path_with_total_discovery(
     remove_source(source)
 }
 
-/// Move-merge `source` into the existing real directory `target`: children
-/// that collide as directories recurse, anything else replaces whatever is in
-/// the way and moves by rename (with the per-child cross-device fallback).
 pub(super) fn move_merge_dir(
     source: &Path,
     target: &Path,
@@ -376,9 +357,6 @@ pub(super) fn move_merge_dir(
     remove_clearing_readonly(source, |path| fs::remove_dir(path)).stringify_err()
 }
 
-/// Clear whatever sits at `target` so a merge can write there. A real
-/// directory is kept when `keep_real_dir` (merge into it); anything else is
-/// removed so the walk never writes through a link or trips on a type clash.
 fn clear_merge_target(target: &Path, keep_real_dir: bool) -> Result<(), String> {
     let Ok(metadata) = fs::symlink_metadata(target) else {
         return Ok(());
@@ -403,14 +381,6 @@ pub fn copy_file_with_progress(
     copy_file_with_total_discovery(TransferPaths { source, target }, transfer)
 }
 
-/// Runs the capability-adapter selection decision for a single file transfer
-/// and logs the outcome at debug level. The actual byte transfer always runs
-/// through the portable streaming loop below regardless of the selection
-/// result — no native `CopyFile2`/`copyfile` implementation exists yet, so
-/// every real platform resolves to `Portable(..)` today. This makes the
-/// selection scaffolding in `worker::select_adapter` and the platform
-/// capability structs genuinely execute on the real copy path instead of
-/// sitting unreachable.
 fn log_transfer_adapter_selection(source: &Path) {
     #[cfg(target_os = "macos")]
     let adapter: MacosCapabilities = MacosCapabilities::default();

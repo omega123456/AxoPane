@@ -120,8 +120,6 @@ function PaneTab({ paneId, title, tab, index, isActive, canClose }: PaneTabProps
       index={index}
       onAuxClick={onTabAuxClick}
       onContextMenu={(event) => openTabContextMenu(event, paneId, tab)}
-      // The selected tab shares the command bar's layer colour and covers the
-      // strip's bottom line, so tab and bar read as one shape.
       className={`group relative inline-flex h-8 w-tab min-w-0 shrink items-center gap-2 rounded-t-control border-x border-t pl-2.75 pr-1.5 text-caption ${tabStateClass(isActive)}`}
     >
       {(handleRef) => (
@@ -135,8 +133,6 @@ function PaneTab({ paneId, title, tab, index, isActive, canClose }: PaneTabProps
             aria-selected={isActive}
             aria-label={`Tab ${tabLabel(tab)} in ${title}`}
             onClick={() => void switchTab(paneId, tab.id)}
-            // The ::before layer stretches the hit area over the whole tab
-            // (padding included), so a click or drag anywhere on it lands here.
             className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-control text-left before:absolute before:inset-0 before:rounded-t-control ${FOCUS_RING}`}
           >
             <LocationIcon path={tab.path} volumes={volumes} />
@@ -191,7 +187,6 @@ function TabTrailingControl({
         event.stopPropagation()
         onClose()
       }}
-      // Close shows on the selected tab and on hover, as Windows tabs do.
       className={`relative z-10 inline-flex size-5.5 shrink-0 cursor-pointer items-center justify-center rounded-control font-normal ${TEXT_SECONDARY} hover:bg-light-hover hover:text-light-text focus-visible:opacity-100 dark:hover:bg-dark-hover dark:hover:text-dark-text ${closeButtonVisibilityClass(isActive)} ${FOCUS_RING}`}
     >
       <XIcon className="size-3.5" />

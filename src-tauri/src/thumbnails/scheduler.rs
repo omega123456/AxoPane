@@ -1,6 +1,3 @@
-//! Bounded thumbnail scheduler. Work is shared by cache fingerprint while
-//! subscriber identity remains contextual and independently cancellable.
-
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
@@ -402,8 +399,6 @@ impl State {
 }
 
 impl State {
-    /// Drops the scope's subscriptions and its unsubscribed queued jobs;
-    /// returns the candidates of active jobs left without subscribers.
     fn remove_scope(&mut self, scope: &ThumbnailSubscriber) -> Vec<ThumbnailCandidate> {
         let removed_scope = ScopeKey::from(scope);
         self.scope_revisions
@@ -525,7 +520,6 @@ impl ThumbnailScheduler {
         }
     }
 
-    /// Compatibility helper for direct scheduler callers and focused tests.
     pub fn submit(&self, subscriber: ThumbnailSubscriber, candidate: ThumbnailCandidate) {
         let queued_new_job = self
             .shared
@@ -627,7 +621,6 @@ fn wait_for_next_job(shared: &Shared) -> Option<NextJob> {
     }
 }
 
-/// `None` when the file changed since it was requested.
 fn generate_if_current(
     shared: &Arc<Shared>,
     key: &ThumbnailCacheKey,
@@ -654,7 +647,6 @@ fn generate_if_current(
     )
 }
 
-/// Forwards each preview to the job's current subscribers, if any remain.
 fn preview_reporter(
     shared: &Arc<Shared>,
     key: &ThumbnailCacheKey,

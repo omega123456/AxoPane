@@ -30,23 +30,16 @@ const SEVERITY_STYLES: Record<InfoBarSeverity, { fill: string; icon: string; gly
 
 type InfoBarProps = {
   severity: InfoBarSeverity
-  /** Bold lead-in shown inline before the message. */
   title?: string
   children?: ReactNode
-  /** The one optional action, rendered as a standard button. */
   action?: ReactNode
   onDismiss?: () => void
   dismissLabel?: string
   dismissDisabled?: boolean
-  /** Accessible name for the bar itself. */
   label?: string
   className?: string
 }
 
-/**
- * Windows InfoBar: a tinted fill per severity, a filled 16px status icon, the
- * bold title inline with the message, one action and a dismiss button.
- */
 export function InfoBar({
   severity,
   title,

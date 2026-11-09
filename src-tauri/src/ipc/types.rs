@@ -63,10 +63,6 @@ pub struct InitialShellResponse {
     pub tree_roots: Vec<TreeRoot>,
 }
 
-/// A single log line forwarded from the frontend logger (`app-log-commands.ts`).
-///
-/// `category` defaults to `frontend` and `details` carries the serialized log
-/// context when present.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogFrontendRequest {
@@ -85,7 +81,6 @@ pub struct SaveConfigRequest {
     pub config: AppConfig,
 }
 
-/// Request to change the backend's minimum capture level.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetLogLevelRequest {
@@ -148,8 +143,6 @@ pub struct FolderSizesRequest {
     pub mode: Option<RequestMode>,
 }
 
-/// One pane's live size-update set; an empty `folder_paths` with no
-/// `current_path` clears it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SizeSubscriptionsRequest {
@@ -172,8 +165,6 @@ pub struct IconStateEvent {
     pub icon_data_url: Option<String>,
 }
 
-/// A listing-derived identity for a previewable file. Directory entries are
-/// deliberately excluded: folders retain their ordinary large icon.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThumbnailCandidateRequest {
@@ -250,20 +241,12 @@ pub struct ThumbnailResultEvent {
     pub data_url: Option<String>,
 }
 
-/// Batch of representative single-item (`File`/`Folder`) requests whose
-/// derived cache keys should be background-warmed. Each element reproduces
-/// exactly the request shape a single-row right-click would build, so the
-/// warmed key equals the interactive key.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WarmNativeMenusRequest {
     pub requests: Vec<LoadNativeMenuRequest>,
 }
 
-/// The cache keys newly inserted by a `warm_native_menus` call. Returned only
-/// by the `test-utils` command variant for assertions; the production
-/// (non-`test-utils`) command is fire-and-forget and returns nothing to the
-/// frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WarmNativeMenusResponse {
@@ -326,7 +309,6 @@ pub struct OpenPathRequest {
     pub path: String,
 }
 
-/// `"light"` / `"dark"`, or `None` to follow the OS.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetWindowThemeRequest {
@@ -418,8 +400,6 @@ pub struct CancelSizesResponse {
 #[serde(rename_all = "camelCase")]
 pub struct SetTabWatchRequest {
     pub target: Option<WatchTarget>,
-    /// Optional already-published session entries for `target.path`. When
-    /// supplied, these establish the watch baseline without a second scan.
     pub entries: Option<Vec<DirectoryEntry>>,
 }
 

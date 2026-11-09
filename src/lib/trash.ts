@@ -1,12 +1,6 @@
 import type { DirectoryEntry, TrashEntry } from '@/lib/types/ipc'
 import { fromUnixTime } from 'date-fns'
 
-/**
- * Virtual, non-filesystem path used to navigate a pane to the trash browser.
- * Deliberately contains no `/` or `\` so path-parsing helpers written for
- * real filesystem paths (e.g. `getParentPath`) treat it as rootless rather
- * than misparsing a segment out of it.
- */
 export const TRASH_PATH = 'axopane:trash'
 
 export function isTrashPath(path: string): boolean {

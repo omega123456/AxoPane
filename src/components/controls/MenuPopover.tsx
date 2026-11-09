@@ -141,10 +141,6 @@ function useMenuPopoverState(items: MenuPopoverItem[], radio: boolean) {
   return { open, triggerRef, menuRef, focusControls, openMenu }
 }
 
-/**
- * A compact, trigger-anchored menu for toolbar controls. It intentionally owns
- * its keyboard and focus lifecycle so callers only describe actions.
- */
 export function MenuPopover({ ariaLabel, trigger, items, radio = false }: MenuPopoverProps) {
   const menuId = useId()
   const { open, triggerRef, menuRef, focusControls, openMenu } = useMenuPopoverState(items, radio)

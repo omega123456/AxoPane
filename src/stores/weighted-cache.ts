@@ -37,11 +37,6 @@ function evictUntilWithinLimits<CacheRecord extends WeightedCacheRecord>(
   }
 }
 
-/**
- * Drops expired unprotected records, then evicts the deterministic oldest
- * unprotected records until both limits are met. With `evictProtected`, the
- * oldest protected records go too when unprotected eviction was not enough.
- */
 export type WeightedCachePolicy<CacheRecord extends WeightedCacheRecord> = {
   isExpired: (record: CacheRecord) => boolean
   limits: WeightedCacheLimits

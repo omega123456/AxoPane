@@ -76,8 +76,6 @@ fn read_file_clipboard_impl() -> Result<ReadFileClipboardResponse, String> {
     })
 }
 
-/// Pair each clipboard path with its display name. A path without a file name
-/// (a drive root, for example) keeps the full path as its name.
 pub fn file_clipboard_items(paths: Vec<String>) -> Vec<FileClipboardItem> {
     paths
         .into_iter()

@@ -1,7 +1,3 @@
-/**
- * Text with matched ranges emphasised. `ranges` are sorted `[start, end)`
- * UTF-16 offsets (JS string indices), as the search service reports them.
- */
 export function HighlightedText({ text, ranges }: { text: string; ranges: [number, number][] }) {
   const parts: { text: string; match: boolean }[] = []
   let cursor = 0

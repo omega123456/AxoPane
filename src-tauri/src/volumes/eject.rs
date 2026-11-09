@@ -1,14 +1,3 @@
-//! Safe-remove ("eject") for removable volumes.
-//!
-//! This is a machine-global operation (it can physically power down a device) so
-//! it must never touch a real OS API under `test-utils`.
-//!
-//! Eject is **macOS-only**. On Windows a reliable *safe* removal isn't possible
-//! from here — a volume that is still in use can only be force-dismounted (with
-//! possible data loss), so Windows users are directed to the native "Eject" entry
-//! already surfaced in the shell context menu, which offers that choice safely.
-//! The command therefore reports `Unsupported` on Windows.
-
 use crate::ipc::types::MenuActionStatus;
 
 #[cfg(all(target_os = "macos", not(feature = "test-utils")))]

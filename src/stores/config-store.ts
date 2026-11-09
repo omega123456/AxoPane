@@ -29,7 +29,6 @@ export type ConfigSnapshot = {
 }
 
 type ConfigStore = ConfigSnapshot & {
-  /** Favourite path whose name is being edited inline; never persisted. */
   renamingFavourite: string | null
   hydrate: (config: ConfigSnapshot) => void
   setThemePreference: (theme: ThemePreference) => Promise<void>
@@ -47,7 +46,6 @@ type ConfigStore = ConfigSnapshot & {
   removeFavourite: (path: string) => Promise<void>
   reorderFavourite: (path: string, index: number) => Promise<void>
   setRenamingFavourite: (path: string | null) => void
-  /** A blank name restores the folder's own name. */
   renameFavourite: (path: string, name: string) => Promise<void>
   setFavouritesCollapsed: (favouritesCollapsed: boolean) => Promise<void>
   reset: () => void
@@ -74,7 +72,6 @@ export function defaultConfigSnapshot(): ConfigSnapshot {
 
 const CONFIG_SNAPSHOT_FIELDS = Object.keys(defaultConfigSnapshot()) as (keyof ConfigSnapshot)[]
 
-/** The config-store fields of `source`, each falling back to its default when nullish. */
 export function pickConfigSnapshot(source: Partial<ConfigSnapshot>): ConfigSnapshot {
   const defaults = defaultConfigSnapshot()
   return Object.fromEntries(

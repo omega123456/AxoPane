@@ -4,19 +4,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-/// Sum the byte size of a directory tree to drive byte-accurate progress.
-///
-/// `follow_symlinks` should match what the caller does with a link. Copy/move
-/// preserve a symlink itself, while callers that deliberately traverse targets
-/// can opt in to the cycle-guarded path below. IO errors are skipped so
-/// measurement never aborts the operation.
 pub fn measure_tree_size(path: &Path, cancel: &Arc<AtomicBool>, follow_symlinks: bool) -> u64 {
     if !follow_symlinks {
         return measure_tree_size_without_following_links(path, cancel);
     }
-    // Seed the starting directory itself (like `copy_dir_recursive`'s `visited`
-    // guard) so a symlink cycling straight back to `path` is caught on its
-    // first hop rather than being traversed once before detection.
     let mut visited = match path.canonicalize() {
         Ok(canonical) => HashSet::from([canonical]),
         Err(_) => HashSet::new(),
@@ -91,8 +82,6 @@ impl LinkFollowingMeasure<'_> {
         entry.metadata().map_or(0, |metadata| metadata.len())
     }
 
-    /// Resolve a symlink's target and measure it, recursing (with cycle
-    /// protection) if the target is a directory.
     fn symlink_target_size(&mut self, link: &Path) -> u64 {
         let Ok(target_metadata) = fs::metadata(link) else {
             return 0;

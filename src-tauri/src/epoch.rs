@@ -1,5 +1,3 @@
-//! Unix-epoch timestamps. Times before the epoch read as zero.
-
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub fn since_epoch(time: SystemTime) -> Duration {

@@ -33,8 +33,6 @@ pub(super) fn setup(app: &mut App) -> Result<(), Box<dyn Error>> {
     app.manage(persistence);
     manage_listing_services(app);
 
-    // The shared coordinator lives for the app's lifetime; its `Drop` shuts
-    // the dispatcher thread down when this `Arc` is finally dropped.
     let resource_coordinator = Arc::new(ResourceCoordinator::new());
     app.manage(Arc::clone(&resource_coordinator));
     manage_coordinated_services(app, &resource_coordinator);
@@ -86,9 +84,6 @@ fn manage_coordinated_services(app: &mut App, resource_coordinator: &Arc<Resourc
     app.manage(Arc::new(ReconcileCoordinator::default()));
 }
 
-/// Folder-size traversal shares the app-wide coordinator so it is fairly
-/// scheduled against the same lanes as every other subsystem. Search shares
-/// the size service's Everything handle or index.
 fn manage_sizes_and_search(
     app: &mut App,
     resource_coordinator: &Arc<ResourceCoordinator>,

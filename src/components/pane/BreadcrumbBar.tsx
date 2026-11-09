@@ -190,8 +190,6 @@ function BreadcrumbTrail({ pane, onStartEdit }: { pane: PaneState; onStartEdit: 
   }
 
   return (
-    // Flat at rest; the hover fill shows the row is clickable. Double-click
-    // its empty part (or right-click anywhere) to type a path.
     <div
       className={`ml-0.75 flex h-8 min-w-0 flex-1 cursor-text items-center overflow-hidden rounded-control pl-1.5 pr-1 ${HOVER_ON_POINTER}`}
       onDoubleClick={startEditOnEmptyArea}
@@ -271,10 +269,6 @@ function CrumbSeparator() {
 
 type Segment = { label: string; path: string }
 
-/**
- * Labels the POSIX root crumb with the boot volume's name ("Macintosh HD"), as
- * Finder does. Drive letters and UNC roots already name their volume.
- */
 export function withRootVolumeLabel(segments: Segment[], volumes: VolumeInfo[]): Segment[] {
   const [root, ...rest] = segments
   if (root?.path !== POSIX_ROOT) {
@@ -284,10 +278,6 @@ export function withRootVolumeLabel(segments: Segment[], volumes: VolumeInfo[]):
   return label ? [{ ...root, label }, ...rest] : segments
 }
 
-/**
- * Splits an absolute path into clickable breadcrumb segments with correct
- * cumulative target paths, for both Windows (`C:\a\b`) and POSIX (`/a/b`).
- */
 export function splitPath(path: string): Segment[] {
   if (!path) {
     return [{ label: CURRENT_DIRECTORY, path: CURRENT_DIRECTORY }]

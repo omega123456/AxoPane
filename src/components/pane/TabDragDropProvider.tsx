@@ -103,7 +103,6 @@ type PointerActivationConstraintsFactory = NonNullable<
   PointerSensorOptions['activationConstraints']
 >
 
-// dnd-kit's ActivationConstraint base class carries a #private brand and is not exported, so a duck-typed constraint needs a cast.
 const mouseDistanceActivation = (() => [
   new MouseDistanceConstraint(),
 ]) as unknown as PointerActivationConstraintsFactory
@@ -117,8 +116,6 @@ function compensateDragZoom(element: HTMLElement) {
   const zoom = Number.parseFloat(document.documentElement.style.zoom) || 1
   if (zoom === 1) return
 
-  // DnD renders viewport geometry back inside the zoomed root. Counter-scale
-  // only its fixed-position feedback so that geometry stays in viewport pixels.
   const previousZoom = element.style.zoom
   element.style.zoom = String(1 / zoom)
   const observer = new MutationObserver(() => {
@@ -318,7 +315,6 @@ function useTabDragSession(tabIds: TabIdsByPane) {
       const sourceElement = sourceTabElement(sourceTabId)
       dragRecord.current.restoreDragZoom?.()
       dragRecord.current = { sourceTabId, sourceDomPosition: domPositionOf(sourceElement) }
-      // Let DnD capture the original placeholder and pointer origin first.
       queueMicrotask(() => {
         const restoreDragZoom = sourceElement ? compensateDragZoom(sourceElement) : undefined
         dragRecord.current = { ...dragRecord.current, restoreDragZoom }

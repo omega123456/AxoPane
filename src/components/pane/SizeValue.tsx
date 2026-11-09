@@ -66,7 +66,6 @@ export function SizeValue({ entry }: SizeValueProps) {
   return <span>{entry.sizeBytes === null ? EMPTY_VALUE : formatBytes(entry.sizeBytes)}</span>
 }
 
-/** "Doesn't include Documents, Desktop, Downloads and 2 more. Open them to include them." */
 function lowerBoundTitle(names: string[], more: number) {
   if (names.length === 0) {
     return "Doesn't include folders macOS blocked access to."

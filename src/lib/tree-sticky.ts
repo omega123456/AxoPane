@@ -1,11 +1,5 @@
 import type { TreeNodeState } from '@/stores/panes-store'
 
-/**
- * Ordered ancestor chain (volume root -> ... -> active node) for the
- * currently active tree path. `revealPath` keeps exactly these nodes
- * expanded, so this chain is what FolderTree pins to the top of the
- * scroll area as the user scrolls through a deeply nested folder.
- */
 export function buildStickyChain(
   treeNodes: Record<string, TreeNodeState>,
   activePath: string | null,
@@ -25,18 +19,11 @@ export function buildStickyChain(
   }
   return chain
 }
-/** Pinned rows beyond the volume root: the active folder plus its two nearest ancestors. */
 export const STICKY_MAX_ANCESTORS = 3
 
-/** Path levels below the volume root shown before the middle folds into one row. */
 export const FOLD_MAX_LEVELS = 6
 const FOLD_KEEP_HEAD = 2
 
-/**
- * Which parts of the active path the tree folds. `chain` is the active path's
- * ancestor chain (from `buildStickyChain`); `revealedSiblings` holds the chain
- * folders whose other children the user opened.
- */
 export type TreeFoldState = {
   chain: string[]
   revealedSiblings: ReadonlySet<string>
@@ -49,12 +36,10 @@ export const EMPTY_TREE_FOLD: TreeFoldState = {
   showHiddenLevels: false,
 }
 
-/** A single visible tree row, flattened out of the nested node graph. */
 export type FlatTreeRow =
   | {
       kind: 'node'
       path: string
-      /** Nesting level from the volume root (0 = the root itself); drives indentation. */
       depth: number
     }
   | { kind: 'fold-siblings'; parentPath: string; count: number; depth: number }
@@ -64,11 +49,6 @@ function isExpandedTowards(node: TreeNodeState | undefined, childPath: string) {
   return node?.expanded === true && node.children.includes(childPath)
 }
 
-/**
- * Middle levels of a long active path that fold into one "N levels hidden"
- * row. Only folds when every hidden level is expanded down the chain, so the
- * folded row always stands in for rows that would otherwise render.
- */
 function hiddenChainLevels(
   treeNodes: Record<string, TreeNodeState>,
   fold: TreeFoldState,
@@ -89,15 +69,6 @@ function hiddenChainLevels(
   return chainIsOpen ? hidden : []
 }
 
-/**
- * Depth-first flatten of the visible subtree under `rootPath` (the root plus
- * every descendant reachable through `expanded` nodes), in render order.
- *
- * Folders on the active path (`fold.chain`) are folded: each shows only its
- * next path folder followed by one "N other folders" row, unless the user
- * revealed that level. A path deeper than `FOLD_MAX_LEVELS` also folds its
- * middle levels into one row. Folders off the active path walk unchanged.
- */
 export type VisibleTreeOptions = {
   excludedRootPaths?: ReadonlySet<string>
   fold?: TreeFoldState
@@ -215,11 +186,6 @@ class VisibleTreeWalk {
   }
 }
 
-/**
- * Caps the pinned ancestor chain to the volume root plus the nearest
- * `STICKY_MAX_ANCESTORS` rendered path folders. Entries folded out of the tree
- * (absent from `indexByPath`) are skipped.
- */
 export function capStickyChain(
   chain: string[],
   indexByPath: ReadonlyMap<string, number>,

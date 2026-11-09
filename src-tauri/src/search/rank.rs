@@ -1,7 +1,3 @@
-//! Scores a candidate against a parsed query and orders the hits: lower
-//! summed tiers first, then fewer folder levels between the matched folder
-//! and the item, folders before files, shorter paths, newer items and name.
-
 use std::cmp::Ordering;
 use std::ops::Range;
 use std::time::SystemTime;
@@ -13,18 +9,13 @@ use super::Candidate;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scored {
-    /// The backend's path, used for every action.
     pub path: String,
-    /// NFC display name and parent path; the ranges index into these.
     pub name: String,
     pub parent: String,
     pub is_dir: bool,
     pub modified: Option<SystemTime>,
-    /// Sum of the matched segments' tiers.
     pub penalty: u32,
-    /// Folder levels skipped between matched segments and the item.
     pub gap: u32,
-    /// Number of path components.
     pub depth: u32,
     pub name_ranges: Vec<(u32, u32)>,
     pub parent_ranges: Vec<(u32, u32)>,
@@ -75,12 +66,10 @@ pub fn score(candidate: &Candidate, query: &ParsedQuery, style: PathStyle) -> Op
     })
 }
 
-/// How a candidate's ancestors satisfied the query's folder part.
 #[derive(Default)]
 struct FolderMatch {
     penalty: u32,
     gap: u32,
-    /// Matched ancestor index with the ranges matched inside its name.
     hits: Vec<(usize, Vec<(u32, u32)>)>,
 }
 
@@ -114,13 +103,10 @@ fn lowest_searchable_ancestor(lists_parent: bool, upper: usize) -> Option<usize>
     Some(0)
 }
 
-/// Matches folder segments innermost first, each against ancestors above the
-/// previous match.
 fn match_folder_segments(query: &ParsedQuery, ancestors: &[String]) -> Option<FolderMatch> {
     let mut folders = FolderMatch::default();
     let mut upper = ancestors.len();
     for (segment_index, segment) in query.folder_segs.iter().enumerate().rev() {
-        // Listing children: the innermost folder must be the parent.
         let lists_parent = query.browse && segment_index + 1 == query.folder_segs.len();
         let lowest = lowest_searchable_ancestor(lists_parent, upper)?;
         let AncestorMatch {
@@ -140,8 +126,6 @@ struct AncestorMatch {
     found: Match,
 }
 
-/// The best-tier ancestor in `range`, preferring the innermost; an exact
-/// match ends the search.
 fn best_ancestor_match(
     segment: &Segment,
     ancestors: &[String],
@@ -187,8 +171,6 @@ fn parent_ranges(hits: Vec<(usize, Vec<(u32, u32)>)>, offsets: &[u32]) -> Vec<(u
     parent_ranges
 }
 
-/// The parent path for display, plus the UTF-16 offset of each ancestor
-/// name within it.
 struct DisplayParent {
     text: String,
     offsets: Vec<u32>,
@@ -210,7 +192,6 @@ fn display_parent(style: PathStyle, path: AncestorPath<'_>) -> DisplayParent {
     DisplayParent { text, offsets }
 }
 
-/// A total order over hits; a missing modified time sorts after known ones.
 pub fn compare(left: &Scored, right: &Scored) -> Ordering {
     left.penalty
         .cmp(&right.penalty)

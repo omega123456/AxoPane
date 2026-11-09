@@ -30,12 +30,10 @@ export type ConflictInfo = {
   name: string
 }
 
-/** `null` follows the OS theme. */
 export type SetWindowThemeRequest = {
   theme: 'light' | 'dark' | null
 }
 
-/** `mica` on Windows 11; everything else renders the solid base. */
 export type WindowBackdrop = 'mica' | 'solid'
 
 export type OpProgress = {
@@ -72,7 +70,6 @@ export type QueueProgressEvent = OpProgress
 
 export type QueueConflictEvent = ConflictInfo
 
-/** Operation id of a transfer the backend has auto-removed from the queue. */
 export type QueueRemovedEvent = string
 
 export type OpIdRequest = {

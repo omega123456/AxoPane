@@ -96,10 +96,6 @@ fn emit_icons(paths: Vec<String>, app: &AppHandle) {
     emit_icon_batch(app, batcher.drain_remainder());
 }
 
-/// `test-utils` synchronous variant: returns the same batched shape the
-/// production command emits over IPC (`Vec<Vec<IconStateEvent>>`, one inner
-/// `Vec` per flushed batch) instead of a single flat list, so tests can
-/// assert on the number of batches produced.
 #[cfg(feature = "test-utils")]
 #[tauri::command]
 pub fn request_icons(payload: RequestIconsRequest) -> Vec<Vec<IconStateEvent>> {

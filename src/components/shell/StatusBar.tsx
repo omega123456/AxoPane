@@ -63,9 +63,6 @@ function VolumeSpace({
 }
 
 function useActivePaneSummary() {
-  // Select only cheap references here; the O(n) lookup for the focused entry is
-  // deferred to a `useMemo` below so it runs when entries/focus change rather
-  // than on every unrelated panes-store emission (size/icon/patch bursts).
   return usePanesStore(
     useShallow((state) => {
       const pane = state.panes[state.activePaneId]
@@ -96,11 +93,7 @@ function isSizeUpdating(size: EntrySizeState | undefined) {
   return size?.state === 'calculating' || size?.refreshing === true
 }
 
-// `null` when no selected item has a known size, so an unsized folder
-// selection reads as blank rather than "0 B".
 function useSelectedBytes(entries: DirectoryEntry[], selectedIds: string[] | undefined) {
-  // Folder sizes only count where an index (Everything / the macOS index)
-  // keeps them current; otherwise the total is files only.
   const autoFolderSize = useConfigStore((state) => state.autoFolderSize)
   const sizeStates = usePanesStore((state) => indexedSizeStates(state, autoFolderSize))
   return useMemo(() => {
@@ -163,8 +156,6 @@ export function StatusBar() {
   const volumes = usePanesStore(useShallow((state) => state.volumes))
   const selectedIds = useSelectionStore((state) => state.selections[activePaneId]?.selectedIds)
   const selectionCount = selectedIds?.length ?? 0
-  // With a multi-selection the focused row's name says nothing useful and
-  // would crowd out the selection stats.
   const shownEntry = selectionCount <= 1 ? focusedEntry : undefined
   const selectedBytes = useSelectedBytes(entries, selectedIds)
   const volume = volumes.find((candidate) => isPathInsideVolume(path, candidate.mountRoot))

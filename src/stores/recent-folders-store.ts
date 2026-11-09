@@ -1,11 +1,9 @@
 import { create } from 'zustand'
 import { pathsMatch } from '@/lib/path-compare'
 
-/** How many recently visited folders Search everywhere offers. */
 export const MAX_RECENT_FOLDERS = 20
 
 type RecentFoldersState = {
-  /** Most recent first. */
   folders: string[]
   hydrate: (folders: string[]) => void
   record: (path: string) => void

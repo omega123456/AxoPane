@@ -6,10 +6,6 @@ function stateIconToneClass(danger: boolean) {
   return danger ? 'text-light-danger dark:text-dark-danger' : TEXT_SECONDARY
 }
 
-/**
- * The one template for empty, error and permission states: a 48px icon tile,
- * a 20px title, one line of explanation and one action.
- */
 export function StatePanel({
   icon,
   danger = false,

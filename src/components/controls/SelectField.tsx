@@ -4,7 +4,6 @@ import { TEXT_SECONDARY } from '@/lib/class-names'
 
 export type SelectOption<T extends string> = { value: T; label: string }
 
-/** Fluent combo box: 32px, control fill and strokes, 12px chevron. */
 export function SelectField<T extends string>({
   value,
   onChange,

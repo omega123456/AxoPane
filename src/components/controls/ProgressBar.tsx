@@ -9,7 +9,6 @@ const toneFill: Record<ProgressTone, string> = {
   neutral: 'bg-light-text-secondary dark:bg-dark-text-secondary',
 }
 
-/** Fluent determinate progress bar: a 4px divider track with an accent fill. */
 export function ProgressBar({
   value,
   label,
@@ -17,7 +16,6 @@ export function ProgressBar({
   tone = 'accent',
   className = '',
 }: {
-  /** 0–100. */
   value: number
   label?: string
   labelledBy?: string
@@ -35,7 +33,6 @@ export function ProgressBar({
       aria-valuenow={Math.round(clamped)}
       className={`h-1 overflow-hidden rounded-full bg-light-divider dark:bg-dark-divider ${className}`}
     >
-      {/* Runtime geometry: the fill width follows progress. */}
       <div className={`h-full rounded-full ${toneFill[tone]}`} style={{ width: `${clamped}%` }} />
     </div>
   )

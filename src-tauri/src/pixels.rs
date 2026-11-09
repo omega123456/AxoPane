@@ -1,13 +1,9 @@
-//! Pure pixel-format conversion and PNG encoding shared by the native icon and
-//! thumbnail providers.
-
 use base64::Engine;
 use png::{BitDepth, ColorType, Encoder};
 
 pub const RGBA_BYTES_PER_PIXEL: usize = 4;
 const CHANNEL_MAX: u32 = 255;
 
-/// Straight-alpha value of one premultiplied channel, rounded to nearest.
 pub fn unpremultiply(channel: u8, alpha: u8) -> u8 {
     let alpha = u32::from(alpha);
     (u32::from(channel) * CHANNEL_MAX + alpha / 2)
@@ -15,8 +11,6 @@ pub fn unpremultiply(channel: u8, alpha: u8) -> u8 {
         .map_or(0, |value| value.min(CHANNEL_MAX) as u8)
 }
 
-/// Converts premultiplied BGRA (as `GetDIBits` returns for 32bpp) to
-/// straight-alpha RGBA, or `None` when `pixels` is not whole pixels.
 pub fn premultiplied_bgra_to_rgba(pixels: &[u8]) -> Option<Vec<u8>> {
     let whole_pixels = pixels.len().is_multiple_of(RGBA_BYTES_PER_PIXEL);
     if !whole_pixels {

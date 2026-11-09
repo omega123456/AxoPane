@@ -10,16 +10,6 @@ use super::{
     ETA_STABILIZATION_SAMPLES, PROGRESS_EMIT_INTERVAL,
 };
 
-/// Coalesces the flood of per-chunk / per-member progress emissions produced
-/// while transferring bytes. Every transfer-shaped path carries one of these:
-/// the recursive directory walk (`copy_dir_recursive`) shares a single
-/// throttle across the whole tree; the single top-level file transfer (the
-/// non-directory branch of `copy_path_with_total_discovery`) gets its own
-/// throttle, since a large single file floods exactly the same way a
-/// directory walk does; and the compress/extract member loops
-/// (`compress_item_with_progress`, `extract_item_with_progress`) share one
-/// throttle across every member of the operation so a many-small-member
-/// archive does not re-flood by minting a fresh throttle per member.
 pub struct TransferThrottle {
     last_emit: Instant,
     interval: Duration,
@@ -53,8 +43,6 @@ pub(super) fn emit_operation_progress(progress: &Option<ProgressEmitter>, operat
     }
 }
 
-/// Emit `operation`'s progress now, or — when a [`TransferThrottle`] is supplied —
-/// only once `interval` has elapsed since the last emission for this walk.
 fn maybe_emit_transfer(
     context: &WorkerContext<'_>,
     operation: &OpState,
@@ -67,12 +55,6 @@ fn maybe_emit_transfer(
     }
 }
 
-/// Pre-measure the real byte total for items whose size arrived as 0 (folders,
-/// whose size the frontend cannot cheaply know up front) before any work starts.
-/// Without this, the total grows piecemeal as the walk discovers each nested
-/// file, so `copied / total` can race ahead of 100% and get clamped there long
-/// before the job is actually done — this keeps the denominator accurate from
-/// the first progress emission for all transfer-shaped kinds.
 pub(super) fn measure_totals_up_front(
     items: &[OpItem],
     shared_operation: &Arc<Mutex<OpState>>,
@@ -86,9 +68,6 @@ pub(super) fn measure_totals_up_front(
         return;
     }
 
-    // Copy preserves symlinks as links, so their own on-disk size belongs in
-    // the total instead of the size of whatever they happen to point at.
-    // Delete also removes the link itself, so neither operation follows them.
     let follow_symlinks = false;
     let mut discovered_bytes = 0_u64;
     for item in items.iter().filter(|item| item.size_bytes == 0) {

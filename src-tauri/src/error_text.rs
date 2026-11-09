@@ -1,9 +1,6 @@
-//! Converts errors into the plain-string form IPC commands report to the UI.
-
 use std::fmt::Display;
 
 pub trait StringifyError<T> {
-    /// Replaces the error with its `Display` text.
     fn stringify_err(self) -> Result<T, String>;
 }
 

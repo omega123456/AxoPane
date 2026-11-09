@@ -22,20 +22,12 @@ use crate::volumes::VolumeInfo;
 
 pub(super) struct Inner {
     pub(super) ops: HashMap<String, Arc<Mutex<OpState>>>,
-    /// Per-operation wakeup signal. Each operation owns its own `Condvar` so that a
-    /// parked worker always pairs the same `Condvar` with the same operation mutex —
-    /// `Condvar` panics on platforms (e.g. macOS pthread) if a single instance
-    /// is waited on with two different mutexes, which happened when one shared
-    /// `Condvar` served every operation's per-op `OpState` mutex.
     pub(super) signals: HashMap<String, Arc<Condvar>>,
-    /// Submission/scheduling order (also the reorder order for pending items).
     pub(super) order: VecDeque<String>,
-    /// Volumes currently occupied by an active operation.
     pub(super) busy_volumes: HashSet<String>,
     pub(super) workers: Vec<JoinHandle<()>>,
 }
 
-/// The queue engine. Held as Tauri managed state.
 pub struct OpsService {
     inner: Arc<Mutex<Inner>>,
     next_id: AtomicU64,
@@ -97,7 +89,6 @@ impl OpsService {
         }
     }
 
-    /// Override the volume table used for identity (tests inject deterministic data).
     pub fn set_volumes(&self, volumes: Vec<VolumeInfo>) {
         *self.volumes.lock().expect("volumes lock") = volumes;
     }
@@ -152,7 +143,6 @@ impl OpsService {
         roots
     }
 
-    /// Enqueue a new copy/move operation. Returns its id.
     pub fn start_op(&self, request: StartOpRequest) -> String {
         let id = format!("op-{}", self.next_id.fetch_add(1, Ordering::Relaxed));
         let destination_dir = PathBuf::from(&request.destination_dir);
@@ -162,7 +152,6 @@ impl OpsService {
             .iter()
             .map(|item| PathBuf::from(&item.source_path))
             .collect();
-        // A delete has no destination; lock only the source volume(s).
         if !matches!(request.kind, OpKind::Delete) {
             source_paths.push(destination_dir.clone());
         }
@@ -234,11 +223,6 @@ impl OpsService {
         let inner = self.inner.clone();
         let runtime = self.worker_runtime();
         let handle = thread::spawn(move || {
-            // All source/destination resource keys are admitted as one
-            // duplicate-collapsed set through the shared resource
-            // coordinator, whether this is `id`'s first dispatch or a
-            // rescheduled run after another operation released its
-            // volumes — see `admit_and_run_operation`.
             admit_and_run_operation(id.clone(), &inner, &runtime);
             release_and_reschedule(&id, &inner, &runtime);
         });
@@ -304,7 +288,6 @@ impl OpsService {
         Some(cancellation)
     }
 
-    /// Skip one item only from a paused operation, then leave the operation paused.
     pub fn skip_op(&self, id: &str) {
         if self.skip_locked(id) {
             self.notify_waiters(id);
@@ -333,8 +316,6 @@ impl OpsService {
         }
     }
 
-    /// Reorder *pending* operations. Unknown / non-pending ids are ignored; any
-    /// pending ids not named keep their relative order at the back.
     pub fn reorder_ops(&self, ids: &[String]) {
         let mut inner = self.inner.lock().expect("ops lock");
         let pending = inner.pending_ids();
@@ -371,7 +352,6 @@ impl OpsService {
         true
     }
 
-    /// Retry a failed operation by re-queuing it.
     pub fn retry_op(&self, id: &str) {
         if self.retry_locked(id) {
             self.schedule();
@@ -405,7 +385,6 @@ impl OpsService {
             .collect()
     }
 
-    /// True while work is active or a cancelled worker is still unwinding.
     pub fn has_unfinished_work(&self) -> bool {
         let inner = self.inner.lock().expect("ops lock");
         inner.ops.values().any(|operation| {
@@ -420,7 +399,6 @@ impl OpsService {
         self.inner.lock().expect("ops lock").ops.get(id).cloned()
     }
 
-    /// The per-op wakeup signal, used to notify a parked worker for `id`.
     fn signal(&self, id: &str) -> Option<Arc<Condvar>> {
         self.inner
             .lock()

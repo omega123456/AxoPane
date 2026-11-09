@@ -1,12 +1,3 @@
-//! Index snapshot encoding plus the catch-up decision. Pure: the snapshot
-//! path is injected, and FSEvents flags arrive pre-mapped to [`ChangeFlags`].
-//!
-//! Layout (little-endian): magic, `u32` version, volume UUID, OS build, `u64` saved
-//! event ID, `u64` last full-scan Unix seconds, visited roots, node table,
-//! then an FNV-1a 64 checksum of everything before it. Strings are a `u32`
-//! byte length plus UTF-8. Nodes are written parents-first as `u32` parent
-//! position (`u32::MAX` for roots), name, `u64` direct bytes, `u8` flags.
-
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -18,15 +9,11 @@ const MAGIC: &[u8; 8] = b"AXOSIZE\0";
 const MAX_STRING_BYTES: usize = 64 * 1024;
 const MAX_VISITED_ROOTS: u32 = 1024;
 
-/// Everything in a snapshot except the tree.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SnapshotMeta {
     pub volume_uuid: String,
-    /// The macOS build the tree was scanned on; an update means a rescan.
     pub os_build: String,
-    /// The event ID captured before the scan that produced the tree.
     pub event_id: u64,
-    /// Unix seconds when the last full scan completed.
     pub last_full_scan_secs: u64,
     pub visited_roots: Vec<PathBuf>,
 }
@@ -64,7 +51,6 @@ pub fn encode(meta: &SnapshotMeta, tree: &FolderSizeTree) -> Vec<u8> {
     out
 }
 
-/// `None` for anything but an intact snapshot of the current version.
 pub fn decode(bytes: &[u8]) -> Option<Snapshot> {
     let (body, checksum) = bytes.split_last_chunk::<{ size_of::<u64>() }>()?;
     let checksum_matches = fnv1a(body) == u64::from_le_bytes(*checksum);
@@ -120,7 +106,6 @@ pub fn decode(bytes: &[u8]) -> Option<Snapshot> {
     })
 }
 
-/// Writes atomically: a sibling temp file, fsync, then rename over `path`.
 pub fn save(path: &Path, meta: &SnapshotMeta, tree: &FolderSizeTree) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -133,26 +118,20 @@ pub fn save(path: &Path, meta: &SnapshotMeta, tree: &FolderSizeTree) -> io::Resu
     fs::rename(&temp, path)
 }
 
-/// On macOS `sync_all` is `F_FULLFSYNC`, which flushes the whole drive's
-/// write cache.
 #[cfg(not(feature = "test-utils"))]
 fn sync(file: &fs::File) -> io::Result<()> {
     file.sync_all()
 }
 
-/// Tests skip the device-wide flush; a torn snapshot is caught by `load`'s
-/// checksum anyway.
 #[cfg(feature = "test-utils")]
 fn sync(_file: &fs::File) -> io::Result<()> {
     Ok(())
 }
 
-/// `None` when the file is missing, unreadable, corrupt or outdated.
 pub fn load(path: &Path) -> Option<Snapshot> {
     decode(&fs::read(path).ok()?)
 }
 
-/// The FSEvents flags the index reacts to, independent of FSEvents itself.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ChangeFlags {
     pub must_scan_sub_dirs: bool,
@@ -162,7 +141,6 @@ pub struct ChangeFlags {
     pub root_changed: bool,
 }
 
-/// One reported directory change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChangeEvent {
     pub path: PathBuf,
@@ -172,13 +150,10 @@ pub struct ChangeEvent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplayOutcome {
     UpToDate,
-    /// Re-read these single directories and rescan these subtrees. Both are
-    /// sorted and deduplicated; nothing is listed inside a rescanned subtree.
     Apply {
         reread: Vec<PathBuf>,
         rescan: Vec<PathBuf>,
     },
-    /// Rescan everything in the background, keeping old totals visible.
     FullRescan,
 }
 
@@ -189,10 +164,6 @@ pub struct CurrentVolume<'volume> {
     pub event_id: u64,
 }
 
-/// Launch catch-up: `events` are those replayed since
-/// `saved.event_id`. Any `MustScanSubDirs` during replay means history was
-/// coalesced, so it forces a full rescan here, as does a different volume or
-/// OS build (an update rewrites the sealed system volume without events).
 pub fn plan_catch_up(
     saved: &SnapshotMeta,
     current: CurrentVolume<'_>,
@@ -217,9 +188,6 @@ pub fn plan_catch_up(
     plan_batch(events)
 }
 
-/// A live batch, or the per-directory part of a catch-up: `MustScanSubDirs`
-/// rescans that subtree only; dropped, wrapped or root-changed events force a
-/// full rescan.
 pub fn plan_batch(events: &[ChangeEvent]) -> ReplayOutcome {
     if events.iter().any(|event| forces_full_rescan(event.flags)) {
         return ReplayOutcome::FullRescan;
@@ -251,7 +219,6 @@ fn forces_full_rescan(flags: ChangeFlags) -> bool {
     flags.user_dropped || flags.kernel_dropped || flags.event_ids_wrapped || flags.root_changed
 }
 
-/// Sorted paths with every path inside another one dropped.
 fn outermost(mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
     paths.sort();
     let mut kept: Vec<PathBuf> = Vec::new();
@@ -278,7 +245,6 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     })
 }
 
-/// A bounds-checked cursor; every read is `None` past the end.
 struct Reader<'a>(&'a [u8]);
 
 impl<'a> Reader<'a> {

@@ -6,8 +6,6 @@ use ignore::{Walk, WalkBuilder};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TraversalOptions {
-    /// Include the root in output. Recursive consumers generally leave this
-    /// false, because they already own root handling.
     pub include_root: bool,
 }
 
@@ -39,10 +37,6 @@ impl std::fmt::Display for TraversalError {
 
 impl std::error::Error for TraversalError {}
 
-/// Create the AxoPane recursive iterator. Ignore files and hidden-file policy
-/// are disabled here because AxoPane, not a repository convention, controls
-/// visibility. Directory links are never followed; they are returned as link
-/// entries so copy/archive policies can preserve them deliberately.
 pub fn walk(
     root: &Path,
     options: TraversalOptions,
@@ -70,13 +64,6 @@ pub fn walk(
         .parents(false)
         .follow_links(false)
         .threads(1);
-    // Deliberately no `sort_by_file_name`: the `ignore` crate materializes
-    // and sorts every directory's full child list up front to support it,
-    // which is an unbounded buffer for a wide directory. Traversal order is
-    // not a product contract (archive member sequence, size/count walks,
-    // etc. are defined by member set/path/metadata/content, never order),
-    // so this yields entries in whatever order the platform readdir call
-    // returns them.
     Ok(TraversalIter {
         walk: builder.build(),
         root: root.to_path_buf(),

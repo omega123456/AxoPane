@@ -10,7 +10,6 @@ function segmentStateClass(active: boolean) {
   return active ? ACTIVE_SEGMENT_CLASS : INACTIVE_SEGMENT_CLASS
 }
 
-/** Fluent segmented control: 26px items in a 2px-padded control well; selection is solid accent. */
 export function SegmentedControl<T extends string>({
   value,
   onChange,

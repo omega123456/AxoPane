@@ -68,7 +68,6 @@ export const useQueueStore = create<QueueStore>((set) => ({
   reset: () => set(defaultQueueData()),
 }))
 
-/** Operations in display order, freshest data resolved from the store map. */
 export function orderedOperations(state: QueueStore): OpProgress[] {
   return state.order
     .map((id) => state.operations[id])
