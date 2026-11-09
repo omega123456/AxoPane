@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import type { PlaywrightScenario } from '../src/tests/playwright-fixtures/e2e'
 
 async function injectScenario(page: Page, scenario: PlaywrightScenario) {
@@ -50,4 +50,27 @@ export async function openSettingsSection(
 
 export async function rightClickPane(page: Page, paneName: 'Left pane' | 'Right pane') {
   await page.getByRole('region', { name: paneName }).click({ button: 'right' })
+}
+
+const DRAG_STEP_COUNT = 6
+
+type Point = { x: number; y: number }
+
+async function centerOf(locator: Locator): Promise<Point> {
+  const box = await locator.boundingBox()
+  if (!box) throw new Error('missing element geometry')
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+}
+
+export async function pressAndDragInWholePixelSteps(page: Page, source: Locator, target: Locator) {
+  const start = await centerOf(source)
+  const end = await centerOf(target)
+  await page.mouse.move(start.x, start.y)
+  await page.mouse.down()
+  for (let step = 1; step <= DRAG_STEP_COUNT; step++) {
+    const progress = step / DRAG_STEP_COUNT
+    const x = start.x + Math.round((end.x - start.x) * progress)
+    const y = start.y + Math.round((end.y - start.y) * progress)
+    await page.mouse.move(x, y)
+  }
 }

@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test'
-import { gotoScenario, openSettingsSection, rightClickPane } from './helpers'
+import {
+  gotoScenario,
+  openSettingsSection,
+  pressAndDragInWholePixelSteps,
+  rightClickPane,
+} from './helpers'
 import { screenshotScenarios } from '../src/tests/playwright-fixtures/e2e'
 import { longTypeLabel } from '../src/tests/playwright-fixtures/file-types'
 import { RELATIVE_DATES_NOW } from '../src/tests/playwright-fixtures/relative-dates'
@@ -378,17 +383,7 @@ for (const mode of ['light', 'dark'] as const) {
     await gotoScenario(page, screenshotScenarios.tabDrag[mode])
     const leftPane = page.getByRole('group', { name: 'Left pane tabs' })
     const tabs = leftPane.getByRole('tab')
-    const source = tabs.nth(0)
-    const target = tabs.nth(2)
-    const sourceBox = await source.boundingBox()
-    const targetBox = await target.boundingBox()
-    if (!sourceBox || !targetBox) throw new Error('missing tab geometry')
-
-    await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2)
-    await page.mouse.down()
-    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, {
-      steps: 6,
-    })
+    await pressAndDragInWholePixelSteps(page, tabs.nth(0), tabs.nth(2))
     await expect(page.locator('main')).toHaveScreenshot(`tab-drag-same-pane-${mode}.png`)
     await page.mouse.up()
     await expect(leftPane.getByRole('tab').last()).toHaveText('Omega')
@@ -400,15 +395,7 @@ for (const mode of ['light', 'dark'] as const) {
     const rightPane = page.getByRole('group', { name: 'Right pane tabs' })
     const source = leftPane.getByRole('tab').nth(1)
     const target = rightPane.getByRole('tab').last()
-    const sourceBox = await source.boundingBox()
-    const targetBox = await target.boundingBox()
-    if (!sourceBox || !targetBox) throw new Error('missing tab geometry')
-
-    await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2)
-    await page.mouse.down()
-    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, {
-      steps: 6,
-    })
+    await pressAndDragInWholePixelSteps(page, source, target)
     await expect(page.locator('main')).toHaveScreenshot(`tab-drag-cross-pane-${mode}.png`)
     await page.mouse.up()
     await expect(rightPane.getByRole('tab')).toHaveCount(3)
@@ -418,15 +405,7 @@ for (const mode of ['light', 'dark'] as const) {
     await gotoScenario(page, screenshotScenarios.invalidTabDrag[mode])
     const source = page.getByRole('group', { name: 'Left pane tabs' }).getByRole('tab')
     const target = page.getByRole('group', { name: 'Right pane tabs' }).getByRole('tab').first()
-    const sourceBox = await source.boundingBox()
-    const targetBox = await target.boundingBox()
-    if (!sourceBox || !targetBox) throw new Error('missing tab geometry')
-
-    await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2)
-    await page.mouse.down()
-    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, {
-      steps: 6,
-    })
+    await pressAndDragInWholePixelSteps(page, source, target)
     await expect(page.locator('main')).toHaveScreenshot(`tab-drag-invalid-${mode}.png`)
     await page.mouse.up()
     await expect(page.getByRole('group', { name: 'Left pane tabs' }).getByRole('tab')).toHaveCount(
