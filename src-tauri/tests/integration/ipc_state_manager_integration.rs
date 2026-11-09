@@ -109,7 +109,11 @@ fn commands_round_trip_config_through_persistence() {
         config: saved_config.clone(),
     };
     assert_eq!(
-        commands::save_config(request, as_state(&persistence)),
+        commands::save_config(
+            request,
+            as_state(&persistence),
+            as_state(&SizeService::default())
+        ),
         saved_config
     );
     assert_eq!(commands::load_config(as_state(&persistence)), saved_config);
@@ -601,7 +605,11 @@ fn save_config_keeps_the_rust_held_index_exclusions() {
         ..Config::default()
     };
 
-    let saved = commands::save_config(SaveConfigRequest { config: stale }, as_state(&persistence));
+    let saved = commands::save_config(
+        SaveConfigRequest { config: stale },
+        as_state(&persistence),
+        as_state(&SizeService::default()),
+    );
 
     assert_eq!(saved.index_exclusions, held);
     assert_eq!(saved.theme, "dark");

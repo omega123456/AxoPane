@@ -36,6 +36,16 @@ export const searchIndexUnavailable: FolderSizeIndexStatus = {
   fileNamesAvailable: false,
 }
 
+export const searchIndexOff: FolderSizeIndexStatus = {
+  backend: 'macIndex',
+  isAvailable: false,
+  state: 'off',
+  fileNamesAvailable: false,
+}
+
+/** Both index toggles on, as the running-index scenarios need. */
+export const searchIndexTogglesOn = { indexFolders: true, indexFiles: true }
+
 export const searchIndexInsideExisting: AddIndexExclusionResponse = {
   exclusions: searchIndexExclusions,
   outcomes: [

@@ -348,7 +348,7 @@ describe('SettingsModal', () => {
   it.each([
     [
       'macIndex',
-      'Restore every setting to how AxoPane ships. Search index exclusions stay as they are.',
+      'Restore every setting to how AxoPane ships. Search index settings stay as they are.',
     ],
     ['everything', 'Restore every setting to how AxoPane ships'],
   ] as const)('words the reset expander for the %s backend', async (backend, description) => {
@@ -367,10 +367,32 @@ describe('SettingsModal', () => {
     expect(screen.getByRole('button', { name: /Reset to defaults/ })).toHaveTextContent(description)
   })
 
-  it('keeps the index exclusions when resetting to defaults', async () => {
+  it('offers no reset on the Search index page', async () => {
+    useSettingsStore.getState().open('searchIndex')
+    usePanesStore.setState({
+      folderSizeIndexStatus: {
+        backend: 'macIndex',
+        isAvailable: true,
+        state: 'upToDate',
+        fileNamesAvailable: true,
+      },
+    })
+
+    render(<SettingsModal />)
+    await screen.findByText('AxoPane 0.1.0')
+    expect(screen.getByRole('heading', { name: 'Search index' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Reset to defaults/ })).not.toBeInTheDocument()
+  })
+
+  it('keeps the index toggles and exclusions when resetting to defaults', async () => {
     const user = userEvent.setup()
     const exclusions = ['/Users/alex/Projects/app/build-cache']
-    useConfigStore.setState({ indexExclusions: exclusions, showTime: true })
+    useConfigStore.setState({
+      indexExclusions: exclusions,
+      indexFolders: true,
+      indexFiles: true,
+      showTime: true,
+    })
     useSettingsStore.getState().open('dates')
 
     render(<SettingsModal />)
@@ -380,6 +402,8 @@ describe('SettingsModal', () => {
 
     await waitFor(() => expect(useConfigStore.getState().showTime).toBe(false))
     expect(useConfigStore.getState().indexExclusions).toEqual(exclusions)
+    expect(useConfigStore.getState().indexFolders).toBe(true)
+    expect(useConfigStore.getState().indexFiles).toBe(true)
   })
 
   it('shows the auto folder size toggle when Everything is available', async () => {

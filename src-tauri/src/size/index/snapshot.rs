@@ -126,9 +126,14 @@ impl Machine {
             return;
         }
         let event_id = self.snapshot_event_id();
+        if !self.shared.collect_file_names {
+            return self.save_folders_without_names(event_id);
+        }
         match choose_save(trigger, self.save_state(event_id)) {
             SaveKind::Skip => {}
-            SaveKind::FolderOnly => self.save_folder_snapshot(event_id),
+            SaveKind::FolderOnly => {
+                self.save_folder_snapshot(event_id);
+            }
             SaveKind::Pair => self.save_pair(PairSave { event_id, trigger }),
         }
     }
@@ -157,7 +162,25 @@ impl Machine {
         }
     }
 
-    fn save_folder_snapshot(&mut self, event_id: u64) {
+    fn save_folders_without_names(&mut self, event_id: u64) {
+        if !self.folders_unsaved(event_id) {
+            return;
+        }
+        let saved = self.save_folder_snapshot(event_id);
+        if saved {
+            self.shared.view_mut().tree.mark_structure_saved();
+        }
+    }
+
+    fn folders_unsaved(&self, event_id: u64) -> bool {
+        let view = self.shared.view();
+        view.tree.is_dirty()
+            || view.tree.structure_changed()
+            || self.meta_dirty
+            || event_id != self.meta.event_id
+    }
+
+    fn save_folder_snapshot(&mut self, event_id: u64) -> bool {
         let started = Instant::now();
         let meta = self.next_meta(event_id, self.meta.pair_token);
         let bytes = persist::encode(&meta, &self.shared.view().tree);
@@ -166,7 +189,7 @@ impl Machine {
                 "size index: snapshot write to {} failed: {error}",
                 self.snapshot_path.display()
             );
-            return;
+            return false;
         }
         self.shared.view_mut().tree.mark_clean();
         self.meta = meta;
@@ -176,6 +199,7 @@ impl Machine {
             bytes.len(),
             started.elapsed().as_millis()
         );
+        true
     }
 
     fn capture_pair(&self, meta: &SnapshotMeta) -> PairInputs {

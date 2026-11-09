@@ -20,7 +20,7 @@ test('layout hides the auto folder size toggle without a backend', async ({ page
 })
 
 for (const [name, status] of Object.entries(macIndexStatuses)) {
-  test(`auto folder size row on macOS reports ${name}`, async ({ page }) => {
+  test(`index progress on macOS reports ${name}`, async ({ page }) => {
     await gotoScenario(page, {
       ...browsing,
       platform: 'macos',
@@ -28,20 +28,45 @@ for (const [name, status] of Object.entries(macIndexStatuses)) {
     })
     await openSettingsSection(page, 'searchIndex')
     const row = page
-      .getByText('Automatically calculate folder sizes', { exact: true })
-      .locator('xpath=../..')
-    await expect(row.getByText(/Folders you open are sized right away/)).toBeVisible()
+      .getByRole('heading', { name: 'Index progress' })
+      .locator('xpath=following-sibling::*[1]')
     await expect(row.getByRole('status')).toHaveText(folderSizeStatusLabel(status))
   })
 }
 
-test('reset expander keeps the macOS index exclusions', async ({ page }) => {
+test('reset expander keeps the macOS index settings', async ({ page }) => {
   await gotoScenario(page, screenshotScenarios.searchIndexEmpty.light)
   await openSettingsSection(page, 'dates')
   const expander = page.getByRole('button', { name: /Reset to defaults/ })
   await expander.click()
   await expect(expander).toHaveAttribute('aria-expanded', 'true')
-  await expect(expander).toContainText('Search index exclusions stay as they are.')
+  await expect(expander).toContainText('Search index settings stay as they are.')
+})
+
+test('search index page has no reset expander', async ({ page }) => {
+  await gotoScenario(page, screenshotScenarios.searchIndexEmpty.light)
+  await openSettingsSection(page, 'searchIndex')
+  await expect(page.getByText('Everything is indexed')).toBeVisible()
+  await expect(page.getByRole('button', { name: /Reset to defaults/ })).toHaveCount(0)
+})
+
+test('search index turned off shows only the two index toggles', async ({ page }) => {
+  await gotoScenario(page, screenshotScenarios.searchIndexOff.light)
+  await openSettingsSection(page, 'searchIndex')
+  await expect(page.getByRole('switch', { name: 'Folder index' })).toHaveAttribute(
+    'aria-checked',
+    'false',
+  )
+  await expect(page.getByRole('switch', { name: 'File index' })).toHaveAttribute(
+    'aria-checked',
+    'false',
+  )
+  await expect(page.getByRole('textbox', { name: 'Folder to exclude' })).toHaveCount(0)
+  await page.getByRole('switch', { name: 'File index' }).click()
+  await expect(page.getByRole('switch', { name: 'Folder index' })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  )
 })
 
 test('search index with no exclusions', async ({ page }) => {

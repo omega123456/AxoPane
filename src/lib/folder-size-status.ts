@@ -7,6 +7,8 @@ export const compactCount = new Intl.NumberFormat('en', {
 
 const PREPARING_LABEL = 'Preparing…'
 
+const INDEX_OFF_LABEL = 'Off'
+
 export const INDEX_UNAVAILABLE_LABEL = "The index couldn't start"
 
 export function pauseLabel(pauseReason: FolderSizeIndexStatus['pauseReason']) {
@@ -21,6 +23,7 @@ const statusLabels: Record<
   FolderSizeIndexStatus['state'],
   (status: FolderSizeIndexStatus) => string
 > = {
+  off: () => INDEX_OFF_LABEL,
   upToDate: () => 'Up to date',
   paused: pausedLabel,
   indexing: () => 'Indexing…',
@@ -34,6 +37,10 @@ export function folderSizeStatusLabel(status: FolderSizeIndexStatus) {
     | ((status: FolderSizeIndexStatus) => string)
     | undefined
   return label ? label(status) : PREPARING_LABEL
+}
+
+export function isIndexRunning(status: FolderSizeIndexStatus) {
+  return status.state !== 'off'
 }
 
 export function isIndexUnavailable(status: FolderSizeIndexStatus) {

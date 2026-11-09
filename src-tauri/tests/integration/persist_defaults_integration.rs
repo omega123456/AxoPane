@@ -40,6 +40,8 @@ fn persistence_defaults_match_the_frontend_contract() {
     assert!(config.favourite_names.is_empty());
     assert!(!config.favourites_collapsed);
     assert!(config.index_exclusions.is_empty());
+    assert!(!config.index_folders);
+    assert!(!config.index_files);
     assert_eq!(config.columns, columns);
     assert_eq!(config.layout, LayoutConfig::default());
     assert_eq!(config.layout.default_view_mode, "details");

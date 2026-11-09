@@ -38,3 +38,11 @@ impl FolderTreeSource for crate::size::index::FolderSizeIndex {
         })
     }
 }
+
+#[cfg(target_os = "macos")]
+impl FolderTreeSource for crate::size::index::IndexHost {
+    fn read(&self, read: &mut dyn FnMut(IndexRead<'_>)) -> Result<(), SearchError> {
+        let index = self.index().ok_or(SearchError::Unavailable)?;
+        FolderTreeSource::read(index.as_ref(), read)
+    }
+}

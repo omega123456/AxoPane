@@ -99,6 +99,7 @@ pub(crate) struct Harness {
     pub(crate) protected: Vec<PathBuf>,
     pub(crate) user_exclusions: Vec<PathBuf>,
     pub(crate) home: Option<PathBuf>,
+    pub(crate) collect_file_names: bool,
     pub(crate) service: Option<SizeService>,
 }
 
@@ -136,6 +137,7 @@ impl Harness {
             parked: Arc::default(),
             user_exclusions: Vec::new(),
             home: None,
+            collect_file_names: true,
             service: None,
         }
     }
@@ -147,6 +149,7 @@ impl Harness {
         let (now, parked) = (Arc::clone(&self.now), Arc::clone(&self.parked));
         let (live, statuses) = (Arc::clone(&self.live), Arc::clone(&self.statuses));
         let options = IndexOptions {
+            collect_file_names: self.collect_file_names,
             roots: self.roots.clone(),
             excluded: self.excluded.clone(),
             protected: self.protected.clone(),

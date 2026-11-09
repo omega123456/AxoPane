@@ -6,6 +6,8 @@ pub mod platform;
 pub mod tree;
 
 #[cfg(target_os = "macos")]
+mod host;
+#[cfg(target_os = "macos")]
 mod lanes;
 #[cfg(target_os = "macos")]
 mod machine;
@@ -25,6 +27,8 @@ use std::path::PathBuf;
 use names::FileNameStore;
 use tree::FolderSizeTree;
 
+#[cfg(target_os = "macos")]
+pub use host::{IndexHost, IndexHostSetup, IndexOptionsFactory};
 #[cfg(all(target_os = "macos", feature = "test-utils"))]
 pub use service::LaneSnapshot;
 #[cfg(all(target_os = "macos", not(feature = "test-utils")))]

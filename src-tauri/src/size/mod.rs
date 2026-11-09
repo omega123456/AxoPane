@@ -77,12 +77,36 @@ pub enum IndexBackend {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum IndexState {
+    Off,
     Unavailable,
     NotReady,
     Indexing,
     Updating,
     UpToDate,
     Paused,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexScope {
+    Off,
+    Folders,
+    FoldersAndFiles,
+}
+
+impl IndexScope {
+    pub fn from_toggles(index_folders: bool, index_files: bool) -> Self {
+        if index_files {
+            return Self::FoldersAndFiles;
+        }
+        if index_folders {
+            return Self::Folders;
+        }
+        Self::Off
+    }
+
+    pub fn collects_file_names(self) -> bool {
+        self == Self::FoldersAndFiles
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -235,7 +259,14 @@ struct SizeServiceInner {
     scheduler: Arc<scheduler::SizeScheduler<QueuedWork>>,
     everything: Option<Arc<EverythingHandle>>,
     #[cfg(target_os = "macos")]
-    index: Option<Arc<index::FolderSizeIndex>>,
+    index_host: Option<Arc<index::IndexHost>>,
+}
+
+#[cfg(target_os = "macos")]
+impl SizeServiceInner {
+    fn running_index(&self) -> Option<Arc<index::FolderSizeIndex>> {
+        self.index_host.as_ref().and_then(|host| host.index())
+    }
 }
 
 impl Default for SizeService {
@@ -312,7 +343,7 @@ impl SizeService {
             scheduler: Arc::clone(&scheduler),
             everything,
             #[cfg(target_os = "macos")]
-            index: None,
+            index_host: None,
         }));
 
         let workers = (0..max_throughput_slots())
@@ -341,15 +372,20 @@ impl SizeService {
             .len()
     }
 
-    #[cfg(all(target_os = "macos", not(feature = "test-utils")))]
+    #[cfg(target_os = "macos")]
     pub fn with_folder_size_index(
         timeout: Duration,
         coordinator: Arc<ResourceCoordinator>,
-        index_setup: index::MacIndexSetup<'_>,
+        host_setup: index::IndexHostSetup,
     ) -> Self {
-        let options = index::IndexOptions::for_this_mac(index_setup, Arc::clone(&coordinator));
-        let service = Self::with_resource_coordinator(timeout, coordinator);
-        service.attach_index(index::FolderSizeIndex::start(options));
+        let service = Self::build(ServiceParts {
+            timeout,
+            everything: EverythingHandle::load().ok().map(Arc::new),
+            coordinator,
+            scheduler_capacity: scheduler::MAX_SIZE_METADATA_ENTRIES,
+        });
+        let host = Arc::new(index::IndexHost::start(host_setup));
+        service.inner.lock().expect("size service lock").index_host = Some(host);
         service
     }
 
@@ -358,25 +394,38 @@ impl SizeService {
         timeout: Duration,
         options: index::IndexOptions,
     ) -> Self {
-        let service = Self::build(ServiceParts {
-            timeout,
-            everything: None,
-            coordinator: Arc::clone(&options.coordinator),
-            scheduler_capacity: scheduler::MAX_SIZE_METADATA_ENTRIES,
-        });
-        service.attach_index(index::FolderSizeIndex::start(options));
-        service
+        let coordinator = Arc::clone(&options.coordinator);
+        let host_setup = index::IndexHostSetup {
+            emit_status: Arc::clone(&options.emit_status),
+            scope: IndexScope::from_toggles(true, options.collect_file_names),
+            options_for_start: Box::new(move || options.clone()),
+        };
+        Self::with_folder_size_index(timeout, coordinator, host_setup)
     }
 
     #[cfg(target_os = "macos")]
-    fn attach_index(&self, index: index::FolderSizeIndex) {
-        self.inner.lock().expect("size service lock").index = Some(Arc::new(index));
+    pub fn index_host(&self) -> Option<Arc<index::IndexHost>> {
+        self.inner
+            .lock()
+            .expect("size service lock")
+            .index_host
+            .clone()
     }
 
     #[cfg(target_os = "macos")]
     pub fn folder_size_index(&self) -> Option<Arc<index::FolderSizeIndex>> {
-        self.inner.lock().expect("size service lock").index.clone()
+        self.index_host().and_then(|host| host.index())
     }
+
+    #[cfg(target_os = "macos")]
+    pub fn set_index_scope(&self, scope: IndexScope) {
+        if let Some(host) = self.index_host() {
+            host.set_scope(scope);
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn set_index_scope(&self, _scope: IndexScope) {}
 
     pub fn everything_handle(&self) -> Option<Arc<EverythingHandle>> {
         self.inner
@@ -412,8 +461,8 @@ impl SizeService {
 
     #[cfg(target_os = "macos")]
     fn status_without_everything(&self) -> FolderSizeIndexStatus {
-        self.folder_size_index()
-            .map_or_else(unsupported_status, |index| index.status())
+        self.index_host()
+            .map_or_else(unsupported_status, |host| host.status())
     }
 
     #[cfg(not(any(windows, target_os = "macos")))]
@@ -436,8 +485,7 @@ impl SizeService {
         }
         #[cfg(target_os = "macos")]
         if inner
-            .index
-            .as_ref()
+            .running_index()
             .is_some_and(|index| index.contains(path))
         {
             return SizeBackend::Index;
@@ -571,7 +619,7 @@ impl SizeService {
             .filter(|path| cancel_tracked_job(&mut inner, path))
             .count();
         #[cfg(target_os = "macos")]
-        if let Some(index) = inner.index.clone() {
+        if let Some(index) = inner.running_index() {
             drop(inner);
             return cancelled + index.cancel(paths);
         }

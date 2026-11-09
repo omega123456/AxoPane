@@ -59,6 +59,8 @@ fn customised_config() -> Config {
         )]),
         favourites_collapsed: true,
         index_exclusions: vec!["/Users/alex/Projects/app/build-cache".to_string()],
+        index_folders: true,
+        index_files: true,
     }
 }
 

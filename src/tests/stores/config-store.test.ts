@@ -84,6 +84,8 @@ describe('config-store', () => {
       favouriteNames: {},
       favouritesCollapsed: true,
       indexExclusions: [],
+      indexFolders: false,
+      indexFiles: false,
     })
 
     const state = useConfigStore.getState()
@@ -227,6 +229,8 @@ describe('config-store', () => {
       favouriteNames: {},
       favouritesCollapsed: false,
       indexExclusions: [],
+      indexFolders: false,
+      indexFiles: false,
     })
     expect(useConfigStore.getState().logLevel).toBe('warn')
 
@@ -256,6 +260,8 @@ describe('config-store', () => {
       favouriteNames: {},
       favouritesCollapsed: false,
       indexExclusions: [],
+      indexFolders: false,
+      indexFiles: false,
       keybindings: {},
       columns: [],
       layout: {

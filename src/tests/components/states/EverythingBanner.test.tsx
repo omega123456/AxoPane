@@ -51,6 +51,8 @@ describe('EverythingBanner', () => {
       favouriteNames: {},
       favouritesCollapsed: false,
       indexExclusions: [],
+      indexFolders: false,
+      indexFiles: false,
       keybindings: {},
       columns: [],
       layout: {

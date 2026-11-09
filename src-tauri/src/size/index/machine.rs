@@ -8,7 +8,7 @@ use crossbeam_channel::{Receiver, Sender};
 
 use super::exclusions;
 use super::exclusions::plan_reconcile;
-use super::names::file::NamesHeader;
+use super::names::file::{remove_if_present, NamesHeader};
 use super::names::{PackedNames, PairExpectation};
 use super::persist::{self, ChangeEvent, ReplayOutcome, Snapshot, SnapshotMeta};
 use super::platform::{self, IndexPlatform, PowerSignal, RawEvent, StreamHandle, StreamRequest};
@@ -35,7 +35,7 @@ struct RescanStart {
 struct Resume {
     snapshot: Snapshot,
     current_id: u64,
-    names: NamesHeader,
+    names_event_id: u64,
 }
 
 pub(super) struct ExclusionEdit {
@@ -354,22 +354,23 @@ impl Machine {
         let snapshot = persist::load(&self.snapshot_path);
         self.restore_access(snapshot.as_ref());
         self.discard_stale_spill();
-        let names = snapshot
+        self.discard_saved_names_when_off();
+        let names_event_id = snapshot
             .as_ref()
-            .and_then(|snapshot| self.open_names_pair(snapshot));
-        match (snapshot, names) {
-            (Some(snapshot), Some(names))
+            .and_then(|snapshot| self.names_resume_point(snapshot));
+        match (snapshot, names_event_id) {
+            (Some(snapshot), Some(names_event_id))
                 if is_resumable(&snapshot.meta, &identity, current_id) =>
             {
                 log::info!(
                     "size index: resuming from saved snapshot ({} folders, event {})",
                     snapshot.tree.slot_len(),
-                    snapshot.meta.event_id.min(names.event_id)
+                    snapshot.meta.event_id.min(names_event_id)
                 );
                 Some(self.resume_from(Resume {
                     snapshot,
                     current_id,
-                    names,
+                    names_event_id,
                 }))
             }
             (stale, names) => {
@@ -401,6 +402,32 @@ impl Machine {
         }
     }
 
+    fn names_resume_point(&self, snapshot: &Snapshot) -> Option<u64> {
+        if !self.shared.collect_file_names {
+            return Some(snapshot.meta.event_id);
+        }
+        self.open_names_pair(snapshot).map(|names| names.event_id)
+    }
+
+    fn discard_saved_names_when_off(&self) {
+        if self.shared.collect_file_names {
+            return;
+        }
+        let names_path = self.shared.view().names.path().to_path_buf();
+        if let Err(error) = remove_if_present(&names_path) {
+            log::warn!("size index: saved file names could not be removed: {error}");
+        }
+    }
+
+    fn unpair_when_file_names_are_off(&mut self) {
+        let is_paired = self.meta.pair_token != persist::NO_PAIR;
+        let pair_is_obsolete = is_paired && !self.shared.collect_file_names;
+        if pair_is_obsolete {
+            self.meta.pair_token = persist::NO_PAIR;
+            self.meta_dirty = true;
+        }
+    }
+
     fn open_names_pair(&self, snapshot: &Snapshot) -> Option<NamesHeader> {
         let expected = PairExpectation {
             pair_token: snapshot.meta.pair_token,
@@ -416,12 +443,13 @@ impl Machine {
         let Resume {
             snapshot,
             current_id,
-            names,
+            names_event_id,
         } = resume;
         let mut saved = snapshot.meta;
-        saved.event_id = saved.event_id.min(names.event_id);
+        saved.event_id = saved.event_id.min(names_event_id);
         self.load_tree(snapshot.tree);
         self.meta = saved.clone();
+        self.unpair_when_file_names_are_off();
         self.last_applied_id = saved.event_id;
         self.phase = Phase::replaying_history(saved, current_id);
         self.meta.event_id
@@ -624,6 +652,9 @@ impl Machine {
     }
 
     fn begin_spill(&self) {
+        if !self.shared.collect_file_names {
+            return;
+        }
         if let Err(error) = self.shared.view_mut().names.begin_spill() {
             log::warn!("size index: file-name spill could not start: {error}");
             return;
@@ -835,7 +866,7 @@ impl View {
             return;
         }
         self.tombstone_removed();
-        self.names.set_names(excluded.slot, PackedNames::default());
+        self.clear_names(excluded.slot);
     }
 
     pub(super) fn prune_folder(&mut self, path: &Path) {
@@ -848,8 +879,18 @@ impl View {
         self.tombstone_removed();
     }
 
+    fn clear_names(&mut self, slot: u32) {
+        if self.keeps_file_names {
+            self.names.set_names(slot, PackedNames::default());
+        }
+    }
+
     fn tombstone_removed(&mut self) {
-        for slot in self.tree.take_removed_slots() {
+        let removed_slots = self.tree.take_removed_slots();
+        if !self.keeps_file_names {
+            return;
+        }
+        for slot in removed_slots {
             self.names.tombstone(slot);
         }
     }

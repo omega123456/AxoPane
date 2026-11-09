@@ -54,6 +54,8 @@ export type AppConfig = {
   favouriteNames: Record<string, string>
   favouritesCollapsed: boolean
   indexExclusions: string[]
+  indexFolders: boolean
+  indexFiles: boolean
 }
 
 export type SessionTab = {

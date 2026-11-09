@@ -49,6 +49,10 @@ pub struct Config {
     pub favourites_collapsed: bool,
     #[serde(default)]
     pub index_exclusions: Vec<String>,
+    #[serde(default)]
+    pub index_folders: bool,
+    #[serde(default)]
+    pub index_files: bool,
 }
 
 pub fn default_true() -> bool {
@@ -191,6 +195,8 @@ impl Default for Config {
             favourite_names: HashMap::new(),
             favourites_collapsed: false,
             index_exclusions: Vec::new(),
+            index_folders: false,
+            index_files: false,
         }
     }
 }

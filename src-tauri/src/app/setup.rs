@@ -104,22 +104,44 @@ fn size_service(
     resource_coordinator: &Arc<ResourceCoordinator>,
 ) -> Result<SizeService, Box<dyn Error>> {
     let cache_dir = resolved_app_config_dir(&app.path().app_cache_dir()?);
-    let index_setup = size::index::MacIndexSetup {
-        cache_dir: &cache_dir,
-        user_exclusions: persisted_index_exclusions(app),
-        emit_sizes: size_state_emitter(app.handle()),
+    let config = app.state::<PersistenceState>().config.current();
+    let host_setup = size::index::IndexHostSetup {
+        options_for_start: index_options_factory(
+            app.handle().clone(),
+            cache_dir,
+            Arc::clone(resource_coordinator),
+        ),
         emit_status: frontend_emitter(app.handle(), events::SIZE_INDEX_STATUS),
+        scope: size::IndexScope::from_toggles(config.index_folders, config.index_files),
     };
     Ok(SizeService::with_folder_size_index(
         size::DEFAULT_MANUAL_SIZE_TIMEOUT,
         Arc::clone(resource_coordinator),
-        index_setup,
+        host_setup,
     ))
 }
 
 #[cfg(target_os = "macos")]
-fn persisted_index_exclusions(app: &App) -> Vec<std::path::PathBuf> {
-    app.state::<PersistenceState>()
+fn index_options_factory(
+    handle: tauri::AppHandle,
+    cache_dir: std::path::PathBuf,
+    resource_coordinator: Arc<ResourceCoordinator>,
+) -> size::index::IndexOptionsFactory {
+    Box::new(move || {
+        let index_setup = size::index::MacIndexSetup {
+            cache_dir: &cache_dir,
+            user_exclusions: persisted_index_exclusions(&handle),
+            emit_sizes: size_state_emitter(&handle),
+            emit_status: frontend_emitter(&handle, events::SIZE_INDEX_STATUS),
+        };
+        size::index::IndexOptions::for_this_mac(index_setup, Arc::clone(&resource_coordinator))
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn persisted_index_exclusions(handle: &tauri::AppHandle) -> Vec<std::path::PathBuf> {
+    handle
+        .state::<PersistenceState>()
         .config
         .current()
         .index_exclusions

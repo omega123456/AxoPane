@@ -468,6 +468,8 @@ export const fixtures: {
     favouriteNames: {},
     favouritesCollapsed: false,
     indexExclusions: [],
+    indexFolders: false,
+    indexFiles: false,
     keybindings: {},
     columns: [
       { key: 'name', visible: true },
@@ -512,6 +514,8 @@ export const fixtures: {
     favouriteNames: {},
     favouritesCollapsed: false,
     indexExclusions: [],
+    indexFolders: false,
+    indexFiles: false,
     keybindings: {},
     columns: [
       { key: 'name', visible: true },

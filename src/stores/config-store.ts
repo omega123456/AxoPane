@@ -27,6 +27,8 @@ export type ConfigSnapshot = {
   favouriteNames: Record<string, string>
   favouritesCollapsed: boolean
   indexExclusions: string[]
+  indexFolders: boolean
+  indexFiles: boolean
 }
 
 type ConfigStore = ConfigSnapshot & {
@@ -70,6 +72,8 @@ export function defaultConfigSnapshot(): ConfigSnapshot {
     favouriteNames: {},
     favouritesCollapsed: false,
     indexExclusions: [],
+    indexFolders: false,
+    indexFiles: false,
   }
 }
 

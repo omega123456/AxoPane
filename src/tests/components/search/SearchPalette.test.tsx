@@ -334,6 +334,20 @@ describe('SearchPalette', () => {
     ).toBeInTheDocument()
   })
 
+  it('points to the settings when the macOS index is off', async () => {
+    const user = userEvent.setup()
+    setIndexStatus(macStatus({ isAvailable: false, state: 'off', fileNamesAvailable: false }))
+    ipc.override('search_query', () => Promise.reject({ kind: 'unavailable' }))
+    await renderPalette()
+    await search(user, 'proj')
+    expect(screen.getByText('The search index is off')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'To search this Mac, turn on the folder index in Settings, under Search index.',
+      ),
+    ).toBeInTheDocument()
+  })
+
   it('says when nothing matched', async () => {
     const user = userEvent.setup()
     ipc.override('search_query', page([]))

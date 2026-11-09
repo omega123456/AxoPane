@@ -40,7 +40,7 @@ import { SETTINGS_ICON_CLASS as iconClass, type SectionProps } from './settings/
 import {
   cloneDraft,
   commitDraft,
-  defaultDraft,
+  defaultDraftKeepingIndex,
   shortcutConflictsByCommand,
   type DraftState,
   type DraftUpdater,
@@ -68,10 +68,12 @@ const sectionComponents: Record<Section, (props: SectionProps) => ReactNode> = {
 
 const MAC_INDEX_ONLY_SECTIONS: ReadonlySet<Section> = new Set(['searchIndex'])
 
+const SECTIONS_WITHOUT_RESET: ReadonlySet<Section> = new Set(['searchIndex'])
+
 const DEFAULT_RESET_DESCRIPTION = 'Restore every setting to how AxoPane ships'
 
 const MAC_INDEX_RESET_DESCRIPTION =
-  'Restore every setting to how AxoPane ships. Search index exclusions stay as they are.'
+  'Restore every setting to how AxoPane ships. Search index settings stay as they are.'
 
 function usesMacIndex(status: FolderSizeIndexStatus | null) {
   return status?.backend === 'macIndex'
@@ -112,7 +114,7 @@ function useSettingsDraft() {
     updateDraft((current) => ({ ...current, layout: { ...current.layout, [key]: value } }))
   }
 
-  return { draft, updateDraft, updateLayout, resetDraft: () => updateDraft(defaultDraft) }
+  return { draft, updateDraft, updateLayout, resetDraft: () => updateDraft(defaultDraftKeepingIndex) }
 }
 
 function useShortcutCapture(updateDraft: DraftUpdater) {
@@ -190,11 +192,13 @@ function SettingsModalContent() {
                 conflicts={conflicts}
                 platform={detectPlatformOs()}
               />
-              <ResetExpander
-                key={section}
-                onReset={resetDraft}
-                description={resetDescription(folderSizeStatus)}
-              />
+              {SECTIONS_WITHOUT_RESET.has(section) ? null : (
+                <ResetExpander
+                  key={section}
+                  onReset={resetDraft}
+                  description={resetDescription(folderSizeStatus)}
+                />
+              )}
             </div>
           </div>
         </div>

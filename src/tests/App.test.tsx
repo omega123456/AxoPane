@@ -315,6 +315,8 @@ describe('App', () => {
       favouriteNames: {},
       favouritesCollapsed: false,
       indexExclusions: [],
+      indexFolders: false,
+      indexFiles: false,
       keybindings: {
         refresh: ['F5'],
       },

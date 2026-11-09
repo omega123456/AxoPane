@@ -28,6 +28,8 @@ import {
   searchIndexAfterRemovingBuildCache,
   searchIndexExclusions,
   searchIndexInsideExisting,
+  searchIndexOff,
+  searchIndexTogglesOn,
   searchIndexUnavailable,
   searchIndexUpdating,
   searchIndexUpToDate,
@@ -114,6 +116,8 @@ const lightConfig: AppConfig = {
   favouriteNames: {},
   favouritesCollapsed: false,
   indexExclusions: [],
+  indexFolders: false,
+  indexFiles: false,
   keybindings: {},
   columns: [
     { key: 'name', visible: true },
@@ -392,7 +396,7 @@ function searchIndexScenario(
 ): { light: PlaywrightScenario; dark: PlaywrightScenario } {
   const scenario = (base: AppConfig): PlaywrightScenario => ({
     commands: {
-      load_config: { ...base, ...config },
+      load_config: { ...base, ...searchIndexTogglesOn, ...config },
       queue_snapshot: emptyQueueSnapshot,
       ...commands,
     },
@@ -1111,6 +1115,10 @@ export const screenshotScenarios = {
       folder_size_index_status: searchIndexUpdating,
       remove_index_exclusion: searchIndexAfterRemovingBuildCache,
     },
+  ),
+  searchIndexOff: searchIndexScenario(
+    { indexFolders: false, indexFiles: false },
+    { folder_size_index_status: searchIndexOff },
   ),
   searchIndexUnavailable: searchIndexScenario(
     {},

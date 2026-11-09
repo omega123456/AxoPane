@@ -2,7 +2,11 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SettingsModal } from '@/components/dialogs/SettingsModal'
-import type { IndexExclusionOutcome, IndexExclusionOutcomeKind } from '@/lib/types/ipc'
+import type {
+  AppConfig,
+  IndexExclusionOutcome,
+  IndexExclusionOutcomeKind,
+} from '@/lib/types/ipc'
 import { ipc } from '@/tests/ipc-mock'
 import { useConfigStore } from '@/stores/config-store'
 import { usePanesStore } from '@/stores/panes-store'
@@ -32,6 +36,26 @@ async function openSearchIndex(exclusions: string[] = []) {
   useSettingsStore.getState().open('searchIndex')
   render(<SettingsModal />)
   await screen.findByText('AxoPane 0.1.0')
+}
+
+function indexSwitch(name: 'Folder index' | 'File index') {
+  return screen.getByRole('switch', { name })
+}
+
+function savedIndexToggles() {
+  const { indexFolders, indexFiles } = useConfigStore.getState()
+  return { indexFolders, indexFiles }
+}
+
+function showIndexAsOff() {
+  usePanesStore.setState({
+    folderSizeIndexStatus: {
+      backend: 'macIndex',
+      isAvailable: false,
+      state: 'off',
+      fileNamesAvailable: false,
+    },
+  })
 }
 
 function pathField() {
@@ -69,6 +93,98 @@ describe('SearchIndexSection', () => {
         fileNamesAvailable: true,
       },
     })
+  })
+
+  it('starts with both indexes off and shows only the two toggles', async () => {
+    showIndexAsOff()
+    await openSearchIndex()
+
+    expect(indexSwitch('Folder index')).toHaveAttribute('aria-checked', 'false')
+    expect(indexSwitch('File index')).toHaveAttribute('aria-checked', 'false')
+    expect(
+      screen.getByText(/Folder sizes and folder search need only this index\./),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/so search finds files too\./)).toBeInTheDocument()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Folder to exclude' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Rebuild index')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('switch', { name: 'Automatically calculate folder sizes' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('turns on the folder index alone and saves it', async () => {
+    const user = userEvent.setup()
+    const save = vi.fn((payload: { config: AppConfig }) => payload.config)
+    ipc.override('save_config', save)
+    showIndexAsOff()
+    await openSearchIndex()
+
+    await user.click(indexSwitch('Folder index'))
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
+    expect(savedIndexToggles()).toEqual({ indexFolders: true, indexFiles: false })
+    expect(save.mock.calls[0][0].config).toMatchObject({ indexFolders: true, indexFiles: false })
+    expect(indexSwitch('Folder index')).toHaveAttribute('aria-checked', 'true')
+    expect(indexSwitch('File index')).toHaveAttribute('aria-checked', 'false')
+  })
+
+  it('turns on the folder index together with the file index', async () => {
+    const user = userEvent.setup()
+    showIndexAsOff()
+    await openSearchIndex()
+
+    await user.click(indexSwitch('File index'))
+
+    await waitFor(() =>
+      expect(savedIndexToggles()).toEqual({ indexFolders: true, indexFiles: true }),
+    )
+    expect(indexSwitch('Folder index')).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('turns off the file index alone and keeps the folder index', async () => {
+    const user = userEvent.setup()
+    useConfigStore.setState({ indexFolders: true, indexFiles: true })
+    await openSearchIndex()
+
+    await user.click(indexSwitch('File index'))
+
+    await waitFor(() =>
+      expect(savedIndexToggles()).toEqual({ indexFolders: true, indexFiles: false }),
+    )
+  })
+
+  it('turns off the file index together with the folder index', async () => {
+    const user = userEvent.setup()
+    useConfigStore.setState({ indexFolders: true, indexFiles: true })
+    await openSearchIndex()
+
+    await user.click(indexSwitch('Folder index'))
+
+    await waitFor(() =>
+      expect(savedIndexToggles()).toEqual({ indexFolders: false, indexFiles: false }),
+    )
+    expect(indexSwitch('File index')).toHaveAttribute('aria-checked', 'false')
+  })
+
+  it.each([
+    [false, 'Folder index'],
+    [true, 'Folder index and file index'],
+  ])('reports progress in its own section (file index on: %s)', async (indexFiles, scope) => {
+    useConfigStore.setState({ indexFolders: true, indexFiles })
+    await openSearchIndex()
+
+    const heading = screen.getByRole('heading', { name: 'Index progress' })
+    const row = heading.nextElementSibling as HTMLElement
+    expect(within(row).getByRole('status')).toHaveTextContent('Up to date')
+    expect(within(row).getByText(scope)).toBeInTheDocument()
+    for (const title of ['Folder index', 'File index']) {
+      const toggleRow = screen.getByRole('switch', { name: title }).closest('.rounded-card')
+      expect(within(toggleRow as HTMLElement).queryByRole('status')).not.toBeInTheDocument()
+    }
+    expect(
+      screen.getByRole('switch', { name: 'Automatically calculate folder sizes' }),
+    ).toBeInTheDocument()
   })
 
   it('shows the empty state until a folder is excluded', async () => {

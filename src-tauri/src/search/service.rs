@@ -29,8 +29,8 @@ impl SearchBackend {
             return Self::Everything(handle);
         }
         #[cfg(target_os = "macos")]
-        if let Some(index) = sizes.folder_size_index() {
-            return Self::Tree(index);
+        if let Some(host) = sizes.index_host() {
+            return Self::Tree(host);
         }
         Self::None
     }

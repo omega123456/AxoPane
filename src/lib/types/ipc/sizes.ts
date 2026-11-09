@@ -23,7 +23,7 @@ export type SizeStateEvent = {
 export type FolderSizeIndexStatus = {
   backend: 'everything' | 'macIndex' | 'none'
   isAvailable: boolean
-  state: 'unavailable' | 'notReady' | 'indexing' | 'updating' | 'upToDate' | 'paused'
+  state: 'off' | 'unavailable' | 'notReady' | 'indexing' | 'updating' | 'upToDate' | 'paused'
   itemsScanned?: number
   pauseReason?: 'lowPowerMode' | 'thermal'
   fileNamesAvailable: boolean

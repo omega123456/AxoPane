@@ -3,7 +3,13 @@ import { AlertTriangleIcon, SearchIcon } from '@/components/icons'
 import { FOCUS_RING } from '@/lib/focus-ring'
 import type { SearchRejection } from '@/lib/types/ipc'
 import { TEXT_SECONDARY } from '@/lib/class-names'
+import { usePanesStore } from '@/stores/panes-store'
 import type { PalettePhase } from './search-palette-model'
+
+const INDEX_OFF_COPY = {
+  title: 'The search index is off',
+  message: 'To search this Mac, turn on the folder index in Settings, under Search index.',
+}
 
 const INDEX_STARTING_COPY = {
   title: 'The search index is starting',
@@ -13,6 +19,16 @@ const INDEX_STARTING_COPY = {
 const INDEX_UNAVAILABLE_COPY = {
   title: 'Search is unavailable',
   message: 'Search needs the index, which could not start on this Mac.',
+}
+
+function indexRejectionCopy(rejection: SearchRejection, indexIsOff: boolean) {
+  if (indexIsOff) {
+    return INDEX_OFF_COPY
+  }
+  if (rejection.kind === 'notReady') {
+    return INDEX_STARTING_COPY
+  }
+  return INDEX_UNAVAILABLE_COPY
 }
 
 function stateTileToneClass(warning: boolean) {
@@ -57,6 +73,7 @@ export function SearchUnavailableState({
   backend: 'everything' | 'macIndex' | 'none'
   rejection: SearchRejection
 }) {
+  const indexIsOff = usePanesStore((state) => state.folderSizeIndexStatus?.state === 'off')
   if (rejection.kind === 'failed') {
     return (
       <PaletteState
@@ -87,7 +104,7 @@ export function SearchUnavailableState({
       />
     )
   }
-  const copy = rejection.kind === 'notReady' ? INDEX_STARTING_COPY : INDEX_UNAVAILABLE_COPY
+  const copy = indexRejectionCopy(rejection, indexIsOff)
   return (
     <PaletteState
       icon={<SearchIcon className="size-6" />}

@@ -110,6 +110,8 @@ pub mod size_index_names_service_integration;
 pub mod size_index_names_store_integration;
 pub mod size_index_persist_integration;
 #[cfg(target_os = "macos")]
+pub mod size_index_scope_integration;
+#[cfg(target_os = "macos")]
 pub mod size_index_service_integration;
 #[cfg(target_os = "macos")]
 pub mod size_index_storage_integration;

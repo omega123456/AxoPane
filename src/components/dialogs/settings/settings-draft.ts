@@ -24,6 +24,8 @@ const DRAFT_CONFIG_FIELDS = [
   'relativeDates',
   'autoFolderSize',
   'autoExpandActiveQueueToasts',
+  'indexFolders',
+  'indexFiles',
 ] as const satisfies readonly (keyof ConfigSnapshot)[]
 
 type DraftConfig = Pick<ConfigSnapshot, (typeof DRAFT_CONFIG_FIELDS)[number]>
@@ -67,6 +69,32 @@ export function defaultDraft(): DraftState {
     relativeDates: false,
     autoFolderSize: true,
     autoExpandActiveQueueToasts: false,
+    indexFolders: false,
+    indexFiles: false,
+  }
+}
+
+export function defaultDraftKeepingIndex(current: DraftState): DraftState {
+  return {
+    ...defaultDraft(),
+    indexFolders: current.indexFolders,
+    indexFiles: current.indexFiles,
+  }
+}
+
+export function withFolderIndex(draft: DraftState, enabled: boolean): DraftState {
+  return {
+    ...draft,
+    indexFolders: enabled,
+    indexFiles: enabled && draft.indexFiles,
+  }
+}
+
+export function withFileIndex(draft: DraftState, enabled: boolean): DraftState {
+  return {
+    ...draft,
+    indexFolders: enabled || draft.indexFolders,
+    indexFiles: enabled,
   }
 }
 

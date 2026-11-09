@@ -36,7 +36,9 @@ pub(super) const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
 pub(super) const WEEK: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 pub(super) const FLUSH_TIMEOUT: Duration = Duration::from_secs(3);
 
+#[derive(Clone)]
 pub struct IndexOptions {
+    pub collect_file_names: bool,
     pub roots: Vec<PathBuf>,
     pub excluded: Vec<PathBuf>,
     pub protected: Vec<PathBuf>,
@@ -84,6 +86,7 @@ impl IndexOptions {
         } = setup;
         let home = platform::home_dir();
         Self {
+            collect_file_names: false,
             roots: vec![PathBuf::from("/")],
             excluded: fast_walk::INDEX_EXCLUDED_ROOTS
                 .iter()
@@ -122,7 +125,7 @@ pub fn names_path_beside(snapshot_path: &Path) -> PathBuf {
 pub struct FolderSizeIndex {
     shared: Arc<Shared>,
     sender: Sender<Message>,
-    threads: Vec<JoinHandle<()>>,
+    threads: Mutex<Vec<JoinHandle<()>>>,
     snapshot_path: PathBuf,
 }
 
@@ -173,6 +176,7 @@ pub(super) struct Shared {
     pub(super) exclusions: RwLock<ExclusionSet>,
     pub(super) exclusion_rules: ExclusionRules,
     pub(super) coordinator: Arc<ResourceCoordinator>,
+    pub(super) collect_file_names: bool,
     pub(super) booted: AtomicBool,
     #[cfg(feature = "test-utils")]
     pub(super) walk_hooks: fast_walk::TestHooks,
@@ -183,6 +187,7 @@ pub(super) struct Shared {
 pub(super) struct View {
     pub(super) tree: FolderSizeTree,
     pub(super) names: FileNameStore,
+    pub(super) keeps_file_names: bool,
     pub(super) visited: HashSet<PathBuf>,
     pub(super) full_disk_access: bool,
     pub(super) available: bool,
@@ -198,6 +203,7 @@ impl FolderSizeIndex {
             view: RwLock::new(View {
                 tree,
                 names: FileNameStore::new(names_path_beside(&options.snapshot_path)),
+                keeps_file_names: options.collect_file_names,
                 visited: HashSet::new(),
                 full_disk_access: false,
                 available: true,
@@ -220,6 +226,7 @@ impl FolderSizeIndex {
                 home: options.home.clone(),
             },
             coordinator: Arc::clone(&options.coordinator),
+            collect_file_names: options.collect_file_names,
             booted: AtomicBool::new(false),
             #[cfg(feature = "test-utils")]
             walk_hooks: options.walk_hooks.clone(),
@@ -243,7 +250,7 @@ impl FolderSizeIndex {
         Self {
             shared,
             sender,
-            threads,
+            threads: Mutex::new(threads),
             snapshot_path,
         }
     }
@@ -434,14 +441,26 @@ impl FolderSizeIndex {
     }
 }
 
-impl Drop for FolderSizeIndex {
-    fn drop(&mut self) {
+impl FolderSizeIndex {
+    pub fn stop(&self) {
+        self.flush();
+        self.shut_down();
+    }
+
+    fn shut_down(&self) {
         self.shared.shut_down_lanes();
         self.shared.wake.notify_all();
         let _ = self.sender.send(Message::Shutdown);
-        for thread in self.threads.drain(..) {
+        let mut threads = self.threads.lock().expect("index threads lock");
+        for thread in threads.drain(..) {
             let _ = thread.join();
         }
+    }
+}
+
+impl Drop for FolderSizeIndex {
+    fn drop(&mut self) {
+        self.shut_down();
     }
 }
 
@@ -617,7 +636,7 @@ impl Shared {
         options
             .excluded
             .extend(self.exclusions().paths().iter().cloned());
-        options.collect_file_names = true;
+        options.collect_file_names = self.collect_file_names;
         options.qos = tuning.qos;
         options.threads = tuning.threads;
         #[cfg(feature = "test-utils")]
