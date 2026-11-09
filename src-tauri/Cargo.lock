@@ -932,7 +932,7 @@ dependencies = [
 
 [[package]]
 name = "file-explorer"
-version = "4.1.1"
+version = "5.0.0"
 dependencies = [
  "base64 0.22.1",
  "block2",
