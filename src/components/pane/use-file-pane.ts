@@ -8,7 +8,7 @@ import type { PaneViewMode } from '@/lib/pane-view'
 import { useClipboardStore } from '@/stores/clipboard-store'
 import { useKeymapStore } from '@/stores/keymap-store'
 import { getParentPath, usePanesStore } from '@/stores/panes-store'
-import { useSelectionStore } from '@/stores/selection-store'
+import { singleEntrySelection, useSelectionStore } from '@/stores/selection-store'
 import { useTabsStore } from '@/stores/tabs-store'
 import type { PaneId, PaneState } from '@/types/pane'
 import type { DetailsViewHandle } from './DetailsView'
@@ -90,14 +90,14 @@ export function usePaneContext(paneId: PaneId) {
 }
 
 export function useCutEntryPaths() {
-  const clipboardMode = useClipboardStore((state) => state.mode)
-  const clipboardEntries = useClipboardStore((state) => state.entries)
+  const clipboard = useClipboardStore((state) => state.snapshot)
   return useMemo(() => {
-    if (clipboardMode !== 'move') {
+    const isCut = clipboard?.mode === 'move'
+    if (!isCut) {
       return new Set<string>()
     }
-    return new Set(clipboardEntries.map((entry) => pathKey(entry.path)))
-  }, [clipboardEntries, clipboardMode])
+    return new Set(clipboard.entries.map((entry) => pathKey(entry.path)))
+  }, [clipboard])
 }
 
 export function usePaneBodyState({ pane, layout }: PaneContext) {
@@ -115,13 +115,13 @@ export function useClickSelection({ paneId, pane }: PaneContext) {
   const setSelection = useSelectionStore((state) => state.setSelection)
   const setFocusedEntry = usePanesStore((state) => state.setFocusedEntry)
   function selectWithModifiers(entryId: string, event: MouseEvent<HTMLDivElement>) {
-    const update = selectionForClick(pane.entries, selection, entryId, event)
-    setSelection(paneId, update.selectedIds, update.anchorId, update.focusedId)
+    const update = selectionForClick(pane.entries, selection, { entryId, modifiers: event })
+    setSelection(paneId, update)
     setFocusedEntry(paneId, entryId)
   }
   function selectSingleEntry(entryId: string) {
     setFocusedEntry(paneId, entryId)
-    setSelection(paneId, [entryId], entryId, entryId)
+    setSelection(paneId, singleEntrySelection(entryId))
   }
   return { selectWithModifiers, selectSingleEntry }
 }

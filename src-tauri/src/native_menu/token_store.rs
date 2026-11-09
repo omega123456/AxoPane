@@ -13,6 +13,12 @@ pub struct StoredInvocation {
     pub expires_at: Instant,
 }
 
+#[cfg(feature = "test-utils")]
+pub struct IssuedInvocation<'request> {
+    pub request_id: &'request str,
+    pub invocation: ProviderInvocation,
+}
+
 #[derive(Default)]
 pub struct NativeMenuTokenStore {
     state: Mutex<TokenStoreState>,
@@ -86,12 +92,11 @@ impl NativeMenuTokenStore {
     }
 
     #[cfg(feature = "test-utils")]
-    pub fn insert_expired_for_tests(
-        &self,
-        request_id: &str,
-        token: &str,
-        invocation: ProviderInvocation,
-    ) {
+    pub fn insert_expired_for_tests(&self, token: &str, issued: IssuedInvocation<'_>) {
+        let IssuedInvocation {
+            request_id,
+            invocation,
+        } = issued;
         let mut state = self.state.lock().expect("native menu token store lock");
         state
             .tokens_by_request

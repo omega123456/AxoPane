@@ -15,12 +15,17 @@ pub fn transfer_admission(resources: impl IntoIterator<Item = String>, cpu: bool
     JobSpec::new(classes, resources)
 }
 
+#[derive(Clone, Copy)]
+pub struct TransferPaths<'path> {
+    pub source: &'path Path,
+    pub target: &'path Path,
+}
+
 /// `rename` is attempted only for a known same resource. A non-cross-device
 /// error must be surfaced; treating permissions/conflicts as cross-volume can
 /// otherwise overwrite source data through an unnecessary fallback.
 pub fn rename_or_cross_device<F>(
-    source: &Path,
-    target: &Path,
+    paths: TransferPaths<'_>,
     same_resource: bool,
     rename: F,
 ) -> Result<bool, String>
@@ -30,7 +35,7 @@ where
     if !same_resource {
         return Ok(false);
     }
-    match rename(source, target) {
+    match rename(paths.source, paths.target) {
         Ok(()) => Ok(true),
         Err(error) if is_cross_device(&error) => Ok(false),
         Err(error) => Err(error.to_string()),

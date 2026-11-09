@@ -258,11 +258,11 @@ describe('buildTreeFlatModel', () => {
   it('labels fixed volumes Locations on macOS and Drives on Windows', () => {
     const volumes = [volume({ mountRoot: 'C:\\' })]
 
-    expect(rowShapes(buildTreeFlatModel({}, volumes, undefined, 'macos').rows)[0]).toEqual({
+    expect(rowShapes(buildTreeFlatModel({}, volumes, { platform: 'macos' }).rows)[0]).toEqual({
       kind: 'header',
       label: 'Locations',
     })
-    expect(rowShapes(buildTreeFlatModel({}, volumes, undefined, 'windows').rows)[0]).toEqual({
+    expect(rowShapes(buildTreeFlatModel({}, volumes, { platform: 'windows' }).rows)[0]).toEqual({
       kind: 'header',
       label: 'Drives',
     })
@@ -282,7 +282,7 @@ describe('buildTreeFlatModel', () => {
       showHiddenLevels: false,
     }
 
-    const { rows, indexByPath } = buildTreeFlatModel(treeNodes, volumes, fold)
+    const { rows, indexByPath } = buildTreeFlatModel(treeNodes, volumes, { fold: fold })
 
     expect(rowShapes(rows)).toEqual([
       { kind: 'header', label: 'Drives' },
@@ -321,7 +321,7 @@ describe('buildTreeFlatModel', () => {
     )
     const fold = { chain, revealedSiblings: new Set<string>(), showHiddenLevels: false }
 
-    const { rows } = buildTreeFlatModel(treeNodes, volumes, fold)
+    const { rows } = buildTreeFlatModel(treeNodes, volumes, { fold: fold })
 
     expect(rows.find((row) => row.kind === 'fold-levels')?.renderKey).toBe('fold-levels-C:\\')
   })

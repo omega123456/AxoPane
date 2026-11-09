@@ -3,7 +3,7 @@ import { isTrashPath } from '@/lib/trash'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import { useNativeMenuWarmStore } from '@/stores/native-menu-warm-store'
 import { usePanesStore } from '@/stores/panes-store'
-import type { PaneId } from '@/types/pane'
+import type { PaneId, VisibleRange } from '@/types/pane'
 
 const VISIBLE_RANGE_REQUEST_DEBOUNCE_MS = 100
 
@@ -22,11 +22,12 @@ export function useVisibleRangeRequests({ paneId, path, entries }: VisibleRangeO
   useEffect(() => () => window.clearTimeout(requestTimerRef.current), [])
 
   return useCallback(
-    (start: number, end: number, viewportCount: number) => {
+    (visibleRange: VisibleRange) => {
       window.clearTimeout(requestTimerRef.current)
       requestTimerRef.current = window.setTimeout(() => {
-        if (!isTrashPath(path)) void requestVisibleItemCounts(paneId, start, end, viewportCount)
-        const visiblePaths = entries.slice(start, end + 1).map((entry) => entry.path)
+        if (!isTrashPath(path)) void requestVisibleItemCounts(paneId, visibleRange)
+        const visibleEntries = entries.slice(visibleRange.startIndex, visibleRange.endIndex + 1)
+        const visiblePaths = visibleEntries.map((entry) => entry.path)
         void requestVisibleIcons(paneId, visiblePaths)
         void warmVisibleNativeMenus(paneId, visiblePaths)
       }, VISIBLE_RANGE_REQUEST_DEBOUNCE_MS)

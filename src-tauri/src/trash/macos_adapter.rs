@@ -56,12 +56,13 @@ pub trait SystemTrashAdapter {
     fn source_facts(&mut self, path: &str) -> Result<TrashFacts, String>;
     fn delete(&mut self, path: &str) -> Result<(), String>;
     fn now_seconds(&mut self) -> i64;
-    fn record_manifest(
-        &mut self,
-        root: &Path,
-        correlations: &[BatchCorrelation],
-        deleted_at: i64,
-    ) -> Result<(), String>;
+    fn record_manifest(&mut self, root: &Path, batch: ManifestBatch<'_>) -> Result<(), String>;
+}
+
+#[derive(Clone, Copy)]
+pub struct ManifestBatch<'batch> {
+    pub correlations: &'batch [BatchCorrelation],
+    pub deleted_at: i64,
 }
 
 /// Deletes a batch using exactly one before and one after snapshot when the
@@ -111,8 +112,11 @@ pub fn delete_batch<A: SystemTrashAdapter>(
     let has_correlations = !correlations.is_empty();
     result.correlated = correlations;
     if has_correlations {
-        let deleted_at = adapter.now_seconds();
-        if let Err(error) = adapter.record_manifest(&root, &result.correlated, deleted_at) {
+        let batch = ManifestBatch {
+            correlations: &result.correlated,
+            deleted_at: adapter.now_seconds(),
+        };
+        if let Err(error) = adapter.record_manifest(&root, batch) {
             // Deletions remain successful; making their origin unknown is
             // safer than reporting a failed delete after NsFileManager moved it.
             result
@@ -158,7 +162,9 @@ pub fn correlate(
     let mut used = HashSet::new();
     let mut result = Vec::new();
     for source in sources {
-        let Some((index, candidate)) = unique_unused_match(source, &candidates, &used) else {
+        let Some(CandidateMatch { index, candidate }) =
+            unique_unused_match(source, &candidates, &used)
+        else {
             continue;
         };
         used.insert(index);
@@ -170,11 +176,16 @@ pub fn correlate(
     result
 }
 
+struct CandidateMatch<'entry> {
+    index: usize,
+    candidate: &'entry TrashSnapshotEntry,
+}
+
 fn unique_unused_match<'entry>(
     source: &TrashFacts,
     candidates: &[&'entry TrashSnapshotEntry],
     used: &HashSet<usize>,
-) -> Option<(usize, &'entry TrashSnapshotEntry)> {
+) -> Option<CandidateMatch<'entry>> {
     let identity_matches = unused_matches(candidates, used, |facts| {
         source.stable_identity.is_some() && facts.stable_identity == source.stable_identity
     });
@@ -192,12 +203,12 @@ fn unused_matches<'entry>(
     candidates: &[&'entry TrashSnapshotEntry],
     used: &HashSet<usize>,
     matches: impl Fn(&TrashFacts) -> bool,
-) -> Vec<(usize, &'entry TrashSnapshotEntry)> {
+) -> Vec<CandidateMatch<'entry>> {
     candidates
         .iter()
         .enumerate()
         .filter(|(index, candidate)| !used.contains(index) && matches(&candidate.facts))
-        .map(|(index, candidate)| (index, *candidate))
+        .map(|(index, candidate)| CandidateMatch { index, candidate })
         .collect()
 }
 
@@ -242,12 +253,11 @@ impl SystemTrashAdapter for MacosSystemTrashAdapter {
     fn now_seconds(&mut self) -> i64 {
         now_seconds()
     }
-    fn record_manifest(
-        &mut self,
-        root: &Path,
-        correlations: &[BatchCorrelation],
-        deleted_at: i64,
-    ) -> Result<(), String> {
+    fn record_manifest(&mut self, root: &Path, batch: ManifestBatch<'_>) -> Result<(), String> {
+        let ManifestBatch {
+            correlations,
+            deleted_at,
+        } = batch;
         manifest::record_batch(
             root,
             correlations.iter().map(|item| {

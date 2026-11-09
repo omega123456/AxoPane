@@ -110,7 +110,9 @@ describe('DetailsView', () => {
 
     expect(screen.getAllByRole('row')).toHaveLength(30)
     await waitFor(() => expect(onVisibleRangeChange).toHaveBeenCalled())
-    expect(onVisibleRangeChange.mock.calls.at(-1)).toEqual([0, 28, 29])
+    expect(onVisibleRangeChange.mock.calls.at(-1)).toEqual([
+      { startIndex: 0, endIndex: 28, viewportCount: 29 },
+    ])
   })
 
   it('synchronizes detached horizontal columns and exposes the horizontal scrollbar', () => {

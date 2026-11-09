@@ -3,10 +3,17 @@
 //! no locking or session lifecycle here, that lives in `directory_session::mod`.
 
 use super::model::{
-    GetSessionRangeRequest, PaneId, SessionBaseline, SessionRangePage, SessionRangeResponse,
+    GetSessionRangeRequest, SessionBaseline, SessionRangePage, SessionRangeResponse,
     SessionRejection, SESSION_PAGE_SIZE,
 };
 use super::view::SessionView;
+use super::PaneTabKey;
+
+pub struct ExpectedSession<'session> {
+    pub key: &'session PaneTabKey,
+    pub baseline: SessionBaseline,
+    pub view: &'session SessionView,
+}
 
 /// Validates that `request` targets exactly `expected` (pane, tab, and every
 /// revision field), then materializes the requested page from `view`.
@@ -15,13 +22,14 @@ use super::view::SessionView;
 /// lifetime of one baseline.
 pub fn materialize_range(
     request: &GetSessionRangeRequest,
-    expected_pane_id: &PaneId,
-    expected_tab_id: &str,
-    expected: SessionBaseline,
-    view: &SessionView,
+    expected_session: ExpectedSession<'_>,
 ) -> Result<SessionRangeResponse, SessionRejection> {
-    let targets_expected_tab =
-        request.pane_id == *expected_pane_id && request.tab_id == expected_tab_id;
+    let ExpectedSession {
+        key,
+        baseline: expected,
+        view,
+    } = expected_session;
+    let targets_expected_tab = request.pane_id == key.pane_id && request.tab_id == key.tab_id;
     if !targets_expected_tab {
         // Wrong pane/tab entirely: treat as "no active session" from the
         // caller's point of view rather than leaking cross-pane state.

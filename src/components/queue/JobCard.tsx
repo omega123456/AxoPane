@@ -344,7 +344,11 @@ export function JobCard({
   const percent = clampPercent(operation.progressPercent)
   const flags = jobFlags(operation, hasConflict)
 
-  const jobView = useJobCardView(operation, throughputHistory, throughputPeak, flags)
+  const jobView = useJobCardView(
+    operation,
+    { history: throughputHistory, peak: throughputPeak },
+    flags,
+  )
 
   return (
     <article

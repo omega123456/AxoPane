@@ -4,7 +4,7 @@ use file_explorer_lib::watch::{
     add_watch, canonical_dir_for_tests, create_runtime, first_error_path_for_tests,
     handle_debounce_result_for_tests, insert_tab_for_tests, noop_watch_error_for_tests,
     process_compacted_batch_for_tests, raw_mutations_for_event_for_tests, remove_watch,
-    snapshot_for_target, DirPatch, WatchRuntime, WatchTarget,
+    snapshot_for_target, DirPatch, WatchEmitters, WatchRuntime, WatchTarget,
 };
 use notify::event::{
     AccessKind, CreateKind, DataChange, EventKind, ModifyKind, RemoveKind, RenameMode,
@@ -18,7 +18,11 @@ use tempfile::tempdir;
 fn watch_runtime_tracks_reference_counts_for_paths() {
     let fixture = tempdir().expect("temp dir");
     let root = fixture.path();
-    let mut runtime = create_runtime(Arc::new(|_| {}), Arc::new(|_, _| {})).expect("runtime");
+    let mut runtime = create_runtime(WatchEmitters {
+        patch: Arc::new(|_| {}),
+        error: Arc::new(|_, _| {}),
+    })
+    .expect("runtime");
 
     add_watch(&mut runtime, root).expect("first add");
     add_watch(&mut runtime, root).expect("second add");
@@ -48,10 +52,12 @@ impl WatchRecorder {
         handle_debounce_result_for_tests(
             runtime,
             results,
-            Arc::new(move |patch| patches.lock().expect("patches lock").push(patch)),
-            Arc::new(move |path, error| {
-                errors.lock().expect("errors lock").push((path, error));
-            }),
+            WatchEmitters {
+                patch: Arc::new(move |patch| patches.lock().expect("patches lock").push(patch)),
+                error: Arc::new(move |path, error| {
+                    errors.lock().expect("errors lock").push((path, error));
+                }),
+            },
         );
     }
 
@@ -94,7 +100,11 @@ impl WatchRecorder {
 }
 
 fn runtime_watching(target: &WatchTarget, snapshot_target: &WatchTarget) -> WatchRuntime {
-    let mut runtime = create_runtime(Arc::new(|_| {}), Arc::new(|_, _| {})).expect("runtime");
+    let mut runtime = create_runtime(WatchEmitters {
+        patch: Arc::new(|_| {}),
+        error: Arc::new(|_, _| {}),
+    })
+    .expect("runtime");
     insert_tab_for_tests(
         &mut runtime,
         target.clone(),
@@ -342,7 +352,11 @@ fn watched_directory_events_force_an_authoritative_resnapshot() {
 
 #[test]
 fn process_compacted_batch_ignores_unknown_watch_ids_through_the_public_test_hook() {
-    let mut runtime = create_runtime(Arc::new(|_| {}), Arc::new(|_, _| {})).expect("runtime");
+    let mut runtime = create_runtime(WatchEmitters {
+        patch: Arc::new(|_| {}),
+        error: Arc::new(|_, _| {}),
+    })
+    .expect("runtime");
     let patches = Arc::new(Mutex::new(Vec::<DirPatch>::new()));
     let errors = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
     let patches_for_emit = patches.clone();
@@ -359,13 +373,17 @@ fn process_compacted_batch_ignores_unknown_watch_ids_through_the_public_test_hoo
             changed: Vec::new(),
             removed: Vec::new(),
         },
-        Arc::new(move |patch| patches_for_emit.lock().expect("patches lock").push(patch)),
-        Arc::new(move |path, error| {
-            errors_for_emit
-                .lock()
-                .expect("errors lock")
-                .push((path, error))
-        }),
+        WatchEmitters {
+            patch: Arc::new(move |patch| {
+                patches_for_emit.lock().expect("patches lock").push(patch)
+            }),
+            error: Arc::new(move |path, error| {
+                errors_for_emit
+                    .lock()
+                    .expect("errors lock")
+                    .push((path, error))
+            }),
+        },
     );
 
     assert!(patches.lock().expect("patches lock").is_empty());
@@ -379,7 +397,11 @@ fn process_compacted_batch_applies_targeted_and_dirty_batches_through_the_public
     let new_file = root.join("new.txt");
     std::fs::write(&new_file, b"new").expect("write new file");
 
-    let mut runtime = create_runtime(Arc::new(|_| {}), Arc::new(|_, _| {})).expect("runtime");
+    let mut runtime = create_runtime(WatchEmitters {
+        patch: Arc::new(|_| {}),
+        error: Arc::new(|_, _| {}),
+    })
+    .expect("runtime");
     let target = watch_target(root);
     let watch_id = insert_tab_for_tests(&mut runtime, target, Default::default());
 
@@ -392,8 +414,12 @@ fn process_compacted_batch_applies_targeted_and_dirty_batches_through_the_public
             changed: vec![new_file.clone()],
             removed: Vec::new(),
         },
-        Arc::new(move |patch| patches_for_emit.lock().expect("patches lock").push(patch)),
-        Arc::new(|_, _| {}),
+        WatchEmitters {
+            patch: Arc::new(move |patch| {
+                patches_for_emit.lock().expect("patches lock").push(patch)
+            }),
+            error: Arc::new(|_, _| {}),
+        },
     );
     assert!(patches
         .lock()
@@ -413,13 +439,15 @@ fn process_compacted_batch_applies_targeted_and_dirty_batches_through_the_public
             watch_id,
             generation: 1,
         },
-        Arc::new(move |patch| {
-            dirty_patches_for_emit
-                .lock()
-                .expect("dirty patches lock")
-                .push(patch)
-        }),
-        Arc::new(|_, _| {}),
+        WatchEmitters {
+            patch: Arc::new(move |patch| {
+                dirty_patches_for_emit
+                    .lock()
+                    .expect("dirty patches lock")
+                    .push(patch)
+            }),
+            error: Arc::new(|_, _| {}),
+        },
     );
     // The resnapshot reflects the same file already folded in by the
     // targeted batch, so no new changes to report is an acceptable and

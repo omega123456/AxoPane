@@ -289,17 +289,17 @@ impl ResourceCoordinator {
     /// known once `submit` has enqueued the job, callers that need to
     /// cancel a job that might still be waiting should use
     /// [`ResourceCoordinator::submit_cancellable`] instead, which returns
-    /// the id immediately alongside a handle to await.
+    /// a handle to await that already knows the id.
     pub fn submit(&self, spec: JobSpec) -> Result<JobHandle, SubmitError> {
-        self.submit_cancellable(spec).1.recv()
+        self.submit_cancellable(spec).recv()
     }
 
-    /// Like [`ResourceCoordinator::submit`], but returns the assigned
-    /// [`JobId`] immediately (before admission is decided) alongside an
-    /// [`AdmissionAwait`] the caller blocks on separately. This lets one
+    /// Like [`ResourceCoordinator::submit`], but returns immediately (before
+    /// admission is decided) with an [`AdmissionAwait`] that exposes the
+    /// assigned [`JobId`] and that the caller blocks on separately. This lets one
     /// thread submit while another thread cancels the same job by id while
     /// it may still be queued.
-    pub fn submit_cancellable(&self, spec: JobSpec) -> (JobId, AdmissionAwait) {
+    pub fn submit_cancellable(&self, spec: JobSpec) -> AdmissionAwait {
         let id = JobId(self.inner.next_id.fetch_add(1, Ordering::SeqCst));
         let request = JobRequest {
             id,
@@ -323,24 +323,18 @@ impl ResourceCoordinator {
         {
             let (immediate_sender, immediate_receiver) = bounded(1);
             let _ = immediate_sender.send(Err(SubmitError::ShuttingDown));
-            return (
+            return AdmissionAwait {
                 id,
-                AdmissionAwait {
-                    id,
-                    reply_receiver: immediate_receiver,
-                    coordinator: Arc::clone(&self.inner),
-                },
-            );
+                reply_receiver: immediate_receiver,
+                coordinator: Arc::clone(&self.inner),
+            };
         }
 
-        (
+        AdmissionAwait {
             id,
-            AdmissionAwait {
-                id,
-                reply_receiver,
-                coordinator: Arc::clone(&self.inner),
-            },
-        )
+            reply_receiver,
+            coordinator: Arc::clone(&self.inner),
+        }
     }
 
     /// Cancels `id`. If the job is still queued (not yet granted), it is
@@ -567,7 +561,12 @@ impl Dispatcher {
             .and_then(|coalesce_key| state.find_coalesce_target(coalesce_key))
             .filter(|&target_id| target_id != id);
         if let Some(target_id) = coalesce_target {
-            coalesce(&mut state, &mut self.waiting_replies, id, target_id, reply);
+            let coalesced = CoalescedRequest {
+                id,
+                target_id,
+                reply,
+            };
+            coalesce(&mut state, &mut self.waiting_replies, coalesced);
             return AfterMessage::AwaitNext;
         }
         if !state.enqueue(request) {
@@ -639,13 +638,22 @@ impl Dispatcher {
 /// reservation out from under the target. A still-queued target makes the
 /// caller wait for the target's own admission, so it never observes a
 /// `JobHandle` before the underlying resources are reserved.
-fn coalesce(
-    state: &mut SchedulerState,
-    waiting_replies: &mut HashMap<JobId, AdmissionReply>,
+struct CoalescedRequest {
     id: JobId,
     target_id: JobId,
     reply: AdmissionReply,
+}
+
+fn coalesce(
+    state: &mut SchedulerState,
+    waiting_replies: &mut HashMap<JobId, AdmissionReply>,
+    coalesced: CoalescedRequest,
 ) {
+    let CoalescedRequest {
+        id,
+        target_id,
+        reply,
+    } = coalesced;
     state.record_coalesced(id, target_id);
     if !state.is_granted(target_id) {
         waiting_replies.insert(id, reply);

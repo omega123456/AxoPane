@@ -62,16 +62,18 @@ describe('tree state', () => {
   it('records loaded children and failures for a node', () => {
     const tree = { treeRoots: ['/'], treeNodes: { '/': node('/') } }
     const children = [{ name: 'Users', path: '/Users', expandability: 'nonEmpty' as const }]
-    const loaded = loadedTreeNodes(tree, '/', tree.treeNodes['/'], children)
+    const loaded = loadedTreeNodes(tree, { path: '/', currentNode: tree.treeNodes['/'] }, children)
     expect(loaded['/']).toMatchObject({ loaded: true, expanded: true, children: ['/Users'] })
     expect(loaded['/Users']).toMatchObject({ parentPath: '/', expandability: 'nonEmpty' })
 
-    const relisted = loadedTreeNodes({ ...tree, treeNodes: loaded }, '/', loaded['/'], [
-      { ...children[0], name: 'Renamed' },
-    ])
+    const relisted = loadedTreeNodes(
+      { ...tree, treeNodes: loaded },
+      { path: '/', currentNode: loaded['/'] },
+      [{ ...children[0], name: 'Renamed' }],
+    )
     expect(relisted['/Users'].name).toBe('Renamed')
 
-    const failed = failedTreeNodes(tree, '/Users', undefined)
+    const failed = failedTreeNodes(tree, { path: '/Users', currentNode: undefined })
     expect(failed['/Users']).toMatchObject({ loaded: true, expanded: false, parentPath: '/' })
   })
 

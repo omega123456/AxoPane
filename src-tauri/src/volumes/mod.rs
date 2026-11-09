@@ -142,13 +142,13 @@ pub fn list_volumes() -> Vec<VolumeInfo> {
             continue;
         }
 
-        let (total_bytes, free_bytes) = disk_space_for_root(&wide_mount_root);
+        let space = disk_space_for_root(&wide_mount_root);
         let label = read_volume_label(&wide_mount_root);
         volumes.push(VolumeInfo {
             mount_root,
             label,
-            total_bytes,
-            free_bytes,
+            total_bytes: space.total_bytes,
+            free_bytes: space.free_bytes,
             is_network: drive_type == DRIVE_REMOTE,
             is_removable: matches!(drive_type, DRIVE_REMOVABLE | DRIVE_CDROM),
         });
@@ -262,18 +262,20 @@ fn sort_volumes(volumes: &mut [VolumeInfo]) {
 }
 
 #[doc(hidden)]
-pub fn add_network_mount_if_missing(
-    volumes: &mut Vec<VolumeInfo>,
-    mount_root: &str,
-    file_system: &str,
-    total_bytes: u64,
-    free_bytes: u64,
-) -> bool {
-    let mount_root = normalize_supplemental_mount_root(mount_root);
+pub struct MountEntry {
+    pub mount_root: String,
+    pub file_system: String,
+    pub total_bytes: u64,
+    pub free_bytes: u64,
+}
+
+#[doc(hidden)]
+pub fn add_network_mount_if_missing(volumes: &mut Vec<VolumeInfo>, mount: &MountEntry) -> bool {
+    let mount_root = normalize_supplemental_mount_root(&mount.mount_root);
     if mount_root.is_empty() {
         return false;
     }
-    if !is_network_file_system(file_system) {
+    if !is_network_file_system(&mount.file_system) {
         return false;
     }
 
@@ -287,8 +289,8 @@ pub fn add_network_mount_if_missing(
     volumes.push(VolumeInfo {
         label: label_for_mount_root(&mount_root),
         mount_root,
-        total_bytes,
-        free_bytes: free_bytes.min(total_bytes),
+        total_bytes: mount.total_bytes,
+        free_bytes: mount.free_bytes.min(mount.total_bytes),
         is_network: true,
         is_removable: false,
     });
@@ -331,26 +333,12 @@ fn is_network_file_system(file_system: &str) -> bool {
 #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
 fn extend_macos_network_mounts(volumes: &mut Vec<VolumeInfo>) {
     for mount in macos_mount_entries() {
-        add_network_mount_if_missing(
-            volumes,
-            &mount.mount_root,
-            &mount.file_system,
-            mount.total_bytes,
-            mount.free_bytes,
-        );
+        add_network_mount_if_missing(volumes, &mount);
     }
 }
 
 #[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
-struct MacosMountEntry {
-    mount_root: String,
-    file_system: String,
-    total_bytes: u64,
-    free_bytes: u64,
-}
-
-#[cfg(all(not(feature = "test-utils"), target_os = "macos"))]
-fn macos_mount_entries() -> Vec<MacosMountEntry> {
+fn macos_mount_entries() -> Vec<MountEntry> {
     let count = unsafe { libc::getfsstat(std::ptr::null_mut(), 0, libc::MNT_NOWAIT) };
     if count < 1 {
         return Vec::new();
@@ -375,7 +363,7 @@ fn macos_mount_entries() -> Vec<MacosMountEntry> {
         .into_iter()
         .map(|mount| {
             let block_size = u64::from(mount.f_bsize);
-            MacosMountEntry {
+            MountEntry {
                 mount_root: macos_statfs_string(&mount.f_mntonname),
                 file_system: macos_statfs_string(&mount.f_fstypename),
                 total_bytes: mount.f_blocks.saturating_mul(block_size),
@@ -420,7 +408,13 @@ fn read_volume_label(root: &[u16]) -> String {
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]
-fn disk_space_for_root(root: &[u16]) -> (u64, u64) {
+struct DiskSpace {
+    total_bytes: u64,
+    free_bytes: u64,
+}
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+fn disk_space_for_root(root: &[u16]) -> DiskSpace {
     let mut available_to_caller = 0_u64;
     let mut total_bytes = 0_u64;
     let mut free_bytes = 0_u64;
@@ -434,10 +428,16 @@ fn disk_space_for_root(root: &[u16]) -> (u64, u64) {
     };
 
     if ok == 0 {
-        return (0, 0);
+        return DiskSpace {
+            total_bytes: 0,
+            free_bytes: 0,
+        };
     }
 
-    (total_bytes, free_bytes)
+    DiskSpace {
+        total_bytes,
+        free_bytes,
+    }
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]
@@ -513,7 +513,12 @@ fn add_network_resource(volumes: &mut Vec<VolumeInfo>, resource: &NETRESOURCEW) 
     if already_listed {
         return;
     }
-    push_network_volume(volumes, mount_root, None, true);
+    let candidate = NetworkVolumeCandidate {
+        mount_root,
+        label: None,
+        query_space: true,
+    };
+    push_network_volume(volumes, candidate);
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]
@@ -589,18 +594,30 @@ fn extend_network_shortcut_dir(volumes: &mut Vec<VolumeInfo>, path: &Path) {
 fn extend_network_shortcut_file(volumes: &mut Vec<VolumeInfo>, path: &Path, label: Option<&str>) {
     if let Some(candidate) = resolve_shell_link_target(path) {
         if let Some(mount_root) = normalize_network_mount_root("", &candidate) {
-            push_network_volume(volumes, mount_root, label, false);
+            let candidate = NetworkVolumeCandidate {
+                mount_root,
+                label,
+                query_space: false,
+            };
+            push_network_volume(volumes, candidate);
         }
     }
 }
 
 #[cfg(all(not(feature = "test-utils"), windows))]
-fn push_network_volume(
-    volumes: &mut Vec<VolumeInfo>,
+struct NetworkVolumeCandidate<'label> {
     mount_root: String,
-    label: Option<&str>,
+    label: Option<&'label str>,
     query_space: bool,
-) {
+}
+
+#[cfg(all(not(feature = "test-utils"), windows))]
+fn push_network_volume(volumes: &mut Vec<VolumeInfo>, candidate: NetworkVolumeCandidate<'_>) {
+    let NetworkVolumeCandidate {
+        mount_root,
+        label,
+        query_space,
+    } = candidate;
     if volumes
         .iter()
         .any(|volume| volume.mount_root.eq_ignore_ascii_case(&mount_root))
@@ -630,9 +647,9 @@ fn push_network_volume(
 #[cfg(all(not(feature = "test-utils"), windows))]
 fn fill_network_volume_space(volume: &mut VolumeInfo) {
     let space_root = crate::win32::wide_nul(space_query_root(&volume.mount_root));
-    let (total_bytes, free_bytes) = disk_space_for_root(&space_root);
-    volume.total_bytes = total_bytes;
-    volume.free_bytes = free_bytes;
+    let space = disk_space_for_root(&space_root);
+    volume.total_bytes = space.total_bytes;
+    volume.free_bytes = space.free_bytes;
     let volume_label = read_volume_label(&space_root);
     if !volume_label.is_empty() {
         volume.label = volume_label;

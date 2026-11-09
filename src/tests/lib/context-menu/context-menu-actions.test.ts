@@ -124,7 +124,12 @@ describe('dispatchContextMenuAction', () => {
       destinationIndex: 2,
     })
 
-    expect(moveTab).toHaveBeenCalledWith('left', 'left-tab-1', 'right', 2)
+    expect(moveTab).toHaveBeenCalledWith({
+      sourcePaneId: 'left',
+      tabId: 'left-tab-1',
+      destinationPaneId: 'right',
+      destinationIndex: 2,
+    })
   })
 
   it('copies newline-delimited paths to the text clipboard for Copy as path', async () => {

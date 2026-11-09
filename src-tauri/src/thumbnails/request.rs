@@ -2,28 +2,27 @@ use std::path::Path;
 
 use crate::ipc::types::{
     RequestThumbnailsRequest, RequestThumbnailsResponse, ThumbnailCandidateRequest,
-    ThumbnailPriority,
 };
 
-use super::scheduler::{ThumbnailSubscriber, MAX_DESIRED_PER_SCOPE};
+use super::scheduler::{
+    DesiredThumbnail, ScopeRequest, ThumbnailSubscriber, MAX_DESIRED_PER_SCOPE,
+};
 use super::types::{ThumbnailCandidate, ThumbnailFingerprint};
 use super::ThumbnailService;
 
 const CANDIDATE_LIMIT_EXCEEDED: &str = "thumbnail scope exceeds the candidate limit";
 
-fn scheduled_candidate(
-    candidate: ThumbnailCandidateRequest,
-) -> (ThumbnailCandidate, ThumbnailPriority, u32) {
+fn scheduled_candidate(candidate: ThumbnailCandidateRequest) -> DesiredThumbnail {
     let fingerprint = ThumbnailFingerprint::from_metadata(
         Path::new(&candidate.path),
         candidate.modified_unix_seconds,
         candidate.size_bytes,
     );
-    (
-        ThumbnailCandidate::new(fingerprint, candidate.is_directory),
-        candidate.priority,
-        candidate.order,
-    )
+    DesiredThumbnail {
+        candidate: ThumbnailCandidate::new(fingerprint, candidate.is_directory),
+        priority: candidate.priority,
+        order: candidate.order,
+    }
 }
 
 pub fn request_thumbnails(
@@ -45,7 +44,11 @@ pub fn request_thumbnails(
         .into_iter()
         .map(scheduled_candidate)
         .collect();
-    let accepted_count = service.replace_scope(subscriber, payload.revision, candidates);
+    let accepted_count = service.replace_scope(ScopeRequest {
+        subscriber,
+        revision: payload.revision,
+        candidates,
+    });
     Ok(RequestThumbnailsResponse {
         revision: payload.revision,
         accepted_count,

@@ -8,7 +8,7 @@ import {
 import { Button, SectionLabel, SelectField, SettingRow } from '@/components/controls'
 import { useAppVersion } from '@/lib/use-app-version'
 import { UPDATE_INTERVAL_OPTIONS, type UpdateInterval } from '@/lib/update-intervals'
-import { useUpdaterStore } from '@/stores/updater-store'
+import { useUpdaterStore, type UpdaterOutcome } from '@/stores/updater-store'
 import { TEXT_SECONDARY } from '@/lib/class-names'
 
 export function UpdatesSettings({
@@ -18,9 +18,7 @@ export function UpdatesSettings({
   value: UpdateInterval
   onChange: (value: UpdateInterval) => void
 }) {
-  const status = useUpdaterStore((state) => state.status)
-  const summary = useUpdaterStore((state) => state.summary)
-  const error = useUpdaterStore((state) => state.error)
+  const { status, summary, error } = useUpdaterStore((state) => state.outcome)
   const checkForUpdate = useUpdaterStore((state) => state.checkForUpdate)
   const downloadAndInstall = useUpdaterStore((state) => state.downloadAndInstall)
 
@@ -76,7 +74,7 @@ export function UpdatesSettings({
   )
 }
 
-type UpdaterStatus = ReturnType<typeof useUpdaterStore.getState>['status']
+type UpdaterStatus = UpdaterOutcome['status']
 
 type UpdateStatusProps = {
   status: UpdaterStatus

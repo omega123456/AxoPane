@@ -15,14 +15,20 @@ use file_explorer_lib::volumes::registry::{
 };
 use file_explorer_lib::volumes::VolumeInfo;
 
-fn volume(mount_root: &str, label: &str, is_network: bool, is_removable: bool) -> VolumeInfo {
+#[derive(Clone, Copy)]
+struct VolumeFlags {
+    is_network: bool,
+    is_removable: bool,
+}
+
+fn volume(mount_root: &str, label: &str, flags: VolumeFlags) -> VolumeInfo {
     VolumeInfo {
         mount_root: mount_root.to_string(),
         label: label.to_string(),
         total_bytes: 1_000_000,
         free_bytes: 500_000,
-        is_network,
-        is_removable,
+        is_network: flags.is_network,
+        is_removable: flags.is_removable,
     }
 }
 
@@ -61,7 +67,14 @@ fn simulated_add_event_increments_revision_and_updates_the_snapshot() {
     let before = registry.snapshot();
 
     let mut inventory = before.to_volume_infos();
-    inventory.push(volume("/Volumes/added-drive", "Added Drive", false, true));
+    inventory.push(volume(
+        "/Volumes/added-drive",
+        "Added Drive",
+        VolumeFlags {
+            is_network: false,
+            is_removable: true,
+        },
+    ));
     registry.set_fake_inventory(inventory);
 
     let after = registry.refresh();
@@ -139,8 +152,10 @@ fn resolves_windows_style_unc_path_across_short_and_long_alias_forms() {
     registry.set_fake_inventory(vec![volume(
         "\\\\build-server\\shared-drop",
         "Shared Drop",
-        true,
-        false,
+        VolumeFlags {
+            is_network: true,
+            is_removable: false,
+        },
     )]);
     let snapshot = registry.refresh();
 
@@ -158,8 +173,22 @@ fn resolves_windows_style_unc_path_across_short_and_long_alias_forms() {
 fn resolves_exact_match_before_longest_mount_containment() {
     let registry = new_registry();
     registry.set_fake_inventory(vec![
-        volume("/Volumes/data", "Data", false, false),
-        volume("/Volumes/data/nested", "Nested", false, false),
+        volume(
+            "/Volumes/data",
+            "Data",
+            VolumeFlags {
+                is_network: false,
+                is_removable: false,
+            },
+        ),
+        volume(
+            "/Volumes/data/nested",
+            "Nested",
+            VolumeFlags {
+                is_network: false,
+                is_removable: false,
+            },
+        ),
     ]);
     let snapshot = registry.refresh();
 
@@ -179,7 +208,14 @@ fn resolves_exact_match_before_longest_mount_containment() {
 #[test]
 fn resolves_case_insensitive_only_as_a_compatibility_fallback() {
     let registry = new_registry();
-    registry.set_fake_inventory(vec![volume("C:\\Data", "Data", false, false)]);
+    registry.set_fake_inventory(vec![volume(
+        "C:\\Data",
+        "Data",
+        VolumeFlags {
+            is_network: false,
+            is_removable: false,
+        },
+    )]);
     let snapshot = registry.refresh();
 
     // Exact-case match resolves directly.
@@ -196,7 +232,14 @@ fn resolves_case_insensitive_only_as_a_compatibility_fallback() {
 #[test]
 fn resolve_returns_none_for_a_path_outside_every_known_mount() {
     let registry = new_registry();
-    registry.set_fake_inventory(vec![volume("/Volumes/data", "Data", false, false)]);
+    registry.set_fake_inventory(vec![volume(
+        "/Volumes/data",
+        "Data",
+        VolumeFlags {
+            is_network: false,
+            is_removable: false,
+        },
+    )]);
     let snapshot = registry.refresh();
 
     assert!(snapshot.resolve("/Volumes/unrelated/file.txt").is_none());
@@ -205,7 +248,14 @@ fn resolve_returns_none_for_a_path_outside_every_known_mount() {
 #[test]
 fn resolve_resource_key_matches_snapshot_resolve() {
     let registry = new_registry();
-    registry.set_fake_inventory(vec![volume("/Volumes/data", "Data", false, false)]);
+    registry.set_fake_inventory(vec![volume(
+        "/Volumes/data",
+        "Data",
+        VolumeFlags {
+            is_network: false,
+            is_removable: false,
+        },
+    )]);
     registry.refresh();
 
     let key = registry
@@ -224,7 +274,14 @@ fn resolve_resource_key_matches_snapshot_resolve() {
 #[test]
 fn every_fallback_root_volume_is_explicitly_marked_as_fallback_kind() {
     let registry = new_registry();
-    registry.set_fake_inventory(vec![volume("/Volumes/data", "Data", false, false)]);
+    registry.set_fake_inventory(vec![volume(
+        "/Volumes/data",
+        "Data",
+        VolumeFlags {
+            is_network: false,
+            is_removable: false,
+        },
+    )]);
     let snapshot = registry.refresh();
 
     // A plain POSIX mount root (no UNC form) must never claim a stronger
@@ -276,8 +333,22 @@ fn snapshot_is_serializable_round_trip_for_the_ipc_boundary() {
 fn concurrent_refresh_calls_settle_on_one_coherent_final_snapshot() {
     let registry = new_registry();
     registry.set_fake_inventory(vec![
-        volume("/Volumes/a", "A", false, false),
-        volume("/Volumes/b", "B", false, false),
+        volume(
+            "/Volumes/a",
+            "A",
+            VolumeFlags {
+                is_network: false,
+                is_removable: false,
+            },
+        ),
+        volume(
+            "/Volumes/b",
+            "B",
+            VolumeFlags {
+                is_network: false,
+                is_removable: false,
+            },
+        ),
     ]);
 
     let mut handles = Vec::new();

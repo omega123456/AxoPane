@@ -242,11 +242,15 @@ function withoutScrollPosition(scrollPositions: Record<string, number>, path: st
   )
 }
 
+export type PaneNavigation = {
+  path: string
+  viaHistory: boolean
+}
+
 export function navigatedPanes(
   state: Pick<PanesData, 'panes' | 'filterTimers'>,
   paneId: PaneId,
-  path: string,
-  viaHistory: boolean,
+  { path, viaHistory }: PaneNavigation,
 ): Partial<PanesData> {
   if (viaHistory) {
     return withPane(state, paneId, { path })
@@ -360,11 +364,15 @@ export function withFocusedEntry(
   return withPane(state, paneId, { focusedEntryId })
 }
 
+export type ScrollPosition = {
+  path: string
+  scrollTop: number
+}
+
 export function withScrollPosition(
   state: PanesPatch,
   paneId: PaneId,
-  path: string,
-  scrollTop: number,
+  { path, scrollTop }: ScrollPosition,
 ): PanesPatch {
   const scrollPositions = { ...state.panes[paneId].scrollPositions, [path]: scrollTop }
   return withPane(state, paneId, { scrollPositions })

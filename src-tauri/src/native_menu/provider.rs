@@ -99,12 +99,17 @@ pub trait NativeMenuProvider: Send + Sync {
 
     fn load_menu_for_role(
         &self,
-        request: &LoadNativeMenuRequest,
+        role_request: RoleMenuRequest<'_>,
         executor: &ShellExecutor,
-        _role: HelperRole,
     ) -> Vec<ProviderNativeMenuItem> {
-        self.load_menu(request, executor)
+        self.load_menu(role_request.request, executor)
     }
+}
+
+#[derive(Clone, Copy)]
+pub struct RoleMenuRequest<'request> {
+    pub request: &'request LoadNativeMenuRequest,
+    pub role: HelperRole,
 }
 
 pub fn dedupe_provider_items(items: Vec<ProviderNativeMenuItem>) -> Vec<ProviderNativeMenuItem> {

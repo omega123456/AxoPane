@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { log } from '@/lib/app-log-commands'
 import { readFileClipboard } from '@/lib/ipc/commands'
-import type { FileClipboardMode } from '@/lib/types/ipc'
+import type { FileClipboardMode, ReadFileClipboardResponse } from '@/lib/types/ipc'
+import type { PaneId } from '@/types/pane'
 
 /** The subset of a listing row that a paste needs. External clipboard items
  * carry no listing identity, so the store keeps only these fields. */
@@ -11,18 +12,28 @@ export type ClipboardEntry = {
   sizeBytes: number | null
 }
 
-type ClipboardStore = {
-  mode: FileClipboardMode | null
-  sourcePaneId: 'left' | 'right' | null
+export type ClipboardSnapshot = {
+  mode: FileClipboardMode
+  sourcePaneId: PaneId | null
   entries: ClipboardEntry[]
-  setClipboard: (
-    mode: FileClipboardMode,
-    sourcePaneId: 'left' | 'right',
-    entries: ClipboardEntry[],
-  ) => void
+}
+
+type ClipboardStore = {
+  snapshot: ClipboardSnapshot | null
+  setClipboard: (snapshot: ClipboardSnapshot) => void
   clearClipboard: () => void
   /** Adopt what another application put on the OS clipboard. */
   syncFromOs: () => Promise<void>
+}
+
+const NO_CLIPBOARD_ENTRIES: ClipboardEntry[] = []
+
+export function clipboardEntries(snapshot: ClipboardSnapshot | null): ClipboardEntry[] {
+  return snapshot?.entries ?? NO_CLIPBOARD_ENTRIES
+}
+
+export function hasClipboardEntries(): boolean {
+  return clipboardEntries(useClipboardStore.getState().snapshot).length > 0
 }
 
 function samePaths(left: ClipboardEntry[], right: { path: string }[]) {
@@ -33,12 +44,26 @@ function samePaths(left: ClipboardEntry[], right: { path: string }[]) {
   return right.every((item) => known.has(item.path))
 }
 
+export function snapshotFromOs(clipboard: ReadFileClipboardResponse): ClipboardSnapshot | null {
+  const hasItems = clipboard.items.length > 0
+  if (!hasItems) {
+    return null
+  }
+  return {
+    mode: clipboard.mode,
+    sourcePaneId: null,
+    entries: clipboard.items.map((item) => ({
+      path: item.path,
+      name: item.name,
+      sizeBytes: null,
+    })),
+  }
+}
+
 export const useClipboardStore = create<ClipboardStore>((set, get) => ({
-  mode: null,
-  sourcePaneId: null,
-  entries: [],
-  setClipboard: (mode, sourcePaneId, entries) => set({ mode, sourcePaneId, entries }),
-  clearClipboard: () => set({ mode: null, sourcePaneId: null, entries: [] }),
+  snapshot: null,
+  setClipboard: (snapshot) => set({ snapshot }),
+  clearClipboard: () => set({ snapshot: null }),
   syncFromOs: async () => {
     let clipboard
     try {
@@ -51,19 +76,10 @@ export const useClipboardStore = create<ClipboardStore>((set, get) => ({
     // The app writes its own copy/cut to the OS clipboard, so the same paths
     // mean this is our own entry. Keep it: it knows the source pane, and macOS
     // reports every file list as a copy.
-    if (samePaths(get().entries, clipboard.items)) {
+    if (samePaths(clipboardEntries(get().snapshot), clipboard.items)) {
       return
     }
 
-    const hasItems = clipboard.items.length > 0
-    set({
-      mode: hasItems ? clipboard.mode : null,
-      sourcePaneId: null,
-      entries: clipboard.items.map((item) => ({
-        path: item.path,
-        name: item.name,
-        sizeBytes: null,
-      })),
-    })
+    set({ snapshot: snapshotFromOs(clipboard) })
   },
 }))

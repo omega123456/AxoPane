@@ -61,6 +61,12 @@ pub struct SearchOptions {
     pub scope: SearchScope,
 }
 
+pub struct SearchRun<'run, Source: ?Sized> {
+    pub source: &'run Source,
+    pub options: &'run SearchOptions,
+    pub control: &'run Control<'run>,
+}
+
 /// Lets long-running candidate collection stop early.
 pub struct Control<'a> {
     pub cancelled: &'a dyn Fn() -> bool,

@@ -10,12 +10,13 @@ use super::execution::run_operation;
 use super::execution::WorkerRuntime;
 use super::scheduler::{
     admit_and_run_operation, collect_startable, release_and_reschedule, schedule_auto_remove,
+    AutoRemoval,
 };
 use super::status::Cancellation;
 use super::{
-    volume_root_for, ConflictDecision, ConflictEmitter, ConflictResolution, InstantNow,
-    LockOperation, OpKind, OpSnapshot, OpState, OpStatus, ProgressEmitter, RemovedEmitter,
-    StartOpRequest, DEFAULT_COMPLETED_RETENTION, DEFAULT_RATE_WINDOW,
+    volume_root_for, ConflictDecision, ConflictEmitter, InstantNow, LockOperation, OpKind,
+    OpRuntime, OpSnapshot, OpState, OpStatus, ProgressEmitter, RemovedEmitter, StartOpRequest,
+    DEFAULT_COMPLETED_RETENTION, DEFAULT_RATE_WINDOW,
 };
 use crate::volumes::VolumeInfo;
 
@@ -124,7 +125,11 @@ impl OpsService {
             .lock()
             .expect("removed emitter lock")
             .clone();
-        schedule_auto_remove(id, &self.inner, removed, self.completed_retention);
+        let removal = AutoRemoval {
+            removed,
+            retention: self.completed_retention,
+        };
+        schedule_auto_remove(id, &self.inner, removal);
     }
 
     pub fn emit_progress(&self, operation: &OpState) {
@@ -175,26 +180,11 @@ impl OpsService {
             volumes: operation_volumes,
             status: OpStatus::Pending,
             total_items,
-            completed_items: 0,
             total_bytes,
-            copied_bytes: 0,
-            bytes_per_second: 0,
-            eta_seconds: None,
-            sample_count: 0,
-            rate_sample_at: None,
-            rate_sample_bytes: 0,
-            current_file_name: None,
-            current_file_copied: 0,
-            current_file_total: 0,
-            error_message: None,
-            completed_at: None,
             cancel: Arc::new(AtomicBool::new(false)),
             pause: Arc::new(AtomicBool::new(false)),
             skip: Arc::new(AtomicBool::new(false)),
-            conflict: None,
-            conflict_resolution: None,
-            apply_to_all: None,
-            rename_to: None,
+            runtime: OpRuntime::default(),
         };
 
         {
@@ -306,7 +296,7 @@ impl OpsService {
         let mut guard = operation.lock_operation();
         let cancellation = guard.status.cancel().ok()?;
         match cancellation {
-            Cancellation::BeforeStart => guard.completed_at = Some(Instant::now()),
+            Cancellation::BeforeStart => guard.runtime.completed_at = Some(Instant::now()),
             Cancellation::WhileRunning => guard.request_cancel(),
         }
         guard.status = cancellation.next_status();
@@ -356,18 +346,7 @@ impl OpsService {
         inner.order = reordered_queue(&inner.order, &pending, requested);
     }
 
-    pub fn resolve_conflict(
-        &self,
-        id: &str,
-        resolution: ConflictResolution,
-        apply_to_all: bool,
-        rename_to: Option<String>,
-    ) {
-        let decision = ConflictDecision {
-            resolution,
-            apply_to_all,
-            rename_to,
-        };
+    pub fn resolve_conflict(&self, id: &str, decision: ConflictDecision) {
         if self.resolve_conflict_locked(id, decision) {
             self.notify_waiters(id);
         }
@@ -381,12 +360,12 @@ impl OpsService {
         let Ok(next) = guard.status.resolve_conflict() else {
             return false;
         };
-        guard.conflict_resolution = Some(decision.resolution);
-        guard.rename_to = decision.rename_to;
+        guard.runtime.conflict_resolution = Some(decision.resolution);
+        guard.runtime.rename_to = decision.rename_to;
         if decision.apply_to_all {
-            guard.apply_to_all = Some(decision.resolution);
+            guard.runtime.apply_to_all = Some(decision.resolution);
         }
-        guard.conflict = None;
+        guard.runtime.conflict = None;
         guard.status = next;
         self.emit_progress(&guard);
         true
@@ -433,7 +412,7 @@ impl OpsService {
             let operation = operation.lock_operation();
             !operation.is_terminal()
                 || (matches!(operation.status, OpStatus::Cancelled)
-                    && operation.completed_at.is_none())
+                    && operation.runtime.completed_at.is_none())
         })
     }
 

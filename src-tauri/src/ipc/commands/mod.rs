@@ -56,11 +56,16 @@ async fn latency_filesystem_cancellable<T: Send + 'static>(
 ) -> Result<T, String> {
     executor
         .latency_cancellable(
-            resource_key,
-            crate::ipc::executor::Cancellation::default(),
+            crate::ipc::executor::LatencyRequest::new(resource_key),
             work,
         )
         .await
+}
+
+#[cfg(not(feature = "test-utils"))]
+struct CancellableMutation {
+    resource_key: String,
+    cancelled_message: &'static str,
 }
 
 /// Runs `work` through the latency executor unless the request was
@@ -69,10 +74,13 @@ async fn latency_filesystem_cancellable<T: Send + 'static>(
 #[cfg(not(feature = "test-utils"))]
 async fn latency_filesystem_unless_cancelled<T: Send + 'static>(
     executor: &crate::ipc::executor::IpcExecutor,
-    resource_key: String,
-    cancelled_message: &'static str,
+    mutation: CancellableMutation,
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
+    let CancellableMutation {
+        resource_key,
+        cancelled_message,
+    } = mutation;
     latency_filesystem_cancellable(executor, resource_key, move |cancel| {
         if cancel.is_cancelled() {
             return Err(cancelled_message.to_string());

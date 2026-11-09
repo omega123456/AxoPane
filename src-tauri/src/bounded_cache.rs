@@ -13,6 +13,11 @@ struct Record<V> {
     touched: u64,
 }
 
+pub struct Weighted<V> {
+    pub value: V,
+    pub weight: usize,
+}
+
 #[derive(Debug)]
 pub struct BoundedCache<K, V> {
     entries: HashMap<K, Record<V>>,
@@ -48,7 +53,8 @@ impl<K: Eq + Hash + Clone, V> BoundedCache<K, V> {
         Some(&record.value)
     }
 
-    pub fn insert(&mut self, key: K, value: V, weight: usize) {
+    pub fn insert(&mut self, key: K, entry: Weighted<V>) {
+        let Weighted { value, weight } = entry;
         self.clock = self.clock.wrapping_add(1);
         if let Some(previous) = self.entries.remove(&key) {
             self.total_weight = self.total_weight.saturating_sub(previous.weight);

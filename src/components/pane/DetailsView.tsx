@@ -4,8 +4,8 @@ import { FileRow, type FileRowActions } from './FileRow'
 import { HeaderRow } from './HeaderRow'
 import { ParentRow } from './ParentRow'
 import { pathKey } from '@/lib/path-compare'
-import { entryRenameProps, type InlineRenameState } from '@/stores/inline-rename-store'
-import type { PaneState } from '@/types/pane'
+import { renameDraftForEntry, type InlineRenameState } from '@/stores/inline-rename-store'
+import type { PaneState, VisibleRange } from '@/types/pane'
 import { dropTargetOutline, NO_CLASS, SCROLLBAR_THIN } from '@/lib/class-names'
 import { MarqueeSelection, type MarqueeRect } from './MarqueeSelection'
 import {
@@ -47,7 +47,7 @@ type DetailsViewProps = {
   actions: FileRowActions
   usesDetachedMacScrollbars: boolean
   marqueeRect: MarqueeRect | null
-  onVisibleRangeChange: (start: number, end: number, viewportCount: number) => void
+  onVisibleRangeChange: (visibleRange: VisibleRange) => void
   onContainerMouseDown: (event: React.MouseEvent<HTMLDivElement>) => void
   onScroll: (position: number) => void
   onContainerContextMenu: (event: React.MouseEvent<HTMLDivElement>) => void
@@ -108,7 +108,7 @@ function DetailsRow(props: DetailsRowProps) {
         isCut={props.cutEntryPaths.has(pathKey(entry.path))}
         isDropTarget={props.dropTargetEntryId === entry.id}
         draggable={!entry.trashId}
-        {...entryRenameProps(props.rename, entry.id)}
+        rename={renameDraftForEntry(props.rename, entry.id)}
         actions={actions}
       />
     </div>
@@ -118,10 +118,9 @@ function DetailsRow(props: DetailsRowProps) {
 function rowKey(
   virtualRow: { index: number; key: unknown },
   pane: PaneState,
-  hasParent: boolean,
   parentOffset: number,
 ) {
-  const isParentRow = hasParent && virtualRow.index === 0
+  const isParentRow = virtualRow.index < parentOffset
   if (isParentRow) {
     return PARENT_ROW_ID
   }
@@ -177,7 +176,7 @@ function DetailsScrollArea({
   layout,
   ...props
 }: DetailsScrollAreaProps) {
-  const { pane, hasParent, usesDetachedMacScrollbars } = props
+  const { pane, usesDetachedMacScrollbars } = props
   const { itemsToRender, totalHeight, contentWidth, parentOffset } = layout
   return (
     <div
@@ -203,7 +202,7 @@ function DetailsScrollArea({
       >
         {itemsToRender.map((virtualRow) => (
           <DetailsRow
-            key={rowKey(virtualRow, pane, hasParent, parentOffset)}
+            key={rowKey(virtualRow, pane, parentOffset)}
             {...props}
             index={virtualRow.index}
             start={virtualRow.start}

@@ -79,13 +79,11 @@ export function withResolvedIcons(entries: DirectoryEntry[], resolvedIconPaths: 
 }
 
 function entriesWithIcons(pane: PaneState, events: IconStateEvent[]) {
-  return updateEntries(
-    pane.entries,
-    events,
-    (event) => pane.entries.findIndex((entry) => entry.path === event.path),
-    (entry, event) =>
+  return updateEntries(pane.entries, events, {
+    locate: (event) => pane.entries.findIndex((entry) => entry.path === event.path),
+    apply: (entry, event) =>
       entry.iconDataUrl === event.iconDataUrl ? null : { ...entry, iconDataUrl: event.iconDataUrl },
-  )
+  })
 }
 
 function allEntryPaths(panes: PaneRecord) {
@@ -104,7 +102,10 @@ function boundedIconCache(
       { value, touched: iconCacheTouched[path] ?? now, weight: utf16ByteWeight(value) },
     ]),
   )
-  const retainedIcons = pruneIconCache(iconRecords, protectedIconPaths, now, windowsPlatform)
+  const retainedIcons = pruneIconCache(iconRecords, protectedIconPaths, {
+    now,
+    nativeIconsSupported: windowsPlatform,
+  })
   return {
     resolvedIconPaths: Object.fromEntries(
       Object.entries(retainedIcons).map(([path, record]) => [path, record.value]),

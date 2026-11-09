@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use file_explorer_lib::search::matcher::{
     match_token, match_words, merge_ranges, nfc, FoldedName, Match, NameKind, Pattern, Token,
-    CONTAINS, EXACT, FUZZY, FUZZY_MIN_CHARS, PREFIX,
+    Words, CONTAINS, EXACT, FUZZY, FUZZY_MIN_CHARS, PREFIX,
 };
 
 fn token(word: &str, name: &str, kind: NameKind) -> Option<Match> {
@@ -86,29 +86,64 @@ fn ranges_are_utf16_offsets_into_the_display_name() {
     );
 }
 
+fn phrase_words<'words>(phrase: Option<&'words Pattern>, tokens: &'words [Token]) -> Words<'words> {
+    Words { phrase, tokens }
+}
+
 #[test]
 fn multi_word_segments_try_the_phrase_then_every_word() {
     let name = FoldedName::new("Q3 report.docx");
     let phrase = Pattern::new("q3 report");
     let words = [Token::new("q3"), Token::new("report")];
-    let exact = match_words(Some(&phrase), &words, &name, FILE).expect("phrase");
+    let exact = match_words(phrase_words(Some(&phrase), &words), &name, FILE).expect("phrase");
     assert_eq!(exact.tier, EXACT);
 
     let swapped = [Token::new("report"), Token::new("q3")];
-    let anded = match_words(Some(&Pattern::new("report q3")), &swapped, &name, FILE).expect("and");
+    let anded = match_words(
+        phrase_words(Some(&Pattern::new("report q3")), &swapped),
+        &name,
+        FILE,
+    )
+    .expect("and");
     assert_eq!(anded.tier, CONTAINS);
     assert_eq!(anded.ranges, vec![(0, 2), (3, 9)]);
 
     let fuzzy_word = [Token::new("q3"), Token::new("rpt")];
     assert_eq!(
-        match_words(None, &fuzzy_word, &name, FILE).map(|found| found.tier),
+        match_words(
+            Words {
+                phrase: None,
+                tokens: &fuzzy_word
+            },
+            &name,
+            FILE
+        )
+        .map(|found| found.tier),
         Some(FUZZY)
     );
     let missing = [Token::new("q3"), Token::new("zzz")];
-    assert_eq!(match_words(None, &missing, &name, FILE), None);
+    assert_eq!(
+        match_words(
+            Words {
+                phrase: None,
+                tokens: &missing
+            },
+            &name,
+            FILE
+        ),
+        None
+    );
     let single = [Token::new("report")];
     assert_eq!(
-        match_words(None, &single, &name, FILE).map(|found| found.tier),
+        match_words(
+            Words {
+                phrase: None,
+                tokens: &single
+            },
+            &name,
+            FILE
+        )
+        .map(|found| found.tier),
         Some(CONTAINS)
     );
 }

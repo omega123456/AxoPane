@@ -50,26 +50,29 @@ mod tests {
             volumes: volumes.iter().map(|value| (*value).to_string()).collect(),
             status,
             total_items: 1,
-            completed_items: 0,
             total_bytes: 0,
-            copied_bytes: 0,
-            bytes_per_second: 0,
-            eta_seconds: None,
-            sample_count: 0,
-            rate_sample_at: None,
-            rate_sample_bytes: 0,
-            current_file_name: None,
-            current_file_copied: 0,
-            current_file_total: 0,
-            error_message: None,
-            completed_at: None,
             cancel: Arc::new(AtomicBool::new(false)),
             pause: Arc::new(AtomicBool::new(false)),
             skip: Arc::new(AtomicBool::new(false)),
-            conflict: None,
-            conflict_resolution: None,
-            apply_to_all: None,
-            rename_to: None,
+            runtime: OpRuntime {
+                completed_items: 0,
+                copied_bytes: 0,
+                bytes_per_second: 0,
+                eta_seconds: None,
+                sample_count: 0,
+                rate_sample: None,
+                current_file: CurrentFileProgress {
+                    name: None,
+                    copied: 0,
+                    total: 0,
+                },
+                error_message: None,
+                completed_at: None,
+                conflict: None,
+                conflict_resolution: None,
+                apply_to_all: None,
+                rename_to: None,
+            },
         }
     }
 
@@ -181,8 +184,8 @@ mod tests {
                 Duration::from_millis(100),
             );
 
-        compress_item_with_progress(&source_dir, &archive_path, &source_item, &context)
-            .expect("compress");
+        let compress_paths = native_paths(&source_dir, &archive_path);
+        compress_item_with_progress(compress_paths, &source_item, &context).expect("compress");
         assert!(archive_path.exists());
         assert!(is_zip_archive_path(&archive_path));
         assert_eq!(archive_stem_for_item(&archive_path), "payload");
@@ -200,8 +203,8 @@ mod tests {
             Path::new("nested/inside.txt")
         );
 
-        extract_item_with_progress(&archive_path, &extract_root, &archive_item, &context)
-            .expect("extract");
+        let extract_paths = native_paths(&archive_path, &extract_root);
+        extract_item_with_progress(extract_paths, &archive_item, &context).expect("extract");
         assert_eq!(
             std::fs::read(
                 extract_root
@@ -241,35 +244,34 @@ mod tests {
             make_context(operation_state(OpStatus::Active, &["/"]));
 
         assert!(compress_item_with_progress(
-            &source_file,
-            &fixture.path().join("output.bin"),
+            native_paths(&source_file, &fixture.path().join("output.bin")),
             &bad_archive_item,
-            &context
+            &context,
         )
         .expect_err("invalid extension")
         .contains(".zip"));
         assert!(compress_item_with_progress(
-            &fixture.path().join("missing"),
-            &fixture.path().join("missing.zip"),
+            native_paths(
+                &fixture.path().join("missing"),
+                &fixture.path().join("missing.zip")
+            ),
             &bad_archive_item,
-            &context
+            &context,
         )
         .expect_err("missing source")
         .contains("does not exist"));
         assert!(compress_item_with_progress(
-            &source_file,
-            &existing_archive,
+            native_paths(&source_file, &existing_archive),
             &bad_archive_item,
-            &context
+            &context,
         )
         .expect_err("existing archive")
         .contains("already exists"));
 
         assert!(extract_item_with_progress(
-            &source_file,
-            &destination_file,
+            native_paths(&source_file, &destination_file),
             &bad_archive_item,
-            &context
+            &context,
         )
         .expect_err("extract destination file")
         .contains("not a folder"));
@@ -314,13 +316,15 @@ mod tests {
         schedule_auto_remove(
             "op-3",
             &inner,
-            Some(Arc::new(move |id| {
-                removed_ids_for_emitter
-                    .lock()
-                    .expect("removed ids lock")
-                    .push(id);
-            })),
-            Duration::from_millis(10),
+            AutoRemoval {
+                removed: Some(Arc::new(move |id| {
+                    removed_ids_for_emitter
+                        .lock()
+                        .expect("removed ids lock")
+                        .push(id);
+                })),
+                retention: Duration::from_millis(10),
+            },
         );
         std::thread::sleep(Duration::from_millis(30));
 
@@ -341,7 +345,14 @@ mod tests {
             make_context(operation_state(OpStatus::Active, &["/"]));
 
         add_discovered_total(&context, 12, None);
-        begin_file_progress(&context, Path::new("/tmp/example.txt"), 12, None);
+        begin_file_progress(
+            &context,
+            FileProgressStart {
+                source: Path::new("/tmp/example.txt"),
+                total_bytes: 12,
+            },
+            None,
+        );
         report_chunk_progress(&context, 5, None);
         count_skipped_bytes(&context, 2);
         finish_file_progress(&context, None);
@@ -352,9 +363,11 @@ mod tests {
             let mut state = shared_operation.lock().expect("op lock");
             refresh_rate_locked_with_now(
                 &mut state,
-                Instant::now() - Duration::from_secs(3),
-                Duration::ZERO,
-                Instant::now(),
+                RateClock {
+                    start: Instant::now() - Duration::from_secs(3),
+                    rate_window: Duration::ZERO,
+                    now: Instant::now(),
+                },
             );
             state.pause.store(true, Ordering::Relaxed);
             state.cancel.store(true, Ordering::Relaxed);
@@ -363,14 +376,21 @@ mod tests {
 
         let mut reader = Cursor::new(b"cancelled".to_vec());
         let mut writer = Cursor::new(Vec::<u8>::new());
-        copy_reader_with_progress(&mut reader, &mut writer, &context, None)
-            .expect("cancelled copy");
+        copy_reader_with_progress(
+            &mut reader,
+            &mut writer,
+            ChunkReporter {
+                context: &context,
+                throttle: None,
+            },
+        )
+        .expect("cancelled copy");
 
         let state = shared_operation.lock().expect("op lock");
         assert_eq!(state.total_bytes, 12);
-        assert_eq!(state.completed_items, 1);
-        assert_eq!(state.copied_bytes, 7);
-        assert!(state.sample_count > 0);
+        assert_eq!(state.runtime.completed_items, 1);
+        assert_eq!(state.runtime.copied_bytes, 7);
+        assert!(state.runtime.sample_count > 0);
         drop(state);
 
         let emitted = progress_log.lock().expect("progress log lock");
@@ -398,25 +418,25 @@ mod tests {
             resolver_for_thread.notify_all();
         });
 
-        let resolution = resolve_or_park(
-            &context,
-            &OpItem {
-                source_path: fixture
-                    .path()
-                    .join("source.txt")
-                    .to_string_lossy()
-                    .into_owned(),
-                name: "target.txt".to_string(),
-                size_bytes: 8,
-            },
-            &target,
-            &None,
-        );
+        let item = OpItem {
+            source_path: fixture
+                .path()
+                .join("source.txt")
+                .to_string_lossy()
+                .into_owned(),
+            name: "target.txt".to_string(),
+            size_bytes: 8,
+        };
+        let candidate = ConflictCandidate {
+            item: &item,
+            target: &target,
+        };
+        let resolution = resolve_or_park(&context, candidate, &None);
 
         assert!(resolution.is_none());
         let state = shared_operation.lock().expect("op lock");
         assert_eq!(state.status, OpStatus::Conflict);
-        assert!(state.conflict.is_some());
+        assert!(state.runtime.conflict.is_some());
         drop(state);
         assert!(!progress_log.lock().expect("progress log lock").is_empty());
     }
@@ -439,6 +459,7 @@ mod tests {
 
         let state = shared_operation.lock().expect("op lock");
         assert!(state
+            .runtime
             .error_message
             .as_deref()
             .is_some_and(|message| message.contains("Cannot move")));
@@ -458,7 +479,10 @@ mod tests {
         let (delete_arc, _resolver, _progress_log, delete_context) = make_context(delete_state);
         process_item(&delete_context, &item(&delete_source, 6), &None);
         assert!(!delete_source.exists());
-        assert_eq!(delete_arc.lock().expect("op lock").completed_items, 1);
+        assert_eq!(
+            delete_arc.lock().expect("op lock").runtime.completed_items,
+            1
+        );
 
         let source_dir = fixture.path().join("payload");
         std::fs::create_dir_all(&source_dir).expect("source dir");
@@ -472,7 +496,14 @@ mod tests {
             make_context(compress_state);
         process_item(&compress_context, &item(&source_dir, 0), &None);
         assert!(archive_path.exists());
-        assert_eq!(compress_arc.lock().expect("op lock").completed_items, 1);
+        assert_eq!(
+            compress_arc
+                .lock()
+                .expect("op lock")
+                .runtime
+                .completed_items,
+            1
+        );
 
         let extract_root = fixture.path().join("extract");
         let mut extract_state = operation_state(OpStatus::Active, &["/"]);
@@ -491,7 +522,10 @@ mod tests {
             .expect("extract"),
             b"payload"
         );
-        assert_eq!(extract_arc.lock().expect("op lock").completed_items, 1);
+        assert_eq!(
+            extract_arc.lock().expect("op lock").runtime.completed_items,
+            1
+        );
     }
 
     #[test]
@@ -554,7 +588,7 @@ mod tests {
 
         let failed = failed_operation.lock().expect("failed lock");
         assert_eq!(failed.status, OpStatus::Failed);
-        assert!(failed.error_message.is_some());
+        assert!(failed.runtime.error_message.is_some());
         drop(failed);
 
         let cancelled = cancelled_operation.lock().expect("cancelled lock");
@@ -622,11 +656,22 @@ mod tests {
             .any(|id| id == "op-1"));
     }
 
-    fn delete_state(status: OpStatus, volume: &str, file: &Path, id: &str) -> OpState {
-        let mut state = operation_state(status, &[volume]);
+    struct DeleteSpec<'spec> {
+        id: &'spec str,
+        status: OpStatus,
+        volume: &'spec str,
+        file: &'spec Path,
+    }
+
+    fn native_paths<'path>(source: &'path Path, target: &'path Path) -> NativeItemPaths<'path> {
+        NativeItemPaths { source, target }
+    }
+
+    fn delete_state(spec: DeleteSpec<'_>) -> OpState {
+        let mut state = operation_state(spec.status, &[spec.volume]);
         state.kind = OpKind::Delete;
-        state.items = vec![item(file, 4)];
-        state.id = id.to_string();
+        state.items = vec![item(spec.file, 4)];
+        state.id = spec.id.to_string();
         state
     }
 
@@ -681,18 +726,18 @@ mod tests {
         std::fs::write(&completed_file, b"done").expect("completed");
         std::fs::write(&pending_file, b"wait").expect("pending");
 
-        let completed_operation = Arc::new(Mutex::new(delete_state(
-            OpStatus::Completed,
-            "alpha",
-            &completed_file,
-            "op-1",
-        )));
-        let pending_operation = Arc::new(Mutex::new(delete_state(
-            OpStatus::Pending,
-            "beta",
-            &pending_file,
-            "op-2",
-        )));
+        let completed_operation = Arc::new(Mutex::new(delete_state(DeleteSpec {
+            id: "op-1",
+            status: OpStatus::Completed,
+            volume: "alpha",
+            file: &completed_file,
+        })));
+        let pending_operation = Arc::new(Mutex::new(delete_state(DeleteSpec {
+            id: "op-2",
+            status: OpStatus::Pending,
+            volume: "beta",
+            file: &pending_file,
+        })));
         let inner = inner_with_completed_then_pending(
             completed_operation,
             pending_operation.clone(),

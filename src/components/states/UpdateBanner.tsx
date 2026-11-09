@@ -3,10 +3,7 @@ import { InfoBar } from '@/components/shell/InfoBar'
 import { useUpdaterStore } from '@/stores/updater-store'
 
 export function UpdateBanner() {
-  const summary = useUpdaterStore((state) => state.summary)
-  const update = useUpdaterStore((state) => state.update)
-  const status = useUpdaterStore((state) => state.status)
-  const error = useUpdaterStore((state) => state.error)
+  const { summary, update, status, error } = useUpdaterStore((state) => state.outcome)
   const downloadAndInstall = useUpdaterStore((state) => state.downloadAndInstall)
   const dismiss = useUpdaterStore((state) => state.dismiss)
 

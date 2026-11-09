@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::bounded;
-use file_explorer_lib::reconcile::ReconcileCoordinator;
+use file_explorer_lib::reconcile::{ReconcileCoordinator, ReconcileResource};
 use file_explorer_lib::resource_coordinator::{JobClass, JobSpec, ResourceCoordinator};
 use file_explorer_lib::watch::coordinator::{
     CompactedBatch, ControlMessage, MutationKind, RawMutation, WatchCoordinator, WatchId,
@@ -96,14 +96,26 @@ fn focus_requests_return_immediately_and_only_latest_generation_publishes() {
     let reconcile = Arc::new(ReconcileCoordinator::default());
     let published = Arc::new(Mutex::new(Vec::new()));
     let start = Instant::now();
-    let first = reconcile.request_reconcile(Arc::clone(&resources), "focus-volume".to_string(), {
-        let published = Arc::clone(&published);
-        move |generation| published.lock().expect("published lock").push(generation)
-    });
-    let second = reconcile.request_reconcile(Arc::clone(&resources), "focus-volume".to_string(), {
-        let published = Arc::clone(&published);
-        move |generation| published.lock().expect("published lock").push(generation)
-    });
+    let first = reconcile.request_reconcile(
+        ReconcileResource {
+            coordinator: Arc::clone(&resources),
+            resource_key: "focus-volume".to_string(),
+        },
+        {
+            let published = Arc::clone(&published);
+            move |generation| published.lock().expect("published lock").push(generation)
+        },
+    );
+    let second = reconcile.request_reconcile(
+        ReconcileResource {
+            coordinator: Arc::clone(&resources),
+            resource_key: "focus-volume".to_string(),
+        },
+        {
+            let published = Arc::clone(&published);
+            move |generation| published.lock().expect("published lock").push(generation)
+        },
+    );
     assert!(start.elapsed() < Duration::from_millis(100));
     assert!(second > first);
 
@@ -154,9 +166,15 @@ fn distinct_focus_targets_each_run_when_requested_by_the_same_focus_event() {
 
     for target in ["volume-registry", "watch-service"] {
         let published_sender = published_sender.clone();
-        reconcile.request_reconcile(Arc::clone(&resources), target.to_string(), move |_| {
-            published_sender.send(target).expect("test receives target");
-        });
+        reconcile.request_reconcile(
+            ReconcileResource {
+                coordinator: Arc::clone(&resources),
+                resource_key: target.to_string(),
+            },
+            move |_| {
+                published_sender.send(target).expect("test receives target");
+            },
+        );
     }
 
     let mut published = vec![

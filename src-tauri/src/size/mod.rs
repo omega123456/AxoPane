@@ -147,17 +147,12 @@ pub struct SizeUpdate {
 }
 
 impl SizeUpdate {
-    pub fn new(
-        path: String,
-        state: SizeStateKind,
-        source: SizeSource,
-        size_bytes: Option<u64>,
-    ) -> Self {
+    fn new(path: String, state: SizeStateKind, source: SizeSource) -> Self {
         Self {
             path,
             state,
             source,
-            size_bytes,
+            size_bytes: None,
             na_reason: None,
             is_lower_bound: false,
             skipped_roots: None,
@@ -165,12 +160,59 @@ impl SizeUpdate {
         }
     }
 
+    pub fn without_size(path: String, state: SizeStateKind, source: SizeSource) -> Self {
+        Self::new(path, state, source)
+    }
+
+    pub fn ready(path: String, source: SizeSource, size_bytes: u64) -> Self {
+        Self {
+            size_bytes: Some(size_bytes),
+            ..Self::new(path, SizeStateKind::Ready, source)
+        }
+    }
+
     pub fn na(path: String, source: SizeSource, reason: Option<NaReason>) -> Self {
         Self {
             na_reason: reason,
-            ..Self::new(path, SizeStateKind::Na, source, None)
+            ..Self::new(path, SizeStateKind::Na, source)
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SizeRequest {
+    pub paths: Vec<String>,
+    pub mode: RequestMode,
+}
+
+impl SizeRequest {
+    pub fn manual(paths: Vec<String>) -> Self {
+        Self {
+            paths,
+            mode: RequestMode::Manual,
+        }
+    }
+}
+
+pub struct SizeRequestWithVolumes {
+    pub request: SizeRequest,
+    pub volumes: Vec<VolumeInfo>,
+}
+
+/// One pane's live-update set: `folders` receive `size://state` whenever
+/// their indexed totals change, and `current_path` marks a protected folder
+/// as visited.
+pub struct PaneSubscriptions {
+    pub pane_id: String,
+    pub current_path: Option<String>,
+    pub folders: Vec<String>,
+}
+
+struct ServiceParts {
+    timeout: Duration,
+    everything: Option<Arc<EverythingHandle>>,
+    coordinator: Arc<ResourceCoordinator>,
+    scheduler_capacity: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -223,12 +265,12 @@ impl SizeService {
         coordinator: Arc<ResourceCoordinator>,
     ) -> Self {
         let everything = EverythingHandle::load().ok().map(Arc::new);
-        Self::build(
+        Self::build(ServiceParts {
             timeout,
             everything,
             coordinator,
-            scheduler::MAX_SIZE_METADATA_ENTRIES,
-        )
+            scheduler_capacity: scheduler::MAX_SIZE_METADATA_ENTRIES,
+        })
     }
 
     #[cfg(feature = "test-utils")]
@@ -250,12 +292,12 @@ impl SizeService {
         handle: Option<EverythingHandle>,
         coordinator: Arc<ResourceCoordinator>,
     ) -> Self {
-        Self::build(
+        Self::build(ServiceParts {
             timeout,
-            handle.map(Arc::new),
+            everything: handle.map(Arc::new),
             coordinator,
-            scheduler::MAX_SIZE_METADATA_ENTRIES,
-        )
+            scheduler_capacity: scheduler::MAX_SIZE_METADATA_ENTRIES,
+        })
     }
 
     /// Test-only constructor that additionally overrides the scheduler's
@@ -269,15 +311,21 @@ impl SizeService {
         coordinator: Arc<ResourceCoordinator>,
         capacity: usize,
     ) -> Self {
-        Self::build(timeout, None, coordinator, capacity)
+        Self::build(ServiceParts {
+            timeout,
+            everything: None,
+            coordinator,
+            scheduler_capacity: capacity,
+        })
     }
 
-    fn build(
-        timeout: Duration,
-        everything: Option<Arc<EverythingHandle>>,
-        coordinator: Arc<ResourceCoordinator>,
-        scheduler_capacity: usize,
-    ) -> Self {
+    fn build(parts: ServiceParts) -> Self {
+        let ServiceParts {
+            timeout,
+            everything,
+            coordinator,
+            scheduler_capacity,
+        } = parts;
         let scheduler = Arc::new(scheduler::SizeScheduler::new(scheduler_capacity));
         let inner = Arc::new(Mutex::new(SizeServiceInner {
             jobs: HashMap::new(),
@@ -319,16 +367,9 @@ impl SizeService {
     pub fn with_folder_size_index(
         timeout: Duration,
         coordinator: Arc<ResourceCoordinator>,
-        cache_dir: &Path,
-        emit_sizes: index::SizeEmitter,
-        emit_status: index::StatusEmitter,
+        index_setup: index::MacIndexSetup<'_>,
     ) -> Self {
-        let options = index::IndexOptions::for_this_mac(
-            cache_dir,
-            Arc::clone(&coordinator),
-            emit_sizes,
-            emit_status,
-        );
+        let options = index::IndexOptions::for_this_mac(index_setup, Arc::clone(&coordinator));
         let service = Self::with_resource_coordinator(timeout, coordinator);
         service.attach_index(index::FolderSizeIndex::start(options));
         service
@@ -341,12 +382,12 @@ impl SizeService {
         timeout: Duration,
         options: index::IndexOptions,
     ) -> Self {
-        let service = Self::build(
+        let service = Self::build(ServiceParts {
             timeout,
-            None,
-            Arc::clone(&options.coordinator),
-            scheduler::MAX_SIZE_METADATA_ENTRIES,
-        );
+            everything: None,
+            coordinator: Arc::clone(&options.coordinator),
+            scheduler_capacity: scheduler::MAX_SIZE_METADATA_ENTRIES,
+        });
         service.attach_index(index::FolderSizeIndex::start(options));
         service
     }
@@ -433,30 +474,25 @@ impl SizeService {
         SizeBackend::Manual
     }
 
-    pub fn request_paths<F>(&self, paths: Vec<String>, mode: RequestMode, emitter: F)
+    pub fn request_paths<F>(&self, request: SizeRequest, emitter: F)
     where
         F: Fn(Vec<SizeUpdate>) + Send + Sync + 'static,
     {
-        let emitter = Arc::new(emitter);
-        let volumes = volumes::list_volumes();
-        self.request_paths_with_mode(paths, mode, volumes, emitter);
+        let routed = SizeRequestWithVolumes {
+            request,
+            volumes: volumes::list_volumes(),
+        };
+        self.request_paths_with_mode(routed, Arc::new(emitter));
     }
 
-    /// Replaces one pane's live-update set: `folders` receive
-    /// `size://state` whenever their indexed totals change. `current_path`
-    /// marks a protected folder as visited.
-    pub fn set_subscriptions(
-        &self,
-        pane_id: String,
-        current_path: Option<String>,
-        folders: Vec<String>,
-    ) {
+    /// Replaces one pane's live-update set.
+    pub fn set_subscriptions(&self, subscriptions: PaneSubscriptions) {
         #[cfg(target_os = "macos")]
         if let Some(index) = self.folder_size_index() {
-            index.set_subscriptions(pane_id, current_path, folders);
+            index.set_subscriptions(subscriptions);
         }
         #[cfg(not(target_os = "macos"))]
-        let _ = (pane_id, current_path, folders);
+        let _ = subscriptions;
     }
 
     /// Main-window focus changes: focus re-probes Full Disk Access and checks
@@ -503,24 +539,6 @@ impl SizeService {
             return cancelled + index.cancel(paths);
         }
         cancelled
-    }
-
-    pub fn request_path_with_volumes(
-        &self,
-        path: String,
-        volumes: Vec<VolumeInfo>,
-        emitter: Arc<dyn Fn(Vec<SizeUpdate>) + Send + Sync>,
-    ) {
-        self.request_paths_with_volumes(vec![path], volumes, emitter);
-    }
-
-    pub fn request_paths_with_volumes(
-        &self,
-        paths: Vec<String>,
-        volumes: Vec<VolumeInfo>,
-        emitter: Arc<dyn Fn(Vec<SizeUpdate>) + Send + Sync>,
-    ) {
-        self.request_paths_with_mode(paths, RequestMode::Manual, volumes, emitter);
     }
 }
 

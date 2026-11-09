@@ -120,6 +120,67 @@ pub struct FolderTotal {
     pub lower_bound: Option<LowerBound>,
 }
 
+pub struct DirectoryListing<'listing, S> {
+    pub direct_bytes: u64,
+    pub subdirs: &'listing [S],
+    pub denied: bool,
+}
+
+impl<'listing, S> DirectoryListing<'listing, S> {
+    pub fn scanned(direct_bytes: u64, subdirs: &'listing [S]) -> Self {
+        Self {
+            direct_bytes,
+            subdirs,
+            denied: false,
+        }
+    }
+}
+
+pub(crate) struct ImportedNode {
+    pub(crate) parent: u32,
+    pub(crate) name: Box<str>,
+    pub(crate) direct: u64,
+    pub(crate) flags: u8,
+}
+
+struct ImportedLink<'name> {
+    parent: u32,
+    name: &'name str,
+}
+
+#[derive(Clone, Copy)]
+struct OwnSize {
+    direct: u64,
+    flags: u8,
+}
+
+#[derive(Clone, Copy)]
+struct PathLookup<'path> {
+    path: &'path Path,
+    fold_case: bool,
+}
+
+#[derive(Clone, Copy)]
+struct NameLookup<'name> {
+    name: &'name str,
+    fold_case: bool,
+}
+
+struct RootedRest<'path> {
+    root: NodeId,
+    rest: std::path::Components<'path>,
+}
+
+struct UnscannedTopsWalk {
+    tops: Vec<PathBuf>,
+    stack: Vec<NodeId>,
+}
+
+pub(crate) struct LiveNode<'tree> {
+    pub(crate) name: &'tree str,
+    pub(crate) parent: Option<u32>,
+}
+
 /// Arena of folder nodes with u32 indices; freed slots are reused.
 #[derive(Debug, Default)]
 pub struct FolderSizeTree {
@@ -174,14 +235,12 @@ impl FolderSizeTree {
     pub fn merge_record<S: AsRef<OsStr>>(
         &mut self,
         path: &Path,
-        direct_bytes: u64,
-        subdirs: &[S],
-        denied: bool,
+        listing: DirectoryListing<'_, S>,
     ) -> bool {
         let Some(id) = self.ensure(path) else {
             return false;
         };
-        self.set_listing(id, direct_bytes, subdirs, denied);
+        self.set_listing(id, listing);
         true
     }
 
@@ -191,23 +250,30 @@ impl FolderSizeTree {
     pub fn apply_listing<S: AsRef<OsStr>>(
         &mut self,
         path: &Path,
-        direct_bytes: u64,
-        subdirs: &[S],
-        denied: bool,
+        listing: DirectoryListing<'_, S>,
     ) -> Option<Vec<PathBuf>> {
         let id = self.find(path)?;
-        Some(self.set_listing(id, direct_bytes, subdirs, denied))
+        Some(self.set_listing(id, listing))
     }
 
     fn set_listing<S: AsRef<OsStr>>(
         &mut self,
         id: NodeId,
-        direct_bytes: u64,
-        subdirs: &[S],
-        denied: bool,
+        listing: DirectoryListing<'_, S>,
     ) -> Vec<PathBuf> {
+        let DirectoryListing {
+            direct_bytes,
+            subdirs,
+            denied,
+        } = listing;
         let flags = (self.node(id).flags & SKIPPED) | SCANNED | denied_flag(denied);
-        self.set_own(id, direct_bytes, flags);
+        self.set_own(
+            id,
+            OwnSize {
+                direct: direct_bytes,
+                flags,
+            },
+        );
 
         let mut listed: Vec<Box<str>> = subdirs
             .iter()
@@ -295,8 +361,11 @@ impl FolderSizeTree {
             return false;
         };
         let node = self.node(id);
-        let flags = with_skipped_flag(node.flags, skipped);
-        self.set_own(id, node.direct, flags);
+        let own = OwnSize {
+            direct: node.direct,
+            flags: with_skipped_flag(node.flags, skipped),
+        };
+        self.set_own(id, own);
         true
     }
 
@@ -332,20 +401,18 @@ impl FolderSizeTree {
     /// The topmost directories still waiting for a scan, e.g. after loading
     /// a snapshot written mid-scan.
     pub fn unscanned_tops(&self) -> Vec<PathBuf> {
-        let mut tops = Vec::new();
-        let mut stack = self.roots.clone();
-        while let Some(id) = stack.pop() {
-            self.visit_for_unscanned_tops(id, &mut tops, &mut stack);
+        let mut walk = UnscannedTopsWalk {
+            tops: Vec::new(),
+            stack: self.roots.clone(),
+        };
+        while let Some(id) = walk.stack.pop() {
+            self.visit_for_unscanned_tops(id, &mut walk);
         }
-        tops
+        walk.tops
     }
 
-    fn visit_for_unscanned_tops(
-        &self,
-        id: NodeId,
-        tops: &mut Vec<PathBuf>,
-        stack: &mut Vec<NodeId>,
-    ) {
+    fn visit_for_unscanned_tops(&self, id: NodeId, walk: &mut UnscannedTopsWalk) {
+        let UnscannedTopsWalk { tops, stack } = walk;
         let node = self.node(id);
         if node.pending == 0 {
             return;
@@ -432,17 +499,25 @@ impl FolderSizeTree {
     }
 
     fn resolve(&self, path: &Path, fold_case: bool) -> Option<NodeId> {
+        let lookup = PathLookup { path, fold_case };
         self.roots
             .iter()
-            .find_map(|&root| self.resolve_below_root(root, path, fold_case))
+            .find_map(|&root| self.resolve_below_root(root, lookup))
     }
 
-    fn resolve_below_root(&self, root: NodeId, path: &Path, fold_case: bool) -> Option<NodeId> {
+    fn resolve_below_root(&self, root: NodeId, lookup: PathLookup<'_>) -> Option<NodeId> {
+        let PathLookup { path, fold_case } = lookup;
         let rest = strip_root(path, self.root_path(root), fold_case)?;
         let mut id = root;
         for component in rest {
             let name = normal_name(component)?;
-            id = self.child_matching(id, &name, fold_case)?;
+            id = self.child_matching(
+                id,
+                NameLookup {
+                    name: &name,
+                    fold_case,
+                },
+            )?;
         }
         Some(id)
     }
@@ -455,15 +530,15 @@ impl FolderSizeTree {
         &self,
         path: &'path Path,
         fold_case: bool,
-    ) -> Option<(NodeId, std::path::Components<'path>)> {
+    ) -> Option<RootedRest<'path>> {
         self.roots.iter().find_map(|&root| {
-            strip_root(path, self.root_path(root), fold_case).map(|rest| (root, rest))
+            strip_root(path, self.root_path(root), fold_case).map(|rest| RootedRest { root, rest })
         })
     }
 
     /// Finds `path` (exact match), creating missing nodes below its root.
     fn ensure(&mut self, path: &Path) -> Option<NodeId> {
-        let (root, rest) = [false, true]
+        let RootedRest { root, rest } = [false, true]
             .into_iter()
             .find_map(|fold_case| self.strip_any_root(path, fold_case))?;
         let names = rest.map(normal_name).collect::<Option<Vec<_>>>()?;
@@ -474,7 +549,8 @@ impl FolderSizeTree {
         )
     }
 
-    fn child_matching(&self, parent: NodeId, name: &str, fold_case: bool) -> Option<NodeId> {
+    fn child_matching(&self, parent: NodeId, lookup: NameLookup<'_>) -> Option<NodeId> {
+        let NameLookup { name, fold_case } = lookup;
         let exact = self.child(parent, name);
         if exact.is_some() {
             return exact;
@@ -558,7 +634,8 @@ impl FolderSizeTree {
         self.dirty = true;
     }
 
-    fn set_own(&mut self, id: NodeId, direct: u64, flags: u8) {
+    fn set_own(&mut self, id: NodeId, own: OwnSize) {
+        let OwnSize { direct, flags } = own;
         let node = self.node(id);
         let delta = Delta::own(direct, flags).minus(Delta::own(node.direct, node.flags));
         let node = self.node_mut(id);
@@ -644,12 +721,15 @@ impl FolderSizeTree {
 
     /// A live node's name and parent (`None` for a root); `None` for a freed
     /// or out-of-range slot.
-    pub(crate) fn live_node(&self, id: u32) -> Option<(&str, Option<u32>)> {
+    pub(crate) fn live_node(&self, id: u32) -> Option<LiveNode<'_>> {
         let node = self.nodes.get(id as usize)?;
         if node.name.is_empty() {
             return None;
         }
-        Some((&node.name, (node.parent != NONE).then_some(node.parent)))
+        Some(LiveNode {
+            name: &node.name,
+            parent: (node.parent != NONE).then_some(node.parent),
+        })
     }
 
     pub(crate) fn lookup(&self, path: &Path) -> Option<u32> {
@@ -692,13 +772,13 @@ impl FolderSizeTree {
 
     /// Appends one exported node; `None` rejects invalid input (forward
     /// parent, bad flags, empty or duplicate name).
-    pub(crate) fn import_node(
-        &mut self,
-        parent: u32,
-        name: Box<str>,
-        direct: u64,
-        flags: u8,
-    ) -> Option<()> {
+    pub(crate) fn import_node(&mut self, imported: ImportedNode) -> Option<()> {
+        let ImportedNode {
+            parent,
+            name,
+            direct,
+            flags,
+        } = imported;
         if name.is_empty() {
             return None;
         }
@@ -707,7 +787,13 @@ impl FolderSizeTree {
             return None;
         }
         let id = self.nodes.len() as NodeId;
-        self.attach_imported(parent, id, &name)?;
+        self.attach_imported(
+            id,
+            ImportedLink {
+                parent,
+                name: &name,
+            },
+        )?;
         self.nodes.push(Node {
             parent,
             name,
@@ -718,7 +804,8 @@ impl FolderSizeTree {
         Some(())
     }
 
-    fn attach_imported(&mut self, parent: u32, id: NodeId, name: &str) -> Option<()> {
+    fn attach_imported(&mut self, id: NodeId, link: ImportedLink<'_>) -> Option<()> {
+        let ImportedLink { parent, name } = link;
         if parent == NONE {
             self.roots.push(id);
             return Some(());

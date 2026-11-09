@@ -147,11 +147,12 @@ function relativeWeekdayPattern(showTime: boolean, showSeconds: boolean): string
   return `'on' EEEE ${showSeconds ? 'HH:mm:ss' : 'HH:mm'}`
 }
 
+type TimeDisplay = Pick<FormatDateOptions, 'showTime' | 'showSeconds'>
+
 function formatRelative(
   value: Date,
   ageMs: number,
-  showTime: boolean,
-  showSeconds: boolean,
+  { showTime, showSeconds }: TimeDisplay,
 ): FormattedDate | null {
   // Clamp clock-skewed "future" timestamps to the present.
   const age = ageMs < 0 ? 0 : ageMs
@@ -195,12 +196,7 @@ export function formatEntryDate(
   }
   const timestamp = getTime(date)
   if (options.relative) {
-    const phrase = formatRelative(
-      date,
-      (options.now ?? Date.now()) - timestamp,
-      options.showTime,
-      options.showSeconds,
-    )
+    const phrase = formatRelative(date, (options.now ?? Date.now()) - timestamp, options)
     if (phrase) {
       // Relative phrases are a function of "now", which advances outside of
       // any cache key we could construct — never cache these.

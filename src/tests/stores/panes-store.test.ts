@@ -127,9 +127,11 @@ describe('panes-store navigation', () => {
     })
 
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
-    useSelectionStore
-      .getState()
-      .setSelection('left', ['C:\\root\\Gamma'], 'C:\\root\\Gamma', 'C:\\root\\Gamma')
+    useSelectionStore.getState().setSelection('left', {
+      selectedIds: ['C:\\root\\Gamma'],
+      anchorId: 'C:\\root\\Gamma',
+      focusedId: 'C:\\root\\Gamma',
+    })
     usePanesStore.getState().setFocusedEntry('left', 'C:\\root\\Gamma')
 
     await usePanesStore.getState().navigatePane('left', 'C:\\root\\Gamma')
@@ -156,14 +158,11 @@ describe('panes-store navigation', () => {
     await usePanesStore.getState().navigatePane('left', 'C:\\root\\Gamma')
     // Selecting something inside the child must not defeat the reveal: the
     // parent listing still highlights the folder we came back from.
-    useSelectionStore
-      .getState()
-      .setSelection(
-        'left',
-        ['C:\\root\\Gamma\\Nested'],
-        'C:\\root\\Gamma\\Nested',
-        'C:\\root\\Gamma\\Nested',
-      )
+    useSelectionStore.getState().setSelection('left', {
+      selectedIds: ['C:\\root\\Gamma\\Nested'],
+      anchorId: 'C:\\root\\Gamma\\Nested',
+      focusedId: 'C:\\root\\Gamma\\Nested',
+    })
 
     await usePanesStore.getState().goUp('left')
 
@@ -193,14 +192,11 @@ describe('panes-store navigation', () => {
 
     await usePanesStore.getState().navigatePane('left', 'C:\\root')
     await usePanesStore.getState().navigatePane('left', 'C:\\root\\Gamma')
-    useSelectionStore
-      .getState()
-      .setSelection(
-        'left',
-        ['C:\\root\\Gamma\\Nested'],
-        'C:\\root\\Gamma\\Nested',
-        'C:\\root\\Gamma\\Nested',
-      )
+    useSelectionStore.getState().setSelection('left', {
+      selectedIds: ['C:\\root\\Gamma\\Nested'],
+      anchorId: 'C:\\root\\Gamma\\Nested',
+      focusedId: 'C:\\root\\Gamma\\Nested',
+    })
 
     await usePanesStore.getState().goBack('left')
 
@@ -674,7 +670,12 @@ describe('panes-store navigation', () => {
     })
     tabs.setActiveTab('left', first)
 
-    await usePanesStore.getState().moveTab('left', inactive, 'right', 1)
+    await usePanesStore.getState().moveTab({
+      sourcePaneId: 'left',
+      tabId: inactive,
+      destinationPaneId: 'right',
+      destinationIndex: 1,
+    })
     expect(listDir).toHaveBeenCalledTimes(1)
     expect(usePanesStore.getState().activePaneId).toBe('right')
     expect(activeTab('left').id).toBe(first)
@@ -682,7 +683,12 @@ describe('panes-store navigation', () => {
     expect(activeTab('right').id).toMatch(/^right-tab-/)
 
     listDir.mockClear()
-    await usePanesStore.getState().moveTab('right', activeTab('right').id, 'left', 1)
+    await usePanesStore.getState().moveTab({
+      sourcePaneId: 'right',
+      tabId: activeTab('right').id,
+      destinationPaneId: 'left',
+      destinationIndex: 1,
+    })
     expect(listDir).toHaveBeenCalledTimes(2)
     expect(usePanesStore.getState().activePaneId).toBe('left')
     expect(activeTab('left')).toMatchObject({ path: 'C:\\inactive' })
@@ -2408,8 +2414,12 @@ describe('panes-store passive item counts', () => {
       },
     }))
 
-    await usePanesStore.getState().requestVisibleItemCounts('left', 0, 204, 204)
-    await usePanesStore.getState().requestVisibleItemCounts('left', 0, 204, 204)
+    await usePanesStore
+      .getState()
+      .requestVisibleItemCounts('left', { startIndex: 0, endIndex: 204, viewportCount: 204 })
+    await usePanesStore
+      .getState()
+      .requestVisibleItemCounts('left', { startIndex: 0, endIndex: 204, viewportCount: 204 })
 
     expect(requestVisibleItemCounts).toHaveBeenCalledOnce()
     const payload = requestVisibleItemCounts.mock.calls[0]?.[0] as
@@ -2482,7 +2492,9 @@ describe('panes-store passive item counts', () => {
       },
     }))
 
-    await usePanesStore.getState().requestVisibleItemCounts('left', 0, 0, 0)
+    await usePanesStore
+      .getState()
+      .requestVisibleItemCounts('left', { startIndex: 0, endIndex: 0, viewportCount: 0 })
     const pane = usePanesStore.getState().panes.left
     const tabId = useTabsStore.getState().panes.left.tabs[0].id
     usePanesStore.getState().applyItemCountEvents([
@@ -2502,7 +2514,9 @@ describe('panes-store passive item counts', () => {
       removed: [],
     })
 
-    await usePanesStore.getState().requestVisibleItemCounts('left', 0, 0, 0)
+    await usePanesStore
+      .getState()
+      .requestVisibleItemCounts('left', { startIndex: 0, endIndex: 0, viewportCount: 0 })
     expect(requestVisibleItemCounts).toHaveBeenCalledTimes(2)
   })
 
@@ -2523,9 +2537,15 @@ describe('panes-store passive item counts', () => {
       },
     }))
 
-    await usePanesStore.getState().requestVisibleItemCounts('left', 0, 0, 0)
-    await usePanesStore.getState().requestVisibleItemCounts('left', 1, 1, 0)
-    await usePanesStore.getState().requestVisibleItemCounts('left', 0, 0, 0)
+    await usePanesStore
+      .getState()
+      .requestVisibleItemCounts('left', { startIndex: 0, endIndex: 0, viewportCount: 0 })
+    await usePanesStore
+      .getState()
+      .requestVisibleItemCounts('left', { startIndex: 1, endIndex: 1, viewportCount: 0 })
+    await usePanesStore
+      .getState()
+      .requestVisibleItemCounts('left', { startIndex: 0, endIndex: 0, viewportCount: 0 })
 
     expect(requestVisibleItemCounts).toHaveBeenCalledTimes(3)
     const requestedPaths = (
@@ -2549,7 +2569,9 @@ describe('panes-store passive item counts', () => {
       },
     }))
 
-    await usePanesStore.getState().requestVisibleItemCounts('left', 0, 0, 0)
+    await usePanesStore
+      .getState()
+      .requestVisibleItemCounts('left', { startIndex: 0, endIndex: 0, viewportCount: 0 })
     expect(requestVisibleItemCounts).not.toHaveBeenCalled()
   })
 
@@ -2557,7 +2579,9 @@ describe('panes-store passive item counts', () => {
     const requestVisibleItemCounts = vi.fn(() => undefined)
     ipc.override('request_visible_item_counts', requestVisibleItemCounts)
     await usePanesStore.getState().navigatePane('left', 'trash://')
-    await usePanesStore.getState().requestVisibleItemCounts('left', 0, 10, 10)
+    await usePanesStore
+      .getState()
+      .requestVisibleItemCounts('left', { startIndex: 0, endIndex: 10, viewportCount: 10 })
     expect(requestVisibleItemCounts).not.toHaveBeenCalled()
   })
 

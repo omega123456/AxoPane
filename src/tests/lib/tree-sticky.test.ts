@@ -163,11 +163,15 @@ describe('flattenVisibleTree', () => {
       }),
     }
 
-    expect(flattenVisibleTree(treeNodes, '/', new Set(['/volumes/team']))).toEqual([
+    expect(
+      flattenVisibleTree(treeNodes, '/', { excludedRootPaths: new Set(['/volumes/team']) }),
+    ).toEqual([
       { kind: 'node', path: '/', depth: 0 },
       { kind: 'node', path: '/Volumes', depth: 1 },
     ])
-    expect(flattenVisibleTree(treeNodes, '/Volumes/team', new Set(['/']))).toEqual([
+    expect(
+      flattenVisibleTree(treeNodes, '/Volumes/team', { excludedRootPaths: new Set(['/']) }),
+    ).toEqual([
       { kind: 'node', path: '/Volumes/team', depth: 0 },
       { kind: 'node', path: '/Volumes/team/Project', depth: 1 },
     ])
@@ -214,7 +218,7 @@ describe('flattenVisibleTree folding', () => {
   it('shows each path folder followed by one other-folders row per level', () => {
     const { chain, treeNodes } = pathTree(2)
 
-    expect(flattenVisibleTree(treeNodes, 'C:\\', new Set(), foldOf(chain))).toEqual([
+    expect(flattenVisibleTree(treeNodes, 'C:\\', { fold: foldOf(chain) })).toEqual([
       { kind: 'node', path: 'C:\\', depth: 0 },
       { kind: 'node', path: 'C:\\p1', depth: 1 },
       { kind: 'node', path: 'C:\\p1\\p2', depth: 2 },
@@ -229,7 +233,7 @@ describe('flattenVisibleTree folding', () => {
       'C:\\only': node({ path: 'C:\\only', parentPath: 'C:\\', expanded: false }),
     }
 
-    expect(flattenVisibleTree(treeNodes, 'C:\\', new Set(), foldOf(['C:\\', 'C:\\only']))).toEqual([
+    expect(flattenVisibleTree(treeNodes, 'C:\\', { fold: foldOf(['C:\\', 'C:\\only']) })).toEqual([
       { kind: 'node', path: 'C:\\', depth: 0 },
       { kind: 'node', path: 'C:\\only', depth: 1 },
     ])
@@ -239,7 +243,7 @@ describe('flattenVisibleTree folding', () => {
     const { chain, treeNodes } = pathTree(2)
     const fold = foldOf(chain, { revealedSiblings: new Set(['C:\\']) })
 
-    expect(flattenVisibleTree(treeNodes, 'C:\\', new Set(), fold)).toEqual([
+    expect(flattenVisibleTree(treeNodes, 'C:\\', { fold: fold })).toEqual([
       { kind: 'node', path: 'C:\\', depth: 0 },
       { kind: 'node', path: 'C:\\a', depth: 1 },
       { kind: 'node', path: 'C:\\p1', depth: 1 },
@@ -253,7 +257,7 @@ describe('flattenVisibleTree folding', () => {
     const { chain, treeNodes } = pathTree(2)
     treeNodes['C:\\'] = { ...treeNodes['C:\\'], children: ['C:\\a', 'C:\\z'] }
 
-    expect(flattenVisibleTree(treeNodes, 'C:\\', new Set(), foldOf(chain))).toEqual([
+    expect(flattenVisibleTree(treeNodes, 'C:\\', { fold: foldOf(chain) })).toEqual([
       { kind: 'node', path: 'C:\\', depth: 0 },
       { kind: 'node', path: 'C:\\a', depth: 1 },
       { kind: 'node', path: 'C:\\z', depth: 1 },
@@ -268,7 +272,12 @@ describe('flattenVisibleTree folding', () => {
     }
     const fold = foldOf(['/', '/Volumes', '/Volumes/team'])
 
-    expect(flattenVisibleTree(treeNodes, '/', new Set(['/volumes/team']), fold)).toEqual([
+    expect(
+      flattenVisibleTree(treeNodes, '/', {
+        excludedRootPaths: new Set(['/volumes/team']),
+        fold: fold,
+      }),
+    ).toEqual([
       { kind: 'node', path: '/', depth: 0 },
       { kind: 'node', path: '/Volumes', depth: 1 },
     ])
@@ -277,7 +286,7 @@ describe('flattenVisibleTree folding', () => {
   it('folds the middle of a path deeper than six levels into one row', () => {
     const { chain, treeNodes } = pathTree(10)
 
-    const rows = flattenVisibleTree(treeNodes, 'C:\\', new Set(), foldOf(chain))
+    const rows = flattenVisibleTree(treeNodes, 'C:\\', { fold: foldOf(chain) })
 
     expect(rows.slice(0, 5)).toEqual([
       { kind: 'node', path: chain[0], depth: 0 },
@@ -300,7 +309,7 @@ describe('flattenVisibleTree folding', () => {
     const { chain, treeNodes } = pathTree(10)
     const fold = foldOf(chain, { revealedSiblings: new Set([chain[2]]) })
 
-    const rows = flattenVisibleTree(treeNodes, 'C:\\', new Set(), fold)
+    const rows = flattenVisibleTree(treeNodes, 'C:\\', { fold: fold })
 
     expect(rows.find((row) => row.kind === 'fold-levels')).toEqual({
       kind: 'fold-levels',
@@ -313,12 +322,9 @@ describe('flattenVisibleTree folding', () => {
   it('shows every level once hidden levels are revealed', () => {
     const { chain, treeNodes } = pathTree(10)
 
-    const rows = flattenVisibleTree(
-      treeNodes,
-      'C:\\',
-      new Set(),
-      foldOf(chain, { showHiddenLevels: true }),
-    )
+    const rows = flattenVisibleTree(treeNodes, 'C:\\', {
+      fold: foldOf(chain, { showHiddenLevels: true }),
+    })
 
     expect(rows.some((row) => row.kind === 'fold-levels')).toBe(false)
     expect(rows.filter((row) => row.kind === 'node')).toHaveLength(chain.length)
@@ -328,7 +334,7 @@ describe('flattenVisibleTree folding', () => {
     const { chain, treeNodes } = pathTree(10)
     treeNodes[chain[4]] = { ...treeNodes[chain[4]], expanded: false }
 
-    const rows = flattenVisibleTree(treeNodes, 'C:\\', new Set(), foldOf(chain))
+    const rows = flattenVisibleTree(treeNodes, 'C:\\', { fold: foldOf(chain) })
 
     expect(rows.some((row) => row.kind === 'fold-levels')).toBe(false)
     expect(rows.filter((row) => row.kind === 'node').map((row) => row.path)).toEqual(

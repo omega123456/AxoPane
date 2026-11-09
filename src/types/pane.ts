@@ -2,6 +2,12 @@ import type { DirectoryEntry, SortDirection, SortKey } from '@/lib/types/ipc'
 
 export type PaneId = 'left' | 'right'
 
+export type VisibleRange = {
+  startIndex: number
+  endIndex: number
+  viewportCount: number
+}
+
 export type PaneState = {
   id: PaneId
   title: string

@@ -60,6 +60,7 @@ export default tseslint.config(
       'local/named-conditions': 'error',
       'id-length': ['error', { min: 2, properties: 'never', exceptions: ['_'] }],
       complexity: ['error', 10],
+      'max-params': ['error', 3],
       'max-depth': ['error', 2],
       'max-lines-per-function': ['error', { max: 60, skipBlankLines: true, skipComments: true }],
       'max-lines': ['error', { max: 400, skipBlankLines: true, skipComments: true }],

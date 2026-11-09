@@ -161,9 +161,13 @@ impl WalkOptions {
 /// Total logical bytes under `root`. A denied directory fails the walk.
 pub fn subtree_total(root: &Path, options: &WalkOptions) -> Result<u64, ManualSizeError> {
     let total = AtomicU64::new(0);
-    walk(root, options, true, &|record| {
-        total.fetch_add(record.direct_bytes, Ordering::Relaxed);
-    })?;
+    let sink = RecordSink {
+        fail_on_denied: true,
+        on_record: &|record| {
+            total.fetch_add(record.direct_bytes, Ordering::Relaxed);
+        },
+    };
+    walk(root, options, sink)?;
     Ok(total.into_inner())
 }
 
@@ -175,24 +179,39 @@ pub fn subtree_records(
     options: &WalkOptions,
     on_record: impl Fn(DirRecord) + Sync,
 ) -> Result<(), ManualSizeError> {
-    walk(root, options, false, &on_record)
+    let sink = RecordSink {
+        fail_on_denied: false,
+        on_record: &on_record,
+    };
+    walk(root, options, sink)
 }
 
 /// Reads one directory. Ignores exclusions and device boundaries; a missing
 /// directory is a `NotFound` I/O error.
 pub fn list_dir(dir: &Path, options: &WalkOptions) -> Result<DirListing, ManualSizeError> {
     let mut buffer = vec![0_u8; buffer_size(options)];
-    read_dir(dir, options, None, &mut buffer)?
+    let scope = ReadScope {
+        options,
+        allowed_devs: None,
+    };
+    read_dir(dir, scope, &mut buffer)?
         .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound).into())
 }
 
 /// Current and peak helper threads in use across the process.
 #[cfg(feature = "test-utils")]
-pub fn helper_threads_for_tests() -> (usize, usize) {
-    (
-        HELPERS_IN_USE.load(Ordering::Acquire),
-        PEAK_HELPERS.load(Ordering::Acquire),
-    )
+pub fn helper_threads_for_tests() -> HelperThreadCounts {
+    HelperThreadCounts {
+        in_use: HELPERS_IN_USE.load(Ordering::Acquire),
+        peak: PEAK_HELPERS.load(Ordering::Acquire),
+    }
+}
+
+#[cfg(feature = "test-utils")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HelperThreadCounts {
+    pub in_use: usize,
+    pub peak: usize,
 }
 
 struct Queue {
@@ -241,18 +260,25 @@ fn allowed_devices(
     Ok(Some(devices))
 }
 
-fn walk(
-    root: &Path,
-    options: &WalkOptions,
+#[derive(Clone, Copy)]
+struct RecordSink<'sink> {
     fail_on_denied: bool,
-    on_record: &(dyn Fn(DirRecord) + Sync),
-) -> Result<(), ManualSizeError> {
+    on_record: &'sink (dyn Fn(DirRecord) + Sync),
+}
+
+#[derive(Clone, Copy)]
+struct ReadScope<'scope> {
+    options: &'scope WalkOptions,
+    allowed_devs: Option<&'scope [u64]>,
+}
+
+fn walk(root: &Path, options: &WalkOptions, sink: RecordSink<'_>) -> Result<(), ManualSizeError> {
     let allowed_devs = allowed_devices(options, root)?;
     let walk = Walk {
         options,
         allowed_devs,
-        fail_on_denied,
-        on_record,
+        fail_on_denied: sink.fail_on_denied,
+        on_record: sink.on_record,
         queue: Mutex::new(Queue {
             pending: vec![root.to_path_buf()],
             busy: 0,
@@ -322,8 +348,11 @@ impl Walk<'_> {
         if self.options.excluded.contains(&dir) {
             return Ok(Vec::new());
         }
-        let Some(listing) = read_dir(&dir, self.options, self.allowed_devs.as_deref(), buffer)?
-        else {
+        let scope = ReadScope {
+            options: self.options,
+            allowed_devs: self.allowed_devs.as_deref(),
+        };
+        let Some(listing) = read_dir(&dir, scope, buffer)? else {
             return Ok(Vec::new());
         };
         if listing.denied && self.fail_on_denied {
@@ -396,10 +425,13 @@ fn check_stop(options: &WalkOptions) -> Result<(), ManualSizeError> {
 /// on a device outside `allowed_devs`.
 fn read_dir(
     dir: &Path,
-    options: &WalkOptions,
-    allowed_devs: Option<&[u64]>,
+    scope: ReadScope<'_>,
     buffer: &mut [u8],
 ) -> Result<Option<DirListing>, ManualSizeError> {
+    let ReadScope {
+        options,
+        allowed_devs,
+    } = scope;
     before_dir_open(options, dir);
     let mut listing = DirListing::default();
     let file = match OpenOptions::new()

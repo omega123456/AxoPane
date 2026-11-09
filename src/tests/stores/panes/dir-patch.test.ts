@@ -74,23 +74,26 @@ describe('dir patch', () => {
 
   it('skips patches while typing, for inactive tabs and for other paths', () => {
     const typing = panesDataWithLeft({ path: '/root', typing: true })
-    expect(dirPatchOutcome(typing, 'left', patch(), TAB_ID)).toEqual({
+    expect(dirPatchOutcome(typing, patch(), { paneId: 'left', activeTabId: TAB_ID })).toEqual({
       kind: 'skipped',
       reason: 'typing',
     })
     const idle = panesDataWithLeft({ path: '/root' })
-    expect(dirPatchOutcome(idle, 'left', patch(), 'other-tab')).toEqual({
+    expect(dirPatchOutcome(idle, patch(), { paneId: 'left', activeTabId: 'other-tab' })).toEqual({
       kind: 'skipped',
       reason: 'inactiveTab',
     })
-    expect(dirPatchOutcome(idle, 'left', patch({ path: '/elsewhere' }), TAB_ID)).toEqual({
+    expect(
+      dirPatchOutcome(idle, patch({ path: '/elsewhere' }), { paneId: 'left', activeTabId: TAB_ID }),
+    ).toEqual({
       kind: 'skipped',
       reason: 'pathMismatch',
     })
     const items = panesDataWithLeft({ path: '/root', sortKey: 'items' })
-    expect(dirPatchOutcome(items, 'left', patch({ path: '/elsewhere' }), TAB_ID).kind).toBe(
-      'skipped',
-    )
+    expect(
+      dirPatchOutcome(items, patch({ path: '/elsewhere' }), { paneId: 'left', activeTabId: TAB_ID })
+        .kind,
+    ).toBe('skipped')
   })
 
   it('applies rows, keeps focus and folds folder changes into a loaded tree node', () => {
@@ -99,7 +102,7 @@ describe('dir patch', () => {
       { treeNodes: { '/root': loadedNode('/root', []) } },
     )
     const event = patch({ changed: [{ path: '/root/dir', entry: directoryEntry('/root/dir') }] })
-    const outcome = dirPatchOutcome(state, 'left', event, TAB_ID)
+    const outcome = dirPatchOutcome(state, event, { paneId: 'left', activeTabId: TAB_ID })
     expect(outcome.kind).toBe('applied')
     if (outcome.kind !== 'applied') return
     expect(outcome.entryCount).toBe(2)
@@ -110,7 +113,10 @@ describe('dir patch', () => {
   it('marks an items-sorted pane as counting without touching its rows', () => {
     const entries = [fileEntry('/root/a')]
     const state = panesDataWithLeft({ path: '/root', sortKey: 'items', entries })
-    const outcome = dirPatchOutcome(state, 'left', patch({ removed: ['/root/a'] }), TAB_ID)
+    const outcome = dirPatchOutcome(state, patch({ removed: ['/root/a'] }), {
+      paneId: 'left',
+      activeTabId: TAB_ID,
+    })
     expect(outcome.kind).toBe('itemsSortPending')
     if (outcome.kind !== 'itemsSortPending') return
     expect(outcome.next.panes?.left.entries).toBe(entries)

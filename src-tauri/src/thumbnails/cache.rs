@@ -2,7 +2,7 @@
 //! protection; the renderer owns that presentation policy.
 
 use super::types::{ThumbnailCacheKey, ThumbnailState};
-use crate::bounded_cache::BoundedCache;
+use crate::bounded_cache::{BoundedCache, Weighted};
 use crate::ipc::types::ThumbnailQuality;
 
 pub const MAX_CACHE_RECORDS: usize = 256;
@@ -15,6 +15,17 @@ struct CacheRecord {
     state: ThumbnailState,
     expires_at: Option<u64>,
     retry_after: Option<u64>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CachedThumbnailLookup {
+    pub state: ThumbnailState,
+    pub should_upgrade: bool,
+}
+
+pub struct ThumbnailCacheEntry {
+    pub key: ThumbnailCacheKey,
+    pub state: ThumbnailState,
 }
 
 #[derive(Debug)]
@@ -45,14 +56,14 @@ impl ThumbnailCache {
 
     pub fn get(&mut self, key: &ThumbnailCacheKey, now_seconds: u64) -> Option<ThumbnailState> {
         self.get_with_upgrade(key, now_seconds)
-            .map(|(state, _)| state)
+            .map(|lookup| lookup.state)
     }
 
     pub fn get_with_upgrade(
         &mut self,
         key: &ThumbnailCacheKey,
         now_seconds: u64,
-    ) -> Option<(ThumbnailState, bool)> {
+    ) -> Option<CachedThumbnailLookup> {
         let record = self.records.get(key)?;
         if record
             .expires_at
@@ -68,15 +79,14 @@ impl ThumbnailCache {
                 ..
             }
         ) && record.retry_after.is_none_or(|retry| retry <= now_seconds);
-        Some((record.state.clone(), should_upgrade))
+        Some(CachedThumbnailLookup {
+            state: record.state.clone(),
+            should_upgrade,
+        })
     }
 
-    pub fn insert(
-        &mut self,
-        key: ThumbnailCacheKey,
-        state: ThumbnailState,
-        now_seconds: u64,
-    ) -> bool {
+    pub fn insert(&mut self, entry: ThumbnailCacheEntry, now_seconds: u64) -> bool {
+        let ThumbnailCacheEntry { key, state } = entry;
         let decision = self
             .records
             .get(&key)
@@ -87,7 +97,11 @@ impl ThumbnailCache {
             InsertDecision::KeepExisting => return false,
             InsertDecision::DeferRetry(record) => {
                 let weight = record.state.weight();
-                self.records.insert(key, record, weight);
+                let entry = Weighted {
+                    value: record,
+                    weight,
+                };
+                self.records.insert(key, entry);
                 return false;
             }
             InsertDecision::Replace => {}
@@ -98,15 +112,15 @@ impl ThumbnailCache {
             ThumbnailState::Ready { .. } => None,
         };
         let weight = state.weight();
-        self.records.insert(
-            key,
-            CacheRecord {
+        let entry = Weighted {
+            value: CacheRecord {
                 state,
                 expires_at,
                 retry_after: None,
             },
             weight,
-        );
+        };
+        self.records.insert(key, entry);
         true
     }
 }

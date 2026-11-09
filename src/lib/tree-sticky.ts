@@ -98,15 +98,25 @@ function hiddenChainLevels(
  * revealed that level. A path deeper than `FOLD_MAX_LEVELS` also folds its
  * middle levels into one row. Folders off the active path walk unchanged.
  */
+export type VisibleTreeOptions = {
+  excludedRootPaths?: ReadonlySet<string>
+  fold?: TreeFoldState
+}
+
 export function flattenVisibleTree(
   treeNodes: Record<string, TreeNodeState>,
   rootPath: string,
-  excludedRootPaths: ReadonlySet<string> = new Set(),
-  fold: TreeFoldState = EMPTY_TREE_FOLD,
+  options: VisibleTreeOptions = {},
 ): FlatTreeRow[] {
+  const { excludedRootPaths = new Set<string>(), fold = EMPTY_TREE_FOLD } = options
   const walk = new VisibleTreeWalk(treeNodes, excludedRootPaths, fold)
   walk.walk(rootPath, 0)
   return walk.rows
+}
+
+type TreePosition = {
+  path: string
+  depth: number
 }
 
 class VisibleTreeWalk {
@@ -151,7 +161,7 @@ class VisibleTreeWalk {
       this.walkChildren(node, next, depth)
       return
     }
-    this.walkFolded(path, node, next, depth)
+    this.walkFolded({ path, depth }, node, next)
   }
 
   private walkPath(path: string, depth: number): void {
@@ -196,7 +206,7 @@ class VisibleTreeWalk {
     this.walk(path, depth)
   }
 
-  private walkFolded(path: string, node: TreeNodeState, next: string, depth: number) {
+  private walkFolded({ path, depth }: TreePosition, node: TreeNodeState, next: string) {
     this.walkPath(next, depth + 1)
     const others = node.children.length - 1
     if (others > 0) {

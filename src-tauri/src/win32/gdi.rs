@@ -50,7 +50,18 @@ pub enum IconBitmapFallback {
     None,
 }
 
-fn bitmap_dimensions(bitmap: HBITMAP) -> Option<(u32, u32)> {
+#[derive(Clone, Copy)]
+struct BitmapSize {
+    width: u32,
+    height: u32,
+}
+
+struct BgraBitmap {
+    size: BitmapSize,
+    pixels: Vec<u8>,
+}
+
+fn bitmap_dimensions(bitmap: HBITMAP) -> Option<BitmapSize> {
     let mut object = BITMAP::default();
     let copied = unsafe {
         GetObjectW(
@@ -64,13 +75,14 @@ fn bitmap_dimensions(bitmap: HBITMAP) -> Option<(u32, u32)> {
     }
     let width = u32::try_from(object.bmWidth).ok()?;
     let height = u32::try_from(object.bmHeight.abs()).ok()?;
-    (width != 0 && height != 0).then_some((width, height))
+    (width != 0 && height != 0).then_some(BitmapSize { width, height })
 }
 
 /// Renders a bitmap as premultiplied top-down BGRA. `accept` can reject the
 /// dimensions before any pixel buffer is allocated.
-fn read_bgra(bitmap: HBITMAP, accept: impl Fn(u32, u32) -> bool) -> Option<(u32, u32, Vec<u8>)> {
-    let (width, height) = bitmap_dimensions(bitmap)?;
+fn read_bgra(bitmap: HBITMAP, accept: impl Fn(u32, u32) -> bool) -> Option<BgraBitmap> {
+    let size = bitmap_dimensions(bitmap)?;
+    let BitmapSize { width, height } = size;
     if !accept(width, height) {
         return None;
     }
@@ -106,14 +118,14 @@ fn read_bgra(bitmap: HBITMAP, accept: impl Fn(u32, u32) -> bool) -> Option<(u32,
             DIB_RGB_COLORS,
         )
     };
-    (scan_lines != 0).then_some((width, height, pixels))
+    (scan_lines != 0).then_some(BgraBitmap { size, pixels })
 }
 
 /// Encodes a premultiplied 32bpp bitmap as PNG, after `accept` approves its size.
 pub fn bitmap_to_png_bytes(bitmap: HBITMAP, accept: impl Fn(u32, u32) -> bool) -> Option<Vec<u8>> {
-    let (width, height, bgra) = read_bgra(bitmap, accept)?;
-    let rgba = premultiplied_bgra_to_rgba(&bgra)?;
-    encode_rgba_png(width, height, &rgba)
+    let bgra = read_bgra(bitmap, accept)?;
+    let rgba = premultiplied_bgra_to_rgba(&bgra.pixels)?;
+    encode_rgba_png(bgra.size.width, bgra.size.height, &rgba)
 }
 
 pub fn accept_any_size(_width: u32, _height: u32) -> bool {

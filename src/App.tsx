@@ -79,7 +79,7 @@ function App() {
           key={conflict.operationId}
           conflict={conflict}
           onResolve={(resolution, applyToAll, renameTo) =>
-            resolveConflict(conflict.operationId, resolution, applyToAll, renameTo)
+            resolveConflict({ id: conflict.operationId, resolution, applyToAll, renameTo })
           }
         />
       ) : null}

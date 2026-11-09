@@ -48,7 +48,7 @@ impl PathStyle {
     }
 
     pub fn split<'a>(self, path: &'a str) -> PathParts<'a> {
-        let (root, rest) = self.split_root(path);
+        let RootSplit { root, rest } = self.split_root(path);
         PathParts {
             root,
             components: rest
@@ -93,21 +93,36 @@ impl PathStyle {
         !parts.root.is_empty() && parts.components.is_empty()
     }
 
-    fn split_root(self, path: &str) -> (String, &str) {
+    fn split_root(self, path: &str) -> RootSplit<'_> {
         match self {
             Self::Posix => match path.strip_prefix('/') {
-                Some(rest) => ("/".to_owned(), rest),
-                None => (String::new(), path),
+                Some(rest) => RootSplit::new("/".to_owned(), rest),
+                None => RootSplit::relative(path),
             },
             Self::Windows => windows_root(path),
         }
     }
 }
 
-fn windows_root(path: &str) -> (String, &str) {
+struct RootSplit<'path> {
+    root: String,
+    rest: &'path str,
+}
+
+impl<'path> RootSplit<'path> {
+    fn new(root: String, rest: &'path str) -> Self {
+        Self { root, rest }
+    }
+
+    fn relative(path: &'path str) -> Self {
+        Self::new(String::new(), path)
+    }
+}
+
+fn windows_root(path: &str) -> RootSplit<'_> {
     if starts_with_drive_designator(path) {
         let rest = path[DRIVE_DESIGNATOR_LEN..].trim_start_matches(['\\', '/']);
-        return (format!("{}\\", &path[..DRIVE_DESIGNATOR_LEN]), rest);
+        return RootSplit::new(format!("{}\\", &path[..DRIVE_DESIGNATOR_LEN]), rest);
     }
     let unc = path
         .strip_prefix(UNC_PREFIX)
@@ -118,11 +133,11 @@ fn windows_root(path: &str) -> (String, &str) {
         let share = parts.next().unwrap_or_default();
         let has_share_root = !server.is_empty() && !share.is_empty();
         if has_share_root {
-            return (
+            return RootSplit::new(
                 format!(r"\\{server}\{share}\"),
                 parts.next().unwrap_or_default(),
             );
         }
     }
-    (String::new(), path)
+    RootSplit::relative(path)
 }

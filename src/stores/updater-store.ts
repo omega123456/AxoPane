@@ -13,6 +13,36 @@ import { errorMessage } from '@/lib/error-message'
 
 type UpdaterStatus = 'idle' | 'checking' | 'up-to-date' | 'available' | 'installing' | 'error'
 
+export type UpdaterOutcome = {
+  update: AppUpdate | null
+  summary: UpdateSummary | null
+  status: UpdaterStatus
+  error: string | null
+}
+
+export const IDLE_OUTCOME: UpdaterOutcome = {
+  update: null,
+  summary: null,
+  status: 'idle',
+  error: null,
+}
+
+export function availableOutcome(update: AppUpdate, summary: UpdateSummary): UpdaterOutcome {
+  return { update, summary, status: 'available', error: null }
+}
+
+export function failedCheckOutcome(error: string): UpdaterOutcome {
+  return { ...IDLE_OUTCOME, status: 'error', error }
+}
+
+export function withUpdaterStatus(
+  outcome: UpdaterOutcome,
+  status: UpdaterStatus,
+  error: string | null = null,
+): UpdaterOutcome {
+  return { ...outcome, status, error }
+}
+
 // How long a manual "you're up to date" acknowledgement lingers before the
 // status quietly returns to idle.
 const UP_TO_DATE_RESET_MS = 4_000
@@ -38,8 +68,9 @@ function scheduleUpToDateReset() {
   clearUpToDateTimer()
   upToDateTimer = setTimeout(() => {
     upToDateTimer = null
-    if (useUpdaterStore.getState().status === 'up-to-date') {
-      useUpdaterStore.setState({ status: 'idle' })
+    const { outcome } = useUpdaterStore.getState()
+    if (outcome.status === 'up-to-date') {
+      useUpdaterStore.setState({ outcome: withUpdaterStatus(outcome, 'idle', outcome.error) })
     }
   }, UP_TO_DATE_RESET_MS)
 }
@@ -48,19 +79,16 @@ function settleNoAvailableUpdate(set: UpdaterSet, acknowledge: boolean) {
   clearUpToDateTimer()
 
   if (acknowledge) {
-    set({ update: null, summary: null, status: 'up-to-date', error: null })
+    set({ outcome: withUpdaterStatus(IDLE_OUTCOME, 'up-to-date') })
     scheduleUpToDateReset()
     return
   }
 
-  set({ update: null, summary: null, status: 'idle', error: null })
+  set({ outcome: IDLE_OUTCOME })
 }
 
 type UpdaterStore = {
-  update: AppUpdate | null
-  summary: UpdateSummary | null
-  status: UpdaterStatus
-  error: string | null
+  outcome: UpdaterOutcome
   setAvailable: (update: AppUpdate, summary: UpdateSummary) => void
   setStatus: (status: UpdaterStatus, error?: string | null) => void
   dismiss: () => void
@@ -79,23 +107,23 @@ function isUpdaterBusy(status: UpdaterStatus) {
 }
 
 async function checkForUpdate(set: UpdaterSet, get: UpdaterGet, manual: boolean) {
-  const { status, update: currentUpdate } = get()
-  if (isUpdaterBusy(status)) {
+  const { outcome } = get()
+  if (isUpdaterBusy(outcome.status)) {
     return
   }
 
   clearUpToDateTimer()
 
-  const showsChecking = manual || !currentUpdate
+  const showsChecking = manual || !outcome.update
   if (showsChecking) {
-    set({ status: 'checking', error: null })
+    set({ outcome: withUpdaterStatus(outcome, 'checking') })
   }
 
   try {
     const update = await checkForAppUpdate()
 
     if (update) {
-      set({ update, summary: summarizeUpdate(update), status: 'available', error: null })
+      set({ outcome: availableOutcome(update, summarizeUpdate(update)) })
       return
     }
 
@@ -105,7 +133,7 @@ async function checkForUpdate(set: UpdaterSet, get: UpdaterGet, manual: boolean)
     log.error('app update check failed', { manual, error: message })
 
     if (manual) {
-      set({ update: null, summary: null, status: 'error', error: message })
+      set({ outcome: failedCheckOutcome(message) })
       return
     }
 
@@ -114,15 +142,15 @@ async function checkForUpdate(set: UpdaterSet, get: UpdaterGet, manual: boolean)
 }
 
 async function downloadAndInstall(set: UpdaterSet, get: UpdaterGet) {
-  const { update, status } = get()
-  if (!update) {
+  const { outcome } = get()
+  if (!outcome.update) {
     return
   }
-  if (isUpdaterBusy(status)) {
+  if (isUpdaterBusy(outcome.status)) {
     return
   }
 
-  set({ status: 'installing', error: null })
+  set({ outcome: withUpdaterStatus(outcome, 'installing') })
   try {
     const latestUpdate = await checkForAppUpdate()
     if (!latestUpdate) {
@@ -130,35 +158,29 @@ async function downloadAndInstall(set: UpdaterSet, get: UpdaterGet) {
       return
     }
 
-    set({
-      update: latestUpdate,
-      summary: summarizeUpdate(latestUpdate),
-      status: 'installing',
-      error: null,
-    })
+    const latestOutcome = availableOutcome(latestUpdate, summarizeUpdate(latestUpdate))
+    set({ outcome: withUpdaterStatus(latestOutcome, 'installing') })
     await downloadAndInstallAppUpdate(latestUpdate)
     // On Windows the NSIS passive installer relaunches the app, so reaching
     // this point usually means the process is on its way out.
   } catch (cause) {
     const message = errorMessage(cause)
     log.error('app update install failed', { error: message })
-    set({ status: 'error', error: message })
+    set({ outcome: withUpdaterStatus(get().outcome, 'error', message) })
   }
 }
 
 export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
-  update: null,
-  summary: null,
-  status: 'idle',
-  error: null,
+  outcome: IDLE_OUTCOME,
 
-  setAvailable: (update, summary) => set({ update, summary, status: 'available', error: null }),
+  setAvailable: (update, summary) => set({ outcome: availableOutcome(update, summary) }),
 
-  setStatus: (status, error = null) => set({ status, error }),
+  setStatus: (status, error = null) =>
+    set({ outcome: withUpdaterStatus(get().outcome, status, error) }),
 
   dismiss: () => {
     clearUpToDateTimer()
-    set({ update: null, summary: null, status: 'idle', error: null })
+    set({ outcome: IDLE_OUTCOME })
   },
 
   checkForUpdate: (manual) => checkForUpdate(set, get, manual),

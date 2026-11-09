@@ -15,26 +15,30 @@ fn rejected(from: OpStatus, action: StatusAction) -> RejectedTransition {
     RejectedTransition { from, action }
 }
 
-fn expected_transition(
-    status: OpStatus,
+#[derive(Clone, Copy)]
+struct AllowedTransition {
     allowed_from: OpStatus,
     next: OpStatus,
     action: StatusAction,
+}
+
+fn expected_transition(
+    status: OpStatus,
+    rule: AllowedTransition,
 ) -> Result<OpStatus, RejectedTransition> {
-    if status == allowed_from {
-        return Ok(next);
+    if status == rule.allowed_from {
+        return Ok(rule.next);
     }
-    Err(rejected(status, action))
+    Err(rejected(status, rule.action))
 }
 
 fn assert_only_allowed_from(
-    allowed_from: OpStatus,
-    next: OpStatus,
-    action: StatusAction,
+    rule: AllowedTransition,
     transition: fn(OpStatus) -> Result<OpStatus, RejectedTransition>,
 ) {
     for status in ALL_STATUSES {
-        let expected = expected_transition(status, allowed_from, next, action);
+        let expected = expected_transition(status, rule);
+        let action = rule.action;
         assert_eq!(transition(status), expected, "{status:?} {action:?}");
     }
 }
@@ -42,33 +46,43 @@ fn assert_only_allowed_from(
 #[test]
 fn pause_resume_skip_retry_and_resolve_require_their_source_status() {
     assert_only_allowed_from(
-        OpStatus::Active,
-        OpStatus::Paused,
-        StatusAction::Pause,
+        AllowedTransition {
+            allowed_from: OpStatus::Active,
+            next: OpStatus::Paused,
+            action: StatusAction::Pause,
+        },
         OpStatus::pause,
     );
     assert_only_allowed_from(
-        OpStatus::Paused,
-        OpStatus::Active,
-        StatusAction::Resume,
+        AllowedTransition {
+            allowed_from: OpStatus::Paused,
+            next: OpStatus::Active,
+            action: StatusAction::Resume,
+        },
         OpStatus::resume,
     );
     assert_only_allowed_from(
-        OpStatus::Paused,
-        OpStatus::Active,
-        StatusAction::Skip,
+        AllowedTransition {
+            allowed_from: OpStatus::Paused,
+            next: OpStatus::Active,
+            action: StatusAction::Skip,
+        },
         OpStatus::skip,
     );
     assert_only_allowed_from(
-        OpStatus::Failed,
-        OpStatus::Pending,
-        StatusAction::Retry,
+        AllowedTransition {
+            allowed_from: OpStatus::Failed,
+            next: OpStatus::Pending,
+            action: StatusAction::Retry,
+        },
         OpStatus::retry,
     );
     assert_only_allowed_from(
-        OpStatus::Conflict,
-        OpStatus::Active,
-        StatusAction::ResolveConflict,
+        AllowedTransition {
+            allowed_from: OpStatus::Conflict,
+            next: OpStatus::Active,
+            action: StatusAction::ResolveConflict,
+        },
         OpStatus::resolve_conflict,
     );
 }

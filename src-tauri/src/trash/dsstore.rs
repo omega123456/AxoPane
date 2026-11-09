@@ -144,9 +144,13 @@ fn parse(bytes: &[u8]) -> Option<HashMap<String, PutBack>> {
     let dsdb_position = *blocks.get(&dsdb_block)?;
     let root_node_id = reader.u32(dsdb_position)?;
 
-    let mut records = Vec::new();
-    walk(&reader, &blocks, root_node_id, &mut records)?;
-    Some(put_backs(records))
+    let mut tree = NodeTree {
+        reader: &reader,
+        blocks: &blocks,
+        records: Vec::new(),
+    };
+    tree.walk(root_node_id)?;
+    Some(put_backs(tree.records))
 }
 
 fn block_positions(
@@ -231,33 +235,46 @@ fn put_backs(records: Vec<Record>) -> HashMap<String, PutBack> {
         .collect()
 }
 
-fn walk(
-    reader: &Reader<'_>,
-    blocks: &HashMap<u32, usize>,
-    block_id: u32,
-    out: &mut Vec<Record>,
-) -> Option<()> {
-    let position = *blocks.get(&block_id)?;
-    let mode = reader.u32(position)?;
-    let count = reader.u32(position + U32_BYTES)?;
-    let mut cursor = position + NODE_HEADER_BYTES;
-
-    let is_internal_node = mode != LEAF_NODE_MODE;
-    for _ in 0..count {
-        if is_internal_node {
-            let child = reader.u32(cursor)?;
-            cursor += U32_BYTES;
-            walk(reader, blocks, child, out)?;
-        }
-        let (record, next) = parse_record(reader, cursor)?;
-        out.push(record);
-        cursor = next;
-    }
-
-    Some(())
+struct NodeTree<'tree> {
+    reader: &'tree Reader<'tree>,
+    blocks: &'tree HashMap<u32, usize>,
+    records: Vec<Record>,
 }
 
-fn parse_record(reader: &Reader<'_>, position: usize) -> Option<(Record, usize)> {
+impl NodeTree<'_> {
+    fn walk(&mut self, block_id: u32) -> Option<()> {
+        let position = *self.blocks.get(&block_id)?;
+        let mode = self.reader.u32(position)?;
+        let count = self.reader.u32(position + U32_BYTES)?;
+        let mut cursor = position + NODE_HEADER_BYTES;
+
+        let is_internal_node = mode != LEAF_NODE_MODE;
+        for _ in 0..count {
+            cursor = self.walk_entry(cursor, is_internal_node)?;
+        }
+
+        Some(())
+    }
+
+    fn walk_entry(&mut self, cursor: usize, is_internal_node: bool) -> Option<usize> {
+        let mut record_position = cursor;
+        if is_internal_node {
+            let child = self.reader.u32(cursor)?;
+            record_position += U32_BYTES;
+            self.walk(child)?;
+        }
+        let parsed = parse_record(self.reader, record_position)?;
+        self.records.push(parsed.record);
+        Some(parsed.next)
+    }
+}
+
+struct ParsedRecord {
+    record: Record,
+    next: usize,
+}
+
+fn parse_record(reader: &Reader<'_>, position: usize) -> Option<ParsedRecord> {
     let name_length = reader.u32(position)? as usize;
     let mut cursor = position + U32_BYTES;
     let name = reader.utf16be(cursor, name_length)?;
@@ -288,14 +305,14 @@ fn parse_record(reader: &Reader<'_>, position: usize) -> Option<(Record, usize)>
         _ => return None,
     };
 
-    Some((
-        Record {
+    Some(ParsedRecord {
+        record: Record {
             name,
             struct_id,
             value,
         },
         next,
-    ))
+    })
 }
 
 /// Older macOS releases stored `ptbL` as an alias/bookmark blob instead of a

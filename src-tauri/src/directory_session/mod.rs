@@ -48,9 +48,51 @@ use view::SessionView;
 /// the tab id is still carried and validated so a release/range request can
 /// never accidentally cross tabs within the same pane).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct PaneTabKey {
-    pane_id: PaneId,
-    tab_id: String,
+pub struct PaneTabKey {
+    pub pane_id: PaneId,
+    pub tab_id: String,
+}
+
+pub struct EnumerationAdmission<'admission> {
+    pub coordinator: Option<&'admission ResourceCoordinator>,
+    pub resource_key: Option<String>,
+}
+
+impl EnumerationAdmission<'_> {
+    pub fn ungated() -> Self {
+        Self {
+            coordinator: None,
+            resource_key: None,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct PanePath<'target> {
+    pub pane_id: &'target str,
+    pub path: &'target str,
+}
+
+pub struct WatchMutation {
+    pub changed_entries: Vec<DirectoryEntry>,
+    pub removed_paths: Vec<String>,
+}
+
+pub struct PaneSnapshot {
+    pub entries: Vec<DirectoryEntry>,
+    pub generation: u64,
+    pub resolved_path: String,
+}
+
+#[derive(Clone, Copy)]
+pub struct EnumerationTarget<'target> {
+    pub path: &'target Path,
+    pub view: &'target ViewParams,
+}
+
+pub struct Reconciled {
+    pub snapshot: Vec<DirectoryEntry>,
+    pub watch_revision: WatchRevision,
 }
 
 /// Everything the session owns for one active pane: the unfiltered snapshot,
@@ -113,15 +155,14 @@ impl DirectorySessionService {
     pub fn begin_navigation(
         &self,
         request: BeginNavigationRequest,
-        coordinator: Option<&ResourceCoordinator>,
-        resource_key: Option<String>,
+        admission: EnumerationAdmission<'_>,
     ) -> Result<BeginNavigationResponse, String> {
         let navigation_revision = self.retire_pane_session(&request.pane_id);
         let session_id = SessionId(navigation_revision.0);
 
         let path = PathBuf::from(&request.path);
 
-        let _permit = admit_enumeration(coordinator, resource_key)?;
+        let _permit = admit_enumeration(admission)?;
 
         // Watch-first: start capturing direct-child mutations before the
         // directory is enumerated so nothing that happens during enumeration
@@ -131,7 +172,14 @@ impl DirectorySessionService {
         let entries = enumerate_snapshot(&path, &request.view)
             .map_err(|error| format!("Failed to load \"{}\": {error}", request.path))?;
 
-        let (snapshot, watch_revision) = reconcile_capture(&path, &request.view, entries, capture)?;
+        let target = EnumerationTarget {
+            path: &path,
+            view: &request.view,
+        };
+        let Reconciled {
+            snapshot,
+            watch_revision,
+        } = reconcile_capture(target, entries, capture)?;
 
         let view = SessionView::derive(&snapshot, &request.view);
         let total_rows = view.total_rows();
@@ -165,7 +213,7 @@ impl DirectorySessionService {
             view_params: request.view,
         };
 
-        self.publish_session(&request.pane_id, navigation_revision, session)?;
+        self.publish_session(session)?;
 
         Ok(BeginNavigationResponse {
             pane_id: request.pane_id,
@@ -202,23 +250,19 @@ impl DirectorySessionService {
     /// The reservation is held while publishing so a newer navigation cannot
     /// interleave an old session insert between its retirement and its own
     /// reservation.
-    fn publish_session(
-        &self,
-        pane_id: &str,
-        navigation_revision: NavigationRevision,
-        session: ActiveSession,
-    ) -> Result<(), String> {
+    fn publish_session(&self, session: ActiveSession) -> Result<(), String> {
         let mut reservations = self
             .navigation_reservations
             .lock()
             .expect("directory navigation reservation lock");
         let mut sessions = self.sessions.lock().expect("directory session lock");
-        let still_reserved = reservations.get(pane_id) == Some(&navigation_revision);
+        let pane_id = session.key.pane_id.clone();
+        let still_reserved = reservations.get(&pane_id) == Some(&session.navigation_revision);
         if !still_reserved {
             return Err("Directory navigation was superseded.".to_string());
         }
-        sessions.insert(pane_id.to_string(), session);
-        reservations.remove(pane_id);
+        reservations.remove(&pane_id);
+        sessions.insert(pane_id, session);
         Ok(())
     }
 
@@ -230,14 +274,17 @@ impl DirectorySessionService {
     /// `tab_id`/`session_id`.
     pub fn revise_view(
         &self,
-        pane_id: &PaneId,
-        tab_id: &str,
-        session_id: SessionId,
-        view: ViewParams,
+        request: ReviseSessionViewRequest,
     ) -> Result<BeginNavigationResponse, SessionRejection> {
+        let ReviseSessionViewRequest {
+            pane_id,
+            tab_id,
+            session_id,
+            view,
+        } = request;
         let mut sessions = self.sessions.lock().expect("directory session lock");
         let session = sessions
-            .get_mut(pane_id)
+            .get_mut(&pane_id)
             .ok_or(SessionRejection::NoActiveSession)?;
 
         if session.key.tab_id != tab_id {
@@ -259,7 +306,7 @@ impl DirectorySessionService {
             .unwrap_or_default();
 
         Ok(BeginNavigationResponse {
-            pane_id: pane_id.clone(),
+            pane_id,
             tab_id: session.key.tab_id.clone(),
             path: session.path.clone(),
             baseline: session.baseline(),
@@ -286,13 +333,12 @@ impl DirectorySessionService {
             .get(&request.pane_id)
             .ok_or(SessionRejection::NoActiveSession)?;
 
-        paging::materialize_range(
-            request,
-            &session.key.pane_id,
-            &session.key.tab_id,
-            session.baseline(),
-            &session.view,
-        )
+        let expected = paging::ExpectedSession {
+            key: &session.key,
+            baseline: session.baseline(),
+            view: &session.view,
+        };
+        paging::materialize_range(request, expected)
     }
 
     /// Idempotent release: retires the active session for `request.pane_id`
@@ -355,21 +401,17 @@ impl DirectorySessionService {
     /// fresh [`view::SessionView`] from the *unfiltered* snapshot is what
     /// lets the caller apply its own requested view without stomping on the
     /// session's actual active view.
-    pub fn snapshot_for_pane_path(
-        &self,
-        pane_id: &PaneId,
-        path: &str,
-    ) -> Option<(Vec<DirectoryEntry>, u64, String)> {
+    pub fn snapshot_for_pane_path(&self, pane_id: &PaneId, path: &str) -> Option<PaneSnapshot> {
         let sessions = self.sessions.lock().expect("directory session lock");
         let session = sessions.get(pane_id)?;
         if !fs_path_matches(&session.path, path) {
             return None;
         }
-        Some((
-            session.snapshot.clone(),
-            session.watch_revision.0,
-            session.path.clone(),
-        ))
+        Some(PaneSnapshot {
+            entries: session.snapshot.clone(),
+            generation: session.watch_revision.0,
+            resolved_path: session.path.clone(),
+        })
     }
 
     /// Returns the mutation-driven generation for the active matching
@@ -396,11 +438,14 @@ impl DirectorySessionService {
     /// actually changed (e.g. a duplicate/no-op mutation report).
     pub fn apply_watch_mutation(
         &self,
-        pane_id: &PaneId,
-        path: &str,
-        changed_entries: Vec<DirectoryEntry>,
-        removed_paths: Vec<String>,
+        target: PanePath<'_>,
+        mutation: WatchMutation,
     ) -> Option<SessionPatch> {
+        let PanePath { pane_id, path } = target;
+        let WatchMutation {
+            changed_entries,
+            removed_paths,
+        } = mutation;
         let mut sessions = self.sessions.lock().expect("directory session lock");
         let session = sessions.get_mut(pane_id)?;
         if !fs_path_matches(&session.path, path) {
@@ -473,10 +518,10 @@ impl DirectorySessionService {
     /// required" contract.
     pub fn apply_metadata_only(
         &self,
-        pane_id: &PaneId,
-        path: &str,
+        target: PanePath<'_>,
         updates: Vec<MetadataDelta>,
     ) -> Option<SessionPatch> {
+        let PanePath { pane_id, path } = target;
         if updates.is_empty() {
             return None;
         }
@@ -487,7 +532,7 @@ impl DirectorySessionService {
         }
 
         Some(SessionPatch::MetadataOnly {
-            pane_id: pane_id.clone(),
+            pane_id: pane_id.to_string(),
             tab_id: session.key.tab_id.clone(),
             path: session.path.clone(),
             baseline: session.baseline(),
@@ -576,25 +621,35 @@ fn enumerate_snapshot(path: &Path, view: &ViewParams) -> Result<Vec<DirectoryEnt
 /// resnapshot once more to guarantee no change is silently lost, and bump the
 /// watch revision to mark the fresh baseline.
 fn reconcile_capture(
-    path: &Path,
-    view: &ViewParams,
+    target: EnumerationTarget<'_>,
     entries: Vec<DirectoryEntry>,
     capture: Option<CaptureHandle>,
-) -> Result<(Vec<DirectoryEntry>, WatchRevision), String> {
+) -> Result<Reconciled, String> {
     let Some(capture) = capture else {
         // Capture could not be established (e.g. watch limits, unsupported
         // path). The enumeration above is still the best available
         // authoritative read; treat this as the initial watch revision but
         // note it never captured anything to reconcile.
-        return Ok((entries, WatchRevision(0)));
+        return Ok(Reconciled::initial(entries));
     };
 
-    resolve_reconciliation(
-        path,
-        view,
-        entries,
-        watch::drain_captured_mutations(capture),
-    )
+    resolve_reconciliation(target, entries, watch::drain_captured_mutations(capture))
+}
+
+impl Reconciled {
+    fn initial(snapshot: Vec<DirectoryEntry>) -> Self {
+        Self {
+            snapshot,
+            watch_revision: WatchRevision(0),
+        }
+    }
+
+    fn resnapshotted(snapshot: Vec<DirectoryEntry>) -> Self {
+        Self {
+            snapshot,
+            watch_revision: WatchRevision(1),
+        }
+    }
 }
 
 /// Pure reconciliation decision given the drained mutation set (or `None` for
@@ -602,13 +657,13 @@ fn reconcile_capture(
 /// branching logic can be exercised deterministically under `test-utils`
 /// without depending on real OS watcher event timing.
 fn resolve_reconciliation(
-    path: &Path,
-    view: &ViewParams,
+    target: EnumerationTarget<'_>,
     entries: Vec<DirectoryEntry>,
     drained: Option<std::collections::HashSet<PathBuf>>,
-) -> Result<(Vec<DirectoryEntry>, WatchRevision), String> {
+) -> Result<Reconciled, String> {
+    let EnumerationTarget { path, view } = target;
     match drained {
-        Some(mutated) if mutated.is_empty() => Ok((entries, WatchRevision(0))),
+        Some(mutated) if mutated.is_empty() => Ok(Reconciled::initial(entries)),
         Some(_) | None => {
             // At least one direct-child mutation raced enumeration (a
             // resolved mutation set), or capture could not tell us
@@ -624,7 +679,7 @@ fn resolve_reconciliation(
             // the watch revision to mark it.
             let resnapshot = enumerate_snapshot(path, view)
                 .map_err(|error| format!("Failed to resnapshot \"{}\": {error}", path.display()))?;
-            Ok((resnapshot, WatchRevision(1)))
+            Ok(Reconciled::resnapshotted(resnapshot))
         }
     }
 }
@@ -651,20 +706,20 @@ pub fn enumerate_snapshot_for_tests(
 /// reproduce in a test.
 #[cfg(feature = "test-utils")]
 pub fn resolve_reconciliation_for_tests(
-    path: &Path,
-    view: &ViewParams,
+    target: EnumerationTarget<'_>,
     entries: Vec<DirectoryEntry>,
     drained: Option<std::collections::HashSet<PathBuf>>,
-) -> Result<(Vec<DirectoryEntry>, WatchRevision), String> {
-    resolve_reconciliation(path, view, entries, drained)
+) -> Result<Reconciled, String> {
+    resolve_reconciliation(target, entries, drained)
 }
 
 /// Gates enumeration behind a `Latency` admission when the path resolved to a
 /// resource key; an unresolvable path proceeds ungated.
-fn admit_enumeration(
-    coordinator: Option<&ResourceCoordinator>,
-    resource_key: Option<String>,
-) -> Result<Option<JobHandle>, String> {
+fn admit_enumeration(admission: EnumerationAdmission<'_>) -> Result<Option<JobHandle>, String> {
+    let EnumerationAdmission {
+        coordinator,
+        resource_key,
+    } = admission;
     let (Some(coordinator), Some(resource_key)) = (coordinator, resource_key) else {
         return Ok(None);
     };

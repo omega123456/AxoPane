@@ -392,7 +392,9 @@ describe('queue store', () => {
   it('resolve clears the conflict locally', () => {
     ipc.override('resolve_conflict', () => undefined)
     useQueueStore.getState().applyConflict(conflict('op-1'))
-    useQueueStore.getState().resolve('op-1', 'skip', false, null)
+    useQueueStore
+      .getState()
+      .resolve({ id: 'op-1', resolution: 'skip', applyToAll: false, renameTo: null })
     expect(activeConflict(useQueueStore.getState())).toBeUndefined()
   })
 

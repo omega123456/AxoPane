@@ -39,7 +39,7 @@ function markDropEffect(target: DropTarget, sourceDir: string, platform: Platfor
   const modifiers = dropModifiers(target.event, platform)
   setDropEffect(
     target.event.dataTransfer,
-    resolveDropKind(modifiers, sourceDir, target.path, platform),
+    resolveDropKind(modifiers, { sourceDir, destinationDir: target.path }, platform),
   )
 }
 
@@ -150,7 +150,7 @@ export function usePaneDragSource(options: PaneDragSourceOptions) {
     const drag = useDragStore.getState().drag
     const modifiers = dropModifiers(event, options.platform)
     clearDragState()
-    await performDrop(drag, targetPath, modifiers, options.platform)
+    await performDrop(drag, { destinationDir: targetPath, modifiers }, options.platform)
   }
 
   return {

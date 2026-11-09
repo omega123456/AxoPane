@@ -65,24 +65,40 @@ describe('sameVolume', () => {
 
 describe('resolveDropKind', () => {
   it('defaults to move within a volume and copy across volumes', () => {
-    expect(resolveDropKind({ ctrlKey: false, shiftKey: false }, 'C:\\a', 'C:\\b', 'windows')).toBe(
-      'move',
-    )
-    expect(resolveDropKind({ ctrlKey: false, shiftKey: false }, 'C:\\a', 'D:\\b', 'windows')).toBe(
-      'copy',
-    )
+    expect(
+      resolveDropKind(
+        { ctrlKey: false, shiftKey: false },
+        { sourceDir: 'C:\\a', destinationDir: 'C:\\b' },
+        'windows',
+      ),
+    ).toBe('move')
+    expect(
+      resolveDropKind(
+        { ctrlKey: false, shiftKey: false },
+        { sourceDir: 'C:\\a', destinationDir: 'D:\\b' },
+        'windows',
+      ),
+    ).toBe('copy')
   })
 
   it('lets a force-copy modifier win over volume defaults', () => {
-    expect(resolveDropKind({ ctrlKey: true, shiftKey: false }, 'C:\\a', 'C:\\b', 'windows')).toBe(
-      'copy',
-    )
+    expect(
+      resolveDropKind(
+        { ctrlKey: true, shiftKey: false },
+        { sourceDir: 'C:\\a', destinationDir: 'C:\\b' },
+        'windows',
+      ),
+    ).toBe('copy')
   })
 
   it('lets a force-move modifier win across volumes', () => {
-    expect(resolveDropKind({ ctrlKey: false, shiftKey: true }, 'C:\\a', 'D:\\b', 'windows')).toBe(
-      'move',
-    )
+    expect(
+      resolveDropKind(
+        { ctrlKey: false, shiftKey: true },
+        { sourceDir: 'C:\\a', destinationDir: 'D:\\b' },
+        'windows',
+      ),
+    ).toBe('move')
   })
 })
 
@@ -129,8 +145,7 @@ describe('performDrop', () => {
 
     const result = await performDrop(
       payload({ sourceDir: 'C:\\root' }),
-      'C:\\root',
-      { ctrlKey: false, shiftKey: false },
+      { destinationDir: 'C:\\root', modifiers: { ctrlKey: false, shiftKey: false } },
       'windows',
     )
 
@@ -144,8 +159,7 @@ describe('performDrop', () => {
 
     const result = await performDrop(
       payload(),
-      'C:\\dest',
-      { ctrlKey: false, shiftKey: false },
+      { destinationDir: 'C:\\dest', modifiers: { ctrlKey: false, shiftKey: false } },
       'windows',
     )
 
@@ -163,7 +177,11 @@ describe('performDrop', () => {
     const startOp = vi.fn(() => 'op-8')
     ipc.override('start_op', startOp)
 
-    await performDrop(payload(), 'C:\\dest', { ctrlKey: true, shiftKey: false }, 'windows')
+    await performDrop(
+      payload(),
+      { destinationDir: 'C:\\dest', modifiers: { ctrlKey: true, shiftKey: false } },
+      'windows',
+    )
 
     await waitFor(() => {
       expect(startOp).toHaveBeenCalledWith(expect.objectContaining({ kind: 'copy' }))
@@ -178,8 +196,7 @@ describe('performDrop', () => {
       payload({
         items: [{ id: 'd', name: 'sub', path: 'C:\\root\\sub', isDir: true, sizeBytes: null }],
       }),
-      'C:\\dest',
-      { ctrlKey: false, shiftKey: false },
+      { destinationDir: 'C:\\dest', modifiers: { ctrlKey: false, shiftKey: false } },
       'windows',
     )
 

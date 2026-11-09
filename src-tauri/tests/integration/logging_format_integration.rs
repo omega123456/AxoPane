@@ -6,7 +6,7 @@ use std::fs;
 use file_explorer_lib::logging::{
     current_local_date, current_local_datetime, daily_log_file_name, escape_message,
     format_log_line, format_timestamp, parse_log_file_date, parse_log_line, prune_old_logs,
-    read_current_day_logs, unescape_message, LogLevel, RETENTION_DAYS,
+    read_current_day_logs, unescape_message, LogLevel, LogMessage, RETENTION_DAYS,
 };
 use tempfile::tempdir;
 use time::{Date, Month, OffsetDateTime, Time};
@@ -133,9 +133,11 @@ fn unescape_preserves_dangling_and_unknown_escapes() {
 fn format_and_parse_line_round_trip_preserves_fields() {
     let line = format_log_line(
         "2026-06-30T12:00:00Z",
-        LogLevel::Warn,
-        "file_explorer_lib::ipc",
-        "queue stalled :: retrying\nnext",
+        LogMessage {
+            level: LogLevel::Warn,
+            target: "file_explorer_lib::ipc",
+            message: "queue stalled :: retrying\nnext",
+        },
     );
     let entry = parse_log_line(&line).expect("parse");
     assert_eq!(entry.id, 0);
@@ -160,8 +162,22 @@ fn read_current_day_skips_malformed_lines_and_assigns_ids() {
     let today = date(2026, Month::June, 30);
     let contents = format!(
         "{}\nthis is junk\n{}\n",
-        format_log_line("2026-06-30T00:00:00Z", LogLevel::Info, "a", "first"),
-        format_log_line("2026-06-30T00:00:01Z", LogLevel::Error, "b", "second"),
+        format_log_line(
+            "2026-06-30T00:00:00Z",
+            LogMessage {
+                level: LogLevel::Info,
+                target: "a",
+                message: "first",
+            },
+        ),
+        format_log_line(
+            "2026-06-30T00:00:01Z",
+            LogMessage {
+                level: LogLevel::Error,
+                target: "b",
+                message: "second",
+            },
+        ),
     );
     fs::write(dir.path().join(daily_log_file_name(today)), contents).expect("write");
 

@@ -8,7 +8,7 @@ import type { PlatformOs } from '@/lib/keymap'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import { useContextMenuStore } from '@/stores/context-menu-store'
 import { usePanesStore } from '@/stores/panes-store'
-import { useSelectionStore } from '@/stores/selection-store'
+import { singleEntrySelection, useSelectionStore } from '@/stores/selection-store'
 import type { PaneId } from '@/types/pane'
 
 type PaneContextMenuOptions = {
@@ -25,7 +25,7 @@ function claimContextMenuEvent(event: MouseEvent) {
 
 function selectEntryForMenu(paneId: PaneId, entry: DirectoryEntry, selectedIds: string[]) {
   if (selectedIds.includes(entry.id)) return
-  useSelectionStore.getState().setSelection(paneId, [entry.id], entry.id, entry.id)
+  useSelectionStore.getState().setSelection(paneId, singleEntrySelection(entry.id))
   usePanesStore.getState().setFocusedEntry(paneId, entry.id)
 }
 

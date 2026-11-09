@@ -107,12 +107,16 @@ fn size_service(
     app: &App,
     resource_coordinator: &Arc<ResourceCoordinator>,
 ) -> Result<SizeService, Box<dyn Error>> {
+    let cache_dir = resolved_app_config_dir(&app.path().app_cache_dir()?);
+    let index_setup = size::index::MacIndexSetup {
+        cache_dir: &cache_dir,
+        emit_sizes: size_state_emitter(app.handle()),
+        emit_status: frontend_emitter(app.handle(), events::SIZE_INDEX_STATUS),
+    };
     Ok(SizeService::with_folder_size_index(
         size::DEFAULT_MANUAL_SIZE_TIMEOUT,
         Arc::clone(resource_coordinator),
-        &resolved_app_config_dir(&app.path().app_cache_dir()?),
-        size_state_emitter(app.handle()),
-        frontend_emitter(app.handle(), events::SIZE_INDEX_STATUS),
+        index_setup,
     ))
 }
 

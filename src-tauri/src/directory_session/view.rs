@@ -3,7 +3,7 @@
 //! re-enumerating the filesystem. Filtering and sorting are *view* changes
 //! over the same snapshot, never new snapshots.
 
-use crate::fs::{compare_entries, DirectoryEntry};
+use crate::fs::{compare_entries, DirectoryEntry, SortOrder};
 
 use super::model::ViewParams;
 
@@ -29,9 +29,11 @@ impl SessionView {
             .cloned()
             .collect();
 
-        ordered.sort_by(|left, right| {
-            compare_entries(left, right, params.sort_key, params.sort_direction)
-        });
+        let order = SortOrder {
+            key: params.sort_key,
+            direction: params.sort_direction,
+        };
+        ordered.sort_by(|left, right| compare_entries(left, right, order));
 
         Self { ordered }
     }

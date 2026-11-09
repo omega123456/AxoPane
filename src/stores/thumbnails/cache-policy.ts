@@ -32,5 +32,5 @@ export function pruneThumbnailCache(
 ): Record<string, ThumbnailCacheRecord> {
   const isExpired = (record: ThumbnailCacheRecord) => !isThumbnailCacheRecordUsable(record, now)
   const limits = { maxEntries: MAX_THUMBNAIL_CACHE_ENTRIES, maxBytes: MAX_THUMBNAIL_CACHE_BYTES }
-  return pruneWeightedCache(cache, protectedKeys, isExpired, limits, true)
+  return pruneWeightedCache(cache, protectedKeys, { isExpired, limits, evictProtected: true })
 }

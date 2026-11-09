@@ -35,23 +35,43 @@ impl OpStatus {
     }
 
     pub fn pause(self) -> Result<OpStatus, RejectedTransition> {
-        self.transition(Self::Active, StatusAction::Pause, Self::Paused)
+        self.transition(Transition {
+            required: Self::Active,
+            action: StatusAction::Pause,
+            next: Self::Paused,
+        })
     }
 
     pub fn resume(self) -> Result<OpStatus, RejectedTransition> {
-        self.transition(Self::Paused, StatusAction::Resume, Self::Active)
+        self.transition(Transition {
+            required: Self::Paused,
+            action: StatusAction::Resume,
+            next: Self::Active,
+        })
     }
 
     pub fn skip(self) -> Result<OpStatus, RejectedTransition> {
-        self.transition(Self::Paused, StatusAction::Skip, Self::Active)
+        self.transition(Transition {
+            required: Self::Paused,
+            action: StatusAction::Skip,
+            next: Self::Active,
+        })
     }
 
     pub fn retry(self) -> Result<OpStatus, RejectedTransition> {
-        self.transition(Self::Failed, StatusAction::Retry, Self::Pending)
+        self.transition(Transition {
+            required: Self::Failed,
+            action: StatusAction::Retry,
+            next: Self::Pending,
+        })
     }
 
     pub fn resolve_conflict(self) -> Result<OpStatus, RejectedTransition> {
-        self.transition(Self::Conflict, StatusAction::ResolveConflict, Self::Active)
+        self.transition(Transition {
+            required: Self::Conflict,
+            action: StatusAction::ResolveConflict,
+            next: Self::Active,
+        })
     }
 
     pub fn cancel(self) -> Result<Cancellation, RejectedTransition> {
@@ -72,21 +92,22 @@ impl OpStatus {
         }
     }
 
-    fn transition(
-        self,
-        required: OpStatus,
-        action: StatusAction,
-        next: OpStatus,
-    ) -> Result<OpStatus, RejectedTransition> {
-        if self == required {
-            return Ok(next);
+    fn transition(self, transition: Transition) -> Result<OpStatus, RejectedTransition> {
+        if self == transition.required {
+            return Ok(transition.next);
         }
-        Err(self.rejected(action))
+        Err(self.rejected(transition.action))
     }
 
     fn rejected(self, action: StatusAction) -> RejectedTransition {
         RejectedTransition { from: self, action }
     }
+}
+
+struct Transition {
+    required: OpStatus,
+    action: StatusAction,
+    next: OpStatus,
 }
 
 impl Cancellation {

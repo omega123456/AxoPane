@@ -22,15 +22,13 @@ import { pathsMatch } from '@/lib/path-compare'
 
 export function favouriteRow(path: string, remove = false): ContextMenuActionRow {
   const isFavourite = useConfigStore.getState().favourites.some((item) => pathsMatch(item, path))
-  return customRow(
-    `${remove ? 'remove' : 'add'}-favourite-${path}`,
-    remove ? 'Remove from Favourites' : 'Add to Favourites',
-    remove ? removeFavouriteContextAction(path) : addFavouriteContextAction(path),
-    {
-      disabled: !remove && isFavourite,
-      icon: { kind: 'app', name: remove ? 'close-tab' : 'new-folder' },
-    },
-  )
+  return customRow({
+    id: `${remove ? 'remove' : 'add'}-favourite-${path}`,
+    label: remove ? 'Remove from Favourites' : 'Add to Favourites',
+    action: remove ? removeFavouriteContextAction(path) : addFavouriteContextAction(path),
+    disabled: !remove && isFavourite,
+    icon: { kind: 'app', name: remove ? 'close-tab' : 'new-folder' },
+  })
 }
 
 export function shortcutFor(commandId: CommandId, platform: PlatformOs) {
@@ -106,31 +104,31 @@ export function commandRow(
   }
 }
 
-export function customRow(
-  id: string,
-  label: string,
-  action: ContextMenuActionRow['action'],
-  options?: {
-    disabled?: boolean
-    danger?: boolean
-    hidden?: boolean
-    strong?: boolean
-    shortcut?: string
-    icon?: ContextMenuIcon
-  },
-): ContextMenuActionRow {
+export type CustomRowSpec = {
+  id: string
+  label: string
+  action: ContextMenuActionRow['action']
+  disabled?: boolean
+  danger?: boolean
+  hidden?: boolean
+  strong?: boolean
+  shortcut?: string
+  icon?: ContextMenuIcon
+}
+
+export function customRow(spec: CustomRowSpec): ContextMenuActionRow {
   return {
-    id,
+    id: spec.id,
     kind: 'action',
-    label,
+    label: spec.label,
     owner: 'app',
-    disabled: options?.disabled,
-    danger: options?.danger,
-    hidden: options?.hidden,
-    strong: options?.strong,
-    shortcut: options?.shortcut,
-    icon: options?.icon,
-    action,
+    disabled: spec.disabled,
+    danger: spec.danger,
+    hidden: spec.hidden,
+    strong: spec.strong,
+    shortcut: spec.shortcut,
+    icon: spec.icon,
+    action: spec.action,
   }
 }
 

@@ -14,6 +14,7 @@ import type { DragEvent, MouseEvent, ReactNode, RefObject } from 'react'
 import { memo, useEffect, useMemo, useRef } from 'react'
 import { isMiddleClickOpen } from '@/lib/mouse-buttons'
 import { TEXT_SECONDARY } from '@/lib/class-names'
+import type { InlineRenameDraft } from '@/stores/inline-rename-store'
 
 /**
  * Stable, id-keyed handler dispatcher for a pane's rows.
@@ -72,13 +73,12 @@ export function useVisibleColumns() {
 
 type DateDisplay = FormatDateOptions
 
-type RenameCellState = {
+type RenameCellState = InlineRenameDraft & {
   inputRef: RefObject<HTMLInputElement | null>
-  value: string
-  busy: boolean
-  error: string | null
   actions: FileRowActions
 }
+
+const NO_RENAME_DRAFT: InlineRenameDraft = { value: '', busy: false, error: null }
 
 type CellContext = {
   entry: DirectoryEntry
@@ -181,10 +181,7 @@ type FileRowProps = {
   isSelected: boolean
   actions: FileRowActions
   isCut?: boolean
-  isRenaming?: boolean
-  renameValue?: string
-  renameBusy?: boolean
-  renameError?: string | null
+  rename?: InlineRenameDraft
   /** True while a valid internal drag is hovering this (directory) row. */
   isDropTarget?: boolean
   draggable?: boolean
@@ -197,24 +194,16 @@ function FileRowImpl({
   isSelected,
   actions,
   isCut = false,
-  isRenaming = false,
-  renameValue = '',
-  renameBusy = false,
-  renameError = null,
+  rename,
   isDropTarget = false,
   draggable = false,
 }: FileRowProps) {
   const columnWidths = useLayoutStore((state) => state.columnWidths)
   const visibleColumns = useVisibleColumns()
   const dateDisplay = useDateDisplay()
+  const isRenaming = rename !== undefined
   const renameInputRef = useRenameInputFocus(isRenaming, entry.isDir)
-  const rename = {
-    inputRef: renameInputRef,
-    value: renameValue,
-    busy: renameBusy,
-    error: renameError,
-    actions,
-  }
+  const renameCell = { inputRef: renameInputRef, ...(rename ?? NO_RENAME_DRAFT), actions }
   const cellRenderers = isRenaming ? renameCells : browseCells
   const rowClassName = `group flex h-row w-full items-center rounded-control px-2 text-row text-left focus-visible:outline-none ${rowHighlightClass({ isActivePane, isSelected, isFocused })}`
   const cells = visibleColumns.map((column) => (
@@ -223,7 +212,7 @@ function FileRowImpl({
       style={columnFlexStyle(column.key, columnWidths)}
       className={`${columnCellClassName(column.key)} ${cutFadeClass(isCut)}`}
     >
-      {cellRenderers[column.key]({ entry, dateDisplay, rename })}
+      {cellRenderers[column.key]({ entry, dateDisplay, rename: renameCell })}
     </span>
   ))
 

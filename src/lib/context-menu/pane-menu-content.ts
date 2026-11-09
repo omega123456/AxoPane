@@ -13,7 +13,7 @@ import type {
 } from '@/lib/types/context-menu'
 import { type PlatformOs } from '@/lib/keymap'
 import { selectedEntriesForPane } from '@/lib/commands'
-import { useClipboardStore } from '@/stores/clipboard-store'
+import { hasClipboardEntries } from '@/stores/clipboard-store'
 import { usePanesStore } from '@/stores/panes-store'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import type { PaneId } from '@/types/pane'
@@ -90,15 +90,13 @@ function entryPrimarySection(target: EntryTarget, platform: PlatformOs): Context
       targetEntryId,
       disabled: target.kind === 'file',
     }),
-    customRow(
-      `open-with-${target.entry.id}`,
-      'Open with',
-      openWithContextAction(target.entry.path),
-      {
-        disabled: target.kind === 'folder',
-        icon: { kind: 'app', name: 'open-with' },
-      },
-    ),
+    customRow({
+      id: `open-with-${target.entry.id}`,
+      label: 'Open with',
+      action: openWithContextAction(target.entry.path),
+      disabled: target.kind === 'folder',
+      icon: { kind: 'app', name: 'open-with' },
+    }),
   ])
 }
 
@@ -107,24 +105,28 @@ function entrySecondarySection(
   target: EntryTarget,
   platform: PlatformOs,
 ): ContextMenuSection {
-  const canPaste = useClipboardStore.getState().entries.length > 0
+  const canPaste = hasClipboardEntries()
   const panePath = usePanesStore.getState().panes[paneId].path
   const entryPaths = [target.entry.path]
   return section('secondary', [
     ...(target.kind === 'folder' ? [favouriteRow(target.entry.path)] : []),
     commandRow('paste', platform, { disabled: !canPaste }),
-    customRow(`copy-path-${target.entry.id}`, 'Copy as path', copyPathsContextAction(entryPaths), {
+    customRow({
+      id: `copy-path-${target.entry.id}`,
+      label: 'Copy as path',
+      action: copyPathsContextAction(entryPaths),
       icon: { kind: 'app', name: 'copy' },
     }),
-    customRow(
-      `compress-${target.entry.id}`,
-      'Compress',
-      compressContextAction(entryPaths, panePath),
-      {
-        icon: { kind: 'app', name: 'archive' },
-      },
-    ),
-    customRow(`extract-${target.entry.id}`, 'Extract', extractContextAction(entryPaths, panePath), {
+    customRow({
+      id: `compress-${target.entry.id}`,
+      label: 'Compress',
+      action: compressContextAction(entryPaths, panePath),
+      icon: { kind: 'app', name: 'archive' },
+    }),
+    customRow({
+      id: `extract-${target.entry.id}`,
+      label: 'Extract',
+      action: extractContextAction(entryPaths, panePath),
       disabled: !isZipArchiveEntry(target.entry),
       icon: { kind: 'app', name: 'extract' },
     }),
@@ -149,12 +151,12 @@ export function buildFileOrFolderContent(
       entryPrimarySection(target, platform),
       entrySecondarySection(paneId, target, platform),
       section('footer', [
-        customRow(
-          `properties-${target.entry.id}`,
-          'Properties',
-          propertiesContextAction([targetItem]),
-          { icon: { kind: 'app', name: 'properties' } },
-        ),
+        customRow({
+          id: `properties-${target.entry.id}`,
+          label: 'Properties',
+          action: propertiesContextAction([targetItem]),
+          icon: { kind: 'app', name: 'properties' },
+        }),
       ]),
     ],
   }
@@ -166,21 +168,29 @@ function selectionSection(
   platform: PlatformOs,
 ): ContextMenuSection {
   const pane = usePanesStore.getState().panes[paneId]
-  const clipboard = useClipboardStore.getState()
   const selectedPaths = selectedEntries.map((entry) => entry.path)
   const nothingSelected = selectedEntries.length === 0
   const canExtract = !nothingSelected && selectedEntries.every(isZipArchiveEntry)
   return section('selection', [
-    customRow('compress-selection', 'Compress', compressContextAction(selectedPaths, pane.path), {
+    customRow({
+      id: 'compress-selection',
+      label: 'Compress',
+      action: compressContextAction(selectedPaths, pane.path),
       disabled: nothingSelected,
       icon: { kind: 'app', name: 'archive' },
     }),
-    customRow('extract-selection', 'Extract', extractContextAction(selectedPaths, pane.path), {
+    customRow({
+      id: 'extract-selection',
+      label: 'Extract',
+      action: extractContextAction(selectedPaths, pane.path),
       disabled: !canExtract,
       icon: { kind: 'app', name: 'extract' },
     }),
-    commandRow('paste', platform, { disabled: clipboard.entries.length === 0 }),
-    customRow('copy-path-selection', 'Copy as path', copyPathsContextAction(selectedPaths), {
+    commandRow('paste', platform, { disabled: !hasClipboardEntries() }),
+    customRow({
+      id: 'copy-path-selection',
+      label: 'Copy as path',
+      action: copyPathsContextAction(selectedPaths),
       disabled: nothingSelected,
       icon: { kind: 'app', name: 'copy' },
     }),
@@ -211,12 +221,13 @@ export function buildMultiContent(paneId: PaneId, platform: PlatformOs): Context
     sections: [
       selectionSection(paneId, selectedEntries, platform),
       section('footer', [
-        customRow(
-          'properties-selection',
-          'Properties',
-          propertiesContextAction(selectedEntries.map(toPropertiesDialogItem)),
-          { disabled: nothingSelected, icon: { kind: 'app', name: 'properties' } },
-        ),
+        customRow({
+          id: 'properties-selection',
+          label: 'Properties',
+          action: propertiesContextAction(selectedEntries.map(toPropertiesDialogItem)),
+          disabled: nothingSelected,
+          icon: { kind: 'app', name: 'properties' },
+        }),
       ]),
     ],
   }
@@ -228,13 +239,12 @@ export function buildEmptyContent(paneId: PaneId, platform: PlatformOs): Context
   }
 
   const pane = usePanesStore.getState().panes[paneId]
-  const clipboard = useClipboardStore.getState()
 
   return {
     topStrip: [],
     sections: [
       section('create', [
-        commandRow('paste', platform, { disabled: clipboard.entries.length === 0 }),
+        commandRow('paste', platform, { disabled: !hasClipboardEntries() }),
         commandRow('newFolder', platform),
         commandRow('newFile', platform),
       ]),
@@ -246,12 +256,12 @@ export function buildEmptyContent(paneId: PaneId, platform: PlatformOs): Context
         }),
       ]),
       section('properties', [
-        customRow(
-          `properties-empty-${pane.path}`,
-          'Properties',
-          propertiesContextAction([createPathPropertiesDialogItem(pane.path)]),
-          { icon: { kind: 'app', name: 'properties' } },
-        ),
+        customRow({
+          id: `properties-empty-${pane.path}`,
+          label: 'Properties',
+          action: propertiesContextAction([createPathPropertiesDialogItem(pane.path)]),
+          icon: { kind: 'app', name: 'properties' },
+        }),
       ]),
     ],
   }

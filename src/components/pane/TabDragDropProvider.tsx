@@ -210,15 +210,32 @@ function dragOverState(event: DragOverEvent): TabDragState {
   return { sourcePaneId, destinationPaneId: isInvalid ? null : destinationPaneId, isInvalid }
 }
 
+type TabDragRecord = {
+  sourceTabId: string | null
+  sourceDomPosition: SourceDomPosition | null
+  restoreDragZoom?: () => void
+}
+
+const NO_TAB_DRAG_RECORD: TabDragRecord = { sourceTabId: null, sourceDomPosition: null }
+
+function releasedDragRecord(record: TabDragRecord): TabDragRecord {
+  return { sourceTabId: record.sourceTabId, sourceDomPosition: null }
+}
+
+function sourceTabElement(sourceTabId: string | null) {
+  if (!sourceTabId) {
+    return null
+  }
+  return document.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(sourceTabId)}"]`)
+}
+
 function useTabDragSession() {
   const moveTab = usePanesStore((state) => state.moveTab)
   const [dragState, setDragState] = useState<TabDragState>(IDLE_DRAG_STATE)
-  const sourceTabId = useRef<string | null>(null)
-  const sourceDomPosition = useRef<SourceDomPosition | null>(null)
-  const restoreDragZoom = useRef<(() => void) | undefined>(undefined)
+  const dragRecord = useRef<TabDragRecord>(NO_TAB_DRAG_RECORD)
 
   const restoreSourceLabelFocus = () => {
-    const tabId = sourceTabId.current
+    const tabId = dragRecord.current.sourceTabId
     if (tabId) {
       focusTabLabel(tabId)
     }
@@ -239,15 +256,14 @@ function useTabDragSession() {
     setDragState,
     start: (event: DragStartEvent) => {
       const sourcePaneId = paneIdFromEntity(event.operation.source)
-      sourceTabId.current = sourceTabIdOf(event)
-      const sourceElement = sourceTabId.current
-        ? document.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(sourceTabId.current)}"]`)
-        : null
-      sourceDomPosition.current = domPositionOf(sourceElement)
-      restoreDragZoom.current?.()
+      const sourceTabId = sourceTabIdOf(event)
+      const sourceElement = sourceTabElement(sourceTabId)
+      dragRecord.current.restoreDragZoom?.()
+      dragRecord.current = { sourceTabId, sourceDomPosition: domPositionOf(sourceElement) }
       // Let DnD capture the original placeholder and pointer origin first.
       queueMicrotask(() => {
-        restoreDragZoom.current = sourceElement ? compensateDragZoom(sourceElement) : undefined
+        const restoreDragZoom = sourceElement ? compensateDragZoom(sourceElement) : undefined
+        dragRecord.current = { ...dragRecord.current, restoreDragZoom }
       })
       setDragState({ sourcePaneId, destinationPaneId: sourcePaneId, isInvalid: false })
     },
@@ -257,19 +273,19 @@ function useTabDragSession() {
         return
       }
       if (drop.sourcePaneId !== drop.destinationPaneId) {
-        restoreDomPosition(sourceDomPosition.current)
+        restoreDomPosition(dragRecord.current.sourceDomPosition)
       }
-      const { sourcePaneId, destinationPaneId, destinationIndex } = drop
-      void moveTab(sourcePaneId, drop.sourceTabId, destinationPaneId, destinationIndex).then(
+      const { sourcePaneId, sourceTabId, destinationPaneId, destinationIndex } = drop
+      void moveTab({ sourcePaneId, tabId: sourceTabId, destinationPaneId, destinationIndex }).then(
         handleMoveResult,
       )
     },
     reset: () => {
-      if (!isStillDragging(sourceDomPosition.current)) {
-        restoreDragZoom.current?.()
+      const record = dragRecord.current
+      if (!isStillDragging(record.sourceDomPosition)) {
+        record.restoreDragZoom?.()
       }
-      restoreDragZoom.current = undefined
-      sourceDomPosition.current = null
+      dragRecord.current = releasedDragRecord(record)
       setDragState(IDLE_DRAG_STATE)
     },
   }

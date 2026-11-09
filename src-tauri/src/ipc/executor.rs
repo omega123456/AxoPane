@@ -38,6 +38,30 @@ impl Cancellation {
     }
 }
 
+pub struct LatencyRequest {
+    pub resource_key: String,
+    pub cancellation: Cancellation,
+    pub deadline: Duration,
+}
+
+impl LatencyRequest {
+    pub fn new(resource_key: String) -> Self {
+        Self::cancellable(resource_key, Cancellation::default())
+    }
+
+    pub fn cancellable(resource_key: String, cancellation: Cancellation) -> Self {
+        Self {
+            resource_key,
+            cancellation,
+            deadline: IPC_DEADLINE,
+        }
+    }
+
+    pub fn with_deadline(self, deadline: Duration) -> Self {
+        Self { deadline, ..self }
+    }
+}
+
 type Job = Box<dyn FnOnce() + Send + 'static>;
 
 enum Message {
@@ -86,45 +110,39 @@ impl IpcExecutor {
         T: Send + 'static,
         F: FnOnce() -> Result<T, String> + Send + 'static,
     {
-        self.latency_cancellable(resource_key, Cancellation::default(), move |_| work())
+        self.latency_cancellable(LatencyRequest::new(resource_key), move |_| work())
             .await
     }
 
-    pub async fn latency_cancellable<T, F>(
-        &self,
-        resource_key: String,
-        cancellation: Cancellation,
-        work: F,
-    ) -> Result<T, String>
-    where
-        T: Send + 'static,
-        F: FnOnce(&Cancellation) -> Result<T, String> + Send + 'static,
-    {
-        self.latency_cancellable_with_deadline(resource_key, cancellation, IPC_DEADLINE, work)
-            .await
-    }
-
-    /// Runs one bounded request with an owner-specific completion deadline.
+    /// Runs one bounded request with the request's own completion deadline.
     ///
     /// Most IPC work uses [`IPC_DEADLINE`]. A platform API that presents an
     /// OS-owned confirmation UI may need a longer, still finite deadline so
     /// the executor does not report a failure while that UI is active.
-    pub async fn latency_cancellable_with_deadline<T, F>(
+    pub async fn latency_cancellable<T, F>(
         &self,
-        resource_key: String,
-        cancellation: Cancellation,
-        deadline: Duration,
+        request: LatencyRequest,
         work: F,
     ) -> Result<T, String>
     where
         T: Send + 'static,
         F: FnOnce(&Cancellation) -> Result<T, String> + Send + 'static,
     {
+        let LatencyRequest {
+            resource_key,
+            cancellation,
+            deadline,
+        } = request;
         let coordinator = Arc::clone(&self.coordinator);
         let worker_cancellation = cancellation.clone();
         let (reply_sender, reply_receiver) = oneshot::channel();
         let message = Message::Run(Box::new(move || {
-            let result = run_admitted(&coordinator, resource_key, &worker_cancellation, work);
+            let job = AdmittedJob {
+                coordinator: &coordinator,
+                resource_key,
+                cancellation: &worker_cancellation,
+            };
+            let result = run_admitted(job, work);
             let _ = reply_sender.send(result);
         }));
         self.admit(message)?;
@@ -150,8 +168,7 @@ impl IpcExecutor {
     /// a result nor start another request through this owner.
     pub async fn latency_async_cancellable<T, F, Fut>(
         &self,
-        resource_key: String,
-        cancellation: Cancellation,
+        request: LatencyRequest,
         work: F,
     ) -> Result<T, String>
     where
@@ -159,29 +176,9 @@ impl IpcExecutor {
         F: FnOnce(Cancellation) -> Fut + Send + 'static,
         Fut: Future<Output = Result<T, String>> + Send + 'static,
     {
-        self.latency_async_cancellable_with_deadline(resource_key, cancellation, IPC_DEADLINE, work)
-            .await
-    }
-
-    /// Asynchronous counterpart to [`Self::latency_cancellable_with_deadline`].
-    pub async fn latency_async_cancellable_with_deadline<T, F, Fut>(
-        &self,
-        resource_key: String,
-        cancellation: Cancellation,
-        deadline: Duration,
-        work: F,
-    ) -> Result<T, String>
-    where
-        T: Send + 'static,
-        F: FnOnce(Cancellation) -> Fut + Send + 'static,
-        Fut: Future<Output = Result<T, String>> + Send + 'static,
-    {
-        self.latency_cancellable_with_deadline(
-            resource_key,
-            cancellation,
-            deadline,
-            move |cancel| tauri::async_runtime::block_on(work(cancel.clone())),
-        )
+        self.latency_cancellable(request, move |cancel| {
+            tauri::async_runtime::block_on(work(cancel.clone()))
+        })
         .await
     }
 
@@ -276,14 +273,23 @@ fn admission_error(error: crossbeam_channel::TrySendError<Message>) -> String {
     }
 }
 
+struct AdmittedJob<'job> {
+    coordinator: &'job ResourceCoordinator,
+    resource_key: String,
+    cancellation: &'job Cancellation,
+}
+
 /// Runs `work` under a Latency admission unless the request was cancelled
 /// before or while waiting for it.
 fn run_admitted<T>(
-    coordinator: &ResourceCoordinator,
-    resource_key: String,
-    cancellation: &Cancellation,
+    job: AdmittedJob<'_>,
     work: impl FnOnce(&Cancellation) -> Result<T, String>,
 ) -> Result<T, String> {
+    let AdmittedJob {
+        coordinator,
+        resource_key,
+        cancellation,
+    } = job;
     if cancellation.is_cancelled() {
         return Err(REQUEST_CANCELLED.to_string());
     }

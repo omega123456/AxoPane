@@ -259,9 +259,7 @@ describe('EntryCard', () => {
         rowIndex={1}
         columnIndex={1}
         actions={cardActions}
-        isRenaming
-        renameValue={entry.name}
-        renameError="Name exists"
+        rename={{ value: entry.name, busy: false, error: 'Name exists' }}
       />,
     )
     const input = screen.getByRole('textbox', { name: `Rename ${entry.name}` })

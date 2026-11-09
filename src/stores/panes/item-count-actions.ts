@@ -22,7 +22,7 @@ import {
 } from '@/stores/panes/item-counts'
 import type { PaneState, PanesData } from '@/stores/panes/pane-state'
 import { activeTab } from '@/stores/tabs-store'
-import type { PaneId } from '@/types/pane'
+import type { PaneId, VisibleRange } from '@/types/pane'
 
 function itemCountScope(paneId: PaneId, pane: PaneState): ItemCountScope {
   const activeTabId = activeTab(paneId).id
@@ -86,23 +86,15 @@ export function runActiveItemsSortForPane(paneId: PaneId) {
   return runActiveItemsSort(itemsSortScope(paneId, pane))
 }
 
-export async function requestVisibleItemCounts(
-  paneId: PaneId,
-  visibleStartIndex: number,
-  visibleEndIndex: number,
-  viewportCount: number,
-) {
+export async function requestVisibleItemCounts(paneId: PaneId, visibleRange: VisibleRange) {
   const pane = panesStore().getState().panes[paneId]
   if (!canCountVisibleItems(pane)) {
     return
   }
 
   const scope = itemCountScope(paneId, pane)
-  const countWindow = { visibleStartIndex, visibleEndIndex, viewportCount }
   const pending = visibleItemCountPaths(
-    pane,
-    scope.context,
-    countWindow,
+    { pane, context: scope.context, visibleRange },
     panesStore().getState().passiveItemCountRequests,
   )
   if (pending.length === 0) {

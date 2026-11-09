@@ -120,12 +120,13 @@ function currentRate(throughputHistory: ThroughputSample[], operation: OpProgres
   return throughputHistory.at(-1)?.rate ?? operation.bytesPerSecond
 }
 
-export function useJobCardView(
-  operation: OpProgress,
-  throughputHistory: ThroughputSample[],
-  throughputPeak: number,
-  flags: JobFlags,
-) {
+export type JobThroughput = {
+  history: ThroughputSample[]
+  peak: number
+}
+
+export function useJobCardView(operation: OpProgress, throughput: JobThroughput, flags: JobFlags) {
+  const { history: throughputHistory, peak: throughputPeak } = throughput
   const lastCurrentFile = useLastCurrentFile(operation.currentFileName)
   const rate = currentRate(throughputHistory, operation)
   const liveView = useMemo(

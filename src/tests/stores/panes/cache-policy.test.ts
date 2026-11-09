@@ -15,22 +15,34 @@ describe('pane cache policies', () => {
       old: { value: null, touched: now - ICON_NEGATIVE_TTL_MS, weight: 1 },
       visible: { value: null, touched: now - ICON_NEGATIVE_TTL_MS, weight: 1 },
     }
-    expect(pruneIconCache(cache, new Set(['visible']), now, true)).toEqual({
+    expect(
+      pruneIconCache(cache, new Set(['visible']), { now: now, nativeIconsSupported: true }),
+    ).toEqual({
       visible: cache.visible,
     })
   })
 
   it('does not retain unsupported-platform negative icon history', () => {
     expect(
-      pruneIconCache({ none: { value: null, touched: 1, weight: 1 } }, new Set(), 2, false),
+      pruneIconCache({ none: { value: null, touched: 1, weight: 1 } }, new Set(), {
+        now: 2,
+        nativeIconsSupported: false,
+      }),
     ).toEqual({})
   })
 
   it('uses real recency so a fresh negative entry is retained until its TTL expires', () => {
     const now = Date.now()
     const cache = { fresh: { value: null, touched: now, weight: 1 } }
-    expect(pruneIconCache(cache, new Set(), now, true)).toEqual(cache)
-    expect(pruneIconCache(cache, new Set(), now + ICON_NEGATIVE_TTL_MS, true)).toEqual({})
+    expect(pruneIconCache(cache, new Set(), { now: now, nativeIconsSupported: true })).toEqual(
+      cache,
+    )
+    expect(
+      pruneIconCache(cache, new Set(), {
+        now: now + ICON_NEGATIVE_TTL_MS,
+        nativeIconsSupported: true,
+      }),
+    ).toEqual({})
   })
 
   it('honors icon entry and byte limits deterministically', () => {
@@ -40,7 +52,7 @@ describe('pane cache policies', () => {
         { value: 'x', touched: index, weight: MAX_ICON_CACHE_BYTES },
       ]),
     )
-    const result = pruneIconCache(oversized, new Set(), 10, true)
+    const result = pruneIconCache(oversized, new Set(), { now: 10, nativeIconsSupported: true })
     expect(Object.keys(result)).toHaveLength(1)
     expect(result[`icon-${MAX_ICON_CACHE_ENTRIES}`]).toBeDefined()
   })

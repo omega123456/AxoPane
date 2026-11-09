@@ -242,8 +242,20 @@ pub fn unescape_message(message: &str) -> String {
     out
 }
 
+#[derive(Clone, Copy)]
+pub struct LogMessage<'message> {
+    pub level: LogLevel,
+    pub target: &'message str,
+    pub message: &'message str,
+}
+
 /// Compose a single, round-trippable log line.
-pub fn format_log_line(timestamp: &str, level: LogLevel, target: &str, message: &str) -> String {
+pub fn format_log_line(timestamp: &str, record: LogMessage<'_>) -> String {
+    let LogMessage {
+        level,
+        target,
+        message,
+    } = record;
     format!(
         "{timestamp} [{}] {target}{TARGET_MESSAGE_SEP}{}",
         level.token(),

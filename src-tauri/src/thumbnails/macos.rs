@@ -49,15 +49,26 @@ struct Owner {
     commands: Sender<Command>,
     join: JoinHandle<()>,
 }
+struct GenerateRequest {
+    id: u64,
+    candidate: ThumbnailCandidate,
+    reply: Sender<ProviderUpdate>,
+}
+
+struct GenerationReplies<'reply> {
+    updates: &'reply Receiver<ProviderUpdate>,
+    preview: &'reply ThumbnailPreviewCallback,
+}
+
+struct QuickLookCallback {
+    representation: *mut QLThumbnailRepresentation,
+    representation_type: QLThumbnailRepresentationType,
+    error: *mut NSError,
+}
+
 enum Command {
-    Generate {
-        id: u64,
-        candidate: ThumbnailCandidate,
-        reply: Sender<ProviderUpdate>,
-    },
-    Cancel {
-        fingerprint: ThumbnailFingerprint,
-    },
+    Generate(GenerateRequest),
+    Cancel { fingerprint: ThumbnailFingerprint },
     Shutdown,
 }
 struct Completion {
@@ -127,14 +138,16 @@ impl MacosThumbnailProvider {
     fn await_generation(
         &self,
         candidate: &ThumbnailCandidate,
-        result: &Receiver<ProviderUpdate>,
-        preview: &ThumbnailPreviewCallback,
+        replies: GenerationReplies<'_>,
     ) -> ThumbnailState {
         let deadline = Instant::now() + GENERATION_DEADLINE;
         loop {
-            match result.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            match replies
+                .updates
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            {
                 Ok(update) if update.is_final => return encode_payload(update.payload),
-                Ok(update) => forward_ready_preview(preview, update.payload),
+                Ok(update) => forward_ready_preview(replies.preview, update.payload),
                 Err(_) => break,
             }
         }
@@ -158,15 +171,19 @@ impl ThumbnailProvider for MacosThumbnailProvider {
         }
         let (reply, result) = bounded(REPLY_CAPACITY);
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let command = Command::Generate {
+        let command = Command::Generate(GenerateRequest {
             id,
             candidate: candidate.clone(),
             reply,
-        };
+        });
         if let Err(state) = self.send_generate(command) {
             return state;
         }
-        self.await_generation(candidate, &result, &preview)
+        let replies = GenerationReplies {
+            updates: &result,
+            preview: &preview,
+        };
+        self.await_generation(candidate, replies)
     }
 
     fn cancel(&self, candidate: &ThumbnailCandidate) {
@@ -284,27 +301,18 @@ impl QuickLookOwner {
         completions: &Receiver<Completion>,
     ) {
         match command {
-            Ok(Command::Generate {
-                id,
-                candidate,
-                reply,
-            }) => self.on_generate(id, candidate, reply),
+            Ok(Command::Generate(request)) => self.on_generate(request),
             Ok(Command::Cancel { fingerprint }) => self.cancel_fingerprint(&fingerprint),
             Ok(Command::Shutdown) | Err(_) => self.drain_on_shutdown(completions),
         }
     }
 
-    fn on_generate(
-        &mut self,
-        id: u64,
-        candidate: ThumbnailCandidate,
-        reply: Sender<ProviderUpdate>,
-    ) {
+    fn on_generate(&mut self, request: GenerateRequest) {
         if !self.has_capacity() {
-            let _ = reply.send(unavailable_update());
+            let _ = request.reply.send(unavailable_update());
             return;
         }
-        self.begin(id, candidate, reply);
+        self.begin(request);
     }
 
     fn is_draining_before(&self, deadline: Instant) -> bool {
@@ -354,7 +362,12 @@ impl QuickLookOwner {
         }
     }
 
-    fn begin(&mut self, id: u64, candidate: ThumbnailCandidate, reply: Sender<ProviderUpdate>) {
+    fn begin(&mut self, generate: GenerateRequest) {
+        let GenerateRequest {
+            id,
+            candidate,
+            reply,
+        } = generate;
         let request = thumbnail_request(&candidate);
         let callback = std::sync::Arc::new(CallbackState {
             cancelled: AtomicBool::new(false),
@@ -391,8 +404,12 @@ fn completion_block(
               representation_type: QLThumbnailRepresentationType,
               error: *mut NSError| {
             let is_final = representation_type == QLThumbnailRepresentationType::Thumbnail;
-            let payload =
-                completion_payload(&callback_state, representation, representation_type, error);
+            let callback = QuickLookCallback {
+                representation,
+                representation_type,
+                error,
+            };
+            let payload = completion_payload(&callback_state, callback);
             let worth_sending = is_final || matches!(payload, ProviderPayload::Frame(_));
             if worth_sending {
                 let _ = completion_sender.try_send(Completion {
@@ -420,10 +437,13 @@ fn thumbnail_request(candidate: &ThumbnailCandidate) -> Retained<QLThumbnailGene
 
 fn completion_payload(
     callback_state: &CallbackState,
-    representation: *mut QLThumbnailRepresentation,
-    representation_type: QLThumbnailRepresentationType,
-    error: *mut NSError,
+    callback: QuickLookCallback,
 ) -> ProviderPayload {
+    let QuickLookCallback {
+        representation,
+        representation_type,
+        error,
+    } = callback;
     let produced_nothing = callback_state.cancelled.load(Ordering::Acquire)
         || representation.is_null()
         || !error.is_null();

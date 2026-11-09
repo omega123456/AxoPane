@@ -56,10 +56,14 @@ function isStripTarget(target: TabDragEndEvent['operation']['target']) {
   return Boolean((target?.data as { isStrip?: boolean } | undefined)?.isStrip)
 }
 
+type TabDropEnds = {
+  sourceTabId: string
+  targetPaneId: PaneId
+}
+
 function tabDropDestination(
   event: TabDragEndEvent,
-  sourceTabId: string,
-  targetPaneId: PaneId,
+  { sourceTabId, targetPaneId }: TabDropEnds,
   tabIds: TabIdsByPane,
 ): Pick<TabDrop, 'destinationPaneId' | 'destinationIndex'> {
   if (isStripTarget(event.operation.target)) {
@@ -93,7 +97,7 @@ export function resolveTabDrop(event: TabDragEndEvent, tabIds: TabIdsByPane): Ta
   if (!validDestination(sourcePaneId, targetPaneId)) {
     return null
   }
-  const destination = tabDropDestination(event, sourceTabId, targetPaneId, tabIds)
+  const destination = tabDropDestination(event, { sourceTabId, targetPaneId }, tabIds)
   if (destination.destinationIndex < 0) {
     return null
   }

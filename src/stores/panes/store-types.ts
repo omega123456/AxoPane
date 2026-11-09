@@ -9,9 +9,9 @@ import type {
   SortKey,
   VolumeInfo,
 } from '@/lib/types/ipc'
-import type { TabMoveResult } from '@/stores/tabs-store'
+import type { TabMoveRequest, TabMoveResult } from '@/stores/tabs-store'
 import type { PanesData } from '@/stores/panes/pane-state'
-import type { PaneId } from '@/types/pane'
+import type { PaneId, VisibleRange } from '@/types/pane'
 
 export type NavigateOptions = {
   viaHistory?: boolean
@@ -42,12 +42,7 @@ export type PanesStore = PanesData & {
   closeTabsBeside: (paneId: PaneId, tabId: string, side: 'left' | 'right') => Promise<void>
   setTabLocked: (paneId: PaneId, tabId: string, locked: boolean) => void
   switchTab: (paneId: PaneId, tabId: string) => Promise<void>
-  moveTab: (
-    sourcePaneId: PaneId,
-    tabId: string,
-    destinationPaneId: PaneId,
-    destinationIndex: number,
-  ) => Promise<TabMoveResult>
+  moveTab: (request: TabMoveRequest) => Promise<TabMoveResult>
   refreshSizes: (paneId: PaneId) => Promise<void>
   finalizeListing: (paneId: PaneId) => Promise<void>
   applyDirPatch: (event: DirPatchEvent) => void
@@ -58,12 +53,7 @@ export type PanesStore = PanesData & {
   setFocusedEntry: (paneId: PaneId, entryId: string | null) => void
   setScrollPosition: (paneId: PaneId, path: string, scrollTop: number) => void
   applySizeStates: (events: SizeStateEvent[]) => void
-  requestVisibleItemCounts: (
-    paneId: PaneId,
-    visibleStartIndex: number,
-    visibleEndIndex: number,
-    viewportCount: number,
-  ) => Promise<void>
+  requestVisibleItemCounts: (paneId: PaneId, visibleRange: VisibleRange) => Promise<void>
   applyItemCountEvents: (events: ItemCountEvent[]) => void
   requestVisibleIcons: (paneId: PaneId, paths: string[]) => Promise<void>
   applyIconStates: (events: IconStateEvent[]) => void

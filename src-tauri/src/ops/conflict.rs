@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Condvar, Mutex};
 
 use super::delete::remove_target;
-use super::execution::{record_transfer_failure, ItemTransfer, WorkerContext};
+use super::execution::{record_transfer_failure, ItemTransfer, TransferFailure, WorkerContext};
 use super::paths::{is_real_directory, normalized_components, path_entry_exists, unique_name};
 use super::progress::{advance_item, count_skipped_bytes, emit_operation_progress};
 use super::{
@@ -26,37 +26,56 @@ impl TransferTarget {
 
 /// Picks where an item lands. `None` means the item needs no transfer: it was
 /// skipped, failed while clearing the way, or was cancelled while parked.
+pub(super) struct ConflictCandidate<'candidate> {
+    pub(super) item: &'candidate OpItem,
+    pub(super) target: &'candidate Path,
+}
+
+pub(super) struct ParkedResolution {
+    pub(super) resolution: ConflictResolution,
+    pub(super) rename_to: Option<String>,
+}
+
+struct ConflictDecision {
+    target: PathBuf,
+    parked: ParkedResolution,
+}
+
 pub(super) fn resolve_transfer_target(
     context: &WorkerContext<'_>,
-    item: &OpItem,
     conflict: &Option<ConflictEmitter>,
     transfer: &ItemTransfer,
 ) -> Option<TransferTarget> {
+    let item = transfer.item;
     let target = transfer.destination_dir.join(&item.name);
     if !path_entry_exists(&target) {
         return Some(TransferTarget::separate(target));
     }
-    let (resolution, rename_to) = resolve_or_park(context, item, &target, conflict)?;
-    apply_conflict_decision(context, item, transfer, target, resolution, rename_to)
+    let candidate = ConflictCandidate {
+        item,
+        target: &target,
+    };
+    let parked = resolve_or_park(context, candidate, conflict)?;
+    apply_conflict_decision(context, transfer, ConflictDecision { target, parked })
 }
 
 fn apply_conflict_decision(
     context: &WorkerContext<'_>,
-    item: &OpItem,
     transfer: &ItemTransfer,
-    target: PathBuf,
-    resolution: ConflictResolution,
-    rename_to: Option<String>,
+    decision: ConflictDecision,
 ) -> Option<TransferTarget> {
-    match resolution {
+    let item = transfer.item;
+    let ConflictDecision { target, parked } = decision;
+    match parked.resolution {
         ConflictResolution::Skip => {
             skip_conflicting_item(context, item);
             None
         }
-        ConflictResolution::Replace => replace_target(context, item, transfer, target),
+        ConflictResolution::Replace => replace_target(context, transfer, target),
         ConflictResolution::Rename => {
-            let new_name =
-                rename_to.unwrap_or_else(|| unique_name(&transfer.destination_dir, &item.name));
+            let new_name = parked
+                .rename_to
+                .unwrap_or_else(|| unique_name(&transfer.destination_dir, &item.name));
             Some(TransferTarget::separate(
                 transfer.destination_dir.join(new_name),
             ))
@@ -74,10 +93,10 @@ fn skip_conflicting_item(context: &WorkerContext<'_>, item: &OpItem) {
 /// overwrites conflicting children and keeps the rest.
 fn replace_target(
     context: &WorkerContext<'_>,
-    item: &OpItem,
     transfer: &ItemTransfer,
     target: PathBuf,
 ) -> Option<TransferTarget> {
+    let item = transfer.item;
     let targets_source = normalized_components(&transfer.source) == normalized_components(&target);
     if targets_source {
         skip_conflicting_item(context, item);
@@ -93,10 +112,12 @@ fn replace_target(
     if let Err(error) = remove_target(&target) {
         record_transfer_failure(
             context.shared_operation,
-            transfer.kind,
-            &transfer.source,
-            &target,
-            &error,
+            TransferFailure {
+                kind: transfer.kind,
+                source: &transfer.source,
+                target: &target,
+                error: &error,
+            },
         );
         return None;
     }
@@ -106,15 +127,18 @@ fn replace_target(
 /// Surface a conflict and block until the user resolves it (or it is cancelled).
 pub(super) fn resolve_or_park(
     context: &WorkerContext<'_>,
-    item: &OpItem,
-    target: &Path,
+    candidate: ConflictCandidate<'_>,
     conflict: &Option<ConflictEmitter>,
-) -> Option<(ConflictResolution, Option<String>)> {
+) -> Option<ParkedResolution> {
+    let ConflictCandidate { item, target } = candidate;
     let shared_operation = context.shared_operation;
     {
         let operation = shared_operation.lock_operation();
-        if let Some(blanket) = operation.apply_to_all {
-            return Some((blanket, None));
+        if let Some(blanket) = operation.runtime.apply_to_all {
+            return Some(ParkedResolution {
+                resolution: blanket,
+                rename_to: None,
+            });
         }
     }
 
@@ -128,8 +152,8 @@ pub(super) fn resolve_or_park(
     {
         let mut operation = shared_operation.lock_operation();
         operation.status = OpStatus::Conflict;
-        operation.conflict = Some(info.clone());
-        operation.conflict_resolution = None;
+        operation.runtime.conflict = Some(info.clone());
+        operation.runtime.conflict_resolution = None;
         emit_operation_progress(context.progress, &operation);
     }
     if let Some(emitter) = conflict {
@@ -141,9 +165,12 @@ pub(super) fn resolve_or_park(
         if guard.cancel.load(Ordering::Relaxed) {
             return None;
         }
-        if let Some(resolution) = guard.conflict_resolution.take() {
-            let rename = guard.rename_to.take();
-            return Some((resolution, rename));
+        if let Some(resolution) = guard.runtime.conflict_resolution.take() {
+            let rename_to = guard.runtime.rename_to.take();
+            return Some(ParkedResolution {
+                resolution,
+                rename_to,
+            });
         }
         guard = context.resolver.wait(guard).expect("conflict wait");
     }

@@ -180,10 +180,10 @@ pub fn classify_patch(input: ClassifyPatchInput<'_>) -> Option<SessionPatch> {
         path,
         previous_baseline,
         next_baseline,
-        previous_view,
         next_view,
         changed_paths,
         removed_paths,
+        ..
     } = input;
 
     let total_touched = changed_paths.len() + removed_paths.len();
@@ -192,9 +192,7 @@ pub fn classify_patch(input: ClassifyPatchInput<'_>) -> Option<SessionPatch> {
     }
 
     if total_touched == 1 {
-        if let Some(delta) =
-            single_row_delta(previous_view, next_view, changed_paths, removed_paths)
-        {
+        if let Some(delta) = single_row_delta(&input) {
             return Some(SessionPatch::Delta {
                 pane_id: pane_id.to_string(),
                 tab_id: tab_id.to_string(),
@@ -224,12 +222,14 @@ pub fn classify_patch(input: ClassifyPatchInput<'_>) -> Option<SessionPatch> {
 /// index comparison — e.g. a rename that also happens to change sort
 /// position among other untouched rows shifting is intentionally treated as
 /// ambiguous here rather than risk an incorrect computed index.
-fn single_row_delta(
-    previous_view: &[DirectoryEntry],
-    next_view: &[DirectoryEntry],
-    changed_paths: &[String],
-    removed_paths: &[String],
-) -> Option<RowDelta> {
+fn single_row_delta(input: &ClassifyPatchInput<'_>) -> Option<RowDelta> {
+    let ClassifyPatchInput {
+        previous_view,
+        next_view,
+        changed_paths,
+        removed_paths,
+        ..
+    } = *input;
     if !removed_paths.is_empty() {
         // Exactly one removed child and total_touched == 1 (checked by the
         // caller) means no changed entries at all.

@@ -15,26 +15,35 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use super::conflict::wait_while_paused;
-use super::copy::copy_reader_with_progress;
-use super::execution::{is_operation_cancelled, WorkerContext};
+use super::copy::{copy_reader_with_progress, ChunkReporter};
+use super::execution::{is_operation_cancelled, NativeItemPaths, WorkerContext};
 use super::progress::{
     add_discovered_total, begin_file_progress, finish_file_progress, report_chunk_progress,
-    TransferThrottle,
+    FileProgressStart, TransferThrottle,
 };
 use super::{LockOperation, OpItem, OpKind};
 use crate::error_text::StringifyError;
 use crate::traversal::{TraversalEntry, TraversalError, TraversalOptions};
+
+#[derive(Clone, Copy)]
+struct MemberPaths<'path> {
+    source: &'path Path,
+    archive_path: &'path Path,
+}
 
 pub fn needs_cpu_admission(kind: OpKind) -> bool {
     matches!(kind, OpKind::Compress | OpKind::Extract)
 }
 
 pub(super) fn compress_item_with_progress(
-    source: &Path,
-    archive_path: &Path,
+    paths: NativeItemPaths<'_>,
     item: &OpItem,
     context: &WorkerContext<'_>,
 ) -> Result<(), String> {
+    let NativeItemPaths {
+        source,
+        target: archive_path,
+    } = paths;
     if !is_zip_archive_path(archive_path) {
         return Err("Archive output must end in .zip.".to_string());
     }
@@ -99,11 +108,14 @@ fn open_archive_writer(
 }
 
 pub(super) fn extract_item_with_progress(
-    source: &Path,
-    destination_dir: &Path,
+    paths: NativeItemPaths<'_>,
     item: &OpItem,
     context: &WorkerContext<'_>,
 ) -> Result<(), String> {
+    let NativeItemPaths {
+        source,
+        target: destination_dir,
+    } = paths;
     ensure_extract_destination(destination_dir)?;
     if !is_zip_archive_path(source) {
         return Err("Only .zip archives can be extracted.".to_string());
@@ -183,8 +195,10 @@ impl Extraction<'_, '_> {
         }
         begin_file_progress(
             self.context,
-            &output_path,
-            entry.size(),
+            FileProgressStart {
+                source: &output_path,
+                total_bytes: entry.size(),
+            },
             Some(&mut self.throttle),
         );
         #[cfg(unix)]
@@ -216,12 +230,11 @@ impl Extraction<'_, '_> {
         output_path: &Path,
     ) -> Result<(), String> {
         let mut output_file = fs::File::create(output_path).stringify_err()?;
-        copy_reader_with_progress(
-            entry,
-            &mut output_file,
-            self.context,
-            Some(&mut self.throttle),
-        )?;
+        let reporter = ChunkReporter {
+            context: self.context,
+            throttle: Some(&mut self.throttle),
+        };
+        copy_reader_with_progress(entry, &mut output_file, reporter)?;
         output_file.flush().stringify_err()?;
         drop(output_file);
         apply_extracted_mode(output_path, entry.unix_mode())?;
@@ -285,7 +298,11 @@ impl ArchiveAppend<'_, '_> {
             return self.append_symlink(source, archive_path);
         }
         if metadata.is_dir() {
-            return self.append_tree(source, archive_path, &metadata);
+            let member = MemberPaths {
+                source,
+                archive_path,
+            };
+            return self.append_tree(member, &metadata);
         }
         self.append_file(source, archive_path)
     }
@@ -295,16 +312,19 @@ impl ArchiveAppend<'_, '_> {
     /// contract, so the walk never materializes or sorts a wide directory.
     fn append_tree(
         &mut self,
-        source: &Path,
-        archive_path: &Path,
+        member: MemberPaths<'_>,
         metadata: &fs::Metadata,
     ) -> Result<(), String> {
+        let MemberPaths {
+            source,
+            archive_path,
+        } = member;
         self.add_directory_entry(archive_path, metadata)?;
         let cancel = Arc::clone(&self.context.shared_operation.lock_operation().cancel);
         let mut entries =
             crate::traversal::walk(source, TraversalOptions::default(), cancel).stringify_err()?;
         while let Some(entry) = self.next_entry_to_append(&mut entries)? {
-            self.append_walked_entry(source, archive_path, &entry)?;
+            self.append_walked_entry(member, &entry)?;
         }
         Ok(())
     }
@@ -329,10 +349,13 @@ impl ArchiveAppend<'_, '_> {
 
     fn append_walked_entry(
         &mut self,
-        source_root: &Path,
-        archive_root: &Path,
+        root: MemberPaths<'_>,
         entry: &TraversalEntry,
     ) -> Result<(), String> {
+        let MemberPaths {
+            source: source_root,
+            archive_path: archive_root,
+        } = root;
         let relative = entry.path.strip_prefix(source_root).stringify_err()?;
         let member_archive_path = archive_root.join(relative);
         if entry.file_type.is_symlink() {
@@ -369,8 +392,10 @@ impl ArchiveAppend<'_, '_> {
         }
         begin_file_progress(
             self.context,
-            source,
-            target_length,
+            FileProgressStart {
+                source,
+                total_bytes: target_length,
+            },
             self.throttle.as_deref_mut(),
         );
         // `unix_permissions` masks to 0o777, so only `add_symlink` sets S_IFLNK.
@@ -394,20 +419,21 @@ impl ArchiveAppend<'_, '_> {
         }
         begin_file_progress(
             self.context,
-            source,
-            file_size,
+            FileProgressStart {
+                source,
+                total_bytes: file_size,
+            },
             self.throttle.as_deref_mut(),
         );
         self.writer
             .start_file(to_zip_path(archive_path)?, zip_file_options(&metadata))
             .stringify_err()?;
         let mut input_file = fs::File::open(source).stringify_err()?;
-        copy_reader_with_progress(
-            &mut input_file,
-            self.writer,
-            self.context,
-            self.throttle.as_deref_mut(),
-        )?;
+        let reporter = ChunkReporter {
+            context: self.context,
+            throttle: self.throttle.as_deref_mut(),
+        };
+        copy_reader_with_progress(&mut input_file, self.writer, reporter)?;
         finish_file_progress(self.context, self.throttle.as_deref_mut());
         Ok(())
     }

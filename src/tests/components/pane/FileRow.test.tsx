@@ -293,8 +293,7 @@ describe('FileRow rename mode', () => {
         isActivePane
         isFocused={false}
         isSelected={false}
-        isRenaming
-        renameValue="Doc.txt"
+        rename={{ value: 'Doc.txt', busy: false, error: null }}
         actions={makeActions({
           onRenameChange,
           onRenameSubmit,
@@ -328,9 +327,7 @@ describe('FileRow rename mode', () => {
         isActivePane
         isFocused={false}
         isSelected={false}
-        isRenaming
-        renameValue="Doc"
-        renameError="Name already exists"
+        rename={{ value: 'Doc', busy: false, error: 'Name already exists' }}
         actions={makeActions()}
       />,
     )

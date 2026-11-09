@@ -2,7 +2,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::bounded_cache::BoundedCache;
+use crate::bounded_cache::{BoundedCache, Weighted};
 
 pub const ITEM_COUNT_CACHE_LIMIT: usize = 50_000;
 
@@ -72,16 +72,38 @@ impl ItemCountCache {
         ) {
             return false;
         }
-        self.entries.insert(key, ItemCountState::Pending, 1);
+        self.entries
+            .insert(key, single_entry(ItemCountState::Pending));
         true
     }
-    pub fn resolve(&mut self, path: &str, generation: u64, state: ItemCountState) {
-        self.entries.insert(key(path, generation), state, 1);
+    pub fn resolve(&mut self, resolution: CountResolution<'_>) {
+        let CountResolution {
+            path,
+            generation,
+            state,
+        } = resolution;
+        self.entries
+            .insert(key(path, generation), single_entry(state));
     }
     /// A direct-child mutation changes only this directory's observable generation.
     pub fn invalidate_generation(&mut self, path: &str, generation: u64) {
         self.entries
             .retain(|entry, _| !(same_path(&entry.path, path) && entry.generation <= generation));
+    }
+}
+
+pub struct CountResolution<'path> {
+    pub path: &'path str,
+    pub generation: u64,
+    pub state: ItemCountState,
+}
+
+const SINGLE_ENTRY_WEIGHT: usize = 1;
+
+fn single_entry(state: ItemCountState) -> Weighted<ItemCountState> {
+    Weighted {
+        value: state,
+        weight: SINGLE_ENTRY_WEIGHT,
     }
 }
 

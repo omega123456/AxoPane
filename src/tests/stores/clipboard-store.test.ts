@@ -1,5 +1,10 @@
 import { beforeEach } from 'vitest'
-import { useClipboardStore } from '@/stores/clipboard-store'
+import {
+  clipboardEntries,
+  hasClipboardEntries,
+  snapshotFromOs,
+  useClipboardStore,
+} from '@/stores/clipboard-store'
 import { ipc } from '../ipc-mock'
 
 beforeEach(() => {
@@ -15,20 +20,20 @@ describe('clipboard-store', () => {
 
     await useClipboardStore.getState().syncFromOs()
 
-    const state = useClipboardStore.getState()
-    expect(state.mode).toBe('move')
-    expect(state.sourcePaneId).toBeNull()
-    expect(state.entries).toEqual([
+    const state = useClipboardStore.getState().snapshot
+    expect(state?.mode).toBe('move')
+    expect(state?.sourcePaneId).toBeNull()
+    expect(state?.entries).toEqual([
       { path: '/fixture/reports/Report.txt', name: 'Report.txt', sizeBytes: null },
     ])
   })
 
   it('keeps the in-app clipboard when the OS reports the same paths', async () => {
-    useClipboardStore
-      .getState()
-      .setClipboard('move', 'left', [
-        { path: '/fixture/reports/Report.txt', name: 'Report.txt', sizeBytes: 12 },
-      ])
+    useClipboardStore.getState().setClipboard({
+      mode: 'move',
+      sourcePaneId: 'left',
+      entries: [{ path: '/fixture/reports/Report.txt', name: 'Report.txt', sizeBytes: 12 }],
+    })
     ipc.override('read_file_clipboard', {
       mode: 'copy',
       items: [{ path: '/fixture/reports/Report.txt', name: 'Report.txt' }],
@@ -36,39 +41,57 @@ describe('clipboard-store', () => {
 
     await useClipboardStore.getState().syncFromOs()
 
-    const state = useClipboardStore.getState()
-    expect(state.mode).toBe('move')
-    expect(state.sourcePaneId).toBe('left')
-    expect(state.entries[0].sizeBytes).toBe(12)
+    const state = useClipboardStore.getState().snapshot
+    expect(state?.mode).toBe('move')
+    expect(state?.sourcePaneId).toBe('left')
+    expect(state?.entries[0].sizeBytes).toBe(12)
   })
 
   it('clears the clipboard when the OS clipboard holds no files', async () => {
-    useClipboardStore
-      .getState()
-      .setClipboard('copy', 'left', [
-        { path: '/fixture/reports/Report.txt', name: 'Report.txt', sizeBytes: 12 },
-      ])
+    useClipboardStore.getState().setClipboard({
+      mode: 'copy',
+      sourcePaneId: 'left',
+      entries: [{ path: '/fixture/reports/Report.txt', name: 'Report.txt', sizeBytes: 12 }],
+    })
     ipc.override('read_file_clipboard', { mode: 'copy', items: [] })
 
     await useClipboardStore.getState().syncFromOs()
 
-    const state = useClipboardStore.getState()
-    expect(state.mode).toBeNull()
-    expect(state.entries).toEqual([])
+    expect(useClipboardStore.getState().snapshot).toBeNull()
   })
 
   it('leaves the clipboard alone when the read fails', async () => {
-    useClipboardStore
-      .getState()
-      .setClipboard('copy', 'left', [
-        { path: '/fixture/reports/Report.txt', name: 'Report.txt', sizeBytes: 12 },
-      ])
+    useClipboardStore.getState().setClipboard({
+      mode: 'copy',
+      sourcePaneId: 'left',
+      entries: [{ path: '/fixture/reports/Report.txt', name: 'Report.txt', sizeBytes: 12 }],
+    })
     ipc.override('read_file_clipboard', () => {
       throw new Error('clipboard unavailable')
     })
 
     await useClipboardStore.getState().syncFromOs()
 
-    expect(useClipboardStore.getState().entries).toHaveLength(1)
+    expect(clipboardEntries(useClipboardStore.getState().snapshot)).toHaveLength(1)
+  })
+
+  it('treats a missing snapshot as an empty clipboard', () => {
+    expect(clipboardEntries(null)).toEqual([])
+    expect(hasClipboardEntries()).toBe(false)
+    useClipboardStore.getState().setClipboard({
+      mode: 'copy',
+      sourcePaneId: 'right',
+      entries: [{ path: '/a', name: 'a', sizeBytes: 1 }],
+    })
+    expect(hasClipboardEntries()).toBe(true)
+  })
+
+  it('builds a snapshot from OS items, or none when the OS holds no files', () => {
+    expect(snapshotFromOs({ mode: 'copy', items: [] })).toBeNull()
+    expect(snapshotFromOs({ mode: 'move', items: [{ path: '/a', name: 'a' }] })).toEqual({
+      mode: 'move',
+      sourcePaneId: null,
+      entries: [{ path: '/a', name: 'a', sizeBytes: null }],
+    })
   })
 })

@@ -6,7 +6,7 @@ import { canExecuteCommand, executeCommand, selectedEntriesForPane } from '@/lib
 import { showPropertiesDialog, toPropertiesDialogItem } from '@/lib/properties-commands'
 import { TRASH_PATH } from '@/lib/trash'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
-import { useClipboardStore } from '@/stores/clipboard-store'
+import { clipboardEntries, useClipboardStore } from '@/stores/clipboard-store'
 import { useErrorToastStore } from '@/stores/error-toast-store'
 import { useInlineRenameStore } from '@/stores/inline-rename-store'
 import { usePanesStore } from '@/stores/panes-store'
@@ -170,13 +170,19 @@ describe('executeCommand file actions', () => {
   })
 
   it('renames the sole selected entry when invoked without an explicit target', () => {
-    useSelectionStore.getState().setSelection('left', ['Beta'], 'Beta', 'Beta')
+    useSelectionStore
+      .getState()
+      .setSelection('left', { selectedIds: ['Beta'], anchorId: 'Beta', focusedId: 'Beta' })
     executeCommand('rename', 'left')
     expect(useInlineRenameStore.getState().rename).toMatchObject({ entryId: 'Beta' })
   })
 
   it('does not start inline rename when multiple entries are selected', () => {
-    useSelectionStore.getState().setSelection('left', ['Alpha', 'Beta'], 'Alpha', 'Beta')
+    useSelectionStore.getState().setSelection('left', {
+      selectedIds: ['Alpha', 'Beta'],
+      anchorId: 'Alpha',
+      focusedId: 'Beta',
+    })
     executeCommand('rename', 'left')
     expect(useInlineRenameStore.getState().rename).toBeNull()
   })
@@ -184,7 +190,11 @@ describe('executeCommand file actions', () => {
   it('moves selected entries to trash without opening a dialog', async () => {
     const moveToTrash = vi.fn(() => undefined)
     ipc.override('move_to_trash', moveToTrash)
-    useSelectionStore.getState().setSelection('left', ['Alpha', 'Beta'], 'Alpha', 'Beta')
+    useSelectionStore.getState().setSelection('left', {
+      selectedIds: ['Alpha', 'Beta'],
+      anchorId: 'Alpha',
+      focusedId: 'Beta',
+    })
 
     executeCommand('delete', 'left')
 
@@ -247,7 +257,11 @@ describe('executeCommand file actions', () => {
   })
 
   it('opens a permanent delete confirmation for the selected entries', () => {
-    useSelectionStore.getState().setSelection('left', ['Alpha', 'Beta'], 'Alpha', 'Beta')
+    useSelectionStore.getState().setSelection('left', {
+      selectedIds: ['Alpha', 'Beta'],
+      anchorId: 'Alpha',
+      focusedId: 'Beta',
+    })
     executeCommand('deletePermanent', 'left')
     const dialog = useActionDialogStore.getState().dialog
     expect(dialog?.kind).toBe('delete')
@@ -262,10 +276,12 @@ describe('executeCommand file actions', () => {
   it('copies and cuts selected entries into the clipboard', () => {
     const writeFileClipboard = vi.fn(() => undefined)
     ipc.override('write_file_clipboard', writeFileClipboard)
-    useSelectionStore.getState().setSelection('left', ['Beta'], 'Beta', 'Beta')
+    useSelectionStore
+      .getState()
+      .setSelection('left', { selectedIds: ['Beta'], anchorId: 'Beta', focusedId: 'Beta' })
 
     executeCommand('copy', 'left')
-    expect(useClipboardStore.getState()).toMatchObject({
+    expect(useClipboardStore.getState().snapshot).toMatchObject({
       mode: 'copy',
       sourcePaneId: 'left',
       entries: [{ id: 'Beta' }],
@@ -276,7 +292,7 @@ describe('executeCommand file actions', () => {
     })
 
     executeCommand('cut', 'left', 'Alpha')
-    expect(useClipboardStore.getState()).toMatchObject({
+    expect(useClipboardStore.getState().snapshot).toMatchObject({
       mode: 'move',
       sourcePaneId: 'left',
       entries: [{ id: 'Alpha' }],
@@ -292,7 +308,9 @@ describe('executeCommand file actions', () => {
     const clearFileClipboard = vi.fn(() => undefined)
     ipc.override('start_op', startOp)
     ipc.override('clear_file_clipboard', clearFileClipboard)
-    useClipboardStore.getState().setClipboard('move', 'right', [entry('Beta', false)])
+    useClipboardStore
+      .getState()
+      .setClipboard({ mode: 'move', sourcePaneId: 'right', entries: [entry('Beta', false)] })
 
     executeCommand('paste', 'left')
     await waitFor(() => expect(startOp).toHaveBeenCalledOnce())
@@ -302,7 +320,7 @@ describe('executeCommand file actions', () => {
       destinationDir: 'C:\\root',
       items: [{ sourcePath: 'C:\\root\\Beta', name: 'Beta', sizeBytes: 10 }],
     })
-    expect(useClipboardStore.getState().entries).toEqual([])
+    expect(clipboardEntries(useClipboardStore.getState().snapshot)).toEqual([])
     expect(clearFileClipboard).toHaveBeenCalledOnce()
   })
 
@@ -322,7 +340,11 @@ describe('executeCommand file actions', () => {
         right: { ...state.panes.right, path: 'D:\\dest' },
       },
     }))
-    useSelectionStore.getState().setSelection('left', ['Alpha', 'Beta'], 'Alpha', 'Beta')
+    useSelectionStore.getState().setSelection('left', {
+      selectedIds: ['Alpha', 'Beta'],
+      anchorId: 'Alpha',
+      focusedId: 'Beta',
+    })
 
     executeCommand('copyToOtherPane', 'left')
 
@@ -359,14 +381,18 @@ describe('executeCommand file actions', () => {
     expect(canExecuteCommand('rename', 'left', 'Alpha')).toBe(true)
     expect(canExecuteCommand('delete', 'left')).toBe(false)
     expect(canExecuteCommand('deletePermanent', 'left')).toBe(false)
-    useSelectionStore.getState().setSelection('left', ['Alpha'], 'Alpha', 'Alpha')
+    useSelectionStore
+      .getState()
+      .setSelection('left', { selectedIds: ['Alpha'], anchorId: 'Alpha', focusedId: 'Alpha' })
     expect(canExecuteCommand('delete', 'left')).toBe(true)
     expect(canExecuteCommand('deletePermanent', 'left')).toBe(true)
   })
 
   it('gates commands that require clipboard entries, directory targets, or transfer candidates', () => {
     expect(canExecuteCommand('paste', 'left')).toBe(false)
-    useClipboardStore.getState().setClipboard('copy', 'left', [entry('Beta', false)])
+    useClipboardStore
+      .getState()
+      .setClipboard({ mode: 'copy', sourcePaneId: 'left', entries: [entry('Beta', false)] })
     expect(canExecuteCommand('paste', 'left')).toBe(true)
 
     expect(canExecuteCommand('selectAll', 'left')).toBe(true)
@@ -386,7 +412,9 @@ describe('executeCommand file actions', () => {
   })
 
   it('returns the concrete selected entries for the pane', () => {
-    useSelectionStore.getState().setSelection('left', ['Beta'], 'Beta', 'Beta')
+    useSelectionStore
+      .getState()
+      .setSelection('left', { selectedIds: ['Beta'], anchorId: 'Beta', focusedId: 'Beta' })
 
     expect(selectedEntriesForPane('left')).toEqual([
       expect.objectContaining({
@@ -579,7 +607,7 @@ describe('command failure logging', () => {
 
     executeCommand('copy', 'left', 'Alpha')
 
-    expect(useClipboardStore.getState().mode).toBe('copy')
+    expect(useClipboardStore.getState().snapshot?.mode).toBe('copy')
     await waitFor(() =>
       expect(frontendLog).toHaveBeenCalledWith(
         expect.objectContaining({ message: 'write file clipboard failed' }),
@@ -592,7 +620,9 @@ describe('command failure logging', () => {
     ipc.override('log_frontend', frontendLog)
     ipc.override('start_op', () => 'op-move-1')
     ipc.override('clear_file_clipboard', () => Promise.reject(new Error('busy')) as never)
-    useClipboardStore.getState().setClipboard('move', 'left', [entry('Alpha')])
+    useClipboardStore
+      .getState()
+      .setClipboard({ mode: 'move', sourcePaneId: 'left', entries: [entry('Alpha')] })
 
     executeCommand('paste', 'right')
 
@@ -601,7 +631,7 @@ describe('command failure logging', () => {
         expect.objectContaining({ message: 'clear file clipboard failed' }),
       ),
     )
-    expect(useClipboardStore.getState().mode).toBeNull()
+    expect(useClipboardStore.getState().snapshot).toBeNull()
   })
 
   it('does nothing for rename without a single target', () => {

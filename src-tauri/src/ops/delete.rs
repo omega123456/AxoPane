@@ -19,48 +19,78 @@ pub fn delete_path_with_progress(
     context: &WorkerContext<'_>,
 ) -> Result<(), String> {
     let mut throttle = TransferThrottle::starting_now(context);
-    delete_path_with_progress_throttled(source, add_discovered_totals, context, &mut throttle)
+    let mut walk = DeleteWalk {
+        add_discovered_totals,
+        context,
+        throttle: &mut throttle,
+    };
+    walk.delete_path(source)
 }
 
-fn delete_path_with_progress_throttled(
-    source: &Path,
+struct DeleteWalk<'run, 'context> {
     add_discovered_totals: bool,
-    context: &WorkerContext<'_>,
-    throttle: &mut TransferThrottle,
-) -> Result<(), String> {
-    let metadata = fs::symlink_metadata(source).stringify_err()?;
-    if is_real_directory_type(metadata.file_type()) {
-        return delete_dir_recursive(source, add_discovered_totals, context, throttle);
+    context: &'run WorkerContext<'context>,
+    throttle: &'run mut TransferThrottle,
+}
+
+impl DeleteWalk<'_, '_> {
+    fn delete_path(&mut self, source: &Path) -> Result<(), String> {
+        let metadata = fs::symlink_metadata(source).stringify_err()?;
+        if is_real_directory_type(metadata.file_type()) {
+            return self.delete_dir_recursive(source);
+        }
+        self.delete_file(source)
     }
-    delete_file_with_progress(source, add_discovered_totals, context, throttle)
-}
 
-fn delete_dir_recursive(
-    source: &Path,
-    add_discovered_totals: bool,
-    context: &WorkerContext<'_>,
-    throttle: &mut TransferThrottle,
-) -> Result<(), String> {
-    for entry in fs::read_dir(source).stringify_err()? {
+    fn delete_dir_recursive(&mut self, source: &Path) -> Result<(), String> {
+        let context = self.context;
+        let entries = fs::read_dir(source).stringify_err()?;
+        for entry in entries.take_while(|_| !is_operation_cancelled(context)) {
+            self.delete_child(&entry.stringify_err()?)?;
+        }
+
+        if is_operation_cancelled(self.context) {
+            return Ok(());
+        }
+
+        remove_clearing_readonly(source, |path| fs::remove_dir(path))
+            .map_err(|error| format!("{}: {error}", source.display()))
+    }
+
+    fn delete_child(&mut self, entry: &fs::DirEntry) -> Result<(), String> {
+        let file_type = entry.file_type().stringify_err()?;
+        if is_real_directory_type(file_type) {
+            return self.delete_dir_recursive(&entry.path());
+        }
+        self.delete_file(&entry.path())
+    }
+
+    fn delete_file(&mut self, source: &Path) -> Result<(), String> {
+        let context = self.context;
+        wait_while_paused(context.shared_operation, context.resolver);
         if is_operation_cancelled(context) {
             return Ok(());
         }
 
-        let entry = entry.stringify_err()?;
-        let file_type = entry.file_type().stringify_err()?;
-        if is_real_directory_type(file_type) {
-            delete_dir_recursive(&entry.path(), add_discovered_totals, context, throttle)?;
-            continue;
+        let link_metadata = fs::symlink_metadata(source).stringify_err()?;
+        let file_size = link_metadata.len();
+        remove_file_or_symlink(source, &link_metadata)
+            .map_err(|error| format!("{}: {error}", source.display()))?;
+
+        self.record_deleted_bytes(file_size);
+        maybe_emit_delete(context, self.throttle);
+        Ok(())
+    }
+
+    fn record_deleted_bytes(&self, file_size: u64) {
+        let mut operation = self.context.shared_operation.lock_operation();
+        if self.add_discovered_totals {
+            operation.total_bytes = operation.total_bytes.saturating_add(file_size);
         }
-        delete_file_with_progress(&entry.path(), add_discovered_totals, context, throttle)?;
+        operation.runtime.copied_bytes = operation.runtime.copied_bytes.saturating_add(file_size);
+        operation.clear_current_file();
+        refresh_rate_locked_with_now(&mut operation, self.context.rate_clock());
     }
-
-    if is_operation_cancelled(context) {
-        return Ok(());
-    }
-
-    remove_clearing_readonly(source, |path| fs::remove_dir(path))
-        .map_err(|error| format!("{}: {error}", source.display()))
 }
 
 /// Windows refuses to delete a read-only file or directory with "Access is
@@ -127,40 +157,6 @@ fn remove_file_or_symlink(path: &Path, link_metadata: &fs::Metadata) -> io::Resu
 #[cfg(not(windows))]
 fn remove_file_or_symlink(path: &Path, _link_metadata: &fs::Metadata) -> io::Result<()> {
     fs::remove_file(path)
-}
-
-fn delete_file_with_progress(
-    source: &Path,
-    add_discovered_totals: bool,
-    context: &WorkerContext<'_>,
-    throttle: &mut TransferThrottle,
-) -> Result<(), String> {
-    wait_while_paused(context.shared_operation, context.resolver);
-    if is_operation_cancelled(context) {
-        return Ok(());
-    }
-
-    let link_metadata = fs::symlink_metadata(source).stringify_err()?;
-    let file_size = link_metadata.len();
-    remove_file_or_symlink(source, &link_metadata)
-        .map_err(|error| format!("{}: {error}", source.display()))?;
-
-    {
-        let mut operation = context.shared_operation.lock_operation();
-        if add_discovered_totals {
-            operation.total_bytes = operation.total_bytes.saturating_add(file_size);
-        }
-        operation.copied_bytes = operation.copied_bytes.saturating_add(file_size);
-        operation.clear_current_file();
-        refresh_rate_locked_with_now(
-            &mut operation,
-            context.start,
-            context.rate_window,
-            (context.instant_now)(),
-        );
-    }
-    maybe_emit_delete(context, throttle);
-    Ok(())
 }
 
 pub fn remove_target(target: &Path) -> Result<(), String> {

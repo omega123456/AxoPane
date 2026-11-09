@@ -74,11 +74,15 @@ function warmablePanePath(paneId: PaneId, visiblePathCount: number): string | nu
   return pane.path
 }
 
+type VisiblePanePaths = {
+  paneId: PaneId
+  paths: string[]
+}
+
 async function warmVisibleNativeMenus(
   set: WarmStoreSet,
   warmedTypeKeys: WarmedTypeKeys,
-  paneId: PaneId,
-  paths: string[],
+  { paneId, paths }: VisiblePanePaths,
 ) {
   const panePath = warmablePanePath(paneId, paths.length)
   if (panePath === null) {
@@ -87,7 +91,7 @@ async function warmVisibleNativeMenus(
 
   const context = { paneId, panePath, visiblePathCount: paths.length }
   const pane = usePanesStore.getState().panes[paneId]
-  const collected = collectWarmRequests(pane.entries, panePath, paths, warmedTypeKeys)
+  const collected = collectWarmRequests({ entries: pane.entries, panePath, paths }, warmedTypeKeys)
   const { requests, ...skipped } = collected
   if (requests.length === 0) {
     log.debug('skipping native menu warm batch because every visible type was already handled', {
@@ -139,7 +143,7 @@ async function dispatchWarmBatch(
 export const useNativeMenuWarmStore = create<NativeMenuWarmStore>((set, get) => ({
   warmedTypeKeys: {},
   warmVisibleNativeMenus: (paneId, paths) =>
-    warmVisibleNativeMenus(set, get().warmedTypeKeys, paneId, paths),
+    warmVisibleNativeMenus(set, get().warmedTypeKeys, { paneId, paths }),
   resetWarmedTypeKeys: () => set({ warmedTypeKeys: {} }),
 }))
 
@@ -157,12 +161,17 @@ type CollectWarmRequestsResult = {
  * that is neither already warmed this session nor already picked earlier in
  * this same batch.
  */
+type WarmCandidates = {
+  entries: DirectoryEntry[]
+  panePath: string
+  paths: string[]
+}
+
 function collectWarmRequests(
-  entries: DirectoryEntry[],
-  panePath: string,
-  paths: string[],
+  candidates: WarmCandidates,
   warmedTypeKeys: WarmedTypeKeys,
 ): CollectWarmRequestsResult {
+  const { entries, panePath, paths } = candidates
   const entryByPath = new Map(entries.map((entry) => [entry.path, entry]))
   const seenKeys = new Set<string>()
   const result: WarmRequestEntry[] = []

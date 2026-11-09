@@ -150,10 +150,14 @@ function listedChildNodes(state: TreeState, parentPath: string, children: TreeCh
   return nodes
 }
 
+export type TreeLoadTarget = {
+  path: string
+  currentNode: TreeNodeState | undefined
+}
+
 export function loadedTreeNodes(
   state: TreeState,
-  path: string,
-  currentNode: TreeNodeState | undefined,
+  { path, currentNode }: TreeLoadTarget,
   children: TreeChildEntry[],
 ): TreeNodes {
   return {
@@ -172,8 +176,7 @@ export function loadedTreeNodes(
 
 export function failedTreeNodes(
   state: TreeState,
-  path: string,
-  currentNode: TreeNodeState | undefined,
+  { path, currentNode }: TreeLoadTarget,
 ): TreeNodes {
   return {
     ...state.treeNodes,
@@ -201,12 +204,12 @@ export function revealChain(path: string, root: string): string[] {
   return chain
 }
 
-function expandedForReveal(
-  nodePath: string,
-  ancestors: Set<string>,
-  leaf: string,
-  expanded: boolean,
-) {
+type RevealTarget = {
+  ancestors: Set<string>
+  leaf: string
+}
+
+function expandedForReveal({ ancestors, leaf }: RevealTarget, nodePath: string, expanded: boolean) {
   const nodeKey = pathKey(nodePath)
   if (ancestors.has(nodeKey)) {
     return true
@@ -230,7 +233,7 @@ export function revealedTree(
     : { leaf, revealedSiblings: [], showHiddenLevels: false }
   const treeNodes = { ...state.treeNodes }
   for (const [nodePath, node] of Object.entries(state.treeNodes)) {
-    const expanded = expandedForReveal(nodePath, ancestors, leaf, node.expanded)
+    const expanded = expandedForReveal({ ancestors, leaf }, nodePath, node.expanded)
     if (expanded !== node.expanded) {
       treeNodes[nodePath] = { ...node, expanded }
     }

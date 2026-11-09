@@ -117,11 +117,10 @@ impl EverythingBatch {
             .iter()
             .take_while(|_| !self.all_cancelled())
             .map(|path| {
-                SizeUpdate::new(
+                SizeUpdate::without_size(
                     path.clone(),
                     SizeStateKind::Calculating,
                     SizeSource::Everything,
-                    None,
                 )
             })
             .collect();
@@ -162,16 +161,20 @@ fn everything_terminal_update(
     let Ok(results) = results else {
         return everything_error(path);
     };
-    let size_bytes = results.get(path).copied().flatten();
-    let state = size_bytes.map_or(SizeStateKind::Na, |_| SizeStateKind::Ready);
-    SizeUpdate::new(path.to_string(), state, SizeSource::Everything, size_bytes)
+    let Some(size_bytes) = results.get(path).copied().flatten() else {
+        return SizeUpdate::without_size(
+            path.to_string(),
+            SizeStateKind::Na,
+            SizeSource::Everything,
+        );
+    };
+    SizeUpdate::ready(path.to_string(), SizeSource::Everything, size_bytes)
 }
 
 fn everything_error(path: &str) -> SizeUpdate {
-    SizeUpdate::new(
+    SizeUpdate::without_size(
         path.to_string(),
         SizeStateKind::Error,
         SizeSource::Everything,
-        None,
     )
 }

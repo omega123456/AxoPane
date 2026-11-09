@@ -9,7 +9,12 @@ import {
 } from '@/stores/panes/listing-transitions'
 import { schedulePersistSession } from '@/stores/panes/session-persistence'
 import { reportSizeSubscriptions } from '@/stores/panes/size-actions'
-import { activeTab, type TabMoveResult, useTabsStore } from '@/stores/tabs-store'
+import {
+  activeTab,
+  type TabMoveRequest,
+  type TabMoveResult,
+  useTabsStore,
+} from '@/stores/tabs-store'
 import type { PaneId } from '@/types/pane'
 
 export async function openTabFromPath(
@@ -76,15 +81,8 @@ export function setTabLocked(paneId: PaneId, tabId: string, locked: boolean) {
   schedulePersistSession(panesStore().getState().activePaneId)
 }
 
-export async function moveTab(
-  sourcePaneId: PaneId,
-  tabId: string,
-  destinationPaneId: PaneId,
-  destinationIndex: number,
-): Promise<TabMoveResult> {
-  const result = useTabsStore
-    .getState()
-    .moveTab(sourcePaneId, tabId, destinationPaneId, destinationIndex)
+export async function moveTab(request: TabMoveRequest): Promise<TabMoveResult> {
+  const result = useTabsStore.getState().moveTab(request)
   if (result.kind === 'none') {
     return result
   }

@@ -535,27 +535,28 @@ impl VolumeRegistry {
     }
 }
 
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct VolumeChangeIdentity {
+    resource_key: String,
+    kind: VolumeResourceKind,
+    label: String,
+    is_network: bool,
+    is_removable: bool,
+    is_read_only: bool,
+    availability: VolumeAvailability,
+}
+
 fn volumes_changed(previous: &[VolumeRecord], next: &[VolumeRecord]) -> bool {
-    fn identity(
-        volume: &VolumeRecord,
-    ) -> (
-        String,
-        VolumeResourceKind,
-        String,
-        bool,
-        bool,
-        bool,
-        VolumeAvailability,
-    ) {
-        (
-            volume.resource_key.clone(),
-            volume.kind,
-            volume.label.clone(),
-            volume.is_network,
-            volume.is_removable,
-            volume.is_read_only,
-            volume.availability,
-        )
+    fn identity(volume: &VolumeRecord) -> VolumeChangeIdentity {
+        VolumeChangeIdentity {
+            resource_key: volume.resource_key.clone(),
+            kind: volume.kind,
+            label: volume.label.clone(),
+            is_network: volume.is_network,
+            is_removable: volume.is_removable,
+            is_read_only: volume.is_read_only,
+            availability: volume.availability,
+        }
     }
 
     let mut previous_identities: Vec<_> = previous.iter().map(identity).collect();
@@ -583,12 +584,12 @@ fn build_snapshot_from_infos(_generation: u64, volumes: &[VolumeInfo]) -> Regist
 }
 
 fn to_record(info: &VolumeInfo, now_ms: u64) -> VolumeRecord {
-    let (kind, resource_key, aliases) = resolve_identity(info);
+    let identity = resolve_identity(info);
     VolumeRecord {
-        resource_key,
-        kind,
+        resource_key: identity.resource_key,
+        kind: identity.kind,
         primary_path: info.mount_root.clone(),
-        aliases,
+        aliases: identity.aliases,
         filesystem_kind: String::new(),
         is_network: info.is_network,
         is_removable: info.is_removable,
@@ -621,11 +622,12 @@ fn to_record(info: &VolumeInfo, now_ms: u64) -> VolumeRecord {
 ///
 /// This keeps the identity contract honest (no fabricated GUID/UUID) while
 /// fixing its shape (`kind` + `resource_key` + `aliases`).
-fn resolve_identity(info: &VolumeInfo) -> (VolumeResourceKind, String, Vec<String>) {
+fn resolve_identity(info: &VolumeInfo) -> VolumeIdentity {
     let mount_root = info.mount_root.as_str();
 
-    if let Some((server, share)) = parse_unc_share(mount_root) {
-        let key = format!(
+    if let Some(unc) = parse_unc_share(mount_root) {
+        let UncShare { server, share } = unc;
+        let resource_key = format!(
             "unc:{}\\{}",
             server.to_ascii_lowercase(),
             share.to_ascii_lowercase()
@@ -634,21 +636,36 @@ fn resolve_identity(info: &VolumeInfo) -> (VolumeResourceKind, String, Vec<Strin
         let long_alias = format!("{VERBATIM_UNC_PREFIX}{server}\\{share}");
         let mut aliases = vec![plain_alias, long_alias];
         aliases.retain(|alias| alias != mount_root);
-        return (VolumeResourceKind::UncShare, key, aliases);
+        return VolumeIdentity {
+            kind: VolumeResourceKind::UncShare,
+            resource_key,
+            aliases,
+        };
     }
 
     let normalized_root = normalize_root_for_key(mount_root);
-    (
-        VolumeResourceKind::FallbackRoot,
-        format!("fallback:{}", normalized_root.to_ascii_lowercase()),
-        Vec::new(),
-    )
+    VolumeIdentity {
+        kind: VolumeResourceKind::FallbackRoot,
+        resource_key: format!("fallback:{}", normalized_root.to_ascii_lowercase()),
+        aliases: Vec::new(),
+    }
+}
+
+struct VolumeIdentity {
+    kind: VolumeResourceKind,
+    resource_key: String,
+    aliases: Vec<String>,
+}
+
+struct UncShare {
+    server: String,
+    share: String,
 }
 
 /// Parses a UNC path (`\\server\share`, `\\server\share\sub\dir`, or the
 /// `\\?\UNC\server\share` long-path form) into `(server, share)`. Returns
 /// `None` for drive-letter roots and POSIX paths.
-fn parse_unc_share(path: &str) -> Option<(String, String)> {
+fn parse_unc_share(path: &str) -> Option<UncShare> {
     let trimmed = path.trim();
 
     let after_prefix = strip_unc_prefix(trimmed)?;
@@ -658,7 +675,10 @@ fn parse_unc_share(path: &str) -> Option<(String, String)> {
         .filter(|part| !part.is_empty());
     let server = parts.next()?;
     let share = parts.next()?;
-    Some((server.to_string(), share.to_string()))
+    Some(UncShare {
+        server: server.to_string(),
+        share: share.to_string(),
+    })
 }
 
 fn normalize_root_for_key(mount_root: &str) -> String {

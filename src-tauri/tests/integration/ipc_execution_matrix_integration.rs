@@ -8,8 +8,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::common::wait_until;
-use file_explorer_lib::ipc::executor::{Cancellation, IpcExecutor};
-use file_explorer_lib::reconcile::ReconcileCoordinator;
+use file_explorer_lib::ipc::executor::{Cancellation, IpcExecutor, LatencyRequest};
+use file_explorer_lib::reconcile::{ReconcileCoordinator, ReconcileResource};
 use file_explorer_lib::resource_coordinator::{JobClass, JobSpec, ResourceCoordinator};
 
 const HEAVY_MATRIX: &[(&str, &str)] = &[
@@ -123,7 +123,13 @@ fn focus_reconcile_acknowledges_before_its_latency_executor_runs() {
         })
         .collect::<Vec<_>>();
     let reconcile = Arc::new(ReconcileCoordinator::default());
-    let generation = reconcile.request_reconcile(Arc::clone(&coordinator), "volume".into(), |_| {});
+    let generation = reconcile.request_reconcile(
+        ReconcileResource {
+            coordinator: Arc::clone(&coordinator),
+            resource_key: "volume".into(),
+        },
+        |_| {},
+    );
     assert!(
         generation > 0,
         "matrix row: focus reconcile returns an acknowledgement"
@@ -261,8 +267,7 @@ fn cancelled_ipc_job_never_enters_its_platform_or_filesystem_closure() {
     let cancellation = Cancellation::default();
     cancellation.cancel();
     let result = tauri::async_runtime::block_on(executor.latency_cancellable(
-        "safe-test-resource".into(),
-        cancellation,
+        LatencyRequest::cancellable("safe-test-resource".into(), cancellation),
         |_| -> Result<(), String> { panic!("cancelled matrix work must not execute") },
     ));
     assert!(
@@ -280,10 +285,8 @@ fn owned_ipc_work_honours_its_explicit_completion_deadline() {
     let (started_sender, started_receiver) = mpsc::channel();
     let (release_sender, release_receiver) = crossbeam_channel::bounded::<()>(1);
 
-    let result = tauri::async_runtime::block_on(executor.latency_cancellable_with_deadline(
-        "safe-test-resource".into(),
-        Cancellation::default(),
-        Duration::from_millis(25),
+    let result = tauri::async_runtime::block_on(executor.latency_cancellable(
+        LatencyRequest::new("safe-test-resource".into()).with_deadline(Duration::from_millis(25)),
         move |_| {
             started_sender.send(()).expect("owned work started");
             release_receiver.recv().expect("test release");
@@ -309,8 +312,7 @@ fn owned_ipc_executor_runs_async_platform_work_through_its_bounded_owner() {
     let executor = IpcExecutor::new(Arc::clone(&coordinator));
 
     let value = tauri::async_runtime::block_on(executor.latency_async_cancellable(
-        "safe-test-resource".into(),
-        Cancellation::default(),
+        LatencyRequest::new("safe-test-resource".into()),
         |cancellation| async move {
             assert!(
                 !cancellation.is_cancelled(),

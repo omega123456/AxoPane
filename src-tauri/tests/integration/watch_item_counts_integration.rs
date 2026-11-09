@@ -13,7 +13,8 @@ use std::sync::{Arc, Mutex};
 use file_explorer_lib::fs::{self, DirectoryEntry, SortDirection, SortKey};
 use file_explorer_lib::watch::{
     create_runtime, diff_entries, handle_debounce_result_for_tests, insert_tab_for_tests,
-    snapshot_for_target, tab_snapshot_for_tests, DirPatch, WatchService, WatchTarget,
+    snapshot_for_target, tab_snapshot_for_tests, DirPatch, PatchLabel, TabWatchArm, WatchEmitters,
+    WatchService, WatchTarget,
 };
 use notify::event::EventKind;
 use notify::Event;
@@ -99,11 +100,15 @@ fn set_tab_watch_seeds_baseline_from_supplied_entries_without_relisting() {
 
     service
         .set_tab_watch(
-            Some(target.clone()),
-            None,
-            Some(entries),
-            Arc::new(|_| {}),
-            Arc::new(|_, _| {}),
+            TabWatchArm {
+                target: Some(target.clone()),
+                listing_seed_entries: None,
+                entries: Some(entries),
+            },
+            WatchEmitters {
+                patch: Arc::new(|_| {}),
+                error: Arc::new(|_, _| {}),
+            },
         )
         .expect("seed watch from supplied entries");
 
@@ -153,11 +158,15 @@ fn set_tab_watch_seeds_empty_first_diff_even_when_supplied_entries_carry_icon_da
 
     service
         .set_tab_watch(
-            Some(target.clone()),
-            None,
-            Some(vec![icon_bearing_entry]),
-            Arc::new(|_| {}),
-            Arc::new(|_, _| {}),
+            TabWatchArm {
+                target: Some(target.clone()),
+                listing_seed_entries: None,
+                entries: Some(vec![icon_bearing_entry]),
+            },
+            WatchEmitters {
+                patch: Arc::new(|_| {}),
+                error: Arc::new(|_, _| {}),
+            },
         )
         .expect("seed watch from icon-bearing entries");
 
@@ -172,9 +181,11 @@ fn set_tab_watch_seeds_empty_first_diff_even_when_supplied_entries_carry_icon_da
 
     let real_listing = snapshot_for_target(&target).expect("real directory listing");
     let patch = diff_entries(
-        &target.tab_id,
-        &target.path,
-        "watch",
+        PatchLabel {
+            tab_id: &target.tab_id,
+            path: &target.path,
+            reason: "watch",
+        },
         &baseline,
         &real_listing,
     );
@@ -196,11 +207,15 @@ fn set_tab_watch_falls_back_to_listing_when_no_entries_supplied() {
 
     service
         .set_tab_watch(
-            Some(target.clone()),
-            None,
-            None,
-            Arc::new(|_| {}),
-            Arc::new(|_, _| {}),
+            TabWatchArm {
+                target: Some(target.clone()),
+                listing_seed_entries: None,
+                entries: None,
+            },
+            WatchEmitters {
+                patch: Arc::new(|_| {}),
+                error: Arc::new(|_, _| {}),
+            },
         )
         .expect("set watch without seeded entries");
 
@@ -223,7 +238,11 @@ fn debounce_resnapshot_honors_include_item_counts_flag() {
     let watched_file = root.join("watched.txt");
     std::fs::write(&watched_file, b"seed").expect("seed watched file");
 
-    let mut runtime = create_runtime(Arc::new(|_| {}), Arc::new(|_, _| {})).expect("runtime");
+    let mut runtime = create_runtime(WatchEmitters {
+        patch: Arc::new(|_| {}),
+        error: Arc::new(|_, _| {}),
+    })
+    .expect("runtime");
     let target = base_target("left-1", &root.to_string_lossy(), false);
     insert_tab_for_tests(
         &mut runtime,
@@ -239,13 +258,15 @@ fn debounce_resnapshot_honors_include_item_counts_flag() {
     handle_debounce_result_for_tests(
         &runtime,
         vec![Ok(Event::new(EventKind::Any).add_path(watched_file.clone()))],
-        Arc::new(move |patch| {
-            patches_for_callback
-                .lock()
-                .expect("patches lock")
-                .push(patch);
-        }),
-        Arc::new(|_, _| {}),
+        WatchEmitters {
+            patch: Arc::new(move |patch| {
+                patches_for_callback
+                    .lock()
+                    .expect("patches lock")
+                    .push(patch);
+            }),
+            error: Arc::new(|_, _| {}),
+        },
     );
 
     // The resnapshot should have run (child-dir already present, no new patch is

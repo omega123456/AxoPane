@@ -84,8 +84,8 @@ fn run(bridge: Arc<RegistryReconcileBridge>, ready: Sender<Result<u32, String>>)
     // notification registration are only ever performed once per process,
     // synchronously, on this dedicated thread before any message is pumped.
     let setup = unsafe { setup_window_and_registration(bridge) };
-    let (hwnd, notify_id, context_ptr) = match setup {
-        Ok(parts) => parts,
+    let registration = match setup {
+        Ok(registration) => registration,
         Err(error) => {
             let _ = ready.send(Err(error));
             return;
@@ -114,10 +114,16 @@ fn run(bridge: Arc<RegistryReconcileBridge>, ready: Sender<Result<u32, String>>)
     // SAFETY: `notify_id` came from a successful `SHChangeNotifyRegister`
     // call above and is deregistered exactly once, here, before teardown.
     unsafe {
-        let _ = SHChangeNotifyDeregister(notify_id);
-        drop(Box::from_raw(context_ptr));
-        let _ = DestroyWindow(hwnd);
+        let _ = SHChangeNotifyDeregister(registration.notify_id);
+        drop(Box::from_raw(registration.context));
+        let _ = DestroyWindow(registration.hwnd);
     }
+}
+
+struct WindowRegistration {
+    hwnd: HWND,
+    notify_id: u32,
+    context: *mut ThreadContext,
 }
 
 /// # Safety
@@ -185,7 +191,7 @@ unsafe fn register_volume_notifications(hwnd: HWND, change_message: u32) -> u32 
 /// window is running.
 unsafe fn setup_window_and_registration(
     bridge: Arc<RegistryReconcileBridge>,
-) -> Result<(HWND, u32, *mut ThreadContext), String> {
+) -> Result<WindowRegistration, String> {
     let class_name = crate::win32::wide_nul(WINDOW_CLASS_NAME_STR);
     let class_name_ptr = PCWSTR(class_name.as_ptr());
 
@@ -210,7 +216,11 @@ unsafe fn setup_window_and_registration(
         return Err("SHChangeNotifyRegister failed".to_string());
     }
 
-    Ok((hwnd, notify_id, context))
+    Ok(WindowRegistration {
+        hwnd,
+        notify_id,
+        context,
+    })
 }
 
 unsafe extern "system" fn wnd_proc(

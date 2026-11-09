@@ -8,8 +8,9 @@ use file_explorer_lib::ops::manifest::ProgressiveManifest;
 use file_explorer_lib::ops::{
     archive_root_name_for_tests, archive_stem_for_item_for_tests, begin_file_progress_for_tests,
     copy_dir_recursive, copy_file_with_progress, copy_path, delete_path_with_progress, move_path,
-    process_item_for_tests, ConflictInfo, ConflictResolution, OpItem, OpKind, OpState, OpStatus,
-    OpsService, TreeCopy, WorkerContext,
+    process_item_for_tests, ConflictDecision, ConflictInfo, ConflictResolution,
+    CurrentFileProgress, OpItem, OpKind, OpRuntime, OpState, OpStatus, OpsService, RateSample,
+    TreeCopy, WorkerContext,
 };
 use file_explorer_lib::volumes::VolumeInfo;
 
@@ -48,31 +49,37 @@ fn state() -> OpState {
         volumes: HashSet::from(["c:".to_string()]),
         status: OpStatus::Active,
         total_items: 1,
-        completed_items: 0,
         total_bytes: 100,
-        copied_bytes: 40,
-        bytes_per_second: 20,
-        eta_seconds: Some(3),
-        sample_count: 1,
-        rate_sample_at: Some(Instant::now()),
-        rate_sample_bytes: 10,
-        current_file_name: Some("alpha.txt".to_string()),
-        current_file_copied: 5,
-        current_file_total: 10,
-        error_message: Some("boom".to_string()),
-        completed_at: Some(Instant::now()),
         cancel: Arc::new(AtomicBool::new(false)),
         pause: Arc::new(AtomicBool::new(false)),
         skip: Arc::new(AtomicBool::new(false)),
-        conflict: Some(ConflictInfo {
-            operation_id: "op-1".to_string(),
-            source_path: "C:\\src\\alpha.txt".to_string(),
-            destination_path: "C:\\dest\\alpha.txt".to_string(),
-            name: "alpha.txt".to_string(),
-        }),
-        conflict_resolution: Some(ConflictResolution::Replace),
-        apply_to_all: Some(ConflictResolution::Skip),
-        rename_to: Some("alpha (1).txt".to_string()),
+        runtime: OpRuntime {
+            completed_items: 0,
+            copied_bytes: 40,
+            bytes_per_second: 20,
+            eta_seconds: Some(3),
+            sample_count: 1,
+            rate_sample: Some(RateSample {
+                at: Instant::now(),
+                bytes: 10,
+            }),
+            current_file: CurrentFileProgress {
+                name: Some("alpha.txt".to_string()),
+                copied: 5,
+                total: 10,
+            },
+            error_message: Some("boom".to_string()),
+            completed_at: Some(Instant::now()),
+            conflict: Some(ConflictInfo {
+                operation_id: "op-1".to_string(),
+                source_path: "C:\\src\\alpha.txt".to_string(),
+                destination_path: "C:\\dest\\alpha.txt".to_string(),
+                name: "alpha.txt".to_string(),
+            }),
+            conflict_resolution: Some(ConflictResolution::Replace),
+            apply_to_all: Some(ConflictResolution::Skip),
+            rename_to: Some("alpha (1).txt".to_string()),
+        },
     }
 }
 
@@ -107,12 +114,24 @@ fn worker_context(
 
 type ConflictEmitter = Arc<dyn Fn(ConflictInfo) + Send + Sync>;
 
+struct SourceFile<'source> {
+    path: &'source Path,
+    size_bytes: u64,
+}
+
+fn source_file(path: &Path, size_bytes: u64) -> SourceFile<'_> {
+    SourceFile { path, size_bytes }
+}
+
 fn single_item_state(
     kind: OpKind,
     destination_dir: PathBuf,
-    source: &Path,
-    size_bytes: u64,
+    source_file: SourceFile<'_>,
 ) -> OpState {
+    let SourceFile {
+        path: source,
+        size_bytes,
+    } = source_file;
     let name = source
         .file_name()
         .expect("item name")
@@ -132,10 +151,13 @@ fn single_item_state(
 
 fn without_conflict(state: OpState) -> OpState {
     OpState {
-        conflict: None,
-        conflict_resolution: None,
-        apply_to_all: None,
-        rename_to: None,
+        runtime: OpRuntime {
+            conflict: None,
+            conflict_resolution: None,
+            apply_to_all: None,
+            rename_to: None,
+            ..state.runtime
+        },
         ..state
     }
 }
@@ -160,6 +182,7 @@ fn process_resolving_conflict(
         deciding_operation
             .lock()
             .expect("operation lock")
+            .runtime
             .conflict_resolution = Some(resolution);
         resolver.notify_all();
     });
@@ -168,21 +191,35 @@ fn process_resolving_conflict(
 }
 
 fn completed_items(operation: &Arc<Mutex<OpState>>) -> u64 {
-    operation.lock().expect("operation lock").completed_items
+    operation
+        .lock()
+        .expect("operation lock")
+        .runtime
+        .completed_items
 }
 
 fn error_mentions(operation: &Arc<Mutex<OpState>>, fragment: &str) -> bool {
     operation
         .lock()
         .expect("operation lock")
+        .runtime
         .error_message
         .as_deref()
         .is_some_and(|message| message.contains(fragment))
 }
 
-fn write_conflicting_pair(source: &Path, destination: &Path, incoming: &[u8], existing: &[u8]) {
-    std::fs::write(source, incoming).expect("incoming source");
-    std::fs::write(destination, existing).expect("existing destination");
+struct FileContents<'file> {
+    path: &'file Path,
+    contents: &'file [u8],
+}
+
+fn contents_at<'file>(path: &'file Path, contents: &'file [u8]) -> FileContents<'file> {
+    FileContents { path, contents }
+}
+
+fn write_conflicting_pair(incoming: FileContents<'_>, existing: FileContents<'_>) {
+    std::fs::write(incoming.path, incoming.contents).expect("incoming source");
+    std::fs::write(existing.path, existing.contents).expect("existing destination");
 }
 
 struct QueuedOp<'a> {
@@ -200,25 +237,13 @@ fn queued_state(queued: QueuedOp<'_>) -> OpState {
         volumes: HashSet::from([queued.volume.to_string()]),
         status: OpStatus::Pending,
         total_items: 1,
-        completed_items: 0,
         total_bytes: queued.size_bytes,
-        copied_bytes: 0,
-        bytes_per_second: 0,
-        eta_seconds: None,
-        sample_count: 0,
-        rate_sample_at: None,
-        rate_sample_bytes: 0,
-        current_file_name: None,
-        current_file_copied: 0,
-        current_file_total: 0,
-        error_message: None,
-        completed_at: None,
-        ..without_conflict(single_item_state(
+        runtime: OpRuntime::default(),
+        ..single_item_state(
             queued.kind,
             queued.destination_dir,
-            queued.source,
-            queued.size_bytes,
-        ))
+            source_file(queued.source, queued.size_bytes),
+        )
     }
 }
 
@@ -253,16 +278,16 @@ fn op_state_helpers_report_progress_snapshot_and_terminal_status() {
     assert!(state.is_terminal());
 
     state.reset_runtime_state();
-    assert_eq!(state.completed_items, 0);
-    assert_eq!(state.copied_bytes, 0);
-    assert_eq!(state.bytes_per_second, 0);
-    assert_eq!(state.eta_seconds, None);
-    assert_eq!(state.current_file_name, None);
-    assert_eq!(state.error_message, None);
-    assert_eq!(state.conflict, None);
-    assert_eq!(state.conflict_resolution, None);
-    assert_eq!(state.apply_to_all, None);
-    assert_eq!(state.rename_to, None);
+    assert_eq!(state.runtime.completed_items, 0);
+    assert_eq!(state.runtime.copied_bytes, 0);
+    assert_eq!(state.runtime.bytes_per_second, 0);
+    assert_eq!(state.runtime.eta_seconds, None);
+    assert_eq!(state.runtime.current_file.name, None);
+    assert_eq!(state.runtime.error_message, None);
+    assert_eq!(state.runtime.conflict, None);
+    assert_eq!(state.runtime.conflict_resolution, None);
+    assert_eq!(state.runtime.apply_to_all, None);
+    assert_eq!(state.runtime.rename_to, None);
 }
 
 #[test]
@@ -427,7 +452,7 @@ fn file_operation_helpers_delete_paths_with_progress_directly() {
     let mut delete_state = state();
     delete_state.kind = OpKind::Delete;
     delete_state.total_bytes = 0;
-    delete_state.copied_bytes = 0;
+    delete_state.runtime.copied_bytes = 0;
     let shared_operation = Arc::new(Mutex::new(delete_state));
     let resolver = Arc::new(std::sync::Condvar::new());
     let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
@@ -446,7 +471,14 @@ fn file_operation_helpers_delete_paths_with_progress_directly() {
 
     assert!(!file.exists());
     assert!(!dir.exists());
-    assert_eq!(shared_operation.lock().expect("op lock").copied_bytes, 9);
+    assert_eq!(
+        shared_operation
+            .lock()
+            .expect("op lock")
+            .runtime
+            .copied_bytes,
+        9
+    );
 }
 
 /// Deleting a folder that contains a symlink (to a file or a directory) must
@@ -659,8 +691,11 @@ fn process_item_test_hook_deletes_an_item() {
     let delete_source = fixture.path().join("delete.txt");
     std::fs::write(&delete_source, b"delete").expect("delete source");
 
-    let delete_state =
-        single_item_state(OpKind::Delete, state().destination_dir, &delete_source, 6);
+    let delete_state = single_item_state(
+        OpKind::Delete,
+        state().destination_dir,
+        source_file(&delete_source, 6),
+    );
     let operation = process_only_item(delete_state, None);
     assert!(!delete_source.exists());
     assert_eq!(completed_items(&operation), 1);
@@ -674,13 +709,21 @@ fn process_item_test_hook_compresses_then_extracts_a_folder() {
     std::fs::write(source_dir.join("inside.txt"), b"payload").expect("inside");
     let archive_path = fixture.path().join("payload.zip");
 
-    let compress_state = single_item_state(OpKind::Compress, archive_path.clone(), &source_dir, 0);
+    let compress_state = single_item_state(
+        OpKind::Compress,
+        archive_path.clone(),
+        source_file(&source_dir, 0),
+    );
     let compress_operation = process_only_item(compress_state, None);
     assert!(archive_path.exists());
     assert_eq!(completed_items(&compress_operation), 1);
 
     let extract_root = fixture.path().join("extract");
-    let extract_state = single_item_state(OpKind::Extract, extract_root.clone(), &archive_path, 0);
+    let extract_state = single_item_state(
+        OpKind::Extract,
+        extract_root.clone(),
+        source_file(&archive_path, 0),
+    );
     let extract_operation = process_only_item(extract_state, None);
     assert_eq!(
         std::fs::read(extract_root.join("payload").join("inside.txt")).expect("extract"),
@@ -697,7 +740,7 @@ fn process_item_test_hook_refuses_to_move_a_folder_into_itself() {
     std::fs::create_dir_all(&nested_dest).expect("nested");
     std::fs::write(source_tree.join("top.txt"), b"top").expect("top");
 
-    let move_state = single_item_state(OpKind::Move, nested_dest, &source_tree, 3);
+    let move_state = single_item_state(OpKind::Move, nested_dest, source_file(&source_tree, 3));
     let operation = process_only_item(move_state, None);
     assert!(error_mentions(&operation, "Cannot move"));
 }
@@ -715,7 +758,7 @@ fn process_item_compresses_every_selected_item_into_one_archive() {
     let mut compress_state = state();
     compress_state.kind = OpKind::Compress;
     compress_state.destination_dir = archive_path.clone();
-    compress_state.error_message = None;
+    compress_state.runtime.error_message = None;
     compress_state.items = [&folder, &file]
         .iter()
         .map(|path| OpItem {
@@ -735,8 +778,8 @@ fn process_item_compresses_every_selected_item_into_one_archive() {
     }
 
     let operation = compress_operation.lock().expect("compress lock");
-    assert_eq!(operation.error_message, None);
-    assert_eq!(operation.completed_items, 2);
+    assert_eq!(operation.runtime.error_message, None);
+    assert_eq!(operation.runtime.completed_items, 2);
     drop(operation);
     let archive =
         zip::ZipArchive::new(std::fs::File::open(&archive_path).expect("open")).expect("zip");
@@ -808,9 +851,12 @@ fn ops_service_release_and_reschedule_starts_the_next_pending_operation() {
     std::fs::write(&pending_file, b"wait").expect("pending");
     reschedule_service.insert_op_for_tests(OpState {
         status: OpStatus::Completed,
-        completed_items: 1,
-        copied_bytes: 4,
-        completed_at: Some(Instant::now()),
+        runtime: OpRuntime {
+            completed_items: 1,
+            copied_bytes: 4,
+            completed_at: Some(Instant::now()),
+            ..OpRuntime::default()
+        },
         ..queued_state(QueuedOp {
             id: "done-op",
             kind: OpKind::Delete,
@@ -847,16 +893,13 @@ fn process_item_test_hook_covers_conflict_skip_and_replace_paths() {
 
     let source_skip = fixture.path().join("skip.txt");
     write_conflicting_pair(
-        &source_skip,
-        &dest.join("skip.txt"),
-        b"incoming",
-        b"existing",
+        contents_at(&source_skip, b"incoming"),
+        contents_at(&dest.join("skip.txt"), b"existing"),
     );
     let skip_state = without_conflict(single_item_state(
         OpKind::Copy,
         dest.clone(),
-        &source_skip,
-        8,
+        source_file(&source_skip, 8),
     ));
     let skip_op = process_resolving_conflict(skip_state, ConflictResolution::Skip, None);
     assert_eq!(completed_items(&skip_op), 1);
@@ -867,16 +910,13 @@ fn process_item_test_hook_covers_conflict_skip_and_replace_paths() {
 
     let source_replace = fixture.path().join("replace.txt");
     write_conflicting_pair(
-        &source_replace,
-        &dest.join("replace.txt"),
-        b"fresh",
-        b"stale",
+        contents_at(&source_replace, b"fresh"),
+        contents_at(&dest.join("replace.txt"), b"stale"),
     );
     let replace_state = without_conflict(single_item_state(
         OpKind::Copy,
         dest.clone(),
-        &source_replace,
-        5,
+        source_file(&source_replace, 5),
     ));
     let replace_operation =
         process_resolving_conflict(replace_state, ConflictResolution::Replace, None);
@@ -893,14 +933,24 @@ fn ops_service_methods_cover_terminal_and_noop_paths() {
 
     service.cancel_op("missing");
     service.retry_op("missing");
-    service.resolve_conflict("missing", ConflictResolution::Skip, false, None);
+    service.resolve_conflict(
+        "missing",
+        ConflictDecision {
+            resolution: ConflictResolution::Skip,
+            apply_to_all: false,
+            rename_to: None,
+        },
+    );
     service.run_operation_for_tests("missing");
     service.release_and_reschedule_for_tests("missing");
 
     service.insert_op_for_tests(OpState {
         id: "completed".to_string(),
         status: OpStatus::Completed,
-        completed_at: Some(Instant::now()),
+        runtime: OpRuntime {
+            completed_at: Some(Instant::now()),
+            ..state().runtime
+        },
         ..state()
     });
     service.insert_op_for_tests(OpState {
@@ -915,7 +965,14 @@ fn ops_service_methods_cover_terminal_and_noop_paths() {
     });
 
     service.cancel_op("completed");
-    service.resolve_conflict("active", ConflictResolution::Skip, false, None);
+    service.resolve_conflict(
+        "active",
+        ConflictDecision {
+            resolution: ConflictResolution::Skip,
+            apply_to_all: false,
+            rename_to: None,
+        },
+    );
     service.retry_op("pending");
 
     assert_eq!(status_of(&service, "completed"), OpStatus::Completed);
@@ -931,7 +988,11 @@ fn process_item_test_hook_covers_cancelled_and_error_paths() {
     std::fs::write(&delete_source, b"delete").expect("delete source");
     let cancelled_delete = OpState {
         cancel: Arc::new(AtomicBool::new(true)),
-        ..single_item_state(OpKind::Delete, state().destination_dir, &delete_source, 6)
+        ..single_item_state(
+            OpKind::Delete,
+            state().destination_dir,
+            source_file(&delete_source, 6),
+        )
     };
     let delete_operation = process_only_item(cancelled_delete, None);
     assert!(delete_source.exists());
@@ -943,8 +1004,7 @@ fn process_item_test_hook_covers_cancelled_and_error_paths() {
     let bad_compress = single_item_state(
         OpKind::Compress,
         fixture.path().join("archive.txt"),
-        &source_dir,
-        0,
+        source_file(&source_dir, 0),
     );
     assert!(error_mentions(
         &process_only_item(bad_compress, None),
@@ -956,8 +1016,7 @@ fn process_item_test_hook_covers_cancelled_and_error_paths() {
     let bad_extract = single_item_state(
         OpKind::Extract,
         fixture.path().join("extract"),
-        &source_text,
-        0,
+        source_file(&source_text, 0),
     );
     assert!(error_mentions(
         &process_only_item(bad_extract, None),
@@ -973,12 +1032,14 @@ fn process_item_test_hook_covers_conflict_emitter_and_apply_to_all() {
 
     let emitted = Arc::new(Mutex::new(Vec::<ConflictInfo>::new()));
     let source_emit = fixture.path().join("emit.txt");
-    write_conflicting_pair(&source_emit, &dest.join("emit.txt"), b"fresh", b"existing");
+    write_conflicting_pair(
+        contents_at(&source_emit, b"fresh"),
+        contents_at(&dest.join("emit.txt"), b"existing"),
+    );
     let emit_state = without_conflict(single_item_state(
         OpKind::Copy,
         dest.clone(),
-        &source_emit,
-        5,
+        source_file(&source_emit, 5),
     ));
     let emitted_sink = emitted.clone();
     let emitter: ConflictEmitter = Arc::new(move |info| {
@@ -993,19 +1054,20 @@ fn process_item_test_hook_covers_conflict_emitter_and_apply_to_all() {
 
     let source_skip = fixture.path().join("blanket.txt");
     write_conflicting_pair(
-        &source_skip,
-        &dest.join("blanket.txt"),
-        b"skip",
-        b"existing",
+        contents_at(&source_skip, b"skip"),
+        contents_at(&dest.join("blanket.txt"), b"existing"),
     );
+    let blanket_base = without_conflict(single_item_state(
+        OpKind::Copy,
+        dest.clone(),
+        source_file(&source_skip, 0),
+    ));
     let blanket_state = OpState {
-        apply_to_all: Some(ConflictResolution::Skip),
-        ..without_conflict(single_item_state(
-            OpKind::Copy,
-            dest.clone(),
-            &source_skip,
-            0,
-        ))
+        runtime: OpRuntime {
+            apply_to_all: Some(ConflictResolution::Skip),
+            ..blanket_base.runtime
+        },
+        ..blanket_base
     };
     let blanket_operation = process_only_item(blanket_state, None);
     assert_eq!(completed_items(&blanket_operation), 1);
@@ -1034,7 +1096,9 @@ fn ops_test_hooks_cover_archive_name_fallback_paths() {
         shared_operation
             .lock()
             .expect("op lock")
-            .current_file_name
+            .runtime
+            .current_file
+            .name
             .as_deref(),
         Some("/")
     );

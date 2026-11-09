@@ -6,7 +6,7 @@ import { commandContextAction, noopContextAction } from '@/lib/context-menu/cont
 import { ipc } from '@/tests/ipc-mock'
 import type { ContextMenuDocument } from '@/lib/types/context-menu'
 import type { LoadNativeMenuRequest, LoadNativeMenuResponse } from '@/lib/types/ipc'
-import { useClipboardStore } from '@/stores/clipboard-store'
+import { clipboardEntries, useClipboardStore } from '@/stores/clipboard-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
 import { useInlineRenameStore } from '@/stores/inline-rename-store'
 import { usePanesStore } from '@/stores/panes-store'
@@ -130,7 +130,7 @@ describe('ContextMenu', () => {
 
     fireEvent.keyDown(menu, { key: 'Enter' })
 
-    expect(useClipboardStore.getState().entries).toEqual([fileEntry])
+    expect(clipboardEntries(useClipboardStore.getState().snapshot)).toEqual([fileEntry])
     expect(useContextMenuStore.getState().menu).toBeNull()
   })
 
@@ -307,7 +307,7 @@ describe('ContextMenu', () => {
     const view = render(<ContextMenu />)
 
     await user.click(screen.getByRole('menuitem', { name: 'Copy' }))
-    expect(useClipboardStore.getState()).toMatchObject({
+    expect(useClipboardStore.getState().snapshot).toMatchObject({
       mode: 'copy',
       sourcePaneId: 'left',
       entries: [{ id: fileEntry.id }],
@@ -336,7 +336,7 @@ describe('ContextMenu', () => {
     view.rerender(<ContextMenu />)
 
     await user.click(screen.getByRole('menuitem', { name: 'Cut' }))
-    expect(useClipboardStore.getState()).toMatchObject({
+    expect(useClipboardStore.getState().snapshot).toMatchObject({
       mode: 'move',
       sourcePaneId: 'left',
       entries: [{ id: fileEntry.id }],

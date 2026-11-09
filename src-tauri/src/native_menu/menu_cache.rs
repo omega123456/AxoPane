@@ -3,10 +3,15 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use super::provider::{ProviderInvocation, ProviderNativeMenuItem};
 use super::types::{LoadNativeMenuRequest, NativeMenuTargetKind};
-use crate::bounded_cache::BoundedCache;
+use crate::bounded_cache::{BoundedCache, Weighted};
 
 const MAX_CACHE_ENTRIES: usize = 128;
 const MAX_CACHE_WEIGHT: usize = 16 * 1024 * 1024;
+
+pub struct CacheLoad {
+    pub items: Vec<ProviderNativeMenuItem>,
+    pub loaded: bool,
+}
 
 /// In-memory, per-file-type cache for the (expensive) native shell-menu
 /// enumeration. Entries are keyed on the menu's *structure inputs* — the target
@@ -88,31 +93,37 @@ impl MenuCache {
     pub fn insert(&self, request: &LoadNativeMenuRequest, items: &[ProviderNativeMenuItem]) {
         let key = cache_key(request);
         let mut entries = self.entries.lock().expect("menu cache lock");
-        let weight = estimated_weight(&key, items);
-        entries.insert(key, structuralize_items(items), weight);
+        let entry = Weighted {
+            weight: estimated_weight(&key, items),
+            value: structuralize_items(items),
+        };
+        entries.insert(key, entry);
     }
 
-    pub fn get_or_load<F>(
-        &self,
-        request: &LoadNativeMenuRequest,
-        load: F,
-    ) -> (Vec<ProviderNativeMenuItem>, bool)
+    pub fn get_or_load<F>(&self, request: &LoadNativeMenuRequest, load: F) -> CacheLoad
     where
         F: FnOnce() -> Vec<ProviderNativeMenuItem>,
     {
         if let Some(items) = self.get(request) {
-            return (items, false);
+            return CacheLoad {
+                items,
+                loaded: false,
+            };
         }
 
         let key = cache_key(request);
         let flight = self.join_flight(&key);
         if flight.is_leader() {
-            self.lead_flight(flight.shared(), &key, request, load);
+            flight.shared().publish(self.load_structure(request, load));
+            self.finish_flight(&key);
         }
         let items = flight
             .shared()
             .read_when_ready(|structure| rebind_items(structure, request));
-        (items, flight.is_leader())
+        CacheLoad {
+            items,
+            loaded: flight.is_leader(),
+        }
     }
 
     fn join_flight(&self, key: &String) -> Flight {
@@ -125,25 +136,25 @@ impl MenuCache {
         Flight::Leader(flight)
     }
 
-    fn lead_flight<F>(
+    fn load_structure<F>(
         &self,
-        flight: &CacheFlight,
-        key: &String,
         request: &LoadNativeMenuRequest,
         load: F,
-    ) where
+    ) -> Vec<ProviderNativeMenuItem>
+    where
         F: FnOnce() -> Vec<ProviderNativeMenuItem>,
     {
         let fresh = load();
         self.insert(request, &fresh);
-        let structure = self
-            .entries
+        self.entries
             .lock()
             .expect("menu cache lock")
-            .get(key)
+            .get(&cache_key(request))
             .expect("fresh native menu cache entry")
-            .to_vec();
-        flight.publish(structure);
+            .to_vec()
+    }
+
+    fn finish_flight(&self, key: &String) {
         self.in_flight
             .lock()
             .expect("menu cache flights lock")

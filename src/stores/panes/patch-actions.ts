@@ -23,10 +23,10 @@ export function applyDirPatch(event: DirPatchEvent) {
   const state = panesStore().getState()
   const paneId = paneIdFromTabId(event.tabId)
   const pane = state.panes[paneId]
-  const outcome = dirPatchOutcome(state, paneId, event, activeTab(paneId).id)
+  const outcome = dirPatchOutcome(state, event, { paneId, activeTabId: activeTab(paneId).id })
 
   if (outcome.kind === 'skipped') {
-    logSkippedDirPatch(outcome.reason, paneId, pane, event)
+    logSkippedDirPatch(outcome.reason, { paneId, pane, event })
     return
   }
   panesStore().setState(outcome.next)
@@ -43,12 +43,18 @@ export function applyDirPatch(event: DirPatchEvent) {
   })
 }
 
+type SkippedDirPatch = {
+  paneId: PaneId
+  pane: PaneState
+  event: DirPatchEvent
+}
+
 const dirPatchSkipLoggers = {
-  typing: (paneId: PaneId, _pane: PaneState, event: DirPatchEvent) =>
+  typing: ({ paneId, event }: SkippedDirPatch) =>
     log.debug('applyDirPatch skipped (typing)', { paneId, path: event.path }),
-  inactiveTab: (paneId: PaneId, _pane: PaneState, event: DirPatchEvent) =>
+  inactiveTab: ({ paneId, event }: SkippedDirPatch) =>
     log.debug('applyDirPatch skipped (inactive tab)', { paneId, tabId: event.tabId }),
-  pathMismatch: (paneId: PaneId, pane: PaneState, event: DirPatchEvent) =>
+  pathMismatch: ({ paneId, pane, event }: SkippedDirPatch) =>
     log.debug('applyDirPatch skipped (path mismatch)', {
       paneId,
       panePath: pane.path,
@@ -56,13 +62,8 @@ const dirPatchSkipLoggers = {
     }),
 }
 
-function logSkippedDirPatch(
-  reason: keyof typeof dirPatchSkipLoggers,
-  paneId: PaneId,
-  pane: PaneState,
-  event: DirPatchEvent,
-) {
-  dirPatchSkipLoggers[reason](paneId, pane, event)
+function logSkippedDirPatch(reason: keyof typeof dirPatchSkipLoggers, skipped: SkippedDirPatch) {
+  dirPatchSkipLoggers[reason](skipped)
 }
 
 function sessionStillShowsEvent(paneId: PaneId, event: SessionPatchEvent) {

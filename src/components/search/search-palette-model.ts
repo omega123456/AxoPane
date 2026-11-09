@@ -117,11 +117,15 @@ export function inputPlaceholder(foldersOnly: boolean) {
     : 'Search files and folders, or type a path like alex/'
 }
 
+export type PaletteSuggestions = {
+  favouriteRows: SearchHit[]
+  recentRows: SearchHit[]
+}
+
 export function paletteRows(
   searching: boolean,
   items: SearchHit[],
-  favouriteRows: SearchHit[],
-  recentRows: SearchHit[],
+  { favouriteRows, recentRows }: PaletteSuggestions,
 ) {
   return searching ? items : [...favouriteRows, ...recentRows]
 }

@@ -17,7 +17,11 @@ const SIZE_UPDATE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 #[tauri::command]
 pub fn set_size_subscriptions(payload: SizeSubscriptionsRequest, state: State<'_, SizeService>) {
-    state.set_subscriptions(payload.pane_id, payload.current_path, payload.folder_paths);
+    state.set_subscriptions(crate::size::PaneSubscriptions {
+        pane_id: payload.pane_id,
+        current_path: payload.current_path,
+        folders: payload.folder_paths,
+    });
 }
 
 #[cfg(not(feature = "test-utils"))]
@@ -60,8 +64,11 @@ pub fn request_folder_sizes(
     state: State<'_, SizeService>,
 ) {
     let app_handle = app.clone();
-    let mode = payload.mode.unwrap_or_default();
-    state.request_paths(payload.paths, mode, move |updates| {
+    let request = crate::size::SizeRequest {
+        paths: payload.paths,
+        mode: payload.mode.unwrap_or_default(),
+    };
+    state.request_paths(request, move |updates| {
         let batch = updates
             .into_iter()
             .map(size_state_event_from_update)
@@ -86,8 +93,11 @@ pub fn request_folder_sizes(
     let updates = Arc::new(Mutex::new(Vec::<Vec<SizeStateEvent>>::new()));
     let updates_for_emitter = Arc::clone(&updates);
 
-    let mode = payload.mode.unwrap_or_default();
-    state.request_paths(payload.paths, mode, move |batch| {
+    let request = crate::size::SizeRequest {
+        paths: payload.paths,
+        mode: payload.mode.unwrap_or_default(),
+    };
+    state.request_paths(request, move |batch| {
         let events = batch
             .into_iter()
             .map(size_state_event_from_update)

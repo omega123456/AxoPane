@@ -8,13 +8,10 @@ use notify::event::{EventKind, ModifyKind, RenameMode};
 use super::coordinator::WatchId;
 use super::coordinator::{MutationKind, RawMutation};
 #[cfg(feature = "test-utils")]
-use super::tab_patch::{patch_changed_path, remove_path, resnapshot_tab};
+use super::tab_patch::{resnapshot_tab, SnapshotDraft};
 use super::WatchedTab;
 #[cfg(feature = "test-utils")]
-use super::{
-    is_paired_rename, DirEntryPatch, DirPatch, ErrorEmitter, PatchEmitter, WatchRuntime,
-    WatchTarget, WatchedTabs,
-};
+use super::{is_paired_rename, DirPatch, WatchEmitters, WatchRuntime, WatchTarget, WatchedTabs};
 use crate::fs;
 #[cfg(feature = "test-utils")]
 use crate::fs::DirectoryEntry;
@@ -27,8 +24,7 @@ fn noop_watch_error(_: String, _: String) {}
 fn process_results(
     tabs: &WatchedTabs,
     batch: Vec<Result<notify::Event, notify::Error>>,
-    patch_emitter: &PatchEmitter,
-    error_emitter: &ErrorEmitter,
+    emitters: &WatchEmitters,
 ) {
     let mut events = Vec::new();
     let mut errors = Vec::new();
@@ -40,11 +36,11 @@ fn process_results(
     }
 
     if !events.is_empty() {
-        refresh_tabs_from_events(tabs, &events, patch_emitter, error_emitter);
+        refresh_tabs_from_events(tabs, &events, emitters);
     }
 
     for error in errors {
-        error_emitter(first_error_path(&error), error.to_string());
+        (emitters.error)(first_error_path(&error), error.to_string());
     }
 }
 
@@ -52,8 +48,7 @@ fn process_results(
 fn refresh_tabs_from_events(
     tabs: &WatchedTabs,
     events: &[notify::Event],
-    patch_emitter: &PatchEmitter,
-    error_emitter: &ErrorEmitter,
+    emitters: &WatchEmitters,
 ) {
     let changed_paths: HashSet<PathBuf> = events
         .iter()
@@ -64,7 +59,7 @@ fn refresh_tabs_from_events(
     let mut tabs = tabs.lock().expect("watch tabs lock");
     for watched in tabs.values_mut() {
         if matches_watched_parent(&changed_paths, &watched.target.path) {
-            refresh_tab_from_events(watched, events, patch_emitter, error_emitter);
+            refresh_tab_from_events(watched, events, emitters);
         }
     }
 }
@@ -73,20 +68,19 @@ fn refresh_tabs_from_events(
 fn refresh_tab_from_events(
     watched: &mut WatchedTab,
     events: &[notify::Event],
-    patch_emitter: &PatchEmitter,
-    error_emitter: &ErrorEmitter,
+    emitters: &WatchEmitters,
 ) {
     match patch_for_events(&watched.target, &watched.snapshot, events) {
         Ok(PatchResult::Targeted { patch, snapshot }) => {
             watched.snapshot = snapshot;
             if patch.has_changes() {
-                patch_emitter(patch);
+                (emitters.patch)(patch);
             }
         }
         Ok(PatchResult::NeedsResnapshot) => {
-            resnapshot_tab(watched, "watch", patch_emitter, error_emitter);
+            resnapshot_tab(watched, "watch", emitters);
         }
-        Err(error) => error_emitter(watched.target.path.clone(), error),
+        Err(error) => (emitters.error)(watched.target.path.clone(), error),
     }
 }
 
@@ -184,18 +178,7 @@ enum EventApplication {
 }
 
 #[cfg(feature = "test-utils")]
-struct PatchDraft {
-    next: HashMap<String, DirectoryEntry>,
-    changed: Vec<DirEntryPatch>,
-    removed: Vec<String>,
-}
-
-#[cfg(feature = "test-utils")]
-impl PatchDraft {
-    fn remove(&mut self, path: &Path) {
-        remove_path(&mut self.next, &mut self.removed, path);
-    }
-
+impl SnapshotDraft {
     fn apply_changes<'path>(
         &mut self,
         target: &WatchTarget,
@@ -205,16 +188,6 @@ impl PatchDraft {
             self.apply_change(target, path)?;
         }
         Ok(())
-    }
-
-    fn apply_change(&mut self, target: &WatchTarget, path: &Path) -> Result<(), String> {
-        patch_changed_path(
-            target,
-            &mut self.next,
-            &mut self.changed,
-            &mut self.removed,
-            path,
-        )
     }
 
     fn apply_event(
@@ -276,11 +249,7 @@ pub(super) fn patch_for_events(
     previous: &HashMap<String, DirectoryEntry>,
     events: &[notify::Event],
 ) -> Result<PatchResult, String> {
-    let mut draft = PatchDraft {
-        next: previous.clone(),
-        changed: Vec::new(),
-        removed: Vec::new(),
-    };
+    let mut draft = SnapshotDraft::from_previous(previous);
     for event in events {
         if draft.apply_event(target, event)? == EventApplication::NeedsResnapshot {
             return Ok(PatchResult::NeedsResnapshot);
@@ -322,10 +291,9 @@ pub(super) fn first_error_path(error: &notify::Error) -> String {
 pub fn handle_debounce_result_for_tests(
     runtime: &WatchRuntime,
     batch: Vec<Result<notify::Event, notify::Error>>,
-    emit_patch: PatchEmitter,
-    emit_error: ErrorEmitter,
+    emitters: WatchEmitters,
 ) {
-    process_results(&runtime.tabs, batch, &emit_patch, &emit_error);
+    process_results(&runtime.tabs, batch, &emitters);
 }
 
 #[cfg(feature = "test-utils")]

@@ -48,13 +48,31 @@ function formatContains(itemCount: number | null, isDir: boolean) {
   return `${formatCount(itemCount)} ${itemCount === 1 ? 'item' : 'items'}`
 }
 
+type DefaultAppState = {
+  app: MacApp | null
+  loaded: boolean
+  isLoadingPicker: boolean
+}
+
+const INITIAL_DEFAULT_APP_STATE: DefaultAppState = {
+  app: null,
+  loaded: false,
+  isLoadingPicker: false,
+}
+
+function withLoadedDefaultApp(app: MacApp | null) {
+  return (current: DefaultAppState): DefaultAppState => ({ ...current, app, loaded: true })
+}
+
+function withPickerLoading(isLoadingPicker: boolean) {
+  return (current: DefaultAppState): DefaultAppState => ({ ...current, isLoadingPicker })
+}
+
 function useDefaultApplication(dialog: PropertiesDialogState | null) {
   const closeRef = useRef<HTMLButtonElement>(null)
   const defaultAppPickerGuardRef = useRef<{ cancelled: boolean } | null>(null)
   const defaultAppDialogClosed = useDefaultAppDialogStore((state) => state.dialog === null)
-  const [defaultApp, setDefaultApp] = useState<MacApp | null>(null)
-  const [defaultAppLoaded, setDefaultAppLoaded] = useState(false)
-  const [isLoadingDefaultAppPicker, setIsLoadingDefaultAppPicker] = useState(false)
+  const [defaultApp, setDefaultApp] = useState(INITIAL_DEFAULT_APP_STATE)
   const [prevDialogForDefaultApp, setPrevDialogForDefaultApp] =
     useState<PropertiesDialogState | null>(dialog)
 
@@ -63,9 +81,7 @@ function useDefaultApplication(dialog: PropertiesDialogState | null) {
   // setState-in-effect, since this only fires when `dialog` identity changes).
   if (dialog !== prevDialogForDefaultApp) {
     setPrevDialogForDefaultApp(dialog)
-    setDefaultApp(null)
-    setDefaultAppLoaded(false)
-    setIsLoadingDefaultAppPicker(false)
+    setDefaultApp(INITIAL_DEFAULT_APP_STATE)
   }
 
   useEffect(() => {
@@ -98,8 +114,7 @@ function useDefaultApplication(dialog: PropertiesDialogState | null) {
       if (cancelled) {
         return
       }
-      setDefaultApp(app)
-      setDefaultAppLoaded(true)
+      setDefaultApp(withLoadedDefaultApp(app))
     })
 
     return () => {
@@ -114,18 +129,18 @@ function useDefaultApplication(dialog: PropertiesDialogState | null) {
     const guard = { cancelled: false }
     defaultAppPickerGuardRef.current = guard
 
-    setIsLoadingDefaultAppPicker(true)
+    setDefaultApp(withPickerLoading(true))
     const apps = await listApplications()
 
     if (guard.cancelled) {
       return
     }
 
-    setIsLoadingDefaultAppPicker(false)
+    setDefaultApp(withPickerLoading(false))
     useDefaultAppDialogStore.getState().open({ filePath: item.path, fileName: item.name, apps })
   }
 
-  return { closeRef, defaultApp, defaultAppLoaded, isLoadingDefaultAppPicker, openDefaultAppDialog }
+  return { closeRef, defaultApp, openDefaultAppDialog }
 }
 
 function propertiesSummary(dialog: PropertiesDialogState | null) {
@@ -175,7 +190,7 @@ export function PropertiesDialog() {
       footer={
         <PropertiesFooter
           canSetDefault={canSetDefault}
-          isLoadingPicker={defaultApplication.isLoadingDefaultAppPicker}
+          isLoadingPicker={defaultApplication.defaultApp.isLoadingPicker}
           closeRef={defaultApplication.closeRef}
           onSetDefault={() =>
             singleItem && void defaultApplication.openDefaultAppDialog(singleItem)
@@ -189,12 +204,7 @@ export function PropertiesDialog() {
         <SingleItemProperties
           item={singleItem}
           defaultAppRow={
-            canSetDefault ? (
-              <DefaultAppRow
-                loaded={defaultApplication.defaultAppLoaded}
-                app={defaultApplication.defaultApp}
-              />
-            ) : null
+            canSetDefault ? <DefaultAppRow defaultApp={defaultApplication.defaultApp} /> : null
           }
           dateDisplay={{ dateFormat, showTime, showSeconds }}
         />
@@ -332,7 +342,7 @@ function PropertyRow({
   )
 }
 
-function defaultAppLabel(loaded: boolean, app: MacApp | null): ReactNode {
+function defaultAppLabel({ loaded, app }: DefaultAppState): ReactNode {
   if (!loaded) {
     return 'Loading…'
   }
@@ -350,12 +360,12 @@ function defaultAppLabel(loaded: boolean, app: MacApp | null): ReactNode {
   )
 }
 
-function DefaultAppRow({ loaded, app }: { loaded: boolean; app: MacApp | null }) {
+function DefaultAppRow({ defaultApp }: { defaultApp: DefaultAppState }) {
   return (
     <div className="flex items-baseline gap-4">
       <dt className={`w-24 shrink-0 text-caption ${TEXT_SECONDARY}`}>Default App</dt>
       <dd className="flex min-w-0 flex-1 items-center gap-2 text-row">
-        {defaultAppLabel(loaded, app)}
+        {defaultAppLabel(defaultApp)}
       </dd>
     </div>
   )

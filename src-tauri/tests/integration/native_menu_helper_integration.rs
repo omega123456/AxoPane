@@ -6,7 +6,7 @@ use file_explorer_lib::native_menu::helper_protocol::{
     read_frame, write_frame, HelperOperation, HelperRequest, MAX_FRAME_BYTES,
 };
 use file_explorer_lib::native_menu::helper_supervisor::{
-    HelperFailure, HelperRole, HelperSupervisor, DISCOVERY_DEADLINE,
+    HelperCall, HelperFailure, HelperRole, HelperSupervisor, DISCOVERY_DEADLINE,
 };
 use file_explorer_lib::native_menu::menu_cache::MenuCache;
 use std::io::Cursor;
@@ -55,8 +55,10 @@ fn cache_caps_distinct_menu_types_at_128_entries() {
 fn test_utils_supervisor_never_starts_a_real_shell_helper() {
     let outcome = HelperSupervisor::default().call(
         HelperRole::Warm,
-        HelperOperation::Discover(request("safe", "txt")),
-        DISCOVERY_DEADLINE,
+        HelperCall {
+            operation: HelperOperation::Discover(request("safe", "txt")),
+            deadline: DISCOVERY_DEADLINE,
+        },
     );
     assert_eq!(outcome, Err(HelperFailure::Unsupported));
 }
@@ -124,7 +126,7 @@ fn equivalent_warm_cache_loads_are_single_flight_and_path_independent() {
     let waiter = thread::spawn(move || waiter_cache.get_or_load(&second_request, Vec::new));
     release_sender.send(()).expect("release leader");
 
-    assert!(leader.join().expect("leader result").1);
-    assert!(!waiter.join().expect("waiter result").1);
+    assert!(leader.join().expect("leader result").loaded);
+    assert!(!waiter.join().expect("waiter result").loaded);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 }

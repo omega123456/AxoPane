@@ -13,7 +13,8 @@ vi.mock('@/lib/updater', async (importOriginal) => {
   }
 })
 
-const { useUpdaterStore } = await import('@/stores/updater-store')
+const { useUpdaterStore, IDLE_OUTCOME, availableOutcome, failedCheckOutcome, withUpdaterStatus } =
+  await import('@/stores/updater-store')
 const { useConfigStore } = await import('@/stores/config-store')
 
 function fakeUpdate(overrides: Partial<AppUpdate> = {}): AppUpdate {
@@ -49,7 +50,7 @@ describe('updater-store', () => {
 
     await useUpdaterStore.getState().checkForUpdate(true)
 
-    const state = useUpdaterStore.getState()
+    const state = useUpdaterStore.getState().outcome
     expect(state.status).toBe('available')
     expect(state.update).toBe(update)
     expect(state.summary).toMatchObject({ version: '0.2.0', currentVersion: '0.1.0' })
@@ -59,17 +60,17 @@ describe('updater-store', () => {
     checkForAppUpdate.mockResolvedValue(null)
 
     await useUpdaterStore.getState().checkForUpdate(true)
-    expect(useUpdaterStore.getState().status).toBe('up-to-date')
+    expect(useUpdaterStore.getState().outcome.status).toBe('up-to-date')
 
     await vi.advanceTimersByTimeAsync(4_000)
-    expect(useUpdaterStore.getState().status).toBe('idle')
+    expect(useUpdaterStore.getState().outcome.status).toBe('idle')
   })
 
   it('stays idle when a background check finds nothing', async () => {
     checkForAppUpdate.mockResolvedValue(null)
 
     await useUpdaterStore.getState().checkForUpdate(false)
-    expect(useUpdaterStore.getState().status).toBe('idle')
+    expect(useUpdaterStore.getState().outcome.status).toBe('idle')
   })
 
   it('clears an already-surfaced update when a background check returns null', async () => {
@@ -78,7 +79,7 @@ describe('updater-store', () => {
     checkForAppUpdate.mockResolvedValue(null)
 
     await useUpdaterStore.getState().checkForUpdate(false)
-    expect(useUpdaterStore.getState()).toMatchObject({
+    expect(useUpdaterStore.getState().outcome).toMatchObject({
       status: 'idle',
       update: null,
       summary: null,
@@ -91,7 +92,7 @@ describe('updater-store', () => {
     checkForAppUpdate.mockResolvedValue(null)
 
     await useUpdaterStore.getState().checkForUpdate(true)
-    expect(useUpdaterStore.getState()).toMatchObject({
+    expect(useUpdaterStore.getState().outcome).toMatchObject({
       status: 'up-to-date',
       update: null,
       summary: null,
@@ -102,16 +103,16 @@ describe('updater-store', () => {
     checkForAppUpdate.mockRejectedValue(new Error('offline'))
 
     await useUpdaterStore.getState().checkForUpdate(true)
-    expect(useUpdaterStore.getState().status).toBe('error')
-    expect(useUpdaterStore.getState().error).toBe('offline')
+    expect(useUpdaterStore.getState().outcome.status).toBe('error')
+    expect(useUpdaterStore.getState().outcome.error).toBe('offline')
 
     useUpdaterStore.getState().dismiss()
     await useUpdaterStore.getState().checkForUpdate(false)
-    expect(useUpdaterStore.getState().status).toBe('idle')
+    expect(useUpdaterStore.getState().outcome.status).toBe('idle')
   })
 
   it('ignores a check while already checking or installing', async () => {
-    useUpdaterStore.setState({ status: 'installing' })
+    useUpdaterStore.getState().setStatus('installing')
     await useUpdaterStore.getState().checkForUpdate(true)
     expect(checkForAppUpdate).not.toHaveBeenCalled()
   })
@@ -126,7 +127,7 @@ describe('updater-store', () => {
 
     await useUpdaterStore.getState().downloadAndInstall()
     expect(downloadAndInstallAppUpdate).toHaveBeenCalledWith(latestUpdate)
-    expect(useUpdaterStore.getState()).toMatchObject({
+    expect(useUpdaterStore.getState().outcome).toMatchObject({
       update: latestUpdate,
       summary: { currentVersion: '0.1.0', version: '0.3.0', notes: 'Fixes', date: '2026-06-24' },
       status: 'installing',
@@ -140,8 +141,8 @@ describe('updater-store', () => {
     downloadAndInstallAppUpdate.mockRejectedValue(new Error('disk full'))
 
     await useUpdaterStore.getState().downloadAndInstall()
-    expect(useUpdaterStore.getState().status).toBe('error')
-    expect(useUpdaterStore.getState().error).toBe('disk full')
+    expect(useUpdaterStore.getState().outcome.status).toBe('error')
+    expect(useUpdaterStore.getState().outcome.error).toBe('disk full')
   })
 
   it('drops a stale banner when install-time recheck finds nothing newer to install', async () => {
@@ -152,7 +153,7 @@ describe('updater-store', () => {
     await useUpdaterStore.getState().downloadAndInstall()
 
     expect(downloadAndInstallAppUpdate).not.toHaveBeenCalled()
-    expect(useUpdaterStore.getState()).toMatchObject({
+    expect(useUpdaterStore.getState().outcome).toMatchObject({
       status: 'up-to-date',
       update: null,
       summary: null,
@@ -194,13 +195,34 @@ describe('updater-store', () => {
 
   it('exposes setStatus and dismiss helpers', () => {
     useUpdaterStore.getState().setStatus('error', 'boom')
-    expect(useUpdaterStore.getState()).toMatchObject({ status: 'error', error: 'boom' })
+    expect(useUpdaterStore.getState().outcome).toMatchObject({ status: 'error', error: 'boom' })
 
     useUpdaterStore.getState().dismiss()
-    expect(useUpdaterStore.getState()).toMatchObject({
+    expect(useUpdaterStore.getState().outcome).toMatchObject({
       status: 'idle',
       update: null,
       summary: null,
+    })
+  })
+
+  it('builds updater outcomes with named constructors', () => {
+    const update = fakeUpdate()
+    const summary = { currentVersion: '0.1.0', version: '0.2.0' }
+    expect(availableOutcome(update, summary)).toEqual({
+      update,
+      summary,
+      status: 'available',
+      error: null,
+    })
+    expect(failedCheckOutcome('offline')).toEqual({
+      ...IDLE_OUTCOME,
+      status: 'error',
+      error: 'offline',
+    })
+    expect(withUpdaterStatus(availableOutcome(update, summary), 'installing')).toMatchObject({
+      update,
+      status: 'installing',
+      error: null,
     })
   })
 })

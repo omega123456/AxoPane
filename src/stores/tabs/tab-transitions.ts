@@ -103,13 +103,18 @@ function canTransferTab(source: PaneTabs, destination: PaneTabs, destinationInde
   )
 }
 
+type TabTransferPanes = {
+  source: PaneTabs
+  destination: PaneTabs
+  sourceIndex: number
+}
+
 function transferTab(
-  source: PaneTabs,
-  destination: PaneTabs,
-  sourceIndex: number,
+  transferPanes: TabTransferPanes,
   request: TabMoveRequest,
   createDestinationTabId: CreateTabId,
 ): PlannedTabMove | null {
+  const { source, destination, sourceIndex } = transferPanes
   const { sourcePaneId, tabId, destinationPaneId, destinationIndex } = request
   if (!canTransferTab(source, destination, destinationIndex)) {
     return null
@@ -158,18 +163,22 @@ export function planTabMove(
     return reorderTab(source, sourceIndex, request)
   }
   const destination = panes[request.destinationPaneId]
-  return transferTab(source, destination, sourceIndex, request, createDestinationTabId)
+  return transferTab({ source, destination, sourceIndex }, request, createDestinationTabId)
 }
 
 export function withMovedTabs(panes: TabPanes, move: PlannedTabMove): TabPanes {
   return { ...panes, ...move.panes }
 }
 
+export type PaneHydration = {
+  pane: PaneTabs
+  fallbackTabs: () => TabState[]
+}
+
 export function withHydratedPane(
   panes: TabPanes,
   paneId: PaneId,
-  pane: PaneTabs,
-  fallbackTabs: () => TabState[],
+  { pane, fallbackTabs }: PaneHydration,
 ): TabPanes {
   const hasTabs = pane.tabs.length > 0
   const tabs = hasTabs ? pane.tabs : fallbackTabs()
@@ -179,11 +188,15 @@ export function withHydratedPane(
   })
 }
 
+export type TabAddition = {
+  tab: TabState
+  activate: boolean
+}
+
 export function withAddedTab(
   panes: TabPanes,
   paneId: PaneId,
-  tab: TabState,
-  activate: boolean,
+  { tab, activate }: TabAddition,
 ): TabPanes {
   const pane = panes[paneId]
   const tabs = [...pane.tabs, tab]
@@ -225,11 +238,15 @@ export function withClosedTab(panes: TabPanes, paneId: PaneId, tabId: string): T
   return withPane(panes, paneId, { tabs, activeTabIndex: clampIndex(activeTabIndex, tabs.length) })
 }
 
+export type TabLock = {
+  tabId: string
+  locked: boolean
+}
+
 export function withTabLocked(
   panes: TabPanes,
   paneId: PaneId,
-  tabId: string,
-  locked: boolean,
+  { tabId, locked }: TabLock,
 ): TabPanes {
   const pane = panes[paneId]
   const tabs = pane.tabs.map((tab) => (tab.id === tabId ? { ...tab, locked } : tab))

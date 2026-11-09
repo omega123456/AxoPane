@@ -125,7 +125,7 @@ describe('listing transitions', () => {
       filterApplied: 'x',
       scrollPositions: { '/c': 10, '/a': 5 },
     })
-    const fresh = navigatedPanes(state, 'left', '/c', false)
+    const fresh = navigatedPanes(state, 'left', { path: '/c', viaHistory: false })
     expect(fresh.panes?.left).toMatchObject({
       path: '/c',
       history: ['/a', '/c'],
@@ -134,9 +134,11 @@ describe('listing transitions', () => {
       scrollPositions: { '/a': 5 },
     })
     expect(fresh.filterTimers).toEqual({ left: undefined })
-    expect(navigatedPanes(state, 'left', '/a', false).panes?.left.history).toEqual(['/a'])
+    expect(
+      navigatedPanes(state, 'left', { path: '/a', viaHistory: false }).panes?.left.history,
+    ).toEqual(['/a'])
 
-    const viaHistory = navigatedPanes(state, 'left', '/b', true)
+    const viaHistory = navigatedPanes(state, 'left', { path: '/b', viaHistory: true })
     expect(viaHistory.panes?.left).toMatchObject({ path: '/b', filterApplied: 'x' })
     expect(viaHistory.filterTimers).toBeUndefined()
     expect(withHistoryIndex(state, 'left', 1).panes.left.historyIndex).toBe(1)
@@ -182,7 +184,9 @@ describe('listing transitions', () => {
   it('records focus and scroll positions per pane', () => {
     const state = panesData()
     expect(withFocusedEntry(state, 'left', 'id').panes.left.focusedEntryId).toBe('id')
-    expect(withScrollPosition(state, 'left', '/a', 40).panes.left.scrollPositions).toEqual({
+    expect(
+      withScrollPosition(state, 'left', { path: '/a', scrollTop: 40 }).panes.left.scrollPositions,
+    ).toEqual({
       '/a': 40,
     })
   })

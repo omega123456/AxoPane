@@ -9,47 +9,49 @@ use super::path_style::PathStyle;
 use super::query::ParsedQuery;
 use super::results::{rank_candidates, BROWSE_PARENT_CAP, CANDIDATE_CAP};
 use super::source::EverythingSource;
-use super::{CandidateBatch, Control, SearchError, SearchOptions, SearchScope};
+use super::{CandidateBatch, Control, SearchError, SearchOptions, SearchRun, SearchScope};
 use crate::size::everything::{EverythingQuery, EverythingSort};
 
 /// The fuzzy pass runs only while fewer candidates than this were found.
 pub const FUZZY_PASS_THRESHOLD: usize = 200;
 
+pub type EverythingSearchRun<'run> = SearchRun<'run, dyn EverythingSource>;
+
 pub fn candidates(
-    source: &dyn EverythingSource,
+    run: &EverythingSearchRun<'_>,
     query: &ParsedQuery,
-    options: &SearchOptions,
-    control: &Control<'_>,
 ) -> Result<CandidateBatch, SearchError> {
     if !query.browse {
-        return collect(source, &plan::passes(query, options), control);
+        return collect(run.source, &plan::passes(query, run.options), run.control);
     }
     let parents = match &query.anchor {
         Some(anchor) => vec![anchor.path(PathStyle::Windows)],
-        None => browse_parents(source, &query.browse_parents(), options, control)?,
+        None => browse_parents(run, &query.browse_parents())?,
     };
-    let listings: Vec<EverythingPass> = plan::browse_children_queries(&parents, options)
+    let listings: Vec<EverythingPass> = plan::browse_children_queries(&parents, run.options)
         .into_iter()
         .map(|search| EverythingPass {
             search,
             fuzzy: false,
         })
         .collect();
-    collect(source, &listings, control)
+    collect(run.source, &listings, run.control)
 }
 
 /// The best-ranked folders matching the query's folder segments.
 fn browse_parents(
-    source: &dyn EverythingSource,
+    run: &EverythingSearchRun<'_>,
     parent_query: &ParsedQuery,
-    options: &SearchOptions,
-    control: &Control<'_>,
 ) -> Result<Vec<String>, SearchError> {
     let folders = SearchOptions {
         scope: SearchScope::Folders,
-        ..*options
+        ..*run.options
     };
-    let batch = collect(source, &plan::passes(parent_query, &folders), control)?;
+    let batch = collect(
+        run.source,
+        &plan::passes(parent_query, &folders),
+        run.control,
+    )?;
     Ok(
         rank_candidates(batch.candidates, parent_query, PathStyle::Windows)
             .into_iter()

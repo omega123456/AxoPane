@@ -6,7 +6,7 @@ import type {
 } from '@/lib/types/ipc'
 import type { PaneId } from '@/types/pane'
 import { pathKey } from '@/lib/path-compare'
-import { sortEntries } from '@/stores/panes/entry-sort'
+import { sortEntries, sortSpecFor } from '@/stores/panes/entry-sort'
 import { withResolvedIcons } from '@/stores/panes/icon-requests'
 import { clearPassiveItemCountRequestsForPane } from '@/stores/panes/item-counts'
 import {
@@ -17,6 +17,7 @@ import {
 } from '@/stores/panes/pane-state'
 import { applyTreeDirPatch } from '@/stores/panes/tree-dir-patch'
 import { treeNodesUpdate } from '@/stores/panes/dir-patch'
+import type { TabPath } from '@/stores/tabs-store'
 
 type DirPatchChange = DirPatchEvent['changed'][number]
 
@@ -70,8 +71,7 @@ export function dirPatchFromSessionPatch(event: SessionPatchEvent): DirPatchEven
 }
 
 function folderChangesForTree(
-  tabId: string,
-  path: string,
+  { tabId, path }: TabPath,
   previous: PaneState,
   entries: DirectoryEntry[],
 ): DirPatchEvent {
@@ -95,10 +95,10 @@ export function replacementViewApplied(
   const pane = state.panes[paneId]
   const ordered =
     pane.sortKey === 'size'
-      ? sortEntries(replacement.loadedEntries, pane.sortKey, pane.sortDirection, state.sizeStates)
+      ? sortEntries(replacement.loadedEntries, sortSpecFor(pane, state.sizeStates))
       : replacement.loadedEntries
   const entries = withResolvedIcons(ordered, state.resolvedIconPaths)
-  const treeEvent = folderChangesForTree(replacement.tabId, replacement.path, pane, entries)
+  const treeEvent = folderChangesForTree(replacement, pane, entries)
 
   return {
     passiveItemCountRequests: clearPassiveItemCountRequestsForPane(

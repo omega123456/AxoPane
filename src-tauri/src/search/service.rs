@@ -12,7 +12,9 @@ use super::query::parse;
 use super::rank::Scored;
 use super::results::{rank_candidates, ResultSet};
 use super::source::{EverythingSource, FolderTreeSource};
-use super::{everything_strategy, tree_scan, Control, SearchError, SearchOptions, SearchScope};
+use super::{
+    everything_strategy, tree_scan, Control, SearchError, SearchOptions, SearchRun, SearchScope,
+};
 use crate::ipc::executor::Cancellation;
 use crate::size::SizeService;
 
@@ -158,6 +160,11 @@ pub struct SearchTicket {
     pub cancellation: Cancellation,
 }
 
+pub struct RunTicket<'run> {
+    pub ticket: SearchTicket,
+    pub cancelled: &'run dyn Fn() -> bool,
+}
+
 #[derive(Default)]
 struct State {
     generation: u64,
@@ -209,10 +216,10 @@ impl SearchService {
 
     pub fn run(
         &self,
-        ticket: SearchTicket,
+        run_ticket: RunTicket<'_>,
         request: &SearchQueryRequest,
-        cancelled: &dyn Fn() -> bool,
     ) -> Result<SearchPage, SearchRejection> {
+        let RunTicket { ticket, cancelled } = run_ticket;
         let style = self.backend.path_style();
         let query = parse(&request.query, style, self.home.as_deref())
             .map_err(|_| SearchRejection::TooShort)?;
@@ -229,10 +236,20 @@ impl SearchService {
         };
         let batch = match &self.backend {
             SearchBackend::Everything(source) => {
-                everything_strategy::candidates(source.as_ref(), &query, &options, &control)
+                let run = SearchRun {
+                    source: source.as_ref(),
+                    options: &options,
+                    control: &control,
+                };
+                everything_strategy::candidates(&run, &query)
             }
             SearchBackend::Tree(source) => {
-                tree_scan::candidates(source.as_ref(), &query, &options, &control)
+                let run = SearchRun {
+                    source: source.as_ref(),
+                    options: &options,
+                    control: &control,
+                };
+                tree_scan::candidates(&run, &query)
             }
             SearchBackend::None => Err(SearchError::Unavailable),
         }?;

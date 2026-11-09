@@ -7,8 +7,8 @@ import { gridKeyMovement, type GridMovement } from '@/lib/pane-grid'
 import { pathKey } from '@/lib/path-compare'
 import { useElementWidth } from '@/lib/use-element-width'
 import type { PaneViewMode } from '@/lib/pane-view'
-import { entryRenameProps, type InlineRenameState } from '@/stores/inline-rename-store'
-import type { PaneState } from '@/types/pane'
+import { renameDraftForEntry, type InlineRenameState } from '@/stores/inline-rename-store'
+import type { PaneState, VisibleRange } from '@/types/pane'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
 import { dropTargetOutline, SCROLLBAR_THIN } from '@/lib/class-names'
 import type { GraphicalThumbnailRange } from '@/lib/thumbnail-candidates'
@@ -39,7 +39,7 @@ type GraphicalViewProps = {
   dropTargetEntryId: string | null
   rename: InlineRenameState | null
   actions: FileRowActions
-  onVisibleRangeChange: (start: number, end: number, viewportCount: number) => void
+  onVisibleRangeChange: (visibleRange: VisibleRange) => void
   onThumbnailRangeChange?: (range: GraphicalThumbnailRange) => void
   onFocusEntry: (entryId: string) => void
   onKeyboardMove?: (entryId: string, movement: GridMovement) => void
@@ -129,7 +129,7 @@ function GraphicalRow({
           isSelected={card.selectedIds.has(entry.id)}
           isCut={card.cutEntryPaths.has(pathKey(entry.path))}
           isDropTarget={card.dropTargetEntryId === entry.id}
-          {...entryRenameProps(card.rename, entry.id)}
+          rename={renameDraftForEntry(card.rename, entry.id)}
           draggable={!entry.trashId}
           rowIndex={virtualRow.index + 1}
           columnIndex={column + 1}
@@ -209,7 +209,7 @@ function useGraphicalViewModel(props: GraphicalViewProps, ref: ForwardedRef<Grap
     props.scrollContainerRef,
   )
   const width = useElementWidth(measuredElement)
-  const rows = useGraphicalRows(mode, entryCount, scrollRef, width)
+  const rows = useGraphicalRows({ mode, entryCount, scrollRef, width })
   const { grid, rowCount, rowsToRender } = rows
   const { focusedIndex, moveFocus } = useGraphicalFocus({
     entries: pane.entries,
@@ -230,7 +230,10 @@ function useGraphicalViewModel(props: GraphicalViewProps, ref: ForwardedRef<Grap
     moveFocus,
   })
   useScrollFocusedRowIntoView(focusedIndex, grid.columns, scrollToIndex)
-  useVisibleEntryReport(rowsToRender, grid.columns, entryCount, props.onVisibleRangeChange)
+  useVisibleEntryReport(
+    { rowsToRender, columns: grid.columns, entryCount },
+    props.onVisibleRangeChange,
+  )
   useThumbnailRangeReport(
     {
       mode,

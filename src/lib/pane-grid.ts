@@ -80,9 +80,13 @@ export function visualColumnForIndex(index: number, columns: number) {
   return Math.max(0, index) % Math.max(1, columns)
 }
 
+export type GridCell = {
+  row: number
+  column: number
+}
+
 export function entryIndexForPosition(
-  row: number,
-  column: number,
+  { row, column }: GridCell,
   entryCount: number,
   columns: number,
 ) {

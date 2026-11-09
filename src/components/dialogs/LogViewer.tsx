@@ -65,11 +65,25 @@ function rowTone(level: string): string {
   return ''
 }
 
+type LogLoadState = {
+  isLoading: boolean
+  isRefreshing: boolean
+  hasError: boolean
+}
+
+const INITIAL_LOG_LOAD: LogLoadState = { isLoading: true, isRefreshing: false, hasError: false }
+
+function settledLogLoad(hasError: boolean): LogLoadState {
+  return { isLoading: false, isRefreshing: false, hasError }
+}
+
+function refreshingLogLoad(current: LogLoadState): LogLoadState {
+  return { ...current, isRefreshing: true }
+}
+
 function useLogEntries() {
   const [entries, setEntries] = useState<LogEntry[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [isRefreshing, setIsRefreshing] = useState(false)
-  const [hasError, setHasError] = useState(false)
+  const [loadState, setLoadState] = useState(INITIAL_LOG_LOAD)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const requestIdRef = useRef(0)
 
@@ -84,25 +98,19 @@ function useLogEntries() {
           return
         }
         setEntries(result)
-        setHasError(false)
+        setLoadState(settledLogLoad(false))
       })
       .catch((error: unknown) => {
         if (!isCurrent()) {
           return
         }
-        setHasError(true)
+        setLoadState(settledLogLoad(true))
         log.error('failed to read logs', { error: String(error) })
-      })
-      .finally(() => {
-        if (isCurrent()) {
-          setIsLoading(false)
-          setIsRefreshing(false)
-        }
       })
   }, [])
 
   const refresh = useCallback(() => {
-    setIsRefreshing(true)
+    setLoadState(refreshingLogLoad)
     void load()
   }, [load])
 
@@ -118,7 +126,7 @@ function useLogEntries() {
     return () => window.clearInterval(intervalId)
   }, [autoRefresh, refresh])
 
-  return { entries, isLoading, isRefreshing, hasError, autoRefresh, setAutoRefresh, refresh }
+  return { entries, loadState, autoRefresh, setAutoRefresh, refresh }
 }
 
 function newestAtOrAbove(entries: LogEntry[], filter: LogDisplayFilter) {
@@ -172,7 +180,7 @@ export function LogViewer() {
           options={FILTER_OPTIONS}
         />
         <LogRefreshControls
-          isRefreshing={logs.isRefreshing}
+          isRefreshing={logs.loadState.isRefreshing}
           autoRefresh={logs.autoRefresh}
           onRefresh={logs.refresh}
           onToggleAutoRefresh={() => logs.setAutoRefresh((value) => !value)}
@@ -180,8 +188,8 @@ export function LogViewer() {
       </div>
       <LogPager currentPage={currentPage} onPageChange={setPage} />
       <LogBody
-        hasError={logs.hasError}
-        isEmpty={!logs.isLoading && filtered.length === 0}
+        hasError={logs.loadState.hasError}
+        isEmpty={!logs.loadState.isLoading && filtered.length === 0}
         visible={currentPage.visible}
       />
     </section>

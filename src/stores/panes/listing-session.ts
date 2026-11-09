@@ -104,6 +104,33 @@ export function prefetchPageIndexes(viewportPageIndex: number, lastPageIndex: nu
   return [...pages].sort((left, right) => left - right)
 }
 
+type SessionLifecycle = {
+  status: ListingSessionStatus
+  error: string | null
+}
+
+function lifecycleIn(status: ListingSessionStatus): SessionLifecycle {
+  return { status, error: null }
+}
+
+function failedLifecycle(error: string): SessionLifecycle {
+  return { status: 'error', error }
+}
+
+type ActiveSession = {
+  baseline: SessionBaseline
+  resolvedPath: string
+}
+
+type PendingPages = {
+  inFlight: Set<number>
+  queued: number[]
+}
+
+function emptyPendingPages(): PendingPages {
+  return { inFlight: new Set(), queued: [] }
+}
+
 export type ListingSessionCallbacks = {
   /** Called after any state change that should cause the owning store to re-derive its public pane snapshot. */
   onChange: () => void
@@ -114,12 +141,9 @@ export class ListingSession {
   readonly collection = new PaneEntryCollection()
 
   private tabId: string
-  private baseline: SessionBaseline | null = null
-  private view: SessionViewParams | null = null
-  private status: ListingSessionStatus = 'idle'
-  private error: string | null = null
-  private inFlightPages = new Set<number>()
-  private queuedPages: number[] = []
+  private active: ActiveSession | null = null
+  private lifecycle: SessionLifecycle = lifecycleIn('idle')
+  private pending: PendingPages = emptyPendingPages()
   private callbacks: ListingSessionCallbacks
   /**
    * Fences every asynchronous lifecycle operation. A late begin/release/range
@@ -135,26 +159,31 @@ export class ListingSession {
   }
 
   get currentStatus(): ListingSessionStatus {
-    return this.status
+    return this.lifecycle.status
   }
 
   get currentError(): string | null {
-    return this.error
+    return this.lifecycle.error
   }
 
   get currentBaseline(): SessionBaseline | null {
-    return this.baseline
+    return this.active?.baseline ?? null
   }
 
   get currentPath(): string | null {
-    return this.resolvedPath
+    return this.active?.resolvedPath ?? null
   }
 
   get inFlightCount(): number {
-    return this.inFlightPages.size
+    return this.pending.inFlight.size
   }
 
-  private resolvedPath: string | null = null
+  private discardSessionState() {
+    this.active = null
+    this.pending = emptyPendingPages()
+    this.collection.invalidateAll()
+    this.collection.setTotalRows(0)
+  }
 
   private nextLifecycleToken(): number {
     this.lifecycleToken += 1
@@ -175,19 +204,8 @@ export class ListingSession {
   async begin(tabId: string, path: string, view: SessionViewParams): Promise<void> {
     const lifecycleToken = this.nextLifecycleToken()
     this.tabId = tabId
-    this.view = view
-    this.status = 'initializing'
-    this.error = null
-    // A brand-new navigation invalidates every locally cached page and every
-    // in-flight/queued request from the previous session immediately — even
-    // before the network round trip resolves — so nothing further can be
-    // installed under the old identity.
-    this.baseline = null
-    this.resolvedPath = null
-    this.collection.invalidateAll()
-    this.collection.setTotalRows(0)
-    this.inFlightPages.clear()
-    this.queuedPages = []
+    this.lifecycle = lifecycleIn('initializing')
+    this.discardSessionState()
     this.callbacks.onChange()
 
     try {
@@ -202,8 +220,7 @@ export class ListingSession {
       if (!this.isCurrentLifecycle(lifecycleToken)) {
         return
       }
-      this.status = 'error'
-      this.error = error instanceof Error ? error.message : String(error)
+      this.lifecycle = failedLifecycle(error instanceof Error ? error.message : String(error))
       log.error('ListingSession.begin failed', { paneId: this.paneId, path, error })
       this.callbacks.onChange()
     }
@@ -216,17 +233,14 @@ export class ListingSession {
    * unloaded/loaded page index may now contain entirely different rows).
    */
   async reviseView(view: SessionViewParams): Promise<void> {
-    if (!this.baseline) {
-      // No active session yet; nothing to revise — callers should `begin` first.
+    if (!this.active) {
       return
     }
 
-    const sessionId = this.baseline.sessionId
+    const sessionId = this.active.baseline.sessionId
     const tabId = this.tabId
     const lifecycleToken = this.nextLifecycleToken()
-    this.view = view
-    this.inFlightPages.clear()
-    this.queuedPages = []
+    this.pending = emptyPendingPages()
 
     try {
       const response = await reviseDirectorySessionView({
@@ -250,8 +264,7 @@ export class ListingSession {
         })
         return
       }
-      this.status = 'error'
-      this.error = errorMessage(error)
+      this.lifecycle = failedLifecycle(errorMessage(error))
       log.error('ListingSession.reviseView failed', { paneId: this.paneId, error })
       this.callbacks.onChange()
     }
@@ -263,14 +276,15 @@ export class ListingSession {
    * pulling page zero is deliberately preferred to renderer-side reordering.
    */
   applyPatch(patch: SessionPatchEvent): boolean {
-    if (!this.baseline) {
+    const active = this.active
+    if (!active) {
       return false
     }
     if (!this.isOwnPatch(patch)) {
       return false
     }
     const required = patch.mode === 'metadataOnly' ? patch.baseline : patch.previousBaseline
-    if (!baselinesMatch(this.baseline, required)) {
+    if (!baselinesMatch(active.baseline, required)) {
       return false
     }
 
@@ -283,7 +297,7 @@ export class ListingSession {
     }
 
     this.nextLifecycleToken()
-    this.baseline = patch.nextBaseline
+    this.active = { ...active, baseline: patch.nextBaseline }
     this.collection.invalidateAll()
     this.collection.setTotalRows(patch.totalRows)
     if (patch.totalRows > 0) {
@@ -303,10 +317,10 @@ export class ListingSession {
   }
 
   private isBehindInstalledBaseline(candidate: SessionBaseline) {
-    if (!this.baseline) {
+    if (!this.active) {
       return false
     }
-    return !baselineIsAtLeastAsAdvanced(this.baseline, candidate)
+    return !baselineIsAtLeastAsAdvanced(this.active.baseline, candidate)
   }
 
   private adoptBeginResponse(
@@ -326,10 +340,8 @@ export class ListingSession {
       return
     }
 
-    this.resolvedPath = response.path
-    this.baseline = response.baseline
-    this.status = 'ready'
-    this.error = null
+    this.active = { baseline: response.baseline, resolvedPath: response.path }
+    this.lifecycle = lifecycleIn('ready')
     this.collection.invalidateAll()
     this.collection.setTotalRows(response.totalRows)
     // An empty view (`totalRows === 0`) must produce zero loaded pages, not a
@@ -379,8 +391,8 @@ export class ListingSession {
       return
     }
 
-    if (this.inFlightPages.size >= MAX_IN_FLIGHT_REQUESTS) {
-      this.queuedPages.push(pageIndex)
+    if (this.isAtRequestLimit()) {
+      this.pending.queued.push(pageIndex)
       return
     }
 
@@ -388,12 +400,12 @@ export class ListingSession {
   }
 
   private dispatchRangeRequest(pageIndex: number): void {
-    const baseline = this.baseline
-    if (!baseline) {
+    if (!this.active) {
       return
     }
+    const baseline = this.active.baseline
     const lifecycleToken = this.lifecycleToken
-    this.inFlightPages.add(pageIndex)
+    this.pending.inFlight.add(pageIndex)
 
     void getDirectorySessionRange({
       paneId: this.paneId,
@@ -405,7 +417,7 @@ export class ListingSession {
         if (!this.isCurrentLifecycle(lifecycleToken)) {
           return
         }
-        this.inFlightPages.delete(pageIndex)
+        this.pending.inFlight.delete(pageIndex)
         this.installRangeResponseIfCurrent(response, pageIndex)
         this.drainQueue()
       })
@@ -413,14 +425,14 @@ export class ListingSession {
         if (!this.isCurrentLifecycle(lifecycleToken)) {
           return
         }
-        this.inFlightPages.delete(pageIndex)
+        this.pending.inFlight.delete(pageIndex)
         this.recordRangeFailure(error, pageIndex)
         this.drainQueue()
       })
   }
 
   private isCurrentBaseline(candidate: SessionBaseline): boolean {
-    return this.baseline !== null && baselinesMatch(this.baseline, candidate)
+    return this.active !== null && baselinesMatch(this.active.baseline, candidate)
   }
 
   private installRangeResponseIfCurrent(response: SessionRangeResponse, pageIndex: number): void {
@@ -445,8 +457,7 @@ export class ListingSession {
       })
       return
     }
-    this.status = 'error'
-    this.error = errorMessage(error)
+    this.lifecycle = failedLifecycle(errorMessage(error))
     log.error('ListingSession range request failed', {
       paneId: this.paneId,
       pageIndex,
@@ -456,20 +467,24 @@ export class ListingSession {
   }
 
   private isReadyWithBaseline() {
-    return this.baseline !== null && this.status === 'ready'
+    return this.active !== null && this.lifecycle.status === 'ready'
   }
 
   private isPagePending(pageIndex: number) {
-    return this.inFlightPages.has(pageIndex) || this.queuedPages.includes(pageIndex)
+    return this.pending.inFlight.has(pageIndex) || this.pending.queued.includes(pageIndex)
+  }
+
+  private isAtRequestLimit() {
+    return this.pending.inFlight.size >= MAX_IN_FLIGHT_REQUESTS
   }
 
   private canDispatchQueuedPage() {
-    return this.inFlightPages.size < MAX_IN_FLIGHT_REQUESTS && this.queuedPages.length > 0
+    return !this.isAtRequestLimit() && this.pending.queued.length > 0
   }
 
   private drainQueue(): void {
     while (this.canDispatchQueuedPage()) {
-      const nextPageIndex = this.queuedPages.shift()!
+      const nextPageIndex = this.pending.queued.shift()!
       if (this.collection.isPageLoaded(nextPageIndex)) {
         continue
       }
@@ -489,25 +504,15 @@ export class ListingSession {
    */
   async release(): Promise<void> {
     const lifecycleToken = this.nextLifecycleToken()
-    const baseline = this.baseline
+    const baseline = this.currentBaseline
+    this.discardSessionState()
     if (!baseline) {
-      this.status = 'idle'
-      this.error = null
-      this.resolvedPath = null
-      this.inFlightPages.clear()
-      this.queuedPages = []
-      this.collection.invalidateAll()
-      this.collection.setTotalRows(0)
+      this.lifecycle = lifecycleIn('idle')
       this.callbacks.onChange()
       return
     }
 
-    this.status = 'releasing'
-    this.baseline = null
-    this.inFlightPages.clear()
-    this.queuedPages = []
-    this.collection.invalidateAll()
-    this.collection.setTotalRows(0)
+    this.lifecycle = { ...this.lifecycle, status: 'releasing' }
     this.callbacks.onChange()
 
     try {
@@ -525,7 +530,7 @@ export class ListingSession {
       log.error('ListingSession.release failed', { paneId: this.paneId, error })
     }
     if (this.isCurrentLifecycle(lifecycleToken)) {
-      this.status = 'idle'
+      this.lifecycle = { ...this.lifecycle, status: 'idle' }
       this.callbacks.onChange()
     }
   }

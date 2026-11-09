@@ -11,7 +11,7 @@ use crate::size::fast_walk::{self, DirRecord, Qos, WalkOptions, MAX_JOB_THREADS}
 use crate::size::manual::ManualSizeError;
 
 use super::machine::Message;
-use super::service::{Shared, SizeEmitter, READMIT_EVERY_DIRS, RECORD_BATCH};
+use super::service::{Shared, SizeEmitter, WalkTuning, READMIT_EVERY_DIRS, RECORD_BATCH};
 
 #[derive(Default)]
 pub(super) struct Lanes {
@@ -92,23 +92,36 @@ pub(super) enum WalkOutcome {
     Failed(ManualSizeError),
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct LaneContext<'lane> {
+    pub(super) shared: &'lane Shared,
+    pub(super) sender: &'lane Sender<Message>,
+}
+
+pub(super) struct LaneWalk<'walk> {
+    pub(super) root: &'walk Path,
+    pub(super) lane: Lane,
+    pub(super) cancel: &'walk Arc<AtomicBool>,
+}
+
 pub(super) fn run_background(shared: &Shared, sender: &Sender<Message>) {
+    let context = LaneContext { shared, sender };
     while let Some(ClaimedJob { job, cancel }) = wait_for_job(shared, Lanes::claim_background) {
-        let outcome = walk(
-            shared,
-            sender,
-            &job.root,
-            Lane::Background { full: job.full },
-            &cancel,
-        );
+        let lane_walk = LaneWalk {
+            root: &job.root,
+            lane: Lane::Background { full: job.full },
+            cancel: &cancel,
+        };
+        let outcome = walk(context, lane_walk);
         shared.lanes().running_background = None;
         let _ = sender.send(Message::ScanDone { job, outcome });
     }
 }
 
 pub(super) fn run_boosts(shared: &Shared, sender: &Sender<Message>) {
+    let context = LaneContext { shared, sender };
     while let Some(ClaimedJob { job, cancel }) = wait_for_job(shared, Lanes::claim_boost) {
-        let outcome = admitted_boost_walk(shared, sender, &job, &cancel);
+        let outcome = admitted_boost_walk(context, &job, &cancel);
         shared.lanes().running_boost = None;
         shared.wake.notify_all();
         let _ = sender.send(Message::BoostDone { job, outcome });
@@ -116,27 +129,26 @@ pub(super) fn run_boosts(shared: &Shared, sender: &Sender<Message>) {
 }
 
 fn admitted_boost_walk(
-    shared: &Shared,
-    sender: &Sender<Message>,
+    context: LaneContext<'_>,
     job: &BoostJob,
     cancel: &Arc<AtomicBool>,
 ) -> WalkOutcome {
-    let admission = shared.coordinator.submit(JobSpec::new(
+    let admission = context.shared.coordinator.submit(JobSpec::new(
         [JobClass::Throughput],
         ["size-index-boost".to_string()],
     ));
     let Ok(_admission) = admission else {
         return WalkOutcome::Failed(ManualSizeError::Cancelled);
     };
-    walk(
-        shared,
-        sender,
-        &platform::normalize(Path::new(&job.path)),
-        Lane::Boost {
+    let root = platform::normalize(Path::new(&job.path));
+    let lane_walk = LaneWalk {
+        root: &root,
+        lane: Lane::Boost {
             refresh: job.refresh,
         },
         cancel,
-    )
+    };
+    walk(context, lane_walk)
 }
 
 #[derive(Clone, Copy)]
@@ -159,15 +171,23 @@ impl Lane {
     fn plan(self, shared: &Shared, cancel: &Arc<AtomicBool>) -> WalkPlan {
         match self {
             Lane::Background { full } => WalkPlan {
-                options: shared.walk_options(Arc::clone(cancel), Qos::Background, 1),
+                options: shared.walk_options(
+                    Arc::clone(cancel),
+                    WalkTuning {
+                        qos: Qos::Background,
+                        threads: 1,
+                    },
+                ),
                 full,
                 skip_indexed: false,
             },
             Lane::Boost { refresh } => WalkPlan {
                 options: shared.walk_options(
                     Arc::clone(cancel),
-                    Qos::UserInitiated,
-                    MAX_JOB_THREADS,
+                    WalkTuning {
+                        qos: Qos::UserInitiated,
+                        threads: MAX_JOB_THREADS,
+                    },
                 ),
                 full: false,
                 skip_indexed: !refresh,
@@ -205,13 +225,9 @@ fn narrow_walk(shared: &Shared, root: &Path, plan: &mut WalkPlan) -> bool {
 }
 
 /// Walks `root`, streaming record batches to the coordination thread.
-pub(super) fn walk(
-    shared: &Shared,
-    sender: &Sender<Message>,
-    root: &Path,
-    lane: Lane,
-    cancel: &Arc<AtomicBool>,
-) -> WalkOutcome {
+pub(super) fn walk(context: LaneContext<'_>, lane_walk: LaneWalk<'_>) -> WalkOutcome {
+    let LaneContext { shared, sender } = context;
+    let LaneWalk { root, lane, cancel } = lane_walk;
     let mut plan = lane.plan(shared, cancel);
     if !narrow_walk(shared, root, &mut plan) {
         return WalkOutcome::Skipped;
@@ -237,7 +253,7 @@ pub(super) fn walk(
             gentle
                 .lock()
                 .expect("gentle walk lock")
-                .after_record(shared, cancel, || flush(&mut pending));
+                .after_record(BackgroundTurn { shared, cancel }, || flush(&mut pending));
         }
     });
     flush(&mut batch.lock().expect("record batch lock"));
@@ -245,6 +261,12 @@ pub(super) fn walk(
         Ok(()) => WalkOutcome::Walked,
         Err(error) => WalkOutcome::Failed(error),
     }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct BackgroundTurn<'turn> {
+    pub(super) shared: &'turn Shared,
+    pub(super) cancel: &'turn AtomicBool,
 }
 
 /// Background-walk manners: hold Throughput admission for at most
@@ -273,12 +295,8 @@ impl Gentle {
         }
     }
 
-    pub(super) fn after_record(
-        &mut self,
-        shared: &Shared,
-        cancel: &AtomicBool,
-        flush: impl FnOnce(),
-    ) {
+    pub(super) fn after_record(&mut self, turn: BackgroundTurn<'_>, flush: impl FnOnce()) {
+        let BackgroundTurn { shared, cancel } = turn;
         self.since_admitted += 1;
         let must_wait = shared.lanes().background_must_wait();
         let turn_due = self.since_admitted >= READMIT_EVERY_DIRS || must_wait;

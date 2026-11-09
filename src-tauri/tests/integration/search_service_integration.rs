@@ -3,26 +3,31 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use file_explorer_lib::search::service::{
-    SearchBackend, SearchBackendKind, SearchCapabilities, SearchPageRequest, SearchQueryRequest,
-    SearchRejection, SearchService,
+    RunTicket, SearchBackend, SearchBackendKind, SearchCapabilities, SearchPageRequest,
+    SearchQueryRequest, SearchRejection, SearchService, SearchTicket,
 };
 use file_explorer_lib::search::source::FolderTreeSource;
 use file_explorer_lib::search::{SearchError, SearchScope};
 use file_explorer_lib::size::everything::{
     EverythingHandle, EverythingQuery, EverythingQueryResult, EverythingRow,
 };
-use file_explorer_lib::size::index::tree::FolderSizeTree;
+use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
 use file_explorer_lib::size::SizeService;
 use serde_json::json;
 use tempfile::tempdir;
 
-fn row(parent: &str, name: &str, is_folder: bool, modified: Option<u64>) -> EverythingRow {
+struct RowKind {
+    is_folder: bool,
+    modified: Option<u64>,
+}
+
+fn row(parent: &str, name: &str, kind: RowKind) -> EverythingRow {
     EverythingRow {
         path: parent.to_owned(),
         file_name: name.to_owned(),
-        is_folder,
+        is_folder: kind.is_folder,
         size: None,
-        modified_filetime: modified,
+        modified_filetime: kind.modified,
     }
 }
 
@@ -44,16 +49,20 @@ fn library() -> Vec<EverythingRow> {
             row(
                 r"C:\Users\alex\Invoices",
                 &format!("invoice-{index:02}.pdf"),
-                false,
-                None,
+                RowKind {
+                    is_folder: false,
+                    modified: None,
+                },
             )
         })
         .collect();
     rows.push(row(
         r"C:\Users\alex",
         "Invoices",
-        true,
-        Some(116_444_736_000_000_000),
+        RowKind {
+            is_folder: true,
+            modified: Some(116_444_736_000_000_000),
+        },
     ));
     rows
 }
@@ -66,12 +75,18 @@ fn request(query: &str) -> SearchQueryRequest {
     }
 }
 
+fn live(ticket: SearchTicket) -> RunTicket<'static> {
+    RunTicket {
+        ticket,
+        cancelled: &|| false,
+    }
+}
+
 fn search(
     service: &SearchService,
     query: &str,
 ) -> Result<file_explorer_lib::search::service::SearchPage, SearchRejection> {
-    let ticket = service.begin();
-    service.run(ticket, &request(query), &|| false)
+    service.run(live(service.begin()), &request(query))
 }
 
 #[test]
@@ -122,11 +137,11 @@ fn newer_queries_and_closing_make_older_pages_stale() {
         Err(SearchRejection::Stale)
     );
     assert_eq!(
-        service.run(older, &request("invoice"), &|| false),
+        service.run(live(older), &request("invoice")),
         Err(SearchRejection::Stale)
     );
     let current = service
-        .run(newer, &request("invoice"), &|| false)
+        .run(live(newer), &request("invoice"))
         .expect("current");
     service.close();
     assert_eq!(
@@ -143,7 +158,13 @@ fn rejections_cover_short_queries_and_backend_states() {
     let service = SearchService::new(everything(library()), None);
     assert_eq!(search(&service, "in"), Err(SearchRejection::TooShort));
     assert_eq!(
-        service.run(service.begin(), &request("invoice"), &|| true),
+        service.run(
+            RunTicket {
+                ticket: service.begin(),
+                cancelled: &|| true,
+            },
+            &request("invoice"),
+        ),
         Err(SearchRejection::Stale)
     );
 
@@ -175,24 +196,22 @@ fn scope_filters_hits_and_a_spent_budget_returns_a_truncated_page() {
     let ticket = service.begin();
     let folders = service
         .run(
-            ticket,
+            live(ticket),
             &SearchQueryRequest {
                 scope: SearchScope::Folders,
                 ..request("invoice")
             },
-            &|| false,
         )
         .expect("folders");
     assert_eq!(folders.total, 1);
     let ticket = service.begin();
     let files = service
         .run(
-            ticket,
+            live(ticket),
             &SearchQueryRequest {
                 scope: SearchScope::Files,
                 ..request("invoice")
             },
-            &|| false,
         )
         .expect("files");
     assert_eq!(files.total, 60);
@@ -222,7 +241,7 @@ impl FolderTreeSource for Tree {
 fn tree_at(root: &Path, children: &[&str]) -> Arc<Tree> {
     let mut tree = FolderSizeTree::default();
     assert!(tree.add_root(root));
-    assert!(tree.merge_record(root, 0, children, false));
+    assert!(tree.merge_record(root, DirectoryListing::scanned(0, children)));
     Arc::new(Tree {
         tree,
         during_read: Mutex::new(None),
@@ -262,12 +281,11 @@ fn a_query_superseded_after_collection_is_stale() {
     service.begin();
     assert_eq!(
         service.run(
-            ticket,
+            live(ticket),
             &SearchQueryRequest {
                 scope: SearchScope::Files,
                 ..request("documents")
             },
-            &|| false,
         ),
         Err(SearchRejection::Stale)
     );

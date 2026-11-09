@@ -39,12 +39,12 @@ function buildTrashTreeContent(platform: PlatformOs): ContextMenuContent {
     sections: [
       section('primary', [commandRow('emptyTrash', platform, { danger: true, strong: true })]),
       section('properties', [
-        customRow(
-          'properties-tree-trash',
-          'Properties',
-          propertiesContextAction([createTrashPropertiesDialogItem(platform)]),
-          { icon: { kind: 'app', name: 'properties' } },
-        ),
+        customRow({
+          id: 'properties-tree-trash',
+          label: 'Properties',
+          action: propertiesContextAction([createTrashPropertiesDialogItem(platform)]),
+          icon: { kind: 'app', name: 'properties' },
+        }),
       ]),
     ],
   }
@@ -53,30 +53,28 @@ function buildTrashTreeContent(platform: PlatformOs): ContextMenuContent {
 function buildTreeOpenTargetRows(path: string): ContextMenuActionRow[] {
   if (useLayoutStore.getState().defaultPaneMode === 'single') {
     return [
-      customRow(
-        `open-tree-tab-${path}`,
-        commandLabels.openInNewTab,
-        openPathInNewTabContextAction(path),
-        {
-          icon: { kind: 'app', name: 'open-in-new-tab' },
-        },
-      ),
+      customRow({
+        id: `open-tree-tab-${path}`,
+        label: commandLabels.openInNewTab,
+        action: openPathInNewTabContextAction(path),
+        icon: { kind: 'app', name: 'open-in-new-tab' },
+      }),
     ]
   }
 
   return [
-    customRow(
-      `open-tree-right-${path}`,
-      'Open in right pane',
-      openPathInExplicitPaneContextAction(path, 'right'),
-      { icon: { kind: 'app', name: 'open-in-right-pane' } },
-    ),
-    customRow(
-      `open-tree-left-${path}`,
-      'Open in left pane',
-      openPathInExplicitPaneContextAction(path, 'left'),
-      { icon: { kind: 'app', name: 'open-in-left-pane' } },
-    ),
+    customRow({
+      id: `open-tree-right-${path}`,
+      label: 'Open in right pane',
+      action: openPathInExplicitPaneContextAction(path, 'right'),
+      icon: { kind: 'app', name: 'open-in-right-pane' },
+    }),
+    customRow({
+      id: `open-tree-left-${path}`,
+      label: 'Open in left pane',
+      action: openPathInExplicitPaneContextAction(path, 'left'),
+      icon: { kind: 'app', name: 'open-in-left-pane' },
+    }),
   ]
 }
 
@@ -84,16 +82,14 @@ type TreeTarget = Extract<ContextMenuTarget, { kind: 'tree' | 'favourite' }>
 
 function treePrimarySection(target: TreeTarget, platform: PlatformOs): ContextMenuSection {
   return section('primary', [
-    customRow(
-      `open-tree-${target.path}`,
-      commandLabels.open,
-      navigateContextAction(target.path, 'current-pane'),
-      {
-        shortcut: shortcutFor('open', platform),
-        strong: true,
-        icon: { kind: 'app', name: 'open' },
-      },
-    ),
+    customRow({
+      id: `open-tree-${target.path}`,
+      label: commandLabels.open,
+      action: navigateContextAction(target.path, 'current-pane'),
+      shortcut: shortcutFor('open', platform),
+      strong: true,
+      icon: { kind: 'app', name: 'open' },
+    }),
     ...buildTreeOpenTargetRows(target.path),
   ])
 }
@@ -103,12 +99,12 @@ function renameFavouriteRows(target: TreeTarget): ContextMenuActionRow[] {
     return []
   }
   return [
-    customRow(
-      `rename-favourite-${target.path}`,
-      'Rename Favourite',
-      renameFavouriteContextAction(target.path),
-      { icon: { kind: 'app', name: 'rename' } },
-    ),
+    customRow({
+      id: `rename-favourite-${target.path}`,
+      label: 'Rename Favourite',
+      action: renameFavouriteContextAction(target.path),
+      icon: { kind: 'app', name: 'rename' },
+    }),
   ]
 }
 
@@ -120,25 +116,21 @@ function treeFooterSection(target: TreeTarget, platform: PlatformOs): ContextMen
   return section('footer', [
     favouriteRow(target.path, target.kind === 'favourite'),
     ...renameFavouriteRows(target),
-    customRow(
-      `copy-tree-path-${target.path}`,
-      'Copy as path',
-      copyPathsContextAction([target.path]),
-      {
-        icon: { kind: 'app', name: 'copy' },
-      },
-    ),
-    customRow(
-      `calculate-tree-${target.path}`,
-      commandLabels.calculateSize,
-      requestFolderSizeContextAction(target.path),
-      {
-        shortcut: shortcutFor('calculateSize', platform),
-        hidden: calculateSizeHidden(target.path),
-        disabled: Boolean(networkNode),
-        icon: { kind: 'app', name: 'calculate-size' },
-      },
-    ),
+    customRow({
+      id: `copy-tree-path-${target.path}`,
+      label: 'Copy as path',
+      action: copyPathsContextAction([target.path]),
+      icon: { kind: 'app', name: 'copy' },
+    }),
+    customRow({
+      id: `calculate-tree-${target.path}`,
+      label: commandLabels.calculateSize,
+      action: requestFolderSizeContextAction(target.path),
+      shortcut: shortcutFor('calculateSize', platform),
+      hidden: calculateSizeHidden(target.path),
+      disabled: Boolean(networkNode),
+      icon: { kind: 'app', name: 'calculate-size' },
+    }),
   ])
 }
 
@@ -165,7 +157,10 @@ function ejectSections(target: TreeTarget, platform: PlatformOs): ContextMenuSec
   }
   return [
     section('eject', [
-      customRow(`eject-tree-${target.path}`, 'Eject', ejectVolumeContextAction(volume.mountRoot), {
+      customRow({
+        id: `eject-tree-${target.path}`,
+        label: 'Eject',
+        action: ejectVolumeContextAction(volume.mountRoot),
         icon: { kind: 'app', name: 'eject' },
       }),
     ]),
@@ -184,12 +179,12 @@ export function buildTreeContent(target: TreeTarget, platform: PlatformOs): Cont
       treeFooterSection(target, platform),
       ...ejectSections(target, platform),
       section('properties', [
-        customRow(
-          `properties-tree-${target.path}`,
-          'Properties',
-          propertiesContextAction([createPathPropertiesDialogItem(target.path)]),
-          { icon: { kind: 'app', name: 'properties' } },
-        ),
+        customRow({
+          id: `properties-tree-${target.path}`,
+          label: 'Properties',
+          action: propertiesContextAction([createPathPropertiesDialogItem(target.path)]),
+          icon: { kind: 'app', name: 'properties' },
+        }),
       ]),
     ],
   }

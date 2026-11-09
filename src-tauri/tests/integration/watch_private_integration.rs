@@ -57,7 +57,15 @@ mod tests {
             ),
         ]);
 
-        let patch = diff_entries("left-1", "C:/", "refresh", &previous, &next);
+        let patch = diff_entries(
+            PatchLabel {
+                tab_id: "left-1",
+                path: "C:/",
+                reason: "refresh",
+            },
+            &previous,
+            &next,
+        );
         assert_eq!(patch.tab_id, "left-1");
         assert_eq!(patch.reason, "refresh");
         assert!(patch
@@ -112,7 +120,15 @@ mod tests {
             ),
         ]);
 
-        let patch = diff_entries("left-3", "C:/", "watch", &previous, &next);
+        let patch = diff_entries(
+            PatchLabel {
+                tab_id: "left-3",
+                path: "C:/",
+                reason: "watch",
+            },
+            &previous,
+            &next,
+        );
 
         assert!(patch
             .changed
@@ -338,15 +354,25 @@ mod tests {
 
         service
             .set_tab_watch(
-                Some(target.clone()),
-                None,
-                None,
-                Arc::new(|_| {}),
-                Arc::new(|_, _| {}),
+                TabWatchArm {
+                    target: Some(target.clone()),
+                    listing_seed_entries: None,
+                    entries: None,
+                },
+                WatchEmitters {
+                    patch: Arc::new(|_| {}),
+                    error: Arc::new(|_, _| {}),
+                },
             )
             .expect("set watch");
         service
-            .set_tab_watch(None, None, None, Arc::new(|_| {}), Arc::new(|_, _| {}))
+            .set_tab_watch(
+                TabWatchArm::disarm(),
+                WatchEmitters {
+                    patch: Arc::new(|_| {}),
+                    error: Arc::new(|_, _| {}),
+                },
+            )
             .expect("clear watch");
     }
 
@@ -370,11 +396,15 @@ mod tests {
 
         service
             .set_tab_watch(
-                Some(target.clone()),
-                None,
-                None,
-                Arc::new(|_| {}),
-                Arc::new(|_, _| {}),
+                TabWatchArm {
+                    target: Some(target.clone()),
+                    listing_seed_entries: None,
+                    entries: None,
+                },
+                WatchEmitters {
+                    patch: Arc::new(|_| {}),
+                    error: Arc::new(|_, _| {}),
+                },
             )
             .expect("set watch");
 
@@ -385,16 +415,16 @@ mod tests {
         let fresh_path = root.join("fresh");
         std::fs::create_dir(&fresh_path).expect("fresh dir");
 
-        service.reconcile(
-            Arc::new({
+        service.reconcile(WatchEmitters {
+            patch: Arc::new({
                 let patches = Arc::clone(&patches);
                 move |patch| patches.lock().expect("patches lock").push(patch)
             }),
-            Arc::new({
+            error: Arc::new({
                 let errors = Arc::clone(&errors);
                 move |path, error| errors.lock().expect("errors lock").push((path, error))
             }),
-        );
+        });
 
         assert!(errors.lock().expect("errors lock").is_empty());
 
@@ -415,7 +445,11 @@ mod tests {
     fn add_and_remove_watch_updates_reference_counts() {
         let fixture = tempdir().expect("temp dir");
         let root = fixture.path();
-        let mut runtime = create_runtime(Arc::new(|_| {}), Arc::new(|_, _| {})).expect("runtime");
+        let mut runtime = create_runtime(WatchEmitters {
+            patch: Arc::new(|_| {}),
+            error: Arc::new(|_, _| {}),
+        })
+        .expect("runtime");
 
         add_watch(&mut runtime, root).expect("first add");
         add_watch(&mut runtime, root).expect("second add");
@@ -433,11 +467,15 @@ mod tests {
     fn watch_quietly(service: &WatchService, target: WatchTarget) {
         service
             .set_tab_watch(
-                Some(target),
-                None,
-                None,
-                Arc::new(|_| {}),
-                Arc::new(|_, _| {}),
+                TabWatchArm {
+                    target: Some(target),
+                    listing_seed_entries: None,
+                    entries: None,
+                },
+                WatchEmitters {
+                    patch: Arc::new(|_| {}),
+                    error: Arc::new(|_, _| {}),
+                },
             )
             .expect("set tab watch");
     }
@@ -510,30 +548,37 @@ mod tests {
             include_item_counts: true,
         };
 
-        let mut next = HashMap::new();
-        let mut changed = Vec::new();
-        let mut removed = Vec::new();
+        let mut draft = SnapshotDraft::from_previous(&HashMap::new());
 
-        patch_changed_path(&target, &mut next, &mut changed, &mut removed, &visible)
+        draft
+            .apply_change(&target, &visible)
             .expect("visible patch");
-        assert_eq!(changed.len(), 1);
+        assert_eq!(draft.changed.len(), 1);
 
-        patch_changed_path(&target, &mut next, &mut changed, &mut removed, &hidden)
+        draft
+            .apply_change(&target, &hidden)
             .expect("hidden filtered");
-        assert!(removed.iter().any(|path| path.ends_with(".hidden.txt")));
+        assert!(draft
+            .removed
+            .iter()
+            .any(|path| path.ends_with(".hidden.txt")));
 
         std::fs::remove_file(&visible).expect("remove visible");
-        patch_changed_path(&target, &mut next, &mut changed, &mut removed, &visible)
+        draft
+            .apply_change(&target, &visible)
             .expect("missing visible");
-        assert!(removed.iter().any(|path| path.ends_with("visible.txt")));
+        assert!(draft
+            .removed
+            .iter()
+            .any(|path| path.ends_with("visible.txt")));
 
         let direct = fs::display_path_from_path(&hidden);
-        next.insert(
+        draft.next.insert(
             direct.clone(),
             fs::directory_entry_from_path(&hidden).expect("entry"),
         );
-        remove_path(&mut next, &mut removed, &hidden);
-        assert!(!next.contains_key(&direct));
+        draft.remove(&hidden);
+        assert!(!draft.next.contains_key(&direct));
     }
 
     #[test]
@@ -554,13 +599,13 @@ mod tests {
             include_item_counts: true,
         };
 
-        let mut next = HashMap::new();
-        let mut changed = Vec::new();
-        let mut removed = Vec::new();
-        patch_changed_path(&target, &mut next, &mut changed, &mut removed, &child)
+        let mut draft = SnapshotDraft::from_previous(&HashMap::new());
+        draft
+            .apply_change(&target, &child)
             .expect("directory patch");
 
-        let changed_entry = changed
+        let changed_entry = draft
+            .changed
             .into_iter()
             .find_map(|patch| patch.entry)
             .expect("changed entry");
@@ -589,11 +634,15 @@ mod tests {
 
         service
             .set_tab_watch(
-                Some(target.clone()),
-                None,
-                None,
-                Arc::new(|_| {}),
-                Arc::new(|_, _| {}),
+                TabWatchArm {
+                    target: Some(target.clone()),
+                    listing_seed_entries: None,
+                    entries: None,
+                },
+                WatchEmitters {
+                    patch: Arc::new(|_| {}),
+                    error: Arc::new(|_, _| {}),
+                },
             )
             .expect("set items watch");
 
@@ -709,8 +758,10 @@ mod tests {
                 changed: Vec::new(),
                 removed: Vec::new(),
             },
-            &patch_emitter,
-            &error_emitter,
+            &WatchEmitters {
+                patch: patch_emitter.clone(),
+                error: error_emitter.clone(),
+            },
         );
         assert!(patches.lock().unwrap().is_empty());
         assert!(errors.lock().unwrap().is_empty());
@@ -755,8 +806,10 @@ mod tests {
                 changed: vec![new_file.clone()],
                 removed: Vec::new(),
             },
-            &patch_emitter,
-            &error_emitter,
+            &WatchEmitters {
+                patch: patch_emitter.clone(),
+                error: error_emitter.clone(),
+            },
         );
 
         let emitted = patches.lock().unwrap();
@@ -807,8 +860,10 @@ mod tests {
                 watch_id,
                 generation: 1,
             },
-            &patch_emitter,
-            &error_emitter,
+            &WatchEmitters {
+                patch: patch_emitter.clone(),
+                error: error_emitter.clone(),
+            },
         );
 
         let guard = tabs.lock().unwrap();
@@ -866,8 +921,10 @@ mod tests {
                 changed: vec![missing.clone()],
                 removed: Vec::new(),
             },
-            &patch_emitter,
-            &error_emitter,
+            &WatchEmitters {
+                patch: patch_emitter.clone(),
+                error: error_emitter.clone(),
+            },
         );
 
         let emitted = patches.lock().unwrap();

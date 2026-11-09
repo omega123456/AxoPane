@@ -65,7 +65,12 @@ impl<T> SizeScheduler<T> {
     /// actually authorize removal against the same token the caller tracks,
     /// instead of comparing against a disconnected scheduler-internal one
     /// that could never match.
-    pub fn schedule(&self, path: String, cancelled: Arc<AtomicBool>, payload: T) -> bool {
+    pub fn schedule(&self, job: ScheduledJob<T>) -> bool {
+        let ScheduledJob {
+            path,
+            cancelled,
+            payload,
+        } = job;
         let mut state = self.state.lock().expect("size scheduler lock");
         let already_scheduled = state.jobs.contains_key(&path);
         let at_capacity = state.jobs.len() >= self.capacity;

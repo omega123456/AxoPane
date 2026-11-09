@@ -8,11 +8,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use super::conflict::wait_while_paused;
 use super::delete::{remove_clearing_readonly, remove_source, remove_target};
 use super::execution::{is_operation_cancelled, WorkerContext};
-use super::manifest::ProgressiveManifest;
+use super::manifest::{DiscoveredFile, ProgressiveManifest};
 use super::paths::{is_real_directory, is_real_directory_type};
 use super::progress::{
     add_discovered_total, begin_file_progress, finish_file_progress, report_chunk_progress,
-    TransferThrottle,
+    FileProgressStart, TransferThrottle,
 };
 #[cfg(target_os = "macos")]
 use super::transfer::macos::MacosCapabilities;
@@ -21,7 +21,8 @@ use super::transfer::portable::PortableAdapter;
 #[cfg(windows)]
 use super::transfer::windows::WindowsCapabilities;
 use super::transfer::{self, TransferRequirements};
-use super::{worker, COPY_BUFFER_BYTES};
+use super::worker::{self, TransferPaths};
+use super::COPY_BUFFER_BYTES;
 use crate::error_text::StringifyError;
 
 /// Test-only hook proving the capability-adapter selection genuinely
@@ -38,27 +39,55 @@ pub fn adapter_selection_calls_for_tests() -> u64 {
     ADAPTER_SELECTION_CALLS.load(Ordering::Relaxed)
 }
 
+pub(super) struct TotalDiscovery<'manifest> {
+    pub(super) add_discovered_totals: bool,
+    pub(super) manifest: Option<&'manifest mut ProgressiveManifest>,
+}
+
+impl TotalDiscovery<'_> {
+    pub(super) fn known_totals() -> Self {
+        Self {
+            add_discovered_totals: false,
+            manifest: None,
+        }
+    }
+}
+
+struct FileTransfer<'run, 'context> {
+    add_discovered_totals: bool,
+    context: &'run WorkerContext<'context>,
+    throttle: Option<&'run mut TransferThrottle>,
+}
+
+pub(super) struct ChunkReporter<'run, 'context> {
+    pub(super) context: &'run WorkerContext<'context>,
+    pub(super) throttle: Option<&'run mut TransferThrottle>,
+}
+
 pub fn copy_path(source: &Path, target: &Path, context: &WorkerContext<'_>) -> Result<(), String> {
-    copy_path_with_total_discovery(source, target, false, context, None)
+    let paths = TransferPaths { source, target };
+    copy_path_with_total_discovery(paths, TotalDiscovery::known_totals(), context)
 }
 
 pub(super) fn copy_path_with_total_discovery(
-    source: &Path,
-    target: &Path,
-    add_discovered_totals: bool,
+    paths: TransferPaths<'_>,
+    discovery: TotalDiscovery<'_>,
     context: &WorkerContext<'_>,
-    manifest: Option<&mut ProgressiveManifest>,
 ) -> Result<(), String> {
+    let TransferPaths { source, target } = paths;
+    let TotalDiscovery {
+        add_discovered_totals,
+        manifest,
+    } = discovery;
     let source_metadata = fs::symlink_metadata(source).stringify_err()?;
     let mut whole_transfer_throttle = TransferThrottle::starting_now(context);
+    let transfer = FileTransfer {
+        add_discovered_totals,
+        context,
+        throttle: Some(&mut whole_transfer_throttle),
+    };
     if source_metadata.file_type().is_symlink() {
-        return copy_symlink_with_total_discovery(
-            source,
-            target,
-            add_discovered_totals,
-            context,
-            Some(&mut whole_transfer_throttle),
-        );
+        return copy_symlink_with_total_discovery(paths, transfer);
     }
     if source_metadata.is_dir() {
         let root = source.canonicalize().stringify_err()?;
@@ -68,18 +97,12 @@ pub(super) fn copy_path_with_total_discovery(
             visited: &mut visited,
             add_discovered_totals,
             context,
-            throttle: Some(&mut whole_transfer_throttle),
+            throttle: transfer.throttle,
             manifest,
         };
         return copy_dir_recursive(tree, source, target);
     }
-    copy_file_with_total_discovery(
-        source,
-        target,
-        add_discovered_totals,
-        context,
-        Some(&mut whole_transfer_throttle),
-    )
+    copy_file_with_total_discovery(paths, transfer)
 }
 
 pub fn copy_dir_recursive(
@@ -120,11 +143,11 @@ impl TreeCopy<'_, '_> {
         if file_type.is_symlink() {
             self.record_in_manifest(&child_source, true)?;
             return copy_symlink_with_total_discovery(
-                &child_source,
-                &child_target,
-                self.add_discovered_totals,
-                self.context,
-                self.throttle.as_deref_mut(),
+                TransferPaths {
+                    source: &child_source,
+                    target: &child_target,
+                },
+                self.file_transfer(),
             );
         }
         if file_type.is_dir() {
@@ -132,12 +155,20 @@ impl TreeCopy<'_, '_> {
         }
         self.record_in_manifest(&child_source, false)?;
         copy_file_with_total_discovery(
-            &child_source,
-            &child_target,
-            self.add_discovered_totals,
-            self.context,
-            self.throttle.as_deref_mut(),
+            TransferPaths {
+                source: &child_source,
+                target: &child_target,
+            },
+            self.file_transfer(),
         )
+    }
+
+    fn file_transfer(&mut self) -> FileTransfer<'_, '_> {
+        FileTransfer {
+            add_discovered_totals: self.add_discovered_totals,
+            context: self.context,
+            throttle: self.throttle.as_deref_mut(),
+        }
     }
 
     fn record_in_manifest(&mut self, child_source: &Path, is_link: bool) -> Result<(), String> {
@@ -147,9 +178,11 @@ impl TreeCopy<'_, '_> {
         let link_metadata = fs::symlink_metadata(child_source).stringify_err()?;
         manifest.record(
             self.root,
-            child_source.to_path_buf(),
-            link_metadata.len(),
-            is_link,
+            DiscoveredFile {
+                path: child_source.to_path_buf(),
+                bytes: link_metadata.len(),
+                is_link,
+            },
         );
         Ok(())
     }
@@ -182,12 +215,15 @@ impl TreeCopy<'_, '_> {
 /// dangling, and directory links, so a copied tree has the same topology as
 /// its source and does not accidentally walk outside the selected folder.
 fn copy_symlink_with_total_discovery(
-    source: &Path,
-    target: &Path,
-    add_discovered_total_bytes: bool,
-    context: &WorkerContext<'_>,
-    mut throttle: Option<&mut TransferThrottle>,
+    paths: TransferPaths<'_>,
+    transfer: FileTransfer<'_, '_>,
 ) -> Result<(), String> {
+    let TransferPaths { source, target } = paths;
+    let FileTransfer {
+        add_discovered_totals: add_discovered_total_bytes,
+        context,
+        mut throttle,
+    } = transfer;
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).stringify_err()?;
     }
@@ -199,7 +235,14 @@ fn copy_symlink_with_total_discovery(
     if add_discovered_total_bytes {
         add_discovered_total(context, link_size, throttle.as_deref_mut());
     }
-    begin_file_progress(context, source, link_size, throttle.as_deref_mut());
+    begin_file_progress(
+        context,
+        FileProgressStart {
+            source,
+            total_bytes: link_size,
+        },
+        throttle.as_deref_mut(),
+    );
 
     let link_target = fs::read_link(source).stringify_err()?;
     create_symlink(source, &link_target, target).stringify_err()?;
@@ -235,13 +278,16 @@ fn create_symlink(_source: &Path, _link_target: &Path, _target: &Path) -> io::Re
 pub(super) fn copy_reader_with_progress<R, W>(
     reader: &mut R,
     writer: &mut W,
-    context: &WorkerContext<'_>,
-    mut throttle: Option<&mut TransferThrottle>,
+    reporter: ChunkReporter<'_, '_>,
 ) -> Result<(), String>
 where
     R: Read,
     W: Write,
 {
+    let ChunkReporter {
+        context,
+        mut throttle,
+    } = reporter;
     let mut buffer = [0_u8; COPY_BUFFER_BYTES];
     loop {
         wait_while_paused(context.shared_operation, context.resolver);
@@ -260,23 +306,22 @@ where
 }
 
 pub fn move_path(source: &Path, target: &Path, context: &WorkerContext<'_>) -> Result<(), String> {
-    move_path_with_total_discovery(source, target, false, context)
+    move_path_with_total_discovery(TransferPaths { source, target }, false, context)
 }
 
 pub(super) fn move_path_with_total_discovery(
-    source: &Path,
-    target: &Path,
+    paths: TransferPaths<'_>,
     add_discovered_totals: bool,
     context: &WorkerContext<'_>,
 ) -> Result<(), String> {
+    let TransferPaths { source, target } = paths;
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).stringify_err()?;
     }
     // `same_resource: true` preserves current behavior: rename is always
     // attempted first regardless of resource identity, and only an
     // OS-confirmed cross-device error falls back to copy+delete.
-    let renamed =
-        worker::rename_or_cross_device(source, target, true, |src, dst| fs::rename(src, dst))?;
+    let renamed = worker::rename_or_cross_device(paths, true, |src, dst| fs::rename(src, dst))?;
     if renamed {
         return Ok(());
     }
@@ -285,13 +330,11 @@ pub(super) fn move_path_with_total_discovery(
     // manifest records every file discovered along this fallback walk so the
     // cross-device copy leaves a real, inspectable transfer record behind.
     let mut manifest = ProgressiveManifest::default();
-    copy_path_with_total_discovery(
-        source,
-        target,
+    let discovery = TotalDiscovery {
         add_discovered_totals,
-        context,
-        Some(&mut manifest),
-    )?;
+        manifest: Some(&mut manifest),
+    };
+    copy_path_with_total_discovery(paths, discovery, context)?;
     if is_operation_cancelled(context) {
         return Ok(());
     }
@@ -321,7 +364,11 @@ pub(super) fn move_merge_dir(
             continue;
         }
         clear_merge_target(&child_target, false)?;
-        move_path_with_total_discovery(&child_source, &child_target, false, context)?;
+        let child_paths = TransferPaths {
+            source: &child_source,
+            target: &child_target,
+        };
+        move_path_with_total_discovery(child_paths, false, context)?;
     }
     if is_operation_cancelled(context) {
         return Ok(());
@@ -348,7 +395,12 @@ pub fn copy_file_with_progress(
     target: &Path,
     context: &WorkerContext<'_>,
 ) -> Result<(), String> {
-    copy_file_with_total_discovery(source, target, false, context, None)
+    let transfer = FileTransfer {
+        add_discovered_totals: false,
+        context,
+        throttle: None,
+    };
+    copy_file_with_total_discovery(TransferPaths { source, target }, transfer)
 }
 
 /// Runs the capability-adapter selection decision for a single file transfer
@@ -400,12 +452,15 @@ fn log_transfer_adapter_selection(source: &Path) {
 }
 
 fn copy_file_with_total_discovery(
-    source: &Path,
-    target: &Path,
-    add_discovered_total_bytes: bool,
-    context: &WorkerContext<'_>,
-    mut throttle: Option<&mut TransferThrottle>,
+    paths: TransferPaths<'_>,
+    transfer: FileTransfer<'_, '_>,
 ) -> Result<(), String> {
+    let TransferPaths { source, target } = paths;
+    let FileTransfer {
+        add_discovered_totals: add_discovered_total_bytes,
+        context,
+        mut throttle,
+    } = transfer;
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).stringify_err()?;
     }
@@ -419,11 +474,22 @@ fn copy_file_with_total_discovery(
     if add_discovered_total_bytes {
         add_discovered_total(context, file_size, throttle.as_deref_mut());
     }
-    begin_file_progress(context, source, file_size, throttle.as_deref_mut());
+    begin_file_progress(
+        context,
+        FileProgressStart {
+            source,
+            total_bytes: file_size,
+        },
+        throttle.as_deref_mut(),
+    );
 
     let mut reader = fs::File::open(source).stringify_err()?;
     let mut writer = fs::File::create(target).stringify_err()?;
-    copy_reader_with_progress(&mut reader, &mut writer, context, throttle.as_deref_mut())?;
+    let reporter = ChunkReporter {
+        context,
+        throttle: throttle.as_deref_mut(),
+    };
+    copy_reader_with_progress(&mut reader, &mut writer, reporter)?;
     if !is_operation_cancelled(context) {
         writer.flush().stringify_err()?;
     }

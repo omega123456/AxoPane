@@ -185,11 +185,15 @@ export function retainedFocusId(entries: DirectoryEntry[], focusedEntryId: strin
   return entries[0]?.id ?? null
 }
 
+export type EntryUpdater<Update> = {
+  locate: (update: Update) => number
+  apply: (entry: DirectoryEntry, update: Update) => DirectoryEntry | null
+}
+
 export function updateEntries<Update>(
   entries: DirectoryEntry[],
   updates: Update[],
-  locate: (update: Update) => number,
-  apply: (entry: DirectoryEntry, update: Update) => DirectoryEntry | null,
+  { locate, apply }: EntryUpdater<Update>,
 ): DirectoryEntry[] | null {
   let nextEntries: DirectoryEntry[] | null = null
   for (const update of updates) {

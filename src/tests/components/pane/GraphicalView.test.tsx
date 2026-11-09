@@ -136,7 +136,7 @@ describe('GraphicalView', () => {
     const { onVisibleRangeChange } = renderView({ pane: pane(entries(200)) })
     await waitFor(() => expect(onVisibleRangeChange).toHaveBeenCalled())
     expect(screen.getAllByRole('gridcell').length).toBeLessThan(200)
-    expect(onVisibleRangeChange.mock.calls.at(-1)?.[0]).toBe(0)
+    expect(onVisibleRangeChange.mock.calls.at(-1)?.[0].startIndex).toBe(0)
   })
 
   it('reports the true thumbnail viewport separately from two-row prefetch', async () => {

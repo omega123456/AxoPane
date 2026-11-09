@@ -9,20 +9,17 @@ use super::coordinator::{
     self, CompactedBatch, MutationKind, RawMutation, WatchCoordinator, WatchId,
 };
 use super::tab_patch::{
-    diff_entries, patch_changed_path, remove_path, resnapshot_tab, snapshot_for_watch_baseline,
+    diff_entries, resnapshot_tab, snapshot_for_watch_baseline, PatchLabel, SnapshotDraft,
 };
-use super::{ErrorEmitter, PatchEmitter, WatchRuntime, WatchTarget, WatchedTab, WatchedTabs};
+use super::{WatchEmitters, WatchRuntime, WatchTarget, WatchedTab, WatchedTabs};
 use crate::error_text::StringifyError;
 use crate::fs::DirectoryEntry;
 
-pub fn create_runtime(
-    emit_patch: PatchEmitter,
-    emit_error: ErrorEmitter,
-) -> Result<WatchRuntime, String> {
+pub fn create_runtime(emitters: WatchEmitters) -> Result<WatchRuntime, String> {
     let tabs = Arc::new(Mutex::new(HashMap::<String, WatchedTab>::new()));
     let tabs_for_compactor = Arc::clone(&tabs);
     let coordinator = WatchCoordinator::spawn(Arc::new(move |batch| {
-        process_compacted_batch(&tabs_for_compactor, batch, &emit_patch, &emit_error);
+        process_compacted_batch(&tabs_for_compactor, batch, &emitters);
     }));
     let raw_sender = coordinator.raw_sender();
     let tabs_for_callback = Arc::clone(&tabs);
@@ -51,17 +48,24 @@ pub(super) fn forward_notify_result(
     raw_sender: &coordinator::RawLaneSender,
     result: Result<notify::Event, notify::Error>,
 ) {
-    forward_notify_result_after_before_lock(tabs, raw_sender, result, || {});
+    let lanes = NotifyLanes { tabs, raw_sender };
+    forward_notify_result_after_before_lock(lanes, result, || {});
+}
+
+#[derive(Clone, Copy)]
+struct NotifyLanes<'lane> {
+    tabs: &'lane WatchedTabs,
+    raw_sender: &'lane coordinator::RawLaneSender,
 }
 
 fn forward_notify_result_after_before_lock<F>(
-    tabs: &WatchedTabs,
-    raw_sender: &coordinator::RawLaneSender,
+    lanes: NotifyLanes<'_>,
     result: Result<notify::Event, notify::Error>,
     before_lock: F,
 ) where
     F: FnOnce(),
 {
+    let NotifyLanes { tabs, raw_sender } = lanes;
     before_lock();
     let registrations = {
         let tabs = tabs.lock().expect("watch tabs lock");
@@ -112,8 +116,7 @@ fn mark_registrations_unresolved(
 pub(super) fn process_compacted_batch(
     tabs: &WatchedTabs,
     batch: CompactedBatch,
-    patch_emitter: &PatchEmitter,
-    error_emitter: &ErrorEmitter,
+    emitters: &WatchEmitters,
 ) {
     let Some(watched) = watched_tab_by_id(tabs, batch_watch_id(&batch)) else {
         return;
@@ -127,20 +130,15 @@ pub(super) fn process_compacted_batch(
     let next = match next {
         Ok(next) => next,
         Err(error) => {
-            error_emitter(watched.target.path.clone(), error);
+            (emitters.error)(watched.target.path.clone(), error);
             return;
         }
     };
-    let patch = diff_entries(
-        &watched.target.tab_id,
-        &watched.target.path,
-        "watch",
-        &watched.snapshot,
-        &next,
-    );
+    let label = PatchLabel::for_target(&watched.target, "watch");
+    let patch = diff_entries(label, &watched.snapshot, &next);
     let stored = store_snapshot(tabs, watched.watch_id, next);
     if stored && patch.has_changes() {
-        patch_emitter(patch);
+        (emitters.patch)(patch);
     }
 }
 
@@ -164,22 +162,14 @@ fn snapshot_with_targeted_changes(
     changed: &[PathBuf],
     removed: &[PathBuf],
 ) -> Result<HashMap<String, DirectoryEntry>, String> {
-    let mut next = watched.snapshot.clone();
-    let mut changed_entries = Vec::new();
-    let mut removed_paths = Vec::new();
+    let mut draft = SnapshotDraft::from_previous(&watched.snapshot);
     for path in removed {
-        remove_path(&mut next, &mut removed_paths, path);
+        draft.remove(path);
     }
     for path in changed {
-        patch_changed_path(
-            &watched.target,
-            &mut next,
-            &mut changed_entries,
-            &mut removed_paths,
-            path,
-        )?;
+        draft.apply_change(&watched.target, path)?;
     }
-    Ok(next)
+    Ok(draft.next)
 }
 
 /// Returns `false` when the tab was unwatched while its batch was processed.
@@ -199,15 +189,10 @@ fn store_snapshot(
     true
 }
 
-pub(super) fn reconcile_tabs(
-    tabs: &WatchedTabs,
-    reason: &str,
-    patch_emitter: &PatchEmitter,
-    error_emitter: &ErrorEmitter,
-) {
+pub(super) fn reconcile_tabs(tabs: &WatchedTabs, reason: &str, emitters: &WatchEmitters) {
     let mut tabs = tabs.lock().expect("watch tabs lock");
     for watched in tabs.values_mut() {
-        resnapshot_tab(watched, reason, patch_emitter, error_emitter);
+        resnapshot_tab(watched, reason, emitters);
     }
 }
 
@@ -259,10 +244,9 @@ fn unwatch_path(watcher: &mut notify::RecommendedWatcher, path: &Path) -> Result
 pub fn process_compacted_batch_for_tests(
     runtime: &WatchRuntime,
     batch: CompactedBatch,
-    emit_patch: PatchEmitter,
-    emit_error: ErrorEmitter,
+    emitters: WatchEmitters,
 ) {
-    process_compacted_batch(&runtime.tabs, batch, &emit_patch, &emit_error);
+    process_compacted_batch(&runtime.tabs, batch, &emitters);
 }
 
 /// Drives the same callback forwarding path used by `notify`, allowing
@@ -282,12 +266,12 @@ pub fn forward_notify_result_with_before_lock_for_tests(
     result: Result<notify::Event, notify::Error>,
     before_lock: impl FnOnce(),
 ) {
-    forward_notify_result_after_before_lock(
-        &runtime.tabs,
-        &runtime.coordinator.raw_sender(),
-        result,
-        before_lock,
-    );
+    let raw_sender = runtime.coordinator.raw_sender();
+    let lanes = NotifyLanes {
+        tabs: &runtime.tabs,
+        raw_sender: &raw_sender,
+    };
+    forward_notify_result_after_before_lock(lanes, result, before_lock);
 }
 
 #[cfg(feature = "test-utils")]

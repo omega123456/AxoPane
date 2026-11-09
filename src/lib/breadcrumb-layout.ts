@@ -304,7 +304,11 @@ function expandLabelsToFillAvailableWidth({
     let changed = false
     for (let index = segments.length - 1; index >= 0; index -= 1) {
       changed =
-        growLabelByOneCharacter(expandedLabels, segments[index]!.label, index, fitsWidth) || changed
+        growLabelByOneCharacter(
+          expandedLabels,
+          { fullLabel: segments[index]!.label, index },
+          fitsWidth,
+        ) || changed
     }
     if (!changed) {
       return expandedLabels
@@ -313,10 +317,14 @@ function expandLabelsToFillAvailableWidth({
 }
 
 /** Reveals one more character of a truncated label when the row still fits. */
+type LabelSlot = {
+  fullLabel: string
+  index: number
+}
+
 function growLabelByOneCharacter(
   expandedLabels: string[],
-  fullLabel: string,
-  index: number,
+  { fullLabel, index }: LabelSlot,
   fitsWidth: (nextLabels: string[]) => boolean,
 ): boolean {
   const currentLabel = expandedLabels[index]!

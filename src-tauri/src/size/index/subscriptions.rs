@@ -5,18 +5,26 @@ use crate::size::SizeUpdate;
 
 use super::machine::Machine;
 
+/// A subscribed folder's display path and the normalized path its total
+/// lives at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SubscribedFolder {
+    pub(crate) path: String,
+    pub(crate) normalized: PathBuf,
+}
+
 impl Machine {
-    pub(super) fn subscribed(&self) -> Vec<(String, PathBuf)> {
+    pub(super) fn subscribed(&self) -> Vec<SubscribedFolder> {
         let mut seen = HashSet::new();
         self.subscriptions
             .values()
             .flatten()
-            .filter(|(path, _)| seen.insert(path.as_str()))
+            .filter(|folder| seen.insert(folder.path.as_str()))
             .cloned()
             .collect()
     }
 
-    fn replace_pane_subscriptions(&mut self, pane: String, folders: Vec<(String, PathBuf)>) {
+    fn replace_pane_subscriptions(&mut self, pane: String, folders: Vec<SubscribedFolder>) {
         if folders.is_empty() {
             self.subscriptions.remove(&pane);
             return;
@@ -26,19 +34,19 @@ impl Machine {
 
     /// Replaces a pane's set; newly subscribed folders get their current
     /// indexed totals, so a revisited folder is never stale.
-    pub(super) fn subscribe(&mut self, pane: String, folders: Vec<(String, PathBuf)>) {
+    pub(super) fn subscribe(&mut self, pane: String, folders: Vec<SubscribedFolder>) {
         let before: HashSet<String> = self
             .subscribed()
             .into_iter()
-            .map(|(path, _)| path)
+            .map(|folder| folder.path)
             .collect();
         self.replace_pane_subscriptions(pane, folders);
         let view = self.shared.view();
         let updates: Vec<SizeUpdate> = self
             .subscribed()
             .into_iter()
-            .filter(|(path, _)| !before.contains(path))
-            .filter_map(|(path, normalized)| self.shared.settled_update(&view, &path, &normalized))
+            .filter(|folder| !before.contains(&folder.path))
+            .filter_map(|folder| self.shared.settled_update(&view, &folder))
             .collect();
         drop(view);
         if !updates.is_empty() {
@@ -57,17 +65,17 @@ impl Machine {
         self.publish_status();
     }
 
-    fn changed_subscribed_updates(&self, subscribed: &[(String, PathBuf)]) -> Vec<SizeUpdate> {
+    fn changed_subscribed_updates(&self, subscribed: &[SubscribedFolder]) -> Vec<SizeUpdate> {
         let mut view = self.shared.view_mut();
         let changed: HashSet<PathBuf> = view
             .tree
-            .drain_changed(subscribed.iter().map(|(_, normalized)| normalized))
+            .drain_changed(subscribed.iter().map(|folder| &folder.normalized))
             .into_iter()
             .collect();
         subscribed
             .iter()
-            .filter(|(_, normalized)| changed.contains(normalized))
-            .filter_map(|(path, normalized)| self.shared.settled_update(&view, path, normalized))
+            .filter(|folder| changed.contains(&folder.normalized))
+            .filter_map(|folder| self.shared.settled_update(&view, folder))
             .collect()
     }
 }

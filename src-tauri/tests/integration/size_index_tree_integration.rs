@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use file_explorer_lib::size::index::tree::{FolderSizeTree, FolderTotal, LowerBound};
+use file_explorer_lib::size::index::tree::{
+    DirectoryListing, FolderSizeTree, FolderTotal, LowerBound,
+};
 
 /// A path under the relative root `idx`, built from components so it is
 /// valid on every OS.
@@ -26,21 +28,26 @@ fn sorted(mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
     paths
 }
 
-fn record(tree: &mut FolderSizeTree, parts: &[&str], direct: u64, subdirs: &[&str]) {
-    assert!(
-        tree.merge_record(&path_of(parts), direct, subdirs, false),
-        "{parts:?}"
-    );
+fn record(tree: &mut FolderSizeTree, parts: &[&str], listing: DirectoryListing<'_, &str>) {
+    assert!(tree.merge_record(&path_of(parts), listing), "{parts:?}");
 }
 
 /// idx(1) / a(10) / b(100) / c(1000), plus idx / s(5).
 fn chain() -> FolderSizeTree {
     let mut tree = tree();
-    record(&mut tree, &[], 1, &["a", "s"]);
-    record(&mut tree, &["a"], 10, &["b"]);
-    record(&mut tree, &["a", "b"], 100, &["c"]);
-    record(&mut tree, &["a", "b", "c"], 1000, &[]);
-    record(&mut tree, &["s"], 5, &[]);
+    record(&mut tree, &[], DirectoryListing::scanned(1, &["a", "s"]));
+    record(&mut tree, &["a"], DirectoryListing::scanned(10, &["b"]));
+    record(
+        &mut tree,
+        &["a", "b"],
+        DirectoryListing::scanned(100, &["c"]),
+    );
+    record(
+        &mut tree,
+        &["a", "b", "c"],
+        DirectoryListing::scanned(1000, &[]),
+    );
+    record(&mut tree, &["s"], DirectoryListing::scanned(5, &[]));
     tree
 }
 
@@ -50,7 +57,10 @@ fn delta_propagates_to_every_ancestor_and_reports_only_subscribed_changes() {
     assert_eq!(bytes(&tree, &[]), 1116);
     tree.drain_changed(Vec::<PathBuf>::new());
 
-    let added = tree.apply_listing::<&str>(&path_of(&["a", "b", "c"]), 1500, &[], false);
+    let added = tree.apply_listing::<&str>(
+        &path_of(&["a", "b", "c"]),
+        DirectoryListing::scanned(1500, &[]),
+    );
     assert_eq!(added, Some(vec![]));
     assert_eq!(bytes(&tree, &["a", "b", "c"]), 1500);
     assert_eq!(bytes(&tree, &["a", "b"]), 1600);
@@ -63,7 +73,10 @@ fn delta_propagates_to_every_ancestor_and_reports_only_subscribed_changes() {
     assert!(tree.drain_changed(&subscribed).is_empty());
 
     // A re-read that changes nothing is not a change.
-    tree.apply_listing::<&str>(&path_of(&["a", "b", "c"]), 1500, &[], false);
+    tree.apply_listing::<&str>(
+        &path_of(&["a", "b", "c"]),
+        DirectoryListing::scanned(1500, &[]),
+    );
     assert!(tree.drain_changed(&subscribed).is_empty());
 }
 
@@ -81,7 +94,11 @@ fn record_merge_in_any_order_equals_the_walk_totals() {
     let mut tree = tree();
     let mut expected: HashMap<PathBuf, u64> = HashMap::new();
     for (parts, direct, subdirs) in &records {
-        record(&mut tree, parts, *direct, subdirs);
+        record(
+            &mut tree,
+            parts,
+            DirectoryListing::scanned(*direct, subdirs),
+        );
         for depth in 0..=parts.len() {
             *expected.entry(path_of(&parts[..depth])).or_default() += direct;
         }
@@ -98,7 +115,7 @@ fn record_merge_in_any_order_equals_the_walk_totals() {
 #[test]
 fn listed_subdirectories_stay_pending_until_their_own_record_arrives() {
     let mut tree = tree();
-    record(&mut tree, &[], 1, &["a", "b"]);
+    record(&mut tree, &[], DirectoryListing::scanned(1, &["a", "b"]));
     let root = tree.total(&path_of(&[])).expect("root");
     assert!(
         root.scanned && !root.fully_indexed,
@@ -111,7 +128,11 @@ fn listed_subdirectories_stay_pending_until_their_own_record_arrives() {
     );
 
     // A deep record creates its missing ancestors as pending too.
-    record(&mut tree, &["a", "deep", "er"], 4, &[]);
+    record(
+        &mut tree,
+        &["a", "deep", "er"],
+        DirectoryListing::scanned(4, &[]),
+    );
     assert_eq!(bytes(&tree, &["a"]), 4);
     assert!(
         !tree
@@ -124,9 +145,13 @@ fn listed_subdirectories_stay_pending_until_their_own_record_arrives() {
         vec![path_of(&["a"]), path_of(&["b"])]
     );
 
-    record(&mut tree, &["a"], 1, &["deep"]);
-    record(&mut tree, &["a", "deep"], 0, &["er"]);
-    record(&mut tree, &["b"], 0, &[]);
+    record(&mut tree, &["a"], DirectoryListing::scanned(1, &["deep"]));
+    record(
+        &mut tree,
+        &["a", "deep"],
+        DirectoryListing::scanned(0, &["er"]),
+    );
+    record(&mut tree, &["b"], DirectoryListing::scanned(0, &[]));
     assert!(tree.total(&path_of(&[])).expect("root").fully_indexed);
     assert_eq!(bytes(&tree, &[]), 6);
 }
@@ -134,13 +159,28 @@ fn listed_subdirectories_stay_pending_until_their_own_record_arrives() {
 #[test]
 fn listing_adds_new_children_as_pending_and_prunes_removed_ones() {
     let mut tree = chain();
-    record(&mut tree, &["a"], 10, &["b", "old"]);
-    record(&mut tree, &["a", "old"], 40, &["deep"]);
-    record(&mut tree, &["a", "old", "deep"], 400, &[]);
+    record(
+        &mut tree,
+        &["a"],
+        DirectoryListing::scanned(10, &["b", "old"]),
+    );
+    record(
+        &mut tree,
+        &["a", "old"],
+        DirectoryListing::scanned(40, &["deep"]),
+    );
+    record(
+        &mut tree,
+        &["a", "old", "deep"],
+        DirectoryListing::scanned(400, &[]),
+    );
     assert_eq!(bytes(&tree, &[]), 1556);
 
     let added = tree
-        .apply_listing(&path_of(&["a"]), 12, &["b", "new", "new"], false)
+        .apply_listing(
+            &path_of(&["a"]),
+            DirectoryListing::scanned(12, &["b", "new", "new"]),
+        )
         .expect("listed");
     assert_eq!(added, vec![path_of(&["a", "new"])]);
     assert!(tree.total(&path_of(&["a", "old"])).is_none());
@@ -151,11 +191,11 @@ fn listing_adds_new_children_as_pending_and_prunes_removed_ones() {
     let new = tree.total(&path_of(&["a", "new"])).expect("added");
     assert!(!new.scanned && !new.fully_indexed);
     assert!(!tree.total(&path_of(&[])).expect("root").fully_indexed);
-    record(&mut tree, &["a", "new"], 2, &[]);
+    record(&mut tree, &["a", "new"], DirectoryListing::scanned(2, &[]));
     assert!(tree.total(&path_of(&[])).expect("root").fully_indexed);
 
     assert_eq!(
-        tree.apply_listing::<&str>(&path_of(&["nope"]), 0, &[], false),
+        tree.apply_listing::<&str>(&path_of(&["nope"]), DirectoryListing::scanned(0, &[])),
         None
     );
 }
@@ -173,7 +213,11 @@ fn prune_subtracts_exactly_once() {
     assert_eq!(bytes(&tree, &[]), 16);
 
     // Freed slots are reused without disturbing totals.
-    record(&mut tree, &["a", "n1", "n2"], 3, &[]);
+    record(
+        &mut tree,
+        &["a", "n1", "n2"],
+        DirectoryListing::scanned(3, &[]),
+    );
     assert_eq!(bytes(&tree, &[]), 19);
     assert_eq!(tree.node_count(), before);
 }
@@ -202,7 +246,7 @@ fn rename_moves_the_subtree_and_its_totals() {
     );
 
     // Renaming onto an existing folder replaces it.
-    record(&mut tree, &["t"], 50, &[]);
+    record(&mut tree, &["t"], DirectoryListing::scanned(50, &[]));
     assert!(tree.rename(&path_of(&["t"]), &path_of(&["a"])));
     assert_eq!(bytes(&tree, &["a"]), 50);
     assert_eq!(bytes(&tree, &[]), 1156);
@@ -225,7 +269,7 @@ fn rename_rejects_impossible_moves() {
 fn skipped_roots_make_ancestors_lower_bounds_with_three_names_and_a_count() {
     let mut tree = tree();
     let names = ["Downloads", "Desktop", "Documents", "Containers", "Cloud"];
-    record(&mut tree, &["home"], 8, &names);
+    record(&mut tree, &["home"], DirectoryListing::scanned(8, &names));
     for name in names {
         assert!(tree.set_skipped(&path_of(&["home", name]), true));
     }
@@ -249,7 +293,11 @@ fn skipped_roots_make_ancestors_lower_bounds_with_three_names_and_a_count() {
     // Visiting clears the skip; the root waits for its scan, then resolves.
     for name in ["Downloads", "Desktop", "Documents", "Containers"] {
         assert!(tree.set_skipped(&path_of(&["home", name]), false));
-        record(&mut tree, &["home", name], 1, &[]);
+        record(
+            &mut tree,
+            &["home", name],
+            DirectoryListing::scanned(1, &[]),
+        );
     }
     let home = tree.total(&path_of(&["home"])).expect("home");
     assert_eq!(
@@ -258,7 +306,11 @@ fn skipped_roots_make_ancestors_lower_bounds_with_three_names_and_a_count() {
     );
     tree.set_skipped(&path_of(&["home", "Cloud"]), false);
     assert!(!tree.total(&path_of(&["home"])).expect("home").fully_indexed);
-    record(&mut tree, &["home", "Cloud"], 1, &[]);
+    record(
+        &mut tree,
+        &["home", "Cloud"],
+        DirectoryListing::scanned(1, &[]),
+    );
     let home = tree.total(&path_of(&["home"])).expect("home");
     assert_eq!(home.lower_bound, None);
     assert_eq!(home.bytes, 13);
@@ -270,7 +322,11 @@ fn skipped_roots_make_ancestors_lower_bounds_with_three_names_and_a_count() {
 #[test]
 fn nested_skipped_roots_are_named_once_each() {
     let mut tree = tree();
-    record(&mut tree, &["lib"], 0, &["Group"]);
+    record(
+        &mut tree,
+        &["lib"],
+        DirectoryListing::scanned(0, &["Group"]),
+    );
     tree.set_skipped(&path_of(&["lib", "Group"]), true);
     tree.set_skipped(&path_of(&["lib", "Group", "inner"]), true);
     let bound = tree
@@ -284,8 +340,19 @@ fn nested_skipped_roots_are_named_once_each() {
 #[test]
 fn denied_directories_propagate_and_clear_when_readable() {
     let mut tree = chain();
-    record(&mut tree, &["a", "b"], 100, &["c", "locked"]);
-    assert!(tree.merge_record::<&str>(&path_of(&["a", "b", "locked"]), 0, &[], true));
+    record(
+        &mut tree,
+        &["a", "b"],
+        DirectoryListing::scanned(100, &["c", "locked"]),
+    );
+    assert!(tree.merge_record::<&str>(
+        &path_of(&["a", "b", "locked"]),
+        DirectoryListing {
+            direct_bytes: 0,
+            subdirs: &[],
+            denied: true,
+        },
+    ));
     let locked = tree.total(&path_of(&["a", "b", "locked"])).expect("locked");
     assert!(locked.denied && locked.scanned && locked.lower_bound.is_none());
     for parts in [&["a", "b"][..], &["a"][..], &[][..]] {
@@ -302,7 +369,10 @@ fn denied_directories_propagate_and_clear_when_readable() {
         );
     }
 
-    tree.apply_listing::<&str>(&path_of(&["a", "b", "locked"]), 9, &[], false);
+    tree.apply_listing::<&str>(
+        &path_of(&["a", "b", "locked"]),
+        DirectoryListing::scanned(9, &[]),
+    );
     assert_eq!(
         tree.total(&path_of(&["a"])),
         Some(FolderTotal {
@@ -319,10 +389,18 @@ fn denied_directories_propagate_and_clear_when_readable() {
 #[test]
 fn lookup_is_exact_first_then_case_insensitive() {
     let mut tree = tree();
-    record(&mut tree, &[], 0, &["Foo", "foo", "Bar"]);
-    record(&mut tree, &["Foo"], 1, &[]);
-    record(&mut tree, &["foo"], 2, &[]);
-    record(&mut tree, &["Bar", "Ünï"], 3, &[]);
+    record(
+        &mut tree,
+        &[],
+        DirectoryListing::scanned(0, &["Foo", "foo", "Bar"]),
+    );
+    record(&mut tree, &["Foo"], DirectoryListing::scanned(1, &[]));
+    record(&mut tree, &["foo"], DirectoryListing::scanned(2, &[]));
+    record(
+        &mut tree,
+        &["Bar", "Ünï"],
+        DirectoryListing::scanned(3, &[]),
+    );
 
     assert_eq!(bytes(&tree, &["Foo"]), 1);
     assert_eq!(bytes(&tree, &["foo"]), 2);
@@ -336,15 +414,13 @@ fn lookup_is_exact_first_then_case_insensitive() {
     assert!(tree.total(&path_of(&["baz"])).is_none());
     assert!(tree.total(Path::new("other")).is_none());
     assert!(tree.total(&path_of(&["..", "Foo"])).is_none());
-    assert!(!tree.merge_record::<&str>(&path_of(&["..", "x"]), 1, &[], false));
-    assert!(!tree.merge_record::<&str>(Path::new("other"), 1, &[], false));
+    assert!(!tree.merge_record::<&str>(&path_of(&["..", "x"]), DirectoryListing::scanned(1, &[])));
+    assert!(!tree.merge_record::<&str>(Path::new("other"), DirectoryListing::scanned(1, &[])));
 
     // A case-variant record still lands under the existing root.
     assert!(tree.merge_record::<&str>(
         &["IDX", "Bar"].iter().collect::<PathBuf>(),
-        4,
-        &["Ünï"],
-        false
+        DirectoryListing::scanned(4, &["Ünï"])
     ));
     assert_eq!(bytes(&tree, &["Bar"]), 7);
 }
@@ -356,8 +432,8 @@ fn multiple_roots_including_absolute_os_paths() {
     assert!(tree.add_root(&path_of(&[])));
     assert!(tree.add_root(&absolute));
     assert!(!tree.add_root(&absolute));
-    assert!(tree.merge_record::<&str>(&absolute.join("child"), 6, &[], false));
-    record(&mut tree, &["child"], 2, &[]);
+    assert!(tree.merge_record::<&str>(&absolute.join("child"), DirectoryListing::scanned(6, &[])));
+    record(&mut tree, &["child"], DirectoryListing::scanned(2, &[]));
     assert_eq!(tree.total(&absolute).map(|total| total.bytes), Some(6));
     assert_eq!(bytes(&tree, &[]), 2);
 
@@ -377,13 +453,13 @@ fn a_filesystem_root_is_an_indexed_folder_with_its_own_total() {
     let root = Path::new(std::path::MAIN_SEPARATOR_STR);
     let mut tree = FolderSizeTree::default();
     assert!(tree.add_root(root));
-    assert!(tree.merge_record(root, 1, &["Users", "usr"], false));
-    assert!(tree.merge_record::<&str>(&root.join("Users"), 20, &[], false));
+    assert!(tree.merge_record(root, DirectoryListing::scanned(1, &["Users", "usr"])));
+    assert!(tree.merge_record::<&str>(&root.join("Users"), DirectoryListing::scanned(20, &[])));
     assert_eq!(
         tree.total(root).map(|total| total.fully_indexed),
         Some(false)
     );
-    assert!(tree.merge_record::<&str>(&root.join("usr"), 300, &[], false));
+    assert!(tree.merge_record::<&str>(&root.join("usr"), DirectoryListing::scanned(300, &[])));
     let total = tree.total(root).expect("root");
     assert_eq!((total.bytes, total.fully_indexed), (321, true));
     assert_eq!(
@@ -397,9 +473,17 @@ fn a_filesystem_root_is_an_indexed_folder_with_its_own_total() {
 #[test]
 fn prune_unscanned_drops_folders_a_finished_walk_never_reached() {
     let mut tree = chain();
-    record(&mut tree, &["a"], 10, &["b", "offdevice", "Desktop"]);
+    record(
+        &mut tree,
+        &["a"],
+        DirectoryListing::scanned(10, &["b", "offdevice", "Desktop"]),
+    );
     tree.set_skipped(&path_of(&["a", "Desktop"]), true);
-    record(&mut tree, &["a", "b"], 100, &["c", "vanished"]);
+    record(
+        &mut tree,
+        &["a", "b"],
+        DirectoryListing::scanned(100, &["c", "vanished"]),
+    );
     assert!(!tree.total(&path_of(&[])).expect("root").fully_indexed);
 
     assert!(tree.prune_unscanned(&path_of(&["a"])));
@@ -424,9 +508,17 @@ fn prune_unscanned_drops_folders_a_finished_walk_never_reached() {
 #[test]
 fn indexed_subtrees_lists_the_largest_complete_subtrees() {
     let mut tree = chain();
-    record(&mut tree, &["a"], 10, &["b", "b2", "p"]);
-    record(&mut tree, &["a", "b2"], 0, &[]);
-    record(&mut tree, &["a", "p", "done"], 0, &[]);
+    record(
+        &mut tree,
+        &["a"],
+        DirectoryListing::scanned(10, &["b", "b2", "p"]),
+    );
+    record(&mut tree, &["a", "b2"], DirectoryListing::scanned(0, &[]));
+    record(
+        &mut tree,
+        &["a", "p", "done"],
+        DirectoryListing::scanned(0, &[]),
+    );
     let mut got = tree.indexed_subtrees_under(&path_of(&[]));
     got.sort();
     assert_eq!(
@@ -446,7 +538,7 @@ fn dirty_tracks_changes_since_the_last_snapshot() {
     let mut tree = chain();
     assert!(tree.is_dirty());
     tree.mark_clean();
-    tree.apply_listing::<&str>(&path_of(&["s"]), 5, &[], false);
+    tree.apply_listing::<&str>(&path_of(&["s"]), DirectoryListing::scanned(5, &[]));
     assert!(!tree.is_dirty(), "no-op re-read");
     tree.prune(&path_of(&["s"]));
     assert!(tree.is_dirty());

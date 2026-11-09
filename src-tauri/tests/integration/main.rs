@@ -48,6 +48,7 @@ pub mod fs_icons_integration;
 pub mod fs_listing_integration;
 pub mod fs_mutation_edges_integration;
 pub mod fs_mutations_integration;
+pub mod ipc_command_services_integration;
 pub mod ipc_contract_integration;
 pub mod ipc_execution_matrix_integration;
 pub mod ipc_icon_batch_integration;

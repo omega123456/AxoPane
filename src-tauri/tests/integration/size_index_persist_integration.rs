@@ -2,10 +2,10 @@ use std::fs;
 use std::path::PathBuf;
 
 use file_explorer_lib::size::index::persist::{
-    decode, encode, load, plan_batch, plan_catch_up, save, ChangeEvent, ChangeFlags, ReplayOutcome,
-    SnapshotMeta, FORMAT_VERSION,
+    decode, encode, load, plan_batch, plan_catch_up, save, ChangeEvent, ChangeFlags, CurrentVolume,
+    ReplayOutcome, SnapshotMeta, FORMAT_VERSION,
 };
-use file_explorer_lib::size::index::tree::FolderSizeTree;
+use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
 use tempfile::tempdir;
 
 fn path_of(parts: &[&str]) -> PathBuf {
@@ -30,19 +30,39 @@ fn sample_tree() -> FolderSizeTree {
     let mut tree = FolderSizeTree::default();
     tree.add_root(&path_of(&[]));
     tree.add_root(&["second"].iter().collect::<PathBuf>());
-    tree.merge_record(&path_of(&[]), 1, &["home", "pending"], false);
+    tree.merge_record(
+        &path_of(&[]),
+        DirectoryListing::scanned(1, &["home", "pending"]),
+    );
     tree.merge_record(
         &path_of(&["home"]),
-        20,
-        &["zeta", "alpha", "locked", "Desktop"],
-        false,
+        DirectoryListing::scanned(20, &["zeta", "alpha", "locked", "Desktop"]),
     );
-    tree.merge_record::<&str>(&path_of(&["home", "zeta"]), 300, &[], false);
-    tree.merge_record::<&str>(&path_of(&["home", "alpha"]), 4000, &[], false);
-    tree.merge_record::<&str>(&path_of(&["home", "locked"]), 0, &[], true);
+    tree.merge_record::<&str>(
+        &path_of(&["home", "zeta"]),
+        DirectoryListing::scanned(300, &[]),
+    );
+    tree.merge_record::<&str>(
+        &path_of(&["home", "alpha"]),
+        DirectoryListing::scanned(4000, &[]),
+    );
+    tree.merge_record::<&str>(
+        &path_of(&["home", "locked"]),
+        DirectoryListing {
+            direct_bytes: 0,
+            subdirs: &[],
+            denied: true,
+        },
+    );
     tree.set_skipped(&path_of(&["home", "Desktop"]), true);
-    tree.merge_record::<&str>(&path_of(&["pending", "child"]), 7, &[], false);
-    tree.merge_record::<&str>(&["second", "x"].iter().collect::<PathBuf>(), 9, &[], false);
+    tree.merge_record::<&str>(
+        &path_of(&["pending", "child"]),
+        DirectoryListing::scanned(7, &[]),
+    );
+    tree.merge_record::<&str>(
+        &["second", "x"].iter().collect::<PathBuf>(),
+        DirectoryListing::scanned(9, &[]),
+    );
     tree
 }
 
@@ -57,9 +77,41 @@ fn put_str(out: &mut Vec<u8>, value: &[u8]) {
     out.extend_from_slice(value);
 }
 
+fn current<'volume>(
+    uuid: &'volume str,
+    os_build: &'volume str,
+    event_id: u64,
+) -> CurrentVolume<'volume> {
+    CurrentVolume {
+        uuid,
+        os_build,
+        event_id,
+    }
+}
+
+#[derive(Clone, Copy)]
+struct CraftedHeader {
+    version: u32,
+    visited: u32,
+    node_count: u32,
+}
+
+fn header(version: u32, visited: u32, node_count: u32) -> CraftedHeader {
+    CraftedHeader {
+        version,
+        visited,
+        node_count,
+    }
+}
+
 /// A checksummed file with an empty header and the given node bytes, so a
 /// test can isolate one defect at a time.
-fn crafted(version: u32, visited: u32, node_count: u32, nodes: &[u8]) -> Vec<u8> {
+fn crafted(header: CraftedHeader, nodes: &[u8]) -> Vec<u8> {
+    let CraftedHeader {
+        version,
+        visited,
+        node_count,
+    } = header;
     let mut out = b"AXOSIZE\0".to_vec();
     out.extend_from_slice(&version.to_le_bytes());
     put_str(&mut out, b"uuid");
@@ -156,23 +208,23 @@ fn any_corrupted_byte_or_truncation_yields_none() {
 fn old_version_and_malformed_content_yield_none_even_with_a_valid_checksum() {
     let root = node(u32::MAX, b"idx", 1);
     assert!(
-        decode(&crafted(FORMAT_VERSION, 0, 1, &root)).is_some(),
+        decode(&crafted(header(FORMAT_VERSION, 0, 1), &root,)).is_some(),
         "control"
     );
 
-    assert!(decode(&crafted(FORMAT_VERSION - 1, 0, 1, &root)).is_none());
-    assert!(decode(&crafted(FORMAT_VERSION + 1, 0, 1, &root)).is_none());
+    assert!(decode(&crafted(header(FORMAT_VERSION - 1, 0, 1), &root,)).is_none());
+    assert!(decode(&crafted(header(FORMAT_VERSION + 1, 0, 1), &root,)).is_none());
     assert!(
-        decode(&crafted(FORMAT_VERSION, 0, 0, &root)).is_none(),
+        decode(&crafted(header(FORMAT_VERSION, 0, 0), &root,)).is_none(),
         "trailing"
     );
-    assert!(decode(&crafted(FORMAT_VERSION, 2_000, 0, &[])).is_none());
-    assert!(decode(&crafted(FORMAT_VERSION, 1, 0, &[0xFF; 4])).is_none());
-    assert!(decode(&crafted(FORMAT_VERSION, 0, u32::MAX, &root)).is_none());
+    assert!(decode(&crafted(header(FORMAT_VERSION, 2_000, 0), &[],)).is_none());
+    assert!(decode(&crafted(header(FORMAT_VERSION, 1, 0), &[0xFF; 4],)).is_none());
+    assert!(decode(&crafted(header(FORMAT_VERSION, 0, u32::MAX), &root,)).is_none());
 
     let mut huge_name = u32::MAX.to_le_bytes().to_vec();
     huge_name.extend_from_slice(&u32::MAX.to_le_bytes());
-    assert!(decode(&crafted(FORMAT_VERSION, 0, 1, &huge_name)).is_none());
+    assert!(decode(&crafted(header(FORMAT_VERSION, 0, 1), &huge_name,)).is_none());
 
     for bad in [
         node(u32::MAX, b"", 1),
@@ -180,10 +232,10 @@ fn old_version_and_malformed_content_yield_none_even_with_a_valid_checksum() {
         node(u32::MAX, &[0xC3, 0x28], 1),
         node(7, b"orphan", 1),
     ] {
-        assert!(decode(&crafted(FORMAT_VERSION, 0, 1, &bad)).is_none());
+        assert!(decode(&crafted(header(FORMAT_VERSION, 0, 1), &bad,)).is_none());
     }
     let duplicate = [root.clone(), node(0, b"a", 1), node(0, b"a", 1)].concat();
-    assert!(decode(&crafted(FORMAT_VERSION, 0, 3, &duplicate)).is_none());
+    assert!(decode(&crafted(header(FORMAT_VERSION, 0, 3), &duplicate,)).is_none());
 }
 
 fn event(parts: &[&str], flags: ChangeFlags) -> ChangeEvent {
@@ -210,7 +262,7 @@ fn must_scan(parts: &[&str]) -> ChangeEvent {
 #[test]
 fn catch_up_identical_id_is_up_to_date() {
     assert_eq!(
-        plan_catch_up(&meta(), "0A1B-UUID", BUILD, 500, &[]),
+        plan_catch_up(&meta(), current("0A1B-UUID", BUILD, 500), &[],),
         ReplayOutcome::UpToDate
     );
 }
@@ -219,14 +271,14 @@ fn catch_up_identical_id_is_up_to_date() {
 fn catch_up_advanced_id_rereads_reported_directories() {
     let events = [plain(&["b"]), plain(&["a"]), plain(&["b"])];
     assert_eq!(
-        plan_catch_up(&meta(), "0A1B-UUID", BUILD, 900, &events),
+        plan_catch_up(&meta(), current("0A1B-UUID", BUILD, 900), &events,),
         ReplayOutcome::Apply {
             reread: vec![path_of(&["a"]), path_of(&["b"])],
             rescan: vec![],
         }
     );
     assert_eq!(
-        plan_catch_up(&meta(), "0A1B-UUID", BUILD, 900, &[]),
+        plan_catch_up(&meta(), current("0A1B-UUID", BUILD, 900), &[],),
         ReplayOutcome::UpToDate
     );
 }
@@ -236,20 +288,18 @@ fn catch_up_falls_back_to_a_full_rescan() {
     let saved = meta();
     let uuid = "0A1B-UUID";
     assert_eq!(
-        plan_catch_up(&saved, "OTHER", BUILD, 900, &[]),
+        plan_catch_up(&saved, current("OTHER", BUILD, 900), &[],),
         ReplayOutcome::FullRescan
     );
     assert_eq!(
-        plan_catch_up(&saved, uuid, BUILD, 499, &[]),
+        plan_catch_up(&saved, current(uuid, BUILD, 499), &[],),
         ReplayOutcome::FullRescan
     );
     assert_eq!(
         plan_catch_up(
             &saved,
-            uuid,
-            BUILD,
-            900,
-            &[plain(&["a"]), must_scan(&["b"])]
+            current(uuid, BUILD, 900),
+            &[plain(&["a"]), must_scan(&["b"])],
         ),
         ReplayOutcome::FullRescan
     );
@@ -273,7 +323,7 @@ fn catch_up_falls_back_to_a_full_rescan() {
     ] {
         let events = [plain(&["a"]), event(&[], flags)];
         assert_eq!(
-            plan_catch_up(&saved, uuid, BUILD, 900, &events),
+            plan_catch_up(&saved, current(uuid, BUILD, 900), &events,),
             ReplayOutcome::FullRescan,
             "{flags:?}"
         );
@@ -285,11 +335,11 @@ fn catch_up_falls_back_to_a_full_rescan() {
 fn a_different_os_build_forces_a_full_rescan_and_round_trips() {
     let saved = meta();
     assert_eq!(
-        plan_catch_up(&saved, "0A1B-UUID", "25B456", 500, &[]),
+        plan_catch_up(&saved, current("0A1B-UUID", "25B456", 500), &[],),
         ReplayOutcome::FullRescan
     );
     assert_eq!(
-        plan_catch_up(&saved, "0A1B-UUID", "", 900, &[plain(&["a"])]),
+        plan_catch_up(&saved, current("0A1B-UUID", "", 900), &[plain(&["a"])],),
         ReplayOutcome::FullRescan
     );
     let decoded = decode(&encode(&saved, &sample_tree())).expect("decodes");

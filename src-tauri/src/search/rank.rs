@@ -44,14 +44,21 @@ pub fn score(candidate: &Candidate, query: &ParsedQuery, style: PathStyle) -> Op
         .iter()
         .map(|ancestor| nfc(ancestor).into_owned())
         .collect();
+    let ancestor_path = AncestorPath {
+        root: &parts.root,
+        ancestors: &ancestors,
+    };
     let folders = match &query.anchor {
-        Some(anchor) => match_anchor(anchor, &parts.root, &ancestors, query.browse)?,
+        Some(anchor) => match_anchor(anchor, ancestor_path, query.browse)?,
         None => match_folder_segments(query, &ancestors)?,
     };
     let name_penalty = name_match
         .as_ref()
         .map_or(0, |name_match| u32::from(name_match.tier));
-    let (parent, offsets) = display_parent(style, &parts.root, &ancestors);
+    let DisplayParent {
+        text: parent,
+        offsets,
+    } = display_parent(style, ancestor_path);
     Some(Scored {
         path: candidate.path.clone(),
         name,
@@ -77,12 +84,14 @@ struct FolderMatch {
     hits: Vec<(usize, Vec<(u32, u32)>)>,
 }
 
-fn match_anchor(
-    anchor: &Anchor,
-    root: &str,
-    ancestors: &[String],
-    browse: bool,
-) -> Option<FolderMatch> {
+#[derive(Clone, Copy)]
+struct AncestorPath<'path> {
+    root: &'path str,
+    ancestors: &'path [String],
+}
+
+fn match_anchor(anchor: &Anchor, path: AncestorPath<'_>, browse: bool) -> Option<FolderMatch> {
+    let AncestorPath { root, ancestors } = path;
     let names: Vec<&str> = ancestors.iter().map(String::as_str).collect();
     if !anchor.contains(root, &names) {
         return None;
@@ -114,7 +123,10 @@ fn match_folder_segments(query: &ParsedQuery, ancestors: &[String]) -> Option<Fo
         // Listing children: the innermost folder must be the parent.
         let lists_parent = query.browse && segment_index + 1 == query.folder_segs.len();
         let lowest = lowest_searchable_ancestor(lists_parent, upper)?;
-        let (ancestor_index, found) = best_ancestor_match(segment, ancestors, lowest..upper)?;
+        let AncestorMatch {
+            ancestor_index,
+            found,
+        } = best_ancestor_match(segment, ancestors, lowest..upper)?;
         folders.gap += (upper - 1 - ancestor_index) as u32;
         folders.penalty += u32::from(found.tier);
         folders.hits.push((ancestor_index, found.ranges));
@@ -123,14 +135,19 @@ fn match_folder_segments(query: &ParsedQuery, ancestors: &[String]) -> Option<Fo
     Some(folders)
 }
 
+struct AncestorMatch {
+    ancestor_index: usize,
+    found: Match,
+}
+
 /// The best-tier ancestor in `range`, preferring the innermost; an exact
 /// match ends the search.
 fn best_ancestor_match(
     segment: &Segment,
     ancestors: &[String],
     range: Range<usize>,
-) -> Option<(usize, Match)> {
-    let mut best: Option<(usize, Match)> = None;
+) -> Option<AncestorMatch> {
+    let mut best: Option<AncestorMatch> = None;
     for ancestor_index in range.rev() {
         let Some(found) = segment.matches(
             &FoldedName::new(&ancestors[ancestor_index]),
@@ -140,12 +157,15 @@ fn best_ancestor_match(
         };
         let improves = best
             .as_ref()
-            .is_none_or(|(_, best_match)| found.tier < best_match.tier);
+            .is_none_or(|best_match| found.tier < best_match.found.tier);
         if !improves {
             continue;
         }
         let exact = found.tier == EXACT;
-        best = Some((ancestor_index, found));
+        best = Some(AncestorMatch {
+            ancestor_index,
+            found,
+        });
         if exact {
             break;
         }
@@ -169,7 +189,13 @@ fn parent_ranges(hits: Vec<(usize, Vec<(u32, u32)>)>, offsets: &[u32]) -> Vec<(u
 
 /// The parent path for display, plus the UTF-16 offset of each ancestor
 /// name within it.
-fn display_parent(style: PathStyle, root: &str, ancestors: &[String]) -> (String, Vec<u32>) {
+struct DisplayParent {
+    text: String,
+    offsets: Vec<u32>,
+}
+
+fn display_parent(style: PathStyle, path: AncestorPath<'_>) -> DisplayParent {
+    let AncestorPath { root, ancestors } = path;
     let mut text = nfc(root).into_owned();
     let mut offsets = Vec::with_capacity(ancestors.len());
     for name in ancestors {
@@ -181,7 +207,7 @@ fn display_parent(style: PathStyle, root: &str, ancestors: &[String]) -> (String
         offsets.push(text.encode_utf16().count() as u32);
         text.push_str(name);
     }
-    (text, offsets)
+    DisplayParent { text, offsets }
 }
 
 /// A total order over hits; a missing modified time sorts after known ones.

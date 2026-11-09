@@ -10,7 +10,7 @@ use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
-use super::directory_bin::{self, TrashIndex};
+use super::directory_bin::{self, OriginalLocation, TrashIndex};
 use super::{dsstore, manifest, TrashEntry};
 
 /// Loads and parses `trash_dir/.DS_Store` once per operation, for the
@@ -37,18 +37,16 @@ impl TrashIndex for CommandIndexes {
         })
     }
 
-    fn original_location(&self, id: &str) -> Option<(String, Option<i64>)> {
+    fn original_location(&self, id: &str) -> Option<OriginalLocation> {
         match self.manifest.lookup(id) {
-            Some((original_path, deleted_at)) => Some((original_path, Some(deleted_at))),
-            None => self.put_back.get(id).map(|put_back| {
-                (
-                    dsstore::resolve_original_path(
-                        Path::new("/"),
-                        &put_back.original_dir,
-                        &put_back.original_name,
-                    ),
-                    None,
-                )
+            Some(entry) => Some(OriginalLocation::from(entry)),
+            None => self.put_back.get(id).map(|put_back| OriginalLocation {
+                original_path: dsstore::resolve_original_path(
+                    Path::new("/"),
+                    &put_back.original_dir,
+                    &put_back.original_name,
+                ),
+                deleted_at: None,
             }),
         }
     }

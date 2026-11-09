@@ -13,17 +13,21 @@ export const ICON_NEGATIVE_TTL_MS = ICON_NEGATIVE_TTL_MINUTES * millisecondsInMi
 export type IconCacheRecord = WeightedCacheRecord & { value: string | null }
 
 /** Negative records expire first, then the oldest unprotected records go. */
+export type IconCacheClock = {
+  now: number
+  nativeIconsSupported: boolean
+}
+
 export function pruneIconCache(
   cache: Record<string, IconCacheRecord>,
   protectedPaths: ReadonlySet<string>,
-  now: number,
-  nativeIconsSupported: boolean,
+  { now, nativeIconsSupported }: IconCacheClock,
 ): Record<string, IconCacheRecord> {
   const isExpired = (record: IconCacheRecord) =>
     record.value === null && (!nativeIconsSupported || now - record.touched >= ICON_NEGATIVE_TTL_MS)
-  return pruneWeightedCache(cache, protectedPaths, isExpired, {
-    maxEntries: MAX_ICON_CACHE_ENTRIES,
-    maxBytes: MAX_ICON_CACHE_BYTES,
+  return pruneWeightedCache(cache, protectedPaths, {
+    isExpired,
+    limits: { maxEntries: MAX_ICON_CACHE_ENTRIES, maxBytes: MAX_ICON_CACHE_BYTES },
   })
 }
 

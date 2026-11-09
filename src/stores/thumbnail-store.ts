@@ -246,11 +246,15 @@ type ThumbnailGet = () => ThumbnailStore
 type VisibleScope = Parameters<ThumbnailStore['setVisibleCandidates']>[0]
 type VisibleCandidates = Parameters<ThumbnailStore['setVisibleCandidates']>[1]
 
+type SignedCandidates = {
+  visibleCandidates: ReturnType<typeof uniqueFileCandidates>
+  signature: string
+}
+
 function nextActiveScope(
   previous: ActiveThumbnailScope | undefined,
   scope: VisibleScope,
-  visibleCandidates: ReturnType<typeof uniqueFileCandidates>,
-  signature: string,
+  { visibleCandidates, signature }: SignedCandidates,
 ): ActiveThumbnailScope {
   const { generation, revision } = nextScopeVersion(previous, scope)
   return {
@@ -264,9 +268,13 @@ function nextActiveScope(
   }
 }
 
+type ThumbnailStoreAccess = {
+  set: ThumbnailSet
+  get: ThumbnailGet
+}
+
 async function setVisibleCandidates(
-  set: ThumbnailSet,
-  get: ThumbnailGet,
+  { set, get }: ThumbnailStoreAccess,
   scope: VisibleScope,
   candidates: VisibleCandidates,
 ) {
@@ -280,7 +288,7 @@ async function setVisibleCandidates(
   const contextChanged = previous !== undefined && !contextMatches
   const cancelPrevious = contextChanged ? cancelThumbnails(previous) : undefined
   const visibleCandidates = uniqueFileCandidates(candidates)
-  const nextScope = nextActiveScope(previous, scope, visibleCandidates, signature)
+  const nextScope = nextActiveScope(previous, scope, { visibleCandidates, signature })
   const scopes = { ...get().scopes, [key]: nextScope }
   const now = cacheNow()
   const touchedCache = touchCacheRecords(get().cache, Object.keys(nextScope.candidates), now)
@@ -332,7 +340,8 @@ async function requestMissingThumbnails(set: ThumbnailSet, request: MissingThumb
 export const useThumbnailStore = create<ThumbnailStore>((set, get) => ({
   scopes: {},
   cache: {},
-  setVisibleCandidates: (scope, candidates) => setVisibleCandidates(set, get, scope, candidates),
+  setVisibleCandidates: (scope, candidates) =>
+    setVisibleCandidates({ set, get }, scope, candidates),
   cancelScope: async (paneId, tabId) => {
     const key = scopeKey(paneId, tabId)
     const previous = get().scopes[key]

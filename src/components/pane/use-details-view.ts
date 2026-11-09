@@ -11,6 +11,7 @@ import {
 import { useElementVirtualizer } from '@/lib/use-element-virtualizer'
 import { useLayoutStore } from '@/stores/layout-store'
 import { BOTH_SIDES } from '@/lib/numbers'
+import type { VisibleRange } from '@/types/pane'
 import { documentZoom } from '@/components/menus/menu-geometry'
 import { virtualListHeight, virtualRowsOrFallback } from '@/lib/virtual-rows'
 import { paneContentWidth } from './HeaderRow'
@@ -69,13 +70,14 @@ export function useVisibleContentWidth() {
 export function useVisibleRangeReport(
   itemsToRender: Array<{ index: number }>,
   parentOffset: number,
-  onVisibleRangeChange: (start: number, end: number, viewportCount: number) => void,
+  onVisibleRangeChange: (visibleRange: VisibleRange) => void,
 ) {
   useEffect(() => {
     if (itemsToRender.length === 0) return
-    const start = Math.max(0, itemsToRender[0].index - parentOffset)
-    const end = Math.max(0, itemsToRender[itemsToRender.length - 1].index - parentOffset)
-    onVisibleRangeChange(start, end, Math.max(1, end - start + 1))
+    const startIndex = Math.max(0, itemsToRender[0].index - parentOffset)
+    const endIndex = Math.max(0, itemsToRender[itemsToRender.length - 1].index - parentOffset)
+    const viewportCount = Math.max(1, endIndex - startIndex + 1)
+    onVisibleRangeChange({ startIndex, endIndex, viewportCount })
   }, [itemsToRender, onVisibleRangeChange, parentOffset])
 }
 

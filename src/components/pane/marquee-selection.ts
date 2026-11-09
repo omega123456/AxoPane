@@ -1,5 +1,6 @@
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import type { MarqueeRect } from './MarqueeSelection'
+import type { PaneSelection } from '@/stores/selection-store'
 
 export type ContentPoint = { x: number; y: number }
 
@@ -7,12 +8,6 @@ export type MarqueeDrag = {
   start: ContentPoint
   additive: boolean
   baseSelectedIds: string[]
-}
-
-export type MarqueeSelectionResult = {
-  selectedIds: string[]
-  anchorId: string | null
-  focusedId: string | null
 }
 
 export type DetailsRowGeometry = {
@@ -54,7 +49,7 @@ export function detailsEntryIdsInRect(
   return entries.slice(entryStart, entryEnd + 1).map((entry) => entry.id)
 }
 
-export function marqueeSelection(drag: MarqueeDrag, rangeIds: string[]): MarqueeSelectionResult {
+export function marqueeSelection(drag: MarqueeDrag, rangeIds: string[]): PaneSelection {
   const selectedIds = drag.additive
     ? Array.from(new Set([...drag.baseSelectedIds, ...rangeIds]))
     : rangeIds

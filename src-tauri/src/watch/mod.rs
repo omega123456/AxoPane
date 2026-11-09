@@ -30,7 +30,7 @@ pub use runtime::{
     forward_notify_result_for_tests, forward_notify_result_with_before_lock_for_tests,
     process_compacted_batch_for_tests, while_tabs_locked_for_tests,
 };
-pub use tab_patch::{diff_entries, snapshot_for_target};
+pub use tab_patch::{diff_entries, snapshot_for_target, PatchLabel};
 use tab_patch::{snapshot_for_watch_baseline, snapshot_from_entries_for_watch};
 
 /// A paired rename event carries the old path and then the new one.
@@ -98,8 +98,30 @@ impl Drop for WatchRuntime {
     }
 }
 
-type PatchEmitter = Arc<dyn Fn(DirPatch) + Send + Sync>;
-type ErrorEmitter = Arc<dyn Fn(String, String) + Send + Sync>;
+pub type PatchEmitter = Arc<dyn Fn(DirPatch) + Send + Sync>;
+pub type ErrorEmitter = Arc<dyn Fn(String, String) + Send + Sync>;
+
+#[derive(Clone)]
+pub struct WatchEmitters {
+    pub patch: PatchEmitter,
+    pub error: ErrorEmitter,
+}
+
+pub struct TabWatchArm {
+    pub target: Option<WatchTarget>,
+    pub listing_seed_entries: Option<Vec<DirectoryEntry>>,
+    pub entries: Option<Vec<DirectoryEntry>>,
+}
+
+impl TabWatchArm {
+    pub fn disarm() -> Self {
+        Self {
+            target: None,
+            listing_seed_entries: None,
+            entries: None,
+        }
+    }
+}
 type WatchedTabs = Arc<Mutex<HashMap<String, WatchedTab>>>;
 
 #[derive(Clone)]
@@ -117,20 +139,18 @@ impl WatchService {
     /// re-reading the directory, eliminating a redundant enumeration. The
     /// entries supplied must be the post-filter/sort listing for `target.path`
     /// so the first diff against subsequent filesystem events is empty.
-    pub fn set_tab_watch(
-        &self,
-        target: Option<WatchTarget>,
-        listing_seed_entries: Option<Vec<DirectoryEntry>>,
-        entries: Option<Vec<DirectoryEntry>>,
-        emit_patch: PatchEmitter,
-        emit_error: ErrorEmitter,
-    ) -> Result<(), String> {
+    pub fn set_tab_watch(&self, arm: TabWatchArm, emitters: WatchEmitters) -> Result<(), String> {
+        let TabWatchArm {
+            target,
+            listing_seed_entries,
+            entries,
+        } = arm;
         let mut guard = self.inner.lock().expect("watch service lock");
         let Some(target) = target else {
             return disarm_all_tabs(guard.as_mut());
         };
         if guard.is_none() {
-            *guard = Some(create_runtime(emit_patch, emit_error)?);
+            *guard = Some(create_runtime(emitters)?);
         }
 
         let runtime = guard.as_mut().expect("watch runtime");
@@ -151,11 +171,11 @@ impl WatchService {
     /// Rechecks every currently watched tab and emits a patch only for paths
     /// whose snapshot changed. Used as a window-focus reliability net for OS
     /// watcher events that may have been dropped while the app was inactive.
-    pub fn reconcile(&self, emit_patch: PatchEmitter, emit_error: ErrorEmitter) {
+    pub fn reconcile(&self, emitters: WatchEmitters) {
         let Some(tabs) = self.watched_tabs() else {
             return;
         };
-        reconcile_tabs(&tabs, "refresh", &emit_patch, &emit_error);
+        reconcile_tabs(&tabs, "refresh", &emitters);
     }
 }
 

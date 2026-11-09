@@ -1,7 +1,7 @@
 import { createFile, createFolder, renameEntry } from '@/lib/ipc/commands'
 import { activeTab } from '@/stores/tabs-store'
 import { usePanesStore } from '@/stores/panes-store'
-import { useSelectionStore } from '@/stores/selection-store'
+import { singleEntrySelection, useSelectionStore } from '@/stores/selection-store'
 import type { PaneId } from '@/types/pane'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 
@@ -39,7 +39,7 @@ function patchAndFocus(
     .panes[paneId].entries.find((item) => item.path === focusPath)
   if (entry) {
     usePanesStore.getState().setFocusedEntry(paneId, entry.id)
-    useSelectionStore.getState().setSelection(paneId, [entry.id], entry.id, entry.id)
+    useSelectionStore.getState().setSelection(paneId, singleEntrySelection(entry.id))
   }
 }
 

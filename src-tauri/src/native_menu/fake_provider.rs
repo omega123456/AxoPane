@@ -71,20 +71,20 @@ fn fixture_menu(target_kind: &NativeMenuTargetKind) -> Vec<ProviderNativeMenuIte
     }
     let suffix = target_suffix(target_kind);
     vec![
-        fake_action(
-            &format!("fixture-target-{suffix}"),
-            &format!("Fixture {}", target_label(target_kind)),
-            &format!("fixture{suffix}"),
-            &format!("fake.target.{suffix}"),
-        ),
+        fake_action(FakeAction {
+            id: &format!("fixture-target-{suffix}"),
+            label: &format!("Fixture {}", target_label(target_kind)),
+            verb: &format!("fixture{suffix}"),
+            action_id: &format!("fake.target.{suffix}"),
+        }),
         canonical_fake_action(
             NativeMenuCanonicalActionKind::OpenWith,
-            fake_action(
-                "fixture-open-with",
-                "Open with Fixture",
-                "OpenWith",
-                "fake.openWith",
-            ),
+            fake_action(FakeAction {
+                id: "fixture-open-with",
+                label: "Open with Fixture",
+                verb: "OpenWith",
+                action_id: "fake.openWith",
+            }),
         ),
         fake_submenu(
             "fixture-archive-tools",
@@ -97,23 +97,28 @@ fn fixture_menu(target_kind: &NativeMenuTargetKind) -> Vec<ProviderNativeMenuIte
                 data_url: "data:image/png;base64,RkFLRQ==".to_string(),
                 alt: Some("Fixture icon".to_string()),
             }),
-            ..fake_action(
-                "fixture-open-terminal",
-                "Open in Fixture Terminal",
-                "openinfixtureterminal",
-                "fake.openTerminal",
-            )
+            ..fake_action(FakeAction {
+                id: "fixture-open-terminal",
+                label: "Open in Fixture Terminal",
+                verb: "openinfixtureterminal",
+                action_id: "fake.openTerminal",
+            })
         },
         canonical_fake_action(
             NativeMenuCanonicalActionKind::Copy,
-            fake_action("fixture-copy-duplicate", "Copy", "copy", "fake.copy"),
+            fake_action(FakeAction {
+                id: "fixture-copy-duplicate",
+                label: "Copy",
+                verb: "copy",
+                action_id: "fake.copy",
+            }),
         ),
-        fake_action(
-            "fixture-properties-duplicate",
-            "Properties",
-            "properties",
-            "fake.properties",
-        ),
+        fake_action(FakeAction {
+            id: "fixture-properties-duplicate",
+            label: "Properties",
+            verb: "properties",
+            action_id: "fake.properties",
+        }),
     ]
 }
 
@@ -121,32 +126,45 @@ fn archive_tool_items() -> Vec<ProviderNativeMenuItem> {
     vec![
         canonical_fake_action(
             NativeMenuCanonicalActionKind::Compress,
-            fake_action(
-                "fixture-compress",
-                "Add to fixture.zip",
-                "compress",
-                "fake.compress",
-            ),
+            fake_action(FakeAction {
+                id: "fixture-compress",
+                label: "Add to fixture.zip",
+                verb: "compress",
+                action_id: "fake.compress",
+            }),
         ),
         canonical_fake_action(
             NativeMenuCanonicalActionKind::Extract,
-            fake_action(
-                "fixture-extract",
-                "Extract with Fixture",
-                "extract",
-                "fake.extract",
-            ),
+            fake_action(FakeAction {
+                id: "fixture-extract",
+                label: "Extract with Fixture",
+                verb: "extract",
+                action_id: "fake.extract",
+            }),
         ),
-        fake_action(
-            "fixture-share-with-team",
-            "Share with team",
-            "sharewithteam",
-            "fake.shareWithTeam",
-        ),
+        fake_action(FakeAction {
+            id: "fixture-share-with-team",
+            label: "Share with team",
+            verb: "sharewithteam",
+            action_id: "fake.shareWithTeam",
+        }),
     ]
 }
 
-fn fake_action(id: &str, label: &str, verb: &str, action_id: &str) -> ProviderNativeMenuItem {
+struct FakeAction<'text> {
+    id: &'text str,
+    label: &'text str,
+    verb: &'text str,
+    action_id: &'text str,
+}
+
+fn fake_action(action: FakeAction<'_>) -> ProviderNativeMenuItem {
+    let FakeAction {
+        id,
+        label,
+        verb,
+        action_id,
+    } = action;
     ProviderNativeMenuItem {
         id: id.to_string(),
         label: label.to_string(),

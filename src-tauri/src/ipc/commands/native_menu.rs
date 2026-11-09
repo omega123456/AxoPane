@@ -205,10 +205,9 @@ pub async fn set_default_application(
     executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
 ) -> Result<MenuActionStatus, String> {
     executor
-        .latency_async_cancellable_with_deadline(
-            "app-picker-launch-services".into(),
-            crate::ipc::executor::Cancellation::default(),
-            SET_DEFAULT_APPLICATION_DEADLINE,
+        .latency_async_cancellable(
+            crate::ipc::executor::LatencyRequest::new("app-picker-launch-services".into())
+                .with_deadline(SET_DEFAULT_APPLICATION_DEADLINE),
             move |cancellation| async move {
                 Ok(app_picker::set_default_application_cancellable(payload, cancellation).await)
             },

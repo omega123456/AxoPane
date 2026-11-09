@@ -7,11 +7,25 @@ use std::path::{Path, PathBuf};
 
 use super::{manifest, TrashEntry};
 
+pub struct OriginalLocation {
+    pub original_path: String,
+    pub deleted_at: Option<i64>,
+}
+
+impl From<manifest::ManifestEntry> for OriginalLocation {
+    fn from(entry: manifest::ManifestEntry) -> Self {
+        Self {
+            original_path: entry.original_path,
+            deleted_at: Some(entry.deleted_at),
+        }
+    }
+}
+
 /// Original-location bookkeeping loaded once per trash command.
 pub trait TrashIndex: Sized {
     fn load(trash_dir: &Path) -> Result<Self, String>;
     /// The original path of a trashed item and, when recorded, when it was trashed.
-    fn original_location(&self, id: &str) -> Option<(String, Option<i64>)>;
+    fn original_location(&self, id: &str) -> Option<OriginalLocation>;
     /// When the index has no deletion time, the backend's best guess from metadata.
     fn fallback_deleted_at(metadata: &fs::Metadata) -> Option<i64>;
     fn manifest(&mut self) -> &mut manifest::Transaction;
@@ -23,9 +37,8 @@ impl TrashIndex for manifest::Transaction {
         manifest::Transaction::load(trash_dir)
     }
 
-    fn original_location(&self, id: &str) -> Option<(String, Option<i64>)> {
-        self.lookup(id)
-            .map(|(original_path, deleted_at)| (original_path, Some(deleted_at)))
+    fn original_location(&self, id: &str) -> Option<OriginalLocation> {
+        self.lookup(id).map(OriginalLocation::from)
     }
 
     fn fallback_deleted_at(_metadata: &fs::Metadata) -> Option<i64> {
@@ -76,17 +89,16 @@ fn trash_entry<Index: TrashIndex>(entry: &fs::DirEntry, index: &Index) -> Option
         .ok()?;
     let metadata = readable_metadata(&path);
     let is_dir = file_type.is_dir();
-    let (original_path, deleted_at) = match index.original_location(name) {
-        Some((original_path, recorded_deleted_at)) => (
-            Some(original_path),
-            recorded_deleted_at.or_else(|| metadata.as_ref().and_then(Index::fallback_deleted_at)),
-        ),
-        None => (None, None),
-    };
+    let original_location = index.original_location(name);
+    let deleted_at = original_location.as_ref().and_then(|location| {
+        location
+            .deleted_at
+            .or_else(|| metadata.as_ref().and_then(Index::fallback_deleted_at))
+    });
     Some(TrashEntry {
         id: name.to_string(),
         name: name.to_string(),
-        original_path,
+        original_path: original_location.map(|location| location.original_path),
         size_bytes: metadata
             .as_ref()
             .and_then(|metadata| (!is_dir).then_some(metadata.len())),
@@ -123,7 +135,7 @@ pub fn restore_from_trash_in<Index: TrashIndex>(
 ) -> Result<(), String> {
     let mut index = Index::load(trash_dir)?;
     for id in ids {
-        let Some((original_path, _)) = index.original_location(id) else {
+        let Some(OriginalLocation { original_path, .. }) = index.original_location(id) else {
             return Err(format!(
                 "'{id}' has no known original location and cannot be restored"
             ));

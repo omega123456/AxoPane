@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use super::execution::WorkerContext;
 use super::measure::measure_path_size;
 use super::{
-    LockOperation, OpItem, OpKind, OpState, ProgressEmitter, ETA_STABILIZATION_SAMPLES,
-    PROGRESS_EMIT_INTERVAL,
+    CurrentFileProgress, LockOperation, OpItem, OpKind, OpState, ProgressEmitter, RateSample,
+    ETA_STABILIZATION_SAMPLES, PROGRESS_EMIT_INTERVAL,
 };
 
 /// Coalesces the flood of per-chunk / per-member progress emissions produced
@@ -116,14 +116,9 @@ pub(super) fn measure_totals_up_front(
 
 pub(super) fn advance_item(context: &WorkerContext<'_>, _item: &OpItem) {
     let mut operation = context.shared_operation.lock_operation();
-    operation.completed_items += 1;
+    operation.runtime.completed_items += 1;
     operation.clear_current_file();
-    refresh_rate_locked_with_now(
-        &mut operation,
-        context.start,
-        context.rate_window,
-        (context.instant_now)(),
-    );
+    refresh_rate_locked_with_now(&mut operation, context.rate_clock());
 
     emit_operation_progress(context.progress, &operation);
 }
@@ -133,7 +128,7 @@ pub(super) fn count_skipped_bytes(context: &WorkerContext<'_>, skipped_bytes: u6
         return;
     }
     let mut operation = context.shared_operation.lock_operation();
-    operation.copied_bytes = operation.copied_bytes.saturating_add(skipped_bytes);
+    operation.runtime.copied_bytes = operation.runtime.copied_bytes.saturating_add(skipped_bytes);
     emit_operation_progress(context.progress, &operation);
 }
 
@@ -143,13 +138,12 @@ pub(super) fn report_chunk_progress(
     throttle: Option<&mut TransferThrottle>,
 ) {
     let mut operation = context.shared_operation.lock_operation();
-    operation.current_file_copied = operation.current_file_copied.saturating_add(copied_delta);
-    refresh_rate_locked_with_now(
-        &mut operation,
-        context.start,
-        context.rate_window,
-        (context.instant_now)(),
-    );
+    operation.runtime.current_file.copied = operation
+        .runtime
+        .current_file
+        .copied
+        .saturating_add(copied_delta);
+    refresh_rate_locked_with_now(&mut operation, context.rate_clock());
     maybe_emit_transfer(context, &operation, throttle);
 }
 
@@ -166,20 +160,30 @@ pub(super) fn add_discovered_total(
     maybe_emit_transfer(context, &operation, throttle);
 }
 
-pub(super) fn begin_file_progress(
-    context: &WorkerContext<'_>,
-    source: &Path,
-    total_bytes: u64,
-    throttle: Option<&mut TransferThrottle>,
-) {
-    let mut operation = context.shared_operation.lock_operation();
-    operation.current_file_name = source
+pub(super) struct FileProgressStart<'path> {
+    pub source: &'path Path,
+    pub total_bytes: u64,
+}
+
+fn current_file_label(source: &Path) -> String {
+    source
         .file_name()
         .and_then(|name| name.to_str())
         .map(ToOwned::to_owned)
-        .or_else(|| Some(source.to_string_lossy().into_owned()));
-    operation.current_file_copied = 0;
-    operation.current_file_total = total_bytes;
+        .unwrap_or_else(|| source.to_string_lossy().into_owned())
+}
+
+pub(super) fn begin_file_progress(
+    context: &WorkerContext<'_>,
+    file: FileProgressStart<'_>,
+    throttle: Option<&mut TransferThrottle>,
+) {
+    let mut operation = context.shared_operation.lock_operation();
+    operation.runtime.current_file = CurrentFileProgress {
+        name: Some(current_file_label(file.source)),
+        copied: 0,
+        total: file.total_bytes,
+    };
     maybe_emit_transfer(context, &operation, throttle);
 }
 
@@ -188,47 +192,56 @@ pub(super) fn finish_file_progress(
     throttle: Option<&mut TransferThrottle>,
 ) {
     let mut operation = context.shared_operation.lock_operation();
-    operation.copied_bytes = operation
+    operation.runtime.copied_bytes = operation
+        .runtime
         .copied_bytes
-        .saturating_add(operation.current_file_copied);
+        .saturating_add(operation.runtime.current_file.copied);
     operation.clear_current_file();
-    refresh_rate_locked_with_now(
-        &mut operation,
-        context.start,
-        context.rate_window,
-        (context.instant_now)(),
-    );
+    refresh_rate_locked_with_now(&mut operation, context.rate_clock());
     maybe_emit_transfer(context, &operation, throttle);
 }
 
-pub(super) fn refresh_rate_locked_with_now(
-    operation: &mut OpState,
-    start: Instant,
-    rate_window: Duration,
-    now: Instant,
-) {
-    operation.sample_count += 1;
+pub(super) struct RateClock {
+    pub start: Instant,
+    pub rate_window: Duration,
+    pub now: Instant,
+}
+
+pub(super) fn refresh_rate_locked_with_now(operation: &mut OpState, clock: RateClock) {
+    let RateClock {
+        start,
+        rate_window,
+        now,
+    } = clock;
+    operation.runtime.sample_count += 1;
     let visible_copied = operation.visible_copied_bytes();
-    let last_sample_at = operation.rate_sample_at.unwrap_or(start);
-    let last_sample_bytes = operation.rate_sample_bytes;
+    let last_sample = operation.runtime.rate_sample.unwrap_or(RateSample {
+        at: start,
+        bytes: 0,
+    });
+    let last_sample_at = last_sample.at;
+    let last_sample_bytes = last_sample.bytes;
     let should_recompute = rate_window.is_zero()
-        || operation.bytes_per_second == 0
+        || operation.runtime.bytes_per_second == 0
         || now.duration_since(last_sample_at) >= rate_window;
 
     if should_recompute {
         let sample_elapsed = now.duration_since(last_sample_at).as_secs_f64().max(0.001);
         let sample_bytes = visible_copied.saturating_sub(last_sample_bytes);
-        operation.bytes_per_second = (sample_bytes as f64 / sample_elapsed) as u64;
-        operation.rate_sample_at = Some(now);
-        operation.rate_sample_bytes = visible_copied;
+        operation.runtime.bytes_per_second = (sample_bytes as f64 / sample_elapsed) as u64;
+        operation.runtime.rate_sample = Some(RateSample {
+            at: now,
+            bytes: visible_copied,
+        });
     }
 
     let stable_elapsed = start.elapsed().as_secs_f64().max(0.001);
     let stable_rate = (visible_copied as f64 / stable_elapsed) as u64;
-    let rate_is_stable = operation.sample_count >= ETA_STABILIZATION_SAMPLES && stable_rate > 0;
+    let rate_is_stable =
+        operation.runtime.sample_count >= ETA_STABILIZATION_SAMPLES && stable_rate > 0;
     if rate_is_stable {
         let remaining = operation.total_bytes.saturating_sub(visible_copied);
-        operation.eta_seconds = Some(remaining / stable_rate.max(1));
+        operation.runtime.eta_seconds = Some(remaining / stable_rate.max(1));
     }
 }
 pub(super) fn maybe_emit_delete(context: &WorkerContext<'_>, throttle: &mut TransferThrottle) {

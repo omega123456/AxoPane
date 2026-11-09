@@ -10,41 +10,50 @@ use time::{Date, OffsetDateTime};
 
 use super::{
     current_local_date, current_local_datetime, daily_log_file_name, format_log_line,
-    format_timestamp, prune_old_logs, LogLevel, RETENTION_DAYS,
+    format_timestamp, prune_old_logs, LogLevel, LogMessage, RETENTION_DAYS,
 };
+
+struct OpenLogFile {
+    date: Date,
+    file: File,
+}
 
 /// Append-only writer that keeps one open file per calendar day and rolls over
 /// (pruning stale files) when the day changes.
 struct DailyWriter {
-    open: Option<(Date, File)>,
+    dir: PathBuf,
+    open: Option<OpenLogFile>,
 }
 
 impl DailyWriter {
-    fn new() -> Self {
-        Self { open: None }
+    fn new(dir: PathBuf) -> Self {
+        Self { dir, open: None }
     }
 
-    fn write_line(&mut self, dir: &Path, date: Date, line: &str) -> std::io::Result<()> {
-        let needs_roll = !matches!(self.open, Some((open_date, _)) if open_date == date);
-        if needs_roll {
-            std::fs::create_dir_all(dir)?;
+    fn is_open_for(&self, date: Date) -> bool {
+        self.open.as_ref().is_some_and(|open| open.date == date)
+    }
+
+    fn write_line(&mut self, date: Date, line: &str) -> std::io::Result<()> {
+        if !self.is_open_for(date) {
+            std::fs::create_dir_all(&self.dir)?;
             let file = OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(dir.join(daily_log_file_name(date)))?;
-            self.open = Some((date, file));
-            prune_old_logs(dir, date, RETENTION_DAYS);
+                .open(self.dir.join(daily_log_file_name(date)))?;
+            self.open = Some(OpenLogFile { date, file });
+            prune_old_logs(&self.dir, date, RETENTION_DAYS);
         }
-        if let Some((_, file)) = self.open.as_mut() {
-            writeln!(file, "{line}")?;
-            file.flush()?;
+        if let Some(open) = self.open.as_mut() {
+            writeln!(open.file, "{line}")?;
+            open.file.flush()?;
         }
         Ok(())
     }
 
     fn flush(&mut self) {
-        if let Some((_, file)) = self.open.as_mut() {
-            let _ = file.flush();
+        if let Some(open) = self.open.as_mut() {
+            let _ = open.file.flush();
         }
     }
 }
@@ -52,7 +61,6 @@ impl DailyWriter {
 /// A `log::Log` sink that writes to a daily file and to stdout, with a
 /// runtime-adjustable minimum level.
 pub struct FileLogger {
-    dir: PathBuf,
     level: AtomicU8,
     writer: Mutex<DailyWriter>,
 }
@@ -65,9 +73,8 @@ impl FileLogger {
         std::fs::create_dir_all(dir)?;
         prune_old_logs(dir, current_local_date(), RETENTION_DAYS);
         Ok(Arc::new(Self {
-            dir: dir.to_path_buf(),
             level: AtomicU8::new(level as u8),
-            writer: Mutex::new(DailyWriter::new()),
+            writer: Mutex::new(DailyWriter::new(dir.to_path_buf())),
         }))
     }
 
@@ -90,22 +97,23 @@ impl FileLogger {
 
     /// Write a single entry with an injected timestamp (the deterministic core
     /// used by tests and by [`FileLogger::write_record`]).
-    pub fn write_entry(&self, at: OffsetDateTime, level: LogLevel, target: &str, message: &str) {
-        let line = format_log_line(&format_timestamp(at), level, target, message);
+    pub fn write_entry(&self, at: OffsetDateTime, record: LogMessage<'_>) {
+        let line = format_log_line(&format_timestamp(at), record);
         if let Ok(mut writer) = self.writer.lock() {
-            let _ = writer.write_line(&self.dir, at.date(), &line);
+            let _ = writer.write_line(at.date(), &line);
         }
         println!("{line}");
     }
 
     /// Extract and write a `log::Record` using the wall clock.
     pub fn write_record(&self, record: &log::Record<'_>) {
-        self.write_entry(
-            current_local_datetime(),
-            LogLevel::from_log_level(record.level()),
-            record.target(),
-            &record.args().to_string(),
-        );
+        let message = record.args().to_string();
+        let entry = LogMessage {
+            level: LogLevel::from_log_level(record.level()),
+            target: record.target(),
+            message: &message,
+        };
+        self.write_entry(current_local_datetime(), entry);
     }
 }
 

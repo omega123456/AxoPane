@@ -1,7 +1,7 @@
 import type { DirectoryEntry, DirPatchEvent, SortKey } from '@/lib/types/ipc'
 import type { PaneId } from '@/types/pane'
 import { pathsMatch } from '@/lib/path-compare'
-import { insertSorted, sortEntries } from '@/stores/panes/entry-sort'
+import { insertSorted, sortEntries, sortSpecFor, type SortSpec } from '@/stores/panes/entry-sort'
 import { hydrateEntryIcon } from '@/stores/panes/icon-requests'
 import { itemCountContext, withoutPatchedItemCountRequests } from '@/stores/panes/item-counts'
 import {
@@ -9,7 +9,6 @@ import {
   withPane,
   type PaneState,
   type PanesData,
-  type SizeStates,
   type TreeNodes,
 } from '@/stores/panes/pane-state'
 import { applyTreeDirPatch } from '@/stores/panes/tree-dir-patch'
@@ -24,8 +23,7 @@ export type DirPatchOutcome =
 type PatchMerge = (
   kept: DirectoryEntry[],
   inserted: DirectoryEntry[],
-  pane: PaneState,
-  sizeStates: SizeStates,
+  spec: SortSpec,
 ) => DirectoryEntry[]
 
 const RIGHT_PANE_TAB_PREFIX = 'right'
@@ -67,16 +65,15 @@ function patchInserts(event: DirPatchEvent, pane: PaneState, showHiddenFiles: bo
   return Array.from(inserts.values())
 }
 
-const insertIntoSortedEntries: PatchMerge = (kept, inserted, pane, sizeStates) => {
+const insertIntoSortedEntries: PatchMerge = (kept, inserted, spec) => {
   for (const entry of inserted) {
-    insertSorted(kept, entry, pane.sortKey, pane.sortDirection, sizeStates)
+    insertSorted(kept, entry, spec)
   }
   return kept
 }
 
 const patchMergeBySortKey: Partial<Record<SortKey, PatchMerge>> = {
-  size: (kept, inserted, pane, sizeStates) =>
-    sortEntries([...kept, ...inserted], pane.sortKey, pane.sortDirection, sizeStates),
+  size: (kept, inserted, spec) => sortEntries([...kept, ...inserted], spec),
   items: (kept, inserted) => [...kept, ...inserted],
 }
 
@@ -98,7 +95,7 @@ export function patchEntries(
     hydrateEntryIcon(entry, state.resolvedIconPaths),
   )
   const merge = patchMergeBySortKey[pane.sortKey] ?? insertIntoSortedEntries
-  return merge(kept, inserted, pane, state.sizeStates)
+  return merge(kept, inserted, sortSpecFor(pane, state.sizeStates))
 }
 
 export function treeNodesUpdate(treeNodes: TreeNodes | null) {
@@ -123,12 +120,17 @@ function itemsSortedPatchOutcome(
   }
 }
 
+export type DirPatchTarget = {
+  paneId: PaneId
+  activeTabId: string
+}
+
 export function dirPatchOutcome(
   state: PanesData,
-  paneId: PaneId,
   event: DirPatchEvent,
-  activeTabId: string,
+  target: DirPatchTarget,
 ): DirPatchOutcome {
+  const { paneId, activeTabId } = target
   const pane = state.panes[paneId]
   if (pane.typing) {
     return { kind: 'skipped', reason: 'typing' }

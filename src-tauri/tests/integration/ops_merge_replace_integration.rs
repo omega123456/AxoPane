@@ -6,8 +6,8 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use file_explorer_lib::ops::{
-    process_item_for_tests, ConflictResolution, OpItem, OpKind, OpProgress, OpState, OpStatus,
-    WorkerContext,
+    process_item_for_tests, ConflictResolution, CurrentFileProgress, OpItem, OpKind, OpProgress,
+    OpRuntime, OpState, OpStatus, WorkerContext,
 };
 
 fn replace_all_state(kind: OpKind, destination_dir: &Path, source: &Path) -> OpState {
@@ -23,26 +23,29 @@ fn replace_all_state(kind: OpKind, destination_dir: &Path, source: &Path) -> OpS
         volumes: HashSet::new(),
         status: OpStatus::Active,
         total_items: 1,
-        completed_items: 0,
         total_bytes: 0,
-        copied_bytes: 0,
-        bytes_per_second: 0,
-        eta_seconds: None,
-        sample_count: 0,
-        rate_sample_at: None,
-        rate_sample_bytes: 0,
-        current_file_name: None,
-        current_file_copied: 0,
-        current_file_total: 0,
-        error_message: None,
-        completed_at: None,
         cancel: Arc::new(AtomicBool::new(false)),
         pause: Arc::new(AtomicBool::new(false)),
         skip: Arc::new(AtomicBool::new(false)),
-        conflict: None,
-        conflict_resolution: None,
-        apply_to_all: Some(ConflictResolution::Replace),
-        rename_to: None,
+        runtime: OpRuntime {
+            completed_items: 0,
+            copied_bytes: 0,
+            bytes_per_second: 0,
+            eta_seconds: None,
+            sample_count: 0,
+            rate_sample: None,
+            current_file: CurrentFileProgress {
+                name: None,
+                copied: 0,
+                total: 0,
+            },
+            error_message: None,
+            completed_at: None,
+            conflict: None,
+            conflict_resolution: None,
+            apply_to_all: Some(ConflictResolution::Replace),
+            rename_to: None,
+        },
     }
 }
 
@@ -68,7 +71,10 @@ fn run(state: OpState) -> (Option<String>, u64) {
     let item = shared_operation.lock().unwrap().items[0].clone();
     process_item_for_tests(&context, &item, None);
     let guard = shared_operation.lock().unwrap();
-    (guard.error_message.clone(), guard.completed_items)
+    (
+        guard.runtime.error_message.clone(),
+        guard.runtime.completed_items,
+    )
 }
 
 fn write(path: &Path, contents: &str) {

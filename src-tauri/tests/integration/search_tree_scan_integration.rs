@@ -8,9 +8,11 @@ use file_explorer_lib::search::path_style::PathStyle;
 use file_explorer_lib::search::query::{parse, ParsedQuery};
 use file_explorer_lib::search::results::{rank_candidates, CANDIDATE_CAP};
 use file_explorer_lib::search::source::FolderTreeSource;
-use file_explorer_lib::search::tree_scan::{candidates, candidates_in_chunks, SLOTS_PER_READ};
+use file_explorer_lib::search::tree_scan::{
+    candidates, candidates_in_chunks, TreeSearchRun, SLOTS_PER_READ,
+};
 use file_explorer_lib::search::{CandidateBatch, Control, SearchError, SearchOptions, SearchScope};
-use file_explorer_lib::size::index::tree::FolderSizeTree;
+use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
 
 /// A folder tree behind the source trait, counting reads.
 struct Source {
@@ -69,7 +71,7 @@ fn build(folders: &[&str]) -> FolderSizeTree {
     assert!(tree.add_root(Path::new("/")));
     for (parent, names) in &children {
         assert!(
-            tree.merge_record(Path::new(parent), 0, names, false),
+            tree.merge_record(Path::new(parent), DirectoryListing::scanned(0, names)),
             "{parent}"
         );
     }
@@ -105,7 +107,15 @@ fn run(source: &Source, raw: &str, options: &SearchOptions) -> CandidateBatch {
         cancelled: &never,
         expired: &never,
     };
-    candidates(source, &parsed(raw), options, &control).expect("batch")
+    candidates(
+        &TreeSearchRun {
+            source,
+            options,
+            control: &control,
+        },
+        &parsed(raw),
+    )
+    .expect("batch")
 }
 
 fn sorted(batch: &CandidateBatch) -> Vec<&str> {
@@ -227,8 +237,16 @@ fn scans_read_in_chunks_and_honour_cancellation_and_budget() {
         cancelled: &never,
         expired: &never,
     };
-    let chunked =
-        candidates_in_chunks(&source, &parsed("inv"), &VISIBLE, &control, 4).expect("batch");
+    let chunked = candidates_in_chunks(
+        &TreeSearchRun {
+            source: &source,
+            options: &VISIBLE,
+            control: &control,
+        },
+        &parsed("inv"),
+        4,
+    )
+    .expect("batch");
     assert_eq!(chunked.candidates.len(), 5);
     assert!(source.reads() > 2);
 
@@ -238,7 +256,14 @@ fn scans_read_in_chunks_and_honour_cancellation_and_budget() {
         expired: &never,
     };
     assert_eq!(
-        candidates(&source, &parsed("inv"), &VISIBLE, &cancelled),
+        candidates(
+            &TreeSearchRun {
+                source: &source,
+                options: &VISIBLE,
+                control: &cancelled
+            },
+            &parsed("inv")
+        ),
         Err(SearchError::Cancelled)
     );
 
@@ -251,8 +276,16 @@ fn scans_read_in_chunks_and_honour_cancellation_and_budget() {
         cancelled: &never,
         expired: &after_one,
     };
-    let partial =
-        candidates_in_chunks(&source, &parsed("inv"), &VISIBLE, &expiring, 1).expect("partial");
+    let partial = candidates_in_chunks(
+        &TreeSearchRun {
+            source: &source,
+            options: &VISIBLE,
+            control: &expiring,
+        },
+        &parsed("inv"),
+        1,
+    )
+    .expect("partial");
     assert!(partial.truncated);
 }
 
@@ -266,7 +299,10 @@ fn freed_slots_are_skipped_and_reused_slots_reported() {
         .any(|path| path.contains("Documents")));
     {
         let mut tree = source.tree.lock().unwrap();
-        assert!(tree.merge_record(Path::new("/Users/alex"), 0, &["Invoices", "Ledger"], false));
+        assert!(tree.merge_record(
+            Path::new("/Users/alex"),
+            DirectoryListing::scanned(0, &["Invoices", "Ledger"])
+        ));
     }
     assert!(sorted(&run(&source, "ledger", &VISIBLE)).contains(&"/Users/alex/Ledger"));
 }
@@ -280,11 +316,25 @@ fn read_errors_propagate() {
         expired: &never,
     };
     assert_eq!(
-        candidates(&source, &parsed("inv"), &VISIBLE, &control),
+        candidates(
+            &TreeSearchRun {
+                source: &source,
+                options: &VISIBLE,
+                control: &control
+            },
+            &parsed("inv")
+        ),
         Err(SearchError::NotReady)
     );
     assert_eq!(
-        candidates(&source, &parsed("~/"), &VISIBLE, &control),
+        candidates(
+            &TreeSearchRun {
+                source: &source,
+                options: &VISIBLE,
+                control: &control
+            },
+            &parsed("~/")
+        ),
         Err(SearchError::NotReady)
     );
 }
@@ -302,10 +352,17 @@ fn a_query_with_nothing_to_match_finds_nothing() {
         cancelled: &never,
         expired: &never,
     };
-    assert!(candidates(&source, &empty, &VISIBLE, &control)
-        .expect("batch")
-        .candidates
-        .is_empty());
+    assert!(candidates(
+        &TreeSearchRun {
+            source: &source,
+            options: &VISIBLE,
+            control: &control
+        },
+        &empty
+    )
+    .expect("batch")
+    .candidates
+    .is_empty());
 }
 
 fn bulk(count: usize, exact: usize) -> Source {
@@ -314,8 +371,8 @@ fn bulk(count: usize, exact: usize) -> Source {
     names.push("inv".to_owned());
     let mut tree = FolderSizeTree::default();
     assert!(tree.add_root(Path::new("/")));
-    assert!(tree.merge_record(Path::new("/"), 0, &["bulk"], false));
-    assert!(tree.merge_record(Path::new("/bulk"), 0, &names, false));
+    assert!(tree.merge_record(Path::new("/"), DirectoryListing::scanned(0, &["bulk"])));
+    assert!(tree.merge_record(Path::new("/bulk"), DirectoryListing::scanned(0, &names)));
     Source::from_tree(tree)
 }
 
@@ -327,8 +384,16 @@ fn broad_scans_keep_the_best_tiers_up_to_the_cap() {
     };
     for count in [2 * CANDIDATE_CAP + 500, CANDIDATE_CAP + 500] {
         let source = bulk(count, 0);
-        let batch = candidates_in_chunks(&source, &parsed("inv"), &VISIBLE, &control, 1_000)
-            .expect("batch");
+        let batch = candidates_in_chunks(
+            &TreeSearchRun {
+                source: &source,
+                options: &VISIBLE,
+                control: &control,
+            },
+            &parsed("inv"),
+            1_000,
+        )
+        .expect("batch");
         assert!(batch.truncated, "{count}");
         assert_eq!(batch.candidates.len(), CANDIDATE_CAP);
         assert!(

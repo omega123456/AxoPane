@@ -118,12 +118,10 @@ type FlattenContext = {
 function volumeRows(volume: VolumeInfo, category: string, context: FlattenContext) {
   const nestedVolumeRoots = new Set(context.volumeRootKeys)
   nestedVolumeRoots.delete(volume.mountRoot.toLowerCase())
-  return flattenVisibleTree(
-    context.treeNodes,
-    volume.mountRoot,
-    nestedVolumeRoots,
-    context.fold,
-  ).map((row) => toFlatRow(row, volume, category))
+  return flattenVisibleTree(context.treeNodes, volume.mountRoot, {
+    excludedRootPaths: nestedVolumeRoots,
+    fold: context.fold,
+  }).map((row) => toFlatRow(row, volume, category))
 }
 
 function groupRows(group: VolumeGroup, context: FlattenContext): TreeFlatRow[] {
@@ -174,12 +172,17 @@ function rowOffsets(rows: TreeFlatRow[]) {
  * active path), with the trash row appended after the `fixed` group.
  * Favourites live in their own panel above the tree, not in this model.
  */
+export type TreeFlatOptions = {
+  fold?: TreeFoldState
+  platform?: PlatformOs
+}
+
 export function buildTreeFlatModel(
   treeNodes: Record<string, TreeNodeState>,
   volumes: VolumeInfo[],
-  fold: TreeFoldState = EMPTY_TREE_FOLD,
-  platform: PlatformOs = 'windows',
+  options: TreeFlatOptions = {},
 ): TreeFlatModel {
+  const { fold = EMPTY_TREE_FOLD, platform = 'windows' } = options
   const context: FlattenContext = {
     treeNodes,
     volumeRootKeys: new Set(volumes.map((volume) => volume.mountRoot.toLowerCase())),

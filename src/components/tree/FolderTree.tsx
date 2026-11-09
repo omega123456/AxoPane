@@ -101,7 +101,7 @@ function useTreeModel(activePath: string) {
     [stickyChain, treeFold],
   )
   const model = useMemo(
-    () => buildTreeFlatModel(treeNodes, volumes, fold, platform),
+    () => buildTreeFlatModel(treeNodes, volumes, { fold, platform }),
     [treeNodes, volumes, fold, platform],
   )
   const pinnedChain = useMemo(
@@ -171,13 +171,15 @@ function useRevealActiveFolder(
  * folder rows pinned beneath it), and `top` is in viewport space so it never
  * lags the native scroll.
  */
-function pinnedRowsAt(
-  pinnedChain: string[],
-  indexByPath: Map<string, number>,
-  offsets: number[],
-  rows: TreeFlatRow[],
-  scrollTop: number,
-): PinnedRow[] {
+type PinnedRowLayout = {
+  pinnedChain: string[]
+  indexByPath: Map<string, number>
+  offsets: number[]
+  rows: TreeFlatRow[]
+}
+
+function pinnedRowsAt(layout: PinnedRowLayout, scrollTop: number): PinnedRow[] {
+  const { pinnedChain, indexByPath, offsets, rows } = layout
   const pinned: PinnedRow[] = []
   let slotTop = 0
   pinnedChain.forEach((path, chainIndex) => {
@@ -380,7 +382,7 @@ export function FolderTree() {
   )
   useRevealActiveFolder(activePath, indexByPath, scrollToIndex)
   const pinnedRows = useMemo(
-    () => pinnedRowsAt(pinnedChain, indexByPath, offsets, rows, scrollTop),
+    () => pinnedRowsAt({ pinnedChain, indexByPath, offsets, rows }, scrollTop),
     [pinnedChain, indexByPath, offsets, rows, scrollTop],
   )
 

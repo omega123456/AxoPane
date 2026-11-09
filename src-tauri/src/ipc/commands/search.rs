@@ -1,4 +1,4 @@
-use crate::search::service::SearchService;
+use crate::search::service::{RunTicket, SearchService};
 use std::sync::Arc;
 
 use crate::ipc::types::{SearchPage, SearchPageRequest, SearchQueryRequest, SearchRejection};
@@ -16,11 +16,16 @@ pub async fn search_query(
     let ticket = service.begin();
     let cancellation = ticket.cancellation.clone();
     executor
-        .latency_cancellable_with_deadline(
-            "search".to_string(),
-            cancellation,
-            crate::search::service::SEARCH_DEADLINE,
-            move |cancel| Ok(service.run(ticket, &payload, &|| cancel.is_cancelled())),
+        .latency_cancellable(
+            crate::ipc::executor::LatencyRequest::cancellable("search".to_string(), cancellation)
+                .with_deadline(crate::search::service::SEARCH_DEADLINE),
+            move |cancel| {
+                let run_ticket = RunTicket {
+                    ticket,
+                    cancelled: &|| cancel.is_cancelled(),
+                };
+                Ok(service.run(run_ticket, &payload))
+            },
         )
         .await
         .map_err(SearchRejection::from_executor)?
@@ -32,8 +37,11 @@ pub fn search_query(
     payload: SearchQueryRequest,
     search: State<'_, Arc<SearchService>>,
 ) -> Result<SearchPage, SearchRejection> {
-    let ticket = search.begin();
-    search.run(ticket, &payload, &|| false)
+    let run_ticket = RunTicket {
+        ticket: search.begin(),
+        cancelled: &|| false,
+    };
+    search.run(run_ticket, &payload)
 }
 
 /// Serves another page of the latest query's results.

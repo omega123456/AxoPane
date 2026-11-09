@@ -20,7 +20,9 @@ use objc2_foundation::{
 };
 
 use super::super::persist::ChangeFlags;
-use super::{EventSink, IndexPlatform, PowerSignal, PowerSink, RawEvent, StreamHandle};
+use super::{
+    EventSink, IndexPlatform, PowerSignal, PowerSink, RawEvent, StreamHandle, StreamRequest,
+};
 
 const TCC_DATABASE: &str = "/Library/Application Support/com.apple.TCC/TCC.db";
 /// Directory-level events, coalesced for about a second (D3).
@@ -102,33 +104,28 @@ impl IndexPlatform for MacPlatform {
         })
     }
 
-    fn start_stream(
-        &self,
-        roots: &[PathBuf],
-        excluded: &[PathBuf],
-        since: Option<u64>,
-        sink: EventSink,
-    ) -> Option<StreamHandle> {
-        let roots = roots.to_vec();
-        let excluded = excluded
-            .iter()
-            .take(MAX_EXCLUSIONS)
-            .cloned()
-            .collect::<Vec<_>>();
+    fn start_stream(&self, request: StreamRequest<'_>, sink: EventSink) -> Option<StreamHandle> {
+        let spec = StreamSpec {
+            roots: request.roots.to_vec(),
+            excluded: request
+                .excluded
+                .iter()
+                .take(MAX_EXCLUSIONS)
+                .cloned()
+                .collect(),
+            since: request.since,
+        };
         let (started_sender, started_receiver) = mpsc::channel();
         let stopped = Arc::new(AtomicBool::new(false));
         let thread_stopped = Arc::clone(&stopped);
         let thread = thread::Builder::new()
             .name("size-index-fsevents".to_string())
             .spawn(move || {
-                run_stream(
-                    &roots,
-                    &excluded,
-                    since,
-                    sink,
-                    &thread_stopped,
-                    started_sender,
-                )
+                let signals = StreamSignals {
+                    stopped: &thread_stopped,
+                    started: started_sender,
+                };
+                run_stream(&spec, sink, signals)
             })
             .ok()?;
         match started_receiver.recv() {
@@ -153,30 +150,26 @@ impl IndexPlatform for MacPlatform {
         let process = NSNotificationCenter::defaultCenter();
         // SAFETY: these are immutable framework-provided string constants.
         unsafe {
-            observe(
-                &workspace,
-                NSWorkspaceWillSleepNotification,
-                &sink,
-                Some(PowerSignal::WillSleep),
-            );
-            observe(
-                &workspace,
-                NSWorkspaceDidWakeNotification,
-                &sink,
-                Some(PowerSignal::DidWake),
-            );
-            observe(
-                &process,
-                NSProcessInfoPowerStateDidChangeNotification,
-                &sink,
-                None,
-            );
-            observe(
-                &process,
-                NSProcessInfoThermalStateDidChangeNotification,
-                &sink,
-                None,
-            );
+            let will_sleep = PowerObservation {
+                name: NSWorkspaceWillSleepNotification,
+                signal: Some(PowerSignal::WillSleep),
+            };
+            observe(&workspace, will_sleep, &sink);
+            let did_wake = PowerObservation {
+                name: NSWorkspaceDidWakeNotification,
+                signal: Some(PowerSignal::DidWake),
+            };
+            observe(&workspace, did_wake, &sink);
+            let power_state = PowerObservation {
+                name: NSProcessInfoPowerStateDidChangeNotification,
+                signal: None,
+            };
+            observe(&process, power_state, &sink);
+            let thermal_state = PowerObservation {
+                name: NSProcessInfoThermalStateDidChangeNotification,
+                signal: None,
+            };
+            observe(&process, thermal_state, &sink);
         }
         conditions()
     }
@@ -190,13 +183,15 @@ fn conditions() -> PowerSignal {
     }
 }
 
-/// Forwards `name` to `sink` as `signal`, or as fresh conditions.
-fn observe(
-    center: &NSNotificationCenter,
-    name: &NSNotificationName,
-    sink: &PowerSink,
+struct PowerObservation<'name> {
+    name: &'name NSNotificationName,
     signal: Option<PowerSignal>,
-) {
+}
+
+/// Forwards the observed notification to `sink` as its signal, or as fresh
+/// conditions.
+fn observe(center: &NSNotificationCenter, observation: PowerObservation<'_>, sink: &PowerSink) {
+    let PowerObservation { name, signal } = observation;
     let sink = Arc::clone(sink);
     let block = RcBlock::new(move |_note: NonNull<NSNotification>| {
         sink(signal.unwrap_or_else(conditions));
@@ -255,14 +250,25 @@ fn cf_paths(paths: &[PathBuf]) -> cf::CFMutableArrayRef {
     }
 }
 
-fn run_stream(
-    roots: &[PathBuf],
-    excluded: &[PathBuf],
+struct StreamSpec {
+    roots: Vec<PathBuf>,
+    excluded: Vec<PathBuf>,
     since: Option<u64>,
-    sink: EventSink,
-    stopped: &AtomicBool,
+}
+
+struct StreamSignals<'signals> {
+    stopped: &'signals AtomicBool,
     started: mpsc::Sender<Option<usize>>,
-) {
+}
+
+fn run_stream(spec: &StreamSpec, sink: EventSink, signals: StreamSignals<'_>) {
+    let StreamSpec {
+        roots,
+        excluded,
+        since,
+    } = spec;
+    let StreamSignals { stopped, started } = signals;
+    let since = *since;
     let sink = Box::into_raw(Box::new(sink));
     let context = fse::FSEventStreamContext {
         version: 0,

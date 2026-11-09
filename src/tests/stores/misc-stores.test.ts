@@ -342,7 +342,9 @@ describe('keymap-store', () => {
 
 describe('selection-store', () => {
   it('sets and clears a pane selection', () => {
-    useSelectionStore.getState().setSelection('left', ['a', 'b'], 'a', 'b')
+    useSelectionStore
+      .getState()
+      .setSelection('left', { selectedIds: ['a', 'b'], anchorId: 'a', focusedId: 'b' })
     expect(useSelectionStore.getState().selections.left.selectedIds).toEqual(['a', 'b'])
     clearSelectionForPane('left')
     expect(useSelectionStore.getState().selections.left.selectedIds).toEqual([])

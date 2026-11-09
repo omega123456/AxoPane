@@ -199,7 +199,11 @@ describe('FilePane internal drag-and-drop', () => {
       path: 'C:\\root',
       entries: [entry('Alpha'), entry('Beta'), entry('Target', true)],
     })
-    useSelectionStore.getState().setSelection('left', ['Alpha', 'Beta'], 'Alpha', 'Beta')
+    useSelectionStore.getState().setSelection('left', {
+      selectedIds: ['Alpha', 'Beta'],
+      anchorId: 'Alpha',
+      focusedId: 'Beta',
+    })
 
     render(<FilePane paneId="left" />)
     const pane = within(screen.getByLabelText('Left pane'))
@@ -261,7 +265,11 @@ describe('FilePane drag-out to other applications', () => {
 
   it('hands the whole selection to the OS when the grabbed row is part of it', async () => {
     seedPane('left', { path: 'C:\\root', entries: [entry('Alpha'), entry('Beta'), entry('Gamma')] })
-    useSelectionStore.getState().setSelection('left', ['Alpha', 'Gamma'], 'Alpha', 'Gamma')
+    useSelectionStore.getState().setSelection('left', {
+      selectedIds: ['Alpha', 'Gamma'],
+      anchorId: 'Alpha',
+      focusedId: 'Gamma',
+    })
 
     render(<FilePane paneId="left" />)
     const pane = within(screen.getByLabelText('Left pane'))

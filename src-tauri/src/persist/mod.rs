@@ -309,11 +309,15 @@ where
         let value: T = load_json_or_default(&path)?;
         let value = Arc::new(Mutex::new(value));
         let (flush_wake, flush_receiver) = bounded(1);
-        let worker_path = path.clone();
-        let worker_value = Arc::clone(&value);
+        let worker = FlushWorker {
+            receiver: flush_receiver,
+            debounce,
+            path: path.clone(),
+            value: Arc::clone(&value),
+        };
         thread::Builder::new()
             .name("persistence-flush".to_string())
-            .spawn(move || run_flush_worker(&flush_receiver, debounce, &worker_path, &worker_value))
+            .spawn(move || worker.run())
             .expect("failed to spawn persistence worker");
 
         Ok(Self {
@@ -452,28 +456,37 @@ fn replace_file_atomic(source: &Path, target: &Path) -> Result<(), PersistError>
 /// One worker per durable store, with a one-message wake queue. A burst
 /// resets the debounce window without creating threads or retaining an
 /// unbounded series of writes.
-fn run_flush_worker<T: Serialize + Clone>(
-    flush_receiver: &Receiver<()>,
+struct FlushWorker<T> {
+    receiver: Receiver<()>,
     debounce: Duration,
-    path: &Path,
-    value: &Mutex<T>,
-) {
-    while flush_receiver.recv().is_ok() {
-        if !wait_for_quiet_period(flush_receiver, debounce) {
-            return;
-        }
-        let snapshot = value.lock().expect("persist store mutex poisoned").clone();
-        let _ = write_json_atomic(path, &snapshot);
-    }
+    path: PathBuf,
+    value: Arc<Mutex<T>>,
 }
 
-/// Returns `false` once the store has been dropped.
-fn wait_for_quiet_period(flush_receiver: &Receiver<()>, debounce: Duration) -> bool {
-    loop {
-        match flush_receiver.recv_timeout(debounce) {
-            Ok(()) => continue,
-            Err(RecvTimeoutError::Timeout) => return true,
-            Err(RecvTimeoutError::Disconnected) => return false,
+impl<T: Serialize + Clone> FlushWorker<T> {
+    fn run(self) {
+        while self.flush_is_due() {
+            let snapshot = self
+                .value
+                .lock()
+                .expect("persist store mutex poisoned")
+                .clone();
+            let _ = write_json_atomic(&self.path, &snapshot);
+        }
+    }
+
+    fn flush_is_due(&self) -> bool {
+        self.receiver.recv().is_ok() && self.wait_for_quiet_period()
+    }
+
+    /// Returns `false` once the store has been dropped.
+    fn wait_for_quiet_period(&self) -> bool {
+        loop {
+            match self.receiver.recv_timeout(self.debounce) {
+                Ok(()) => continue,
+                Err(RecvTimeoutError::Timeout) => return true,
+                Err(RecvTimeoutError::Disconnected) => return false,
+            }
         }
     }
 }

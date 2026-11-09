@@ -97,9 +97,13 @@ function closeAndDispatch(
   dispatchContextMenuAction(activation.paneId, activation.action)
 }
 
+type StoreAccess = {
+  set: StoreSet
+  get: StoreGet
+}
+
 function finishNativeLoad(
-  set: StoreSet,
-  get: StoreGet,
+  { set, get }: StoreAccess,
   requestId: string,
   finish: (state: OpenStore) => Partial<Store>,
 ) {
@@ -153,8 +157,8 @@ export const useContextMenuStore = create<Store>((set, get) => ({
   },
   beginNativeLoad: () => beginNativeLoad(set, get),
   resolveNativeLoad: (requestId, items) =>
-    finishNativeLoad(set, get, requestId, (state) => resolvedNativeLoad(state, items)),
-  failNativeLoad: (requestId) => finishNativeLoad(set, get, requestId, failedNativeLoad),
+    finishNativeLoad({ set, get }, requestId, (state) => resolvedNativeLoad(state, items)),
+  failNativeLoad: (requestId) => finishNativeLoad({ set, get }, requestId, failedNativeLoad),
   hoverItem: (itemId) => set((state) => hoveredFocus(state, itemId) ?? state),
   moveActive: (direction) => set((state) => movedFocus(state, direction) ?? state),
   moveActiveToEdge: (edge) => set((state) => edgeFocus(state, edge) ?? state),

@@ -8,7 +8,7 @@ use file_explorer_lib::fs::{self as app_fs, SortDirection, SortKey};
 use file_explorer_lib::watch::{
     create_runtime, forward_notify_result_with_before_lock_for_tests, insert_tab_for_tests,
     snapshot_for_target, tab_snapshot_for_tests, while_tabs_locked_for_tests, DirPatch,
-    WatchService, WatchTarget,
+    TabWatchArm, WatchEmitters, WatchService, WatchTarget,
 };
 use notify::event::CreateKind;
 use notify::{Event, EventKind};
@@ -42,11 +42,15 @@ fn set_tab_watch_records_the_current_listing_as_the_tab_baseline() {
 
     service
         .set_tab_watch(
-            Some(watch_target.clone()),
-            None,
-            None,
-            Arc::new(|_| {}),
-            Arc::new(|_, _| {}),
+            TabWatchArm {
+                target: Some(watch_target.clone()),
+                listing_seed_entries: None,
+                entries: None,
+            },
+            WatchEmitters {
+                patch: Arc::new(|_| {}),
+                error: Arc::new(|_, _| {}),
+            },
         )
         .expect("set watch");
 
@@ -70,20 +74,28 @@ fn replacing_a_same_pane_watch_discards_the_previous_tab_snapshot() {
 
     service
         .set_tab_watch(
-            Some(target("left-1", &left_a)),
-            None,
-            None,
-            Arc::new(|_| {}),
-            Arc::new(|_, _| {}),
+            TabWatchArm {
+                target: Some(target("left-1", &left_a)),
+                listing_seed_entries: None,
+                entries: None,
+            },
+            WatchEmitters {
+                patch: Arc::new(|_| {}),
+                error: Arc::new(|_, _| {}),
+            },
         )
         .expect("set first watch");
     service
         .set_tab_watch(
-            Some(target("left-2", &left_b)),
-            None,
-            None,
-            Arc::new(|_| {}),
-            Arc::new(|_, _| {}),
+            TabWatchArm {
+                target: Some(target("left-2", &left_b)),
+                listing_seed_entries: None,
+                entries: None,
+            },
+            WatchEmitters {
+                patch: Arc::new(|_| {}),
+                error: Arc::new(|_, _| {}),
+            },
         )
         .expect("replace same pane watch");
 
@@ -108,17 +120,27 @@ fn clearing_watches_removes_all_recorded_tab_snapshots() {
 
     service
         .set_tab_watch(
-            Some(watch_target.clone()),
-            None,
-            None,
-            Arc::new(|_| {}),
-            Arc::new(|_, _| {}),
+            TabWatchArm {
+                target: Some(watch_target.clone()),
+                listing_seed_entries: None,
+                entries: None,
+            },
+            WatchEmitters {
+                patch: Arc::new(|_| {}),
+                error: Arc::new(|_, _| {}),
+            },
         )
         .expect("set watch");
     assert!(tab_snapshot_for_tests(&service, &watch_target.tab_id).is_some());
 
     service
-        .set_tab_watch(None, None, None, Arc::new(|_| {}), Arc::new(|_, _| {}))
+        .set_tab_watch(
+            TabWatchArm::disarm(),
+            WatchEmitters {
+                patch: Arc::new(|_| {}),
+                error: Arc::new(|_, _| {}),
+            },
+        )
         .expect("clear watches");
 
     assert!(tab_snapshot_for_tests(&service, &watch_target.tab_id).is_none());
@@ -135,43 +157,47 @@ fn reconcile_emits_refresh_patch_for_missed_directory_changes() {
 
     service
         .set_tab_watch(
-            Some(watch_target.clone()),
-            None,
-            None,
-            Arc::new(|_| {}),
-            Arc::new(|_, _| {}),
+            TabWatchArm {
+                target: Some(watch_target.clone()),
+                listing_seed_entries: None,
+                entries: None,
+            },
+            WatchEmitters {
+                patch: Arc::new(|_| {}),
+                error: Arc::new(|_, _| {}),
+            },
         )
         .expect("set watch");
 
     let patches = Arc::new(Mutex::new(Vec::<DirPatch>::new()));
     let errors = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
 
-    service.reconcile(
-        Arc::new({
+    service.reconcile(WatchEmitters {
+        patch: Arc::new({
             let patches = Arc::clone(&patches);
             move |patch| patches.lock().expect("patches lock").push(patch)
         }),
-        Arc::new({
+        error: Arc::new({
             let errors = Arc::clone(&errors);
             move |path, error| errors.lock().expect("errors lock").push((path, error))
         }),
-    );
+    });
     assert!(patches.lock().expect("patches lock").is_empty());
     assert!(errors.lock().expect("errors lock").is_empty());
 
     fs::remove_file(root.join("old.txt")).expect("remove old");
     fs::create_dir(root.join("fresh")).expect("fresh dir");
 
-    service.reconcile(
-        Arc::new({
+    service.reconcile(WatchEmitters {
+        patch: Arc::new({
             let patches = Arc::clone(&patches);
             move |patch| patches.lock().expect("patches lock").push(patch)
         }),
-        Arc::new({
+        error: Arc::new({
             let errors = Arc::clone(&errors);
             move |path, error| errors.lock().expect("errors lock").push((path, error))
         }),
-    );
+    });
 
     assert!(errors.lock().expect("errors lock").is_empty());
     let patches = patches.lock().expect("patches lock");
@@ -197,10 +223,10 @@ fn notify_callback_recovers_a_mutation_after_tabs_lock_contention() {
     let root = fixture.path();
     let watch_target = target("left-1", root);
     let (patch_sender, patch_receiver) = mpsc::channel();
-    let mut runtime = create_runtime(
-        Arc::new(move |patch| patch_sender.send(patch).expect("patch receiver")),
-        Arc::new(|_, error| panic!("unexpected watch error: {error}")),
-    )
+    let mut runtime = create_runtime(WatchEmitters {
+        patch: Arc::new(move |patch| patch_sender.send(patch).expect("patch receiver")),
+        error: Arc::new(|_, error| panic!("unexpected watch error: {error}")),
+    })
     .expect("watch runtime");
     let snapshot = snapshot_for_target(&watch_target).expect("initial snapshot");
     insert_tab_for_tests(&mut runtime, watch_target.clone(), snapshot);

@@ -1,4 +1,4 @@
-import type { ConflictResolution, StartOpRequest } from '@/lib/types/ipc'
+import type { ResolveConflictRequest, StartOpRequest } from '@/lib/types/ipc'
 import { invokeCommand } from './ipc/client'
 
 export function startOp(payload: StartOpRequest) {
@@ -29,16 +29,8 @@ export function reorderOps(operationIds: string[]) {
   return invokeCommand({ command: 'reorder_ops', payload: { ids: operationIds } })
 }
 
-export function resolveConflict(
-  id: string,
-  resolution: ConflictResolution,
-  applyToAll: boolean,
-  renameTo: string | null,
-) {
-  return invokeCommand({
-    command: 'resolve_conflict',
-    payload: { id, resolution, applyToAll, renameTo },
-  })
+export function resolveConflict(payload: ResolveConflictRequest) {
+  return invokeCommand({ command: 'resolve_conflict', payload })
 }
 
 export function queueSnapshot() {

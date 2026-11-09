@@ -10,7 +10,8 @@ use crate::fs::{
 };
 
 pub mod cache;
-use cache::{ItemCountCache, ItemCountState};
+use crate::directory_session::PaneSnapshot;
+use cache::{CountResolution, ItemCountCache, ItemCountState};
 
 pub const AUTO_ITEM_COUNT_LIMIT: usize = 200;
 pub const ITEM_COUNT_BATCH_SIZE: usize = 64;
@@ -303,16 +304,21 @@ impl ItemCountService {
             return;
         }
 
-        let mut batch = AutomaticCountBatch::new(&plan);
+        let mut run = AutomaticCountRun {
+            plan: &plan,
+            batch: AutomaticCountBatch::new(&plan),
+            emit: &mut emit,
+        };
         let flow = plan.paths.iter().enumerate().try_for_each(|(index, path)| {
-            self.count_automatic_path(&plan, index, path, &mut batch, &mut emit)
+            self.count_automatic_path(&mut run, IndexedPath { index, path })
         });
         if flow.is_break() {
             self.release_cancelled_automatic_paths(&plan);
             return;
         }
 
-        let needs_terminal_event = !batch.emitted_any && !self.is_automatic_cancelled(&plan);
+        let emitted_any = run.batch.emitted_any;
+        let needs_terminal_event = !emitted_any && !self.is_automatic_cancelled(&plan);
         if needs_terminal_event {
             emit(ItemCountEvent {
                 context: plan.context,
@@ -324,25 +330,22 @@ impl ItemCountService {
 
     fn count_automatic_path<F>(
         &self,
-        plan: &AutomaticCountPlan,
-        index: usize,
-        path: &str,
-        batch: &mut AutomaticCountBatch,
-        emit: &mut F,
+        run: &mut AutomaticCountRun<'_, F>,
+        item: IndexedPath<'_>,
     ) -> ControlFlow<()>
     where
         F: FnMut(ItemCountEvent),
     {
-        if self.is_automatic_cancelled(plan) {
+        if self.is_automatic_cancelled(run.plan) {
             return ControlFlow::Break(());
         }
-        let state = self.resolve_item_count(path, plan.generation);
+        let state = self.resolve_item_count(item.path, run.plan.generation);
         let result = ItemCountResult {
-            path: path.to_string(),
+            path: item.path.to_string(),
             item_count: state.value(),
         };
-        if let Some(event) = batch.add(index, result) {
-            emit(event);
+        if let Some(event) = run.batch.add(item.index, result) {
+            (run.emit)(event);
         }
         ControlFlow::Continue(())
     }
@@ -367,7 +370,11 @@ impl ItemCountService {
             None => ItemCountState::Unavailable,
         };
         let mut cache = self.cache.lock().expect("item-count cache lock");
-        cache.resolve(path, generation, resolved.clone());
+        cache.resolve(CountResolution {
+            path,
+            generation,
+            state: resolved.clone(),
+        });
         resolved
     }
 
@@ -419,8 +426,12 @@ impl ItemCountService {
         let session_snapshot = sessions.and_then(|sessions| {
             sessions.snapshot_for_pane_path(&request.context.pane_id, &request.context.path)
         });
-        if let Some((snapshot, generation, resolved_path)) = session_snapshot {
-            return self.sort_from_snapshot(request, &handle, snapshot, generation, resolved_path);
+        if let Some(snapshot) = session_snapshot {
+            let sort = ExplicitSort {
+                request,
+                handle: &handle,
+            };
+            return self.sort_from_snapshot(sort, snapshot);
         }
 
         let outcome = fs::list_dir_with_cancellation(
@@ -461,12 +472,15 @@ impl ItemCountService {
     /// reintroduce the redundant-recount cost this method exists to avoid).
     fn sort_from_snapshot(
         &self,
-        request: &ActiveItemsSortRequest,
-        handle: &ExplicitCountHandle,
-        snapshot: Vec<DirectoryEntry>,
-        generation: u64,
-        resolved_path: String,
+        sort: ExplicitSort<'_>,
+        session_snapshot: PaneSnapshot,
     ) -> Result<ActiveItemsSortResponse, FsError> {
+        let ExplicitSort { request, handle } = sort;
+        let PaneSnapshot {
+            entries: snapshot,
+            generation,
+            resolved_path,
+        } = session_snapshot;
         use crate::directory_session::model::ViewParams;
         use crate::directory_session::view::SessionView;
 
@@ -480,9 +494,10 @@ impl ItemCountService {
         let view = SessionView::derive(&snapshot, &view_params);
         let mut entries: Vec<DirectoryEntry> = view.rows().to_vec();
 
+        let pass = ExplicitCountPass { handle, generation };
         let flow = entries
             .iter_mut()
-            .try_for_each(|entry| self.fill_directory_item_count(entry, handle, generation));
+            .try_for_each(|entry| self.fill_directory_item_count(entry, pass));
         if flow.is_break() {
             return Ok(superseded_sort_response(request));
         }
@@ -491,9 +506,11 @@ impl ItemCountService {
         // have been filled in above — SessionView::derive sorted using
         // whatever counts the snapshot already carried, which is frequently
         // `None` for entries never previously counted.
-        entries.sort_by(|left, right| {
-            fs::compare_entries(left, right, SortKey::Items, request.sort_direction)
-        });
+        let items_order = fs::SortOrder {
+            key: SortKey::Items,
+            direction: request.sort_direction,
+        };
+        entries.sort_by(|left, right| fs::compare_entries(left, right, items_order));
 
         if self.is_explicit_cancelled(handle) {
             return Ok(superseded_sort_response(request));
@@ -509,16 +526,15 @@ impl ItemCountService {
     fn fill_directory_item_count(
         &self,
         entry: &mut DirectoryEntry,
-        handle: &ExplicitCountHandle,
-        generation: u64,
+        pass: ExplicitCountPass<'_>,
     ) -> ControlFlow<()> {
-        if self.is_explicit_cancelled(handle) {
+        if self.is_explicit_cancelled(pass.handle) {
             return ControlFlow::Break(());
         }
         if !entry.is_dir {
             return ControlFlow::Continue(());
         }
-        let state = self.resolve_item_count(&entry.path, generation);
+        let state = self.resolve_item_count(&entry.path, pass.generation);
         if let Some(value) = state.value() {
             entry.item_count = Some(value);
         }
@@ -597,6 +613,29 @@ fn contexts_match(left: &ItemCountRequestContext, right: &ItemCountRequestContex
         && left.pane_id == right.pane_id
         && left.tab_id == right.tab_id
         && strings_match(&left.path, &right.path)
+}
+
+struct AutomaticCountRun<'run, F> {
+    plan: &'run AutomaticCountPlan,
+    batch: AutomaticCountBatch,
+    emit: &'run mut F,
+}
+
+struct IndexedPath<'path> {
+    index: usize,
+    path: &'path str,
+}
+
+#[derive(Clone, Copy)]
+struct ExplicitSort<'sort> {
+    request: &'sort ActiveItemsSortRequest,
+    handle: &'sort ExplicitCountHandle,
+}
+
+#[derive(Clone, Copy)]
+struct ExplicitCountPass<'pass> {
+    handle: &'pass ExplicitCountHandle,
+    generation: u64,
 }
 
 struct AutomaticCountBatch {

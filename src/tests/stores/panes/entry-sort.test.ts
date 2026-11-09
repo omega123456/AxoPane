@@ -5,6 +5,7 @@ import {
   nextSortDirection,
   sortedPanes,
   sortEntries,
+  sortSpecFor,
   trashSortedPanes,
 } from '@/stores/panes/entry-sort'
 import { directoryEntry, fileEntry, paneWith, panesDataWithLeft } from './pane-fixtures'
@@ -16,8 +17,12 @@ function paths(entries: { path: string }[]) {
 describe('entry sort', () => {
   it('puts folders first and orders names in either direction', () => {
     const entries = [fileEntry('/b10'), fileEntry('/b2'), directoryEntry('/z')]
-    expect(paths(sortEntries(entries, 'name', 'asc', {}))).toEqual(['/z', '/b10', '/b2'])
-    expect(paths(sortEntries(entries, 'name', 'desc', {}))).toEqual(['/z', '/b2', '/b10'])
+    expect(
+      paths(sortEntries(entries, { sortKey: 'name', sortDirection: 'asc', sizeStates: {} })),
+    ).toEqual(['/z', '/b10', '/b2'])
+    expect(
+      paths(sortEntries(entries, { sortKey: 'name', sortDirection: 'desc', sizeStates: {} })),
+    ).toEqual(['/z', '/b2', '/b10'])
   })
 
   it('keeps unknown sizes after known ones and prefers live size states', () => {
@@ -26,11 +31,9 @@ describe('entry sort', () => {
       '/small': { state: 'ready' as const, sizeBytes: 1, source: 'manual' as const },
       '/big': { state: 'ready' as const, sizeBytes: 9, source: 'manual' as const },
     }
-    expect(paths(sortEntries(entries, 'size', 'desc', sizeStates))).toEqual([
-      '/big',
-      '/small',
-      '/unknown',
-    ])
+    expect(
+      paths(sortEntries(entries, { sortKey: 'size', sortDirection: 'desc', sizeStates })),
+    ).toEqual(['/big', '/small', '/unknown'])
   })
 
   it('orders by modified date and falls back to the name on ties', () => {
@@ -39,12 +42,18 @@ describe('entry sort', () => {
       fileEntry('/a', { modifiedAt: '2024-01-01' }),
       fileEntry('/c', { modifiedAt: '2023-01-01' }),
     ]
-    expect(paths(sortEntries(entries, 'modified', 'asc', {}))).toEqual(['/c', '/a', '/b'])
+    expect(
+      paths(sortEntries(entries, { sortKey: 'modified', sortDirection: 'asc', sizeStates: {} })),
+    ).toEqual(['/c', '/a', '/b'])
   })
 
   it('binary-inserts into an already sorted listing', () => {
     const entries = [fileEntry('/a'), fileEntry('/c')]
-    insertSorted(entries, fileEntry('/b'), 'name', 'asc', {})
+    insertSorted(entries, fileEntry('/b'), {
+      sortKey: 'name',
+      sortDirection: 'asc',
+      sizeStates: {},
+    })
     expect(paths(entries)).toEqual(['/a', '/b', '/c'])
   })
 
@@ -80,5 +89,13 @@ describe('entry sort', () => {
     const nameSorted = sortedPanes(state, 'left', 'type').panes.left
     expect(nameSorted.itemsSortStatus).toBe('idle')
     expect(nameSorted.sortDirection).toBe('asc')
+  })
+
+  it('builds a sort spec from the pane order and the live size states', () => {
+    const sizeStates = {}
+    const pane = paneWith('left', { sortKey: 'size', sortDirection: 'desc' })
+    const spec = sortSpecFor(pane, sizeStates)
+    expect(spec).toMatchObject({ sortKey: 'size', sortDirection: 'desc' })
+    expect(spec.sizeStates).toBe(sizeStates)
   })
 })

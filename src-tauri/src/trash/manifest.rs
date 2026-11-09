@@ -22,9 +22,9 @@ struct Manifest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ManifestEntry {
-    original_path: String,
-    deleted_at: i64,
+pub struct ManifestEntry {
+    pub original_path: String,
+    pub deleted_at: i64,
 }
 
 /// A command-scoped manifest view.  Load this once at the start of a Trash
@@ -68,11 +68,8 @@ impl Transaction {
         })
     }
 
-    pub fn lookup(&self, trashed_name: &str) -> Option<(String, i64)> {
-        self.manifest
-            .entries
-            .get(trashed_name)
-            .map(|entry| (entry.original_path.clone(), entry.deleted_at))
+    pub fn lookup(&self, trashed_name: &str) -> Option<ManifestEntry> {
+        self.manifest.entries.get(trashed_name).cloned()
     }
 
     pub fn record_batch<I>(&mut self, entries: I)

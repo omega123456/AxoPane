@@ -42,26 +42,29 @@ mod tests {
             volumes: HashSet::from(["/".to_string()]),
             status,
             total_items,
-            completed_items: 0,
             total_bytes: 0,
-            copied_bytes: 0,
-            bytes_per_second: 0,
-            eta_seconds: None,
-            sample_count: 0,
-            rate_sample_at: None,
-            rate_sample_bytes: 0,
-            current_file_name: None,
-            current_file_copied: 0,
-            current_file_total: 0,
-            error_message: None,
-            completed_at: None,
             cancel: Arc::new(AtomicBool::new(false)),
             pause: Arc::new(AtomicBool::new(false)),
             skip: Arc::new(AtomicBool::new(false)),
-            conflict: None,
-            conflict_resolution: None,
-            apply_to_all: None,
-            rename_to: None,
+            runtime: OpRuntime {
+                completed_items: 0,
+                copied_bytes: 0,
+                bytes_per_second: 0,
+                eta_seconds: None,
+                sample_count: 0,
+                rate_sample: None,
+                current_file: CurrentFileProgress {
+                    name: None,
+                    copied: 0,
+                    total: 0,
+                },
+                error_message: None,
+                completed_at: None,
+                conflict: None,
+                conflict_resolution: None,
+                apply_to_all: None,
+                rename_to: None,
+            },
         }
     }
 
@@ -193,7 +196,14 @@ mod tests {
 
         // t=0: begin fires at the same instant the throttle was created, so it
         // is swallowed (0ms elapsed < 90ms interval).
-        begin_file_progress(&context, Path::new("/tmp/big.bin"), 30, Some(&mut throttle));
+        begin_file_progress(
+            &context,
+            FileProgressStart {
+                source: Path::new("/tmp/big.bin"),
+                total_bytes: 30,
+            },
+            Some(&mut throttle),
+        );
         assert!(
             progress_log.lock().expect("progress log lock").is_empty(),
             "begin at t=0 should be throttled"
@@ -271,8 +281,15 @@ mod tests {
             Arc::new(Instant::now),
         );
 
-        compress_item_with_progress(&source_dir, &archive_path, &source_item, &context)
-            .expect("compress many small members");
+        compress_item_with_progress(
+            NativeItemPaths {
+                source: &source_dir,
+                target: &archive_path,
+            },
+            &source_item,
+            &context,
+        )
+        .expect("compress many small members");
 
         assert!(archive_path.exists());
         let intra_member_events = progress_log.lock().expect("progress log lock").len();
@@ -305,8 +322,10 @@ mod tests {
                 Arc::new(Instant::now),
             );
         compress_item_with_progress(
-            &source_dir,
-            &archive_path,
+            NativeItemPaths {
+                source: &source_dir,
+                target: &archive_path,
+            },
             &item(&source_dir, 0),
             &compress_context,
         )
@@ -319,8 +338,15 @@ mod tests {
             Arc::new(Instant::now),
         );
 
-        extract_item_with_progress(&archive_path, &extract_root, &archive_item, &context)
-            .expect("extract many small members");
+        extract_item_with_progress(
+            NativeItemPaths {
+                source: &archive_path,
+                target: &extract_root,
+            },
+            &archive_item,
+            &context,
+        )
+        .expect("extract many small members");
 
         let intra_member_events = progress_log.lock().expect("progress log lock").len();
         assert!(

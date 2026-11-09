@@ -38,12 +38,23 @@ impl From<TraversalError> for ManualSizeError {
     }
 }
 
+#[derive(Clone, Copy)]
+struct StopConditions<'stop> {
+    cancel: &'stop Arc<AtomicBool>,
+    started_at: Instant,
+    timeout: Duration,
+}
+
 pub fn calculate(
     path: &Path,
     cancel: &Arc<AtomicBool>,
     timeout: Duration,
 ) -> Result<u64, ManualSizeError> {
-    let started_at = Instant::now();
+    let stop = StopConditions {
+        cancel,
+        started_at: Instant::now(),
+        timeout,
+    };
     let metadata = std::fs::symlink_metadata(path)?;
 
     // macOS sizes a symlink as its target, resolved once here (a dangling or
@@ -54,24 +65,24 @@ pub fn calculate(
         if !target.is_dir() {
             return Ok(0);
         }
-        return subtree_total(&target, cancel, started_at, timeout);
+        return subtree_total(&target, &stop);
     }
 
     if !is_real_directory(&metadata) {
         return Ok(0);
     }
 
-    subtree_total(path, cancel, started_at, timeout)
+    subtree_total(path, &stop)
 }
 
 /// macOS totals come from the parallel `getattrlistbulk` walker.
 #[cfg(target_os = "macos")]
-fn subtree_total(
-    path: &Path,
-    cancel: &Arc<AtomicBool>,
-    started_at: Instant,
-    timeout: Duration,
-) -> Result<u64, ManualSizeError> {
+fn subtree_total(path: &Path, stop: &StopConditions<'_>) -> Result<u64, ManualSizeError> {
+    let StopConditions {
+        cancel,
+        started_at,
+        timeout,
+    } = *stop;
     use super::fast_walk::{self, WalkOptions};
 
     fast_walk::subtree_total(
@@ -81,12 +92,12 @@ fn subtree_total(
 }
 
 #[cfg(not(target_os = "macos"))]
-fn subtree_total(
-    path: &Path,
-    cancel: &Arc<AtomicBool>,
-    started_at: Instant,
-    timeout: Duration,
-) -> Result<u64, ManualSizeError> {
+fn subtree_total(path: &Path, stop: &StopConditions<'_>) -> Result<u64, ManualSizeError> {
+    let StopConditions {
+        cancel,
+        started_at,
+        timeout,
+    } = *stop;
     use crate::traversal::{walk, TraversalOptions};
     use std::sync::atomic::Ordering;
 

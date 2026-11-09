@@ -1,5 +1,6 @@
+use crate::directory_session::EnumerationAdmission;
 use crate::fs;
-use crate::volumes;
+use crate::ipc::command_services::NavigationServices;
 use std::sync::Arc;
 
 #[cfg(not(feature = "test-utils"))]
@@ -21,8 +22,7 @@ pub async fn list_dir(
     let key = payload.path.clone();
     executor
         .latency_cancellable(
-            key,
-            crate::ipc::executor::Cancellation::default(),
+            crate::ipc::executor::LatencyRequest::new(key),
             move |cancel| list_dir_until_cancelled(&payload, cancel),
         )
         .await
@@ -64,16 +64,19 @@ fn list_dir_impl(payload: ListDirRequest) -> Result<ListDirResponse, String> {
 #[tauri::command]
 pub async fn begin_directory_session(
     payload: BeginNavigationRequest,
-    state: State<'_, Arc<crate::directory_session::DirectorySessionService>>,
+    services: NavigationServices<'_>,
     executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
-    registry: State<'_, Arc<volumes::registry::VolumeRegistry>>,
 ) -> Result<BeginNavigationResponse, String> {
-    let resource_key = registry.resolve_resource_key(&payload.path);
+    let resource_key = services.registry.resolve_resource_key(&payload.path);
     let key = resource_key.clone().unwrap_or_else(|| payload.path.clone());
-    let sessions = Arc::clone(state.inner());
+    let sessions = Arc::clone(services.sessions.inner());
     executor
         .latency(key, move || {
-            sessions.begin_navigation(payload, None, resource_key)
+            let admission = EnumerationAdmission {
+                coordinator: None,
+                resource_key,
+            };
+            sessions.begin_navigation(payload, admission)
         })
         .await
 }
@@ -82,12 +85,15 @@ pub async fn begin_directory_session(
 #[tauri::command]
 pub fn begin_directory_session(
     payload: BeginNavigationRequest,
-    state: State<'_, Arc<crate::directory_session::DirectorySessionService>>,
+    services: NavigationServices<'_>,
     coordinator: State<'_, Arc<crate::resource_coordinator::ResourceCoordinator>>,
-    registry: State<'_, Arc<volumes::registry::VolumeRegistry>>,
 ) -> Result<BeginNavigationResponse, String> {
-    let resource_key = registry.resolve_resource_key(&payload.path);
-    state.begin_navigation(payload, Some(&coordinator), resource_key)
+    let resource_key = services.registry.resolve_resource_key(&payload.path);
+    let admission = EnumerationAdmission {
+        coordinator: Some(&coordinator),
+        resource_key,
+    };
+    services.sessions.begin_navigation(payload, admission)
 }
 
 /// Idempotent page-index range fetch for an established v2 directory
@@ -116,12 +122,7 @@ pub fn revise_directory_session_view(
     payload: ReviseSessionViewRequest,
     state: State<'_, Arc<crate::directory_session::DirectorySessionService>>,
 ) -> Result<BeginNavigationResponse, SessionRejection> {
-    state.revise_view(
-        &payload.pane_id,
-        &payload.tab_id,
-        payload.session_id,
-        payload.view,
-    )
+    state.revise_view(payload)
 }
 
 /// Idempotent release of a v2 directory session. Safe to call more than once

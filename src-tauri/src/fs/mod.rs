@@ -365,9 +365,11 @@ where
         }
     }
 
-    entries.sort_by(|left, right| {
-        compare_entries(left, right, options.sort_key, options.sort_direction)
-    });
+    let order = SortOrder {
+        key: options.sort_key,
+        direction: options.sort_direction,
+    };
+    entries.sort_by(|left, right| compare_entries(left, right, order));
 
     if is_cancelled() {
         return Ok(ListDirOutcome::Cancelled);
@@ -667,12 +669,21 @@ pub fn infer_type_label(name: &str, is_dir: bool) -> String {
         .unwrap_or_else(|| "File".to_string())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SortOrder {
+    pub key: SortKey,
+    pub direction: SortDirection,
+}
+
 pub fn compare_entries(
     left: &DirectoryEntry,
     right: &DirectoryEntry,
-    sort_key: SortKey,
-    sort_direction: SortDirection,
+    order: SortOrder,
 ) -> Ordering {
+    let SortOrder {
+        key: sort_key,
+        direction: sort_direction,
+    } = order;
     match left.is_dir.cmp(&right.is_dir).reverse() {
         Ordering::Equal => {}
         non_equal => return non_equal,

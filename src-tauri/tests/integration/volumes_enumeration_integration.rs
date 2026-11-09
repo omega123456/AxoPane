@@ -1,5 +1,5 @@
 use file_explorer_lib::volumes::{
-    add_network_mount_if_missing, list_volumes, path_is_network, VolumeInfo,
+    add_network_mount_if_missing, list_volumes, path_is_network, MountEntry, VolumeInfo,
 };
 
 #[test]
@@ -101,17 +101,21 @@ fn adds_missing_network_mounts_from_filesystem_type() {
 
     assert!(add_network_mount_if_missing(
         &mut volumes,
-        "/Volumes/team-share/",
-        "smbfs",
-        2_000,
-        1_500,
+        &MountEntry {
+            mount_root: "/Volumes/team-share/".to_string(),
+            file_system: "smbfs".to_string(),
+            total_bytes: 2_000,
+            free_bytes: 1_500,
+        },
     ));
     assert!(add_network_mount_if_missing(
         &mut volumes,
-        "/Volumes/build-cache",
-        "nfs",
-        3_000,
-        2_500,
+        &MountEntry {
+            mount_root: "/Volumes/build-cache".to_string(),
+            file_system: "nfs".to_string(),
+            total_bytes: 3_000,
+            free_bytes: 2_500,
+        },
     ));
 
     assert_eq!(volumes.len(), 3);
@@ -137,17 +141,21 @@ fn skips_duplicate_or_local_supplemental_mounts() {
 
     assert!(!add_network_mount_if_missing(
         &mut volumes,
-        "/Volumes/team-share/",
-        "smbfs",
-        2_000,
-        1_500,
+        &MountEntry {
+            mount_root: "/Volumes/team-share/".to_string(),
+            file_system: "smbfs".to_string(),
+            total_bytes: 2_000,
+            free_bytes: 1_500,
+        },
     ));
     assert!(!add_network_mount_if_missing(
         &mut volumes,
-        "/Volumes/local",
-        "apfs",
-        2_000,
-        1_500,
+        &MountEntry {
+            mount_root: "/Volumes/local".to_string(),
+            file_system: "apfs".to_string(),
+            total_bytes: 2_000,
+            free_bytes: 1_500,
+        },
     ));
 
     assert_eq!(volumes.len(), 1);

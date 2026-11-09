@@ -19,11 +19,15 @@ function withinLimits(usage: CacheUsage, limits: WeightedCacheLimits) {
   return usage.count <= limits.maxEntries && usage.weight <= limits.maxBytes
 }
 
+type CacheBudget = {
+  usage: CacheUsage
+  limits: WeightedCacheLimits
+}
+
 function evictUntilWithinLimits<CacheRecord extends WeightedCacheRecord>(
   cache: Record<string, CacheRecord>,
   candidates: [string, CacheRecord][],
-  usage: CacheUsage,
-  limits: WeightedCacheLimits,
+  { usage, limits }: CacheBudget,
 ) {
   for (const [key, record] of candidates.sort(oldestFirst)) {
     if (withinLimits(usage, limits)) return
@@ -38,13 +42,18 @@ function evictUntilWithinLimits<CacheRecord extends WeightedCacheRecord>(
  * unprotected records until both limits are met. With `evictProtected`, the
  * oldest protected records go too when unprotected eviction was not enough.
  */
+export type WeightedCachePolicy<CacheRecord extends WeightedCacheRecord> = {
+  isExpired: (record: CacheRecord) => boolean
+  limits: WeightedCacheLimits
+  evictProtected?: boolean
+}
+
 export function pruneWeightedCache<CacheRecord extends WeightedCacheRecord>(
   cache: Record<string, CacheRecord>,
   protectedKeys: ReadonlySet<string>,
-  isExpired: (record: CacheRecord) => boolean,
-  limits: WeightedCacheLimits,
-  evictProtected = false,
+  policy: WeightedCachePolicy<CacheRecord>,
 ): Record<string, CacheRecord> {
+  const { isExpired, limits, evictProtected = false } = policy
   const next = { ...cache }
   for (const [key, record] of Object.entries(next)) {
     const evictable = !protectedKeys.has(key) && isExpired(record)
@@ -57,7 +66,8 @@ export function pruneWeightedCache<CacheRecord extends WeightedCacheRecord>(
     weight: remaining.reduce((total, [, record]) => total + record.weight, 0),
   }
   const unprotected = remaining.filter(([key]) => !protectedKeys.has(key))
-  evictUntilWithinLimits(next, unprotected, usage, limits)
-  if (evictProtected) evictUntilWithinLimits(next, Object.entries(next), usage, limits)
+  const budget = { usage, limits }
+  evictUntilWithinLimits(next, unprotected, budget)
+  if (evictProtected) evictUntilWithinLimits(next, Object.entries(next), budget)
   return next
 }

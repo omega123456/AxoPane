@@ -31,13 +31,13 @@ async function loadTreeChildren(path: string) {
     })
     if (!isSuperseded()) {
       panesStore().setState((state) => ({
-        treeNodes: loadedTreeNodes(state, path, currentNode, response.children),
+        treeNodes: loadedTreeNodes(state, { path, currentNode }, response.children),
       }))
     }
   } catch {
     if (!isSuperseded()) {
       panesStore().setState((state) => ({
-        treeNodes: failedTreeNodes(state, path, currentNode),
+        treeNodes: failedTreeNodes(state, { path, currentNode }),
       }))
     }
   } finally {

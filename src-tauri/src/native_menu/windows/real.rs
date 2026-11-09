@@ -75,27 +75,25 @@ pub(super) fn invoke_impl(invocation: ProviderInvocation) -> MenuActionStatus {
         },
         ProviderInvocation::WindowsModern {
             clsid,
-            packaged,
             request,
             command_path,
-        } => match crate::native_menu::windows_modern::invoke_modern(
-            clsid,
-            packaged,
-            &request,
-            &command_path,
-        ) {
-            Ok(()) => MenuActionStatus::handled_with_message("invoked"),
-            Err(error) => {
-                log::warn!(
+            ..
+        } => {
+            match crate::native_menu::windows_modern::invoke_modern(clsid, &request, &command_path)
+            {
+                Ok(()) => MenuActionStatus::handled_with_message("invoked"),
+                Err(error) => {
+                    log::warn!(
                     "modern menu invocation failed for request {} clsid {:032x} at path {:?}: {}",
                     request.request_id,
                     clsid,
                     command_path,
                     error
                 );
-                MenuActionStatus::unsupported("native-invoke-failed")
+                    MenuActionStatus::unsupported("native-invoke-failed")
+                }
             }
-        },
+        }
         ProviderInvocation::Fake { .. } => MenuActionStatus::unsupported(UNSUPPORTED_MESSAGE),
     }
 }
@@ -178,7 +176,15 @@ fn enumerate_menu(
             .ok()?;
     }
 
-    enumerate_popup_items(request, &context_menu, popup_menu, 0, Vec::new())
+    let walk = MenuWalk {
+        request,
+        context_menu: &context_menu,
+    };
+    let top_level = MenuLevel {
+        depth: 0,
+        parent_path: &[],
+    };
+    walk.popup_items(popup_menu, top_level)
 }
 
 fn invoke_command(
@@ -310,118 +316,125 @@ unsafe fn bind_to_parent(
     Ok((parent, child))
 }
 
-fn enumerate_popup_items(
-    request: &LoadNativeMenuRequest,
-    context_menu: &IContextMenu,
-    menu: windows::Win32::UI::WindowsAndMessaging::HMENU,
-    depth: usize,
-    parent_path: Vec<u32>,
-) -> windows::core::Result<Vec<ProviderNativeMenuItem>> {
-    let count = unsafe { GetMenuItemCount(Some(menu)) };
-    if count <= 0 {
-        return Ok(Vec::new());
-    }
+struct MenuWalk<'walk> {
+    request: &'walk LoadNativeMenuRequest,
+    context_menu: &'walk IContextMenu,
+}
 
-    let mut items = Vec::new();
-    for index in 0..count {
-        if let Some(item) = enumerate_menu_item(
-            request,
-            context_menu,
-            menu,
-            index as u32,
-            depth,
-            &parent_path,
-        )? {
-            items.push(item);
+#[derive(Clone, Copy)]
+struct MenuLevel<'path> {
+    depth: usize,
+    parent_path: &'path [u32],
+}
+
+#[derive(Clone, Copy)]
+struct MenuSlot {
+    menu: windows::Win32::UI::WindowsAndMessaging::HMENU,
+    position: u32,
+}
+
+impl MenuWalk<'_> {
+    fn popup_items(
+        &self,
+        menu: windows::Win32::UI::WindowsAndMessaging::HMENU,
+        level: MenuLevel<'_>,
+    ) -> windows::core::Result<Vec<ProviderNativeMenuItem>> {
+        let count = unsafe { GetMenuItemCount(Some(menu)) };
+        if count <= 0 {
+            return Ok(Vec::new());
         }
-    }
-    Ok(items)
-}
 
-fn enumerate_menu_item(
-    request: &LoadNativeMenuRequest,
-    context_menu: &IContextMenu,
-    menu: windows::Win32::UI::WindowsAndMessaging::HMENU,
-    position: u32,
-    depth: usize,
-    parent_path: &[u32],
-) -> windows::core::Result<Option<ProviderNativeMenuItem>> {
-    let mut text_buffer = vec![0u16; MAX_PATH as usize];
-    let mut info = MENUITEMINFOW {
-        cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-        fMask: MIIM_BITMAP | MIIM_FTYPE | MIIM_STATE | MIIM_ID | MIIM_SUBMENU | MIIM_STRING,
-        dwTypeData: windows::core::PWSTR(text_buffer.as_mut_ptr()),
-        cch: (text_buffer.len() - 1) as u32,
-        ..Default::default()
-    };
-
-    unsafe {
-        GetMenuItemInfoW(menu, position, true, &mut info)?;
+        let mut items = Vec::new();
+        for index in 0..count {
+            let slot = MenuSlot {
+                menu,
+                position: index as u32,
+            };
+            items.extend(self.menu_item(slot, level)?);
+        }
+        Ok(items)
     }
 
-    if info.fType == MFT_SEPARATOR {
-        return Ok(None);
+    fn menu_item(
+        &self,
+        slot: MenuSlot,
+        level: MenuLevel<'_>,
+    ) -> windows::core::Result<Option<ProviderNativeMenuItem>> {
+        let MenuSlot { menu, position } = slot;
+        let mut text_buffer = vec![0u16; MAX_PATH as usize];
+        let mut info = MENUITEMINFOW {
+            cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+            fMask: MIIM_BITMAP | MIIM_FTYPE | MIIM_STATE | MIIM_ID | MIIM_SUBMENU | MIIM_STRING,
+            dwTypeData: windows::core::PWSTR(text_buffer.as_mut_ptr()),
+            cch: (text_buffer.len() - 1) as u32,
+            ..Default::default()
+        };
+
+        unsafe {
+            GetMenuItemInfoW(menu, position, true, &mut info)?;
+        }
+
+        if info.fType == MFT_SEPARATOR {
+            return Ok(None);
+        }
+
+        let label =
+            sanitize_menu_label(String::from_utf16_lossy(&text_buffer[..info.cch as usize]));
+        if label.is_empty() {
+            return Ok(None);
+        }
+
+        let child_menu = info.hSubMenu;
+        let has_submenu = !child_menu.0.is_null();
+        let current_path = append_path(level.parent_path, position);
+        let submenu = MenuSlot {
+            menu: child_menu,
+            position,
+        };
+        let submenu_level = MenuLevel {
+            depth: level.depth,
+            parent_path: &current_path,
+        };
+        let children = self.submenu_children(submenu, submenu_level)?;
+
+        let enabled = (info.fState & (MFS_DISABLED | MFS_GRAYED)).0 == 0;
+        let normalized_verb = command_verb(self.context_menu, info.wID);
+        let canonical_action_kind = classify_canonical_action(normalized_verb.as_deref(), &label);
+        let danger = canonical_action_kind == Some(NativeMenuCanonicalActionKind::Delete);
+        let icon = extract_menu_icon(&info);
+        let id = format!("windows-item-{}-{}", path_key(&current_path), info.wID);
+        let invocation = leaf_invocation(self.request, has_submenu, current_path);
+
+        Ok(Some(ProviderNativeMenuItem {
+            id,
+            label,
+            enabled,
+            danger,
+            canonical_action_kind,
+            normalized_verb,
+            icon,
+            invocation,
+            children,
+        }))
     }
 
-    let label = sanitize_menu_label(String::from_utf16_lossy(&text_buffer[..info.cch as usize]));
-    if label.is_empty() {
-        return Ok(None);
+    fn submenu_children(
+        &self,
+        submenu: MenuSlot,
+        level: MenuLevel<'_>,
+    ) -> windows::core::Result<Vec<ProviderNativeMenuItem>> {
+        let has_submenu = !submenu.menu.0.is_null();
+        let descends_into_submenu = has_submenu && level.depth < MAX_SUBMENU_DEPTH;
+        if !descends_into_submenu {
+            return Ok(Vec::new());
+        }
+        initialize_submenu(self.context_menu, submenu.menu, submenu.position);
+        let child_level = MenuLevel {
+            depth: level.depth + 1,
+            parent_path: level.parent_path,
+        };
+        self.popup_items(submenu.menu, child_level)
     }
-
-    let child_menu = info.hSubMenu;
-    let has_submenu = !child_menu.0.is_null();
-    let current_path = append_path(parent_path, position);
-    let children = enumerate_submenu_children(
-        request,
-        context_menu,
-        child_menu,
-        position,
-        depth,
-        &current_path,
-    )?;
-
-    let enabled = (info.fState & (MFS_DISABLED | MFS_GRAYED)).0 == 0;
-    let normalized_verb = command_verb(context_menu, info.wID);
-    let canonical_action_kind = classify_canonical_action(normalized_verb.as_deref(), &label);
-    let danger = canonical_action_kind == Some(NativeMenuCanonicalActionKind::Delete);
-    let icon = extract_menu_icon(&info);
-    let id = format!("windows-item-{}-{}", path_key(&current_path), info.wID);
-    let invocation = leaf_invocation(request, has_submenu, current_path);
-
-    Ok(Some(ProviderNativeMenuItem {
-        id,
-        label,
-        enabled,
-        danger,
-        canonical_action_kind,
-        normalized_verb,
-        icon,
-        invocation,
-        children,
-    }))
-}
-
-fn enumerate_submenu_children(
-    request: &LoadNativeMenuRequest,
-    context_menu: &IContextMenu,
-    child_menu: windows::Win32::UI::WindowsAndMessaging::HMENU,
-    position: u32,
-    depth: usize,
-    current_path: &[u32],
-) -> windows::core::Result<Vec<ProviderNativeMenuItem>> {
-    let has_submenu = !child_menu.0.is_null();
-    let descends_into_submenu = has_submenu && depth < MAX_SUBMENU_DEPTH;
-    if !descends_into_submenu {
-        return Ok(Vec::new());
-    }
-    initialize_submenu(context_menu, child_menu, position);
-    enumerate_popup_items(
-        request,
-        context_menu,
-        child_menu,
-        depth + 1,
-        current_path.to_vec(),
-    )
 }
 
 fn leaf_invocation(

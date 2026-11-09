@@ -114,7 +114,11 @@ function useTreeDropTarget(path: string) {
     event.preventDefault()
     setDropEffect(
       event.dataTransfer,
-      resolveDropKind(dropModifiers(event, platform), drag.sourceDir, path, platform),
+      resolveDropKind(
+        dropModifiers(event, platform),
+        { sourceDir: drag.sourceDir, destinationDir: path },
+        platform,
+      ),
     )
     setIsDropTarget(true)
   }
@@ -132,7 +136,7 @@ function useTreeDropTarget(path: string) {
     const modifiers = dropModifiers(event, platform)
     setIsDropTarget(false)
     useDragStore.getState().end()
-    await performDrop(drag, path, modifiers, platform)
+    await performDrop(drag, { destinationDir: path, modifiers }, platform)
   }
 
   return { isDropTarget, handleDragOver, handleDragLeave, handleDrop }

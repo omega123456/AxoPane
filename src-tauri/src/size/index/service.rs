@@ -12,12 +12,13 @@ use super::tree::{FolderSizeTree, FolderTotal};
 use crate::resource_coordinator::ResourceCoordinator;
 use crate::size::fast_walk::{self, Qos, WalkOptions};
 use crate::size::{
-    route_of, FolderSizeIndexStatus, IndexBackend, IndexState, NaReason, RequestMode, Route,
-    SizeSource, SizeStateKind, SizeUpdate,
+    route_of, FolderSizeIndexStatus, IndexBackend, IndexState, NaReason, PaneSubscriptions,
+    RequestMode, Route, SizeRequest, SizeSource, SizeStateKind, SizeUpdate,
 };
 
 use super::lanes::{run_background, run_boosts, BoostJob, Lanes, ScanJob};
 use super::machine::{Machine, Message};
+use super::subscriptions::SubscribedFolder;
 
 pub type SizeEmitter = Arc<dyn Fn(Vec<SizeUpdate>) + Send + Sync>;
 pub type StatusEmitter = Arc<dyn Fn(FolderSizeIndexStatus) + Send + Sync>;
@@ -68,13 +69,20 @@ pub struct LaneSnapshot {
 }
 
 #[cfg(not(feature = "test-utils"))]
+pub struct MacIndexSetup<'setup> {
+    pub cache_dir: &'setup Path,
+    pub emit_sizes: SizeEmitter,
+    pub emit_status: StatusEmitter,
+}
+
+#[cfg(not(feature = "test-utils"))]
 impl IndexOptions {
-    pub fn for_this_mac(
-        cache_dir: &Path,
-        coordinator: Arc<ResourceCoordinator>,
-        emit_sizes: SizeEmitter,
-        emit_status: StatusEmitter,
-    ) -> Self {
+    pub fn for_this_mac(setup: MacIndexSetup<'_>, coordinator: Arc<ResourceCoordinator>) -> Self {
+        let MacIndexSetup {
+            cache_dir,
+            emit_sizes,
+            emit_status,
+        } = setup;
         let home = platform::home_dir();
         Self {
             roots: vec![PathBuf::from("/")],
@@ -223,16 +231,12 @@ impl FolderSizeIndex {
 
     /// Answers indexed paths at once; the rest are boosted and
     /// answered through `emitter` when their walk completes.
-    pub fn request(&self, paths: Vec<String>, mode: RequestMode, emitter: SizeEmitter) {
+    pub fn request(&self, request: SizeRequest, emitter: SizeEmitter) {
         if !self.shared.is_booted() {
-            let _ = self.sender.send(Message::Request {
-                paths,
-                mode,
-                emitter,
-            });
+            let _ = self.sender.send(Message::Request { request, emitter });
             return;
         }
-        self.shared.request(paths, mode, emitter);
+        self.shared.request(request, emitter);
     }
 
     /// Drops queued boosts for `paths` and stops a running one; returns
@@ -259,12 +263,12 @@ impl FolderSizeIndex {
     /// path clears it. A current path inside an unvisited protected root
     /// marks it visited before any later request is answered. Indexed
     /// paths through a symlink track their resolved target.
-    pub fn set_subscriptions(
-        &self,
-        pane: String,
-        current_path: Option<String>,
-        folders: Vec<String>,
-    ) {
+    pub fn set_subscriptions(&self, subscriptions: PaneSubscriptions) {
+        let PaneSubscriptions {
+            pane_id: pane,
+            current_path,
+            folders,
+        } = subscriptions;
         if let Some(root) =
             current_path.and_then(|path| self.shared.visit(&self.tracked(Path::new(&path))))
         {
@@ -272,9 +276,9 @@ impl FolderSizeIndex {
         }
         let folders = folders
             .into_iter()
-            .map(|folder| {
-                let tracked = self.tracked(Path::new(&folder));
-                (folder, tracked)
+            .map(|path| {
+                let normalized = self.tracked(Path::new(&path));
+                SubscribedFolder { path, normalized }
             })
             .collect();
         let _ = self.sender.send(Message::Subscribe { pane, folders });
@@ -352,11 +356,13 @@ impl Shared {
         }
     }
 
-    pub(super) fn request(&self, paths: Vec<String>, mode: RequestMode, emitter: SizeEmitter) {
+    pub(super) fn request(&self, request: SizeRequest, emitter: SizeEmitter) {
+        let SizeRequest { paths, mode } = request;
         let mut triage = RequestTriage::default();
         let view = self.view();
+        let query = ViewQuery { view: &view, mode };
         for path in paths {
-            let answer = self.answer(&view, &path, mode);
+            let answer = self.answer(query, &path);
             triage.record(path, answer);
         }
         drop(view);
@@ -365,7 +371,11 @@ impl Shared {
             emitter(answered);
         }
         if !boosted.is_empty() {
-            self.queue_boosts(boosted, mode == RequestMode::Refresh, Some(emitter));
+            self.queue_boosts(BoostRequest {
+                paths: boosted,
+                refresh: mode == RequestMode::Refresh,
+                waiter: Some(emitter),
+            });
         }
     }
 
@@ -411,14 +421,13 @@ impl Shared {
     pub(super) fn settled_update(
         &self,
         view: &View,
-        path: &str,
-        normalized: &Path,
+        folder: &SubscribedFolder,
     ) -> Option<SizeUpdate> {
-        if self.privacy_blocked(view, normalized) {
+        if self.privacy_blocked(view, &folder.normalized) {
             return None;
         }
-        let total = view.tree.total(normalized)?;
-        (total.fully_indexed && !total.skipped).then(|| update_from_total(path, &total))
+        let total = view.tree.total(&folder.normalized)?;
+        (total.fully_indexed && !total.skipped).then(|| update_from_total(&folder.path, &total))
     }
 
     /// Background and automatic work must not read `path`.
@@ -437,7 +446,8 @@ impl Shared {
     }
 
     /// `None` means the path needs a boosted walk.
-    pub(super) fn answer(&self, view: &View, path: &str, mode: RequestMode) -> Option<SizeUpdate> {
+    pub(super) fn answer(&self, query: ViewQuery<'_>, path: &str) -> Option<SizeUpdate> {
+        let ViewQuery { view, mode } = query;
         let normalized = platform::normalize(Path::new(path));
         if self.privacy_blocked(view, &normalized) {
             return Some(unknown(path));
@@ -447,12 +457,12 @@ impl Shared {
             .then(|| update_from_total(path, &total))
     }
 
-    pub(super) fn queue_boosts(
-        &self,
-        paths: Vec<String>,
-        refresh: bool,
-        waiter: Option<SizeEmitter>,
-    ) {
+    pub(super) fn queue_boosts(&self, request: BoostRequest) {
+        let BoostRequest {
+            paths,
+            refresh,
+            waiter,
+        } = request;
         let mut lanes = self.lanes();
         for path in paths {
             let mut job = match lanes.boosts.iter().position(|job| job.path == path) {
@@ -481,22 +491,35 @@ impl Shared {
         true
     }
 
-    pub(super) fn walk_options(
-        &self,
-        cancel: Arc<AtomicBool>,
-        qos: Qos,
-        threads: usize,
-    ) -> WalkOptions {
+    pub(super) fn walk_options(&self, cancel: Arc<AtomicBool>, tuning: WalkTuning) -> WalkOptions {
         let mut options = WalkOptions::new(cancel, None).with_index_boundaries();
         options.excluded.extend(self.excluded.iter().cloned());
-        options.qos = qos;
-        options.threads = threads;
+        options.qos = tuning.qos;
+        options.threads = tuning.threads;
         #[cfg(feature = "test-utils")]
         {
             options.hooks = self.walk_hooks.clone();
         }
         options
     }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ViewQuery<'view> {
+    pub(super) view: &'view View,
+    pub(super) mode: RequestMode,
+}
+
+pub(super) struct BoostRequest {
+    pub(super) paths: Vec<String>,
+    pub(super) refresh: bool,
+    pub(super) waiter: Option<SizeEmitter>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct WalkTuning {
+    pub(super) qos: Qos,
+    pub(super) threads: usize,
 }
 
 /// Exact prefix first, then a case-insensitive one.
@@ -509,24 +532,14 @@ pub(super) fn lowercase(path: &Path) -> PathBuf {
 }
 
 pub(super) fn unknown(path: &str) -> SizeUpdate {
-    SizeUpdate::new(
-        path.to_string(),
-        SizeStateKind::Unknown,
-        SizeSource::Index,
-        None,
-    )
+    SizeUpdate::without_size(path.to_string(), SizeStateKind::Unknown, SizeSource::Index)
 }
 
 pub(super) fn update_from_total(path: &str, total: &FolderTotal) -> SizeUpdate {
     if total.denied {
         return SizeUpdate::na(path.to_string(), SizeSource::Index, Some(NaReason::Denied));
     }
-    let mut update = SizeUpdate::new(
-        path.to_string(),
-        SizeStateKind::Ready,
-        SizeSource::Index,
-        Some(total.bytes),
-    );
+    let mut update = SizeUpdate::ready(path.to_string(), SizeSource::Index, total.bytes);
     if let Some(bound) = &total.lower_bound {
         update.is_lower_bound = true;
         update.skipped_roots =
@@ -558,10 +571,9 @@ impl RequestTriage {
 }
 
 fn calculating_update(path: &str) -> SizeUpdate {
-    SizeUpdate::new(
+    SizeUpdate::without_size(
         path.to_string(),
         SizeStateKind::Calculating,
         SizeSource::Index,
-        None,
     )
 }

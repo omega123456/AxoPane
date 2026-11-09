@@ -300,15 +300,19 @@ fn ipc_commands_round_trip_config_and_session() {
     assert_eq!(reloaded_session, saved_session);
 }
 
+struct NewEntry<'entry> {
+    parent: &'entry Path,
+    name: &'entry str,
+}
+
 fn created_entry_name(
     test_app: &TestApp<tauri::test::MockRuntime>,
     command: &str,
-    parent: &Path,
-    name: &str,
+    entry: NewEntry<'_>,
 ) -> Option<String> {
     let request = CreateEntryRequest {
-        parent: path_text(parent),
-        name: name.to_string(),
+        parent: path_text(entry.parent),
+        name: entry.name.to_string(),
     };
     let created = test_app
         .invoke_payload::<Value, _>(command, request)
@@ -327,9 +331,23 @@ fn ipc_commands_cover_filesystem_entry_lifecycle() {
     let folder_path = root.join("Docs");
     let renamed_path = root.join("done.txt");
 
-    let folder_name = created_entry_name(&test_app, "create_folder", root, "Docs");
+    let folder_name = created_entry_name(
+        &test_app,
+        "create_folder",
+        NewEntry {
+            parent: root,
+            name: "Docs",
+        },
+    );
     assert_eq!(folder_name.as_deref(), Some("Docs"));
-    let file_name = created_entry_name(&test_app, "create_file", root, "todo.txt");
+    let file_name = created_entry_name(
+        &test_app,
+        "create_file",
+        NewEntry {
+            parent: root,
+            name: "todo.txt",
+        },
+    );
     assert_eq!(file_name.as_deref(), Some("todo.txt"));
 
     let listing = test_app.list_dir(root, true).expect("list dir");

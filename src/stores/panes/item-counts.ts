@@ -5,7 +5,7 @@ import type {
   ItemCountRequestContext,
   SortDirection,
 } from '@/lib/types/ipc'
-import type { PaneId } from '@/types/pane'
+import type { PaneId, VisibleRange } from '@/types/pane'
 import { isTrashPath } from '@/lib/trash'
 import { pathKey, pathsMatch, samePathOrWindowsCaseFold } from '@/lib/path-compare'
 import { withResolvedIcons } from '@/stores/panes/icon-requests'
@@ -48,12 +48,6 @@ export type ItemsSortResponse = {
   context: ItemCountRequestContext
   path: string
   entries: DirectoryEntry[]
-}
-
-export type VisibleItemCountWindow = {
-  visibleStartIndex: number
-  visibleEndIndex: number
-  viewportCount: number
 }
 
 type PassiveRequestState = Pick<PanesData, 'passiveItemCountRequests'>
@@ -233,11 +227,11 @@ function firstByPathKey(entries: DirectoryEntry[]) {
   })
 }
 
-function overscannedRange(pane: PaneState, countWindow: VisibleItemCountWindow) {
-  const overscan = Math.max(0, countWindow.viewportCount)
+function overscannedRange(pane: PaneState, visibleRange: VisibleRange) {
+  const overscan = Math.max(0, visibleRange.viewportCount)
   return {
-    startIndex: Math.max(0, countWindow.visibleStartIndex - overscan),
-    endIndex: Math.min(pane.entries.length - 1, countWindow.visibleEndIndex + overscan),
+    startIndex: Math.max(0, visibleRange.startIndex - overscan),
+    endIndex: Math.min(pane.entries.length - 1, visibleRange.endIndex + overscan),
   }
 }
 
@@ -249,13 +243,18 @@ function requestedCountForContext(
   return Object.keys(passiveItemCountRequests).filter((key) => key.startsWith(contextPrefix)).length
 }
 
+export type VisibleItemCountRequest = {
+  pane: PaneState
+  context: ItemCountRequestContext
+  visibleRange: VisibleRange
+}
+
 export function visibleItemCountPaths(
-  pane: PaneState,
-  context: ItemCountRequestContext,
-  countWindow: VisibleItemCountWindow,
+  request: VisibleItemCountRequest,
   passiveItemCountRequests: PendingRequests,
 ): string[] {
-  const { startIndex, endIndex } = overscannedRange(pane, countWindow)
+  const { pane, context, visibleRange } = request
+  const { startIndex, endIndex } = overscannedRange(pane, visibleRange)
   if (endIndex < startIndex) {
     return []
   }
@@ -314,13 +313,11 @@ function entriesWithItemCounts(
   const results = events
     .filter((event) => itemCountContextMatches(pane, { ...scope, context: event.context }))
     .flatMap((event) => event.results)
-  return updateEntries(
-    pane.entries,
-    results,
-    (result) => pane.entries.findIndex((entry) => isDirectoryAtPath(entry, result.path)),
-    (entry, result) =>
+  return updateEntries(pane.entries, results, {
+    locate: (result) => pane.entries.findIndex((entry) => isDirectoryAtPath(entry, result.path)),
+    apply: (entry, result) =>
       entry.itemCount === result.itemCount ? null : { ...entry, itemCount: result.itemCount },
-  )
+  })
 }
 
 export function appliedItemCounts(

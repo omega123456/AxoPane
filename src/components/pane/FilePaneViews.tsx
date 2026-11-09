@@ -10,7 +10,7 @@ import type { PaneViewMode } from '@/lib/pane-view'
 import { useActionDialogStore } from '@/stores/action-dialog-store'
 import type { InlineRenameState } from '@/stores/inline-rename-store'
 import { usePanesStore } from '@/stores/panes-store'
-import type { PaneId, PaneState } from '@/types/pane'
+import type { PaneId, PaneState, VisibleRange } from '@/types/pane'
 import { DetailsView, type DetailsViewHandle } from './DetailsView'
 import type { FileRowActions } from './FileRow'
 import { GraphicalSortBar } from './GraphicalSortBar'
@@ -30,7 +30,7 @@ export type SharedPaneViewProps = {
   rename: InlineRenameState | null
   actions: FileRowActions
   marqueeRect: MarqueeRect | null
-  onVisibleRangeChange: (start: number, end: number, viewportCount: number) => void
+  onVisibleRangeChange: (visibleRange: VisibleRange) => void
   onScroll: (position: number) => void
   onContainerMouseDown: (event: MouseEvent<HTMLDivElement>) => void
   onContainerContextMenu: (event: MouseEvent<HTMLDivElement>) => void

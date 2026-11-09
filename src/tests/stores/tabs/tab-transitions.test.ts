@@ -102,22 +102,26 @@ describe('tab-transitions', () => {
   it('hydrates a pane, falling back when it has no tabs', () => {
     const fallback = [tab('fallback')]
     expect(
-      withHydratedPane(
-        panes(['a']),
-        'left',
-        { activeTabIndex: 4, tabs: [tab('x'), tab('y')] },
-        () => fallback,
-      ).left.activeTabIndex,
+      withHydratedPane(panes(['a']), 'left', {
+        pane: { activeTabIndex: 4, tabs: [tab('x'), tab('y')] },
+        fallbackTabs: () => fallback,
+      }).left.activeTabIndex,
     ).toBe(1)
     expect(
-      withHydratedPane(panes(['a']), 'left', { activeTabIndex: 0, tabs: [] }, () => fallback).left
-        .tabs,
+      withHydratedPane(panes(['a']), 'left', {
+        pane: { activeTabIndex: 0, tabs: [] },
+        fallbackTabs: () => fallback,
+      }).left.tabs,
     ).toBe(fallback)
   })
 
   it('adds a tab, activating it unless told not to', () => {
-    expect(withAddedTab(panes(['a']), 'left', tab('b'), true).left.activeTabIndex).toBe(1)
-    expect(withAddedTab(panes(['a']), 'left', tab('b'), false).left.activeTabIndex).toBe(0)
+    expect(
+      withAddedTab(panes(['a']), 'left', { tab: tab('b'), activate: true }).left.activeTabIndex,
+    ).toBe(1)
+    expect(
+      withAddedTab(panes(['a']), 'left', { tab: tab('b'), activate: false }).left.activeTabIndex,
+    ).toBe(0)
   })
 
   it('closes tabs, shifting the active index and refusing locked or last tabs', () => {
@@ -126,7 +130,7 @@ describe('tab-transitions', () => {
     expect(withClosedTab(panes(['a', 'b', 'c'], 0), 'left', 'c')?.left.activeTabIndex).toBe(0)
     expect(withClosedTab(panes(['a']), 'left', 'a')).toBeNull()
     expect(withClosedTab(panes(['a', 'b']), 'left', 'zz')).toBeNull()
-    const locked = withTabLocked(panes(['a', 'b']), 'left', 'a', true)
+    const locked = withTabLocked(panes(['a', 'b']), 'left', { tabId: 'a', locked: true })
     expect(locked.left.tabs[0].locked).toBe(true)
     expect(withClosedTab(locked, 'left', 'a')).toBeNull()
   })

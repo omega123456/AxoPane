@@ -21,7 +21,11 @@ pub fn measure_tree_size(path: &Path, cancel: &Arc<AtomicBool>, follow_symlinks:
         Ok(canonical) => HashSet::from([canonical]),
         Err(_) => HashSet::new(),
     };
-    measure_tree_size_inner(path, cancel, follow_symlinks, &mut visited)
+    let mut measure = LinkFollowingMeasure {
+        cancel,
+        visited: &mut visited,
+    };
+    measure.tree_size(path)
 }
 
 fn measure_tree_size_without_following_links(path: &Path, cancel: &Arc<AtomicBool>) -> u64 {
@@ -53,69 +57,59 @@ fn walked_entry_size(entry: &crate::traversal::TraversalEntry) -> Option<u64> {
         .map(|metadata| metadata.len())
 }
 
-fn measure_tree_size_inner(
-    path: &Path,
-    cancel: &Arc<AtomicBool>,
-    follow_symlinks: bool,
-    visited: &mut HashSet<PathBuf>,
-) -> u64 {
-    let Ok(entries) = fs::read_dir(path) else {
-        return 0;
-    };
-    entries
-        .flatten()
-        .take_while(|_| !cancel.load(Ordering::Relaxed))
-        .map(|entry| measure_entry_size(&entry, cancel, follow_symlinks, visited))
-        .fold(0_u64, u64::saturating_add)
+struct LinkFollowingMeasure<'walk> {
+    cancel: &'walk Arc<AtomicBool>,
+    visited: &'walk mut HashSet<PathBuf>,
 }
 
-fn measure_entry_size(
-    entry: &fs::DirEntry,
-    cancel: &Arc<AtomicBool>,
-    follow_symlinks: bool,
-    visited: &mut HashSet<PathBuf>,
-) -> u64 {
-    let Ok(file_type) = entry.file_type() else {
-        return 0;
-    };
-    if file_type.is_symlink() {
-        return measure_symlink_target_size(&entry.path(), cancel, follow_symlinks, visited);
+impl LinkFollowingMeasure<'_> {
+    fn tree_size(&mut self, path: &Path) -> u64 {
+        let Ok(entries) = fs::read_dir(path) else {
+            return 0;
+        };
+        let cancel = Arc::clone(self.cancel);
+        entries
+            .flatten()
+            .take_while(|_| !cancel.load(Ordering::Relaxed))
+            .map(|entry| self.entry_size(&entry))
+            .fold(0_u64, u64::saturating_add)
     }
-    if file_type.is_dir() {
-        return measure_tree_size_inner(&entry.path(), cancel, follow_symlinks, visited);
-    }
-    if !file_type.is_file() {
-        return 0;
-    }
-    entry.metadata().map_or(0, |metadata| metadata.len())
-}
 
-/// Resolve a symlink's target and measure it, recursing (with cycle
-/// protection) if the target is a directory.
-fn measure_symlink_target_size(
-    link: &Path,
-    cancel: &Arc<AtomicBool>,
-    follow_symlinks: bool,
-    visited: &mut HashSet<PathBuf>,
-) -> u64 {
-    if !follow_symlinks {
-        return 0;
+    fn entry_size(&mut self, entry: &fs::DirEntry) -> u64 {
+        let Ok(file_type) = entry.file_type() else {
+            return 0;
+        };
+        if file_type.is_symlink() {
+            return self.symlink_target_size(&entry.path());
+        }
+        if file_type.is_dir() {
+            return self.tree_size(&entry.path());
+        }
+        if !file_type.is_file() {
+            return 0;
+        }
+        entry.metadata().map_or(0, |metadata| metadata.len())
     }
-    let Ok(target_metadata) = fs::metadata(link) else {
-        return 0;
-    };
-    if !target_metadata.is_dir() {
-        return target_metadata.len();
+
+    /// Resolve a symlink's target and measure it, recursing (with cycle
+    /// protection) if the target is a directory.
+    fn symlink_target_size(&mut self, link: &Path) -> u64 {
+        let Ok(target_metadata) = fs::metadata(link) else {
+            return 0;
+        };
+        if !target_metadata.is_dir() {
+            return target_metadata.len();
+        }
+        let Ok(canonical) = link.canonicalize() else {
+            return 0;
+        };
+        if !self.visited.insert(canonical.clone()) {
+            return 0;
+        }
+        let total = self.tree_size(link);
+        self.visited.remove(&canonical);
+        total
     }
-    let Ok(canonical) = link.canonicalize() else {
-        return 0;
-    };
-    if !visited.insert(canonical.clone()) {
-        return 0;
-    }
-    let total = measure_tree_size_inner(link, cancel, follow_symlinks, visited);
-    visited.remove(&canonical);
-    total
 }
 
 pub(super) fn measure_path_size(
@@ -130,7 +124,12 @@ pub(super) fn measure_path_size(
         if !follow_symlinks {
             return link_metadata.len();
         }
-        return measure_symlink_target_size(path, cancel, follow_symlinks, &mut HashSet::new());
+        let mut visited = HashSet::new();
+        let mut measure = LinkFollowingMeasure {
+            cancel,
+            visited: &mut visited,
+        };
+        return measure.symlink_target_size(path);
     }
     if link_metadata.is_dir() {
         return measure_tree_size(path, cancel, follow_symlinks);

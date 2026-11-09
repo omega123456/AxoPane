@@ -38,9 +38,11 @@ describe('menu definitions', () => {
   })
 
   it('resolves multi-select targets when the right-clicked entry is inside the current selection', () => {
-    useSelectionStore
-      .getState()
-      .setSelection('left', [folderEntry.id, fileEntry.id], folderEntry.id, fileEntry.id)
+    useSelectionStore.getState().setSelection('left', {
+      selectedIds: [folderEntry.id, fileEntry.id],
+      anchorId: folderEntry.id,
+      focusedId: fileEntry.id,
+    })
     expect(resolveMenuTarget('left', folderEntry)).toEqual({ kind: 'multi' })
     expect(resolveMenuTarget('left')).toEqual({ kind: 'multi' })
   })
@@ -80,9 +82,11 @@ describe('menu definitions', () => {
         },
       ],
     }))
-    useSelectionStore
-      .getState()
-      .setSelection('left', [folderEntry.id, fileEntry.id], folderEntry.id, fileEntry.id)
+    useSelectionStore.getState().setSelection('left', {
+      selectedIds: [folderEntry.id, fileEntry.id],
+      anchorId: folderEntry.id,
+      focusedId: fileEntry.id,
+    })
 
     expect(
       buildContextMenuContent('left', { kind: 'file', entry: fileEntry }, 'windows').nativeRequest,

@@ -11,6 +11,7 @@ import type { DirectoryEntry } from '@/lib/types/ipc'
 import { thumbnailFingerprintKey, useThumbnailStore } from '@/stores/thumbnail-store'
 import { FOCUS_RING_INSET } from '@/lib/focus-ring'
 import { TEXT_SECONDARY } from '@/lib/class-names'
+import type { InlineRenameDraft } from '@/stores/inline-rename-store'
 
 export type EntryCardThumbnail = {
   state: 'ready' | 'loading' | 'unavailable' | 'failed'
@@ -105,10 +106,7 @@ type EntryCardProps = {
   rowIndex: number
   columnIndex: number
   isCut?: boolean
-  isRenaming?: boolean
-  renameValue?: string
-  renameBusy?: boolean
-  renameError?: string | null
+  rename?: InlineRenameDraft
   isDropTarget?: boolean
   draggable?: boolean
   thumbnail?: EntryCardThumbnail
@@ -158,31 +156,22 @@ function cardInteractionProps(
 type CardRenameCaptionProps = {
   inputRef: RefObject<HTMLInputElement | null>
   entry: DirectoryEntry
-  value: string
-  busy: boolean
-  error: string | null
+  rename: InlineRenameDraft
   actions: FileRowActions
 }
 
-function CardRenameCaption({
-  inputRef,
-  entry,
-  value,
-  busy,
-  error,
-  actions,
-}: CardRenameCaptionProps) {
+function CardRenameCaption({ inputRef, entry, rename, actions }: CardRenameCaptionProps) {
   return (
     <div className="min-w-0">
       <InlineRenameInput
         inputRef={inputRef}
         entryName={entry.name}
-        value={value}
-        busy={busy}
+        value={rename.value}
+        busy={rename.busy}
         actions={actions}
         className="w-full"
       />
-      <CardRenameError message={error} />
+      <CardRenameError message={rename.error} />
     </div>
   )
 }
@@ -197,15 +186,12 @@ function EntryCardImpl({
   rowIndex,
   columnIndex,
   isCut = false,
-  isRenaming = false,
-  renameValue = '',
-  renameBusy = false,
-  renameError = null,
+  rename,
   isDropTarget = false,
   draggable = false,
   thumbnail,
 }: EntryCardProps) {
-  const renameInputRef = useRenameInputFocus(isRenaming, entry.isDir)
+  const renameInputRef = useRenameInputFocus(rename !== undefined, entry.isDir)
 
   const stateClassName = cardHighlightClass({ isActivePane, isSelected, isFocused, isDropTarget })
   const contentClassName = cutFadeClass(isCut)
@@ -216,15 +202,8 @@ function EntryCardImpl({
     columnIndex,
     isSelected,
   })
-  const caption = isRenaming ? (
-    <CardRenameCaption
-      inputRef={renameInputRef}
-      entry={entry}
-      value={renameValue}
-      busy={renameBusy}
-      error={renameError}
-      actions={actions}
-    />
+  const caption = rename ? (
+    <CardRenameCaption inputRef={renameInputRef} entry={entry} rename={rename} actions={actions} />
   ) : (
     <CardLabels entry={entry} />
   )

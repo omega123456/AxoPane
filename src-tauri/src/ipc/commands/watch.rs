@@ -1,9 +1,12 @@
 use crate::item_counts::ItemCountService;
+#[cfg(feature = "test-utils")]
 use crate::watch::WatchService;
+use crate::watch::{TabWatchArm, WatchEmitters};
 use std::sync::Arc;
 
 use crate::fs::DirectoryEntry;
 use crate::ipc::types::SetTabWatchRequest;
+#[cfg(feature = "test-utils")]
 use tauri::State;
 #[cfg(not(feature = "test-utils"))]
 use tauri::{AppHandle, Emitter, Manager};
@@ -62,12 +65,15 @@ fn fold_dir_patch_into_session_core(
                 .map(|entry| entry.path.clone())
         })
         .collect();
-    let session_patch = session_state.apply_watch_mutation(
-        &pane_id,
-        &patch.path,
+    let target = crate::directory_session::PanePath {
+        pane_id: &pane_id,
+        path: &patch.path,
+    };
+    let mutation = crate::directory_session::WatchMutation {
         changed_entries,
-        patch.removed.clone(),
-    )?;
+        removed_paths: patch.removed.clone(),
+    };
+    let session_patch = session_state.apply_watch_mutation(target, mutation)?;
     invalidate_item_counts_for_patch(item_count_state, &session_patch, &changed_dirs);
     Some(session_patch)
 }
@@ -149,17 +155,23 @@ pub fn fold_dir_patch_into_session_for_tests(
 pub fn set_tab_watch(
     payload: SetTabWatchRequest,
     app: AppHandle,
-    state: State<'_, Arc<WatchService>>,
-    session_state: State<'_, Arc<crate::directory_session::DirectorySessionService>>,
+    services: crate::ipc::command_services::WatchServices<'_>,
 ) -> Result<(), String> {
-    let emit_patch = session_patch_emitter(app.clone(), Arc::clone(session_state.inner()));
-    state.set_tab_watch(
-        payload.target,
-        None,
-        payload.entries,
-        emit_patch,
-        watch_error_emitter(app, "watch error"),
-    )
+    let emitters = WatchEmitters {
+        patch: session_patch_emitter(app.clone(), Arc::clone(services.sessions.inner())),
+        error: watch_error_emitter(app, "watch error"),
+    };
+    services
+        .watches
+        .set_tab_watch(tab_watch_arm(payload), emitters)
+}
+
+fn tab_watch_arm(payload: SetTabWatchRequest) -> TabWatchArm {
+    TabWatchArm {
+        target: payload.target,
+        listing_seed_entries: None,
+        entries: payload.entries,
+    }
 }
 
 #[cfg(not(feature = "test-utils"))]
@@ -197,11 +209,9 @@ pub fn set_tab_watch(
     payload: SetTabWatchRequest,
     state: State<'_, Arc<WatchService>>,
 ) -> Result<(), String> {
-    state.set_tab_watch(
-        payload.target,
-        None,
-        payload.entries,
-        Arc::new(noop_dir_patch),
-        Arc::new(noop_watch_error),
-    )
+    let emitters = WatchEmitters {
+        patch: Arc::new(noop_dir_patch),
+        error: Arc::new(noop_watch_error),
+    };
+    state.set_tab_watch(tab_watch_arm(payload), emitters)
 }

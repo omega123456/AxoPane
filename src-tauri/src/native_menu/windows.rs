@@ -1,9 +1,10 @@
 #[cfg(not(feature = "test-utils"))]
 use super::helper_protocol::{HelperOperation, HelperResult};
-use super::helper_supervisor::HelperRole;
 #[cfg(not(feature = "test-utils"))]
-use super::helper_supervisor::{DISCOVERY_DEADLINE, INVOCATION_DEADLINE};
-use super::provider::{NativeMenuProvider, ProviderInvocation, ProviderNativeMenuItem};
+use super::helper_supervisor::{HelperCall, HelperRole, DISCOVERY_DEADLINE, INVOCATION_DEADLINE};
+use super::provider::{
+    NativeMenuProvider, ProviderInvocation, ProviderNativeMenuItem, RoleMenuRequest,
+};
 use super::shell_executor::ShellExecutor;
 use super::types::LoadNativeMenuRequest;
 use crate::ipc::types::{MenuActionStatus, OpenWithRequest, ShowPropertiesRequest};
@@ -22,11 +23,11 @@ impl NativeMenuProvider for WindowsNativeMenuProvider {
         #[cfg(not(feature = "test-utils"))]
         {
             let _ = executor;
-            match super::helper_supervisor::shared().call(
-                HelperRole::Interactive,
-                HelperOperation::Discover(request.clone()),
-                DISCOVERY_DEADLINE,
-            ) {
+            let call = HelperCall {
+                operation: HelperOperation::Discover(request.clone()),
+                deadline: DISCOVERY_DEADLINE,
+            };
+            match super::helper_supervisor::shared().call(HelperRole::Interactive, call) {
                 Ok(HelperResult::Items(items)) => items,
                 _ => Vec::new(),
             }
@@ -46,11 +47,11 @@ impl NativeMenuProvider for WindowsNativeMenuProvider {
         #[cfg(not(feature = "test-utils"))]
         {
             let _ = executor;
-            match super::helper_supervisor::shared().call(
-                HelperRole::Interactive,
-                HelperOperation::Invoke(invocation.clone()),
-                INVOCATION_DEADLINE,
-            ) {
+            let call = HelperCall {
+                operation: HelperOperation::Invoke(invocation.clone()),
+                deadline: INVOCATION_DEADLINE,
+            };
+            match super::helper_supervisor::shared().call(HelperRole::Interactive, call) {
                 Ok(HelperResult::Status(status)) => status,
                 _ => MenuActionStatus::unsupported("native-helper-failed"),
             }
@@ -64,26 +65,24 @@ impl NativeMenuProvider for WindowsNativeMenuProvider {
 
     fn load_menu_for_role(
         &self,
-        request: &LoadNativeMenuRequest,
+        role_request: RoleMenuRequest<'_>,
         executor: &ShellExecutor,
-        role: HelperRole,
     ) -> Vec<ProviderNativeMenuItem> {
         #[cfg(not(feature = "test-utils"))]
         {
             let _ = executor;
-            match super::helper_supervisor::shared().call(
-                role,
-                HelperOperation::Discover(request.clone()),
-                DISCOVERY_DEADLINE,
-            ) {
+            let call = HelperCall {
+                operation: HelperOperation::Discover(role_request.request.clone()),
+                deadline: DISCOVERY_DEADLINE,
+            };
+            match super::helper_supervisor::shared().call(role_request.role, call) {
                 Ok(HelperResult::Items(items)) => items,
                 _ => Vec::new(),
             }
         }
         #[cfg(feature = "test-utils")]
         {
-            let _ = role;
-            self.load_menu(request, executor)
+            self.load_menu(role_request.request, executor)
         }
     }
 }

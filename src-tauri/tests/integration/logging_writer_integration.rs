@@ -5,6 +5,7 @@ use std::fs;
 
 use file_explorer_lib::logging::{
     current_local_date, daily_log_file_name, read_current_day_logs, FileLogger, LogLevel,
+    LogMessage,
 };
 use tempfile::tempdir;
 use time::{Date, Month, OffsetDateTime, Time};
@@ -53,8 +54,22 @@ fn write_entry_rolls_files_per_day_and_prunes_stale() {
     fs::write(dir.path().join(&stale), b"old").expect("seed stale");
 
     let logger = FileLogger::new(dir.path(), LogLevel::Trace).expect("logger");
-    logger.write_entry(day_one, LogLevel::Info, "core", "first day");
-    logger.write_entry(day_two, LogLevel::Warn, "core", "second day");
+    logger.write_entry(
+        day_one,
+        LogMessage {
+            level: LogLevel::Info,
+            target: "core",
+            message: "first day",
+        },
+    );
+    logger.write_entry(
+        day_two,
+        LogMessage {
+            level: LogLevel::Warn,
+            target: "core",
+            message: "second day",
+        },
+    );
 
     assert!(dir
         .path()

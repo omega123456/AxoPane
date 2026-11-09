@@ -9,7 +9,8 @@ use file_explorer_lib::thumbnails::provider::{
     ProviderCapability, ThumbnailPreviewCallback, ThumbnailProvider,
 };
 use file_explorer_lib::thumbnails::scheduler::{
-    ThumbnailScheduler, ThumbnailSubscriber, MAX_ACTIVE_JOBS, MAX_DESIRED_PER_SCOPE,
+    DesiredThumbnail, SchedulerCounts, SchedulerParts, ScopeRequest, ThumbnailScheduler,
+    ThumbnailSubscriber, MAX_ACTIVE_JOBS, MAX_DESIRED_PER_SCOPE,
 };
 use file_explorer_lib::thumbnails::types::{
     ThumbnailCandidate, ThumbnailFingerprint, ThumbnailState,
@@ -21,6 +22,22 @@ fn candidate(name: &str) -> ThumbnailCandidate {
         false,
     )
 }
+fn desired(name: &str, priority: ThumbnailPriority, order: u32) -> DesiredThumbnail {
+    DesiredThumbnail {
+        candidate: candidate(name),
+        priority,
+        order,
+    }
+}
+
+fn scope_request(tab: &str, candidates: Vec<DesiredThumbnail>) -> ScopeRequest {
+    ScopeRequest {
+        subscriber: subscriber(tab, 1),
+        revision: 1,
+        candidates,
+    }
+}
+
 fn subscriber(tab: &str, generation: u64) -> ThumbnailSubscriber {
     ThumbnailSubscriber {
         pane_id: "left".into(),
@@ -84,17 +101,18 @@ fn verifies_metadata_once_per_generated_miss() {
     let checks = Arc::new(AtomicUsize::new(0));
     let checks_for_verifier = Arc::clone(&checks);
     let (completed_sender, completed_receiver) = mpsc::channel();
-    let scheduler = ThumbnailScheduler::new_with_metadata_verifier(
+    let parts = SchedulerParts::new(
         file_explorer_lib::thumbnails::platform_provider().into(),
         Arc::new(ResourceCoordinator::new()),
         Arc::new(move |_, _, _| {
             let _ = completed_sender.send(());
         }),
-        Arc::new(move |_| {
-            checks_for_verifier.fetch_add(1, Ordering::Relaxed);
-            true
-        }),
-    );
+    )
+    .with_metadata_matcher(Arc::new(move |_| {
+        checks_for_verifier.fetch_add(1, Ordering::Relaxed);
+        true
+    }));
+    let scheduler = ThumbnailScheduler::from_parts(parts);
     scheduler.submit(subscriber("metadata", 1), candidate("metadata.png"));
     completed_receiver
         .recv_timeout(Duration::from_millis(200))
@@ -112,9 +130,10 @@ fn limits_are_fixed_and_scope_cancellation_is_safe() {
         Arc::new(|_, _: ThumbnailState, _| {}),
     );
     scheduler.submit(subscriber("old", 1), candidate("cancelled.png"));
-    scheduler.cancel_scope("left", "old", "/folder", 1);
-    let (active, queued) = scheduler.counts();
-    assert!(active <= MAX_ACTIVE_JOBS && queued <= MAX_DESIRED_PER_SCOPE);
+    scheduler.cancel_scope(&subscriber("old", 1));
+    let counts = scheduler.counts();
+    assert!(counts.active <= MAX_ACTIVE_JOBS);
+    assert!(counts.queued <= MAX_DESIRED_PER_SCOPE);
     scheduler.shutdown();
 }
 
@@ -141,20 +160,26 @@ fn replacement_retains_ranges_larger_than_the_old_queue_limit() {
 
     let requested = (0..144)
         .map(|index| {
-            (
-                candidate(&format!("preview-{index}.png")),
+            desired(
+                &format!("preview-{index}.png"),
                 ThumbnailPriority::Visible,
                 index,
             )
         })
         .collect::<Vec<_>>();
     assert_eq!(
-        scheduler.replace_scope(subscriber("range", 1), 1, requested),
+        scheduler.replace_scope(scope_request("range", requested)),
         144
     );
-    assert_eq!(scheduler.counts(), (2, 144));
+    assert_eq!(
+        scheduler.counts(),
+        SchedulerCounts {
+            active: 2,
+            queued: 144
+        }
+    );
 
-    scheduler.cancel_scope("left", "range", "/folder", 1);
+    scheduler.cancel_scope(&subscriber("range", 1));
     release_sender.send(()).expect("release first");
     release_sender.send(()).expect("release second");
     scheduler.shutdown();
@@ -174,14 +199,11 @@ fn visible_work_precedes_directional_and_behind_prefetch() {
         Arc::new(|_, _, _| {}),
     );
     let jobs = vec![
-        (candidate("behind.png"), ThumbnailPriority::Behind, 0),
-        (candidate("visible.png"), ThumbnailPriority::Visible, 10),
-        (candidate("ahead.png"), ThumbnailPriority::Ahead, 0),
+        desired("behind.png", ThumbnailPriority::Behind, 0),
+        desired("visible.png", ThumbnailPriority::Visible, 10),
+        desired("ahead.png", ThumbnailPriority::Ahead, 0),
     ];
-    assert_eq!(
-        scheduler.replace_scope(subscriber("priority", 1), 1, jobs),
-        3
-    );
+    assert_eq!(scheduler.replace_scope(scope_request("priority", jobs)), 3);
     let started = (0..MAX_ACTIVE_JOBS)
         .map(|_| {
             started_receiver
@@ -191,7 +213,7 @@ fn visible_work_precedes_directional_and_behind_prefetch() {
         .collect::<Vec<_>>();
     assert!(started.iter().any(|path| path.ends_with("visible.png")));
     assert!(started.iter().any(|path| path.ends_with("ahead.png")));
-    scheduler.cancel_scope("left", "priority", "/folder", 1);
+    scheduler.cancel_scope(&subscriber("priority", 1));
     release_sender.send(()).expect("release first");
     release_sender.send(()).expect("release second");
     scheduler.shutdown();

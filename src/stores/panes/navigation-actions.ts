@@ -107,7 +107,7 @@ export async function reloadPane(paneId: PaneId) {
       return
     }
 
-    const resolved = await loadDirectoryListing(attempt, pane, selection, revealChildPath)
+    const resolved = await loadDirectoryListing(attempt, pane, { selection, revealChildPath })
     if (!resolved) {
       return
     }
@@ -140,7 +140,7 @@ export async function navigatePane(paneId: PaneId, path: string, options: Naviga
   parkRevealPath(paneId, revealTargetAfterNavigation(leavingPath, path, options.revealPath))
   releaseSizesOnLeave(paneId, path)
 
-  panesStore().setState((state) => navigatedPanes(state, paneId, path, viaHistory))
+  panesStore().setState((state) => navigatedPanes(state, paneId, { path, viaHistory }))
   await panesStore().getState().reloadPane(paneId)
 }
 
@@ -264,7 +264,7 @@ export function setScrollPosition(paneId: PaneId, path: string, scrollTop: numbe
   if (previous === scrollTop) {
     return
   }
-  panesStore().setState((state) => withScrollPosition(state, paneId, path, scrollTop))
+  panesStore().setState((state) => withScrollPosition(state, paneId, { path, scrollTop }))
 }
 
 export async function setShowHiddenFiles(showHiddenFiles: boolean) {

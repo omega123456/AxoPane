@@ -8,7 +8,8 @@ use std::time::{Duration, Instant};
 
 use file_explorer_lib::fs::{DirectoryEntry, SortDirection, SortKey};
 use file_explorer_lib::watch::{
-    diff_entries, pane_scope, snapshot_for_target, DirPatch, WatchService, WatchTarget,
+    diff_entries, pane_scope, snapshot_for_target, DirPatch, PatchLabel, TabWatchArm,
+    WatchEmitters, WatchService, WatchTarget,
 };
 use tempfile::tempdir;
 
@@ -50,7 +51,15 @@ fn helper_scope_and_diff_functions_describe_changes() {
         ),
     ]);
 
-    let patch = diff_entries("left-1", "C:/", "refresh", &previous, &next);
+    let patch = diff_entries(
+        PatchLabel {
+            tab_id: "left-1",
+            path: "C:/",
+            reason: "refresh",
+        },
+        &previous,
+        &next,
+    );
     assert_eq!(patch.tab_id, "left-1");
     assert_eq!(patch.reason, "refresh");
     assert!(patch
@@ -112,29 +121,39 @@ fn clearing_watches_stops_future_patch_delivery() {
     let patches_for_callback = patches.clone();
     service
         .set_tab_watch(
-            Some(WatchTarget {
-                tab_id: String::from("left-1"),
-                path: root.to_string_lossy().into_owned(),
-                sort_key: SortKey::Name,
-                sort_direction: SortDirection::Asc,
-                filter: String::new(),
-                show_hidden: true,
-                include_item_counts: true,
-            }),
-            None,
-            None,
-            Arc::new(move |patch| {
-                patches_for_callback
-                    .lock()
-                    .expect("patches lock")
-                    .push(patch);
-            }),
-            Arc::new(|_, _| {}),
+            TabWatchArm {
+                target: Some(WatchTarget {
+                    tab_id: String::from("left-1"),
+                    path: root.to_string_lossy().into_owned(),
+                    sort_key: SortKey::Name,
+                    sort_direction: SortDirection::Asc,
+                    filter: String::new(),
+                    show_hidden: true,
+                    include_item_counts: true,
+                }),
+                listing_seed_entries: None,
+                entries: None,
+            },
+            WatchEmitters {
+                patch: Arc::new(move |patch| {
+                    patches_for_callback
+                        .lock()
+                        .expect("patches lock")
+                        .push(patch);
+                }),
+                error: Arc::new(|_, _| {}),
+            },
         )
         .expect("set watch");
 
     service
-        .set_tab_watch(None, None, None, Arc::new(|_| {}), Arc::new(|_, _| {}))
+        .set_tab_watch(
+            TabWatchArm::disarm(),
+            WatchEmitters {
+                patch: Arc::new(|_| {}),
+                error: Arc::new(|_, _| {}),
+            },
+        )
         .expect("clear watches");
     fs::write(root.join("after-clear.txt"), b"x").expect("after clear");
     thread::sleep(Duration::from_millis(250));

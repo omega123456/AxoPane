@@ -11,7 +11,7 @@ import type { CommandId, DirectoryEntry } from '@/lib/types/ipc'
 import { isTrashPath } from '@/lib/trash'
 import { isNetworkPath } from '@/lib/volumes'
 import { useActionDialogStore, type DeleteTarget } from '@/stores/action-dialog-store'
-import { useClipboardStore } from '@/stores/clipboard-store'
+import { hasClipboardEntries, useClipboardStore } from '@/stores/clipboard-store'
 import { useErrorToastStore } from '@/stores/error-toast-store'
 import { useInlineRenameStore } from '@/stores/inline-rename-store'
 import { indexEntriesById, usePanesStore } from '@/stores/panes-store'
@@ -149,12 +149,11 @@ function openDirectoryInPane(context: CommandContext, destinationPaneId: PaneId)
 
 function selectAllEntries({ pane, paneId }: CommandContext) {
   const firstEntryId = pane.entries[0]?.id ?? null
-  useSelectionStore.getState().setSelection(
-    paneId,
-    pane.entries.map((item) => item.id),
-    firstEntryId,
-    firstEntryId,
-  )
+  useSelectionStore.getState().setSelection(paneId, {
+    selectedIds: pane.entries.map((item) => item.id),
+    anchorId: firstEntryId,
+    focusedId: firstEntryId,
+  })
 }
 
 function soleSelectedEntry(selectedEntries: DirectoryEntry[]): DirectoryEntry | undefined {
@@ -245,7 +244,9 @@ function placeOnClipboard(mode: 'copy' | 'move'): CommandHandler {
     if (effectiveEntries.length === 0) {
       return
     }
-    useClipboardStore.getState().setClipboard(mode, paneId, effectiveEntries)
+    useClipboardStore
+      .getState()
+      .setClipboard({ mode, sourcePaneId: paneId, entries: effectiveEntries })
     const paths = entryPaths(effectiveEntries)
     void writeFileClipboard({ mode, paths }).catch((error) => {
       log.warn('write file clipboard failed', { paneId, mode, paths, error })
@@ -261,10 +262,11 @@ function clearClipboardAfterMove(paneId: PaneId) {
 }
 
 function pasteClipboard({ pane, paneId }: CommandContext) {
-  const { mode, entries } = useClipboardStore.getState()
-  if (!mode) {
+  const clipboard = useClipboardStore.getState().snapshot
+  if (!clipboard) {
     return
   }
+  const { mode, entries } = clipboard
   if (entries.length === 0) {
     return
   }
@@ -420,7 +422,7 @@ export function canExecuteCommand(commandId: CommandId, paneId: PaneId, targetEn
     pane,
     entry: targetEntryId ? indexEntriesById(pane.entries).get(targetEntryId) : undefined,
     hasSelection: useSelectionStore.getState().selections[paneId].selectedIds.length > 0,
-    clipboardHasEntries: useClipboardStore.getState().entries.length > 0,
+    clipboardHasEntries: hasClipboardEntries(),
   })
 }
 

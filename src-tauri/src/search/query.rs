@@ -42,7 +42,11 @@ impl Segment {
     }
 
     pub fn matches(&self, name: &FoldedName, kind: NameKind) -> Option<Match> {
-        matcher::match_words(self.phrase.as_ref(), &self.tokens, name, kind)
+        let words = matcher::Words {
+            phrase: self.phrase.as_ref(),
+            tokens: &self.tokens,
+        };
+        matcher::match_words(words, name, kind)
     }
 
     /// Cheap pre-check for large scans: `false` only when `name` cannot

@@ -61,18 +61,18 @@ pub fn read_file_clipboard() -> Result<ReadFileClipboardResponse, String> {
 }
 
 fn read_file_clipboard_impl() -> Result<ReadFileClipboardResponse, String> {
-    let (mode, paths) = crate::clipboard::read_paths().map_err(|error| {
+    let clipboard_files = crate::clipboard::read_paths().map_err(|error| {
         let message = format!("Failed to read OS clipboard: {error}");
         log::warn!("{message}");
         message
     })?;
 
     Ok(ReadFileClipboardResponse {
-        mode: match mode {
+        mode: match clipboard_files.mode {
             crate::clipboard::ClipboardMode::Copy => FileClipboardMode::Copy,
             crate::clipboard::ClipboardMode::Move => FileClipboardMode::Move,
         },
-        items: file_clipboard_items(paths),
+        items: file_clipboard_items(clipboard_files.paths),
     })
 }
 

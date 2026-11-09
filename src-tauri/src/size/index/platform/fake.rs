@@ -1,7 +1,9 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
 
-use super::{EventSink, IndexPlatform, PowerSignal, PowerSink, RawEvent, StreamHandle};
+use super::{
+    EventSink, IndexPlatform, PowerSignal, PowerSink, RawEvent, StreamHandle, StreamRequest,
+};
 
 /// Scriptable platform: tests set IDs, the UUID, the OS build, Full Disk
 /// Access and power, and push event batches into the running stream.
@@ -106,15 +108,9 @@ impl IndexPlatform for FakePlatform {
         self.state().os_build.clone()
     }
 
-    fn start_stream(
-        &self,
-        _roots: &[PathBuf],
-        _excluded: &[PathBuf],
-        since: Option<u64>,
-        sink: EventSink,
-    ) -> Option<StreamHandle> {
+    fn start_stream(&self, request: StreamRequest<'_>, sink: EventSink) -> Option<StreamHandle> {
         let mut state = self.state();
-        state.stream_starts.push(since);
+        state.stream_starts.push(request.since);
         if state.stream_fails {
             return None;
         }

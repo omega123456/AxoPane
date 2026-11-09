@@ -8,6 +8,7 @@ use file_explorer_lib::fs::{
     collect_attributes, compare_entries, compare_optional_string, compare_optional_u64,
     directory_entry_from_path, infer_type_label, natural_name_compare, platform_root,
     read_item_count, system_time_to_rfc3339, validate_name, DirectoryEntry, SortDirection, SortKey,
+    SortOrder,
 };
 use tempfile::tempdir;
 
@@ -75,26 +76,61 @@ fn helper_compare_entries_orders_by_each_sort_key() {
     let directory = entry("docs", true);
     let file = entry("todo.txt", false);
     assert_eq!(
-        compare_entries(&directory, &file, SortKey::Name, SortDirection::Asc),
+        compare_entries(
+            &directory,
+            &file,
+            SortOrder {
+                key: SortKey::Name,
+                direction: SortDirection::Asc,
+            },
+        ),
         Ordering::Less
     );
 
     let small = entry("a.txt", false);
     let large = entry("longer-name.log", false);
     assert_eq!(
-        compare_entries(&small, &large, SortKey::Size, SortDirection::Desc),
+        compare_entries(
+            &small,
+            &large,
+            SortOrder {
+                key: SortKey::Size,
+                direction: SortDirection::Desc,
+            },
+        ),
         Ordering::Greater
     );
     assert_eq!(
-        compare_entries(&small, &large, SortKey::Type, SortDirection::Asc),
+        compare_entries(
+            &small,
+            &large,
+            SortOrder {
+                key: SortKey::Type,
+                direction: SortDirection::Asc,
+            },
+        ),
         Ordering::Greater
     );
     assert_eq!(
-        compare_entries(&small, &large, SortKey::Modified, SortDirection::Asc),
+        compare_entries(
+            &small,
+            &large,
+            SortOrder {
+                key: SortKey::Modified,
+                direction: SortDirection::Asc,
+            },
+        ),
         Ordering::Less
     );
     assert_eq!(
-        compare_entries(&small, &large, SortKey::Created, SortDirection::Desc),
+        compare_entries(
+            &small,
+            &large,
+            SortOrder {
+                key: SortKey::Created,
+                direction: SortDirection::Desc,
+            },
+        ),
         Ordering::Greater
     );
 }
@@ -106,13 +142,27 @@ fn helper_compare_entries_breaks_equal_keys_by_name() {
     left.modified_at = Some("2026-01-01T00:00:00Z".to_string());
     right.modified_at = Some("2026-01-01T00:00:00Z".to_string());
     assert_eq!(
-        compare_entries(&left, &right, SortKey::Modified, SortDirection::Asc),
+        compare_entries(
+            &left,
+            &right,
+            SortOrder {
+                key: SortKey::Modified,
+                direction: SortDirection::Asc,
+            },
+        ),
         Ordering::Less
     );
     left.created_at = Some("2025-01-01T00:00:00Z".to_string());
     right.created_at = Some("2025-01-01T00:00:00Z".to_string());
     assert_eq!(
-        compare_entries(&left, &right, SortKey::Created, SortDirection::Asc),
+        compare_entries(
+            &left,
+            &right,
+            SortOrder {
+                key: SortKey::Created,
+                direction: SortDirection::Asc,
+            },
+        ),
         Ordering::Less
     );
 
@@ -120,14 +170,28 @@ fn helper_compare_entries_breaks_equal_keys_by_name() {
     let size_b = entry("bbb.txt", false);
     assert_eq!(size_a.size_bytes, size_b.size_bytes);
     assert_eq!(
-        compare_entries(&size_a, &size_b, SortKey::Size, SortDirection::Asc),
+        compare_entries(
+            &size_a,
+            &size_b,
+            SortOrder {
+                key: SortKey::Size,
+                direction: SortDirection::Asc,
+            },
+        ),
         Ordering::Less
     );
     let items_a = entry("one", true);
     let items_b = entry("two", true);
     assert_eq!(items_a.item_count, items_b.item_count);
     assert_eq!(
-        compare_entries(&items_a, &items_b, SortKey::Items, SortDirection::Asc),
+        compare_entries(
+            &items_a,
+            &items_b,
+            SortOrder {
+                key: SortKey::Items,
+                direction: SortDirection::Asc,
+            },
+        ),
         Ordering::Less
     );
 }

@@ -66,8 +66,10 @@ describe('item counts', () => {
     const entries = [directoryEntry('/root/a'), fileEntry('/root/f'), directoryEntry('/root/b')]
     const pane = paneWith('left', { ...LISTED, entries })
     const context = itemCountContext('left', pane, TAB_ID)
-    const countWindow = { visibleStartIndex: 0, visibleEndIndex: 0, viewportCount: 2 }
-    expect(visibleItemCountPaths(pane, context, countWindow, {})).toEqual(['/root/a', '/root/b'])
+    const countWindow = { startIndex: 0, endIndex: 0, viewportCount: 2 }
+    expect(
+      visibleItemCountPaths({ pane: pane, context: context, visibleRange: countWindow }, {}),
+    ).toEqual(['/root/a', '/root/b'])
 
     const state = panesDataWithLeft(pane)
     const requested = withRequestedItemCounts(
@@ -77,7 +79,9 @@ describe('item counts', () => {
     )
     expect(requested).not.toBeNull()
     const passive = requested?.passiveItemCountRequests ?? {}
-    expect(visibleItemCountPaths(pane, context, countWindow, passive)).toEqual(['/root/b'])
+    expect(
+      visibleItemCountPaths({ pane: pane, context: context, visibleRange: countWindow }, passive),
+    ).toEqual(['/root/b'])
     expect(
       withoutRequestedItemCounts({ passiveItemCountRequests: passive }, context, ['/root/a']),
     ).toEqual({
@@ -91,8 +95,10 @@ describe('item counts', () => {
   it('returns nothing for an empty window or exhausted budget', () => {
     const pane = paneWith('left', { ...LISTED, entries: [] })
     const context = itemCountContext('left', pane, TAB_ID)
-    const countWindow = { visibleStartIndex: 0, visibleEndIndex: 0, viewportCount: 0 }
-    expect(visibleItemCountPaths(pane, context, countWindow, {})).toEqual([])
+    const countWindow = { startIndex: 0, endIndex: 0, viewportCount: 0 }
+    expect(
+      visibleItemCountPaths({ pane: pane, context: context, visibleRange: countWindow }, {}),
+    ).toEqual([])
 
     const full = paneWith('left', LISTED)
     const exhausted = Object.fromEntries(
@@ -101,7 +107,9 @@ describe('item counts', () => {
         true as const,
       ]),
     )
-    expect(visibleItemCountPaths(full, context, countWindow, exhausted)).toEqual([])
+    expect(
+      visibleItemCountPaths({ pane: full, context: context, visibleRange: countWindow }, exhausted),
+    ).toEqual([])
   })
 
   it('applies counts only to the matching listing and keeps unchanged panes', () => {

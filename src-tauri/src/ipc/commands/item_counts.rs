@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::ipc::types::{
     ActiveItemsSortRequest, ActiveItemsSortResponse, VisibleItemCountsRequest,
 };
+#[cfg(feature = "test-utils")]
 use tauri::State;
 #[cfg(not(feature = "test-utils"))]
 use tauri::{AppHandle, Emitter, Manager};
@@ -13,22 +14,22 @@ use tauri::{AppHandle, Emitter, Manager};
 pub fn request_visible_item_counts(
     payload: VisibleItemCountsRequest,
     app: AppHandle,
-    state: State<'_, ItemCountService>,
-    session_state: State<'_, Arc<crate::directory_session::DirectorySessionService>>,
-    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+    services: crate::ipc::command_services::ItemCountServices<'_>,
 ) {
-    let generation = session_state
+    let generation = services
+        .sessions
         .watch_revision_for_pane_path(&payload.context.pane_id, &payload.context.path)
         .unwrap_or(payload.context.request_id);
-    let plan = state.plan_automatic_request_with_generation(&payload, generation);
+    let item_counts = &services.item_counts;
+    let plan = item_counts.plan_automatic_request_with_generation(&payload, generation);
     if plan.is_empty() {
         return;
     }
 
-    if !state.enqueue_automatic_request(plan) {
+    if !item_counts.enqueue_automatic_request(plan) {
         return;
     }
-    let executor = Arc::clone(executor.inner());
+    let executor = Arc::clone(services.executor.inner());
     tauri::async_runtime::spawn(async move {
         // `enqueue_automatic_request` grants at most two drainers; every
         // drainer itself runs in the fixed IPC owner rather than a new OS
@@ -68,14 +69,13 @@ pub fn request_visible_item_counts(
 #[tauri::command]
 pub async fn sort_active_items(
     payload: ActiveItemsSortRequest,
-    state: State<'_, ItemCountService>,
-    session_state: State<'_, Arc<crate::directory_session::DirectorySessionService>>,
-    executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
+    services: crate::ipc::command_services::ItemCountServices<'_>,
 ) -> Result<ActiveItemsSortResponse, String> {
     let key = payload.context.path.clone();
-    let item_counts = state.inner().clone();
-    let sessions = Arc::clone(session_state.inner());
-    executor
+    let item_counts = services.item_counts.inner().clone();
+    let sessions = Arc::clone(services.sessions.inner());
+    services
+        .executor
         .latency(key, move || {
             item_counts
                 .sort_active_items_with_session(&payload, Some(&sessions))

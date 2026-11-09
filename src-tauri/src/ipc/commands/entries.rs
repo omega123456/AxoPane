@@ -2,9 +2,9 @@ use crate::fs;
 #[cfg(not(feature = "test-utils"))]
 use std::sync::Arc;
 
-#[cfg(not(feature = "test-utils"))]
-use super::latency_filesystem_unless_cancelled;
 use super::logged_error;
+#[cfg(not(feature = "test-utils"))]
+use super::{latency_filesystem_unless_cancelled, CancellableMutation};
 use crate::fs::DirectoryEntry;
 use crate::ipc::types::{CreateEntryRequest, RenameEntryRequest};
 #[cfg(not(feature = "test-utils"))]
@@ -16,11 +16,12 @@ pub async fn create_folder(
     payload: CreateEntryRequest,
     executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
 ) -> Result<DirectoryEntry, String> {
-    let key = payload.parent.clone();
-    latency_filesystem_unless_cancelled(&executor, key, "create folder cancelled", move || {
-        create_folder_impl(payload)
-    })
-    .await
+    let mutation = CancellableMutation {
+        resource_key: payload.parent.clone(),
+        cancelled_message: "create folder cancelled",
+    };
+    latency_filesystem_unless_cancelled(&executor, mutation, move || create_folder_impl(payload))
+        .await
 }
 
 #[cfg(feature = "test-utils")]
@@ -44,11 +45,12 @@ pub async fn create_file(
     payload: CreateEntryRequest,
     executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
 ) -> Result<DirectoryEntry, String> {
-    let key = payload.parent.clone();
-    latency_filesystem_unless_cancelled(&executor, key, "create file cancelled", move || {
-        create_file_impl(payload)
-    })
-    .await
+    let mutation = CancellableMutation {
+        resource_key: payload.parent.clone(),
+        cancelled_message: "create file cancelled",
+    };
+    latency_filesystem_unless_cancelled(&executor, mutation, move || create_file_impl(payload))
+        .await
 }
 
 #[cfg(feature = "test-utils")]
@@ -72,11 +74,12 @@ pub async fn rename_entry(
     payload: RenameEntryRequest,
     executor: State<'_, Arc<crate::ipc::executor::IpcExecutor>>,
 ) -> Result<DirectoryEntry, String> {
-    let key = payload.path.clone();
-    latency_filesystem_unless_cancelled(&executor, key, "rename cancelled", move || {
-        rename_entry_impl(payload)
-    })
-    .await
+    let mutation = CancellableMutation {
+        resource_key: payload.path.clone(),
+        cancelled_message: "rename cancelled",
+    };
+    latency_filesystem_unless_cancelled(&executor, mutation, move || rename_entry_impl(payload))
+        .await
 }
 
 #[cfg(feature = "test-utils")]

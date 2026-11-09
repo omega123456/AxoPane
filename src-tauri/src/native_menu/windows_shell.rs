@@ -90,13 +90,13 @@ pub(crate) fn icon_resource_to_data_url(resource: &str) -> Option<String> {
         return None;
     }
 
-    let (module, index) = split_icon_resource(trimmed);
-    let module_wide = wide_nul(module);
+    let icon_resource = split_icon_resource(trimmed);
+    let module_wide = wide_nul(icon_resource.module);
     let mut large: HICON = HICON(null_mut());
     let extracted = unsafe {
         SHDefExtractIconW(
             PCWSTR(module_wide.as_ptr()),
-            index,
+            icon_resource.index,
             0,
             Some(&mut large),
             None,
@@ -111,12 +111,20 @@ pub(crate) fn icon_resource_to_data_url(resource: &str) -> Option<String> {
     hicon_to_data_url(large, IconBitmapFallback::None)
 }
 
-fn split_icon_resource(resource: &str) -> (&str, i32) {
+struct IconResource<'resource> {
+    module: &'resource str,
+    index: i32,
+}
+
+fn split_icon_resource(resource: &str) -> IconResource<'_> {
     match resource.rsplit_once(',') {
-        Some((module, index)) => {
-            let parsed = index.trim().parse::<i32>().unwrap_or(0);
-            (module.trim(), parsed)
-        }
-        None => (resource, 0),
+        Some((module, index)) => IconResource {
+            module: module.trim(),
+            index: index.trim().parse::<i32>().unwrap_or(0),
+        },
+        None => IconResource {
+            module: resource,
+            index: 0,
+        },
     }
 }

@@ -7,16 +7,23 @@ use std::time::SystemTime;
 use crossbeam_channel::{Receiver, Sender};
 
 use super::persist::{self, ChangeEvent, ReplayOutcome, Snapshot, SnapshotMeta};
-use super::platform::{self, IndexPlatform, PowerSignal, RawEvent, StreamHandle};
-use super::tree::FolderSizeTree;
+use super::platform::{self, IndexPlatform, PowerSignal, RawEvent, StreamHandle, StreamRequest};
+use super::tree::{DirectoryListing, FolderSizeTree};
 use crate::size::fast_walk::{self, DirRecord, Qos};
 use crate::size::manual::ManualSizeError;
-use crate::size::{RequestMode, SizeSource, SizeStateKind, SizeUpdate};
+use crate::size::{SizeRequest, SizeSource, SizeStateKind, SizeUpdate};
 
 use super::lanes::{BoostJob, ScanJob, WalkOutcome};
 use super::service::{
-    unix_secs, unknown, update_from_total, Clock, IndexOptions, Shared, SizeEmitter, StatusEmitter,
+    unix_secs, unknown, update_from_total, BoostRequest, Clock, IndexOptions, Shared, SizeEmitter,
+    StatusEmitter, WalkTuning,
 };
+use super::subscriptions::SubscribedFolder;
+
+struct RescanStart {
+    identity: SnapshotMeta,
+    current_id: u64,
+}
 
 pub(super) enum Message {
     Events(Vec<RawEvent>),
@@ -34,14 +41,12 @@ pub(super) enum Message {
         outcome: WalkOutcome,
     },
     Request {
-        paths: Vec<String>,
-        mode: RequestMode,
+        request: SizeRequest,
         emitter: SizeEmitter,
     },
     Subscribe {
         pane: String,
-        /// Display paths with the normalized paths they track.
-        folders: Vec<(String, PathBuf)>,
+        folders: Vec<SubscribedFolder>,
     },
     Visited(PathBuf),
     Focus(bool),
@@ -114,7 +119,7 @@ pub(super) struct Machine {
     pub(super) full: Option<FullScan>,
     pub(super) background_inflight: usize,
     pub(super) items_scanned: u64,
-    pub(super) subscriptions: HashMap<String, Vec<(String, PathBuf)>>,
+    pub(super) subscriptions: HashMap<String, Vec<SubscribedFolder>>,
     pub(super) sleeping: bool,
     pub(super) low_power: bool,
     pub(super) thermal_pressure: bool,
@@ -218,7 +223,13 @@ impl Machine {
                 Some(self.resume_from(snapshot, current_id))
             }
             stale => {
-                self.rescan_from(stale, identity, current_id);
+                self.rescan_from(
+                    stale,
+                    RescanStart {
+                        identity,
+                        current_id,
+                    },
+                );
                 None
             }
         }
@@ -244,7 +255,11 @@ impl Machine {
 
     /// Missing, corrupt, foreign, from another OS build or ahead: rescan,
     /// keeping any old totals visible meanwhile.
-    fn rescan_from(&mut self, stale: Option<Snapshot>, identity: SnapshotMeta, current_id: u64) {
+    fn rescan_from(&mut self, stale: Option<Snapshot>, start: RescanStart) {
+        let RescanStart {
+            identity,
+            current_id,
+        } = start;
         if let Some(snapshot) = stale {
             self.load_tree(snapshot.tree);
         }
@@ -255,10 +270,13 @@ impl Machine {
 
     fn start_stream(&mut self, since: Option<u64>) {
         let sender = self.sender.clone();
-        self.stream = self.platform.start_stream(
-            &self.shared.roots,
-            &self.stream_excluded,
+        let request = StreamRequest {
+            roots: &self.shared.roots,
+            excluded: &self.stream_excluded,
             since,
+        };
+        self.stream = self.platform.start_stream(
+            request,
             Arc::new(move |events| {
                 let _ = sender.send(Message::Events(events));
             }),
@@ -279,11 +297,7 @@ impl Machine {
             Message::Records { records, full } => self.records(records, full),
             Message::ScanDone { job, outcome } => self.scan_done(job, outcome),
             Message::BoostDone { job, outcome } => self.boost_done(job, outcome),
-            Message::Request {
-                paths,
-                mode,
-                emitter,
-            } => self.shared.request(paths, mode, emitter),
+            Message::Request { request, emitter } => self.shared.request(request, emitter),
             Message::Subscribe { pane, folders } => self.subscribe(pane, folders),
             Message::Visited(root) => self.visited(root),
             Message::Focus(true) => self.focused(),
@@ -315,14 +329,13 @@ impl Machine {
     }
 
     pub(super) fn finish_history_replay(&mut self, replayed: CatchUp, max_id: u64) {
-        let (volume_uuid, os_build) = (self.meta.volume_uuid.clone(), self.meta.os_build.clone());
-        self.apply_plan(persist::plan_catch_up(
-            &replayed.saved,
-            &volume_uuid,
-            &os_build,
-            replayed.current_id,
-            &replayed.events,
-        ));
+        let current = persist::CurrentVolume {
+            uuid: &self.meta.volume_uuid,
+            os_build: &self.meta.os_build,
+            event_id: replayed.current_id,
+        };
+        let plan = persist::plan_catch_up(&replayed.saved, current, &replayed.events);
+        self.apply_plan(plan);
         self.last_applied_id = self.last_applied_id.max(max_id).max(replayed.current_id);
         self.save_snapshot();
     }
@@ -350,15 +363,21 @@ impl Machine {
         if !self.can_reread(dir) {
             return;
         }
-        let options =
-            self.shared
-                .walk_options(Arc::new(AtomicBool::new(false)), Qos::UserInitiated, 1);
+        let tuning = WalkTuning {
+            qos: Qos::UserInitiated,
+            threads: 1,
+        };
+        let options = self
+            .shared
+            .walk_options(Arc::new(AtomicBool::new(false)), tuning);
         let added = match fast_walk::list_dir(dir, &options) {
             Ok(listing) => self.shared.view_mut().tree.apply_listing(
                 dir,
-                listing.direct_bytes,
-                &listing.subdirs,
-                listing.denied,
+                DirectoryListing {
+                    direct_bytes: listing.direct_bytes,
+                    subdirs: &listing.subdirs,
+                    denied: listing.denied,
+                },
             ),
             Err(ManualSizeError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
                 self.prune(dir);
@@ -382,17 +401,21 @@ impl Machine {
         is_scanned && !self.shared.privacy_blocked(&view, dir)
     }
 
-    fn schedule_added_dir(&mut self, path: PathBuf, subscribed: &[(String, PathBuf)]) {
+    fn schedule_added_dir(&mut self, path: PathBuf, subscribed: &[SubscribedFolder]) {
         if self.shared.privacy_blocked(&self.shared.view(), &path) {
             return;
         }
-        let is_subscribed = subscribed.iter().any(|(_, normalized)| *normalized == path);
+        let is_subscribed = subscribed.iter().any(|folder| folder.normalized == path);
         if !is_subscribed {
             self.queue_background(path);
             return;
         }
         let display = path.to_string_lossy().into_owned();
-        self.shared.queue_boosts(vec![display], false, None);
+        self.shared.queue_boosts(BoostRequest {
+            paths: vec![display],
+            refresh: false,
+            waiter: None,
+        });
     }
 
     pub(super) fn prune(&mut self, dir: &Path) {
@@ -451,9 +474,11 @@ impl Machine {
         for record in records {
             view.tree.merge_record(
                 &record.path,
-                record.direct_bytes,
-                &record.subdirs,
-                record.denied,
+                DirectoryListing {
+                    direct_bytes: record.direct_bytes,
+                    subdirs: &record.subdirs,
+                    denied: record.denied,
+                },
             );
         }
     }
@@ -530,12 +555,7 @@ fn is_resumable(saved: &SnapshotMeta, identity: &SnapshotMeta, current_id: u64) 
 }
 
 fn size_error(path: &str) -> SizeUpdate {
-    SizeUpdate::new(
-        path.to_string(),
-        SizeStateKind::Error,
-        SizeSource::Index,
-        None,
-    )
+    SizeUpdate::without_size(path.to_string(), SizeStateKind::Error, SizeSource::Index)
 }
 
 #[derive(Default)]

@@ -86,21 +86,36 @@ impl ReconcileCoordinator {
     /// still re-check before committing.
     pub fn request_reconcile(
         self: &Arc<Self>,
-        coordinator: Arc<ResourceCoordinator>,
-        resource_key: String,
+        resource: ReconcileResource,
         work: impl Fn(u64) + Send + Sync + 'static,
     ) -> u64 {
-        let target = self.target(&resource_key);
+        let target = self.target(&resource.resource_key);
         let generation = target.generation.fetch_add(1, Ordering::SeqCst) + 1;
         if target.scheduled.swap(true, Ordering::SeqCst) {
             return generation;
         }
         std::thread::spawn(move || {
-            drain_reconcile_requests(&target, &coordinator, &resource_key, generation, &work);
+            let drain = ReconcileDrain {
+                target: &target,
+                resource: &resource,
+                work: &work,
+            };
+            drain.run_until_latest(generation);
         });
 
         generation
     }
+}
+
+pub struct ReconcileResource {
+    pub coordinator: Arc<ResourceCoordinator>,
+    pub resource_key: String,
+}
+
+struct ReconcileDrain<'drain, Work> {
+    target: &'drain ReconcileTarget,
+    resource: &'drain ReconcileResource,
+    work: &'drain Work,
 }
 
 #[cfg(feature = "test-utils")]
@@ -108,46 +123,28 @@ pub fn generation_for_tests(coordinator: &ReconcileCoordinator) -> u64 {
     coordinator.target("test").generation.load(Ordering::SeqCst)
 }
 
-/// A request may arrive while a pass is admitted or running. Drains until no
-/// newer generation exists, running only the latest one instead of every
-/// intermediate focus event.
-fn drain_reconcile_requests(
-    target: &ReconcileTarget,
-    coordinator: &ResourceCoordinator,
-    resource_key: &str,
-    first_generation: u64,
-    work: &impl Fn(u64),
-) {
-    let mut requested_generation = first_generation;
-    loop {
-        run_if_current(
-            target,
-            coordinator,
-            resource_key,
-            requested_generation,
-            work,
-        );
-        let Some(next_generation) = next_requested_generation(target, requested_generation) else {
+impl<Work: Fn(u64)> ReconcileDrain<'_, Work> {
+    /// A request may arrive while a pass is admitted or running. Drains until
+    /// no newer generation exists, running only the latest one instead of
+    /// every intermediate focus event.
+    fn run_until_latest(&self, first_generation: u64) {
+        let mut requested_generation = Some(first_generation);
+        while let Some(generation) = requested_generation {
+            self.run_if_current(generation);
+            requested_generation = next_requested_generation(self.target, generation);
+        }
+    }
+
+    fn run_if_current(&self, requested_generation: u64) {
+        let resource_key = self.resource.resource_key.clone();
+        let spec = JobSpec::new([JobClass::Latency], [resource_key]);
+        let Ok(_permit) = self.resource.coordinator.submit(spec) else {
             return;
         };
-        requested_generation = next_generation;
-    }
-}
-
-fn run_if_current(
-    target: &ReconcileTarget,
-    coordinator: &ResourceCoordinator,
-    resource_key: &str,
-    requested_generation: u64,
-    work: &impl Fn(u64),
-) {
-    let spec = JobSpec::new([JobClass::Latency], [resource_key.to_string()]);
-    let Ok(_permit) = coordinator.submit(spec) else {
-        return;
-    };
-    let still_requested = target.generation.load(Ordering::SeqCst) == requested_generation;
-    if still_requested {
-        work(requested_generation);
+        let current_generation = self.target.generation.load(Ordering::SeqCst);
+        if current_generation == requested_generation {
+            (self.work)(requested_generation);
+        }
     }
 }
 

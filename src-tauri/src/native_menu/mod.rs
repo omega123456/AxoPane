@@ -26,7 +26,9 @@ use std::sync::Arc;
 
 use helper_supervisor::HelperRole;
 use menu_cache::MenuCache;
-use provider::{dedupe_provider_items, NativeMenuProvider, ProviderNativeMenuItem};
+use provider::{
+    dedupe_provider_items, NativeMenuProvider, ProviderNativeMenuItem, RoleMenuRequest,
+};
 use shell_executor::ShellExecutor;
 use token_store::NativeMenuTokenStore;
 use types::{
@@ -83,13 +85,19 @@ impl NativeMenuService {
         // pays the full shell-enumeration cost; subsequent loads reuse the cached
         // structure with their paths rebound. Fresh invoke tokens are still
         // issued per request below, so cache hits never replay stale tokens.
-        let (items, _) = self.cache.get_or_load(&request, || {
-            dedupe_provider_items(self.provider.load_menu_for_role(
-                &request,
-                &self.executor,
-                HelperRole::Interactive,
-            ))
-        });
+        let items = self
+            .cache
+            .get_or_load(&request, || {
+                let role_request = RoleMenuRequest {
+                    request: &request,
+                    role: HelperRole::Interactive,
+                };
+                dedupe_provider_items(
+                    self.provider
+                        .load_menu_for_role(role_request, &self.executor),
+                )
+            })
+            .items;
 
         LoadNativeMenuResponse {
             request_id: request.request_id.clone(),
@@ -196,20 +204,23 @@ impl NativeMenuWarmHandle {
     /// issues tokens — it produces no render payload, only a cache entry.
     pub fn warm(&self, request: &LoadNativeMenuRequest) -> Option<String> {
         let cache_key = menu_cache::cache_key(request);
-        let (_, loaded) = self.cache.get_or_load(request, || {
+        let cache_load = self.cache.get_or_load(request, || {
             log::debug!(
                 "native menu warm loading fresh menu for key {} (target_kind={:?}, target_path={:?})",
                 cache_key,
                 request.target_kind,
                 request.target_path
             );
-            dedupe_provider_items(self.provider.load_menu_for_role(
+            let role_request = RoleMenuRequest {
                 request,
-                &self.executor,
-                HelperRole::Warm,
-            ))
+                role: HelperRole::Warm,
+            };
+            dedupe_provider_items(
+                self.provider
+                    .load_menu_for_role(role_request, &self.executor),
+            )
         });
-        if !loaded {
+        if !cache_load.loaded {
             return None;
         }
         log::debug!("native menu warm cached key {}", cache_key,);

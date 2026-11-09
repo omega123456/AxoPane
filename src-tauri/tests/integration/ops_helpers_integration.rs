@@ -7,9 +7,17 @@ use std::sync::Arc;
 use file_explorer_lib::ops::{
     fallback_root, is_nested_copy_target, measure_tree_size, normalized_components, parent_dir,
     remove_source, remove_target, requested_pop, split_name, unique_name, volume_root_for,
+    FileNameParts,
 };
 use file_explorer_lib::volumes::VolumeInfo;
 use tempfile::tempdir;
+
+fn file_name_parts(stem: &str, extension: &str) -> FileNameParts {
+    FileNameParts {
+        stem: stem.to_string(),
+        extension: extension.to_string(),
+    }
+}
 
 fn volume(mount_root: &str) -> VolumeInfo {
     VolumeInfo {
@@ -29,15 +37,9 @@ fn path_helpers_cover_name_root_and_component_logic() {
     assert_eq!(requested_pop(&mut requested), Some("second".to_string()));
     assert_eq!(requested_pop(&mut requested), None);
 
-    assert_eq!(
-        split_name("photo.png"),
-        ("photo".to_string(), "png".to_string())
-    );
-    assert_eq!(split_name(".env"), (".env".to_string(), String::new()));
-    assert_eq!(
-        split_name("Makefile"),
-        ("Makefile".to_string(), String::new())
-    );
+    assert_eq!(split_name("photo.png"), file_name_parts("photo", "png"));
+    assert_eq!(split_name(".env"), file_name_parts(".env", ""));
+    assert_eq!(split_name("Makefile"), file_name_parts("Makefile", ""));
 
     if cfg!(windows) {
         assert_eq!(

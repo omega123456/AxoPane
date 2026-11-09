@@ -18,6 +18,7 @@ import {
 import { useElementVirtualizer } from '@/lib/use-element-virtualizer'
 import type { PaneViewMode } from '@/lib/pane-view'
 import { BOTH_SIDES } from '@/lib/numbers'
+import type { VisibleRange } from '@/types/pane'
 import { virtualListHeight, virtualRowsOrFallback } from '@/lib/virtual-rows'
 import type { GraphicalThumbnailRange } from '@/lib/thumbnail-candidates'
 import type { DirectoryEntry } from '@/lib/types/ipc'
@@ -53,12 +54,14 @@ export function scrollDirection(
   return nextTop < previousTop ? 'up' : 'stationary'
 }
 
-export function useGraphicalRows(
-  mode: GraphicalMode,
-  entryCount: number,
-  scrollRef: ScrollRef,
-  width: number,
-) {
+type GraphicalRowsOptions = {
+  mode: GraphicalMode
+  entryCount: number
+  scrollRef: ScrollRef
+  width: number
+}
+
+export function useGraphicalRows({ mode, entryCount, scrollRef, width }: GraphicalRowsOptions) {
   const grid = paneGridLayout(mode, width)
   const rowCount = visualRowCount(entryCount, grid.columns)
   const rowVirtualizer = useElementVirtualizer({
@@ -194,22 +197,34 @@ export function useGraphicalHandle(
 
 type VirtualRowIndex = { index: number }
 
+export type VisibleGridRows = {
+  rowsToRender: VirtualRowIndex[]
+  columns: number
+  entryCount: number
+}
+
+const NOTHING_VISIBLE: VisibleRange = { startIndex: 0, endIndex: 0, viewportCount: 0 }
+
+export function visibleGridRange({ rowsToRender, columns, entryCount }: VisibleGridRows) {
+  const nothingVisible = rowsToRender.length === 0 || entryCount === 0
+  if (nothingVisible) {
+    return NOTHING_VISIBLE
+  }
+  const firstRow = rowsToRender[0].index
+  const finalRow = rowsToRender[rowsToRender.length - 1].index
+  const startIndex = firstRow * columns
+  const endIndex = Math.min(entryCount - 1, (finalRow + 1) * columns - 1)
+  const viewportCount = Math.max(1, finalRow - firstRow + 1) * columns
+  return { startIndex, endIndex, viewportCount }
+}
+
 export function useVisibleEntryReport(
-  rowsToRender: VirtualRowIndex[],
-  columns: number,
-  entryCount: number,
-  onVisibleRangeChange: (start: number, end: number, viewportCount: number) => void,
+  visibleRows: VisibleGridRows,
+  onVisibleRangeChange: (visibleRange: VisibleRange) => void,
 ) {
+  const { rowsToRender, columns, entryCount } = visibleRows
   useEffect(() => {
-    const nothingVisible = rowsToRender.length === 0 || entryCount === 0
-    if (nothingVisible) {
-      onVisibleRangeChange(0, 0, 0)
-      return
-    }
-    const first = rowsToRender[0].index * columns
-    const finalRow = rowsToRender[rowsToRender.length - 1].index
-    const last = Math.min(entryCount - 1, (finalRow + 1) * columns - 1)
-    onVisibleRangeChange(first, last, Math.max(1, finalRow - rowsToRender[0].index + 1) * columns)
+    onVisibleRangeChange(visibleGridRange({ rowsToRender, columns, entryCount }))
   }, [columns, onVisibleRangeChange, entryCount, rowsToRender])
 }
 

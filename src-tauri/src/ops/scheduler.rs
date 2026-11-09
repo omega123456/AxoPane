@@ -46,7 +46,8 @@ fn mark_admission_denied(id: &str, inner: &Arc<Mutex<Inner>>) {
     };
     let mut operation = operation.lock_operation();
     operation.status = OpStatus::Cancelled;
-    operation.error_message = Some("Transfer admission was cancelled or shut down.".to_string());
+    operation.runtime.error_message =
+        Some("Transfer admission was cancelled or shut down.".to_string());
 }
 
 /// Once a worker finishes, free its volumes and try to schedule waiting work.
@@ -67,7 +68,11 @@ pub(super) fn release_and_reschedule(id: &str, inner: &Arc<Mutex<Inner>>, runtim
     }
 
     // Auto-remove completed/cancelled operations after the retention window.
-    schedule_auto_remove(id, inner, runtime.removed.clone(), runtime.retention);
+    let removal = AutoRemoval {
+        removed: runtime.removed.clone(),
+        retention: runtime.retention,
+    };
+    schedule_auto_remove(id, inner, removal);
 }
 
 pub(super) fn collect_startable(inner: &Arc<Mutex<Inner>>) -> Vec<String> {
@@ -79,12 +84,13 @@ pub(super) fn collect_startable(inner: &Arc<Mutex<Inner>>) -> Vec<String> {
         .collect()
 }
 
-pub(super) fn schedule_auto_remove(
-    id: &str,
-    inner: &Arc<Mutex<Inner>>,
-    removed: Option<RemovedEmitter>,
-    retention: Duration,
-) {
+pub(super) struct AutoRemoval {
+    pub(super) removed: Option<RemovedEmitter>,
+    pub(super) retention: Duration,
+}
+
+pub(super) fn schedule_auto_remove(id: &str, inner: &Arc<Mutex<Inner>>, removal: AutoRemoval) {
+    let AutoRemoval { removed, retention } = removal;
     let retired = inner.lock().expect("ops lock").is_retired(id);
     if !retired {
         return;

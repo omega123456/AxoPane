@@ -25,6 +25,13 @@ pub(super) struct ManualJob {
     cancel: Arc<AtomicBool>,
 }
 
+pub(super) struct ManualJobRequest {
+    pub(super) path: String,
+    pub(super) source: SizeSource,
+    pub(super) emitter: UpdateEmitter,
+    pub(super) work: ManualWork,
+}
+
 /// The scheduler's queue payload. Every job registered through
 /// `register_job` (manual *and* Everything-backed) occupies one entry in the
 /// scheduler for coalescing/capacity purposes, but only manual jobs carry
@@ -74,11 +81,12 @@ impl SizeService {
         if let Some(existing) = inner.jobs.get(path) {
             return Some(Arc::clone(existing));
         }
-        let payload = make_payload(Arc::clone(&cancel));
-        if !inner
-            .scheduler
-            .schedule(path.to_string(), Arc::clone(&cancel), payload)
-        {
+        let job = scheduler::ScheduledJob {
+            path: path.to_string(),
+            cancelled: Arc::clone(&cancel),
+            payload: make_payload(Arc::clone(&cancel)),
+        };
+        if !inner.scheduler.schedule(job) {
             return None;
         }
         inner.jobs.insert(path.to_string(), Arc::clone(&cancel));
@@ -105,13 +113,13 @@ impl SizeService {
     /// closure to the shared manual-size scheduler queue rather than
     /// spawning a dedicated OS thread. The bounded adaptive worker pool (see
     /// [`spawn_manual_worker`]) claims and executes it.
-    pub(super) fn enqueue_manual_job(
-        &self,
-        path: String,
-        source: SizeSource,
-        emitter: UpdateEmitter,
-        work: ManualWork,
-    ) {
+    pub(super) fn enqueue_manual_job(&self, request: ManualJobRequest) {
+        let ManualJobRequest {
+            path,
+            source,
+            emitter,
+            work,
+        } = request;
         // If this path is already tracked (either still queued or actively
         // executing under a pool worker), `register_job` returns the
         // existing token and this fresh `work`/`emitter` are simply dropped
@@ -133,11 +141,10 @@ impl SizeService {
             // no in-flight work to coalesce onto and nothing will ever call
             // `complete_job` for this path. Report the terminal state
             // immediately instead of leaving the caller waiting forever.
-            rejection_emitter(vec![SizeUpdate::new(
+            rejection_emitter(vec![SizeUpdate::without_size(
                 path,
                 SizeStateKind::Error,
                 source,
-                None,
             )]);
         }
     }
@@ -156,60 +163,67 @@ pub(super) fn spawn_manual_worker(
     inner: Arc<Mutex<SizeServiceInner>>,
     coordinator: Arc<ResourceCoordinator>,
 ) -> JoinHandle<()> {
-    thread::spawn(move || run_manual_worker(&scheduler, &inner, &coordinator))
-}
-
-fn run_manual_worker(
-    scheduler: &scheduler::SizeScheduler<QueuedWork>,
-    inner: &Arc<Mutex<SizeServiceInner>>,
-    coordinator: &ResourceCoordinator,
-) {
-    while let Some(job) = scheduler.next() {
-        let QueuedWork::Manual(manual_job) = job.payload else {
-            continue;
+    thread::spawn(move || {
+        let worker = ManualWorker {
+            inner: &inner,
+            coordinator: &coordinator,
         };
-        run_manual_job(inner, coordinator, job.path, manual_job);
-    }
+        worker.run(&scheduler);
+    })
 }
 
-/// A job cancelled while queued does no filesystem work and emits nothing;
-/// `Calculating` is emitted only once work actually begins. The job is
-/// untracked *before* its terminal update so a request racing the delivery
-/// starts a fresh job instead of coalescing onto a finished one.
-fn run_manual_job(
-    inner: &Arc<Mutex<SizeServiceInner>>,
-    coordinator: &ResourceCoordinator,
-    path: String,
-    job: ManualJob,
-) {
-    let ManualJob {
-        emitter,
-        source,
-        work,
-        cancel,
-    } = job;
-    if cancel.load(Ordering::Relaxed) {
-        SizeService::complete_job(inner, &path, &cancel);
-        return;
+struct ManualWorker<'worker> {
+    inner: &'worker Arc<Mutex<SizeServiceInner>>,
+    coordinator: &'worker ResourceCoordinator,
+}
+
+impl ManualWorker<'_> {
+    fn run(&self, scheduler: &scheduler::SizeScheduler<QueuedWork>) {
+        while let Some(job) = scheduler.next() {
+            self.run_queued(job);
+        }
     }
-    let admission = coordinator.submit(JobSpec::new(
-        [JobClass::Throughput],
-        [format!("size:{path}")],
-    ));
-    let abandoned = admission.is_err() || cancel.load(Ordering::Relaxed);
-    if abandoned {
-        SizeService::complete_job(inner, &path, &cancel);
-        return;
+
+    fn run_queued(&self, job: scheduler::ScheduledJob<QueuedWork>) {
+        let QueuedWork::Manual(manual_job) = job.payload else {
+            return;
+        };
+        self.run_job(job.path, manual_job);
     }
-    emitter(vec![SizeUpdate::new(
-        path.clone(),
-        SizeStateKind::Calculating,
-        source,
-        None,
-    )]);
-    let update = work(path.clone(), Arc::clone(&cancel));
-    SizeService::complete_job(inner, &path, &cancel);
-    if let Some(update) = update {
-        emitter(vec![update]);
+
+    /// A job cancelled while queued does no filesystem work and emits nothing;
+    /// `Calculating` is emitted only once work actually begins. The job is
+    /// untracked *before* its terminal update so a request racing the delivery
+    /// starts a fresh job instead of coalescing onto a finished one.
+    fn run_job(&self, path: String, job: ManualJob) {
+        let ManualJob {
+            emitter,
+            source,
+            work,
+            cancel,
+        } = job;
+        if cancel.load(Ordering::Relaxed) {
+            SizeService::complete_job(self.inner, &path, &cancel);
+            return;
+        }
+        let admission = self.coordinator.submit(JobSpec::new(
+            [JobClass::Throughput],
+            [format!("size:{path}")],
+        ));
+        let abandoned = admission.is_err() || cancel.load(Ordering::Relaxed);
+        if abandoned {
+            SizeService::complete_job(self.inner, &path, &cancel);
+            return;
+        }
+        emitter(vec![SizeUpdate::without_size(
+            path.clone(),
+            SizeStateKind::Calculating,
+            source,
+        )]);
+        let update = work(path.clone(), Arc::clone(&cancel));
+        SizeService::complete_job(self.inner, &path, &cancel);
+        if let Some(update) = update {
+            emitter(vec![update]);
+        }
     }
 }

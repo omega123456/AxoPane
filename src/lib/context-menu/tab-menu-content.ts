@@ -39,40 +39,41 @@ function tabPositionFlags(tabList: TabState[], tabIndex: number) {
 type TabTarget = Extract<ContextMenuTarget, { kind: 'tab' }>
 type TabPositionFlags = ReturnType<typeof tabPositionFlags>
 
+type TabPosition = {
+  tabIndex: number
+  flags: TabPositionFlags
+}
+
 function moveTabSection(
   paneId: PaneId,
   target: TabTarget,
-  tabIndex: number,
-  flags: TabPositionFlags,
+  { tabIndex, flags }: TabPosition,
 ): ContextMenuSection {
   const destinationPaneId = otherPane(paneId)
   const destination = useTabsStore.getState().panes[destinationPaneId]
   return section('move-tab', [
-    customRow(
-      `move-tab-within-left-${target.tabId}`,
-      'Move tab left',
-      moveTabContextAction(target.tabId, paneId, tabIndex - 1),
-      { disabled: flags.cannotMoveLeft, icon: { kind: 'app', name: 'arrow-left' } },
-    ),
-    customRow(
-      `move-tab-within-right-${target.tabId}`,
-      'Move tab right',
-      moveTabContextAction(target.tabId, paneId, tabIndex + 1),
-      {
-        disabled: flags.cannotMoveRight,
-        icon: { kind: 'app', name: 'arrow-right' },
-      },
-    ),
-    customRow(
-      `move-tab-${destinationPaneId}-${target.tabId}`,
-      `Move tab to ${destinationPaneId} pane`,
-      moveTabContextAction(target.tabId, destinationPaneId, destination.tabs.length),
-      {
-        disabled: flags.cannotMoveToOtherPane,
-        hidden: useLayoutStore.getState().defaultPaneMode === 'single',
-        icon: { kind: 'app', name: `panel-${destinationPaneId}` },
-      },
-    ),
+    customRow({
+      id: `move-tab-within-left-${target.tabId}`,
+      label: 'Move tab left',
+      action: moveTabContextAction(target.tabId, paneId, tabIndex - 1),
+      disabled: flags.cannotMoveLeft,
+      icon: { kind: 'app', name: 'arrow-left' },
+    }),
+    customRow({
+      id: `move-tab-within-right-${target.tabId}`,
+      label: 'Move tab right',
+      action: moveTabContextAction(target.tabId, paneId, tabIndex + 1),
+      disabled: flags.cannotMoveRight,
+      icon: { kind: 'app', name: 'arrow-right' },
+    }),
+    customRow({
+      id: `move-tab-${destinationPaneId}-${target.tabId}`,
+      label: `Move tab to ${destinationPaneId} pane`,
+      action: moveTabContextAction(target.tabId, destinationPaneId, destination.tabs.length),
+      disabled: flags.cannotMoveToOtherPane,
+      hidden: useLayoutStore.getState().defaultPaneMode === 'single',
+      icon: { kind: 'app', name: `panel-${destinationPaneId}` },
+    }),
   ])
 }
 
@@ -82,29 +83,28 @@ function closeTabRows(
   flags: TabPositionFlags,
 ) {
   return [
-    customRow(`close-tab-${target.tabId}`, 'Close tab', closeTabContextAction(target.tabId), {
+    customRow({
+      id: `close-tab-${target.tabId}`,
+      label: 'Close tab',
+      action: closeTabContextAction(target.tabId),
       disabled: cannotClose,
       danger: true,
       icon: { kind: 'app', name: 'close-tab' },
     }),
-    customRow(
-      `close-tabs-left-${target.tabId}`,
-      'Close tabs to the left',
-      closeTabsBesideContextAction(target.tabId, 'left'),
-      {
-        disabled: flags.nothingToCloseLeft,
-        danger: true,
-      },
-    ),
-    customRow(
-      `close-tabs-right-${target.tabId}`,
-      'Close tabs to the right',
-      closeTabsBesideContextAction(target.tabId, 'right'),
-      {
-        disabled: flags.nothingToCloseRight,
-        danger: true,
-      },
-    ),
+    customRow({
+      id: `close-tabs-left-${target.tabId}`,
+      label: 'Close tabs to the left',
+      action: closeTabsBesideContextAction(target.tabId, 'left'),
+      disabled: flags.nothingToCloseLeft,
+      danger: true,
+    }),
+    customRow({
+      id: `close-tabs-right-${target.tabId}`,
+      label: 'Close tabs to the right',
+      action: closeTabsBesideContextAction(target.tabId, 'right'),
+      disabled: flags.nothingToCloseRight,
+      danger: true,
+    }),
   ]
 }
 
@@ -122,21 +122,22 @@ export function buildTabContent(paneId: PaneId, target: TabTarget): ContextMenuC
     topStrip: [],
     sections: [
       section('primary', [
-        customRow(
-          `open-tab-other-${target.tabId}`,
-          commandLabels.openInOtherPane,
-          navigateContextAction(path, 'other-pane'),
-          { strong: true, icon: { kind: 'app', name: 'open-in-other-pane' } },
-        ),
+        customRow({
+          id: `open-tab-other-${target.tabId}`,
+          label: commandLabels.openInOtherPane,
+          action: navigateContextAction(path, 'other-pane'),
+          strong: true,
+          icon: { kind: 'app', name: 'open-in-other-pane' },
+        }),
       ]),
-      moveTabSection(paneId, target, tabIndex, flags),
+      moveTabSection(paneId, target, { tabIndex, flags }),
       section('footer', [
         favouriteRow(path, isFavourite),
-        customRow(
-          `lock-tab-${target.tabId}`,
-          locked ? 'Unlock tab' : 'Lock tab',
-          setTabLockedContextAction(target.tabId, !locked),
-        ),
+        customRow({
+          id: `lock-tab-${target.tabId}`,
+          label: locked ? 'Unlock tab' : 'Lock tab',
+          action: setTabLockedContextAction(target.tabId, !locked),
+        }),
         ...closeTabRows(target, cannotClose, flags),
       ]),
     ],

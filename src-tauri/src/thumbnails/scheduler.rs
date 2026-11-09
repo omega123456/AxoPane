@@ -26,12 +26,57 @@ pub struct ThumbnailSubscriber {
     pub generation: u64,
 }
 
-impl ThumbnailSubscriber {
-    fn matches(&self, pane_id: &str, tab_id: &str, path: &str, generation: u64) -> bool {
-        self.pane_id == pane_id
-            && self.tab_id == tab_id
-            && self.path == path
-            && self.generation == generation
+#[derive(Clone, Debug)]
+pub struct DesiredThumbnail {
+    pub candidate: ThumbnailCandidate,
+    pub priority: ThumbnailPriority,
+    pub order: u32,
+}
+
+pub struct ScopeRequest {
+    pub subscriber: ThumbnailSubscriber,
+    pub revision: u64,
+    pub candidates: Vec<DesiredThumbnail>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SchedulerCounts {
+    pub active: usize,
+    pub queued: usize,
+}
+
+pub struct SchedulerParts {
+    pub provider: Arc<dyn ThumbnailProvider>,
+    pub coordinator: Arc<ResourceCoordinator>,
+    pub complete: ResultPublisher,
+    pub progress: ResultPublisher,
+    pub metadata_matches: MetadataMatcher,
+}
+
+impl SchedulerParts {
+    pub fn new(
+        provider: Arc<dyn ThumbnailProvider>,
+        coordinator: Arc<ResourceCoordinator>,
+        complete: ResultPublisher,
+    ) -> Self {
+        Self {
+            provider,
+            coordinator,
+            complete,
+            progress: Arc::new(|_, _, _| {}),
+            metadata_matches: Arc::new(|_| true),
+        }
+    }
+
+    pub fn with_progress(self, progress: ResultPublisher) -> Self {
+        Self { progress, ..self }
+    }
+
+    pub fn with_metadata_matcher(self, metadata_matches: MetadataMatcher) -> Self {
+        Self {
+            metadata_matches,
+            ..self
+        }
     }
 }
 
@@ -70,8 +115,11 @@ impl JobSubscriber {
         }
     }
 
-    fn rank_key(&self) -> (u8, u32) {
-        (priority_rank(self.priority), self.order)
+    fn rank_key(&self) -> SubscriberRankKey {
+        SubscriberRankKey {
+            priority: priority_rank(self.priority),
+            order: self.order,
+        }
     }
 
     fn keep_after_retarget(
@@ -98,9 +146,23 @@ struct Job {
 }
 
 impl Job {
+    fn queued(candidate: ThumbnailCandidate, first_subscriber: JobSubscriber) -> Self {
+        Self {
+            candidate,
+            subscribers: vec![first_subscriber],
+            active: false,
+        }
+    }
+
     fn has_subscribers(&self) -> bool {
         !self.subscribers.is_empty()
     }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct SubscriberRankKey {
+    priority: u8,
+    order: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -121,7 +183,7 @@ enum ScopeReplacement {
 
 impl ThumbnailSubscriber {
     fn same_scope(&self, other: &ThumbnailSubscriber) -> bool {
-        self.matches(&other.pane_id, &other.tab_id, &other.path, other.generation)
+        self == other
     }
 }
 
@@ -141,18 +203,9 @@ impl Job {
             .retain_mut(|existing| existing.keep_after_retarget(subscriber, rank));
     }
 
-    fn drop_subscribers_matching(
-        &mut self,
-        pane_id: &str,
-        tab_id: &str,
-        path: &str,
-        generation: u64,
-    ) {
-        self.subscribers.retain(|subscriber| {
-            !subscriber
-                .context
-                .matches(pane_id, tab_id, path, generation)
-        });
+    fn drop_subscribers_matching(&mut self, scope: &ThumbnailSubscriber) {
+        self.subscribers
+            .retain(|subscriber| !subscriber.context.same_scope(scope));
     }
 
     fn add_subscriber_once(&mut self, job_subscriber: JobSubscriber) {
@@ -196,23 +249,35 @@ struct QueuedChoice {
     pane_id: String,
 }
 
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct QueuedRankKey {
+    priority: u8,
+    same_pane: usize,
+    order: u32,
+}
+
 impl QueuedChoice {
-    fn rank_key(&self) -> (u8, usize, u32) {
-        (self.priority, self.same_pane, self.order)
+    fn rank_key(&self) -> QueuedRankKey {
+        QueuedRankKey {
+            priority: self.priority,
+            same_pane: self.same_pane,
+            order: self.order,
+        }
     }
 }
 
-fn desired_ranks(
-    candidates: &[(ThumbnailCandidate, ThumbnailPriority, u32)],
-) -> HashMap<ThumbnailCacheKey, SubscriberRank> {
+fn desired_ranks(candidates: &[DesiredThumbnail]) -> HashMap<ThumbnailCacheKey, SubscriberRank> {
     candidates
         .iter()
-        .map(|(candidate, priority, order)| {
+        .map(|desired| {
             let rank = SubscriberRank {
-                priority: *priority,
-                order: *order,
+                priority: desired.priority,
+                order: desired.order,
             };
-            (ThumbnailCacheKey(candidate.fingerprint.clone()), rank)
+            (
+                ThumbnailCacheKey(desired.candidate.fingerprint.clone()),
+                rank,
+            )
         })
         .collect()
 }
@@ -227,42 +292,37 @@ struct State {
 }
 
 impl State {
-    fn replace_scope(
-        &mut self,
-        subscriber: &ThumbnailSubscriber,
-        revision: u64,
-        candidates: Vec<(ThumbnailCandidate, ThumbnailPriority, u32)>,
-    ) -> ScopeReplacement {
+    fn replace_scope(&mut self, request: ScopeRequest) -> ScopeReplacement {
         if self.stopped {
             return ScopeReplacement::Ignored { accepted: 0 };
         }
-        let scope = ScopeKey::from(subscriber);
-        if let Some(accepted) = self.ignored_revision(&scope, revision, candidates.len()) {
+        let scope = ScopeKey::from(&request.subscriber);
+        if let Some(accepted) = self.ignored_revision(&scope, &request) {
             return ScopeReplacement::Ignored { accepted };
         }
+        let ScopeRequest {
+            subscriber,
+            revision,
+            candidates,
+        } = request;
         self.scope_revisions.insert(scope, revision);
 
         let desired = desired_ranks(&candidates);
-        let provider_cancels = self.retarget_scope_jobs(subscriber, &desired);
-        self.subscribe_candidates(subscriber, candidates);
+        let provider_cancels = self.retarget_scope_jobs(&subscriber, &desired);
+        self.subscribe_candidates(&subscriber, candidates);
         ScopeReplacement::Applied {
             accepted: desired.len(),
             provider_cancels,
         }
     }
 
-    fn ignored_revision(
-        &self,
-        scope: &ScopeKey,
-        revision: u64,
-        candidate_count: usize,
-    ) -> Option<usize> {
+    fn ignored_revision(&self, scope: &ScopeKey, request: &ScopeRequest) -> Option<usize> {
         let current = *self.scope_revisions.get(scope)?;
-        if revision < current {
+        if request.revision < current {
             return Some(0);
         }
-        if revision == current {
-            return Some(candidate_count);
+        if request.revision == current {
+            return Some(request.candidates.len());
         }
         None
     }
@@ -296,15 +356,15 @@ impl State {
     fn subscribe_candidates(
         &mut self,
         subscriber: &ThumbnailSubscriber,
-        candidates: Vec<(ThumbnailCandidate, ThumbnailPriority, u32)>,
+        candidates: Vec<DesiredThumbnail>,
     ) {
-        for (candidate, priority, order) in candidates {
+        for desired in candidates {
             let job_subscriber = JobSubscriber {
                 context: subscriber.clone(),
-                priority,
-                order,
+                priority: desired.priority,
+                order: desired.order,
             };
-            self.add_subscriber(candidate, job_subscriber);
+            self.add_subscriber(desired.candidate, job_subscriber);
         }
     }
 
@@ -314,23 +374,11 @@ impl State {
             job.add_subscriber_once(job_subscriber);
             return;
         }
-        self.queue_new_job(key, candidate, job_subscriber);
+        self.queue_new_job(key, Job::queued(candidate, job_subscriber));
     }
 
-    fn queue_new_job(
-        &mut self,
-        key: ThumbnailCacheKey,
-        candidate: ThumbnailCandidate,
-        job_subscriber: JobSubscriber,
-    ) {
-        self.jobs.insert(
-            key.clone(),
-            Job {
-                candidate,
-                subscribers: vec![job_subscriber],
-                active: false,
-            },
-        );
+    fn queue_new_job(&mut self, key: ThumbnailCacheKey, job: Job) {
+        self.jobs.insert(key.clone(), job);
         self.queued.push_back(key);
     }
 
@@ -348,7 +396,7 @@ impl State {
             job.subscribers.push(job_subscriber);
             return false;
         }
-        self.queue_new_job(key, candidate, job_subscriber);
+        self.queue_new_job(key, Job::queued(candidate, job_subscriber));
         true
     }
 }
@@ -356,21 +404,12 @@ impl State {
 impl State {
     /// Drops the scope's subscriptions and its unsubscribed queued jobs;
     /// returns the candidates of active jobs left without subscribers.
-    fn remove_scope(
-        &mut self,
-        pane_id: &str,
-        tab_id: &str,
-        path: &str,
-        generation: u64,
-    ) -> Vec<ThumbnailCandidate> {
-        self.scope_revisions.retain(|scope, _| {
-            !(scope.pane_id == pane_id
-                && scope.tab_id == tab_id
-                && scope.path == path
-                && scope.generation == generation)
-        });
+    fn remove_scope(&mut self, scope: &ThumbnailSubscriber) -> Vec<ThumbnailCandidate> {
+        let removed_scope = ScopeKey::from(scope);
+        self.scope_revisions
+            .retain(|existing, _| *existing != removed_scope);
         self.drop_unsubscribed_jobs(|_, job| {
-            job.drop_subscribers_matching(pane_id, tab_id, path, generation);
+            job.drop_subscribers_matching(scope);
         })
     }
 
@@ -416,37 +455,17 @@ impl ThumbnailScheduler {
         coordinator: Arc<ResourceCoordinator>,
         complete: ResultPublisher,
     ) -> Self {
-        Self::new_with_progress_and_metadata_verifier(
-            provider,
-            coordinator,
-            complete,
-            Arc::new(|_, _, _| {}),
-            Arc::new(|_| true),
-        )
+        Self::from_parts(SchedulerParts::new(provider, coordinator, complete))
     }
 
-    pub fn new_with_metadata_verifier(
-        provider: Arc<dyn ThumbnailProvider>,
-        coordinator: Arc<ResourceCoordinator>,
-        complete: ResultPublisher,
-        metadata_matches: MetadataMatcher,
-    ) -> Self {
-        Self::new_with_progress_and_metadata_verifier(
+    pub fn from_parts(parts: SchedulerParts) -> Self {
+        let SchedulerParts {
             provider,
             coordinator,
             complete,
-            Arc::new(|_, _, _| {}),
+            progress,
             metadata_matches,
-        )
-    }
-
-    pub fn new_with_progress_and_metadata_verifier(
-        provider: Arc<dyn ThumbnailProvider>,
-        coordinator: Arc<ResourceCoordinator>,
-        complete: ResultPublisher,
-        progress: ResultPublisher,
-        metadata_matches: MetadataMatcher,
-    ) -> Self {
+        } = parts;
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 queued: VecDeque::new(),
@@ -478,13 +497,8 @@ impl ThumbnailScheduler {
         }
     }
 
-    pub fn replace_scope(
-        &self,
-        subscriber: ThumbnailSubscriber,
-        revision: u64,
-        candidates: Vec<(ThumbnailCandidate, ThumbnailPriority, u32)>,
-    ) -> usize {
-        if candidates.len() > MAX_DESIRED_PER_SCOPE {
+    pub fn replace_scope(&self, request: ScopeRequest) -> usize {
+        if request.candidates.len() > MAX_DESIRED_PER_SCOPE {
             return 0;
         }
         let replacement = self
@@ -492,7 +506,7 @@ impl ThumbnailScheduler {
             .state
             .lock()
             .expect("thumbnail scheduler lock")
-            .replace_scope(&subscriber, revision, candidates);
+            .replace_scope(request);
         let (accepted, provider_cancels) = match replacement {
             ScopeReplacement::Ignored { accepted } => return accepted,
             ScopeReplacement::Applied {
@@ -524,13 +538,13 @@ impl ThumbnailScheduler {
         }
     }
 
-    pub fn cancel_scope(&self, pane_id: &str, tab_id: &str, path: &str, generation: u64) {
+    pub fn cancel_scope(&self, scope: &ThumbnailSubscriber) {
         let provider_cancels = self
             .shared
             .state
             .lock()
             .expect("thumbnail scheduler lock")
-            .remove_scope(pane_id, tab_id, path, generation);
+            .remove_scope(scope);
         self.cancel_in_provider(provider_cancels);
         self.shared.wake.notify_all();
     }
@@ -562,9 +576,12 @@ impl ThumbnailScheduler {
     }
 
     #[cfg(feature = "test-utils")]
-    pub fn counts(&self) -> (usize, usize) {
+    pub fn counts(&self) -> SchedulerCounts {
         let state = self.shared.state.lock().expect("thumbnail scheduler lock");
-        (state.active, state.queued.len())
+        SchedulerCounts {
+            active: state.active,
+            queued: state.queued.len(),
+        }
     }
 }
 
@@ -577,8 +594,13 @@ impl Drop for ThumbnailScheduler {
     }
 }
 
+struct NextJob {
+    key: ThumbnailCacheKey,
+    candidate: ThumbnailCandidate,
+}
+
 fn worker_loop(shared: Arc<Shared>) {
-    while let Some((key, candidate)) = wait_for_next_job(&shared) {
+    while let Some(NextJob { key, candidate }) = wait_for_next_job(&shared) {
         let result = generate_if_current(&shared, &key, &candidate);
         let subscribers = shared
             .state
@@ -592,7 +614,7 @@ fn worker_loop(shared: Arc<Shared>) {
     }
 }
 
-fn wait_for_next_job(shared: &Shared) -> Option<(ThumbnailCacheKey, ThumbnailCandidate)> {
+fn wait_for_next_job(shared: &Shared) -> Option<NextJob> {
     let mut state = shared.state.lock().expect("thumbnail scheduler lock");
     loop {
         if state.stopped {
@@ -653,13 +675,12 @@ fn preview_reporter(
     })
 }
 
-fn take_next_job(state: &mut State) -> Option<(ThumbnailCacheKey, ThumbnailCandidate)> {
-    let last_pane = state.last_pane.as_deref();
+fn take_next_job(state: &mut State) -> Option<NextJob> {
     let choice = state
         .queued
         .iter()
         .enumerate()
-        .filter_map(|(index, key)| queued_choice(state, index, key, last_pane))
+        .filter_map(|(index, key)| queued_choice(state, index, key))
         .min_by_key(QueuedChoice::rank_key)?;
     let key = state.queued.remove(choice.index)?;
     let job = state.jobs.get_mut(&key)?;
@@ -667,15 +688,11 @@ fn take_next_job(state: &mut State) -> Option<(ThumbnailCacheKey, ThumbnailCandi
     let candidate = job.candidate.clone();
     state.active += 1;
     state.last_pane = Some(choice.pane_id);
-    Some((key, candidate))
+    Some(NextJob { key, candidate })
 }
 
-fn queued_choice(
-    state: &State,
-    index: usize,
-    key: &ThumbnailCacheKey,
-    last_pane: Option<&str>,
-) -> Option<QueuedChoice> {
+fn queued_choice(state: &State, index: usize, key: &ThumbnailCacheKey) -> Option<QueuedChoice> {
+    let last_pane = state.last_pane.as_deref();
     let subscriber = state.jobs.get(key)?.best_subscriber()?;
     let pane_id = subscriber.context.pane_id.clone();
     Some(QueuedChoice {

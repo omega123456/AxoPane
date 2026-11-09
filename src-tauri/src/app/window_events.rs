@@ -4,11 +4,11 @@ use tauri::{AppHandle, Manager, Window, WindowEvent};
 
 use crate::directory_session::DirectorySessionService;
 use crate::ipc::commands::{session_patch_emitter, watch_error_emitter};
-use crate::reconcile::ReconcileCoordinator;
+use crate::reconcile::{ReconcileCoordinator, ReconcileResource};
 use crate::resource_coordinator::ResourceCoordinator;
 use crate::size::SizeService;
 use crate::volumes::registry::VolumeRegistry;
-use crate::watch::{DirPatch, WatchService};
+use crate::watch::{DirPatch, WatchEmitters, WatchService};
 
 const VOLUME_REGISTRY_RECONCILE: &str = "volume-registry";
 const WATCH_SERVICE_RECONCILE: &str = "watch-service";
@@ -58,8 +58,10 @@ fn reconcile_volume_registry(
     };
     let registry = Arc::clone(&registry);
     reconcile.request_reconcile(
-        Arc::clone(coordinator),
-        VOLUME_REGISTRY_RECONCILE.to_string(),
+        ReconcileResource {
+            coordinator: Arc::clone(coordinator),
+            resource_key: VOLUME_REGISTRY_RECONCILE.to_string(),
+        },
         move |_generation| {
             registry.refresh();
         },
@@ -83,16 +85,18 @@ fn reconcile_watches(
         .map(|state| Arc::clone(&state));
     let reconcile_for_check = Arc::clone(reconcile);
     reconcile.request_reconcile(
-        coordinator,
-        WATCH_SERVICE_RECONCILE.to_string(),
+        ReconcileResource {
+            coordinator,
+            resource_key: WATCH_SERVICE_RECONCILE.to_string(),
+        },
         move |generation| {
             if !reconcile_for_check.is_current(WATCH_SERVICE_RECONCILE, generation) {
                 return;
             }
-            watch.reconcile(
-                reconcile_patch_emitter(&app, session_state.clone()),
-                watch_error_emitter(app.clone(), "watch reconcile error"),
-            );
+            watch.reconcile(WatchEmitters {
+                patch: reconcile_patch_emitter(&app, session_state.clone()),
+                error: watch_error_emitter(app.clone(), "watch reconcile error"),
+            });
         },
     );
 }

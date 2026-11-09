@@ -132,8 +132,8 @@ pub use dsstore::PutBack;
 
 #[cfg(feature = "test-utils")]
 pub use macos_adapter::{
-    BatchCorrelation, BatchDeletionResult, StableFileIdentity, SystemTrashAdapter, TrashFacts,
-    TrashSnapshotEntry,
+    BatchCorrelation, BatchDeletionResult, ManifestBatch, StableFileIdentity, SystemTrashAdapter,
+    TrashFacts, TrashSnapshotEntry,
 };
 
 #[cfg(feature = "test-utils")]

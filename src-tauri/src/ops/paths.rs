@@ -19,18 +19,27 @@ pub(super) fn path_entry_exists(path: &Path) -> bool {
     path.exists() || fs::symlink_metadata(path).is_ok()
 }
 
-fn numbered_file_name(stem: &str, ext: &str, counter: u32) -> String {
-    if ext.is_empty() {
-        return format!("{stem} ({counter})");
+#[derive(Debug, PartialEq, Eq)]
+pub struct FileNameParts {
+    pub stem: String,
+    pub extension: String,
+}
+
+impl FileNameParts {
+    fn numbered(&self, counter: u32) -> String {
+        let FileNameParts { stem, extension } = self;
+        if extension.is_empty() {
+            return format!("{stem} ({counter})");
+        }
+        format!("{stem} ({counter}).{extension}")
     }
-    format!("{stem} ({counter}).{ext}")
 }
 
 pub fn unique_name(dir: &Path, name: &str) -> String {
-    let (stem, ext) = split_name(name);
+    let name_parts = split_name(name);
     let mut counter = 1;
     loop {
-        let candidate = numbered_file_name(&stem, &ext, counter);
+        let candidate = name_parts.numbered(counter);
         let taken = dir.join(&candidate).exists();
         if !taken {
             return candidate;
@@ -39,10 +48,16 @@ pub fn unique_name(dir: &Path, name: &str) -> String {
     }
 }
 
-pub fn split_name(name: &str) -> (String, String) {
+pub fn split_name(name: &str) -> FileNameParts {
     match name.rfind('.') {
-        Some(index) if index > 0 => (name[..index].to_string(), name[index + 1..].to_string()),
-        _ => (name.to_string(), String::new()),
+        Some(index) if index > 0 => FileNameParts {
+            stem: name[..index].to_string(),
+            extension: name[index + 1..].to_string(),
+        },
+        _ => FileNameParts {
+            stem: name.to_string(),
+            extension: String::new(),
+        },
     }
 }
 

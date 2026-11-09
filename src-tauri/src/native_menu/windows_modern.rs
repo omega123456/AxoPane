@@ -129,17 +129,17 @@ pub fn enumerate_modern_items(request: &LoadNativeMenuRequest) -> Vec<ProviderNa
         let Some(command) = create_command(handler.clsid) else {
             continue;
         };
-        if let Some(item) = build_item_for_command(
-            &command,
-            &array.items,
-            handler.clsid,
-            handler.packaged,
+        let context = ModernHandlerContext {
+            array: &array.items,
+            clsid: handler.clsid,
+            packaged: handler.packaged,
             request,
-            Vec::new(),
-            0,
-        ) {
-            items.push(item);
-        }
+        };
+        items.extend(build_item_for_command(
+            &command,
+            context,
+            CommandPosition::top_level(),
+        ));
     }
 
     items
@@ -149,7 +149,6 @@ pub fn enumerate_modern_items(request: &LoadNativeMenuRequest) -> Vec<ProviderNa
 /// subcommand index path.
 pub fn invoke_modern(
     clsid: u128,
-    _packaged: bool,
     request: &LoadNativeMenuRequest,
     command_path: &[u32],
 ) -> windows::core::Result<()> {
@@ -196,16 +195,44 @@ fn next_subcommand(enumerator: &IEnumExplorerCommand) -> Option<IExplorerCommand
     fetched[0].take()
 }
 
+#[derive(Clone, Copy)]
+struct ModernHandlerContext<'context> {
+    array: &'context IShellItemArray,
+    clsid: u128,
+    packaged: bool,
+    request: &'context LoadNativeMenuRequest,
+}
+
+struct CommandPosition {
+    command_path: Vec<u32>,
+    depth: usize,
+}
+
+impl CommandPosition {
+    fn top_level() -> Self {
+        Self {
+            command_path: Vec::new(),
+            depth: 0,
+        }
+    }
+
+    fn child(&self, index: u32) -> Self {
+        let mut command_path = self.command_path.clone();
+        command_path.push(index);
+        Self {
+            command_path,
+            depth: self.depth + 1,
+        }
+    }
+}
+
 /// Builds a single menu item (and, to depth 1, its subcommands) from a command.
 fn build_item_for_command(
     command: &IExplorerCommand,
-    array: &IShellItemArray,
-    clsid: u128,
-    packaged: bool,
-    request: &LoadNativeMenuRequest,
-    command_path: Vec<u32>,
-    depth: usize,
+    context: ModernHandlerContext<'_>,
+    position: CommandPosition,
 ) -> Option<ProviderNativeMenuItem> {
+    let ModernHandlerContext { array, clsid, .. } = context;
     let state = unsafe { command.GetState(array, false) }.ok()?;
     if state & ECS_HIDDEN.0 as u32 != 0 {
         return None;
@@ -226,21 +253,16 @@ fn build_item_for_command(
             alt: None,
         });
 
-    let children = enumerate_subcommands(
-        command,
-        array,
-        clsid,
-        packaged,
-        request,
-        &command_path,
-        depth,
-    );
+    let children = enumerate_subcommands(command, context, &position);
 
     let normalized_verb = normalize_verb(&label);
     let canonical_action_kind = classify_canonical_action(Some(&normalized_verb), &label);
-    let id = format!("windows-modern-{clsid:032x}-{}", path_key(&command_path));
+    let id = format!(
+        "windows-modern-{clsid:032x}-{}",
+        path_key(&position.command_path)
+    );
 
-    let invocation = modern_leaf_invocation(&children, clsid, packaged, request, command_path);
+    let invocation = modern_leaf_invocation(&children, context, position.command_path);
 
     Some(ProviderNativeMenuItem {
         id,
@@ -257,18 +279,16 @@ fn build_item_for_command(
 
 fn modern_leaf_invocation(
     children: &[ProviderNativeMenuItem],
-    clsid: u128,
-    packaged: bool,
-    request: &LoadNativeMenuRequest,
+    context: ModernHandlerContext<'_>,
     command_path: Vec<u32>,
 ) -> Option<ProviderInvocation> {
     if !children.is_empty() {
         return None;
     }
     Some(ProviderInvocation::WindowsModern {
-        clsid,
-        packaged,
-        request: request.clone(),
+        clsid: context.clsid,
+        packaged: context.packaged,
+        request: context.request.clone(),
         command_path,
     })
 }
@@ -281,14 +301,10 @@ fn has_subcommands(command: &IExplorerCommand) -> bool {
 
 fn enumerate_subcommands(
     command: &IExplorerCommand,
-    array: &IShellItemArray,
-    clsid: u128,
-    packaged: bool,
-    request: &LoadNativeMenuRequest,
-    parent_path: &[u32],
-    depth: usize,
+    context: ModernHandlerContext<'_>,
+    parent: &CommandPosition,
 ) -> Vec<ProviderNativeMenuItem> {
-    let descends_into_subcommands = has_subcommands(command) && depth < MAX_SUBMENU_DEPTH;
+    let descends_into_subcommands = has_subcommands(command) && parent.depth < MAX_SUBMENU_DEPTH;
     if !descends_into_subcommands {
         return Vec::new();
     }
@@ -309,11 +325,7 @@ fn enumerate_subcommands(
             break;
         };
 
-        let mut path = parent_path.to_vec();
-        path.push(index);
-        if let Some(item) =
-            build_item_for_command(&child, array, clsid, packaged, request, path, depth + 1)
-        {
+        if let Some(item) = build_item_for_command(&child, context, parent.child(index)) {
             items.push(item);
             index += 1;
         }

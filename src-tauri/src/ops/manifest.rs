@@ -14,6 +14,13 @@ pub struct ManifestEntry {
     pub is_link: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveredFile {
+    pub path: PathBuf,
+    pub bytes: u64,
+    pub is_link: bool,
+}
+
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ProgressiveManifest {
     entries: Vec<ManifestEntry>,
@@ -21,7 +28,12 @@ pub struct ProgressiveManifest {
 }
 
 impl ProgressiveManifest {
-    pub fn record(&mut self, root: &Path, path: PathBuf, bytes: u64, is_link: bool) {
+    pub fn record(&mut self, root: &Path, discovered: DiscoveredFile) {
+        let DiscoveredFile {
+            path,
+            bytes,
+            is_link,
+        } = discovered;
         let relative_path = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
         self.discovered_bytes = self.discovered_bytes.saturating_add(bytes);
         self.entries.push(ManifestEntry {

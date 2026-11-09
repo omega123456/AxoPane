@@ -5,10 +5,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::manual::{self, ManualSizeError};
-use super::worker_pool::ManualWork;
+use super::worker_pool::{ManualJobRequest, ManualWork};
 use super::{
-    emit_non_empty, NaReason, RequestMode, SizeBackend, SizeService, SizeSource, SizeStateKind,
-    SizeUpdate, UpdateEmitter,
+    emit_non_empty, NaReason, RequestMode, SizeBackend, SizeRequest, SizeRequestWithVolumes,
+    SizeService, SizeSource, SizeStateKind, SizeUpdate, UpdateEmitter,
 };
 #[cfg(target_os = "macos")]
 use crate::volumes;
@@ -91,6 +91,18 @@ impl IndexRequests {
     }
 }
 
+#[derive(Clone, Copy)]
+struct Delivery<'delivery> {
+    mode: RequestMode,
+    emitter: &'delivery UpdateEmitter,
+}
+
+struct RoutingPass<'pass> {
+    delivery: Delivery<'pass>,
+    volumes: &'pass [VolumeInfo],
+    routed: RoutedRequests,
+}
+
 #[derive(Default)]
 struct RoutedRequests {
     everything: Vec<String>,
@@ -107,46 +119,51 @@ impl SizeService {
     /// target while its updates keep the requested path.
     pub fn request_paths_with_mode(
         &self,
-        paths: Vec<String>,
-        mode: RequestMode,
-        volumes: Vec<VolumeInfo>,
+        routed_request: SizeRequestWithVolumes,
         emitter: UpdateEmitter,
     ) {
-        let mut routed = RoutedRequests::default();
+        let SizeRequestWithVolumes {
+            request: SizeRequest { paths, mode },
+            volumes,
+        } = routed_request;
+        let delivery = Delivery {
+            mode,
+            emitter: &emitter,
+        };
+        let mut pass = RoutingPass {
+            delivery,
+            volumes: &volumes,
+            routed: RoutedRequests::default(),
+        };
         for path in paths {
-            self.route_request(path, mode, &volumes, &emitter, &mut routed);
+            self.route_request(&mut pass, path);
         }
 
+        let routed = pass.routed;
         emit_non_empty(&emitter, routed.immediate);
         #[cfg(target_os = "macos")]
-        self.request_from_index(routed.index, mode, &emitter);
+        self.request_from_index(routed.index, delivery);
         let everything_paths = routed.everything;
         if !everything_paths.is_empty() {
             self.spawn_everything_batch(everything_paths, emitter);
         }
     }
 
-    fn route_request(
-        &self,
-        path: String,
-        mode: RequestMode,
-        volumes: &[VolumeInfo],
-        emitter: &UpdateEmitter,
-        routed: &mut RoutedRequests,
-    ) {
-        let request = RequestTarget::resolve(&path, volumes);
+    fn route_request(&self, pass: &mut RoutingPass<'_>, path: String) {
+        let request = RequestTarget::resolve(&path, pass.volumes);
+        let mode = pass.delivery.mode;
         #[cfg(not(target_os = "macos"))]
         let _ = mode;
-        match self.backend_for(&request, volumes) {
+        let routed = &mut pass.routed;
+        match self.backend_for(&request, pass.volumes) {
             #[cfg(target_os = "macos")]
             SizeBackend::Index => routed.index.push(path, request.route),
             #[cfg(target_os = "macos")]
             SizeBackend::Manual if mode == RequestMode::Auto => {
-                routed.immediate.push(SizeUpdate::new(
+                routed.immediate.push(SizeUpdate::without_size(
                     path,
                     SizeStateKind::Unknown,
                     SizeSource::Manual,
-                    None,
                 ));
             }
             SizeBackend::NetworkNa => {
@@ -157,12 +174,12 @@ impl SizeService {
                 ));
             }
             SizeBackend::Everything => routed.everything.push(path),
-            SizeBackend::Manual => self.enqueue_manual_job(
+            SizeBackend::Manual => self.enqueue_manual_job(ManualJobRequest {
                 path,
-                SizeSource::Manual,
-                Arc::clone(emitter),
-                manual_size_work(request.sized, self.timeout),
-            ),
+                source: SizeSource::Manual,
+                emitter: Arc::clone(pass.delivery.emitter),
+                work: manual_size_work(request.sized, self.timeout),
+            }),
         }
     }
 
@@ -177,25 +194,25 @@ impl SizeService {
     }
 
     #[cfg(target_os = "macos")]
-    fn request_from_index(
-        &self,
-        requests: IndexRequests,
-        mode: RequestMode,
-        emitter: &UpdateEmitter,
-    ) {
+    fn request_from_index(&self, requests: IndexRequests, delivery: Delivery<'_>) {
         let Some(index) = self.folder_size_index() else {
             return;
         };
+        let Delivery { mode, emitter } = delivery;
         let plain_paths = requests.plain;
         if !plain_paths.is_empty() {
-            index.request(plain_paths, mode, Arc::clone(emitter));
+            let plain = SizeRequest {
+                paths: plain_paths,
+                mode,
+            };
+            index.request(plain, Arc::clone(emitter));
         }
         for (path, target) in requests.linked {
-            index.request(
-                vec![target.to_string_lossy().into_owned()],
+            let linked = SizeRequest {
+                paths: vec![target.to_string_lossy().into_owned()],
                 mode,
-                reported_as(path, Arc::clone(emitter)),
-            );
+            };
+            index.request(linked, reported_as(path, Arc::clone(emitter)));
         }
     }
 }
@@ -226,23 +243,17 @@ fn manual_size_update(
     result: Result<u64, ManualSizeError>,
 ) -> Option<SizeUpdate> {
     match result {
-        Ok(size_bytes) => Some(SizeUpdate::new(
-            job_path,
-            SizeStateKind::Ready,
-            SizeSource::Manual,
-            Some(size_bytes),
-        )),
+        Ok(size_bytes) => Some(SizeUpdate::ready(job_path, SizeSource::Manual, size_bytes)),
         Err(ManualSizeError::Timeout) => Some(SizeUpdate::na(
             job_path,
             SizeSource::Manual,
             Some(NaReason::Timeout),
         )),
         Err(ManualSizeError::Cancelled) => None,
-        Err(_) => Some(SizeUpdate::new(
+        Err(_) => Some(SizeUpdate::without_size(
             job_path,
             SizeStateKind::Error,
             SizeSource::Manual,
-            None,
         )),
     }
 }

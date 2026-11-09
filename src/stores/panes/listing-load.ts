@@ -2,7 +2,7 @@ import { listTrash, setTabWatch } from '@/lib/ipc/commands'
 import { trashEntryToDirectoryEntry } from '@/lib/trash'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import { panesStore } from '@/stores/panes/store-handle'
-import { sortEntries, clientSortedEntries } from '@/stores/panes/entry-sort'
+import { sortEntries, sortSpecFor, clientSortedEntries } from '@/stores/panes/entry-sort'
 import {
   directoryListingResolved,
   findRevealEntry,
@@ -25,8 +25,8 @@ import type { PaneState } from '@/stores/panes/pane-state'
 import { reportSizeSubscriptions } from '@/stores/panes/size-actions'
 import { schedulePersistSession } from '@/stores/panes/session-persistence'
 import { useRecentFoldersStore } from '@/stores/recent-folders-store'
-import { useSelectionStore } from '@/stores/selection-store'
-import { activeTab, isActiveTabShowingPath, useTabsStore } from '@/stores/tabs-store'
+import { singleEntrySelection, useSelectionStore } from '@/stores/selection-store'
+import { activeTab, isActiveTabShowingPath, useTabsStore, type TabPath } from '@/stores/tabs-store'
 import type { PaneId } from '@/types/pane'
 
 const FAILED_LISTING_MESSAGE = 'Failed to load directory'
@@ -56,12 +56,7 @@ function isMaterializedListingStale(attempt: ListingAttempt, session: ListingSes
   return isListingAttemptStale(attempt) || session.currentBaseline == null
 }
 
-function revisesActiveSession(
-  session: ListingSession,
-  paneId: PaneId,
-  tabId: string,
-  path: string,
-) {
+function revisesActiveSession(session: ListingSession, paneId: PaneId, expected: TabPath) {
   const sessionPath = session.currentPath
   if (session.currentBaseline == null) {
     return false
@@ -69,7 +64,7 @@ function revisesActiveSession(
   if (sessionPath == null) {
     return false
   }
-  return isActiveTabShowingPath(paneId, sessionPath, { tabId, path })
+  return isActiveTabShowingPath(paneId, sessionPath, expected)
 }
 
 function throwIfSessionFailed(session: ListingSession) {
@@ -91,9 +86,7 @@ export async function reloadTrashPane(
   const response = await listTrash()
   const sortedEntries = sortEntries(
     response.entries.map(trashEntryToDirectoryEntry),
-    pane.sortKey,
-    pane.sortDirection,
-    panesStore().getState().sizeStates,
+    sortSpecFor(pane, panesStore().getState().sizeStates),
   )
 
   const listing = { paneId, path: pane.path, sortedEntries, selection }
@@ -108,15 +101,13 @@ function selectRevealedEntry(paneId: PaneId, revealEntry: DirectoryEntry | undef
   if (!revealEntry) {
     return
   }
-  useSelectionStore
-    .getState()
-    .setSelection(paneId, [revealEntry.id], revealEntry.id, revealEntry.id)
+  useSelectionStore.getState().setSelection(paneId, singleEntrySelection(revealEntry.id))
 }
 
 async function openListingSession(paneId: PaneId, tabId: string, pane: PaneState) {
   const session = listingSessions[paneId]
   const view = currentViewParams(pane, panesStore().getState().showHiddenFiles)
-  if (revisesActiveSession(session, paneId, tabId, pane.path)) {
+  if (revisesActiveSession(session, paneId, { tabId, path: pane.path })) {
     await session.reviseView(view)
     return session
   }
@@ -124,11 +115,15 @@ async function openListingSession(paneId: PaneId, tabId: string, pane: PaneState
   return session
 }
 
+export type ListingRestore = {
+  selection: SelectionSnapshot
+  revealChildPath: string | undefined
+}
+
 export async function loadDirectoryListing(
   attempt: ListingAttempt,
   pane: PaneState,
-  selection: SelectionSnapshot,
-  revealChildPath: string | undefined,
+  { selection, revealChildPath }: ListingRestore,
 ) {
   const { paneId } = attempt
   const session = await openListingSession(paneId, attempt.tabId, pane)

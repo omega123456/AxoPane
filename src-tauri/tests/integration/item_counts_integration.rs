@@ -2,11 +2,11 @@ use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use file_explorer_lib::directory_session::{
-    BeginNavigationRequest, DirectorySessionService, ViewParams,
+    BeginNavigationRequest, DirectorySessionService, EnumerationAdmission, ViewParams,
 };
 use file_explorer_lib::fs::{self as explorer_fs, SortDirection, SortKey};
 use file_explorer_lib::item_counts::cache::{
-    ItemCountCache, ItemCountState, ITEM_COUNT_CACHE_LIMIT,
+    CountResolution, ItemCountCache, ItemCountState, ITEM_COUNT_CACHE_LIMIT,
 };
 use file_explorer_lib::item_counts::{
     ActiveItemsSortRequest, ActiveItemsSortResponse, ItemCountRequestContext, ItemCountService,
@@ -468,8 +468,16 @@ fn generation_cache_coalesces_pending_work_and_invalidates_only_the_changed_dire
     assert!(cache.is_empty());
     assert!(cache.begin("/one", 3));
     assert!(!cache.begin("/one", 3));
-    cache.resolve("/one", 3, ItemCountState::Exact { value: 2 });
-    cache.resolve("/two", 3, ItemCountState::Exact { value: 7 });
+    cache.resolve(CountResolution {
+        path: "/one",
+        generation: 3,
+        state: ItemCountState::Exact { value: 2 },
+    });
+    cache.resolve(CountResolution {
+        path: "/two",
+        generation: 3,
+        state: ItemCountState::Exact { value: 7 },
+    });
     assert_eq!(cache.state("/one", 3).value(), Some(2));
     cache.invalidate_generation("/one", 3);
     assert_eq!(cache.state("/one", 3), ItemCountState::Unknown);
@@ -480,13 +488,13 @@ fn generation_cache_coalesces_pending_work_and_invalidates_only_the_changed_dire
 fn item_count_cache_never_exceeds_approved_entry_limit() {
     let mut cache = ItemCountCache::default();
     for index in 0..(ITEM_COUNT_CACHE_LIMIT + 5) {
-        cache.resolve(
-            &format!("/count-{index}"),
-            1,
-            ItemCountState::Exact {
+        cache.resolve(CountResolution {
+            path: &format!("/count-{index}"),
+            generation: 1,
+            state: ItemCountState::Exact {
                 value: index as u64,
             },
-        );
+        });
     }
     assert_eq!(cache.len(), ITEM_COUNT_CACHE_LIMIT);
 }
@@ -507,8 +515,7 @@ fn started_left_session(path: &str) -> DirectorySessionService {
                     include_item_counts: false,
                 },
             },
-            None,
-            None,
+            EnumerationAdmission::ungated(),
         )
         .expect("start session");
     sessions

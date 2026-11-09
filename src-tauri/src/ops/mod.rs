@@ -45,7 +45,7 @@ pub use execution::{
 pub use measure::measure_tree_size;
 pub use paths::{
     fallback_root, is_nested_copy_target, normalized_components, parent_dir, split_name,
-    unique_name, volume_root_for,
+    unique_name, volume_root_for, FileNameParts,
 };
 pub use progress::TransferThrottle;
 pub use service::{requested_pop, OpsService};
@@ -116,10 +116,10 @@ pub enum ConflictResolution {
     Rename,
 }
 
-struct ConflictDecision {
-    resolution: ConflictResolution,
-    apply_to_all: bool,
-    rename_to: Option<String>,
+pub struct ConflictDecision {
+    pub resolution: ConflictResolution,
+    pub apply_to_all: bool,
+    pub rename_to: Option<String>,
 }
 
 /// A single source item belonging to an operation.
@@ -208,24 +208,38 @@ pub struct OpState {
     pub volumes: HashSet<String>,
     pub status: OpStatus,
     pub total_items: u64,
-    pub completed_items: u64,
     pub total_bytes: u64,
-    pub copied_bytes: u64,
-    pub bytes_per_second: u64,
-    pub eta_seconds: Option<u64>,
-    pub sample_count: u64,
-    pub rate_sample_at: Option<Instant>,
-    pub rate_sample_bytes: u64,
-    pub current_file_name: Option<String>,
-    pub current_file_copied: u64,
-    pub current_file_total: u64,
-    pub error_message: Option<String>,
-    pub completed_at: Option<Instant>,
     pub cancel: Arc<AtomicBool>,
     pub pause: Arc<AtomicBool>,
     /// One-shot request to abandon the current top-level item while paused.
     pub skip: Arc<AtomicBool>,
-    /// Pending conflict, and the channel the worker waits on for resolution.
+    pub runtime: OpRuntime,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RateSample {
+    pub at: Instant,
+    pub bytes: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CurrentFileProgress {
+    pub name: Option<String>,
+    pub copied: u64,
+    pub total: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct OpRuntime {
+    pub completed_items: u64,
+    pub copied_bytes: u64,
+    pub bytes_per_second: u64,
+    pub eta_seconds: Option<u64>,
+    pub sample_count: u64,
+    pub rate_sample: Option<RateSample>,
+    pub current_file: CurrentFileProgress,
+    pub error_message: Option<String>,
+    pub completed_at: Option<Instant>,
     pub conflict: Option<ConflictInfo>,
     pub conflict_resolution: Option<ConflictResolution>,
     pub apply_to_all: Option<ConflictResolution>,
@@ -281,23 +295,23 @@ impl OpState {
                 .collect(),
             destination_dir: self.destination_dir.to_string_lossy().into_owned(),
             total_items: self.total_items,
-            completed_items: self.completed_items,
+            completed_items: self.runtime.completed_items,
             total_bytes: self.total_bytes,
             copied_bytes: visible_copied_bytes,
             progress_percent,
-            bytes_per_second: self.bytes_per_second,
-            eta_seconds: self.eta_seconds,
-            current_file_name: self.current_file_name.clone(),
-            current_file_copied_bytes: self.current_file_copied,
-            current_file_total_bytes: self.current_file_total,
-            error_message: self.error_message.clone(),
+            bytes_per_second: self.runtime.bytes_per_second,
+            eta_seconds: self.runtime.eta_seconds,
+            current_file_name: self.runtime.current_file.name.clone(),
+            current_file_copied_bytes: self.runtime.current_file.copied,
+            current_file_total_bytes: self.runtime.current_file.total,
+            error_message: self.runtime.error_message.clone(),
         }
     }
 
     pub fn snapshot(&self) -> OpSnapshot {
         OpSnapshot {
             progress: self.progress(),
-            conflict: self.conflict.clone(),
+            conflict: self.runtime.conflict.clone(),
         }
     }
 
@@ -315,37 +329,24 @@ impl OpState {
         if self.cancel.load(Ordering::Relaxed) {
             return RunOutcome::Cancelled;
         }
-        if self.error_message.is_some() {
+        if self.runtime.error_message.is_some() {
             return RunOutcome::Failed;
         }
         RunOutcome::Completed
     }
 
     fn clear_current_file(&mut self) {
-        self.current_file_name = None;
-        self.current_file_copied = 0;
-        self.current_file_total = 0;
+        self.runtime.current_file = CurrentFileProgress::default();
     }
 
     pub fn visible_copied_bytes(&self) -> u64 {
-        self.copied_bytes.saturating_add(self.current_file_copied)
+        self.runtime
+            .copied_bytes
+            .saturating_add(self.runtime.current_file.copied)
     }
 
     pub fn reset_runtime_state(&mut self) {
-        self.completed_items = 0;
-        self.copied_bytes = 0;
-        self.bytes_per_second = 0;
-        self.eta_seconds = None;
-        self.sample_count = 0;
-        self.rate_sample_at = None;
-        self.rate_sample_bytes = 0;
-        self.clear_current_file();
-        self.error_message = None;
-        self.completed_at = None;
+        self.runtime = OpRuntime::default();
         self.skip.store(false, Ordering::Relaxed);
-        self.conflict = None;
-        self.conflict_resolution = None;
-        self.apply_to_all = None;
-        self.rename_to = None;
     }
 }

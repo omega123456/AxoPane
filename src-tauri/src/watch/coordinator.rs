@@ -240,18 +240,18 @@ impl WatchCoordinator {
         let (raw_sender, raw_receiver) = bounded::<RawMutation>(RAW_LANE_CAPACITY);
         let (control_sender, control_receiver) = bounded::<ControlMessage>(CONTROL_LANE_CAPACITY);
         let overflow = Arc::new(OverflowTracker::default());
-        let overflow_for_thread = Arc::clone(&overflow);
+        let compactor = Compactor {
+            raw_receiver,
+            control_receiver,
+            overflow: Arc::clone(&overflow),
+            on_batch,
+            pending: HashMap::new(),
+            dirty_generation: 1,
+        };
 
         let thread = std::thread::Builder::new()
             .name("watch-coordinator".to_string())
-            .spawn(move || {
-                run_compactor(
-                    raw_receiver,
-                    control_receiver,
-                    overflow_for_thread,
-                    on_batch,
-                );
-            })
+            .spawn(move || compactor.run())
             .expect("failed to spawn watch coordinator thread");
 
         Self {
@@ -302,28 +302,6 @@ impl Drop for WatchCoordinator {
     }
 }
 
-/// Compactor thread body: repeatedly drains whatever is available (control
-/// messages first, then raw mutations), updates per-watch pending state, and
-/// checks every watch with pending state for flush-readiness on each wake
-/// (either a new message arriving or a bounded poll tick so quiet-window/
-/// max-age deadlines are honored even without new traffic).
-fn run_compactor(
-    raw_receiver: Receiver<RawMutation>,
-    control_receiver: Receiver<ControlMessage>,
-    overflow: Arc<OverflowTracker>,
-    on_batch: Arc<dyn Fn(CompactedBatch) + Send + Sync>,
-) {
-    let mut compactor = Compactor {
-        raw_receiver,
-        control_receiver,
-        overflow,
-        on_batch,
-        pending: HashMap::new(),
-        dirty_generation: 1,
-    };
-    while compactor.run_cycle().is_continue() {}
-}
-
 struct Compactor {
     raw_receiver: Receiver<RawMutation>,
     control_receiver: Receiver<ControlMessage>,
@@ -334,6 +312,15 @@ struct Compactor {
 }
 
 impl Compactor {
+    /// Compactor thread body: repeatedly drains whatever is available (control
+    /// messages first, then raw mutations), updates per-watch pending state, and
+    /// checks every watch with pending state for flush-readiness on each wake
+    /// (either a new message arriving or a bounded poll tick so quiet-window/
+    /// max-age deadlines are honored even without new traffic).
+    fn run(mut self) {
+        while self.run_cycle().is_continue() {}
+    }
+
     fn run_cycle(&mut self) -> ControlFlow<()> {
         // Control lane is always drained first and completely, ahead of any
         // raw-mutation processing, so control work can never be starved by

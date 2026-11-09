@@ -74,7 +74,7 @@ fn latency_job_is_not_starved_behind_saturated_throughput_on_the_same_resource()
     // Queue more throughput work behind the saturated per-resource
     // throughput lane so there is a backlog contending for the same
     // class+resource.
-    let (_id, backlog_await) = coordinator.submit_cancellable(throughput(["vol-x"]));
+    let backlog_await = coordinator.submit_cancellable(throughput(["vol-x"]));
 
     // A latency job on the SAME resource must still be granted promptly:
     // latency and throughput are independent lanes/caps, and a resource
@@ -128,10 +128,10 @@ fn explicit_handle_release_frees_its_reservation_for_the_next_job() {
 #[test]
 fn await_exposes_its_submission_id_for_a_coalesced_job_spec() {
     let coordinator = ResourceCoordinator::new();
-    let (submitted_id, awaiting) = coordinator
+    let awaiting = coordinator
         .submit_cancellable(latency(["coalesced-id"]).with_coalesce_key("focus-reconcile"));
+    let submitted_id = awaiting.id();
 
-    assert_eq!(awaiting.id(), submitted_id);
     let handle = awaiting.recv().expect("coalesced job granted");
     assert_eq!(handle.id(), submitted_id);
     drop(handle);
@@ -152,13 +152,22 @@ fn await_exposes_its_submission_id_for_a_coalesced_job_spec() {
 /// signals. This proves true overlap (not just "eventually all succeeded
 /// sequentially") without any fixed sleep: workers only release after the
 /// watcher has recorded their signal, via a second acknowledgement channel.
-fn assert_class_never_exceeds_cap_under_load(
-    coordinator: &Arc<ResourceCoordinator>,
+struct ClassLoad {
     resource_pool_size: usize,
     count: usize,
     cap: usize,
+}
+
+fn assert_class_never_exceeds_cap_under_load(
+    coordinator: &Arc<ResourceCoordinator>,
+    load: ClassLoad,
     spec_for: impl Fn(String) -> JobSpec + Send + Sync + 'static,
 ) {
+    let ClassLoad {
+        resource_pool_size,
+        count,
+        cap,
+    } = load;
     let spec_for = Arc::new(spec_for);
     let live = Arc::new(AtomicUsize::new(0));
     let max_live = Arc::new(AtomicUsize::new(0));
@@ -213,23 +222,29 @@ fn global_caps_are_never_exceeded_across_many_resources() {
 
     assert_class_never_exceeds_cap_under_load(
         &coordinator,
-        resource_pool_size,
-        MAX_LATENCY_SLOTS * 3,
-        MAX_LATENCY_SLOTS,
+        ClassLoad {
+            resource_pool_size,
+            count: MAX_LATENCY_SLOTS * 3,
+            cap: MAX_LATENCY_SLOTS,
+        },
         |resource| latency([resource]),
     );
     assert_class_never_exceeds_cap_under_load(
         &coordinator,
-        resource_pool_size,
-        throughput_slots * 3,
-        throughput_slots,
+        ClassLoad {
+            resource_pool_size,
+            count: throughput_slots * 3,
+            cap: throughput_slots,
+        },
         |resource| throughput([resource]),
     );
     assert_class_never_exceeds_cap_under_load(
         &coordinator,
-        resource_pool_size,
-        MAX_CPU_SLOTS * 3,
-        MAX_CPU_SLOTS,
+        ClassLoad {
+            resource_pool_size,
+            count: MAX_CPU_SLOTS * 3,
+            cap: MAX_CPU_SLOTS,
+        },
         |resource| cpu([resource]),
     );
 
@@ -242,10 +257,15 @@ fn global_caps_are_never_exceeded_across_many_resources() {
 
 fn submit_and_count_grant(
     coordinator: &ResourceCoordinator,
-    resource: &str,
-    grants: &AtomicUsize,
-    round: usize,
+    grants: &[AtomicUsize],
+    target: GrantTarget,
 ) {
+    let GrantTarget {
+        resource,
+        index,
+        round,
+    } = target;
+    let grants = &grants[index];
     let handle = coordinator
         .submit(throughput([resource]))
         .unwrap_or_else(|error| panic!("round {round} resource {resource} failed: {error:?}"));
@@ -307,14 +327,18 @@ fn opposing_resource_pair_jobs_never_deadlock_or_hold_partial_permits() {
         let forward = spawn_submit_after_barrier(
             &coordinator,
             &start,
-            throughput(["A", "B"]),
-            "forward job admitted without deadlock",
+            BarrierJob {
+                spec: throughput(["A", "B"]),
+                expectation: "forward job admitted without deadlock",
+            },
         );
         let backward = spawn_submit_after_barrier(
             &coordinator,
             &start,
-            throughput(["B", "A"]),
-            "backward job admitted without deadlock",
+            BarrierJob {
+                spec: throughput(["B", "A"]),
+                expectation: "backward job admitted without deadlock",
+            },
         );
 
         forward
@@ -338,20 +362,24 @@ fn mixed_cpu_and_throughput_reservations_make_progress_without_partial_holding()
         let mixed = spawn_submit_after_barrier(
             &coordinator,
             &start,
-            JobSpec::new(
-                [JobClass::Throughput, JobClass::Cpu],
-                ["archive-src".to_string(), "archive-dst".to_string()],
-            ),
-            "mixed job admitted",
+            BarrierJob {
+                spec: JobSpec::new(
+                    [JobClass::Throughput, JobClass::Cpu],
+                    ["archive-src".to_string(), "archive-dst".to_string()],
+                ),
+                expectation: "mixed job admitted",
+            },
         );
         let opposing = spawn_submit_after_barrier(
             &coordinator,
             &start,
-            JobSpec::new(
-                [JobClass::Throughput, JobClass::Cpu],
-                ["archive-dst".to_string(), "archive-src".to_string()],
-            ),
-            "opposing mixed job admitted",
+            BarrierJob {
+                spec: JobSpec::new(
+                    [JobClass::Throughput, JobClass::Cpu],
+                    ["archive-dst".to_string(), "archive-src".to_string()],
+                ),
+                expectation: "opposing mixed job admitted",
+            },
         );
 
         mixed
@@ -380,7 +408,8 @@ fn cancelling_a_queued_job_releases_no_partial_state_and_unblocks_the_queue() {
         .expect("first throughput job granted");
 
     // Second job for the same resource queues behind it.
-    let (id, waiting) = coordinator.submit_cancellable(throughput(["removable-usb"]));
+    let waiting = coordinator.submit_cancellable(throughput(["removable-usb"]));
+    let id = waiting.id();
 
     // Simulate the volume being removed / the caller abandoning the job
     // while it is still queued: cancel it explicitly.
@@ -409,7 +438,8 @@ fn cancelling_a_queued_job_releases_no_partial_state_and_unblocks_the_queue() {
 fn cancelling_an_already_granted_job_releases_its_permits() {
     let coordinator = ResourceCoordinator::new();
 
-    let (id, waiting) = coordinator.submit_cancellable(throughput(["vol-a"]));
+    let waiting = coordinator.submit_cancellable(throughput(["vol-a"]));
+    let id = waiting.id();
     let handle = waiting
         .recv()
         .expect("first job on an empty resource is granted immediately");
@@ -456,8 +486,10 @@ fn duplicate_job_identity_coalesces_into_one_reservation() {
     let spec_a = throughput(["vol-coalesce"]).with_coalesce_key("size-scan:vol-coalesce");
     let spec_b = throughput(["vol-coalesce"]).with_coalesce_key("size-scan:vol-coalesce");
 
-    let (id_a, await_a) = coordinator.submit_cancellable(spec_a);
-    let (id_b, await_b) = coordinator.submit_cancellable(spec_b);
+    let await_a = coordinator.submit_cancellable(spec_a);
+    let id_a = await_a.id();
+    let await_b = coordinator.submit_cancellable(spec_b);
+    let id_b = await_b.id();
     assert_ne!(
         id_a, id_b,
         "coalesced submissions still get distinct caller-visible ids"
@@ -511,7 +543,7 @@ fn dropping_one_coalesced_handle_does_not_release_the_shared_reservation() {
     // the same resource must queue rather than being granted immediately.
     drop(handle_b);
 
-    let (_id_c, await_c) = coordinator.submit_cancellable(throughput(["vol-coalesce-refcount"]));
+    let await_c = coordinator.submit_cancellable(throughput(["vol-coalesce-refcount"]));
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(200);
     while coordinator.pending_len() == 0 && std::time::Instant::now() < deadline {
         std::thread::yield_now();
@@ -550,7 +582,7 @@ fn queue_capacity_is_finite_and_rejects_submissions_once_full() {
 
     let mut awaits = Vec::new();
     for _ in 0..MAX_QUEUED_JOBS {
-        let (_id, waiting) = coordinator.submit_cancellable(throughput(["blocker"]));
+        let waiting = coordinator.submit_cancellable(throughput(["blocker"]));
         awaits.push(waiting);
     }
 
@@ -578,7 +610,7 @@ fn shutdown_resolves_queued_jobs_and_leaves_no_blocked_thread() {
     let hold = coordinator
         .submit(throughput(["vol-shutdown"]))
         .expect("holder granted");
-    let (_id, waiting) = coordinator.submit_cancellable(throughput(["vol-shutdown"]));
+    let waiting = coordinator.submit_cancellable(throughput(["vol-shutdown"]));
 
     let (done_sender, done_receiver) = bounded::<Result<(), SubmitError>>(1);
     let waiter = std::thread::spawn(move || {
@@ -693,7 +725,7 @@ fn many_distinct_resources_all_share_the_same_fixed_global_caps() {
     // One more distinct resource must queue (global cap reached) even
     // though its own resource key has never been touched before — proving
     // the cap is global, not per-resource.
-    let (_id, waiting) = coordinator.submit_cancellable(throughput(["distinct-overflow"]));
+    let waiting = coordinator.submit_cancellable(throughput(["distinct-overflow"]));
     let still_pending = waiting.recv_timeout(Duration::from_millis(50));
     assert!(
         still_pending.is_err(),
@@ -752,8 +784,9 @@ fn cancelling_a_coalesce_target_also_resolves_jobs_coalesced_onto_it() {
     let spec_a = throughput(["coalesce-cancel-vol"]).with_coalesce_key("shared");
     let spec_b = throughput(["coalesce-cancel-vol"]).with_coalesce_key("shared");
 
-    let (id_a, await_a) = coordinator.submit_cancellable(spec_a);
-    let (_id_b, await_b) = coordinator.submit_cancellable(spec_b);
+    let await_a = coordinator.submit_cancellable(spec_a);
+    let id_a = await_a.id();
+    let await_b = coordinator.submit_cancellable(spec_b);
 
     // Cancel the original (target) job while both are still queued.
     coordinator.cancel(id_a);
@@ -802,7 +835,7 @@ fn pending_len_reflects_the_queued_backlog_and_drains_as_jobs_are_granted() {
 
     let mut awaits = Vec::new();
     for _ in 0..5 {
-        let (_id, waiting) = coordinator.submit_cancellable(throughput(["pending-len-vol"]));
+        let waiting = coordinator.submit_cancellable(throughput(["pending-len-vol"]));
         awaits.push(waiting);
     }
 
@@ -869,21 +902,21 @@ fn spawn_counting_worker(
     let coordinator = Arc::clone(coordinator);
     let grants = Arc::clone(grants);
     std::thread::spawn(move || {
-        submit_and_count_grant(
-            &coordinator,
-            target.resource,
-            &grants[target.index],
-            target.round,
-        );
+        submit_and_count_grant(&coordinator, &grants, target);
     })
+}
+
+struct BarrierJob {
+    spec: JobSpec,
+    expectation: &'static str,
 }
 
 fn spawn_submit_after_barrier(
     coordinator: &Arc<ResourceCoordinator>,
     start: &Arc<Barrier>,
-    spec: JobSpec,
-    expectation: &'static str,
+    job: BarrierJob,
 ) -> std::thread::JoinHandle<()> {
+    let BarrierJob { spec, expectation } = job;
     let coordinator = Arc::clone(coordinator);
     let start = Arc::clone(start);
     std::thread::spawn(move || {

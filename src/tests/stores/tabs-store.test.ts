@@ -133,7 +133,14 @@ describe('tabs-store', () => {
     })
     store.setActiveTab('left', second)
 
-    expect(store.moveTab('left', first, 'left', 2)).toMatchObject({ kind: 'reorder' })
+    expect(
+      store.moveTab({
+        sourcePaneId: 'left',
+        tabId: first,
+        destinationPaneId: 'left',
+        destinationIndex: 2,
+      }),
+    ).toMatchObject({ kind: 'reorder' })
     const pane = useTabsStore.getState().panes.left
     expect(pane.tabs.map((tab) => tab.id)).toEqual([second, third, first])
     expect(pane.tabs[pane.activeTabIndex]).toMatchObject({
@@ -162,7 +169,14 @@ describe('tabs-store', () => {
       filter: '',
     })
 
-    expect(store.moveTab('left', first, 'left', 3)).toMatchObject({ kind: 'reorder' })
+    expect(
+      store.moveTab({
+        sourcePaneId: 'left',
+        tabId: first,
+        destinationPaneId: 'left',
+        destinationIndex: 3,
+      }),
+    ).toMatchObject({ kind: 'reorder' })
     expect(useTabsStore.getState().panes.left.tabs.map((tab) => tab.id)).toEqual([
       second,
       third,
@@ -189,7 +203,12 @@ describe('tabs-store', () => {
     })
     store.setActiveTab('left', moved)
 
-    const result = store.moveTab('left', moved, 'right', 1)
+    const result = store.moveTab({
+      sourcePaneId: 'left',
+      tabId: moved,
+      destinationPaneId: 'right',
+      destinationIndex: 1,
+    })
     expect(result).toMatchObject({
       kind: 'transfer',
       sourceActiveChanged: true,
@@ -215,9 +234,30 @@ describe('tabs-store', () => {
     const store = useTabsStore.getState()
     const only = store.panes.left.tabs[0].id
     const before = useTabsStore.getState().panes
-    expect(store.moveTab('left', only, 'right', 0)).toEqual({ kind: 'none' })
-    expect(store.moveTab('left', only, 'left', 0)).toEqual({ kind: 'none' })
-    expect(store.moveTab('left', 'missing', 'left', 0)).toEqual({ kind: 'none' })
+    expect(
+      store.moveTab({
+        sourcePaneId: 'left',
+        tabId: only,
+        destinationPaneId: 'right',
+        destinationIndex: 0,
+      }),
+    ).toEqual({ kind: 'none' })
+    expect(
+      store.moveTab({
+        sourcePaneId: 'left',
+        tabId: only,
+        destinationPaneId: 'left',
+        destinationIndex: 0,
+      }),
+    ).toEqual({ kind: 'none' })
+    expect(
+      store.moveTab({
+        sourcePaneId: 'left',
+        tabId: 'missing',
+        destinationPaneId: 'left',
+        destinationIndex: 0,
+      }),
+    ).toEqual({ kind: 'none' })
     expect(useTabsStore.getState().panes).toBe(before)
   })
 

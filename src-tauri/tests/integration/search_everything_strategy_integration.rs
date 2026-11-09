@@ -1,7 +1,9 @@
 use std::cell::Cell;
 use std::sync::Mutex;
 
-use file_explorer_lib::search::everything_strategy::{candidates, FUZZY_PASS_THRESHOLD};
+use file_explorer_lib::search::everything_strategy::{
+    candidates, EverythingSearchRun, FUZZY_PASS_THRESHOLD,
+};
 use file_explorer_lib::search::path_style::PathStyle;
 use file_explorer_lib::search::query::{parse, ParsedQuery};
 use file_explorer_lib::search::results::BROWSE_PARENT_CAP;
@@ -85,7 +87,14 @@ fn run(source: &Source, raw: &str) -> Result<CandidateBatch, SearchError> {
         cancelled: &never,
         expired: &never,
     };
-    candidates(source, &parsed(raw), &ALL, &control)
+    candidates(
+        &EverythingSearchRun {
+            source,
+            options: &ALL,
+            control: &control,
+        },
+        &parsed(raw),
+    )
 }
 
 fn paths(batch: &CandidateBatch) -> Vec<&str> {
@@ -161,7 +170,14 @@ fn cancellation_errors_and_an_expired_budget_keeps_partial_results() {
         expired: &no,
     };
     assert_eq!(
-        candidates(&source, &parsed("invoice"), &ALL, &cancelled),
+        candidates(
+            &EverythingSearchRun {
+                source: &source,
+                options: &ALL,
+                control: &cancelled
+            },
+            &parsed("invoice")
+        ),
         Err(SearchError::Cancelled)
     );
 
@@ -174,7 +190,15 @@ fn cancellation_errors_and_an_expired_budget_keeps_partial_results() {
         cancelled: &no,
         expired: &after_one,
     };
-    let batch = candidates(&source, &parsed("invoice"), &ALL, &expiring).expect("partial");
+    let batch = candidates(
+        &EverythingSearchRun {
+            source: &source,
+            options: &ALL,
+            control: &expiring,
+        },
+        &parsed("invoice"),
+    )
+    .expect("partial");
     assert!(batch.truncated);
     assert_eq!(paths(&batch), [r"C:\a\invoice"]);
 }

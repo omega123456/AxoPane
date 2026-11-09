@@ -52,14 +52,14 @@ describe('UpdateBanner', () => {
   it('renders an install failure message', () => {
     const update = fakeUpdate()
     useUpdaterStore.getState().setAvailable(update, { currentVersion: '0.1.0', version: '0.2.0' })
-    useUpdaterStore.setState({ status: 'error', error: 'network down' })
+    useUpdaterStore.getState().setStatus('error', 'network down')
 
     render(<UpdateBanner />)
     const bar = screen.getByRole('alert', { name: 'Update available' })
     expect(bar).toHaveAttribute('data-severity', 'error')
     expect(bar).toHaveTextContent('Update failed')
     expect(bar).toHaveTextContent('network down')
-    expect(useUpdaterStore.getState().status).toBe('error')
+    expect(useUpdaterStore.getState().outcome.status).toBe('error')
   })
 
   it('dismisses the banner', async () => {
@@ -70,6 +70,6 @@ describe('UpdateBanner', () => {
 
     render(<UpdateBanner />)
     await user.click(screen.getByRole('button', { name: /dismiss update banner/i }))
-    expect(useUpdaterStore.getState().summary).toBeNull()
+    expect(useUpdaterStore.getState().outcome.summary).toBeNull()
   })
 })

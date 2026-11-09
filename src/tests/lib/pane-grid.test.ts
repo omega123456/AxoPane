@@ -35,8 +35,8 @@ describe('pane grid geometry', () => {
     expect(visualRowCount(25, 4)).toBe(7)
     expect(visualRowForIndex(10, 4)).toBe(2)
     expect(visualColumnForIndex(10, 4)).toBe(2)
-    expect(entryIndexForPosition(2, 2, 25, 4)).toBe(10)
-    expect(entryIndexForPosition(6, 1, 25, 4)).toBe(null)
+    expect(entryIndexForPosition({ row: 2, column: 2 }, 25, 4)).toBe(10)
+    expect(entryIndexForPosition({ row: 6, column: 1 }, 25, 4)).toBe(null)
   })
 
   it('moves through visual geometry while preserving row bounds', () => {

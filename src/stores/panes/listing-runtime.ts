@@ -57,11 +57,15 @@ function waitForSessionChange(paneId: PaneId, check: () => boolean): Promise<voi
   })
 }
 
+type SessionPageLoad = {
+  pageIndex: number
+  stillCurrent: () => boolean
+}
+
 async function loadSessionPage(
   paneId: PaneId,
   session: ListingSession,
-  pageIndex: number,
-  stillCurrent: () => boolean,
+  { pageIndex, stillCurrent }: SessionPageLoad,
 ) {
   const { collection } = session
   session.ensurePageLoaded(pageIndex)
@@ -100,7 +104,7 @@ export async function ensureSessionFullyLoaded(
     if (collection.isPageLoaded(pageIndex)) {
       continue
     }
-    await loadSessionPage(paneId, session, pageIndex, stillCurrent)
+    await loadSessionPage(paneId, session, { pageIndex, stillCurrent })
   }
 
   if (stillCurrent()) {

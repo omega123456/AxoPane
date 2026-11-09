@@ -10,6 +10,7 @@ import {
 } from './marquee-selection'
 import { PRIMARY_MOUSE_BUTTON } from '@/lib/mouse-buttons'
 import { hasPrimaryModifier } from '@/lib/key-table'
+import { EMPTY_SELECTION, type PaneSelection } from '@/stores/selection-store'
 
 const ROW_SELECTOR = '[role="row"], [role="gridcell"]'
 
@@ -19,12 +20,7 @@ type MarqueeSelectionOptions = {
   selectedIds: string[]
   entryIdsInRect: (rect: MarqueeRect) => string[]
   onPointerDown: () => void
-  setSelection: (
-    paneId: PaneId,
-    selectedIds: string[],
-    anchorId: string | null,
-    focusedId: string | null,
-  ) => void
+  setSelection: (paneId: PaneId, selection: PaneSelection) => void
   setFocusedEntry: (paneId: PaneId, entryId: string | null) => void
 }
 
@@ -55,7 +51,7 @@ export function useMarqueeSelection(options: MarqueeSelectionOptions) {
 
   function applySelection(drag: MarqueeDrag, rect: MarqueeRect) {
     const result = marqueeSelection(drag, options.entryIdsInRect(rect))
-    setSelection(paneId, result.selectedIds, result.anchorId, result.focusedId)
+    setSelection(paneId, result)
     if (result.focusedId) {
       setFocusedEntry(paneId, result.focusedId)
     }
@@ -106,7 +102,7 @@ export function useMarqueeSelection(options: MarqueeSelectionOptions) {
 
     const additive = hasPrimaryModifier(event)
     if (!additive) {
-      setSelection(paneId, [], null, null)
+      setSelection(paneId, EMPTY_SELECTION)
     }
     trackDrag({ start, additive, baseSelectedIds: options.selectedIds })
   }

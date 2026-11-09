@@ -31,12 +31,12 @@ pub fn cancel_thumbnails(
     payload: CancelThumbnailsRequest,
     state: State<'_, Arc<crate::thumbnails::ThumbnailService>>,
 ) {
-    state.cancel(
-        &payload.pane_id,
-        &payload.tab_id,
-        &payload.path,
-        payload.generation,
-    );
+    state.cancel(&crate::thumbnails::scheduler::ThumbnailSubscriber {
+        pane_id: payload.pane_id,
+        tab_id: payload.tab_id,
+        path: payload.path,
+        generation: payload.generation,
+    });
 }
 
 #[cfg(not(feature = "test-utils"))]

@@ -11,7 +11,7 @@ use super::path_style::PathStyle;
 use super::query::{ParsedQuery, Segment};
 use super::results::{rank_candidates, BROWSE_PARENT_CAP, CANDIDATE_CAP};
 use super::source::FolderTreeSource;
-use super::{Candidate, CandidateBatch, Control, SearchError, SearchOptions, SearchScope};
+use super::{Candidate, CandidateBatch, SearchError, SearchOptions, SearchRun, SearchScope};
 use crate::size::index::tree::FolderSizeTree;
 
 /// Arena slots examined per read-lock hold.
@@ -19,61 +19,63 @@ pub const SLOTS_PER_READ: usize = 32_768;
 /// Matches accumulate to twice the cap before being pruned to the best.
 const FOUND_PRUNE_THRESHOLD: usize = 2 * CANDIDATE_CAP;
 
+pub type TreeSearchRun<'run> = SearchRun<'run, dyn FolderTreeSource>;
+
 pub fn candidates(
-    source: &dyn FolderTreeSource,
+    run: &TreeSearchRun<'_>,
     query: &ParsedQuery,
-    options: &SearchOptions,
-    control: &Control<'_>,
 ) -> Result<CandidateBatch, SearchError> {
-    candidates_in_chunks(source, query, options, control, SLOTS_PER_READ)
+    candidates_in_chunks(run, query, SLOTS_PER_READ)
 }
 
 /// [`candidates`] with an explicit number of slots per read.
 pub fn candidates_in_chunks(
-    source: &dyn FolderTreeSource,
+    run: &TreeSearchRun<'_>,
     query: &ParsedQuery,
-    options: &SearchOptions,
-    control: &Control<'_>,
     slots_per_read: usize,
 ) -> Result<CandidateBatch, SearchError> {
-    if options.scope == SearchScope::Files {
+    if run.options.scope == SearchScope::Files {
         return Ok(CandidateBatch::default());
     }
     match (&query.name_seg, &query.anchor) {
         // Anchored name searches scan too; ranking keeps them inside the
         // anchor, which bounds every lock hold.
-        (Some(name), _) => scan(source, name, options, control, slots_per_read.max(1)),
-        (None, Some(anchor)) => list_children(source, &[anchor.path(PathStyle::Posix)], options),
+        (Some(name), _) => scan(run, name, slots_per_read.max(1)),
+        (None, Some(anchor)) => {
+            list_children(run.source, &[anchor.path(PathStyle::Posix)], run.options)
+        }
         (None, None) if query.browse => {
             let parent_query = query.browse_parents();
-            let parents =
-                candidates_in_chunks(source, &parent_query, options, control, slots_per_read)?;
+            let parents = candidates_in_chunks(run, &parent_query, slots_per_read)?;
             let top: Vec<String> =
                 rank_candidates(parents.candidates, &parent_query, PathStyle::Posix)
                     .into_iter()
                     .take(BROWSE_PARENT_CAP)
                     .map(|hit| hit.path)
                     .collect();
-            list_children(source, &top, options)
+            list_children(run.source, &top, run.options)
         }
         (None, None) => Ok(CandidateBatch::default()),
     }
 }
 
+struct TieredCandidate {
+    tier: u8,
+    candidate: Candidate,
+}
+
 /// Folders whose own name matches `name`. Past the cap, the best-tier
 /// matches are kept, so exact and prefix hits survive a broad query.
 fn scan(
-    source: &dyn FolderTreeSource,
+    run: &TreeSearchRun<'_>,
     name: &Segment,
-    options: &SearchOptions,
-    control: &Control<'_>,
     slots_per_read: usize,
 ) -> Result<CandidateBatch, SearchError> {
-    let mut found: Vec<(u8, Candidate)> = Vec::new();
+    let mut found: Vec<TieredCandidate> = Vec::new();
     let mut truncated = false;
     let mut start = 0;
     loop {
-        if !control.proceed()? {
+        if !run.control.proceed()? {
             truncated = true;
             break;
         }
@@ -81,7 +83,8 @@ fn scan(
             start,
             len: slots_per_read,
         };
-        let read = read_slot_chunk(source, name, options, chunk, &mut found)?;
+        let read = read_slot_chunk(run, name, chunk)?;
+        found.extend(read.hits);
         if found.len() > FOUND_PRUNE_THRESHOLD {
             keep_best(&mut found);
             truncated = true;
@@ -96,7 +99,7 @@ fn scan(
         truncated = true;
     }
     Ok(CandidateBatch {
-        candidates: found.into_iter().map(|(_, candidate)| candidate).collect(),
+        candidates: found.into_iter().map(|hit| hit.candidate).collect(),
         truncated,
     })
 }
@@ -110,50 +113,58 @@ struct SlotChunk {
 struct SlotChunkRead {
     end: usize,
     slot_count: usize,
+    hits: Vec<TieredCandidate>,
+}
+
+#[derive(Clone, Copy)]
+struct VisibleTree<'tree> {
+    tree: &'tree FolderSizeTree,
+    blocked: &'tree [String],
+    include_hidden: bool,
 }
 
 fn read_slot_chunk(
-    source: &dyn FolderTreeSource,
+    run: &TreeSearchRun<'_>,
     name: &Segment,
-    options: &SearchOptions,
     chunk: SlotChunk,
-    found: &mut Vec<(u8, Candidate)>,
 ) -> Result<SlotChunkRead, SearchError> {
     let mut read = SlotChunkRead {
         end: chunk.start,
         slot_count: 0,
+        hits: Vec::new(),
     };
-    source.read(&mut |tree, blocked| {
+    run.source.read(&mut |tree, blocked| {
         let blocked = blocked_prefixes(blocked);
+        let visible = VisibleTree {
+            tree,
+            blocked: &blocked,
+            include_hidden: run.options.include_hidden,
+        };
         read.slot_count = tree.slot_len();
         read.end = (chunk.start + chunk.len).min(read.slot_count);
-        let hits = (chunk.start..read.end)
-            .filter_map(|id| folder_hit(tree, id as u32, name, &blocked, options.include_hidden));
-        found.extend(hits);
+        let hits = (chunk.start..read.end).filter_map(|id| folder_hit(visible, id as u32, name));
+        read.hits.extend(hits);
     })?;
     Ok(read)
 }
 
 /// The match tier and candidate for a live, visible folder whose name
 /// matches `name`.
-fn folder_hit(
-    tree: &FolderSizeTree,
-    id: u32,
-    name: &Segment,
-    blocked: &[String],
-    include_hidden: bool,
-) -> Option<(u8, Candidate)> {
-    let (node_name, _) = tree.live_node(id)?;
-    if !name.may_match(node_name) {
+fn folder_hit(visible: VisibleTree<'_>, id: u32, name: &Segment) -> Option<TieredCandidate> {
+    let node = visible.tree.live_node(id)?;
+    if !name.may_match(node.name) {
         return None;
     }
-    let hit = name.matches(&FoldedName::new(&nfc(node_name)), NameKind::Folder)?;
-    let path = visible_path(tree, id, blocked, include_hidden)?;
-    Some((hit.tier, folder(path)))
+    let hit = name.matches(&FoldedName::new(&nfc(node.name)), NameKind::Folder)?;
+    let path = visible_path(visible, id)?;
+    Some(TieredCandidate {
+        tier: hit.tier,
+        candidate: folder(path),
+    })
 }
 
-fn keep_best(found: &mut Vec<(u8, Candidate)>) {
-    found.sort_by_key(|(tier, _)| *tier);
+fn keep_best(found: &mut Vec<TieredCandidate>) {
+    found.sort_by_key(|hit| hit.tier);
     found.truncate(CANDIDATE_CAP);
 }
 
@@ -166,23 +177,26 @@ fn list_children(
     let mut batch = CandidateBatch::default();
     source.read(&mut |tree, blocked| {
         let blocked = blocked_prefixes(blocked);
-        push_children_of_parents(tree, parents, &blocked, options.include_hidden, &mut batch);
+        let visible = VisibleTree {
+            tree,
+            blocked: &blocked,
+            include_hidden: options.include_hidden,
+        };
+        push_children_of_parents(visible, parents, &mut batch);
     })?;
     Ok(batch)
 }
 
 fn push_children_of_parents(
-    tree: &FolderSizeTree,
+    visible: VisibleTree<'_>,
     parents: &[String],
-    blocked: &[String],
-    include_hidden: bool,
     batch: &mut CandidateBatch,
 ) {
     let parent_ids = parents
         .iter()
-        .filter_map(|parent| tree.lookup(Path::new(parent)));
+        .filter_map(|parent| visible.tree.lookup(Path::new(parent)));
     for parent_id in parent_ids {
-        let has_room = push_visible_children(tree, parent_id, blocked, include_hidden, batch);
+        let has_room = push_visible_children(visible, parent_id, batch);
         if !has_room {
             return;
         }
@@ -191,19 +205,17 @@ fn push_children_of_parents(
 
 /// Returns `false` once the batch is full.
 fn push_visible_children(
-    tree: &FolderSizeTree,
+    visible: VisibleTree<'_>,
     parent_id: u32,
-    blocked: &[String],
-    include_hidden: bool,
     batch: &mut CandidateBatch,
 ) -> bool {
-    for &child in tree.child_ids(parent_id) {
+    for &child in visible.tree.child_ids(parent_id) {
         let batch_full = batch.candidates.len() == CANDIDATE_CAP;
         if batch_full {
             batch.truncated = true;
             return false;
         }
-        if let Some(path) = visible_path(tree, child, blocked, include_hidden) {
+        if let Some(path) = visible_path(visible, child) {
             batch.candidates.push(folder(path));
         }
     }
@@ -212,29 +224,25 @@ fn push_visible_children(
 
 /// The node's POSIX path, unless it is hidden (a dot-named component while
 /// hidden items are off) or inside a blocked protected root.
-fn visible_path(
-    tree: &FolderSizeTree,
-    id: u32,
-    blocked: &[String],
-    include_hidden: bool,
-) -> Option<String> {
+fn visible_path(visible: VisibleTree<'_>, id: u32) -> Option<String> {
     let mut names = Vec::new();
     let mut cursor = Some(id);
     while let Some(current) = cursor {
-        let (name, parent) = tree.live_node(current)?;
-        names.push(name);
-        cursor = parent;
+        let node = visible.tree.live_node(current)?;
+        names.push(node.name);
+        cursor = node.parent;
     }
     // Leaf first; the last entry is the root, which holds a full path.
     let (root, rest) = names.split_last()?;
     let components: Vec<&str> = rest.iter().rev().copied().collect();
     let has_hidden_component = components.iter().any(|name| name.starts_with('.'));
-    let hidden_excluded = has_hidden_component && !include_hidden;
+    let hidden_excluded = has_hidden_component && !visible.include_hidden;
     if hidden_excluded {
         return None;
     }
     let path = PathStyle::Posix.compose(root, &components);
-    if blocked
+    if visible
+        .blocked
         .iter()
         .any(|prefix| path.starts_with(prefix.as_str()))
     {

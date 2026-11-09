@@ -342,9 +342,11 @@ describe('buildAppContextMenuContent', () => {
   })
 
   it('uses a reduced strip for multi-select and keeps tree menus app-owned with disabled network size calculation', () => {
-    useSelectionStore
-      .getState()
-      .setSelection('left', [folderEntry.id, fileEntry.id], folderEntry.id, fileEntry.id)
+    useSelectionStore.getState().setSelection('left', {
+      selectedIds: [folderEntry.id, fileEntry.id],
+      anchorId: folderEntry.id,
+      focusedId: fileEntry.id,
+    })
 
     const multiContent = buildAppContextMenuContent('left', { kind: 'multi' }, 'windows')
     const treeContent = buildAppContextMenuContent(
@@ -463,14 +465,18 @@ describe('buildAppContextMenuContent', () => {
       },
     }))
 
-    useSelectionStore
-      .getState()
-      .setSelection('left', [zipEntry.id, 'archive-2'], zipEntry.id, 'archive-2')
+    useSelectionStore.getState().setSelection('left', {
+      selectedIds: [zipEntry.id, 'archive-2'],
+      anchorId: zipEntry.id,
+      focusedId: 'archive-2',
+    })
     const zipOnlyContent = buildAppContextMenuContent('left', { kind: 'multi' }, 'windows')
 
-    useSelectionStore
-      .getState()
-      .setSelection('left', [zipEntry.id, fileEntry.id], zipEntry.id, fileEntry.id)
+    useSelectionStore.getState().setSelection('left', {
+      selectedIds: [zipEntry.id, fileEntry.id],
+      anchorId: zipEntry.id,
+      focusedId: fileEntry.id,
+    })
     const mixedContent = buildAppContextMenuContent('left', { kind: 'multi' }, 'windows')
 
     expect(zipOnlyContent.sections[0]?.rows.find((row) => row.label === 'Extract')?.disabled).toBe(
@@ -537,14 +543,11 @@ describe('buildAppContextMenuContent', () => {
     })
 
     it('disables multi-select restore when any selected entry lacks an original path', () => {
-      useSelectionStore
-        .getState()
-        .setSelection(
-          'left',
-          [trashEntryWithOriginal.id, trashEntryOrphaned.id],
-          trashEntryWithOriginal.id,
-          trashEntryOrphaned.id,
-        )
+      useSelectionStore.getState().setSelection('left', {
+        selectedIds: [trashEntryWithOriginal.id, trashEntryOrphaned.id],
+        anchorId: trashEntryWithOriginal.id,
+        focusedId: trashEntryOrphaned.id,
+      })
 
       const content = buildAppContextMenuContent('left', { kind: 'multi' }, 'windows')
       expect(content.sections[0]?.rows.map((row) => row.label)).toEqual([

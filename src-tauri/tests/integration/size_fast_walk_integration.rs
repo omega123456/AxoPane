@@ -8,8 +8,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use file_explorer_lib::size::fast_walk::{
-    helper_threads_for_tests, list_dir, subtree_records, subtree_total, DirHook, DirRecord, Qos,
-    WalkOptions, INDEX_EXCLUDED_ROOTS, MAX_HELPER_THREADS, MAX_JOB_THREADS,
+    helper_threads_for_tests, list_dir, subtree_records, subtree_total, DirHook, DirRecord,
+    HelperThreadCounts, Qos, WalkOptions, INDEX_EXCLUDED_ROOTS, MAX_HELPER_THREADS,
+    MAX_JOB_THREADS,
 };
 use file_explorer_lib::size::index::platform::DATA_VOLUME_PREFIX;
 use file_explorer_lib::size::manual::{calculate, ManualSizeError};
@@ -368,7 +369,7 @@ fn concurrent_jobs_never_exceed_the_process_helper_cap() {
         .collect();
 
     entered.wait();
-    assert_eq!(helper_threads_for_tests().0, MAX_HELPER_THREADS);
+    assert_eq!(helper_threads_for_tests().in_use, MAX_HELPER_THREADS);
     // With the budget exhausted a job still completes on its own thread.
     assert_eq!(
         subtree_total(&root, &options()).expect("unhelped"),
@@ -379,7 +380,13 @@ fn concurrent_jobs_never_exceed_the_process_helper_cap() {
     for handle in handles {
         assert_eq!(handle.join().expect("job"), expected);
     }
-    assert_eq!(helper_threads_for_tests(), (0, MAX_HELPER_THREADS));
+    assert_eq!(
+        helper_threads_for_tests(),
+        HelperThreadCounts {
+            in_use: 0,
+            peak: MAX_HELPER_THREADS
+        }
+    );
 }
 
 #[test]
@@ -392,7 +399,7 @@ fn a_panicking_record_callback_aborts_the_walk_instead_of_hanging() {
         subtree_records(root, &options(), |_record| panic!("callback failure"))
     });
     assert!(outcome.is_err());
-    assert_eq!(helper_threads_for_tests().0, 0);
+    assert_eq!(helper_threads_for_tests().in_use, 0);
 }
 
 struct FakeDevices {

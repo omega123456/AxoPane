@@ -39,6 +39,8 @@ mod subscriptions;
 
 #[cfg(all(target_os = "macos", feature = "test-utils"))]
 pub use service::LaneSnapshot;
+#[cfg(all(target_os = "macos", not(feature = "test-utils")))]
+pub use service::MacIndexSetup;
 #[cfg(target_os = "macos")]
 pub use service::{
     Clock, FolderSizeIndex, IndexOptions, SizeEmitter, StatusEmitter, TreeUnavailable,

@@ -7,16 +7,17 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use file_explorer_lib::ops::manifest::ProgressiveManifest;
+use file_explorer_lib::ops::manifest::{DiscoveredFile, ProgressiveManifest};
 use file_explorer_lib::ops::transfer::macos::MacosCapabilities;
 use file_explorer_lib::ops::transfer::portable::PortableAdapter;
 use file_explorer_lib::ops::transfer::windows::WindowsCapabilities;
 use file_explorer_lib::ops::transfer::{
     AdapterSelection, PortableReason, TransferAdapter, TransferRequirements,
 };
-use file_explorer_lib::ops::worker::{rename_or_cross_device, transfer_admission};
+use file_explorer_lib::ops::worker::{rename_or_cross_device, transfer_admission, TransferPaths};
 use file_explorer_lib::ops::{
-    adapter_selection_calls_for_tests, copy_path, move_path, OpItem, OpKind, OpState, WorkerContext,
+    adapter_selection_calls_for_tests, copy_path, move_path, CurrentFileProgress, OpItem, OpKind,
+    OpRuntime, OpState, WorkerContext,
 };
 use file_explorer_lib::resource_coordinator::JobClass;
 
@@ -37,26 +38,29 @@ fn state() -> OpState {
         volumes: Default::default(),
         status: file_explorer_lib::ops::OpStatus::Active,
         total_items: 1,
-        completed_items: 0,
         total_bytes: 0,
-        copied_bytes: 0,
-        bytes_per_second: 0,
-        eta_seconds: None,
-        sample_count: 0,
-        rate_sample_at: None,
-        rate_sample_bytes: 0,
-        current_file_name: None,
-        current_file_copied: 0,
-        current_file_total: 0,
-        error_message: None,
-        completed_at: None,
         cancel: Arc::new(AtomicBool::new(false)),
         pause: Arc::new(AtomicBool::new(false)),
         skip: Arc::new(AtomicBool::new(false)),
-        conflict: None,
-        conflict_resolution: None,
-        apply_to_all: None,
-        rename_to: None,
+        runtime: OpRuntime {
+            completed_items: 0,
+            copied_bytes: 0,
+            bytes_per_second: 0,
+            eta_seconds: None,
+            sample_count: 0,
+            rate_sample: None,
+            current_file: CurrentFileProgress {
+                name: None,
+                copied: 0,
+                total: 0,
+            },
+            error_message: None,
+            completed_at: None,
+            conflict: None,
+            conflict_resolution: None,
+            apply_to_all: None,
+            rename_to: None,
+        },
     }
 }
 
@@ -224,38 +228,56 @@ fn macos_capability_matrix_requires_every_requested_claim() {
 
 #[test]
 fn rename_only_falls_back_for_confirmed_cross_device_errors() {
-    let source = Path::new("source");
-    let target = Path::new("target");
-    assert!(rename_or_cross_device(source, target, true, |_, _| Ok(())).expect("rename succeeds"));
-    assert!(!rename_or_cross_device(source, target, true, |_, _| Err(
-        io::Error::from_raw_os_error(libc::EXDEV)
-    ))
-    .expect("cross device fallback"));
-    #[cfg(windows)]
-    assert!(!rename_or_cross_device(source, target, true, |_, _| Err(
-        io::Error::from_raw_os_error(windows_sys::Win32::Foundation::ERROR_NOT_SAME_DEVICE as i32,)
-    ))
-    .expect("Windows cross-volume fallback"));
+    let paths = TransferPaths {
+        source: Path::new("source"),
+        target: Path::new("target"),
+    };
+    assert!(rename_or_cross_device(paths, true, |_, _| Ok(())).expect("rename succeeds"));
     assert!(
-        rename_or_cross_device(source, target, true, |_, _| Err(io::Error::new(
+        !rename_or_cross_device(paths, true, |_, _| Err(io::Error::from_raw_os_error(
+            libc::EXDEV
+        )))
+        .expect("cross device fallback")
+    );
+    #[cfg(windows)]
+    assert!(
+        !rename_or_cross_device(paths, true, |_, _| Err(io::Error::from_raw_os_error(
+            windows_sys::Win32::Foundation::ERROR_NOT_SAME_DEVICE as i32,
+        )))
+        .expect("Windows cross-volume fallback")
+    );
+    assert!(
+        rename_or_cross_device(paths, true, |_, _| Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "denied"
         )))
         .is_err()
     );
-    assert!(
-        !rename_or_cross_device(source, target, false, |_, _| panic!(
-            "cross-volume does not attempt rename"
-        ))
-        .expect("cross volume plan")
-    );
+    assert!(!rename_or_cross_device(paths, false, |_, _| panic!(
+        "cross-volume does not attempt rename"
+    ))
+    .expect("cross volume plan"));
 }
 
 #[test]
 fn manifests_and_admission_are_progressive_and_atomic() {
     let mut manifest = ProgressiveManifest::default();
-    manifest.record(Path::new("root"), "root/a".into(), 4, false);
-    manifest.record(Path::new("root"), "root/link".into(), 0, true);
+    manifest.record(
+        Path::new("root"),
+        DiscoveredFile {
+            path: "root/a".into(),
+            bytes: 4,
+            is_link: false,
+        },
+    );
+    manifest.record(
+        Path::new("root"),
+        DiscoveredFile {
+            path: "root/link".into(),
+            bytes: 0,
+            is_link: true,
+        },
+    );
     assert_eq!(manifest.discovered_bytes(), 4);
     assert_eq!(manifest.entries()[0].relative_path, Path::new("a"));
     let admission = transfer_admission(

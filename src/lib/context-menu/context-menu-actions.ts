@@ -275,9 +275,12 @@ const contextMenuActionHandlers: KindHandlers<ContextMenuAction, [paneId: PaneId
   'set-tab-locked': (action, paneId) =>
     usePanesStore.getState().setTabLocked(paneId, action.tabId, action.locked),
   'move-tab': (action, paneId) =>
-    void usePanesStore
-      .getState()
-      .moveTab(paneId, action.tabId, action.destinationPaneId, action.destinationIndex),
+    void usePanesStore.getState().moveTab({
+      sourcePaneId: paneId,
+      tabId: action.tabId,
+      destinationPaneId: action.destinationPaneId,
+      destinationIndex: action.destinationIndex,
+    }),
   'add-favourite': (action) => void useConfigStore.getState().addFavourite(action.path),
   'remove-favourite': (action) => void useConfigStore.getState().removeFavourite(action.path),
   'rename-favourite': (action) => useConfigStore.getState().setRenamingFavourite(action.path),

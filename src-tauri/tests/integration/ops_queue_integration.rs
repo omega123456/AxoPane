@@ -8,7 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use file_explorer_lib::ops::{
-    ConflictResolution, OpItem, OpKind, OpProgress, OpState, OpStatus, OpsService, StartOpRequest,
+    ConflictDecision, ConflictResolution, CurrentFileProgress, OpItem, OpKind, OpProgress,
+    OpRuntime, OpState, OpStatus, OpsService, StartOpRequest,
 };
 use file_explorer_lib::volumes::VolumeInfo;
 use tempfile::tempdir;
@@ -65,12 +66,18 @@ fn ever_advancing_clock(step: Duration) -> impl Fn() -> Instant + Send + Sync + 
     }
 }
 
-fn pending_transfer_state(
-    id: &str,
+struct TransferSpec<'spec> {
     kind: OpKind,
-    destination_dir: &Path,
+    destination_dir: &'spec Path,
     items: Vec<OpItem>,
-) -> OpState {
+}
+
+fn pending_transfer_state(id: &str, spec: TransferSpec<'_>) -> OpState {
+    let TransferSpec {
+        kind,
+        destination_dir,
+        items,
+    } = spec;
     let total_items = items.len() as u64;
     let total_bytes = items.iter().map(|item| item.size_bytes).sum();
     OpState {
@@ -81,31 +88,41 @@ fn pending_transfer_state(
         volumes: HashSet::from(["test-volume".to_string()]),
         status: OpStatus::Pending,
         total_items,
-        completed_items: 0,
         total_bytes,
-        copied_bytes: 0,
-        bytes_per_second: 0,
-        eta_seconds: None,
-        sample_count: 0,
-        rate_sample_at: None,
-        rate_sample_bytes: 0,
-        current_file_name: None,
-        current_file_copied: 0,
-        current_file_total: 0,
-        error_message: None,
-        completed_at: None,
         cancel: Arc::new(AtomicBool::new(false)),
         pause: Arc::new(AtomicBool::new(false)),
         skip: Arc::new(AtomicBool::new(false)),
-        conflict: None,
-        conflict_resolution: None,
-        apply_to_all: None,
-        rename_to: None,
+        runtime: OpRuntime {
+            completed_items: 0,
+            copied_bytes: 0,
+            bytes_per_second: 0,
+            eta_seconds: None,
+            sample_count: 0,
+            rate_sample: None,
+            current_file: CurrentFileProgress {
+                name: None,
+                copied: 0,
+                total: 0,
+            },
+            error_message: None,
+            completed_at: None,
+            conflict: None,
+            conflict_resolution: None,
+            apply_to_all: None,
+            rename_to: None,
+        },
     }
 }
 
 fn pending_delete_state(id: &str, items: Vec<OpItem>) -> OpState {
-    pending_transfer_state(id, OpKind::Delete, Path::new(""), items)
+    pending_transfer_state(
+        id,
+        TransferSpec {
+            kind: OpKind::Delete,
+            destination_dir: Path::new(""),
+            items,
+        },
+    )
 }
 
 /// Wait for a predicate over the latest progress snapshot, polling quickly.
@@ -144,11 +161,11 @@ fn unsized_item(path: &Path, name: &str) -> OpItem {
     }
 }
 
-fn run_to_completion(service: &OpsService, kind: OpKind, destination: &Path, item: OpItem) {
+fn run_to_completion(service: &OpsService, spec: TransferSpec<'_>) {
     let id = service.start_op(StartOpRequest {
-        kind,
-        destination_dir: destination.to_string_lossy().into_owned(),
-        items: vec![item],
+        kind: spec.kind,
+        destination_dir: spec.destination_dir.to_string_lossy().into_owned(),
+        items: spec.items,
     });
     wait_for(service, &id, |progress| {
         progress.status == OpStatus::Completed
@@ -223,7 +240,14 @@ fn copying_and_moving_a_folder_preserves_its_symlinks() {
     service.set_volumes(vec![volume(&dir.path().to_string_lossy())]);
     let item = unsized_item(&source, "source");
 
-    run_to_completion(&service, OpKind::Copy, &copy_destination, item.clone());
+    run_to_completion(
+        &service,
+        TransferSpec {
+            kind: OpKind::Copy,
+            destination_dir: &copy_destination,
+            items: vec![item.clone()],
+        },
+    );
     let copied = copy_destination.join("source");
     for (name, expected_target) in [
         ("file-link", "target.txt"),
@@ -237,7 +261,14 @@ fn copying_and_moving_a_folder_preserves_its_symlinks() {
         "dangling link remains dangling"
     );
 
-    run_to_completion(&service, OpKind::Move, &move_destination, item);
+    run_to_completion(
+        &service,
+        TransferSpec {
+            kind: OpKind::Move,
+            destination_dir: &move_destination,
+            items: vec![item],
+        },
+    );
     assert_symlink_to(&move_destination.join("source/directory-link"), "nested");
 }
 
@@ -407,13 +438,15 @@ fn copy_directory_progress_is_monotonic_and_coalesced() {
     }));
     service.insert_op_for_tests(pending_transfer_state(
         "copy-many",
-        OpKind::Copy,
-        &dest,
-        vec![OpItem {
-            source_path: tree.to_string_lossy().into_owned(),
-            name: "many".to_string(),
-            size_bytes: 0,
-        }],
+        TransferSpec {
+            kind: OpKind::Copy,
+            destination_dir: &dest,
+            items: vec![OpItem {
+                source_path: tree.to_string_lossy().into_owned(),
+                name: "many".to_string(),
+                size_bytes: 0,
+            }],
+        },
     ));
 
     service.run_operation_for_tests("copy-many");
@@ -540,15 +573,19 @@ fn archive_round_trip_preserves_permissions_and_links() {
     let archive_path = archive_dir.join("payload.zip");
     run_to_completion(
         &service,
-        OpKind::Compress,
-        &archive_path,
-        unsized_item(&source, "payload"),
+        TransferSpec {
+            kind: OpKind::Compress,
+            destination_dir: &archive_path,
+            items: vec![unsized_item(&source, "payload")],
+        },
     );
     run_to_completion(
         &service,
-        OpKind::Extract,
-        &extract_dir,
-        unsized_item(&archive_path, "payload.zip"),
+        TransferSpec {
+            kind: OpKind::Extract,
+            destination_dir: &extract_dir,
+            items: vec![unsized_item(&archive_path, "payload.zip")],
+        },
     );
 
     let out = extract_dir.join("payload");
@@ -609,7 +646,14 @@ fn archive_jobs_share_the_same_volume_lock_as_transfers() {
         .expect("archive op present");
     assert_eq!(queued.progress.status, OpStatus::Pending);
 
-    service.resolve_conflict(&blocker, ConflictResolution::Skip, false, None);
+    service.resolve_conflict(
+        &blocker,
+        ConflictDecision {
+            resolution: ConflictResolution::Skip,
+            apply_to_all: false,
+            rename_to: None,
+        },
+    );
     wait_for(&service, &archive_id, |progress| {
         progress.status == OpStatus::Completed
     });
@@ -659,8 +703,22 @@ fn jobs_on_disjoint_volumes_run_in_parallel() {
         progress.status == OpStatus::Conflict
     });
 
-    service.resolve_conflict(&id_a, ConflictResolution::Skip, false, None);
-    service.resolve_conflict(&id_b, ConflictResolution::Skip, false, None);
+    service.resolve_conflict(
+        &id_a,
+        ConflictDecision {
+            resolution: ConflictResolution::Skip,
+            apply_to_all: false,
+            rename_to: None,
+        },
+    );
+    service.resolve_conflict(
+        &id_b,
+        ConflictDecision {
+            resolution: ConflictResolution::Skip,
+            apply_to_all: false,
+            rename_to: None,
+        },
+    );
     wait_for(&service, &id_a, |progress| {
         progress.status == OpStatus::Completed
     });
@@ -691,14 +749,28 @@ fn jobs_sharing_a_volume_do_not_park_simultaneously() {
         .expect("second op present");
     assert_eq!(second.progress.status, OpStatus::Pending);
 
-    service.resolve_conflict(&id_a, ConflictResolution::Skip, false, None);
+    service.resolve_conflict(
+        &id_a,
+        ConflictDecision {
+            resolution: ConflictResolution::Skip,
+            apply_to_all: false,
+            rename_to: None,
+        },
+    );
     wait_for(&service, &id_a, |progress| {
         progress.status == OpStatus::Completed
     });
     wait_for(&service, &id_b, |progress| {
         progress.status == OpStatus::Conflict
     });
-    service.resolve_conflict(&id_b, ConflictResolution::Skip, false, None);
+    service.resolve_conflict(
+        &id_b,
+        ConflictDecision {
+            resolution: ConflictResolution::Skip,
+            apply_to_all: false,
+            rename_to: None,
+        },
+    );
     wait_for(&service, &id_b, |progress| {
         progress.status == OpStatus::Completed
     });
@@ -752,7 +824,14 @@ fn conflict_pauses_only_its_job() {
     });
 
     // Resolve with Replace; the conflicting op then completes.
-    service.resolve_conflict(&conflict_id, ConflictResolution::Replace, false, None);
+    service.resolve_conflict(
+        &conflict_id,
+        ConflictDecision {
+            resolution: ConflictResolution::Replace,
+            apply_to_all: false,
+            rename_to: None,
+        },
+    );
     wait_for(&service, &conflict_id, |progress| {
         progress.status == OpStatus::Completed
     });
@@ -784,7 +863,14 @@ fn skip_resolution_leaves_existing_file() {
     wait_for(&service, &id, |progress| {
         progress.status == OpStatus::Conflict
     });
-    service.resolve_conflict(&id, ConflictResolution::Skip, false, None);
+    service.resolve_conflict(
+        &id,
+        ConflictDecision {
+            resolution: ConflictResolution::Skip,
+            apply_to_all: false,
+            rename_to: None,
+        },
+    );
     wait_for(&service, &id, |progress| {
         progress.status == OpStatus::Completed
     });
@@ -817,7 +903,14 @@ fn rename_resolution_writes_a_new_name() {
     wait_for(&service, &id, |progress| {
         progress.status == OpStatus::Conflict
     });
-    service.resolve_conflict(&id, ConflictResolution::Rename, false, None);
+    service.resolve_conflict(
+        &id,
+        ConflictDecision {
+            resolution: ConflictResolution::Rename,
+            apply_to_all: false,
+            rename_to: None,
+        },
+    );
     wait_for(&service, &id, |progress| {
         progress.status == OpStatus::Completed
     });
@@ -874,7 +967,14 @@ fn skip_advances_one_paused_item_and_keeps_the_job_paused() {
     let second = seed_file(&dir.path().join("second.txt"), 6);
 
     let service = Arc::new(OpsService::new(Duration::from_secs(30)));
-    let state = pending_transfer_state("skip-op", OpKind::Copy, &dest, vec![first, second]);
+    let state = pending_transfer_state(
+        "skip-op",
+        TransferSpec {
+            kind: OpKind::Copy,
+            destination_dir: &dest,
+            items: vec![first, second],
+        },
+    );
     state.pause.store(true, Ordering::Relaxed);
     service.insert_op_for_tests(state);
 
@@ -905,7 +1005,14 @@ fn skip_advances_one_paused_item_and_keeps_the_job_paused() {
 #[test]
 fn cancelling_an_active_job_is_visible_immediately() {
     let service = OpsService::new(Duration::from_secs(30));
-    let mut state = pending_transfer_state("cancel-op", OpKind::Copy, Path::new("dest"), vec![]);
+    let mut state = pending_transfer_state(
+        "cancel-op",
+        TransferSpec {
+            kind: OpKind::Copy,
+            destination_dir: Path::new("dest"),
+            items: vec![],
+        },
+    );
     state.status = OpStatus::Active;
     service.insert_op_for_tests(state);
 
@@ -1030,7 +1137,14 @@ fn cancelled_jobs_auto_remove_after_retention() {
         std::thread::sleep(Duration::from_millis(10));
     }
 
-    service.resolve_conflict(&blocker, ConflictResolution::Skip, false, None);
+    service.resolve_conflict(
+        &blocker,
+        ConflictDecision {
+            resolution: ConflictResolution::Skip,
+            apply_to_all: false,
+            rename_to: None,
+        },
+    );
     wait_for(&service, &blocker, |progress| {
         progress.status == OpStatus::Completed
     });
@@ -1155,7 +1269,14 @@ fn pending_jobs_can_be_reordered() {
     assert!(pos2 < pos1, "reorder should move id2 ahead of id1");
 
     // Clean up: resolve blocker so threads finish.
-    service.resolve_conflict(&blocker, ConflictResolution::Skip, false, None);
+    service.resolve_conflict(
+        &blocker,
+        ConflictDecision {
+            resolution: ConflictResolution::Skip,
+            apply_to_all: false,
+            rename_to: None,
+        },
+    );
 }
 
 #[test]
@@ -1185,7 +1306,14 @@ fn has_unfinished_work_reflects_active_and_pending() {
     });
     assert!(service.has_unfinished_work());
 
-    service.resolve_conflict(&id, ConflictResolution::Skip, false, None);
+    service.resolve_conflict(
+        &id,
+        ConflictDecision {
+            resolution: ConflictResolution::Skip,
+            apply_to_all: false,
+            rename_to: None,
+        },
+    );
     wait_for(&service, &id, |progress| {
         progress.status == OpStatus::Completed
     });
@@ -1359,7 +1487,14 @@ fn cancelling_a_pending_op_marks_it_cancelled_immediately() {
         progress.status == OpStatus::Cancelled
     });
 
-    service.resolve_conflict(&blocker, ConflictResolution::Skip, false, None);
+    service.resolve_conflict(
+        &blocker,
+        ConflictDecision {
+            resolution: ConflictResolution::Skip,
+            apply_to_all: false,
+            rename_to: None,
+        },
+    );
     wait_for(&service, &blocker, |progress| {
         progress.status == OpStatus::Completed
     });
@@ -1655,14 +1790,28 @@ fn reorder_ignores_unknown_and_non_pending_ids() {
         .collect();
     assert_eq!(order, vec![blocker.clone(), pending.clone()]);
 
-    service.resolve_conflict(&blocker, ConflictResolution::Skip, false, None);
+    service.resolve_conflict(
+        &blocker,
+        ConflictDecision {
+            resolution: ConflictResolution::Skip,
+            apply_to_all: false,
+            rename_to: None,
+        },
+    );
     wait_for(&service, &blocker, |progress| {
         progress.status == OpStatus::Completed
     });
     wait_for(&service, &pending, |progress| {
         progress.status == OpStatus::Conflict
     });
-    service.resolve_conflict(&pending, ConflictResolution::Skip, false, None);
+    service.resolve_conflict(
+        &pending,
+        ConflictDecision {
+            resolution: ConflictResolution::Skip,
+            apply_to_all: false,
+            rename_to: None,
+        },
+    );
     wait_for(&service, &pending, |progress| {
         progress.status == OpStatus::Completed
     });
@@ -1694,9 +1843,11 @@ fn rename_with_explicit_target_uses_given_name() {
     });
     service.resolve_conflict(
         &id,
-        ConflictResolution::Rename,
-        false,
-        Some("doc-copy".to_string()),
+        ConflictDecision {
+            resolution: ConflictResolution::Rename,
+            apply_to_all: false,
+            rename_to: Some("doc-copy".to_string()),
+        },
     );
     wait_for(&service, &id, |progress| {
         progress.status == OpStatus::Completed
@@ -1844,7 +1995,14 @@ fn auto_rename_handles_extensionless_names() {
     wait_for(&service, &id, |progress| {
         progress.status == OpStatus::Conflict
     });
-    service.resolve_conflict(&id, ConflictResolution::Rename, false, None);
+    service.resolve_conflict(
+        &id,
+        ConflictDecision {
+            resolution: ConflictResolution::Rename,
+            apply_to_all: false,
+            rename_to: None,
+        },
+    );
     wait_for(&service, &id, |progress| {
         progress.status == OpStatus::Completed
     });
@@ -1860,7 +2018,14 @@ fn unknown_ids_are_no_ops() {
     service.cancel_op("nope");
     service.skip_op("nope");
     service.retry_op("nope");
-    service.resolve_conflict("nope", ConflictResolution::Skip, false, None);
+    service.resolve_conflict(
+        "nope",
+        ConflictDecision {
+            resolution: ConflictResolution::Skip,
+            apply_to_all: false,
+            rename_to: None,
+        },
+    );
     assert!(service.snapshot().is_empty());
     assert!(!service.has_unfinished_work());
 }
@@ -1896,7 +2061,14 @@ fn apply_to_all_reuses_resolution_for_later_conflicts() {
         progress.status == OpStatus::Conflict
     });
     // Apply Replace to all remaining conflicts.
-    service.resolve_conflict(&id, ConflictResolution::Replace, true, None);
+    service.resolve_conflict(
+        &id,
+        ConflictDecision {
+            resolution: ConflictResolution::Replace,
+            apply_to_all: true,
+            rename_to: None,
+        },
+    );
     wait_for(&service, &id, |progress| {
         progress.status == OpStatus::Completed
     });

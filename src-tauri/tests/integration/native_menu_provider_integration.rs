@@ -9,7 +9,7 @@ use file_explorer_lib::native_menu::fake_provider::FakeNativeMenuProvider;
 use file_explorer_lib::native_menu::provider::{
     dedupe_provider_items, NativeMenuProvider, ProviderInvocation, ProviderNativeMenuItem,
 };
-use file_explorer_lib::native_menu::token_store::NativeMenuTokenStore;
+use file_explorer_lib::native_menu::token_store::{IssuedInvocation, NativeMenuTokenStore};
 use file_explorer_lib::native_menu::types::NativeMenuCanonicalActionKind;
 use file_explorer_lib::native_menu::unsupported::{self, UnsupportedNativeMenuProvider};
 use file_explorer_lib::native_menu::NativeMenuService;
@@ -17,10 +17,12 @@ use file_explorer_lib::native_menu::NativeMenuService;
 fn fixture_folder_request(request_id: &str) -> LoadNativeMenuRequest {
     load_request(
         request_id,
-        NativeMenuTargetKind::Folder,
-        Some("C:\\fixture"),
-        Some("C:\\fixture"),
-        &["C:\\fixture"],
+        MenuTarget {
+            kind: NativeMenuTargetKind::Folder,
+            target_path: Some("C:\\fixture"),
+            folder_path: Some("C:\\fixture"),
+            selected_paths: &["C:\\fixture"],
+        },
     )
 }
 
@@ -187,10 +189,12 @@ fn fake_provider_covers_phase_five_target_mapping() {
     for (index, case) in TARGET_MAPPING_CASES.iter().enumerate() {
         let response = service.load_menu(load_request(
             &format!("req-target-{index}"),
-            case.kind.clone(),
-            case.target_path,
-            Some(case.folder_path),
-            case.selected_paths,
+            MenuTarget {
+                kind: case.kind.clone(),
+                target_path: case.target_path,
+                folder_path: Some(case.folder_path),
+                selected_paths: case.selected_paths,
+            },
         ));
 
         assert_eq!(
@@ -210,10 +214,12 @@ fn fake_provider_returns_an_empty_menu_for_tab_targets() {
     let items = provider.load_menu(
         &load_request(
             "req-tab",
-            NativeMenuTargetKind::Tab,
-            None,
-            Some("C:\\fixture"),
-            &[],
+            MenuTarget {
+                kind: NativeMenuTargetKind::Tab,
+                target_path: None,
+                folder_path: Some("C:\\fixture"),
+                selected_paths: &[],
+            },
         ),
         &executor,
     );
@@ -255,10 +261,12 @@ fn token_store_replaces_takes_and_clears_request_tokens() {
         },
     );
     store.insert_expired_for_tests(
-        "req-expired",
         "native:req-expired:stale",
-        ProviderInvocation::Fake {
-            action_id: "stale".to_string(),
+        IssuedInvocation {
+            request_id: "req-expired",
+            invocation: ProviderInvocation::Fake {
+                action_id: "stale".to_string(),
+            },
         },
     );
     assert!(store.take("native:req-expired:stale").is_none());
@@ -275,10 +283,12 @@ fn fake_provider_rejects_windows_shell_invocations_in_test_utils() {
         &ProviderInvocation::Windows {
             request: load_request(
                 "req-windows",
-                NativeMenuTargetKind::File,
-                Some("C:\\fixture\\report.txt"),
-                Some("C:\\fixture"),
-                &["C:\\fixture\\report.txt"],
+                MenuTarget {
+                    kind: NativeMenuTargetKind::File,
+                    target_path: Some("C:\\fixture\\report.txt"),
+                    folder_path: Some("C:\\fixture"),
+                    selected_paths: &["C:\\fixture\\report.txt"],
+                },
             ),
             command_path: vec![0, 1],
         },
@@ -303,10 +313,12 @@ fn fake_provider_rejects_modern_windows_invocations_in_test_utils() {
             packaged: true,
             request: load_request(
                 "req-modern",
-                NativeMenuTargetKind::File,
-                Some("C:\\fixture\\report.txt"),
-                Some("C:\\fixture"),
-                &["C:\\fixture\\report.txt"],
+                MenuTarget {
+                    kind: NativeMenuTargetKind::File,
+                    target_path: Some("C:\\fixture\\report.txt"),
+                    folder_path: Some("C:\\fixture"),
+                    selected_paths: &["C:\\fixture\\report.txt"],
+                },
             ),
             command_path: vec![0],
         },
@@ -328,10 +340,12 @@ fn unsupported_provider_returns_safe_statuses() {
     let items = provider.load_menu(
         &load_request(
             "req-unsupported",
-            NativeMenuTargetKind::File,
-            Some("C:\\fixture\\report.txt"),
-            Some("C:\\fixture"),
-            &["C:\\fixture\\report.txt"],
+            MenuTarget {
+                kind: NativeMenuTargetKind::File,
+                target_path: Some("C:\\fixture\\report.txt"),
+                folder_path: Some("C:\\fixture"),
+                selected_paths: &["C:\\fixture\\report.txt"],
+            },
         ),
         &executor,
     );
@@ -616,19 +630,21 @@ fn provider_dedupe_drops_always_excluded_windows_submenus() {
     assert!(items.is_empty());
 }
 
-fn load_request(
-    request_id: &str,
-    target_kind: NativeMenuTargetKind,
-    target_path: Option<&str>,
-    folder_path: Option<&str>,
-    selected_paths: &[&str],
-) -> LoadNativeMenuRequest {
+struct MenuTarget<'target> {
+    kind: NativeMenuTargetKind,
+    target_path: Option<&'target str>,
+    folder_path: Option<&'target str>,
+    selected_paths: &'target [&'target str],
+}
+
+fn load_request(request_id: &str, target: MenuTarget<'_>) -> LoadNativeMenuRequest {
     LoadNativeMenuRequest {
         request_id: request_id.to_string(),
-        target_kind,
-        target_path: target_path.map(str::to_string),
-        folder_path: folder_path.map(str::to_string),
-        selected_paths: selected_paths
+        target_kind: target.kind,
+        target_path: target.target_path.map(str::to_string),
+        folder_path: target.folder_path.map(str::to_string),
+        selected_paths: target
+            .selected_paths
             .iter()
             .map(|path| (*path).to_string())
             .collect(),

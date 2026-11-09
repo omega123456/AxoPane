@@ -1,3 +1,4 @@
+pub mod command_services;
 pub mod commands;
 pub mod events;
 pub mod executor;

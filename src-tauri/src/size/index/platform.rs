@@ -39,6 +39,13 @@ pub type PowerSink = Arc<dyn Fn(PowerSignal) + Send + Sync>;
 /// A running event stream; dropping it stops the stream.
 pub type StreamHandle = Box<dyn Send>;
 
+#[derive(Clone, Copy)]
+pub struct StreamRequest<'request> {
+    pub roots: &'request [PathBuf],
+    pub excluded: &'request [PathBuf],
+    pub since: Option<u64>,
+}
+
 pub trait IndexPlatform: Send + Sync {
     fn current_event_id(&self) -> u64;
     fn volume_uuid(&self, path: &Path) -> Option<String>;
@@ -46,13 +53,7 @@ pub trait IndexPlatform: Send + Sync {
     fn os_build(&self) -> Option<String>;
     /// Starts a directory-level stream over `roots` (minus `excluded`),
     /// replaying from `since` when given. `None` if it could not start.
-    fn start_stream(
-        &self,
-        roots: &[PathBuf],
-        excluded: &[PathBuf],
-        since: Option<u64>,
-        sink: EventSink,
-    ) -> Option<StreamHandle>;
+    fn start_stream(&self, request: StreamRequest<'_>, sink: EventSink) -> Option<StreamHandle>;
     /// Non-prompting probe; any failure means no Full Disk Access.
     fn full_disk_access(&self) -> bool;
     /// Starts power observation and returns the current conditions.

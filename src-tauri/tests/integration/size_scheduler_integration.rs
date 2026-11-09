@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 
-use file_explorer_lib::size::scheduler::{SizeScheduler, MAX_SIZE_METADATA_ENTRIES};
+use file_explorer_lib::size::scheduler::{ScheduledJob, SizeScheduler, MAX_SIZE_METADATA_ENTRIES};
 
 fn token() -> Arc<AtomicBool> {
     Arc::new(AtomicBool::new(false))
@@ -11,8 +11,16 @@ fn token() -> Arc<AtomicBool> {
 #[test]
 fn duplicate_requests_coalesce_and_cancel_removes_queued_work() {
     let scheduler = SizeScheduler::new(4);
-    assert!(scheduler.schedule("/tmp/a".to_string(), token(), 1_u8));
-    assert!(!scheduler.schedule("/tmp/a".to_string(), token(), 2_u8));
+    assert!(scheduler.schedule(ScheduledJob {
+        path: "/tmp/a".to_string(),
+        cancelled: token(),
+        payload: 1_u8,
+    }));
+    assert!(!scheduler.schedule(ScheduledJob {
+        path: "/tmp/a".to_string(),
+        cancelled: token(),
+        payload: 2_u8,
+    }));
     assert_eq!(scheduler.pending_len(), 1);
     assert!(scheduler.cancel("/tmp/a"));
     assert_eq!(scheduler.pending_len(), 0);
@@ -23,9 +31,21 @@ fn duplicate_requests_coalesce_and_cancel_removes_queued_work() {
 #[test]
 fn cancel_many_removes_only_the_requested_queued_jobs() {
     let scheduler = SizeScheduler::new(4);
-    assert!(scheduler.schedule("/tmp/alpha".to_string(), token(), 1_u8));
-    assert!(scheduler.schedule("/tmp/beta".to_string(), token(), 2_u8));
-    assert!(scheduler.schedule("/tmp/gamma".to_string(), token(), 3_u8));
+    assert!(scheduler.schedule(ScheduledJob {
+        path: "/tmp/alpha".to_string(),
+        cancelled: token(),
+        payload: 1_u8,
+    }));
+    assert!(scheduler.schedule(ScheduledJob {
+        path: "/tmp/beta".to_string(),
+        cancelled: token(),
+        payload: 2_u8,
+    }));
+    assert!(scheduler.schedule(ScheduledJob {
+        path: "/tmp/gamma".to_string(),
+        cancelled: token(),
+        payload: 3_u8,
+    }));
 
     assert_eq!(
         scheduler.cancel_many(&[
@@ -48,7 +68,11 @@ fn cancel_many_removes_only_the_requested_queued_jobs() {
 fn completed_job_is_removed_only_by_its_own_cancellation_token() {
     let scheduler = SizeScheduler::new(2);
     let cancel = token();
-    assert!(scheduler.schedule("/tmp/a".to_string(), Arc::clone(&cancel), 1_u8));
+    assert!(scheduler.schedule(ScheduledJob {
+        path: "/tmp/a".to_string(),
+        cancelled: Arc::clone(&cancel),
+        payload: 1_u8,
+    }));
     let job = scheduler.next().expect("job");
     // The token returned inside `job.cancelled` is the *exact same* `Arc`
     // the caller passed to `schedule` — this is what makes `complete`'s
@@ -70,7 +94,11 @@ fn completed_job_is_removed_only_by_its_own_cancellation_token() {
 fn complete_with_a_mismatched_token_does_not_remove_the_entry() {
     let scheduler = SizeScheduler::new(2);
     let real_cancel = token();
-    assert!(scheduler.schedule("/tmp/a".to_string(), Arc::clone(&real_cancel), 1_u8));
+    assert!(scheduler.schedule(ScheduledJob {
+        path: "/tmp/a".to_string(),
+        cancelled: Arc::clone(&real_cancel),
+        payload: 1_u8,
+    }));
 
     let impostor_cancel = token();
     scheduler.complete("/tmp/a", &impostor_cancel);
@@ -92,7 +120,11 @@ fn complete_with_a_mismatched_token_does_not_remove_the_entry() {
 #[test]
 fn non_clone_payload_travels_through_the_queue_by_move() {
     let scheduler: SizeScheduler<Box<dyn FnOnce() -> u64 + Send>> = SizeScheduler::new(4);
-    assert!(scheduler.schedule("/tmp/a".to_string(), token(), Box::new(|| 42)));
+    assert!(scheduler.schedule(ScheduledJob {
+        path: "/tmp/a".to_string(),
+        cancelled: token(),
+        payload: Box::new(|| 42),
+    }));
     let job = scheduler.next().expect("job");
     assert_eq!((job.payload)(), 42);
     scheduler.complete(&job.path, &job.cancelled);
@@ -108,16 +140,28 @@ fn non_clone_payload_travels_through_the_queue_by_move() {
 fn claimed_but_not_yet_completed_job_still_blocks_a_duplicate_schedule() {
     let scheduler = SizeScheduler::new(4);
     let first_cancel = token();
-    assert!(scheduler.schedule("/tmp/a".to_string(), Arc::clone(&first_cancel), 1_u8));
+    assert!(scheduler.schedule(ScheduledJob {
+        path: "/tmp/a".to_string(),
+        cancelled: Arc::clone(&first_cancel),
+        payload: 1_u8,
+    }));
     let job = scheduler.next().expect("job claimed");
     // Still occupies its slot: a second schedule for the same path is
     // rejected (coalescing), not accepted as an independent second job.
-    assert!(!scheduler.schedule("/tmp/a".to_string(), token(), 2_u8));
+    assert!(!scheduler.schedule(ScheduledJob {
+        path: "/tmp/a".to_string(),
+        cancelled: token(),
+        payload: 2_u8,
+    }));
     assert_eq!(scheduler.pending_len(), 1);
     scheduler.complete(&job.path, &first_cancel);
     assert_eq!(scheduler.pending_len(), 0);
     // Now that the job is fully complete, the path is schedulable again.
-    assert!(scheduler.schedule("/tmp/a".to_string(), token(), 3_u8));
+    assert!(scheduler.schedule(ScheduledJob {
+        path: "/tmp/a".to_string(),
+        cancelled: token(),
+        payload: 3_u8,
+    }));
     scheduler.shutdown();
 }
 
@@ -126,7 +170,11 @@ fn claimed_but_not_yet_completed_job_still_blocks_a_duplicate_schedule() {
 #[test]
 fn a_queued_payload_is_claimed_by_exactly_one_caller() {
     let scheduler = Arc::new(SizeScheduler::new(4));
-    assert!(scheduler.schedule("/tmp/a".to_string(), token(), 7_u8));
+    assert!(scheduler.schedule(ScheduledJob {
+        path: "/tmp/a".to_string(),
+        cancelled: token(),
+        payload: 7_u8,
+    }));
 
     let claims = Arc::new(AtomicUsize::new(0));
     let handles: Vec<_> = (0..4)

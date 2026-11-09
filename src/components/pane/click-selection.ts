@@ -43,11 +43,15 @@ function toggledSelection(selection: CurrentSelection, entryId: string): Selecti
   return { selectedIds, anchorId: selection.anchorId ?? entryId, focusedId: entryId }
 }
 
+export type EntryClick = {
+  entryId: string
+  modifiers: ClickModifiers
+}
+
 export function selectionForClick(
   entries: DirectoryEntry[],
   selection: CurrentSelection,
-  entryId: string,
-  modifiers: ClickModifiers,
+  { entryId, modifiers }: EntryClick,
 ): SelectionUpdate {
   const rangeAnchorId = modifiers.shiftKey ? selection.anchorId : null
   if (rangeAnchorId) {

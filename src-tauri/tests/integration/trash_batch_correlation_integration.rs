@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use file_explorer_lib::trash::{
-    delete_batch_with_adapter_for_tests, BatchCorrelation, StableFileIdentity, SystemTrashAdapter,
-    TrashFacts, TrashSnapshotEntry,
+    delete_batch_with_adapter_for_tests, BatchCorrelation, ManifestBatch, StableFileIdentity,
+    SystemTrashAdapter, TrashFacts, TrashSnapshotEntry,
 };
 
 #[derive(Default)]
@@ -41,14 +41,9 @@ impl SystemTrashAdapter for FakeTrash {
     fn now_seconds(&mut self) -> i64 {
         42
     }
-    fn record_manifest(
-        &mut self,
-        _: &Path,
-        entries: &[BatchCorrelation],
-        _: i64,
-    ) -> Result<(), String> {
+    fn record_manifest(&mut self, _: &Path, batch: ManifestBatch<'_>) -> Result<(), String> {
         self.transactions += 1;
-        self.recorded.extend_from_slice(entries);
+        self.recorded.extend_from_slice(batch.correlations);
         Ok(())
     }
 }

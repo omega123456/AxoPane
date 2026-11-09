@@ -40,12 +40,12 @@ pub fn reorder_ops(payload: ReorderOpsRequest, state: State<'_, OpsService>) {
 
 #[tauri::command]
 pub fn resolve_conflict(payload: ResolveConflictRequest, state: State<'_, OpsService>) {
-    state.resolve_conflict(
-        &payload.id,
-        payload.resolution,
-        payload.apply_to_all,
-        payload.rename_to,
-    );
+    let decision = crate::ops::ConflictDecision {
+        resolution: payload.resolution,
+        apply_to_all: payload.apply_to_all,
+        rename_to: payload.rename_to,
+    };
+    state.resolve_conflict(&payload.id, decision);
 }
 
 #[tauri::command]

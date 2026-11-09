@@ -40,7 +40,7 @@ export function SearchPalette() {
 function usePaletteRows(view: SearchPaletteView) {
   const { favouriteRows, recentRows } = useFolderShortcutRows()
   const searching = view.status !== 'idle'
-  const rows = paletteRows(searching, view.items, favouriteRows, recentRows)
+  const rows = paletteRows(searching, view.items, { favouriteRows, recentRows })
   const hasMore = searching && view.items.length < view.total
   return { searching, rows, hasMore, activeRow: rows[view.activeIndex] }
 }

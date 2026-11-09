@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { UpdatesSettings } from '@/components/dialogs/UpdatesSettings'
-import { useUpdaterStore } from '@/stores/updater-store'
+import { useUpdaterStore, type UpdaterOutcome } from '@/stores/updater-store'
 import type { AppUpdate } from '@/lib/updater'
 
 function fakeUpdate(): AppUpdate {
@@ -18,11 +18,9 @@ beforeEach(() => {
   useUpdaterStore.getState().dismiss()
 })
 
-async function renderUpdatesSettings(
-  status?: ReturnType<typeof useUpdaterStore.getState>['status'],
-) {
+async function renderUpdatesSettings(status?: UpdaterOutcome['status']) {
   if (status) {
-    useUpdaterStore.setState({ status })
+    useUpdaterStore.getState().setStatus(status)
   }
 
   render(<UpdatesSettings value="1d" onChange={vi.fn()} />)
@@ -71,7 +69,7 @@ describe('UpdatesSettings', () => {
   })
 
   it('renders an error status with a retry affordance', async () => {
-    useUpdaterStore.setState({ status: 'error', error: 'network down' })
+    useUpdaterStore.getState().setStatus('error', 'network down')
     await renderUpdatesSettings()
     expect(screen.getByTestId('updates-error')).toHaveTextContent('network down')
     expect(screen.getByTestId('updates-check-button')).toBeInTheDocument()

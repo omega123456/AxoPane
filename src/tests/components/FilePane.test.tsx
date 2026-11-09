@@ -186,7 +186,12 @@ describe('FilePane state rendering', () => {
     cancel.mockClear()
 
     await act(async () => {
-      await usePanesStore.getState().moveTab('left', movedTabId, 'right', 1)
+      await usePanesStore.getState().moveTab({
+        sourcePaneId: 'left',
+        tabId: movedTabId,
+        destinationPaneId: 'right',
+        destinationIndex: 1,
+      })
     })
 
     await waitFor(() => {
@@ -380,7 +385,11 @@ describe('FilePane state rendering', () => {
         vi.runOnlyPendingTimers()
       })
 
-      expect(requestVisibleItemCounts).toHaveBeenCalledWith('left', 0, 2, 3)
+      expect(requestVisibleItemCounts).toHaveBeenCalledWith('left', {
+        startIndex: 0,
+        endIndex: 2,
+        viewportCount: 3,
+      })
       expect(requestVisibleItemCounts).toHaveBeenCalledTimes(1)
     } finally {
       act(() => {
@@ -1302,7 +1311,9 @@ describe('FilePane state rendering', () => {
     const user = userEvent.setup()
     const startSpy = vi.fn(() => 'op-1')
     ipc.override('start_op', startSpy)
-    useClipboardStore.getState().setClipboard('copy', 'left', [entry('Alpha', false)])
+    useClipboardStore
+      .getState()
+      .setClipboard({ mode: 'copy', sourcePaneId: 'left', entries: [entry('Alpha', false)] })
     seedPane({ entries: [entry('Alpha', false)], focusedEntryId: 'Alpha' })
 
     // Mimic App.tsx's global window keydown fallback, which also resolves and
@@ -1484,7 +1495,9 @@ describe('FilePane state rendering', () => {
       path: 'C:\\',
       entries: [entry('Alpha', false), entry('Beta', false), entry('Gamma', false)],
     })
-    useSelectionStore.getState().setSelection('left', ['Alpha'], 'Alpha', 'Alpha')
+    useSelectionStore
+      .getState()
+      .setSelection('left', { selectedIds: ['Alpha'], anchorId: 'Alpha', focusedId: 'Alpha' })
 
     render(<FilePane paneId="left" />)
     const scroller = screen.getByTestId('file-pane-scroll-left')
@@ -1503,7 +1516,9 @@ describe('FilePane state rendering', () => {
       path: 'C:\\root',
       entries: [entry('Alpha', false), entry('Beta', false)],
     })
-    useSelectionStore.getState().setSelection('left', ['Alpha'], 'Alpha', 'Alpha')
+    useSelectionStore
+      .getState()
+      .setSelection('left', { selectedIds: ['Alpha'], anchorId: 'Alpha', focusedId: 'Alpha' })
 
     render(<FilePane paneId="left" />)
     const scroller = screen.getByTestId('file-pane-scroll-left')
@@ -1549,7 +1564,9 @@ describe('FilePane state rendering', () => {
   })
 
   it('dims rows whose paths are currently cut in the app clipboard', () => {
-    useClipboardStore.getState().setClipboard('move', 'left', [entry('Alpha', false)])
+    useClipboardStore
+      .getState()
+      .setClipboard({ mode: 'move', sourcePaneId: 'left', entries: [entry('Alpha', false)] })
     seedPane({ entries: [entry('Alpha', false), entry('Beta', false)], focusedEntryId: 'Alpha' })
 
     render(<FilePane paneId="left" />)
@@ -1575,7 +1592,9 @@ describe('FilePane state rendering', () => {
       entries: [entry('Alpha', false), entry('Beta')],
       focusedEntryId: 'Beta',
     })
-    useSelectionStore.getState().setSelection('left', ['Beta'], 'Beta', 'Beta')
+    useSelectionStore
+      .getState()
+      .setSelection('left', { selectedIds: ['Beta'], anchorId: 'Beta', focusedId: 'Beta' })
 
     render(
       <>

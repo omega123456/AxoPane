@@ -3,7 +3,9 @@ use crate::common;
 use std::path::Path;
 
 use base64::Engine;
-use file_explorer_lib::thumbnails::cache::{ThumbnailCache, NEGATIVE_TTL_SECONDS};
+use file_explorer_lib::thumbnails::cache::{
+    ThumbnailCache, ThumbnailCacheEntry, NEGATIVE_TTL_SECONDS,
+};
 use file_explorer_lib::thumbnails::types::{
     validated_png_data_url, ThumbnailCacheKey, ThumbnailFingerprint, ThumbnailState,
     MAX_DATA_URL_BYTES,
@@ -45,7 +47,13 @@ fn negative_records_expire_against_the_injected_clock() {
     let key = key("unknown.bin", 1);
     let mut cache = ThumbnailCache::new();
     assert!(cache.is_empty());
-    cache.insert(key.clone(), ThumbnailState::Unavailable, 12);
+    cache.insert(
+        ThumbnailCacheEntry {
+            key: key.clone(),
+            state: ThumbnailState::Unavailable,
+        },
+        12,
+    );
 
     assert_eq!(cache.get(&key, 12), Some(ThumbnailState::Unavailable));
     assert_eq!(cache.get(&key, 12 + NEGATIVE_TTL_SECONDS), None);
@@ -61,21 +69,33 @@ fn low_quality_preview_survives_failure_and_delays_upgrade_retry() {
     };
     let mut cache = ThumbnailCache::new();
     cache.insert(
-        key.clone(),
-        ThumbnailState::Ready {
-            data_url,
-            quality: file_explorer_lib::ipc::types::ThumbnailQuality::Low,
+        ThumbnailCacheEntry {
+            key: key.clone(),
+            state: ThumbnailState::Ready {
+                data_url,
+                quality: file_explorer_lib::ipc::types::ThumbnailQuality::Low,
+            },
         },
         10,
     );
-    cache.insert(key.clone(), ThumbnailState::Failed, 10);
+    cache.insert(
+        ThumbnailCacheEntry {
+            key: key.clone(),
+            state: ThumbnailState::Failed,
+        },
+        10,
+    );
 
     assert_eq!(
-        cache.get_with_upgrade(&key, 39).map(|(_, upgrade)| upgrade),
+        cache
+            .get_with_upgrade(&key, 39)
+            .map(|lookup| lookup.should_upgrade),
         Some(false)
     );
     assert_eq!(
-        cache.get_with_upgrade(&key, 40).map(|(_, upgrade)| upgrade),
+        cache
+            .get_with_upgrade(&key, 40)
+            .map(|lookup| lookup.should_upgrade),
         Some(true)
     );
 }
@@ -90,25 +110,33 @@ fn unavailable_upgrade_preserves_low_quality_for_the_negative_ttl() {
     };
     let mut cache = ThumbnailCache::new();
     cache.insert(
-        key.clone(),
-        ThumbnailState::Ready {
-            data_url,
-            quality: file_explorer_lib::ipc::types::ThumbnailQuality::Low,
+        ThumbnailCacheEntry {
+            key: key.clone(),
+            state: ThumbnailState::Ready {
+                data_url,
+                quality: file_explorer_lib::ipc::types::ThumbnailQuality::Low,
+            },
         },
         10,
     );
-    cache.insert(key.clone(), ThumbnailState::Unavailable, 10);
+    cache.insert(
+        ThumbnailCacheEntry {
+            key: key.clone(),
+            state: ThumbnailState::Unavailable,
+        },
+        10,
+    );
 
     assert_eq!(
         cache
             .get_with_upgrade(&key, 10 + NEGATIVE_TTL_SECONDS - 1)
-            .map(|(_, upgrade)| upgrade),
+            .map(|lookup| lookup.should_upgrade),
         Some(false)
     );
     assert_eq!(
         cache
             .get_with_upgrade(&key, 10 + NEGATIVE_TTL_SECONDS)
-            .map(|(_, upgrade)| upgrade),
+            .map(|lookup| lookup.should_upgrade),
         Some(true)
     );
 }
@@ -142,8 +170,10 @@ fn cache_evicts_least_recently_used_records_at_the_fixed_entry_limit() {
     let mut cache = ThumbnailCache::new();
     for index in 0..257 {
         cache.insert(
-            key(&format!("{index}.png"), 1),
-            ThumbnailState::Unavailable,
+            ThumbnailCacheEntry {
+                key: key(&format!("{index}.png"), 1),
+                state: ThumbnailState::Unavailable,
+            },
             0,
         );
     }
@@ -162,7 +192,11 @@ fn cache_also_evicts_when_encoded_preview_weight_exceeds_sixteen_mebibytes() {
     let payload = ready_payload(60_000);
     let state = validated_png_data_url(payload).expect("valid payload");
     for index in 0..256 {
-        cache.insert(key(&format!("weighted-{index}.png"), 1), state.clone(), 0);
+        let entry = ThumbnailCacheEntry {
+            key: key(&format!("weighted-{index}.png"), 1),
+            state: state.clone(),
+        };
+        cache.insert(entry, 0);
     }
 
     assert!(cache.len() < 256);

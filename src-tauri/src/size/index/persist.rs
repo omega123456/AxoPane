@@ -11,7 +11,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use super::tree::FolderSizeTree;
+use super::tree::{FolderSizeTree, ImportedNode};
 
 pub const FORMAT_VERSION: u32 = 2;
 const MAGIC: &[u8; 8] = b"AXOSIZE\0";
@@ -97,7 +97,12 @@ pub fn decode(bytes: &[u8]) -> Option<Snapshot> {
         let name = reader.string()?;
         let direct = reader.u64()?;
         let flags = reader.take(1)?[0];
-        tree.import_node(parent, name.into(), direct, flags)?;
+        tree.import_node(ImportedNode {
+            parent,
+            name: name.into(),
+            direct,
+            flags,
+        })?;
     }
     if !reader.is_exhausted() {
         return None;
@@ -177,17 +182,27 @@ pub enum ReplayOutcome {
     FullRescan,
 }
 
+#[derive(Clone, Copy)]
+pub struct CurrentVolume<'volume> {
+    pub uuid: &'volume str,
+    pub os_build: &'volume str,
+    pub event_id: u64,
+}
+
 /// Launch catch-up: `events` are those replayed since
 /// `saved.event_id`. Any `MustScanSubDirs` during replay means history was
 /// coalesced, so it forces a full rescan here, as does a different volume or
 /// OS build (an update rewrites the sealed system volume without events).
 pub fn plan_catch_up(
     saved: &SnapshotMeta,
-    current_uuid: &str,
-    current_os_build: &str,
-    current_event_id: u64,
+    current: CurrentVolume<'_>,
     events: &[ChangeEvent],
 ) -> ReplayOutcome {
+    let CurrentVolume {
+        uuid: current_uuid,
+        os_build: current_os_build,
+        event_id: current_event_id,
+    } = current;
     let volume_changed = saved.volume_uuid != current_uuid;
     let os_changed = saved.os_build != current_os_build;
     let history_rewound = saved.event_id > current_event_id;

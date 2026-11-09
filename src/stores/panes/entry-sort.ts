@@ -11,6 +11,12 @@ import {
   type SizeStates,
 } from '@/stores/panes/pane-state'
 
+export type SortSpec = {
+  sortKey: SortKey
+  sortDirection: SortDirection
+  sizeStates: SizeStates
+}
+
 type EntrySortValue = (
   entry: DirectoryEntry,
   sizeState: EntrySizeState | undefined,
@@ -77,13 +83,19 @@ function compareSortValues(left: string | number, right: string | number) {
   return left > right ? AFTER : SAME
 }
 
+export function sortSpecFor(
+  pane: Pick<PaneState, 'sortKey' | 'sortDirection'>,
+  sizeStates: SizeStates,
+): SortSpec {
+  return { sortKey: pane.sortKey, sortDirection: pane.sortDirection, sizeStates }
+}
+
 export function compareEntries(
   left: DirectoryEntry,
   right: DirectoryEntry,
-  sortKey: SortKey,
-  sortDirection: SortDirection,
-  sizeStates: SizeStates,
+  spec: SortSpec,
 ): number {
+  const { sortKey, sortDirection, sizeStates } = spec
   if (left.isDir !== right.isDir) {
     return left.isDir ? BEFORE : AFTER
   }
@@ -102,30 +114,16 @@ export function compareEntries(
   return order * direction
 }
 
-export function sortEntries(
-  entries: DirectoryEntry[],
-  sortKey: SortKey,
-  sortDirection: SortDirection,
-  sizeStates: SizeStates,
-) {
-  return [...entries].sort((left, right) =>
-    compareEntries(left, right, sortKey, sortDirection, sizeStates),
-  )
+export function sortEntries(entries: DirectoryEntry[], spec: SortSpec) {
+  return [...entries].sort((left, right) => compareEntries(left, right, spec))
 }
 
-export function insertSorted(
-  entries: DirectoryEntry[],
-  entry: DirectoryEntry,
-  sortKey: SortKey,
-  sortDirection: SortDirection,
-  sizeStates: SizeStates,
-) {
+export function insertSorted(entries: DirectoryEntry[], entry: DirectoryEntry, spec: SortSpec) {
   let low = 0
   let high = entries.length
   while (low < high) {
     const middle = Math.floor((low + high) / HALF_DIVISOR)
-    const sortsBefore =
-      compareEntries(entries[middle], entry, sortKey, sortDirection, sizeStates) < 0
+    const sortsBefore = compareEntries(entries[middle], entry, spec) < 0
     if (sortsBefore) {
       low = middle + 1
       continue
@@ -143,7 +141,7 @@ export function clientSortedEntries(
   if (pane.sortKey !== 'size') {
     return loadedEntries
   }
-  return sortEntries(loadedEntries, pane.sortKey, pane.sortDirection, sizeStates)
+  return sortEntries(loadedEntries, sortSpecFor(pane, sizeStates))
 }
 
 export function nextSortDirection(pane: PaneState, sortKey: SortKey): SortDirection {
@@ -165,7 +163,7 @@ export function trashSortedPanes(
   return withPane(state, paneId, {
     sortKey,
     sortDirection,
-    entries: sortEntries(pane.entries, sortKey, sortDirection, state.sizeStates),
+    entries: sortEntries(pane.entries, { sortKey, sortDirection, sizeStates: state.sizeStates }),
     itemsSortStatus: 'complete',
   })
 }
@@ -177,7 +175,7 @@ export function sortedPanes(state: SortableState, paneId: PaneId, sortKey: SortK
   return withPane(state, paneId, {
     entries: isItemsSort
       ? pane.entries
-      : sortEntries(pane.entries, sortKey, sortDirection, state.sizeStates),
+      : sortEntries(pane.entries, { sortKey, sortDirection, sizeStates: state.sizeStates }),
     sortKey,
     sortDirection,
     itemsSortStatus: isItemsSort ? 'counting' : 'idle',

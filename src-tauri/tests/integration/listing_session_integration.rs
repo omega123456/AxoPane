@@ -4,7 +4,9 @@ use tempfile::tempdir;
 
 use file_explorer_lib::directory_session::{
     enumerate_snapshot_for_tests, BeginNavigationRequest, DirectorySessionService,
-    GetSessionRangeRequest, ReleaseSessionRequest, SessionRejection, ViewParams, SESSION_PAGE_SIZE,
+    EnumerationAdmission, EnumerationTarget, GetSessionRangeRequest, PanePath, Reconciled,
+    ReleaseSessionRequest, ReviseSessionViewRequest, SessionRejection, ViewParams, WatchMutation,
+    SESSION_PAGE_SIZE,
 };
 use file_explorer_lib::watch::patch::SessionPatch;
 
@@ -27,6 +29,15 @@ fn nav_request(pane_id: &str, tab_id: &str, path: &str) -> BeginNavigationReques
     }
 }
 
+const LEFT_PANE: &str = "left";
+
+fn left_pane(path: &str) -> PanePath<'_> {
+    PanePath {
+        pane_id: LEFT_PANE,
+        path,
+    }
+}
+
 fn write_files(dir: &std::path::Path, count: usize) {
     for index in 0..count {
         fs::write(dir.join(format!("file-{index:05}.txt")), b"x").expect("write file");
@@ -45,8 +56,7 @@ fn idempotent_forward_and_backward_page_reads_return_identical_content() {
     let begin = service
         .begin_navigation(
             nav_request("left", "left-1", &dir.path().to_string_lossy()),
-            None,
-            None,
+            EnumerationAdmission::ungated(),
         )
         .expect("begin navigation");
 
@@ -93,8 +103,7 @@ fn mutation_during_snapshot_creation_is_present_in_the_established_baseline() {
     let begin = service
         .begin_navigation(
             nav_request("left", "left-1", &dir.path().to_string_lossy()),
-            None,
-            None,
+            EnumerationAdmission::ungated(),
         )
         .expect("begin navigation");
 
@@ -178,14 +187,20 @@ fn a_definite_racing_mutation_still_resnapshots_instead_of_trusting_stale_entrie
         .path()
         .join("missed-during-scan.txt")]));
 
-    let (resolved, watch_revision) =
-        file_explorer_lib::directory_session::resolve_reconciliation_for_tests(
-            dir.path(),
-            &view_params(),
-            stale_entries,
-            drained,
-        )
-        .expect("reconciliation resolves");
+    let view = view_params();
+    let target = EnumerationTarget {
+        path: dir.path(),
+        view: &view,
+    };
+    let Reconciled {
+        snapshot: resolved,
+        watch_revision,
+    } = file_explorer_lib::directory_session::resolve_reconciliation_for_tests(
+        target,
+        stale_entries,
+        drained,
+    )
+    .expect("reconciliation resolves");
 
     assert!(
         resolved
@@ -206,8 +221,7 @@ fn stale_range_revisions_are_rejected_not_served() {
     let begin = service
         .begin_navigation(
             nav_request("left", "left-1", &dir.path().to_string_lossy()),
-            None,
-            None,
+            EnumerationAdmission::ungated(),
         )
         .expect("begin navigation");
 
@@ -246,8 +260,7 @@ fn stale_range_revisions_are_rejected_not_served() {
     let second = service
         .begin_navigation(
             nav_request("left", "left-1", &dir.path().to_string_lossy()),
-            None,
-            None,
+            EnumerationAdmission::ungated(),
         )
         .expect("second begin navigation");
     assert_ne!(second.baseline.session_id, begin.baseline.session_id);
@@ -269,24 +282,23 @@ fn view_revision_changes_invalidate_prior_baseline_range_requests() {
     let begin = service
         .begin_navigation(
             nav_request("left", "left-1", &dir.path().to_string_lossy()),
-            None,
-            None,
+            EnumerationAdmission::ungated(),
         )
         .expect("begin navigation");
 
     let revised = service
-        .revise_view(
-            &"left".to_string(),
-            "left-1",
-            begin.baseline.session_id,
-            ViewParams {
+        .revise_view(ReviseSessionViewRequest {
+            pane_id: "left".to_string(),
+            tab_id: "left-1".to_string(),
+            session_id: begin.baseline.session_id,
+            view: ViewParams {
                 sort_key: SortKey::Size,
                 sort_direction: SortDirection::Asc,
                 filter: String::new(),
                 show_hidden: false,
                 include_item_counts: false,
             },
-        )
+        })
         .expect("revise view");
 
     assert_ne!(revised.baseline.view_revision, begin.baseline.view_revision);
@@ -320,8 +332,7 @@ fn release_session_is_idempotent_and_teardown_safe() {
     let begin = service
         .begin_navigation(
             nav_request("left", "left-1", &dir.path().to_string_lossy()),
-            None,
-            None,
+            EnumerationAdmission::ungated(),
         )
         .expect("begin navigation");
 
@@ -365,15 +376,13 @@ fn close_during_enumeration_range_fetch_and_watch_setup_lifecycle_points_are_saf
     let first = service
         .begin_navigation(
             nav_request("left", "left-1", &dir.path().to_string_lossy()),
-            None,
-            None,
+            EnumerationAdmission::ungated(),
         )
         .expect("first begin navigation");
     let second = service
         .begin_navigation(
             nav_request("left", "left-1", &dir.path().to_string_lossy()),
-            None,
-            None,
+            EnumerationAdmission::ungated(),
         )
         .expect("second begin navigation (simulates close-during-enumeration)");
     assert_ne!(first.baseline.session_id, second.baseline.session_id);
@@ -410,8 +419,7 @@ fn close_during_enumeration_range_fetch_and_watch_setup_lifecycle_points_are_saf
     let third = service
         .begin_navigation(
             nav_request("right", "right-1", &dir.path().to_string_lossy()),
-            None,
-            None,
+            EnumerationAdmission::ungated(),
         )
         .expect("third begin navigation on a different pane");
     let release_third = service.release_session(&ReleaseSessionRequest {
@@ -431,38 +439,39 @@ fn revise_view_rejects_missing_session_wrong_tab_and_stale_session_id() {
     let service = DirectorySessionService::default();
 
     // No active session on this pane at all.
-    let result = service.revise_view(
-        &"left".to_string(),
-        "left-1",
-        file_explorer_lib::directory_session::SessionId(1),
-        view_params(),
-    );
+    let result = service.revise_view(ReviseSessionViewRequest {
+        pane_id: "left".to_string(),
+        tab_id: "left-1".to_string(),
+        session_id: file_explorer_lib::directory_session::SessionId(1),
+        view: view_params(),
+    });
     assert_eq!(result, Err(SessionRejection::NoActiveSession));
 
     let begin = service
         .begin_navigation(
             nav_request("left", "left-1", &dir.path().to_string_lossy()),
-            None,
-            None,
+            EnumerationAdmission::ungated(),
         )
         .expect("begin navigation");
 
     // Wrong tab id for the pane's active session.
-    let result = service.revise_view(
-        &"left".to_string(),
-        "left-2",
-        begin.baseline.session_id,
-        view_params(),
-    );
+    let result = service.revise_view(ReviseSessionViewRequest {
+        pane_id: "left".to_string(),
+        tab_id: "left-2".to_string(),
+        session_id: begin.baseline.session_id,
+        view: view_params(),
+    });
     assert_eq!(result, Err(SessionRejection::NoActiveSession));
 
     // Stale session id (as if the caller held an old handle).
-    let result = service.revise_view(
-        &"left".to_string(),
-        "left-1",
-        file_explorer_lib::directory_session::SessionId(begin.baseline.session_id.0 + 999),
-        view_params(),
-    );
+    let result = service.revise_view(ReviseSessionViewRequest {
+        pane_id: "left".to_string(),
+        tab_id: "left-1".to_string(),
+        session_id: file_explorer_lib::directory_session::SessionId(
+            begin.baseline.session_id.0 + 999,
+        ),
+        view: view_params(),
+    });
     assert_eq!(result, Err(SessionRejection::StaleSession));
 }
 
@@ -477,8 +486,7 @@ fn current_baseline_reflects_active_and_absent_sessions() {
     let begin = service
         .begin_navigation(
             nav_request("left", "left-1", &dir.path().to_string_lossy()),
-            None,
-            None,
+            EnumerationAdmission::ungated(),
         )
         .expect("begin navigation");
     assert_eq!(
@@ -522,8 +530,10 @@ fn begin_navigation_uses_resource_coordinator_admission_when_a_resource_key_is_s
     let begin = service
         .begin_navigation(
             nav_request("left", "left-1", &dir.path().to_string_lossy()),
-            Some(&coordinator),
-            Some("test-volume".to_string()),
+            EnumerationAdmission {
+                coordinator: Some(&coordinator),
+                resource_key: Some("test-volume".to_string()),
+            },
         )
         .expect("begin navigation with coordinator admission");
     assert_eq!(begin.total_rows, 3);
@@ -538,15 +548,13 @@ fn at_most_two_active_sessions_total_one_per_pane() {
     service
         .begin_navigation(
             nav_request("left", "left-1", &dir.path().to_string_lossy()),
-            None,
-            None,
+            EnumerationAdmission::ungated(),
         )
         .expect("left navigation");
     service
         .begin_navigation(
             nav_request("right", "right-1", &dir.path().to_string_lossy()),
-            None,
-            None,
+            EnumerationAdmission::ungated(),
         )
         .expect("right navigation");
 
@@ -556,8 +564,7 @@ fn at_most_two_active_sessions_total_one_per_pane() {
     service
         .begin_navigation(
             nav_request("left", "left-1", &dir.path().to_string_lossy()),
-            None,
-            None,
+            EnumerationAdmission::ungated(),
         )
         .expect("left re-navigation");
     assert_eq!(service.active_session_count(), 2);
@@ -571,7 +578,10 @@ fn apply_watch_mutation_produces_a_delta_patch_for_a_single_insert() {
     let path_string = dir.path().to_string_lossy().to_string();
 
     let begin = service
-        .begin_navigation(nav_request("left", "left-1", &path_string), None, None)
+        .begin_navigation(
+            nav_request("left", "left-1", &path_string),
+            EnumerationAdmission::ungated(),
+        )
         .expect("begin navigation");
 
     fs::write(dir.path().join("file-00002.txt"), b"x").expect("write new file");
@@ -585,10 +595,11 @@ fn apply_watch_mutation_produces_a_delta_patch_for_a_single_insert() {
 
     let patch = service
         .apply_watch_mutation(
-            &"left".to_string(),
-            &begin.path,
-            vec![new_entry.clone()],
-            Vec::new(),
+            left_pane(&begin.path),
+            WatchMutation {
+                changed_entries: vec![new_entry.clone()],
+                removed_paths: Vec::new(),
+            },
         )
         .expect("mutation should produce a patch");
 
@@ -618,7 +629,10 @@ fn apply_watch_mutation_produces_a_replace_view_patch_for_multiple_removals() {
     let path_string = dir.path().to_string_lossy().to_string();
 
     let begin = service
-        .begin_navigation(nav_request("left", "left-1", &path_string), None, None)
+        .begin_navigation(
+            nav_request("left", "left-1", &path_string),
+            EnumerationAdmission::ungated(),
+        )
         .expect("begin navigation");
 
     let removed = [
@@ -649,10 +663,11 @@ fn apply_watch_mutation_produces_a_replace_view_patch_for_multiple_removals() {
 
     let patch = service
         .apply_watch_mutation(
-            &"left".to_string(),
-            &begin.path,
-            Vec::new(),
-            removed_display,
+            left_pane(&begin.path),
+            WatchMutation {
+                changed_entries: Vec::new(),
+                removed_paths: removed_display,
+            },
         )
         .expect("mutation should produce a patch");
 
@@ -670,7 +685,10 @@ fn apply_watch_mutation_is_a_no_op_when_view_is_unchanged() {
     let path_string = dir.path().to_string_lossy().to_string();
 
     let begin = service
-        .begin_navigation(nav_request("left", "left-1", &path_string), None, None)
+        .begin_navigation(
+            nav_request("left", "left-1", &path_string),
+            EnumerationAdmission::ungated(),
+        )
         .expect("begin navigation");
 
     // Report the exact same entries already in the snapshot: the derived
@@ -678,8 +696,13 @@ fn apply_watch_mutation_is_a_no_op_when_view_is_unchanged() {
     // should advance.
     let snapshot = enumerate_snapshot_for_tests(dir.path(), &view_params()).expect("snapshot");
 
-    let patch =
-        service.apply_watch_mutation(&"left".to_string(), &begin.path, snapshot, Vec::new());
+    let patch = service.apply_watch_mutation(
+        left_pane(&begin.path),
+        WatchMutation {
+            changed_entries: snapshot,
+            removed_paths: Vec::new(),
+        },
+    );
     assert!(patch.is_none());
     assert_eq!(
         service.current_baseline(&"left".to_string()).unwrap(),
@@ -696,20 +719,30 @@ fn apply_watch_mutation_is_a_no_op_for_unknown_pane_or_mismatched_path() {
 
     // No active session at all for this pane.
     assert!(service
-        .apply_watch_mutation(&"left".to_string(), &path_string, Vec::new(), Vec::new())
+        .apply_watch_mutation(
+            left_pane(&path_string),
+            WatchMutation {
+                changed_entries: Vec::new(),
+                removed_paths: Vec::new(),
+            },
+        )
         .is_none());
 
     service
-        .begin_navigation(nav_request("left", "left-1", &path_string), None, None)
+        .begin_navigation(
+            nav_request("left", "left-1", &path_string),
+            EnumerationAdmission::ungated(),
+        )
         .expect("begin navigation");
 
     // Path does not match the active session's path.
     assert!(service
         .apply_watch_mutation(
-            &"left".to_string(),
-            "/completely/different/path",
-            Vec::new(),
-            Vec::new()
+            left_pane("/completely/different/path"),
+            WatchMutation {
+                changed_entries: Vec::new(),
+                removed_paths: Vec::new(),
+            },
         )
         .is_none());
 }
@@ -723,16 +756,19 @@ fn apply_metadata_only_builds_a_metadata_patch_and_rejects_bad_input() {
 
     // No active session yet.
     assert!(service
-        .apply_metadata_only(&"left".to_string(), &path_string, Vec::new())
+        .apply_metadata_only(left_pane(&path_string), Vec::new(),)
         .is_none());
 
     let begin = service
-        .begin_navigation(nav_request("left", "left-1", &path_string), None, None)
+        .begin_navigation(
+            nav_request("left", "left-1", &path_string),
+            EnumerationAdmission::ungated(),
+        )
         .expect("begin navigation");
 
     // Empty updates is always a no-op regardless of session state.
     assert!(service
-        .apply_metadata_only(&"left".to_string(), &begin.path, Vec::new())
+        .apply_metadata_only(left_pane(&begin.path), Vec::new(),)
         .is_none());
 
     let snapshot = enumerate_snapshot_for_tests(dir.path(), &view_params()).expect("snapshot");
@@ -744,11 +780,11 @@ fn apply_metadata_only_builds_a_metadata_patch_and_rejects_bad_input() {
 
     // Mismatched path is a no-op.
     assert!(service
-        .apply_metadata_only(&"left".to_string(), "/mismatched/path", updates.clone())
+        .apply_metadata_only(left_pane("/mismatched/path"), updates.clone(),)
         .is_none());
 
     let patch = service
-        .apply_metadata_only(&"left".to_string(), &begin.path, updates)
+        .apply_metadata_only(left_pane(&begin.path), updates)
         .expect("expected a metadata-only patch");
 
     match patch {
@@ -777,7 +813,10 @@ fn resnapshot_rereads_the_directory_and_produces_a_replace_view_patch() {
     let path_string = dir.path().to_string_lossy().to_string();
 
     let begin = service
-        .begin_navigation(nav_request("left", "left-1", &path_string), None, None)
+        .begin_navigation(
+            nav_request("left", "left-1", &path_string),
+            EnumerationAdmission::ungated(),
+        )
         .expect("begin navigation");
 
     // Mutate the directory out from under the session without going through

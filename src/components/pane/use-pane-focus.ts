@@ -3,7 +3,7 @@ import type { PaneViewMode } from '@/lib/pane-view'
 import type { DirectoryEntry } from '@/lib/types/ipc'
 import { clamp } from '@/lib/numbers'
 import { usePanesStore } from '@/stores/panes-store'
-import { useSelectionStore } from '@/stores/selection-store'
+import { EMPTY_SELECTION, singleEntrySelection, useSelectionStore } from '@/stores/selection-store'
 import type { PaneId, PaneState } from '@/types/pane'
 import type { DetailsViewHandle } from './DetailsView'
 import type { GraphicalViewHandle } from './GraphicalView'
@@ -113,7 +113,7 @@ export function usePaneFocus(options: PaneFocusOptions) {
 
   function focusParentRow() {
     setFocusedEntry(paneId, PARENT_ROW_ID)
-    setSelection(paneId, [], null, null)
+    setSelection(paneId, EMPTY_SELECTION)
     if (viewMode === 'details') detailsViewRef.current?.scrollToRow(PARENT_ROW_INDEX)
   }
 
@@ -127,7 +127,7 @@ export function usePaneFocus(options: PaneFocusOptions) {
     const nextEntry = entries[boundedRowIndex - parentOffset]
     if (!nextEntry) return
     setFocusedEntry(paneId, nextEntry.id)
-    setSelection(paneId, [nextEntry.id], nextEntry.id, nextEntry.id)
+    setSelection(paneId, singleEntrySelection(nextEntry.id))
     scrollViewToRow(scrollTarget, boundedRowIndex)
   }
 

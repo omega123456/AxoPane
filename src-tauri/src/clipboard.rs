@@ -27,6 +27,20 @@ impl fmt::Display for ClipboardError {
 
 impl std::error::Error for ClipboardError {}
 
+pub struct ClipboardFiles {
+    pub mode: ClipboardMode,
+    pub paths: Vec<String>,
+}
+
+impl ClipboardFiles {
+    fn empty() -> Self {
+        Self {
+            mode: ClipboardMode::Copy,
+            paths: Vec::new(),
+        }
+    }
+}
+
 pub fn write_paths(mode: ClipboardMode, paths: &[String]) -> Result<(), ClipboardError> {
     if paths.is_empty() {
         return clear();
@@ -55,7 +69,7 @@ pub fn write_paths(mode: ClipboardMode, paths: &[String]) -> Result<(), Clipboar
 
 /// Read the file paths another application (or this one) put on the OS
 /// clipboard. An empty list means that the clipboard holds no files.
-pub fn read_paths() -> Result<(ClipboardMode, Vec<String>), ClipboardError> {
+pub fn read_paths() -> Result<ClipboardFiles, ClipboardError> {
     #[cfg(not(feature = "test-utils"))]
     {
         read_impl::read_paths()
@@ -63,7 +77,7 @@ pub fn read_paths() -> Result<(ClipboardMode, Vec<String>), ClipboardError> {
 
     #[cfg(feature = "test-utils")]
     {
-        Ok((ClipboardMode::Copy, Vec::new()))
+        Ok(ClipboardFiles::empty())
     }
 }
 
@@ -86,10 +100,10 @@ pub fn clear() -> Result<(), ClipboardError> {
 
 #[cfg(not(feature = "test-utils"))]
 mod read_impl {
-    use super::{ClipboardError, ClipboardMode};
+    use super::{ClipboardError, ClipboardFiles, ClipboardMode};
     use clipboard_rs::{Clipboard, ClipboardContext};
 
-    pub(super) fn read_paths() -> Result<(ClipboardMode, Vec<String>), ClipboardError> {
+    pub(super) fn read_paths() -> Result<ClipboardFiles, ClipboardError> {
         let context =
             ClipboardContext::new().map_err(|error| ClipboardError::new(error.to_string()))?;
 
@@ -97,10 +111,13 @@ mod read_impl {
         // That is an empty clipboard, not a failure.
         let paths = context.get_files().unwrap_or_default();
         if paths.is_empty() {
-            return Ok((ClipboardMode::Copy, Vec::new()));
+            return Ok(ClipboardFiles::empty());
         }
 
-        Ok((read_mode(), paths))
+        Ok(ClipboardFiles {
+            mode: read_mode(),
+            paths,
+        })
     }
 
     #[cfg(windows)]

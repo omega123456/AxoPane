@@ -7,7 +7,8 @@ use std::sync::Arc;
 use file_explorer_lib::ipc::commands::{apply_log_level, read_logs, set_log_level};
 use file_explorer_lib::ipc::types::SetLogLevelRequest;
 use file_explorer_lib::logging::{
-    current_local_date, daily_log_file_name, format_log_line, FileLogger, LogLevel, LoggingState,
+    current_local_date, daily_log_file_name, format_log_line, FileLogger, LogLevel, LogMessage,
+    LoggingState,
 };
 use file_explorer_lib::persist::PersistenceState;
 use tempfile::{tempdir, TempDir};
@@ -54,7 +55,14 @@ fn apply_log_level_updates_logger_and_persists_config() {
 fn read_logs_returns_current_day_entries() {
     let (log_dir, _config_dir, _logger, logging, _persistence) = build_state();
     let today = current_local_date();
-    let line = format_log_line("2026-06-30T00:00:00Z", LogLevel::Info, "core", "hello");
+    let line = format_log_line(
+        "2026-06-30T00:00:00Z",
+        LogMessage {
+            level: LogLevel::Info,
+            target: "core",
+            message: "hello",
+        },
+    );
     fs::write(
         log_dir.path().join(daily_log_file_name(today)),
         format!("{line}\n"),

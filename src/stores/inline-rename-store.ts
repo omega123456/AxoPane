@@ -11,33 +11,16 @@ export type InlineRenameState = {
   error: string | null
 }
 
-export type EntryRenameProps = {
-  isRenaming: boolean
-  renameValue: string
-  renameBusy: boolean
-  renameError: string | null
-}
+export type InlineRenameDraft = Pick<InlineRenameState, 'value' | 'busy' | 'error'>
 
-const NOT_RENAMING: EntryRenameProps = {
-  isRenaming: false,
-  renameValue: '',
-  renameBusy: false,
-  renameError: null,
-}
-
-export function entryRenameProps(
+export function renameDraftForEntry(
   rename: InlineRenameState | null,
   entryId: string,
-): EntryRenameProps {
+): InlineRenameDraft | undefined {
   if (rename?.entryId !== entryId) {
-    return NOT_RENAMING
+    return undefined
   }
-  return {
-    isRenaming: true,
-    renameValue: rename.value,
-    renameBusy: rename.busy,
-    renameError: rename.error,
-  }
+  return rename
 }
 
 type BeginRenamePayload = {

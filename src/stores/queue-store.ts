@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { cancelOp, pauseOp, resolveConflict, resumeOp, retryOp, skipOp } from '@/lib/queue-commands'
-import type { ConflictInfo, ConflictResolution, OpProgress, OpSnapshot } from '@/lib/types/ipc'
+import type { ConflictInfo, OpProgress, OpSnapshot, ResolveConflictRequest } from '@/lib/types/ipc'
 import {
   conflictedQueue,
   defaultQueueData,
@@ -30,12 +30,7 @@ type QueueStore = QueueData & {
   cancel: (id: string) => void
   skip: (id: string) => void
   retry: (id: string) => void
-  resolve: (
-    id: string,
-    resolution: ConflictResolution,
-    applyToAll: boolean,
-    renameTo: string | null,
-  ) => void
+  resolve: (request: ResolveConflictRequest) => void
   reset: () => void
 }
 
@@ -66,9 +61,9 @@ export const useQueueStore = create<QueueStore>((set) => ({
     void retryOp(id)
     set((state) => retriedOperation(state, id) ?? state)
   },
-  resolve: (id, resolution, applyToAll, renameTo) => {
-    void resolveConflict(id, resolution, applyToAll, renameTo)
-    set((state) => withoutConflict(state, id))
+  resolve: (request) => {
+    void resolveConflict(request)
+    set((state) => withoutConflict(state, request.id))
   },
   reset: () => set(defaultQueueData()),
 }))

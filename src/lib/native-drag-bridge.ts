@@ -53,11 +53,15 @@ function syntheticDataTransfer() {
   }
 }
 
+type DragDispatch = {
+  type: string
+  target: Element
+  relatedTarget?: Element | null
+}
+
 function dispatchDragEvent(
-  type: string,
-  target: Element,
+  { type, target, relatedTarget = null }: DragDispatch,
   session: DragSession,
-  relatedTarget: Element | null = null,
 ) {
   // A `MouseEvent` named `dragover`/`drop`/… is enough: React resolves its
   // synthetic drag events by event type and reads `dataTransfer` off the native
@@ -124,10 +128,10 @@ function handlePosition(event: DragPositionEvent) {
   if (!sameRegion(previous, target)) {
     session.regionChanges += 1
     if (previous) {
-      dispatchDragEvent('dragleave', previous, session, target)
+      dispatchDragEvent({ type: 'dragleave', target: previous, relatedTarget: target }, session)
     }
     if (target) {
-      dispatchDragEvent('dragenter', target, session, previous)
+      dispatchDragEvent({ type: 'dragenter', target, relatedTarget: previous }, session)
     }
   }
   if (!target) {
@@ -139,7 +143,7 @@ function handlePosition(event: DragPositionEvent) {
   // A drop target marks itself valid by calling `preventDefault` and setting
   // `dropEffect`, exactly as it would for a webview drag — so the badge reports
   // what the existing handlers decided, with no second copy of that logic.
-  const { accepted, dropEffect } = dispatchDragEvent('dragover', target, session)
+  const { accepted, dropEffect } = dispatchDragEvent({ type: 'dragover', target }, session)
   const showsDropKind = accepted && isDropKind(dropEffect)
   setCursor(showsDropKind ? { x, y, kind: dropEffect } : null)
 }
@@ -234,6 +238,6 @@ export function endNativeDragBridge() {
     regionChanges: finished.regionChanges,
   })
   if (finished.target) {
-    dispatchDragEvent('drop', finished.target, finished)
+    dispatchDragEvent({ type: 'drop', target: finished.target }, finished)
   }
 }

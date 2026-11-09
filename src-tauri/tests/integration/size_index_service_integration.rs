@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use file_explorer_lib::resource_coordinator::ResourceCoordinator;
 use file_explorer_lib::search::service::{
-    SearchBackend, SearchBackendKind, SearchQueryRequest, SearchService,
+    RunTicket, SearchBackend, SearchBackendKind, SearchQueryRequest, SearchService,
 };
 use file_explorer_lib::search::source::FolderTreeSource;
 use file_explorer_lib::search::{SearchError, SearchScope};
@@ -23,8 +23,9 @@ use file_explorer_lib::size::index::platform::{
 };
 use file_explorer_lib::size::index::{IndexOptions, LaneSnapshot, TreeUnavailable, SNAPSHOT_FILE};
 use file_explorer_lib::size::{
-    FolderSizeIndexStatus, IndexBackend, IndexState, NaReason, PauseReason, RequestMode,
-    SizeBackend, SizeService, SizeSource, SizeStateKind, SizeUpdate,
+    FolderSizeIndexStatus, IndexBackend, IndexState, NaReason, PaneSubscriptions, PauseReason,
+    RequestMode, SizeBackend, SizeRequest, SizeRequestWithVolumes, SizeService, SizeSource,
+    SizeStateKind, SizeUpdate,
 };
 use tempfile::{tempdir, TempDir};
 
@@ -231,10 +232,12 @@ impl Harness {
     fn request_paths(&self, paths: Vec<String>, mode: RequestMode) -> Arc<Mutex<Vec<SizeUpdate>>> {
         let updates = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&updates);
+        let request = SizeRequestWithVolumes {
+            request: SizeRequest { paths, mode },
+            volumes: Vec::new(),
+        };
         self.service().request_paths_with_mode(
-            paths,
-            mode,
-            Vec::new(),
+            request,
             Arc::new(move |batch| {
                 sink.lock().unwrap().extend(batch);
                 notify();
@@ -548,7 +551,11 @@ fn subscribed_folders_get_live_updates_and_others_do_not() {
     index.wait_state(IndexState::UpToDate);
 
     let service = index.service();
-    service.set_subscriptions("left".into(), Some(index.key("")), vec![index.key("a")]);
+    service.set_subscriptions(PaneSubscriptions {
+        pane_id: "left".into(),
+        current_path: Some(index.key("")),
+        folders: vec![index.key("a")],
+    });
     wait_until("current totals on subscribe", || {
         !index.live_for("a").is_empty()
     });
@@ -563,9 +570,11 @@ fn subscribed_folders_get_live_updates_and_others_do_not() {
     assert!(index.live_for("s").is_empty(), "not subscribed");
 
     // Replacing the set drops the old paths.
-    index
-        .service()
-        .set_subscriptions("left".into(), Some(index.key("")), vec![index.key("s")]);
+    index.service().set_subscriptions(PaneSubscriptions {
+        pane_id: "left".into(),
+        current_path: Some(index.key("")),
+        folders: vec![index.key("s")],
+    });
     wait_until("s subscribed", || index.live_for("s").len() == 1);
     fs::write(index.path("a/again.bin"), vec![0; 1]).unwrap();
     index.event("a", ChangeFlags::default());
@@ -575,14 +584,18 @@ fn subscribed_folders_get_live_updates_and_others_do_not() {
     assert_eq!(index.live_for("a").len(), 2, "a no longer subscribed");
 
     // Clearing the set (Trash, tab close) stops updates.
-    index
-        .service()
-        .set_subscriptions("left".into(), None, Vec::new());
+    index.service().set_subscriptions(PaneSubscriptions {
+        pane_id: "left".into(),
+        current_path: None,
+        folders: Vec::new(),
+    });
     fs::write(index.path("s/third.bin"), vec![0; 1]).unwrap();
     index.event("s", ChangeFlags::default());
-    index
-        .service()
-        .set_subscriptions("right".into(), None, vec![index.key("a")]);
+    index.service().set_subscriptions(PaneSubscriptions {
+        pane_id: "right".into(),
+        current_path: None,
+        folders: vec![index.key("a")],
+    });
     wait_until("right pane", || index.live_for("a").len() == 3);
     assert_eq!(index.live_for("s").len(), 2);
 }
@@ -592,11 +605,11 @@ fn live_events_add_prune_and_rescan_and_follow_the_data_volume_prefix() {
     let mut index = Harness::new();
     index.start();
     index.wait_state(IndexState::UpToDate);
-    index.service().set_subscriptions(
-        "left".into(),
-        None,
-        vec![index.key("a/new"), index.key("s")],
-    );
+    index.service().set_subscriptions(PaneSubscriptions {
+        pane_id: "left".into(),
+        current_path: None,
+        folders: vec![index.key("a/new"), index.key("s")],
+    });
 
     // A new subscribed folder is boosted; the event path is Data-prefixed.
     fs::create_dir(index.path("a/new")).unwrap();
@@ -689,11 +702,11 @@ fn unvisited_protected_folders_are_unknown_until_visited() {
     assert!(!index.opened("home/Documents"), "never read");
 
     // Visiting it (a pane's current path) marks it visited and scans it.
-    index.service().set_subscriptions(
-        "left".into(),
-        Some(index.key("home/Documents/inner")),
-        vec![index.key("home")],
-    );
+    index.service().set_subscriptions(PaneSubscriptions {
+        pane_id: "left".into(),
+        current_path: Some(index.key("home/Documents/inner")),
+        folders: vec![index.key("home")],
+    });
     let docs = terminal(
         &index.request(&["home/Documents"], RequestMode::Auto),
         &index.key("home/Documents"),
@@ -1069,11 +1082,11 @@ fn symlinked_folders_are_sized_as_their_resolved_target() {
 
     // A subscribed link row follows its target's live total; paths outside
     // the index are never resolved.
-    index.service().set_subscriptions(
-        "left".into(),
-        Some(index.key("")),
-        vec![index.key("link-a"), outside.to_string_lossy().into_owned()],
-    );
+    index.service().set_subscriptions(PaneSubscriptions {
+        pane_id: "left".into(),
+        current_path: Some(index.key("")),
+        folders: vec![index.key("link-a"), outside.to_string_lossy().into_owned()],
+    });
     wait_until("link subscribed", || !index.live_for("link-a").is_empty());
     fs::write(index.path("a/more.bin"), vec![0; 40]).unwrap();
     index.event("a", ChangeFlags::default());
@@ -1137,11 +1150,11 @@ fn search_reads_the_tree_hiding_protected_roots_until_visited() {
     .expect("search read");
     assert_eq!(seen, vec![index.path("home/Documents")]);
 
-    index.service().set_subscriptions(
-        "left".into(),
-        Some(index.key("home/Documents/inner")),
-        Vec::new(),
-    );
+    index.service().set_subscriptions(PaneSubscriptions {
+        pane_id: "left".into(),
+        current_path: Some(index.key("home/Documents/inner")),
+        folders: Vec::new(),
+    });
     wait_until("documents visited", || blocked_now(&index).is_empty());
 }
 
@@ -1179,16 +1192,18 @@ fn search_finds_folders_through_the_live_index() {
     let search = SearchService::new(SearchBackend::from_sizes(index.service()), None);
     assert_eq!(search.capabilities().backend, SearchBackendKind::MacIndex);
     assert!(search.capabilities().folders_only);
-    let ticket = search.begin();
+    let run_ticket = RunTicket {
+        ticket: search.begin(),
+        cancelled: &|| false,
+    };
     let page = search
         .run(
-            ticket,
+            run_ticket,
             &SearchQueryRequest {
                 query: "home".into(),
                 include_hidden: false,
                 scope: SearchScope::All,
             },
-            &|| false,
         )
         .expect("page");
     assert!(

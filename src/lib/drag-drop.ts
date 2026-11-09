@@ -136,10 +136,14 @@ export function dropModifiers(event: ModifierKeyState, platform: PlatformOs): Dr
 }
 
 /** Resolve copy vs move: Ctrl forces copy, Shift forces move, else volume-based. */
+export type DropRoute = {
+  sourceDir: string
+  destinationDir: string
+}
+
 export function resolveDropKind(
   modifiers: DropModifiers,
-  sourceDir: string,
-  destinationDir: string,
+  { sourceDir, destinationDir }: DropRoute,
   platform: PlatformOs = detectPlatformOs(),
 ): DropKind {
   if (modifiers.ctrlKey) {
@@ -192,17 +196,22 @@ function normalizedEqual(leftPath: string, rightPath: string, platform: Platform
  * an invalid drop resolves to `null` without touching the queue. The queue
  * engine + fs watcher refresh the affected panes, so no manual reload is needed.
  */
+export type DropRequest = {
+  destinationDir: string
+  modifiers: DropModifiers
+}
+
 export async function performDrop(
   payload: DragPayload | null,
-  destinationDir: string,
-  modifiers: DropModifiers,
+  { destinationDir, modifiers }: DropRequest,
   platform: PlatformOs = detectPlatformOs(),
 ): Promise<string | null> {
   if (!canDropInto(payload, destinationDir, platform)) {
     return null
   }
   if (payload?.kind !== 'file-transfer') return null
-  const kind = resolveDropKind(modifiers, payload.sourceDir, destinationDir, platform)
+  const route = { sourceDir: payload.sourceDir, destinationDir }
+  const kind = resolveDropKind(modifiers, route, platform)
   return startOp({
     kind,
     destinationDir,

@@ -166,7 +166,13 @@ pub struct Match {
 
 pub fn match_token(token: &Token, name: &FoldedName, kind: NameKind) -> Option<Match> {
     match token {
-        Token::Literal(pattern) => match_literal(&pattern.chars, name, kind, FUZZY),
+        Token::Literal(pattern) => {
+            let literal = LiteralPattern {
+                chars: &pattern.chars,
+                worst: FUZZY,
+            };
+            match_literal(literal, name, kind)
+        }
         Token::Glob(pattern) => glob(&pattern.chars, &name.chars).map(|positions| Match {
             tier: EXACT,
             ranges: name.ranges(&positions),
@@ -177,18 +183,19 @@ pub fn match_token(token: &Token, name: &FoldedName, kind: NameKind) -> Option<M
 /// Matches a multi-word segment: the whole phrase first (never fuzzily),
 /// otherwise every word must match and the segment takes the worst word's
 /// tier, no better than contains.
-pub fn match_words(
-    phrase: Option<&Pattern>,
-    tokens: &[Token],
-    name: &FoldedName,
-    kind: NameKind,
-) -> Option<Match> {
+pub fn match_words(words: Words<'_>, name: &FoldedName, kind: NameKind) -> Option<Match> {
+    let Words { phrase, tokens } = words;
     if let [token] = tokens {
         return match_token(token, name, kind);
     }
-    if let Some(found) =
-        phrase.and_then(|phrase| match_literal(&phrase.chars, name, kind, CONTAINS))
-    {
+    let phrase_match = phrase.and_then(|phrase| {
+        let literal = LiteralPattern {
+            chars: &phrase.chars,
+            worst: CONTAINS,
+        };
+        match_literal(literal, name, kind)
+    });
+    if let Some(found) = phrase_match {
         return Some(found);
     }
     let mut tier = CONTAINS;
@@ -204,7 +211,23 @@ pub fn match_words(
     })
 }
 
-fn match_literal(pattern: &[char], name: &FoldedName, kind: NameKind, worst: u8) -> Option<Match> {
+#[derive(Clone, Copy)]
+pub struct Words<'words> {
+    pub phrase: Option<&'words Pattern>,
+    pub tokens: &'words [Token],
+}
+
+#[derive(Clone, Copy)]
+struct LiteralPattern<'pattern> {
+    chars: &'pattern [char],
+    worst: u8,
+}
+
+fn match_literal(literal: LiteralPattern<'_>, name: &FoldedName, kind: NameKind) -> Option<Match> {
+    let LiteralPattern {
+        chars: pattern,
+        worst,
+    } = literal;
     let chars = &name.chars;
     if pattern.is_empty() {
         return None;

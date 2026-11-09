@@ -14,13 +14,14 @@ import {
   withPatchedActiveTab,
   withTabLocked,
   type PaneTabs,
+  type TabMoveRequest,
   type TabMoveResult,
   type TabPanes,
   type TabPatch,
   type TabState,
 } from '@/stores/tabs/tab-transitions'
 
-export type { PaneTabs, TabMoveResult, TabState }
+export type { PaneTabs, TabMoveRequest, TabMoveResult, TabState }
 
 type NewTabState = Omit<TabState, 'id' | 'viewMode' | 'locked'> & {
   viewMode?: PaneViewMode
@@ -35,12 +36,7 @@ type TabsStore = {
   setTabLocked: (paneId: PaneId, tabId: string, locked: boolean) => void
   setActiveTab: (paneId: PaneId, tabId: string) => void
   patchActiveTab: (paneId: PaneId, patch: TabPatch) => void
-  moveTab: (
-    sourcePaneId: PaneId,
-    tabId: string,
-    destinationPaneId: PaneId,
-    destinationIndex: number,
-  ) => TabMoveResult
+  moveTab: (request: TabMoveRequest) => TabMoveResult
   reset: () => void
 }
 
@@ -112,25 +108,29 @@ export const useTabsStore = create<TabsStore>((set, get) => ({
   ...defaultState(),
   hydrate: (paneId, pane) =>
     set((state) => ({
-      panes: withHydratedPane(state.panes, paneId, pane, () => singleTabPane('.').tabs),
+      panes: withHydratedPane(state.panes, paneId, {
+        pane,
+        fallbackTabs: () => singleTabPane('.').tabs,
+      }),
     })),
   addTab: (paneId, tab, options) => {
     const id = createTabId(paneId)
     const activate = options?.activate !== false
-    set((state) => ({ panes: withAddedTab(state.panes, paneId, completedTab(id, tab), activate) }))
+    set((state) => ({
+      panes: withAddedTab(state.panes, paneId, { tab: completedTab(id, tab), activate }),
+    }))
     return id
   },
   closeTab: (paneId, tabId) =>
     set((state) => panesChange(withClosedTab(state.panes, paneId, tabId)) ?? state),
   setTabLocked: (paneId, tabId, locked) =>
-    set((state) => ({ panes: withTabLocked(state.panes, paneId, tabId, locked) })),
+    set((state) => ({ panes: withTabLocked(state.panes, paneId, { tabId, locked }) })),
   setActiveTab: (paneId, tabId) =>
     set((state) => panesChange(withActiveTab(state.panes, paneId, tabId)) ?? state),
   patchActiveTab: (paneId, patch) =>
     set((state) => ({ panes: withPatchedActiveTab(state.panes, paneId, patch) })),
-  moveTab: (sourcePaneId, tabId, destinationPaneId, destinationIndex) => {
-    const request = { sourcePaneId, tabId, destinationPaneId, destinationIndex }
-    const move = planTabMove(get().panes, request, () => createTabId(destinationPaneId))
+  moveTab: (request) => {
+    const move = planTabMove(get().panes, request, () => createTabId(request.destinationPaneId))
     if (!move) {
       return NO_TAB_MOVE
     }

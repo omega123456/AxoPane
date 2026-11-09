@@ -10,7 +10,9 @@
 
 use file_explorer_lib::ipc::types::{MenuActionStatus, OpenWithRequest, ShowPropertiesRequest};
 use file_explorer_lib::native_menu::helper_supervisor::HelperRole;
-use file_explorer_lib::native_menu::provider::{NativeMenuProvider, ProviderInvocation};
+use file_explorer_lib::native_menu::provider::{
+    NativeMenuProvider, ProviderInvocation, RoleMenuRequest,
+};
 use file_explorer_lib::native_menu::shell_executor::ShellExecutor;
 use file_explorer_lib::native_menu::types::{LoadNativeMenuRequest, NativeMenuTargetKind};
 use file_explorer_lib::native_menu::windows::{
@@ -50,7 +52,12 @@ fn windows_provider_load_menu_for_role_delegates_to_the_safe_stub() {
     let provider = WindowsNativeMenuProvider;
     let executor = ShellExecutor::new();
 
-    let items = provider.load_menu_for_role(&sample_request(), &executor, HelperRole::Interactive);
+    let request = sample_request();
+    let role_request = RoleMenuRequest {
+        request: &request,
+        role: HelperRole::Interactive,
+    };
+    let items = provider.load_menu_for_role(role_request, &executor);
 
     assert!(
         items.is_empty(),

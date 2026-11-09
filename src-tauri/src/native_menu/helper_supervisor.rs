@@ -62,21 +62,21 @@ pub fn shared() -> &'static HelperSupervisor {
     SUPERVISOR.get_or_init(HelperSupervisor::default)
 }
 
+pub struct HelperCall {
+    pub operation: HelperOperation,
+    pub deadline: Duration,
+}
+
 impl HelperSupervisor {
-    pub fn call(
-        &self,
-        role: HelperRole,
-        operation: HelperOperation,
-        deadline: Duration,
-    ) -> Result<HelperResult, HelperFailure> {
+    pub fn call(&self, role: HelperRole, call: HelperCall) -> Result<HelperResult, HelperFailure> {
         #[cfg(any(feature = "test-utils", not(target_os = "windows")))]
         {
-            let _ = (role, operation, deadline);
+            let _ = (role, call);
             Err(HelperFailure::Unsupported)
         }
         #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
         {
-            self.call_persistent_helper(role, operation, deadline)
+            self.call_persistent_helper(role, call)
         }
     }
 
@@ -84,9 +84,12 @@ impl HelperSupervisor {
     fn call_persistent_helper(
         &self,
         role: HelperRole,
-        operation: HelperOperation,
-        deadline: Duration,
+        call: HelperCall,
     ) -> Result<HelperResult, HelperFailure> {
+        let HelperCall {
+            operation,
+            deadline,
+        } = call;
         let request_id = self.next_request_id.fetch_add(1, Ordering::Relaxed) + 1;
         let mut helper = self.helper_slot(role).lock().expect("native helper lock");
         if helper.is_none() {
