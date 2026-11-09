@@ -106,6 +106,17 @@ pub struct FolderSizeIndexStatus {
     pub file_names_available: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderSizeIndexStorage {
+    pub directory: String,
+    pub size_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_count: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_count: Option<u64>,
+}
+
 impl FolderSizeIndexStatus {
     pub fn new(backend: IndexBackend, is_available: bool, state: IndexState) -> Self {
         Self {
@@ -499,6 +510,16 @@ impl SizeService {
         self.attached_index().map(|index| index.retry_stream())
     }
 
+    #[cfg(target_os = "macos")]
+    pub fn rebuild_folder_size_index(&self) -> Result<(), IndexUnsupported> {
+        self.attached_index().map(|index| index.rebuild())
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn folder_size_index_storage(&self) -> Result<FolderSizeIndexStorage, IndexUnsupported> {
+        self.attached_index().map(|index| index.storage())
+    }
+
     #[cfg(not(target_os = "macos"))]
     pub fn require_index(&self) -> Result<(), IndexUnsupported> {
         Err(IndexUnsupported)
@@ -519,6 +540,16 @@ impl SizeService {
 
     #[cfg(not(target_os = "macos"))]
     pub fn retry_folder_size_index(&self) -> Result<(), IndexUnsupported> {
+        Err(IndexUnsupported)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn rebuild_folder_size_index(&self) -> Result<(), IndexUnsupported> {
+        Err(IndexUnsupported)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn folder_size_index_storage(&self) -> Result<FolderSizeIndexStorage, IndexUnsupported> {
         Err(IndexUnsupported)
     }
 

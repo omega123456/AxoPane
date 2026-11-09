@@ -279,6 +279,14 @@ export function retryFolderSizeIndex() {
   return invokeCommand({ command: 'retry_folder_size_index' })
 }
 
+export function rebuildFolderSizeIndex() {
+  return invokeCommand({ command: 'rebuild_folder_size_index' })
+}
+
+export function folderSizeIndexStorage() {
+  return invokeCommand({ command: 'folder_size_index_storage' })
+}
+
 export function setTabWatch(
   target: WatchTarget | null,
   entries?: DirectoryEntry[],

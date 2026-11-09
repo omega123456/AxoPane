@@ -639,5 +639,13 @@ fn index_exclusion_commands_are_unsupported_without_a_macos_index() {
         commands::retry_folder_size_index(as_state(&size_service)),
         Err(IndexCommandError::Unsupported)
     );
+    assert_eq!(
+        commands::rebuild_folder_size_index(as_state(&size_service)),
+        Err(IndexCommandError::Unsupported)
+    );
+    assert_eq!(
+        commands::folder_size_index_storage(as_state(&size_service)),
+        Err(IndexCommandError::Unsupported)
+    );
     assert!(persistence.config.current().index_exclusions.is_empty());
 }

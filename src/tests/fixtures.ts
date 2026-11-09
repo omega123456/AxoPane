@@ -444,6 +444,13 @@ export const fixtures: {
     paths: [],
   },
   retry_folder_size_index: undefined,
+  rebuild_folder_size_index: undefined,
+  folder_size_index_storage: {
+    directory: '/Users/omega/Library/Caches/com.axopane.app',
+    sizeBytes: 78_643_200,
+    folderCount: 658_631,
+    fileCount: 4_193_422,
+  },
   set_tab_watch: undefined,
   load_config: {
     theme: 'dark',

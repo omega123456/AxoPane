@@ -28,6 +28,14 @@ export type FolderSizeIndexStatus = {
   pauseReason?: 'lowPowerMode' | 'thermal'
   fileNamesAvailable: boolean
 }
+
+export type FolderSizeIndexStorage = {
+  directory: string
+  sizeBytes: number
+  folderCount?: number
+  fileCount?: number
+}
+
 export type SizeRequestMode = 'auto' | 'manual' | 'refresh'
 
 export type FolderSizeRequest = {

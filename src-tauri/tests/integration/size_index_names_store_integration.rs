@@ -8,8 +8,9 @@ use file_explorer_lib::size::index::names::writer::{
     is_past, write_names, PairStamp, RewriteError, RewriteStats,
 };
 use file_explorer_lib::size::index::names::{
-    names_in, FileNameStore, FolderNames, InstallError, NamesCounters, NamesScratch, OverlayStats,
-    PackedNames, PairExpectation, OVERLAY_THRESHOLD_BYTES, OVERLAY_THRESHOLD_FOLDERS,
+    names_in, FileNameStore, FolderNames, InstallError, NamesCounters, NamesScratch,
+    NamesUnreadable, OverlayStats, PackedNames, PairExpectation, OVERLAY_THRESHOLD_BYTES,
+    OVERLAY_THRESHOLD_FOLDERS,
 };
 use file_explorer_lib::size::index::persist::temp_path;
 use tempfile::{tempdir, TempDir};
@@ -616,4 +617,33 @@ fn overlay_thresholds_count_folders_and_name_bytes() {
             peak_open_blocks: 1,
         }
     );
+}
+
+#[test]
+fn counting_names_adds_the_overlay_to_blocks_it_does_not_replace() {
+    let fixture = Fixture::new();
+    let mut store = written_store(&fixture, &[0, 1, 2, 3]);
+    assert_eq!(store.count_saved_and_overlay_names(), Ok(12));
+
+    store.set_names(2, packed(&["fresh.txt"]));
+    store.tombstone(3);
+    store.set_names(4, packed(&["new-a", "new-b"]));
+
+    assert_eq!(store.count_saved_and_overlay_names(), Ok(3 + 3 + 1 + 2));
+}
+
+#[test]
+fn counting_names_fails_on_a_corrupt_block() {
+    let fixture = Fixture::new();
+    drop(written_store(&fixture, &[0, 1, 2, 3]));
+    corrupt_byte_at(&fixture.path, HEADER_BYTES);
+    let mut store = fixture.store();
+    let expected = PairExpectation {
+        pair_token: 1,
+        folder_count: 4,
+    };
+    store.open_pair(expected).expect("the header is intact");
+
+    assert_eq!(store.count_saved_and_overlay_names(), Err(NamesUnreadable));
+    assert!(store.take_unreported_failure());
 }

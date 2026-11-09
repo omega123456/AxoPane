@@ -10,7 +10,7 @@ import {
   XCircleIcon,
 } from '@/components/icons'
 import { Button, ProgressBar } from '@/components/controls'
-import { DETAIL_SEPARATOR, formatCount, formatDuration } from '@/lib/format'
+import { countLabel, DETAIL_SEPARATOR, formatCount, formatDuration } from '@/lib/format'
 import type { OpKind, OpProgress } from '@/lib/types/ipc'
 import { isTerminal, useQueueStore } from '@/stores/queue-store'
 import { FOCUS_RING } from '@/lib/focus-ring'
@@ -25,10 +25,6 @@ const kindIcons: Record<OpKind, typeof CopyIcon> = {
   delete: Trash2Icon,
   compress: PackageIcon,
   extract: PackageOpenIcon,
-}
-
-function countLabel(count: number, noun: string) {
-  return `${formatCount(count)} ${noun}${count === 1 ? '' : 's'}`
 }
 
 function finishedSummary(active: OpProgress[], operations: OpProgress[]) {

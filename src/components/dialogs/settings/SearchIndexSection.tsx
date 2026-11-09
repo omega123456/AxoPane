@@ -28,6 +28,7 @@ import { useConfigStore } from '@/stores/config-store'
 import { usePanesStore } from '@/stores/panes-store'
 import { basenameFromPath, getParentPath } from '@/stores/panes/pane-paths'
 import { AutoFolderSizeRow } from './AutoFolderSizeRow'
+import { IndexStorageRows } from './IndexStorageRows'
 import {
   addedPaths,
   focusAfterAdd,
@@ -135,6 +136,7 @@ export function SearchIndexSection(props: SectionProps) {
         <AutoFolderSizeRow {...props} description={<MacFolderSizeDescription status={status} />} />
       ) : null}
       <ExcludedFolders />
+      {status ? <IndexStorageRows state={status.state} /> : null}
     </>
   )
 }

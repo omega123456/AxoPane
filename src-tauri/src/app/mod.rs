@@ -61,6 +61,8 @@ macro_rules! registered_commands {
             commands::remove_index_exclusion,
             commands::pick_index_exclusions,
             commands::retry_folder_size_index,
+            commands::rebuild_folder_size_index,
+            commands::folder_size_index_storage,
             commands::set_tab_watch,
             commands::load_config,
             commands::save_config,

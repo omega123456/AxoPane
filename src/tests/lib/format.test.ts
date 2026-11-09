@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  countLabel,
   EMPTY_VALUE,
   formatBytes,
   formatCount,
@@ -43,6 +44,12 @@ describe('item counts', () => {
   it('formats a count with thousands separators and its noun', () => {
     expect(formatItemCount(1)).toBe('1 item')
     expect(formatItemCount(1248)).toBe('1,248 items')
+  })
+
+  it('labels any count with its noun, pluralised unless it is exactly one', () => {
+    expect(countLabel(1, 'folder')).toBe('1 folder')
+    expect(countLabel(0, 'file')).toBe('0 files')
+    expect(countLabel(4193422, 'file')).toBe('4,193,422 files')
   })
 
   it('shows an em dash for an empty value', () => {

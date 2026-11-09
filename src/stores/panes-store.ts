@@ -100,3 +100,13 @@ export const usePanesStore = create<PanesStore>(() => ({
 }))
 
 bindPanesStore(usePanesStore)
+
+export function navigateActivePane(path: string) {
+  const panes = usePanesStore.getState()
+  void panes.navigatePane(panes.activePaneId, path)
+}
+
+export function openTabInActivePane(path: string) {
+  const panes = usePanesStore.getState()
+  void panes.openTabFromPath(panes.activePaneId, path)
+}

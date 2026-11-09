@@ -16,6 +16,7 @@ use super::machine::{Machine, Phase};
 pub(super) enum SaveTrigger {
     Blur,
     CatchUp,
+    ExclusionEdit,
     ScanComplete,
     Exit(Instant),
 }
@@ -24,12 +25,15 @@ impl SaveTrigger {
     fn deadline(self) -> Option<Instant> {
         match self {
             Self::Exit(deadline) => Some(deadline),
-            Self::Blur | Self::CatchUp | Self::ScanComplete => None,
+            Self::Blur | Self::CatchUp | Self::ExclusionEdit | Self::ScanComplete => None,
         }
     }
 
     fn saves_every_name_change(self) -> bool {
-        matches!(self, Self::ScanComplete | Self::Exit(_))
+        matches!(
+            self,
+            Self::ExclusionEdit | Self::ScanComplete | Self::Exit(_)
+        )
     }
 }
 

@@ -44,6 +44,10 @@ export function formatCount(value: number): string {
   return value.toLocaleString('en-US')
 }
 
+export function countLabel(count: number, noun: string) {
+  return `${formatCount(count)} ${noun}${count === 1 ? '' : 's'}`
+}
+
 export function itemNoun(count: number) {
   return count === 1 ? 'item' : 'items'
 }

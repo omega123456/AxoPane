@@ -19,7 +19,12 @@ import { buildTreeFlatModel, treeRowHeight, type TreeFlatRow } from '@/lib/tree-
 import { buildStickyChain, capStickyChain } from '@/lib/tree-sticky'
 import { useElementVirtualizer } from '@/lib/use-element-virtualizer'
 import { useLayoutStore } from '@/stores/layout-store'
-import { usePanesStore, type TreeNodeState } from '@/stores/panes-store'
+import {
+  navigateActivePane,
+  openTabInActivePane,
+  usePanesStore,
+  type TreeNodeState,
+} from '@/stores/panes-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
 import { SCROLLBAR_THIN } from '@/lib/class-names'
 
@@ -40,16 +45,6 @@ function openTreeContextMenu(title: string, path: string, event: MouseEvent) {
     y: event.clientY,
     ...buildContextMenuContent(paneId, { kind: 'tree', path }, detectPlatformOs()),
   })
-}
-
-function navigateActivePane(path: string) {
-  const panes = usePanesStore.getState()
-  void panes.navigatePane(panes.activePaneId, path)
-}
-
-function openTabInActivePane(path: string) {
-  const panes = usePanesStore.getState()
-  void panes.openTabFromPath(panes.activePaneId, path)
 }
 
 const treeRowActions: TreeRowActions = {

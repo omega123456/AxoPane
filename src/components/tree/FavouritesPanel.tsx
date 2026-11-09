@@ -12,7 +12,7 @@ import { useConfigStore } from '@/stores/config-store'
 import { useContextMenuStore } from '@/stores/context-menu-store'
 import { useDragStore } from '@/stores/drag-store'
 import { FAVOURITES_HEIGHT_MAX, FAVOURITES_HEIGHT_MIN, useLayoutStore } from '@/stores/layout-store'
-import { usePanesStore } from '@/stores/panes-store'
+import { navigateActivePane, openTabInActivePane, usePanesStore } from '@/stores/panes-store'
 import { disclosureChevronClass, SCROLLBAR_THIN } from '@/lib/class-names'
 import { canDropOnFavourite, dropAtFavouritesEnd } from './favourite-drop'
 
@@ -28,16 +28,6 @@ async function handleFavouritesDrop(event: DragEvent<HTMLElement>) {
   event.preventDefault()
   useDragStore.getState().end()
   await dropAtFavouritesEnd(drag)
-}
-
-function navigateActivePane(path: string) {
-  const panes = usePanesStore.getState()
-  void panes.navigatePane(panes.activePaneId, path)
-}
-
-function openTabInActivePane(path: string) {
-  const panes = usePanesStore.getState()
-  void panes.openTabFromPath(panes.activePaneId, path)
 }
 
 function openFavouriteContextMenu(path: string, event: MouseEvent) {

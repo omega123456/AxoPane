@@ -79,6 +79,8 @@ pub(super) enum Message {
         ack: Sender<()>,
     },
     RetryStream(Sender<()>),
+    Rebuild(Sender<()>),
+    Save(SaveTrigger),
     NamesUnreadable,
     Shutdown,
 }
@@ -241,6 +243,14 @@ impl Machine {
         if self.stream.is_none() {
             self.republish_status();
         }
+    }
+
+    fn rebuild(&mut self) {
+        if self.stream.is_none() {
+            return;
+        }
+        log::info!("size index: rebuild requested");
+        self.start_full_scan();
     }
 
     fn refresh_resume_point(&mut self) -> Option<u64> {
@@ -473,11 +483,17 @@ impl Machine {
             Message::Exclusions { edit, ack } => {
                 self.exclusions_changed(edit);
                 let _ = ack.send(());
+                let _ = self.sender.send(Message::Save(SaveTrigger::ExclusionEdit));
             }
             Message::RetryStream(ack) => {
                 self.retry_stream();
                 let _ = ack.send(());
             }
+            Message::Rebuild(ack) => {
+                self.rebuild();
+                let _ = ack.send(());
+            }
+            Message::Save(trigger) => self.save_snapshot(trigger),
             Message::NamesUnreadable => self.names_unreadable(),
             Message::Shutdown => {}
         }

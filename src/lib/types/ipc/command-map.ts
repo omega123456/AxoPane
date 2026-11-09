@@ -73,6 +73,7 @@ import type {
   CancelSizesResponse,
   CancelThumbnailsRequest,
   FolderSizeIndexStatus,
+  FolderSizeIndexStorage,
   FolderSizeRequest,
   FolderSizesRequest,
   RequestIconsRequest,
@@ -291,6 +292,14 @@ export type IpcCommandMap = {
   retry_folder_size_index: {
     request: undefined
     response: void
+  }
+  rebuild_folder_size_index: {
+    request: undefined
+    response: void
+  }
+  folder_size_index_storage: {
+    request: undefined
+    response: FolderSizeIndexStorage
   }
   set_tab_watch: {
     request: SetTabWatchRequest

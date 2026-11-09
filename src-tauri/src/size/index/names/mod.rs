@@ -95,6 +95,11 @@ impl<'names> FolderNames<'names> {
     pub fn names(&self) -> impl Iterator<Item = &'names [u8]> {
         names_in(self.packed)
     }
+
+    pub fn name_count(&self) -> u64 {
+        let terminators = self.packed.iter().filter(|&&byte| byte == NAME_TERMINATOR);
+        terminators.count() as u64
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -463,6 +468,20 @@ impl FileNameStore {
         for folder in named {
             visit(folder);
         }
+    }
+
+    pub fn count_saved_and_overlay_names(&self) -> Result<u64, NamesUnreadable> {
+        let mut count = 0;
+        self.visit_overlay(&mut |folder| count += folder.name_count());
+        let mut scratch = NamesScratch::default();
+        for index in 0..self.block_count() {
+            let block = self.read_block(index, &mut scratch)?;
+            count += block
+                .folders()
+                .map(|folder| folder.name_count())
+                .sum::<u64>();
+        }
+        Ok(count)
     }
 
     pub fn visit_spill(

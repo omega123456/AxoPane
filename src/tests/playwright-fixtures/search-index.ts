@@ -1,6 +1,7 @@
 import type {
   AddIndexExclusionResponse,
   FolderSizeIndexStatus,
+  FolderSizeIndexStorage,
   IndexExclusionsResponse,
   PickIndexExclusionsResponse,
 } from '@/lib/types/ipc'
@@ -48,10 +49,20 @@ export const searchIndexAfterRemovingBuildCache: IndexExclusionsResponse = {
 
 const noPickedFolders: PickIndexExclusionsResponse = { paths: [] }
 
+/** The saved index the Search index screenshots describe. */
+export const searchIndexStorage: FolderSizeIndexStorage = {
+  directory: '/Users/alex/Library/Caches/com.axopane.app',
+  sizeBytes: 78_643_200,
+  folderCount: 658_631,
+  fileCount: 4_193_422,
+}
+
 /** Defaults for the exclusion commands; scenarios override them per screenshot. */
 export const searchIndexCommandFixtures = {
   add_index_exclusion: { exclusions: [], outcomes: [] } satisfies AddIndexExclusionResponse,
   remove_index_exclusion: { exclusions: [] } satisfies IndexExclusionsResponse,
   pick_index_exclusions: noPickedFolders,
   retry_folder_size_index: undefined,
+  rebuild_folder_size_index: undefined,
+  folder_size_index_storage: searchIndexStorage,
 }

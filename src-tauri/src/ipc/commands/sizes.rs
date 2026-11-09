@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::persist::{Config, PersistenceState};
-use crate::size::SizeService;
+use crate::size::{FolderSizeIndexStorage, SizeService};
 #[cfg(feature = "test-utils")]
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "test-utils")]
@@ -212,6 +212,19 @@ pub fn remove_index_exclusion(
 pub fn retry_folder_size_index(sizes: State<'_, SizeService>) -> Result<(), IndexCommandError> {
     sizes.retry_folder_size_index()?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn rebuild_folder_size_index(sizes: State<'_, SizeService>) -> Result<(), IndexCommandError> {
+    sizes.rebuild_folder_size_index()?;
+    Ok(())
+}
+
+#[tauri::command(async)]
+pub fn folder_size_index_storage(
+    sizes: State<'_, SizeService>,
+) -> Result<FolderSizeIndexStorage, IndexCommandError> {
+    Ok(sizes.folder_size_index_storage()?)
 }
 
 #[cfg(not(feature = "test-utils"))]

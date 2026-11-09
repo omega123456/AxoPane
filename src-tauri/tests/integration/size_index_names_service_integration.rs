@@ -7,7 +7,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use file_explorer_lib::size::index::names::file::{spill_path, MappedNames, NamesHeader};
-use file_explorer_lib::size::index::names::{NamesCounters, OVERLAY_THRESHOLD_FOLDERS};
+use file_explorer_lib::size::index::names::{
+    FileNameStore, NamesCounters, NamesScratch, PairExpectation, OVERLAY_THRESHOLD_FOLDERS,
+};
 use file_explorer_lib::size::index::persist::{self, temp_path, ChangeFlags};
 use file_explorer_lib::size::index::platform::{IndexPlatform, PowerSignal, RawEvent};
 use file_explorer_lib::size::index::{names_path_beside, IndexRead};
@@ -554,4 +556,44 @@ fn pair_save_failures_never_leave_a_half_written_pair() {
     assert!(names_file(&snapshot_blocked).is_file());
     assert!(snapshot_blocked.snapshot.is_dir());
     assert!(!temp_path(&snapshot_blocked.snapshot).exists());
+}
+
+fn names_saved_on_disk(index: &Harness) -> Vec<String> {
+    let header = names_header(index);
+    let mut store = FileNameStore::new(names_file(index));
+    let expected = PairExpectation {
+        pair_token: header.pair_token,
+        folder_count: header.folder_count,
+    };
+    store.open_pair(expected).expect("saved pair");
+    let mut scratch = NamesScratch::default();
+    let mut saved = Vec::new();
+    for block_index in 0..store.block_count() {
+        let block = store.read_block(block_index, &mut scratch).expect("block");
+        for folder in block.folders() {
+            saved.extend(sorted_strings(folder.names()));
+        }
+    }
+    saved.sort();
+    saved
+}
+
+#[test]
+fn an_exclusion_removes_its_names_from_disk_without_waiting_for_blur() {
+    let mut index = Harness::new();
+    index.start();
+    index.wait_state(IndexState::UpToDate);
+    let token = snapshot_token(&index);
+    assert!(names_saved_on_disk(&index).contains(&"b.bin".to_string()));
+
+    index
+        .service()
+        .add_index_exclusions(&[index.path("a")])
+        .expect("index attached");
+
+    poll_until("pair saved", || snapshot_token(&index) != token);
+    assert_eq!(names_saved_on_disk(&index), ["h.bin", "s.bin", "top.bin"]);
+    let saved = persist::load(&index.snapshot).expect("snapshot");
+    assert_eq!(saved.meta.exclusions, [index.path("a")]);
+    assert!(saved.tree.lookup(&index.path("a/b")).is_none());
 }

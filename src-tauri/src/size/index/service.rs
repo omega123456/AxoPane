@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock};
@@ -8,7 +9,7 @@ use std::time::{Duration, Instant, SystemTime};
 use crossbeam_channel::{bounded, unbounded, Sender};
 
 use super::exclusions::{ExclusionChange, ExclusionRules, ExclusionSet};
-use super::names::file::NAMES_FILE;
+use super::names::file::{spill_path, NAMES_FILE};
 use super::names::FileNameStore;
 use super::platform::{self, IndexPlatform};
 use super::tree::{FolderSizeTree, FolderTotal, LowerBound};
@@ -16,8 +17,8 @@ use super::IndexRead;
 use crate::resource_coordinator::ResourceCoordinator;
 use crate::size::fast_walk::{self, Qos, WalkOptions};
 use crate::size::{
-    route_of, FolderSizeIndexStatus, IndexBackend, IndexState, NaReason, PaneSubscriptions,
-    RequestMode, Route, SizeRequest, SizeSource, SizeStateKind, SizeUpdate,
+    route_of, FolderSizeIndexStatus, FolderSizeIndexStorage, IndexBackend, IndexState, NaReason,
+    PaneSubscriptions, RequestMode, Route, SizeRequest, SizeSource, SizeStateKind, SizeUpdate,
 };
 
 use super::lanes::{run_background, run_boosts, BoostJob, Lanes, ScanJob};
@@ -122,6 +123,43 @@ pub struct FolderSizeIndex {
     shared: Arc<Shared>,
     sender: Sender<Message>,
     threads: Vec<JoinHandle<()>>,
+    snapshot_path: PathBuf,
+}
+
+struct IndexedItems {
+    folders: u64,
+    files: Option<u64>,
+}
+
+impl IndexedItems {
+    fn counted(read: IndexRead<'_>) -> Self {
+        Self {
+            folders: read.tree.node_count() as u64,
+            files: counted_file_names(read.names),
+        }
+    }
+}
+
+fn counted_file_names(names: &FileNameStore) -> Option<u64> {
+    let complete_without_spill = names.is_available() && !names.is_spilling();
+    if !complete_without_spill {
+        return None;
+    }
+    names.count_saved_and_overlay_names().ok()
+}
+
+fn index_files(snapshot_path: &Path) -> [PathBuf; 3] {
+    let names_path = names_path_beside(snapshot_path);
+    let spill = spill_path(&names_path);
+    [snapshot_path.to_path_buf(), names_path, spill]
+}
+
+fn bytes_on_disk(paths: &[PathBuf]) -> u64 {
+    paths
+        .iter()
+        .filter_map(|path| fs::metadata(path).ok())
+        .map(|metadata| metadata.len())
+        .sum()
 }
 
 pub(super) struct Shared {
@@ -188,6 +226,7 @@ impl FolderSizeIndex {
             #[cfg(feature = "test-utils")]
             on_background_parked: Arc::clone(&options.on_background_parked),
         });
+        let snapshot_path = options.snapshot_path.clone();
         let (sender, receiver) = unbounded();
         let machine = Machine::new(Arc::clone(&shared), options, sender.clone());
         let threads = vec![
@@ -205,6 +244,7 @@ impl FolderSizeIndex {
             shared,
             sender,
             threads,
+            snapshot_path,
         }
     }
 
@@ -359,27 +399,37 @@ impl FolderSizeIndex {
     }
 
     fn apply_exclusion_edit(&self, edit: ExclusionEdit) {
-        let (ack, done) = bounded(1);
-        if self.sender.send(Message::Exclusions { edit, ack }).is_ok() {
-            let _ = done.recv_timeout(FLUSH_TIMEOUT);
-        }
+        self.send_and_wait(|ack| Message::Exclusions { edit, ack });
     }
 
     pub fn retry_stream(&self) {
+        self.send_and_wait(Message::RetryStream);
+    }
+
+    pub fn rebuild(&self) {
+        self.send_and_wait(Message::Rebuild);
+    }
+
+    pub fn flush(&self) {
+        let deadline = Instant::now() + FLUSH_TIMEOUT;
+        self.send_and_wait(|ack| Message::Flush(FlushRequest { ack, deadline }));
+    }
+
+    fn send_and_wait(&self, message: impl FnOnce(Sender<()>) -> Message) {
         let (ack, done) = bounded(1);
-        if self.sender.send(Message::RetryStream(ack)).is_ok() {
+        if self.sender.send(message(ack)).is_ok() {
             let _ = done.recv_timeout(FLUSH_TIMEOUT);
         }
     }
 
-    pub fn flush(&self) {
-        let (ack, done) = bounded(1);
-        let request = FlushRequest {
-            ack,
-            deadline: Instant::now() + FLUSH_TIMEOUT,
-        };
-        if self.sender.send(Message::Flush(request)).is_ok() {
-            let _ = done.recv_timeout(FLUSH_TIMEOUT);
+    pub fn storage(&self) -> FolderSizeIndexStorage {
+        let items = self.read_index(IndexedItems::counted).ok();
+        let directory = self.snapshot_path.parent().unwrap_or(&self.snapshot_path);
+        FolderSizeIndexStorage {
+            directory: directory.to_string_lossy().into_owned(),
+            size_bytes: bytes_on_disk(&index_files(&self.snapshot_path)),
+            folder_count: items.as_ref().map(|items| items.folders),
+            file_count: items.and_then(|items| items.files),
         }
     }
 }
