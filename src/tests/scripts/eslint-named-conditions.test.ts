@@ -1,9 +1,19 @@
+/// <reference types="node" />
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
 import { Linter } from 'eslint'
 import tseslint from 'typescript-eslint'
 import { localRulesPlugin } from '../../../scripts/eslint-named-conditions.mjs'
 
 const RULE_ID = 'local/named-conditions'
 const virtualFileName = 'named-conditions-fixture.ts'
+const typedProjectDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'named-conditions-project')
+
+type LintTarget = {
+  config: Linter.Config[]
+  cwd: string
+  filename: string
+}
 
 const ruleConfig = {
   plugins: { local: localRulesPlugin },
@@ -25,15 +35,28 @@ const typedConfig: Linter.Config[] = [
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: {
-        projectService: { allowDefaultProject: ['*.ts'] },
+        projectService: true,
+        tsconfigRootDir: typedProjectDir,
       },
     },
   },
 ]
 
-function reportedLines(source: string, config: Linter.Config[] = untypedConfig) {
-  const linter = new Linter({ configType: 'flat' })
-  const messages = linter.verify(source, config, { filename: virtualFileName })
+const untypedTarget: LintTarget = {
+  config: untypedConfig,
+  cwd: process.cwd(),
+  filename: virtualFileName,
+}
+
+const typedTarget: LintTarget = {
+  config: typedConfig,
+  cwd: typedProjectDir,
+  filename: path.join(typedProjectDir, virtualFileName),
+}
+
+function reportedLines(source: string, target: LintTarget = untypedTarget) {
+  const linter = new Linter({ configType: 'flat', cwd: target.cwd })
+  const messages = linter.verify(source, target.config, { filename: target.filename })
   return messages.map((message) => {
     expect(message.ruleId).toBe(RULE_ID)
     return message.line
@@ -152,6 +175,6 @@ describe('named-conditions rule', () => {
       'export const anonymous = [1].map(function () { return ready && count > 0 })',
     )
 
-    expect(reportedLines(source, typedConfig)).toEqual([4, 5])
+    expect(reportedLines(source, typedTarget)).toEqual([4, 5])
   })
 })

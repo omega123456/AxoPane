@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "types": [],
+    "strict": true,
+    "noEmit": true
+  },
+  "files": ["named-conditions-fixture.ts"]
+}
