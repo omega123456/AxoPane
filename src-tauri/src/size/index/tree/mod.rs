@@ -130,6 +130,13 @@ struct GraftSite<'graft> {
 }
 
 #[derive(Clone, Copy)]
+struct ForestTop<'forest> {
+    root: &'forest Path,
+    top: &'forest Path,
+    ids: &'forest Range<NodeId>,
+}
+
+#[derive(Clone, Copy)]
 struct GraftedOver<'graft> {
     replaced: NodeId,
     graft_root: NodeId,
@@ -175,6 +182,12 @@ pub struct Graft<'graft> {
     pub path: &'graft Path,
     pub segment: Arc<MappedSegment>,
     pub kept: &'graft [PathBuf],
+}
+
+pub struct Forest<'forest> {
+    pub root: &'forest Path,
+    pub tops: &'forest [PathBuf],
+    pub segment: Arc<MappedSegment>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -280,6 +293,52 @@ impl FolderSizeTree {
         self.dirty = true;
         self.structure_changed = true;
         Some(ids)
+    }
+
+    pub fn install_forest(&mut self, forest: Forest<'_>) -> Option<Range<u32>> {
+        let Forest {
+            root,
+            tops,
+            segment,
+        } = forest;
+        let holds_one_root = segment.top_level().ok()?.len() == 1;
+        let lies_under_a_root = self.find(root).is_some();
+        if !(holds_one_root && lies_under_a_root) {
+            return None;
+        }
+        let ids = self.attach_segment(segment)?;
+        let grafted: Vec<Range<NodeId>> = tops
+            .iter()
+            .filter_map(|top| {
+                self.graft_forest_top(ForestTop {
+                    root,
+                    top,
+                    ids: &ids,
+                })
+            })
+            .collect();
+        let unused = KeptRanges::of(grafted).uncovered_parts_of(ids.clone());
+        for dead in unused {
+            self.dead.add(dead.clone());
+            self.removed.ranges.push(dead);
+        }
+        self.dirty = true;
+        self.structure_changed = true;
+        Some(ids)
+    }
+
+    fn graft_forest_top(&mut self, forest_top: ForestTop<'_>) -> Option<Range<NodeId>> {
+        let ForestTop { root, top, ids } = forest_top;
+        let below_root = top.strip_prefix(root).ok()?;
+        let top_id = self.descend(ids.start, below_root)?;
+        let is_inside_the_segment = ids.contains(&top_id) && top_id != ids.start;
+        if !is_inside_the_segment {
+            return None;
+        }
+        let place = self.graft_place(top)?;
+        self.remove_replaced(place, &[]);
+        self.link_graft_root(place.parent, top_id);
+        Some(self.segments.subtree(top_id))
     }
 
     fn graft_place(&mut self, path: &Path) -> Option<GraftPlace> {

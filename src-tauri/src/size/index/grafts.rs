@@ -1,3 +1,4 @@
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -7,14 +8,16 @@ use super::exclusions;
 use super::lanes::{BuiltGraft, Lane, ScanJob, ScanKind, WalkOutcome};
 use super::machine::{FullScan, Machine};
 use super::persist::SegmentRef;
+use super::scan_batch::{BatchedWalk, BuiltForest, FinishedBatch, ForestOutcome};
+use super::segment::BuiltSegment;
 use super::segment::MappedSegment;
-use super::tree::Graft;
+use super::tree::{FolderSizeTree, Forest, Graft};
 use crate::size::manual::ManualSizeError;
 
 pub(super) const REREADS_PER_WALK: usize = 1_024;
 
 pub(super) struct WalkLog {
-    root: PathBuf,
+    roots: Vec<PathBuf>,
     rereads: Vec<PathBuf>,
     overflowed: bool,
 }
@@ -22,14 +25,17 @@ pub(super) struct WalkLog {
 impl WalkLog {
     fn started(root: PathBuf) -> Self {
         Self {
-            root,
+            roots: vec![root],
             rereads: Vec::new(),
             overflowed: false,
         }
     }
 
     fn note(&mut self, dir: &Path) {
-        let is_under_the_walk = exclusions::is_within(dir, &self.root);
+        let is_under_the_walk = self
+            .roots
+            .iter()
+            .any(|root| exclusions::is_within(dir, root));
         if self.overflowed || !is_under_the_walk {
             return;
         }
@@ -67,6 +73,12 @@ impl WalkLogs {
     }
 }
 
+struct SegmentPlacement<'built> {
+    sequence: u64,
+    built: &'built BuiltSegment,
+    under: &'built Path,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum WalkEnd {
     Indexed,
@@ -87,7 +99,12 @@ fn is_not_found(error: &ManualSizeError) -> bool {
 
 impl Machine {
     pub(super) fn walk_started(&mut self, root: PathBuf, lane: Lane) {
-        *self.walk_logs.of_lane(lane) = Some(WalkLog::started(root));
+        let log = self.walk_logs.of_lane(lane);
+        let Some(batched) = log else {
+            *log = Some(WalkLog::started(root));
+            return;
+        };
+        batched.roots.push(root);
     }
 
     pub(super) fn note_reread(&mut self, dir: &Path) {
@@ -141,18 +158,37 @@ impl Machine {
             built,
             kept,
         } = graft;
-        let attached = MappedSegment::open(&built.paths).and_then(|segment| {
-            self.attach_graft(Graft {
+        let placement = SegmentPlacement {
+            sequence,
+            built: &built,
+            under: root,
+        };
+        self.place_segment(placement, |tree, segment| {
+            tree.install_graft(Graft {
                 path: root,
-                segment: Arc::new(segment),
+                segment,
                 kept: &kept,
             })
-        });
+        })
+    }
+
+    fn place_segment(
+        &mut self,
+        placement: SegmentPlacement<'_>,
+        attach: impl FnOnce(&mut FolderSizeTree, Arc<MappedSegment>) -> Option<Range<u32>>,
+    ) -> bool {
+        let SegmentPlacement {
+            sequence,
+            built,
+            under,
+        } = placement;
+        let attached = MappedSegment::open(&built.paths)
+            .and_then(|segment| self.attach_mapped(Arc::new(segment), attach));
         let Some(token) = attached else {
             self.shared.sequences().release(sequence);
             log::warn!(
-                "size index: the walk of {} could not be grafted",
-                root.display()
+                "size index: a walk under {} could not be grafted",
+                under.display()
             );
             discard_segment(&built.paths);
             return false;
@@ -164,16 +200,20 @@ impl Machine {
         log::info!(
             "size index: grafted {} folders under {}",
             built.node_count,
-            root.display()
+            under.display()
         );
         true
     }
 
-    fn attach_graft(&self, graft: Graft<'_>) -> Option<u64> {
-        let token = graft.segment.token();
-        let file_names = graft.segment.shared_file_names();
+    fn attach_mapped(
+        &self,
+        segment: Arc<MappedSegment>,
+        attach: impl FnOnce(&mut FolderSizeTree, Arc<MappedSegment>) -> Option<Range<u32>>,
+    ) -> Option<u64> {
+        let token = segment.token();
+        let file_names = segment.shared_file_names();
         let mut view = self.shared.view_mut();
-        let ids = view.tree.install_graft(graft)?;
+        let ids = attach(&mut view.tree, segment)?;
         if view.keeps_file_names {
             view.names.attach_segment(ids, file_names);
         }
@@ -181,10 +221,15 @@ impl Machine {
         Some(token)
     }
 
+    fn requeue_walks(&mut self, roots: Vec<PathBuf>) {
+        for root in roots {
+            self.queue_background(root);
+        }
+    }
+
     fn replay_rereads(&mut self, log: WalkLog) {
         if log.overflowed {
-            self.queue_background(log.root);
-            return;
+            return self.requeue_walks(log.roots);
         }
         for dir in log.rereads {
             self.reread(&dir);
@@ -254,5 +299,65 @@ impl Machine {
         if is_done {
             self.finish_full_scan();
         }
+    }
+}
+
+impl Machine {
+    pub(super) fn scan_batch_done(&mut self, finished: FinishedBatch) {
+        let FinishedBatch { forest, walks } = finished;
+        let log = self
+            .walk_logs
+            .of_lane(Lane::Background { full: true })
+            .take();
+        let installed = self.install_forest_outcome(forest);
+        for walk in walks {
+            self.settle_batched_walk(walk, installed);
+        }
+        if let Some(log) = log {
+            self.replay_rereads(log);
+        }
+        self.finish_full_scan_if_done();
+    }
+
+    fn install_forest_outcome(&mut self, forest: ForestOutcome) -> bool {
+        match forest {
+            ForestOutcome::Built(built) => self.install_forest(built),
+            ForestOutcome::Failed => false,
+        }
+    }
+
+    fn settle_batched_walk(&mut self, walk: BatchedWalk, installed: bool) {
+        let BatchedWalk { job, outcome } = walk;
+        self.background_inflight = self.background_inflight.saturating_sub(1);
+        if let Some(full) = &mut self.full {
+            full.remaining = full.remaining.saturating_sub(1);
+        }
+        let walk_was_lost = !installed && matches!(outcome, WalkOutcome::Walked);
+        if walk_was_lost {
+            self.queue_background(job.root);
+            return;
+        }
+        self.settle_walk(&job.root, outcome);
+    }
+
+    fn install_forest(&mut self, forest: BuiltForest) -> bool {
+        let BuiltForest {
+            sequence,
+            built,
+            root,
+            tops,
+        } = forest;
+        let placement = SegmentPlacement {
+            sequence,
+            built: &built,
+            under: &root,
+        };
+        self.place_segment(placement, |tree, segment| {
+            tree.install_forest(Forest {
+                root: &root,
+                tops: &tops,
+                segment,
+            })
+        })
     }
 }

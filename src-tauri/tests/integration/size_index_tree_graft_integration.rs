@@ -6,7 +6,7 @@ use file_explorer_lib::size::index::segment::{
     GraftTarget, MappedSegment, NodeFlags, SegmentBuilder, SegmentEntry, SegmentTarget,
     SpillOptions, WalkSpill, RUN_BYTES,
 };
-use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree, Graft};
+use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree, Forest, Graft};
 use tempfile::{tempdir, TempDir};
 
 use crate::common::segment::{
@@ -334,4 +334,88 @@ fn changes_inside_a_graft_reach_every_ancestor_above_it() {
 
     assert_eq!(fixture.total("a"), Some(20 + 200 + 2_500));
     assert_eq!(fixture.total(""), Some(before + 500));
+}
+
+impl Fixture {
+    fn forest_segment(&self, records: &[Walked]) -> Arc<MappedSegment> {
+        let directory = self.directory.path().join("forest");
+        let mut spill = WalkSpill::create(SpillOptions {
+            runs_path: directory.join(GRAFT_SPILL_FILE),
+            root: self.root.clone(),
+            run_bytes: RUN_BYTES,
+        });
+        append(&mut spill, &walked(self.root.clone(), 0)).expect("root");
+        for record in records {
+            append(&mut spill, record).expect("append");
+        }
+        let built = spill
+            .build(GraftTarget {
+                segment: SegmentTarget {
+                    paths: paths_in(&directory),
+                    token: GRAFT_TOKEN,
+                },
+                root_name: self.root.to_string_lossy().into_owned(),
+            })
+            .expect("build");
+        Arc::new(MappedSegment::open(&built.paths).expect("opens"))
+    }
+}
+
+#[test]
+fn a_forest_grafts_each_top_under_its_own_parent_and_buries_the_rest() {
+    let mut fixture = fixture();
+    let records = vec![
+        Walked {
+            subdirs: strings(&["n"]),
+            ..walked(fixture.path("a/b"), 300)
+        },
+        walked(fixture.path("a/b/n"), 7),
+        walked(fixture.path("s"), 55),
+    ];
+    let segment = fixture.forest_segment(&records);
+    let tops = vec![
+        fixture.path("a/b"),
+        fixture.path("missing"),
+        fixture.path("s"),
+    ];
+    let folder_a = fixture.mapped.lookup(&fixture.path("a"));
+    let nodes_before = fixture.mapped.node_count();
+
+    let ids = fixture
+        .mapped
+        .install_forest(Forest {
+            root: &fixture.root,
+            tops: &tops,
+            segment,
+        })
+        .expect("installed");
+
+    assert_eq!(fixture.total("a/b"), Some(307));
+    assert_eq!(fixture.total("s"), Some(55));
+    assert_eq!(fixture.total("a"), Some(10 + 307 + 440));
+    assert_eq!(fixture.total(""), Some(1 + 757 + 55));
+    assert_eq!(fixture.mapped.lookup(&fixture.path("a")), folder_a);
+    assert_eq!(fixture.total("missing"), None);
+    assert_eq!(fixture.mapped.node_count(), nodes_before + 1);
+    assert!(fixture.mapped.unscanned_tops().is_empty());
+    let removed = fixture.mapped.take_removed_ranges();
+    assert!(
+        removed.iter().any(|dead| dead.start == ids.start),
+        "the synthetic root is buried"
+    );
+}
+
+#[test]
+fn a_forest_outside_every_root_is_refused() {
+    let mut fixture = fixture();
+    let segment = fixture.forest_segment(&[walked(fixture.path("s"), 1)]);
+    let elsewhere = PathBuf::from("/elsewhere");
+    let tops = vec![elsewhere.join("s")];
+    let refused = fixture.mapped.install_forest(Forest {
+        root: &elsewhere,
+        tops: &tops,
+        segment,
+    });
+    assert!(refused.is_none());
+    assert_eq!(fixture.total("s"), Some(5));
 }

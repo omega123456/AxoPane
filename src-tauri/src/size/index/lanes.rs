@@ -20,6 +20,7 @@ use crate::size::fast_walk::{self, DirRecord, Qos, WalkOptions};
 use crate::size::manual::ManualSizeError;
 
 use super::machine::Message;
+use super::scan_batch::BatchLane;
 use super::service::{Shared, SizeEmitter, WalkTuning, READMIT_EVERY_DIRS, RECORD_BATCH};
 use super::split::split_root;
 
@@ -67,6 +68,17 @@ impl Lanes {
         self.background_must_wait() && !self.shutdown
     }
 
+    pub(super) fn claim_ready_background(&mut self) -> Option<ClaimedJob<ScanJob>> {
+        if self.shutdown {
+            return None;
+        }
+        self.claim_background()
+    }
+
+    pub(super) fn next_background_is(&self, wanted: impl Fn(&ScanJob) -> bool) -> bool {
+        self.background.front().is_some_and(wanted)
+    }
+
     fn claim_background(&mut self) -> Option<ClaimedJob<ScanJob>> {
         if self.background_must_wait() {
             return None;
@@ -88,9 +100,9 @@ impl Lanes {
     }
 }
 
-struct ClaimedJob<Job> {
-    job: Job,
-    cancel: Arc<AtomicBool>,
+pub(super) struct ClaimedJob<Job> {
+    pub(super) job: Job,
+    pub(super) cancel: Arc<AtomicBool>,
 }
 
 fn wait_for_job<Job>(
@@ -148,6 +160,15 @@ pub(super) enum WalkOutcome {
     BuildFailed,
 }
 
+impl WalkOutcome {
+    pub(super) fn of_walk(walked: Result<(), ManualSizeError>) -> Self {
+        match walked {
+            Ok(()) => Self::Walked,
+            Err(error) => Self::Failed(error),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct LaneContext<'lane> {
     pub(super) shared: &'lane Shared,
@@ -162,11 +183,33 @@ pub(super) struct LaneWalk<'walk> {
 
 pub(super) fn run_background(shared: &Shared, sender: &Sender<Message>) {
     let context = LaneContext { shared, sender };
-    while let Some(ClaimedJob { job, cancel }) = wait_for_job(shared, Lanes::claim_background) {
+    let mut batches = BatchLane::new(context);
+    while let Some(claimed) = next_background_job(shared, &mut batches) {
+        if batches.takes(&claimed.job) {
+            batches.walk(claimed);
+            shared.lanes().running_background = None;
+            continue;
+        }
+        batches.flush();
+        let ClaimedJob { job, cancel } = claimed;
         let outcome = background_scan(context, &job, &cancel);
         shared.lanes().running_background = None;
         let _ = sender.send(Message::ScanDone { job, outcome });
     }
+}
+
+fn next_background_job(
+    shared: &Shared,
+    batches: &mut BatchLane<'_>,
+) -> Option<ClaimedJob<ScanJob>> {
+    if batches.is_open() {
+        let ready = shared.lanes().claim_ready_background();
+        if ready.is_some() {
+            return ready;
+        }
+        batches.flush();
+    }
+    wait_for_job(shared, Lanes::claim_background)
 }
 
 pub(super) fn run_boosts(shared: &Shared, sender: &Sender<Message>) {
@@ -309,13 +352,13 @@ pub(super) fn narrow_walk(shared: &Shared, root: &Path, plan: &mut WalkPlan) -> 
     true
 }
 
-struct ClaimedSpill {
-    sequence: u64,
-    spill: WalkSpill,
+pub(super) struct ClaimedSpill {
+    pub(super) sequence: u64,
+    pub(super) spill: WalkSpill,
 }
 
 impl ClaimedSpill {
-    fn claim(shared: &Shared, root: &Path) -> Self {
+    pub(super) fn claim(shared: &Shared, root: &Path) -> Self {
         let sequence = shared.sequences().claim();
         Self {
             sequence,
@@ -327,7 +370,7 @@ impl ClaimedSpill {
         }
     }
 
-    fn append(&mut self, record: &DirRecord) -> Result<(), BuildError> {
+    pub(super) fn append(&mut self, record: &DirRecord) -> Result<(), BuildError> {
         let no_file_names = PackedNames::default();
         let file_names = record.file_names.as_ref().unwrap_or(&no_file_names);
         self.spill.append(SpillRecord {
@@ -348,6 +391,36 @@ enum GraftFailure {
     Build(BuildError),
 }
 
+pub(super) struct ProgressReport<'report> {
+    context: LaneContext<'report>,
+    full: bool,
+    unreported_items: u64,
+}
+
+impl<'report> ProgressReport<'report> {
+    pub(super) fn new(context: LaneContext<'report>, full: bool) -> Self {
+        Self {
+            context,
+            full,
+            unreported_items: 0,
+        }
+    }
+
+    pub(super) fn add(&mut self, items: u64) {
+        self.unreported_items += items;
+        if self.unreported_items >= ITEMS_PER_PROGRESS_REPORT {
+            self.send();
+        }
+    }
+
+    pub(super) fn send(&mut self) {
+        let items = std::mem::take(&mut self.unreported_items);
+        if self.full && items > 0 {
+            let _ = self.context.sender.send(Message::Progress(items));
+        }
+    }
+}
+
 struct RecordSink<'walk> {
     context: LaneContext<'walk>,
     lane_walk: &'walk LaneWalk<'walk>,
@@ -355,7 +428,7 @@ struct RecordSink<'walk> {
     buffered: Vec<DirRecord>,
     spill: Option<ClaimedSpill>,
     spill_failure: Option<BuildError>,
-    unreported_items: u64,
+    progress: ProgressReport<'walk>,
 }
 
 impl<'walk> RecordSink<'walk> {
@@ -367,7 +440,7 @@ impl<'walk> RecordSink<'walk> {
             buffered: Vec::new(),
             spill: None,
             spill_failure: None,
-            unreported_items: 0,
+            progress: ProgressReport::new(context, full),
         }
     }
 
@@ -375,7 +448,7 @@ impl<'walk> RecordSink<'walk> {
         if self.spill_failure.is_some() {
             return;
         }
-        let heap_batch_records = self.context.shared.heap_batch_records;
+        let heap_batch_records = self.context.shared.batching.heap_records;
         let fits_in_heap_batch = self.spill.is_none() && self.buffered.len() < heap_batch_records;
         if fits_in_heap_batch {
             self.buffered.push(record);
@@ -398,26 +471,12 @@ impl<'walk> RecordSink<'walk> {
             claimed.append(&spilled)?;
             spilled_items += 1 + spilled.file_count;
         }
-        self.report_progress(spilled_items);
+        self.progress.add(spilled_items);
         Ok(())
     }
 
-    fn report_progress(&mut self, spilled_items: u64) {
-        self.unreported_items += spilled_items;
-        if self.unreported_items >= ITEMS_PER_PROGRESS_REPORT {
-            self.send_progress();
-        }
-    }
-
-    fn send_progress(&mut self) {
-        let items = std::mem::take(&mut self.unreported_items);
-        if self.full && items > 0 {
-            let _ = self.context.sender.send(Message::Progress(items));
-        }
-    }
-
     fn finish(mut self, walked: Result<(), ManualSizeError>, graft: GraftPlan) -> WalkOutcome {
-        self.send_progress();
+        self.progress.send();
         let Some(claimed) = self.spill.take() else {
             return self.finish_in_the_heap(walked);
         };
@@ -438,10 +497,7 @@ impl<'walk> RecordSink<'walk> {
 
     fn finish_in_the_heap(self, walked: Result<(), ManualSizeError>) -> WalkOutcome {
         send_records(self.context, self.buffered, self.full);
-        match walked {
-            Ok(()) => WalkOutcome::Walked,
-            Err(error) => WalkOutcome::Failed(error),
-        }
+        WalkOutcome::of_walk(walked)
     }
 
     fn spilled_walk(&mut self, walked: Result<(), ManualSizeError>) -> Result<(), GraftFailure> {

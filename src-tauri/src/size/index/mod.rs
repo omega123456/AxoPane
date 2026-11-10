@@ -19,6 +19,8 @@ mod machine;
 #[cfg(target_os = "macos")]
 mod privacy;
 #[cfg(target_os = "macos")]
+mod scan_batch;
+#[cfg(target_os = "macos")]
 mod service;
 #[cfg(target_os = "macos")]
 mod snapshot;
@@ -43,7 +45,8 @@ pub use service::MacIndexSetup;
 #[cfg(target_os = "macos")]
 pub use service::{
     names_path_beside, Clock, FolderSizeIndex, IndexOptions, SizeEmitter, StatusEmitter,
-    TreeUnavailable, HEAP_BATCH_RECORDS, READMIT_EVERY_DIRS, SNAPSHOT_FILE,
+    TreeUnavailable, WalkBatching, FOREST_BATCH_RECORDS, HEAP_BATCH_RECORDS, READMIT_EVERY_DIRS,
+    SNAPSHOT_FILE,
 };
 
 pub struct IndexRead<'view> {

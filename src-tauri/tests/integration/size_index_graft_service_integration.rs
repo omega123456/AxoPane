@@ -3,7 +3,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
-use file_explorer_lib::size::index::persist::ChangeFlags;
+use file_explorer_lib::size::index::names::OVERLAY_THRESHOLD_FOLDERS;
+use file_explorer_lib::size::index::persist::{self, ChangeFlags};
 use file_explorer_lib::size::index::platform::{PowerSignal, RawEvent};
 use file_explorer_lib::size::index::HEAP_BATCH_RECORDS;
 use file_explorer_lib::size::{IndexState, RequestMode, SizeStateKind};
@@ -26,7 +27,7 @@ fn deep_harness() -> Harness {
     fs::create_dir_all(index.path("a/b/c/d")).unwrap();
     fs::write(index.path("a/b/c/c.bin"), vec![0; 20]).unwrap();
     fs::write(index.path("a/b/c/d/d.bin"), vec![0; 40]).unwrap();
-    index.heap_batch_records = SPILL_EVERY_SECOND_FOLDER;
+    index.batching.heap_records = SPILL_EVERY_SECOND_FOLDER;
     index
 }
 
@@ -188,7 +189,7 @@ fn a_graft_that_cannot_be_written_reports_an_error_and_keeps_the_index() {
 #[test]
 fn a_quit_mid_scan_resumes_only_the_unscanned_subtrees() {
     let mut index = deep_harness();
-    index.heap_batch_records = HEAP_BATCH_RECORDS;
+    index.batching.heap_records = HEAP_BATCH_RECORDS;
     index.platform.set_event_id(EVENT_ID);
     index.blocker.block(&index.path("a/b/c"));
     index.start();
@@ -263,4 +264,65 @@ fn auto_size(index: &Harness, relative: &str) -> (SizeStateKind, Option<u64>) {
     let key = index.key(relative);
     let update = terminal(&index.request(&[relative], RequestMode::Auto), &key);
     (update.state, update.size_bytes)
+}
+
+#[test]
+fn a_full_scan_batch_that_cannot_be_written_is_walked_again() {
+    let mut index = deep_harness();
+    index.batching.heap_records = HEAP_BATCH_RECORDS;
+    let cache = cache_directory(&index);
+    fs::create_dir_all(&cache).unwrap();
+    set_mode(&cache, READ_ONLY);
+    index.start();
+    let scanned = || index.state() == IndexState::UpToDate && indexing_runs(&index) == 1;
+    wait_until("the scan finished", scanned);
+    set_mode(&cache, WRITABLE);
+
+    assert!(
+        times_opened(&index, "a/b/c") >= 2,
+        "the subtree is walked again"
+    );
+    assert_eq!(indexed_names(&index, "a/b/c/d"), owned(&["d.bin"]));
+    let (state, bytes) = auto_size(&index, "a");
+    assert_eq!(state, SizeStateKind::Ready);
+    assert_eq!(bytes, Some(fresh_total(&index.path("a"))));
+}
+
+const ONE_FOLDER_PER_FOREST: u64 = 1;
+
+#[test]
+fn a_full_scan_flushes_a_forest_whenever_the_batch_is_full() {
+    let mut index = deep_harness();
+    index.batching.forest_records = ONE_FOLDER_PER_FOREST;
+    fs::create_dir_all(index.path("s/t/u")).unwrap();
+    fs::write(index.path("s/t/u/u.bin"), vec![0; 9]).unwrap();
+    scan_and_save(&mut index);
+
+    assert_eq!(indexed_names(&index, "a/b/c/d"), owned(&["d.bin"]));
+    assert_eq!(indexed_names(&index, "s/t/u"), owned(&["u.bin"]));
+    for relative in ["a", "s"] {
+        let (state, bytes) = auto_size(&index, relative);
+        assert_eq!(state, SizeStateKind::Ready, "{relative}");
+        assert_eq!(bytes, Some(fresh_total(&index.path(relative))), "{relative}");
+    }
+}
+
+#[test]
+fn a_full_overlay_is_compacted_while_the_scan_is_still_running() {
+    let mut index = deep_harness();
+    for number in 0..=OVERLAY_THRESHOLD_FOLDERS {
+        fs::create_dir_all(index.path(&format!("many/d{number}"))).unwrap();
+    }
+    index.blocker.block(&index.path("a/b/c"));
+    index.start();
+    wait_until("the scan reaches the subtree c", || index.opened("a/b/c"));
+
+    wait_until("a compaction saved a base mid-scan", || {
+        persist::load(&index.snapshot).is_some_and(|snapshot| {
+            snapshot.meta.full_scan_running && !snapshot.segments.is_empty()
+        })
+    });
+    index.blocker.release(&index.path("a/b/c"));
+    index.wait_state(IndexState::UpToDate);
+    assert_eq!(indexed_names(&index, "a/b/c/d"), owned(&["d.bin"]));
 }

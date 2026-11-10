@@ -34,6 +34,22 @@ pub type Clock = Arc<dyn Fn() -> SystemTime + Send + Sync>;
 pub const SNAPSHOT_FILE: &str = "folder-size-index.bin";
 pub const READMIT_EVERY_DIRS: u64 = 1_000;
 pub const HEAP_BATCH_RECORDS: usize = 4_096;
+pub const FOREST_BATCH_RECORDS: u64 = 256 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WalkBatching {
+    pub heap_records: usize,
+    pub forest_records: u64,
+}
+
+impl Default for WalkBatching {
+    fn default() -> Self {
+        Self {
+            heap_records: HEAP_BATCH_RECORDS,
+            forest_records: FOREST_BATCH_RECORDS,
+        }
+    }
+}
 pub(super) const RECORD_BATCH: usize = 256;
 pub(super) const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
 pub(super) const WEEK: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -86,7 +102,7 @@ pub struct IndexOptions {
     pub user_exclusions: Vec<PathBuf>,
     pub home: Option<PathBuf>,
     pub snapshot_path: PathBuf,
-    pub heap_batch_records: usize,
+    pub batching: WalkBatching,
     pub platform: Arc<dyn IndexPlatform>,
     pub clock: Clock,
     pub coordinator: Arc<ResourceCoordinator>,
@@ -144,7 +160,7 @@ impl IndexOptions {
             user_exclusions,
             home,
             snapshot_path: cache_dir.join(SNAPSHOT_FILE),
-            heap_batch_records: HEAP_BATCH_RECORDS,
+            batching: WalkBatching::default(),
             platform: Arc::new(platform::MacPlatform),
             clock: Arc::new(SystemTime::now),
             coordinator,
@@ -231,7 +247,7 @@ pub(super) struct Shared {
     pub(super) exclusion_rules: ExclusionRules,
     pub(super) coordinator: Arc<ResourceCoordinator>,
     pub(super) collect_file_names: bool,
-    pub(super) heap_batch_records: usize,
+    pub(super) batching: WalkBatching,
     pub(super) segment_directory: PathBuf,
     pub(super) sequences: Mutex<SegmentSequences>,
     pub(super) booted: AtomicBool,
@@ -540,7 +556,7 @@ impl Shared {
             },
             coordinator: Arc::clone(&options.coordinator),
             collect_file_names: options.collect_file_names,
-            heap_batch_records: options.heap_batch_records,
+            batching: options.batching,
             segment_directory: segment_directory_of(&options.snapshot_path),
             sequences: Mutex::new(SegmentSequences::default()),
             booted: AtomicBool::new(false),

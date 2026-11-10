@@ -22,7 +22,7 @@ use file_explorer_lib::size::index::platform::{
     DATA_VOLUME_PREFIX,
 };
 use file_explorer_lib::size::index::{
-    IndexOptions, LaneSnapshot, TreeUnavailable, HEAP_BATCH_RECORDS, SNAPSHOT_FILE,
+    IndexOptions, LaneSnapshot, TreeUnavailable, WalkBatching, SNAPSHOT_FILE,
 };
 use file_explorer_lib::size::{
     FolderSizeIndexStatus, IndexBackend, IndexState, NaReason, PaneSubscriptions, PauseReason,
@@ -102,7 +102,7 @@ pub(crate) struct Harness {
     pub(crate) user_exclusions: Vec<PathBuf>,
     pub(crate) home: Option<PathBuf>,
     pub(crate) collect_file_names: bool,
-    pub(crate) heap_batch_records: usize,
+    pub(crate) batching: WalkBatching,
     pub(crate) service: Option<SizeService>,
 }
 
@@ -141,7 +141,7 @@ impl Harness {
             user_exclusions: Vec::new(),
             home: None,
             collect_file_names: true,
-            heap_batch_records: HEAP_BATCH_RECORDS,
+            batching: WalkBatching::default(),
             service: None,
         }
     }
@@ -161,7 +161,7 @@ impl Harness {
             user_exclusions: self.user_exclusions.clone(),
             home: self.home.clone(),
             snapshot_path: self.snapshot.clone(),
-            heap_batch_records: self.heap_batch_records,
+            batching: self.batching,
             platform: self.platform.clone(),
             clock: Arc::new(move || *now.lock().unwrap()),
             coordinator: Arc::new(ResourceCoordinator::new()),

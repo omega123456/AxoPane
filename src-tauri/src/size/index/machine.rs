@@ -21,6 +21,7 @@ use crate::size::manual::ManualSizeError;
 use crate::size::{SizeRequest, SizeSource, SizeStateKind, SizeUpdate};
 
 use super::lanes::{BoostJob, Lane, ScanJob, ScanKind, WalkOutcome};
+use super::scan_batch::FinishedBatch;
 use super::service::{
     unix_secs, unknown, BoostRequest, Clock, IndexOptions, Shared, SizeEmitter, StatusEmitter,
     View, WalkTuning,
@@ -62,6 +63,7 @@ pub(super) enum Message {
     },
     Progress(u64),
     ScanTops(Vec<PathBuf>),
+    ScanBatchDone(FinishedBatch),
     ScanDone {
         job: ScanJob,
         outcome: WalkOutcome,
@@ -264,7 +266,7 @@ impl Machine {
 
     fn can_compact(&self) -> bool {
         let is_live = self.stream.is_some() && !matches!(self.phase, Phase::Booting);
-        is_live && self.full.is_none() && !self.compactor.is_running()
+        is_live && !self.compactor.is_running()
     }
 
     fn compact_if_overlay_or_segments_are_full(&mut self) {
@@ -578,6 +580,7 @@ impl Machine {
             Message::Records { records, full } => self.records(records, full),
             Message::WalkStarted { root, lane } => self.walk_started(root, lane),
             Message::Progress(items) => self.count_scanned(items),
+            Message::ScanBatchDone(finished) => self.scan_batch_done(finished),
             Message::ScanTops(tops) => {
                 self.queue_scan_tops(tops);
             }
