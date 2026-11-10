@@ -97,6 +97,7 @@ pub mod search_path_style_integration;
 pub mod search_query_parse_integration;
 pub mod search_rank_integration;
 pub mod search_results_integration;
+pub mod search_segment_scan_integration;
 pub mod search_service_integration;
 pub mod search_tree_scan_integration;
 pub mod size_everything_run_query_integration;
@@ -119,6 +120,7 @@ pub mod size_index_service_integration;
 #[cfg(target_os = "macos")]
 pub mod size_index_storage_integration;
 pub mod size_index_tree_integration;
+pub mod size_index_tree_segment_integration;
 pub mod size_manual_integration;
 pub mod size_scheduler_integration;
 pub mod thumbnail_cache_integration;

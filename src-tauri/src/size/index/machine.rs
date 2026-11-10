@@ -364,7 +364,7 @@ impl Machine {
             {
                 log::info!(
                     "size index: resuming from saved snapshot ({} folders, event {})",
-                    snapshot.tree.slot_len(),
+                    snapshot.tree.node_count(),
                     snapshot.meta.event_id.min(names_event_id)
                 );
                 Some(self.resume_from(Resume {
@@ -429,9 +429,11 @@ impl Machine {
     }
 
     fn open_names_pair(&self, snapshot: &Snapshot) -> Option<NamesHeader> {
+        let imported_slots = snapshot.tree.heap_ids();
         let expected = PairExpectation {
             pair_token: snapshot.meta.pair_token,
-            folder_count: snapshot.tree.slot_len() as u32,
+            first_slot: imported_slots.start,
+            folder_count: imported_slots.len() as u32,
         };
         if expected.pair_token == persist::NO_PAIR {
             return None;
@@ -887,11 +889,15 @@ impl View {
 
     fn tombstone_removed(&mut self) {
         let removed_slots = self.tree.take_removed_slots();
+        let removed_ranges = self.tree.take_removed_ranges();
         if !self.keeps_file_names {
             return;
         }
         for slot in removed_slots {
             self.names.tombstone(slot);
+        }
+        for slots in removed_ranges {
+            self.names.tombstone_range(slots);
         }
     }
 }

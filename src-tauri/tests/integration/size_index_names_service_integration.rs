@@ -20,6 +20,7 @@ use crate::size_index_service_integration::{wait_until, Harness};
 const POLL_INTERVAL: Duration = Duration::from_millis(2);
 const POLL_LIMIT: Duration = Duration::from_secs(1);
 const NAMES_HEADER_BYTES: u64 = 48;
+const FIRST_SLOT: u32 = 0;
 const BARRIER_PANE: &str = "names-barrier";
 const BARRIER_FOLDER: &str = "s";
 
@@ -563,6 +564,7 @@ fn names_saved_on_disk(index: &Harness) -> Vec<String> {
     let mut store = FileNameStore::new(names_file(index));
     let expected = PairExpectation {
         pair_token: header.pair_token,
+        first_slot: FIRST_SLOT,
         folder_count: header.folder_count,
     };
     store.open_pair(expected).expect("saved pair");

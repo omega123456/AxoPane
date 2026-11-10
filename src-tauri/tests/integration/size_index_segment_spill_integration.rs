@@ -1,15 +1,17 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use file_explorer_lib::size::index::names::PackedNames;
 use file_explorer_lib::size::index::segment::{
     BuildError, GraftTarget, MappedSegment, SegmentTarget, SpillOptions, SpillRecord, WalkSpill,
     RUN_BYTES,
 };
-use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
+use file_explorer_lib::size::index::tree::FolderSizeTree;
 use tempfile::{tempdir, TempDir};
 
-use crate::common::segment::{child_names, descend, file_names_of, files_in, names_to, paths_in};
+use crate::common::segment::{
+    append, child_names, descend, file_names_of, files_in, heap_of, listing, names_to, paths_in,
+    strings, walked, Walked,
+};
 
 const TOKEN: u64 = 9;
 const ROOT_ID: u32 = 0;
@@ -17,29 +19,6 @@ const TINY_RUN_BYTES: usize = 512;
 const ONE_RECORD_PER_RUN: usize = 1;
 const TOP_FOLDERS: [&str; 6] = ["a", "a b", "a.b", "B", "é", "zz"];
 const BULK_FOLDERS: usize = 300;
-
-#[derive(Clone)]
-struct Walked {
-    path: PathBuf,
-    direct: u64,
-    denied: bool,
-    subdirs: Vec<String>,
-    files: Vec<String>,
-}
-
-fn walked(path: PathBuf, direct: u64) -> Walked {
-    Walked {
-        path,
-        direct,
-        denied: false,
-        subdirs: Vec::new(),
-        files: Vec::new(),
-    }
-}
-
-fn strings(names: &[&str]) -> Vec<String> {
-    names.iter().map(|name| name.to_string()).collect()
-}
 
 fn walked_top_folder(root: &Path, position: usize) -> Vec<Walked> {
     let top = root.join(TOP_FOLDERS[position]);
@@ -91,23 +70,6 @@ fn walked_tree(root: &Path) -> Vec<Walked> {
     }
     records.extend(walked_bulk(root));
     records
-}
-
-fn listing(record: &Walked) -> DirectoryListing<'_, String> {
-    DirectoryListing {
-        direct_bytes: record.direct,
-        subdirs: &record.subdirs,
-        denied: record.denied,
-    }
-}
-
-fn heap_of(root: &Path, records: &[Walked]) -> FolderSizeTree {
-    let mut tree = FolderSizeTree::default();
-    assert!(tree.add_root(root));
-    for record in records {
-        assert!(tree.merge_record(&record.path, listing(record)));
-    }
-    tree
 }
 
 struct Fixture {
@@ -166,15 +128,6 @@ impl Fixture {
         let names: Vec<&str> = names.iter().map(String::as_str).collect();
         descend(segment, ROOT_ID, &names).expect("path is in the segment")
     }
-}
-
-fn append(spill: &mut WalkSpill, record: &Walked) -> Result<(), BuildError> {
-    let files = PackedNames::from_names(&record.files);
-    spill.append(SpillRecord {
-        path: &record.path,
-        listing: listing(record),
-        file_names: files.as_bytes(),
-    })
 }
 
 fn every_folder(records: &[Walked]) -> BTreeSet<PathBuf> {

@@ -2,6 +2,7 @@ use std::cmp::Ordering as NameOrder;
 use std::fs::File;
 use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use memmap2::Mmap;
 
@@ -18,7 +19,7 @@ const BITS_PER_WORD: usize = u64::BITS as usize;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SegmentCorrupt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SegmentRow {
     pub parent: Option<u32>,
     pub direct: u64,
@@ -30,7 +31,7 @@ pub struct SegmentRow {
     pub subtree_end: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ChildIds<'segment> {
     bytes: &'segment [u8],
 }
@@ -49,7 +50,7 @@ impl<'segment> ChildIds<'segment> {
         le_u32(self.bytes.get(start..start.checked_add(CHILD_ID_BYTES)?)?)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = u32> + 'segment {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = u32> + 'segment {
         self.bytes.chunks_exact(CHILD_ID_BYTES).filter_map(le_u32)
     }
 }
@@ -87,7 +88,7 @@ pub struct MappedSegment {
     header: TreeHeader,
     layout: Layout,
     verified: VerifiedChunks,
-    names: MappedNames,
+    names: Arc<MappedNames>,
 }
 
 impl MappedSegment {
@@ -108,7 +109,7 @@ impl MappedSegment {
             map,
             header,
             layout,
-            names,
+            names: Arc::new(names),
         })
     }
 
@@ -122,6 +123,10 @@ impl MappedSegment {
 
     pub fn file_names(&self) -> &MappedNames {
         &self.names
+    }
+
+    pub fn shared_file_names(&self) -> Arc<MappedNames> {
+        Arc::clone(&self.names)
     }
 
     pub fn top_level(&self) -> Result<Vec<u32>, SegmentCorrupt> {

@@ -17,6 +17,7 @@ use tempfile::{tempdir, TempDir};
 
 const SMALL_BLOCK_TARGET: usize = 64;
 const HEADER_BYTES: u64 = 48;
+const FIRST_SLOT: u32 = 0;
 
 fn packed(names: &[&str]) -> PackedNames {
     PackedNames::from_names(names.iter().map(|name| name.as_bytes()))
@@ -397,17 +398,20 @@ fn open_pair_accepts_only_a_matching_token_and_folder_count() {
     let mut store = fixture.store();
     let mismatched_token = PairExpectation {
         pair_token: 2,
+        first_slot: FIRST_SLOT,
         folder_count: 3,
     };
     assert_eq!(store.open_pair(mismatched_token), None);
     let mismatched_count = PairExpectation {
         pair_token: 1,
+        first_slot: FIRST_SLOT,
         folder_count: 4,
     };
     assert_eq!(store.open_pair(mismatched_count), None);
     assert!(!store.has_names_file());
     let matching = PairExpectation {
         pair_token: 1,
+        first_slot: FIRST_SLOT,
         folder_count: 3,
     };
     assert_eq!(store.open_pair(matching), Some(header));
@@ -453,6 +457,7 @@ fn a_corrupt_block_flips_availability_and_is_reported_once() {
     let mut store = fixture.store();
     let expected = PairExpectation {
         pair_token: 1,
+        first_slot: FIRST_SLOT,
         folder_count: 4,
     };
     assert!(store.open_pair(expected).is_some(), "the header is intact");
@@ -484,6 +489,7 @@ fn rewrites_that_need_a_corrupt_block_fail_as_unreadable() {
     corrupt_byte_at(&fixture.path, HEADER_BYTES);
     let expected = PairExpectation {
         pair_token: 1,
+        first_slot: FIRST_SLOT,
         folder_count: 4,
     };
 
@@ -640,6 +646,7 @@ fn counting_names_fails_on_a_corrupt_block() {
     let mut store = fixture.store();
     let expected = PairExpectation {
         pair_token: 1,
+        first_slot: FIRST_SLOT,
         folder_count: 4,
     };
     store.open_pair(expected).expect("the header is intact");

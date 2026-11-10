@@ -25,9 +25,9 @@ const CORRUPTION: [u8; 4] = [0xEE; 4];
 
 const FILLER_FOLDERS: usize = 40;
 
-struct Folder {
-    path: String,
-    files: Vec<String>,
+pub(crate) struct Folder {
+    pub(crate) path: String,
+    pub(crate) files: Vec<String>,
 }
 
 fn folder(path: &str, files: &[&str]) -> Folder {
@@ -37,7 +37,7 @@ fn folder(path: &str, files: &[&str]) -> Folder {
     }
 }
 
-fn library() -> Vec<Folder> {
+pub(crate) fn library() -> Vec<Folder> {
     vec![
         folder(
             "/Users/alex/project",
@@ -64,29 +64,29 @@ fn wide_library() -> Vec<Folder> {
     folders
 }
 
-const WITH_HIDDEN: SearchOptions = SearchOptions {
+pub(crate) const WITH_HIDDEN: SearchOptions = SearchOptions {
     include_hidden: true,
     scope: SearchScope::All,
 };
 
-const FILES: SearchOptions = SearchOptions {
+pub(crate) const FILES: SearchOptions = SearchOptions {
     include_hidden: false,
     scope: SearchScope::Files,
 };
 
-const FOLDERS: SearchOptions = SearchOptions {
+pub(crate) const FOLDERS: SearchOptions = SearchOptions {
     include_hidden: false,
     scope: SearchScope::Folders,
 };
 
-struct Fixture {
+pub(crate) struct Fixture {
     _dir: TempDir,
     names_path: PathBuf,
-    source: Source,
+    pub(crate) source: Source,
 }
 
 impl Fixture {
-    fn new(folders: &[Folder]) -> Self {
+    pub(crate) fn new(folders: &[Folder]) -> Self {
         Self::with_block_target(folders, LARGE_BLOCK_TARGET)
     }
 
@@ -133,7 +133,7 @@ fn slot(tree: &FolderSizeTree, path: &str) -> u32 {
     tree.lookup(Path::new(path)).expect("folder in tree")
 }
 
-fn packed<Name: AsRef<str>>(files: &[Name]) -> PackedNames {
+pub(crate) fn packed<Name: AsRef<str>>(files: &[Name]) -> PackedNames {
     PackedNames::from_names(files.iter().map(|file| file.as_ref().as_bytes()))
 }
 
@@ -147,7 +147,7 @@ fn write_pair(names: &mut FileNameStore, order: Vec<u32>) {
     names.install(written, || Ok(())).expect("installed");
 }
 
-fn ranked(source: &Source, raw: &str, options: &SearchOptions) -> Vec<String> {
+pub(crate) fn ranked(source: &Source, raw: &str, options: &SearchOptions) -> Vec<String> {
     let batch = run(source, raw, options);
     rank_candidates(batch.candidates, &parsed(raw), PathStyle::Posix)
         .into_iter()
@@ -471,6 +471,7 @@ fn a_corrupt_block_falls_back_to_folders_and_marks_results_truncated() {
     let mut names = FileNameStore::new(names_path);
     let expectation = PairExpectation {
         pair_token: PAIR_TOKEN,
+        first_slot: tree.heap_ids().start,
         folder_count,
     };
     assert!(names.open_pair(expectation).is_some());

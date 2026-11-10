@@ -16,11 +16,11 @@ use codec::DecodeScratch;
 use file::{remove_if_present, spill_path, MappedNames, NamesHeader, SpillFile, SpillLocation};
 use writer::{PairCapture, RewriteStats, WrittenNames};
 
+use super::tree::DeadRanges;
+
 pub const NAME_TERMINATOR: u8 = 0;
 pub const OVERLAY_THRESHOLD_BYTES: usize = 4 * 1024 * 1024;
 pub const OVERLAY_THRESHOLD_FOLDERS: usize = 5_000;
-
-const NO_SLOT: u32 = u32::MAX;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PackedNames(Vec<u8>);
@@ -175,6 +175,18 @@ impl Overlay {
         }
     }
 
+    fn remove_range(&mut self, slots: &Range<u32>) {
+        let inside: Vec<u32> = self
+            .entries
+            .keys()
+            .copied()
+            .filter(|slot| slots.contains(slot))
+            .collect();
+        for slot in inside {
+            self.remove(slot);
+        }
+    }
+
     pub(crate) fn get(&self, slot: u32) -> Option<&OverlayEntry> {
         self.entries.get(&slot)
     }
@@ -189,37 +201,30 @@ impl Overlay {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SpillIndex {
-    locations: Vec<SpillLocation>,
+    locations: HashMap<u32, SpillLocation>,
 }
 
 impl SpillIndex {
     pub(crate) fn location(&self, slot: u32) -> Option<SpillLocation> {
-        self.locations
-            .get(slot as usize)
-            .copied()
-            .filter(SpillLocation::is_present)
+        self.locations.get(&slot).copied()
     }
 
     fn set(&mut self, slot: u32, location: SpillLocation) {
-        let index = slot as usize;
-        if index >= self.locations.len() {
-            self.locations.resize(index + 1, SpillLocation::ABSENT);
-        }
-        self.locations[index] = location;
+        self.locations.insert(slot, location);
     }
 
     fn clear(&mut self, slot: u32) {
-        if let Some(location) = self.locations.get_mut(slot as usize) {
-            *location = SpillLocation::ABSENT;
-        }
+        self.locations.remove(&slot);
     }
 
-    fn present(&self) -> impl Iterator<Item = (u32, SpillLocation)> + '_ {
-        self.locations
-            .iter()
-            .enumerate()
-            .filter(|(_, location)| location.is_present())
-            .map(|(slot, location)| (slot as u32, *location))
+    fn clear_range(&mut self, slots: &Range<u32>) {
+        self.locations.retain(|slot, _| !slots.contains(slot));
+    }
+
+    fn slots(&self) -> Vec<u32> {
+        let mut slots: Vec<u32> = self.locations.keys().copied().collect();
+        slots.sort_unstable();
+        slots
     }
 }
 
@@ -232,49 +237,87 @@ pub(crate) struct Spill {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Translation {
     to_slot: Vec<u32>,
-    to_ordinal: Vec<u32>,
+    to_ordinal: HashMap<u32, u32>,
 }
 
 impl Translation {
     fn from_order(order: Vec<u32>) -> Self {
-        let slot_count = order
+        let to_ordinal = order
             .iter()
-            .map(|&slot| slot as usize + 1)
-            .max()
-            .unwrap_or(0);
-        let mut to_ordinal = vec![NO_SLOT; slot_count];
-        for (ordinal, &slot) in order.iter().enumerate() {
-            to_ordinal[slot as usize] = ordinal as u32;
-        }
+            .enumerate()
+            .map(|(ordinal, &slot)| (slot, ordinal as u32))
+            .collect();
         Self {
             to_slot: order,
             to_ordinal,
         }
     }
 
-    fn identity(count: u32) -> Self {
-        Self::from_order((0..count).collect())
+    fn slot_of(&self, ordinal: u32) -> Option<u32> {
+        self.to_slot.get(ordinal as usize).copied()
     }
 
+    fn ordinal_of(&self, slot: u32) -> Option<u32> {
+        self.to_ordinal.get(&slot).copied()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum SlotMap {
+    Listed(Translation),
+    Contiguous(Range<u32>),
+}
+
+impl SlotMap {
     pub(crate) fn slot_of(&self, ordinal: u32) -> Option<u32> {
-        self.to_slot
-            .get(ordinal as usize)
-            .copied()
-            .filter(|&slot| slot != NO_SLOT)
+        match self {
+            Self::Listed(translation) => translation.slot_of(ordinal),
+            Self::Contiguous(slots) => slots
+                .start
+                .checked_add(ordinal)
+                .filter(|slot| slots.contains(slot)),
+        }
     }
 
     pub(crate) fn ordinal_of(&self, slot: u32) -> Option<u32> {
-        self.to_ordinal
-            .get(slot as usize)
-            .copied()
-            .filter(|&ordinal| ordinal != NO_SLOT)
+        match self {
+            Self::Listed(translation) => translation.ordinal_of(slot),
+            Self::Contiguous(slots) => slots.contains(&slot).then(|| slot - slots.start),
+        }
     }
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct MappedState {
     pub(crate) file: Arc<MappedNames>,
-    pub(crate) translation: Translation,
+    pub(crate) translation: SlotMap,
+}
+
+struct PlacedSource<'store> {
+    source: &'store MappedState,
+    first_block: usize,
+}
+
+struct LocatedFolder<'store> {
+    source: &'store MappedState,
+    ordinal: u32,
+    first_block: usize,
+}
+
+impl LocatedFolder<'_> {
+    fn block_in_source(&self) -> usize {
+        let own_ordinal = self.ordinal..self.ordinal + 1;
+        self.source.file.blocks_covering(own_ordinal).start
+    }
+
+    fn block(&self) -> usize {
+        self.first_block + self.block_in_source()
+    }
+}
+
+struct LocatedBlock<'store> {
+    source: &'store MappedState,
+    index_in_source: usize,
 }
 
 #[derive(Debug, Default)]
@@ -310,6 +353,7 @@ impl ReadFailure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PairExpectation {
     pub pair_token: u64,
+    pub first_slot: u32,
     pub folder_count: u32,
 }
 
@@ -324,7 +368,9 @@ pub struct FileNameStore {
     path: PathBuf,
     block_target: usize,
     mapped: Option<MappedState>,
+    segments: Vec<MappedState>,
     overlay: Overlay,
+    dead: DeadRanges,
     spill: Option<Spill>,
     failure: ReadFailure,
     blocks_decompressed: AtomicU64,
@@ -341,7 +387,9 @@ impl FileNameStore {
             path,
             block_target,
             mapped: None,
+            segments: Vec::new(),
             overlay: Overlay::default(),
+            dead: DeadRanges::default(),
             spill: None,
             failure: ReadFailure::default(),
             blocks_decompressed: AtomicU64::new(0),
@@ -358,7 +406,8 @@ impl FileNameStore {
     }
 
     pub fn is_available(&self) -> bool {
-        let has_source = self.mapped.is_some() || self.spill.is_some();
+        let has_mapped_source = self.sources().next().is_some();
+        let has_source = has_mapped_source || self.spill.is_some();
         has_source && !self.failure.is_failed()
     }
 
@@ -403,10 +452,52 @@ impl FileNameStore {
         self.mapped.as_ref()?.translation.slot_of(ordinal)
     }
 
+    fn sources(&self) -> impl Iterator<Item = &MappedState> {
+        self.mapped.iter().chain(&self.segments)
+    }
+
+    fn placed_sources(&self) -> impl Iterator<Item = PlacedSource<'_>> {
+        self.sources().scan(0, |next_block, source| {
+            let first_block = *next_block;
+            *next_block += source.file.block_count();
+            Some(PlacedSource {
+                source,
+                first_block,
+            })
+        })
+    }
+
+    fn locate(&self, slot: u32) -> Option<LocatedFolder<'_>> {
+        self.placed_sources().find_map(|placed| {
+            let ordinal = placed.source.translation.ordinal_of(slot)?;
+            Some(LocatedFolder {
+                source: placed.source,
+                ordinal,
+                first_block: placed.first_block,
+            })
+        })
+    }
+
+    fn locate_block(&self, index: usize) -> Option<LocatedBlock<'_>> {
+        self.placed_sources().find_map(|placed| {
+            let index_in_source = index.checked_sub(placed.first_block)?;
+            let is_in_source = index_in_source < placed.source.file.block_count();
+            is_in_source.then_some(LocatedBlock {
+                source: placed.source,
+                index_in_source,
+            })
+        })
+    }
+
+    pub fn attach_segment(&mut self, slots: Range<u32>, file: Arc<MappedNames>) {
+        self.segments.push(MappedState {
+            file,
+            translation: SlotMap::Contiguous(slots),
+        });
+    }
+
     pub fn block_count(&self) -> usize {
-        self.mapped
-            .as_ref()
-            .map_or(0, |mapped| mapped.file.block_count())
+        self.sources().map(|source| source.file.block_count()).sum()
     }
 
     pub fn blocks_covering(&self, ordinals: Range<u32>) -> Range<usize> {
@@ -418,8 +509,8 @@ impl FileNameStore {
     pub fn blocks_for_slots(&self, slots: &[u32]) -> Vec<usize> {
         let mut blocks: Vec<usize> = slots
             .iter()
-            .filter_map(|&slot| self.ordinal_of(slot))
-            .map(|ordinal| self.blocks_covering(ordinal..ordinal + 1).start)
+            .filter_map(|&slot| self.locate(slot))
+            .map(|folder| folder.block())
             .collect();
         blocks.sort_unstable();
         blocks.dedup();
@@ -431,22 +522,24 @@ impl FileNameStore {
         index: usize,
         scratch: &'read mut NamesScratch,
     ) -> Result<BlockNames<'read>, NamesUnreadable> {
-        let decoded = self.decode_block(index, &mut scratch.decode)?;
+        let block = self.locate_block(index).ok_or(NamesUnreadable)?;
+        let decoded = self.decode_block(&block, &mut scratch.decode)?;
         Ok(BlockNames {
             store: self,
+            slots: &block.source.translation,
             decoded,
         })
     }
 
     fn decode_block<'raw>(
         &self,
-        index: usize,
+        block: &LocatedBlock<'_>,
         scratch: &'raw mut DecodeScratch,
     ) -> Result<DecodedBlock<'raw>, NamesUnreadable> {
-        let stored = self
-            .mapped
-            .as_ref()
-            .and_then(|mapped| mapped.file.block(index))
+        let stored = block
+            .source
+            .file
+            .block(block.index_in_source)
             .ok_or(NamesUnreadable)?;
         self.blocks_decompressed.fetch_add(1, Ordering::Relaxed);
         block::decode(stored, scratch).map_err(|corrupt| self.unreadable(corrupt))
@@ -492,7 +585,7 @@ impl FileNameStore {
         let Some(spill) = &self.spill else {
             return Ok(());
         };
-        let spilled: Vec<u32> = spill.index.present().map(|(slot, _)| slot).collect();
+        let spilled = spill.index.slots();
         let request = SpillRead {
             slots: &spilled,
             scratch,
@@ -527,6 +620,9 @@ impl FileNameStore {
         if let Some(entry) = self.overlay.get(slot) {
             return Ok(Some(PackedNames(entry.packed().to_vec())));
         }
+        if self.dead.contains(slot) {
+            return Ok(Some(PackedNames::default()));
+        }
         let mut scratch = NamesScratch::default();
         if let Some(location) = self.spill_location(slot) {
             return self.spilled_names(location, &mut scratch).map(Some);
@@ -556,17 +652,22 @@ impl FileNameStore {
         slot: u32,
         scratch: &mut NamesScratch,
     ) -> Result<Option<PackedNames>, NamesUnreadable> {
-        let Some(ordinal) = self.ordinal_of(slot) else {
+        let Some(folder) = self.locate(slot) else {
             return Ok(None);
         };
-        let index = self.blocks_covering(ordinal..ordinal + 1).start;
-        let decoded = self.decode_block(index, &mut scratch.decode)?;
-        let packed = decoded.names_of(ordinal).unwrap_or_default();
+        let block = LocatedBlock {
+            source: folder.source,
+            index_in_source: folder.block_in_source(),
+        };
+        let decoded = self.decode_block(&block, &mut scratch.decode)?;
+        let packed = decoded.names_of(folder.ordinal).unwrap_or_default();
         Ok(Some(PackedNames(packed.to_vec())))
     }
 
     fn overrides(&self, slot: u32) -> bool {
-        self.overlay.get(slot).is_some() || self.spill_location(slot).is_some()
+        let has_newer_names =
+            self.overlay.get(slot).is_some() || self.spill_location(slot).is_some();
+        has_newer_names || self.dead.contains(slot)
     }
 
     pub fn take_unreported_failure(&self) -> bool {
@@ -586,6 +687,14 @@ impl FileNameStore {
         if let Some(spill) = &mut self.spill {
             spill.index.clear(slot);
         }
+    }
+
+    pub fn tombstone_range(&mut self, slots: Range<u32>) {
+        self.overlay.remove_range(&slots);
+        if let Some(spill) = &mut self.spill {
+            spill.index.clear_range(&slots);
+        }
+        self.dead.add(slots);
     }
 
     pub fn spill_names(&mut self, slot: u32, names: PackedNames) {
@@ -635,9 +744,10 @@ impl FileNameStore {
         if !(token_matches && count_matches) {
             return None;
         }
+        let first_slot = expected.first_slot;
         self.mapped = Some(MappedState {
             file: Arc::new(file),
-            translation: Translation::identity(header.folder_count),
+            translation: SlotMap::Contiguous(first_slot..first_slot + header.folder_count),
         });
         self.failure.clear();
         Some(header)
@@ -664,10 +774,10 @@ impl FileNameStore {
         written: WrittenNames,
         commit_snapshot: impl FnOnce() -> io::Result<()>,
     ) -> Result<(), InstallError> {
-        let previous_translation = self.mapped.take().map(|state| state.translation);
+        let previous_slots = self.mapped.take().map(|state| state.translation);
         if let Err(error) = fs::rename(&written.temp, &self.path) {
             let _ = remove_if_present(&written.temp);
-            self.mapped = previous_translation.and_then(|translation| self.remapped(translation));
+            self.mapped = previous_slots.and_then(|slots| self.remapped(slots));
             return Err(InstallError::NamesNotReplaced(error));
         }
         let committed = commit_snapshot();
@@ -675,7 +785,7 @@ impl FileNameStore {
         committed.map_err(InstallError::SnapshotNotReplaced)
     }
 
-    fn remapped(&self, translation: Translation) -> Option<MappedState> {
+    fn remapped(&self, translation: SlotMap) -> Option<MappedState> {
         let file = MappedNames::open(&self.path)?;
         Some(MappedState {
             file: Arc::new(file),
@@ -686,7 +796,7 @@ impl FileNameStore {
     fn adopt(&mut self, written: WrittenNames) {
         let WrittenNames { order, stats, .. } = written;
         self.rewrites.absorb(stats);
-        self.mapped = self.remapped(Translation::from_order(order));
+        self.mapped = self.remapped(SlotMap::Listed(Translation::from_order(order)));
         self.overlay = Overlay::default();
         self.close_spill();
         self.failure.clear();
@@ -695,6 +805,7 @@ impl FileNameStore {
 
 pub struct BlockNames<'read> {
     store: &'read FileNameStore,
+    slots: &'read SlotMap,
     decoded: DecodedBlock<'read>,
 }
 
@@ -706,7 +817,7 @@ impl<'read> BlockNames<'read> {
     pub fn folders(&self) -> impl Iterator<Item = FolderNames<'read>> + '_ {
         let first_ordinal = self.decoded.span.first_ordinal;
         self.decoded.entries().filter_map(move |entry| {
-            let slot = self.store.slot_of(first_ordinal + entry.relative_id)?;
+            let slot = self.slots.slot_of(first_ordinal + entry.relative_id)?;
             let shadowed = self.store.overrides(slot);
             (!shadowed).then_some(FolderNames {
                 slot,

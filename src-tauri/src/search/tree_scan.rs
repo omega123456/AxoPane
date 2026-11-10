@@ -12,6 +12,7 @@ use crate::size::index::IndexRead;
 
 pub const SLOTS_PER_READ: usize = 32_768;
 
+const FIRST_ID: u32 = 0;
 const HIDDEN_NAME_PREFIX: char = '.';
 const PATH_SEPARATOR: char = '/';
 
@@ -165,7 +166,7 @@ impl FolderScan<'_, '_> {
         if pass.is_idle() {
             return Ok(sweep.roots);
         }
-        let mut next_start = Some(0);
+        let mut next_start = Some(FIRST_ID);
         while let Some(start) = next_start {
             next_start = self.sweep_chunk(&mut sweep, start)?;
         }
@@ -175,8 +176,8 @@ impl FolderScan<'_, '_> {
     fn sweep_chunk(
         &self,
         sweep: &mut FolderSweep<'_, '_>,
-        start: usize,
-    ) -> Result<Option<usize>, SearchError> {
+        start: u32,
+    ) -> Result<Option<u32>, SearchError> {
         if !self.run.control.proceed()? {
             sweep.pool.mark_truncated();
             return Ok(None);
@@ -188,8 +189,7 @@ impl FolderScan<'_, '_> {
         let read = self.read_slot_chunk(sweep.pass, chunk)?;
         sweep.pool.extend(read.hits);
         sweep.roots.extend(read.roots);
-        let reached_end = read.end >= read.slot_count;
-        Ok((!reached_end).then_some(read.end))
+        Ok(read.next_start)
     }
 
     fn read_slot_chunk<'query>(
@@ -232,15 +232,14 @@ struct FolderSweep<'query, 'pool> {
 
 #[derive(Clone, Copy)]
 struct SlotChunk {
-    start: usize,
+    start: u32,
     len: usize,
 }
 
 struct SlotChunkRead<'query> {
     pass: FolderPass<'query>,
     chunk: SlotChunk,
-    end: usize,
-    slot_count: usize,
+    next_start: Option<u32>,
     hits: Vec<TieredCandidate>,
     roots: Vec<u32>,
 }
@@ -250,18 +249,20 @@ impl<'query> SlotChunkRead<'query> {
         Self {
             pass,
             chunk,
-            end: chunk.start,
-            slot_count: 0,
+            next_start: None,
             hits: Vec::new(),
             roots: Vec::new(),
         }
     }
 
     fn collect(&mut self, visible: &VisibleTree<'_>) {
-        self.slot_count = visible.tree.slot_len();
-        self.end = (self.chunk.start + self.chunk.len).min(self.slot_count);
-        for id in self.chunk.start..self.end {
-            self.inspect(visible, id as u32);
+        let Some(ids) = visible.tree.ids_from(self.chunk.start, self.chunk.len) else {
+            return;
+        };
+        let has_more = visible.tree.ids_from(ids.end, self.chunk.len).is_some();
+        self.next_start = has_more.then_some(ids.end);
+        for id in ids {
+            self.inspect(visible, id);
         }
     }
 
@@ -338,8 +339,8 @@ impl<'tree> VisibleTree<'tree> {
 fn push_children(visible: &VisibleTree<'_>, parents: &[u32], pool: &mut CandidatePool) {
     let child_paths = parents
         .iter()
-        .flat_map(|&parent| visible.tree.child_ids(parent))
-        .filter_map(|&child| visible.path_of(child));
+        .flat_map(|&parent| visible.tree.child_ids(parent).iter())
+        .filter_map(|child| visible.path_of(child));
     for path in child_paths {
         let has_room = pool.push_listed(folder(path));
         if !has_room {

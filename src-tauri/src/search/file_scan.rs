@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::iter;
 use std::ops::ControlFlow;
 
@@ -157,13 +158,14 @@ fn spilled_slots(view: &IndexRead<'_>, members: Option<&SlotSet>) -> Vec<u32> {
         return Vec::new();
     }
     let Some(members) = members else {
-        return (0..view.tree.slot_len() as u32).collect();
+        return view.tree.id_ranges().into_iter().flatten().collect();
     };
     members.slots.clone()
 }
 
+#[derive(Default)]
 struct SlotSet {
-    present: Vec<bool>,
+    present: HashSet<u32>,
     slots: Vec<u32>,
 }
 
@@ -176,21 +178,18 @@ impl SlotSet {
         }
     }
 
-    fn empty(tree: &FolderSizeTree) -> Self {
-        Self {
-            present: vec![false; tree.slot_len()],
-            slots: Vec::new(),
-        }
-    }
-
     fn of(tree: &FolderSizeTree, folders: &[u32]) -> Self {
-        let mut set = Self::empty(tree);
-        set.extend(folders.iter().copied());
+        let mut set = Self::default();
+        let live_folders = folders
+            .iter()
+            .copied()
+            .filter(|&folder| tree.live_node(folder).is_some());
+        set.extend(live_folders);
         set
     }
 
     fn below(tree: &FolderSizeTree, roots: &[u32]) -> Self {
-        let mut set = Self::empty(tree);
+        let mut set = Self::default();
         for &root in roots {
             set.extend_below(tree, root);
         }
@@ -211,18 +210,14 @@ impl SlotSet {
     }
 
     fn insert(&mut self, slot: u32) {
-        let Some(present) = self.present.get_mut(slot as usize) else {
-            return;
-        };
-        if *present {
-            return;
+        let is_new = self.present.insert(slot);
+        if is_new {
+            self.slots.push(slot);
         }
-        *present = true;
-        self.slots.push(slot);
     }
 
     fn contains(&self, slot: u32) -> bool {
-        self.present.get(slot as usize).copied().unwrap_or(false)
+        self.present.contains(&slot)
     }
 }
 
