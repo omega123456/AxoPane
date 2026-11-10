@@ -185,8 +185,6 @@ fn root_folder() -> CraftedFolder {
     }
 }
 
-/// A checksummed manifest holding only what a test sets, so each test can
-/// isolate one defect at a time.
 struct Crafted {
     version: u32,
     visited: u32,
@@ -372,7 +370,6 @@ fn base_walk() -> Vec<Walked> {
     ]
 }
 
-/// A base segment with every kind of overlay change on top of it.
 fn segment_backed() -> SegmentBacked {
     let directory = tempdir().expect("temp dir");
     let place = SegmentPlace {

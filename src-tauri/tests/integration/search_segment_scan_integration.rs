@@ -30,7 +30,6 @@ const QUERIES: [&str; 7] = [
 ];
 const EVERY_SCOPE: [&SearchOptions; 4] = [&VISIBLE, &WITH_HIDDEN, &FILES, &FOLDERS];
 
-/// One walk record per folder and ancestor, as a full scan under `/` reports them.
 fn walk_of(folders: &[Folder]) -> Vec<Walked> {
     let mut records: BTreeMap<String, Walked> = BTreeMap::new();
     let mut record_of = |path: &str| {
@@ -63,7 +62,6 @@ fn walk_of(folders: &[Folder]) -> Vec<Walked> {
     records.into_values().collect()
 }
 
-/// The library held in one mapped segment, with nothing in the overlays yet.
 struct SegmentBacked {
     _directory: TempDir,
     source: Source,

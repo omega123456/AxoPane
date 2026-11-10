@@ -1,6 +1,3 @@
-//! Walks larger than the heap batch spill to disk and install as mapped
-//! segments (grafts) under the live tree. macOS only, fake platform.
-
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -223,4 +220,47 @@ fn a_quit_mid_scan_resumes_only_the_unscanned_subtrees() {
     assert_eq!(indexed_names(&index, "a/b/c/d"), owned(&["d.bin"]));
     blur(&index);
     assert!(!saved(&index).meta.full_scan_running);
+}
+
+#[test]
+fn a_boost_on_an_unindexed_folder_grafts_it_and_keeps_its_indexed_children() {
+    let mut index = deep_harness();
+    scan_and_save(&mut index);
+    index.platform.signal(PowerSignal::Conditions {
+        low_power: true,
+        thermal_pressure: false,
+    });
+    fs::create_dir_all(index.path("p/kept")).unwrap();
+    fs::create_dir_all(index.path("p/q/r")).unwrap();
+    fs::write(index.path("p/kept/kept.bin"), vec![0; 3]).unwrap();
+    fs::write(index.path("p/q/r/r.bin"), vec![0; 30]).unwrap();
+    fs::write(index.path("p/p.bin"), vec![0; 300]).unwrap();
+    index.event("", ChangeFlags::default());
+    barrier(&index);
+
+    let (kept_state, _) = auto_size(&index, "p/kept");
+    assert_eq!(kept_state, SizeStateKind::Ready);
+    index.opened.lock().unwrap().clear();
+    let (state, bytes) = auto_size(&index, "p");
+
+    assert_eq!(state, SizeStateKind::Ready);
+    assert_eq!(bytes, Some(fresh_total(&index.path("p"))));
+    assert!(
+        !index.opened("p/kept"),
+        "the indexed child is not walked again"
+    );
+    assert_eq!(indexed_names(&index, "p/kept"), owned(&["kept.bin"]));
+    assert_eq!(indexed_names(&index, "p/q/r"), owned(&["r.bin"]));
+    blur(&index);
+    assert!(saved(&index).segments.len() > 1, "the walk of p is a graft");
+    index.platform.signal(PowerSignal::Conditions {
+        low_power: false,
+        thermal_pressure: false,
+    });
+}
+
+fn auto_size(index: &Harness, relative: &str) -> (SizeStateKind, Option<u64>) {
+    let key = index.key(relative);
+    let update = terminal(&index.request(&[relative], RequestMode::Auto), &key);
+    (update.state, update.size_bytes)
 }

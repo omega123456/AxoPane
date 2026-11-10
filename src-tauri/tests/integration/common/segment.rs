@@ -69,7 +69,6 @@ pub struct SegmentPlace<'place> {
     pub token: u64,
 }
 
-/// One segment holding the whole walk under `root`, as a full scan would build it.
 pub fn walked_segment(place: SegmentPlace<'_>, records: &[Walked]) -> MappedSegment {
     let mut spill = WalkSpill::create(SpillOptions {
         runs_path: place.directory.join(WALK_SPILL_FILE),
@@ -154,7 +153,6 @@ pub struct Compaction<'index> {
     pub block_target: usize,
 }
 
-/// Rewrites the whole index into one base segment, as a compaction does.
 pub fn compacted(compaction: Compaction<'_>) -> MappedSegment {
     let Compaction {
         tree,
@@ -177,7 +175,6 @@ pub struct SegmentBackedIndex {
     pub names: FileNameStore,
 }
 
-/// The index a relaunch sees right after a compaction: one base segment, empty overlays.
 pub fn index_over(segment: MappedSegment, names_path: &Path) -> SegmentBackedIndex {
     let segment = Arc::new(segment);
     let mut tree = FolderSizeTree::default();

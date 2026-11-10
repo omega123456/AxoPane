@@ -407,8 +407,6 @@ fn concurrent_jobs_never_exceed_the_process_helper_cap() {
     seed_tree(&root);
     let expected = previous_total(&root);
 
-    // One job more than the budget can fully serve. Each parks at its root
-    // until released, so every job holds its helpers at the same moment.
     let helpers_per_job = walker_job_threads() - 1;
     let jobs = walker_helper_budget() / helpers_per_job + 1;
     assert!(jobs * helpers_per_job > walker_helper_budget());

@@ -268,7 +268,6 @@ fn tree_at(root: &Path, children: &[&str]) -> Arc<Tree> {
     })
 }
 
-/// A tree whose root folder holds `files` in a saved segment.
 fn tree_with_files(root: &Path, files: &[&str]) -> Arc<Tree> {
     let tree = folder_tree(root, &["documents"]);
     let mut names = FileNameStore::new(root.join(NAMES_FILE));

@@ -22,7 +22,6 @@ const WIDE_CHILDREN: usize = 6_000;
 const WIDE_ROOT: &str = "wide-root";
 const FOLDERS_IN_THE_WALK: usize = 8;
 
-/// Every folder the tests create, move or remove, relative to the root.
 const KNOWN_FOLDERS: [&[&str]; 14] = [
     &[],
     &["a"],
@@ -40,8 +39,6 @@ const KNOWN_FOLDERS: [&[&str]; 14] = [
     &["missing"],
 ];
 
-/// root(1) / a(10) / b(100) / c(1000, denied), a / old(40) / deep(400),
-/// root / s(5), and root / pending which the walk never visited.
 fn walk(root: &Path) -> Vec<Walked> {
     let folder_a = root.join("a");
     vec![
@@ -70,7 +67,6 @@ fn walk(root: &Path) -> Vec<Walked> {
     ]
 }
 
-/// The same walk held twice: once on the heap, once in a mapped segment.
 struct Twins {
     _directory: TempDir,
     root: PathBuf,

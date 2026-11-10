@@ -18,6 +18,10 @@ impl SaveTrigger {
     fn rewrites_the_base(self) -> bool {
         matches!(self, Self::ExclusionEdit | Self::ScanComplete)
     }
+
+    fn saves_before_compacting(self) -> bool {
+        self == Self::ScanComplete
+    }
 }
 
 impl Machine {
@@ -41,6 +45,9 @@ impl Machine {
         }
         if matches!(self.phase, Phase::Booting) {
             return;
+        }
+        if trigger.saves_before_compacting() {
+            self.save_manifest();
         }
         if trigger.rewrites_the_base() {
             return self.start_compaction();

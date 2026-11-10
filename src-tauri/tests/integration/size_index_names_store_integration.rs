@@ -83,7 +83,6 @@ fn entry<'entry>(
     }
 }
 
-/// A segment whose folder with slot `n` holds `names_for(n)`: a root and its children.
 fn write_segment(directory: &Path, folder_count: u32) {
     let target = SegmentTarget {
         paths: paths_in(directory),
@@ -110,7 +109,6 @@ fn saved_names(directory: &Path) -> SavedNames {
     saved
 }
 
-/// A store reading the names of `folder_count` folders from one mapped segment.
 fn segment_store(fixture: &Fixture, folder_count: u32) -> FileNameStore {
     write_segment(&fixture.segment_directory(), folder_count);
     let mut store = fixture.store();
