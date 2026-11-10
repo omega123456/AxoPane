@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use block::{BlockSpan, DecodedBlock, EntryRange, NamesCorrupt};
+use block::{BlockSpan, DecodedBlock, EncodedBlock, EntryRange, NamesCorrupt};
 use codec::DecodeScratch;
 use file::{remove_if_present, spill_path, MappedNames};
 use writer::RewriteStats;
@@ -114,7 +114,21 @@ pub struct NamesScratch {
 pub struct NamesCounters {
     pub blocks_decompressed: u64,
     pub blocks_reencoded: u64,
+    pub blocks_copied: u64,
     pub peak_open_output_blocks: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReusableBlock {
+    pub index: usize,
+    pub first_slot: u32,
+    pub folder_count: u32,
+}
+
+impl ReusableBlock {
+    pub fn slots(&self) -> Range<u32> {
+        self.first_slot..self.first_slot + self.folder_count
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -180,6 +194,10 @@ impl Overlay {
         if let Some(removed) = self.entries.remove(&slot) {
             self.name_bytes -= removed.packed().len();
         }
+    }
+
+    fn touches(&self, mut slots: Range<u32>) -> bool {
+        slots.any(|slot| self.entries.contains_key(&slot))
     }
 
     fn remove_range(&mut self, slots: &Range<u32>) {
@@ -389,6 +407,7 @@ impl FileNameStore {
         NamesCounters {
             blocks_decompressed: self.blocks_decompressed.load(Ordering::Relaxed),
             blocks_reencoded: self.rewrites.blocks_reencoded,
+            blocks_copied: self.rewrites.blocks_copied,
             peak_open_output_blocks: self.rewrites.peak_open_blocks,
         }
     }
@@ -416,6 +435,38 @@ impl FileNameStore {
                 ordinal,
                 first_block: placed.first_block,
             })
+        })
+    }
+
+    pub fn reusable_block_at(&self, slot: u32) -> Option<ReusableBlock> {
+        let folder = self.locate(slot)?;
+        let index_in_source = folder.source.file.block_starting_at(folder.ordinal)?;
+        let span = folder.source.file.span(index_in_source)?;
+        let block = ReusableBlock {
+            index: folder.first_block + index_in_source,
+            first_slot: slot,
+            folder_count: span.folder_count,
+        };
+        let is_unchanged =
+            !self.dead.intersects(&block.slots()) && !self.overlay.touches(block.slots());
+        is_unchanged.then_some(block)
+    }
+
+    pub fn copied_block(&self, index: usize) -> Result<EncodedBlock, NamesUnreadable> {
+        let located = self.locate_block(index).ok_or(NamesUnreadable)?;
+        let stored = located
+            .source
+            .file
+            .block(located.index_in_source)
+            .ok_or(NamesUnreadable)?;
+        if block::checksum(stored.compressed) != stored.checksum {
+            return Err(self.unreadable(NamesCorrupt));
+        }
+        Ok(EncodedBlock {
+            span: stored.span,
+            raw_len: stored.raw_len,
+            checksum: stored.checksum,
+            compressed: stored.compressed.to_vec(),
         })
     }
 

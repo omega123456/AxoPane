@@ -437,16 +437,19 @@ fn overlay_thresholds_count_folders_and_name_bytes() {
 
     let mut stats = RewriteStats {
         blocks_reencoded: 1,
+        blocks_copied: 2,
         peak_open_blocks: 1,
     };
     stats.absorb(RewriteStats {
         blocks_reencoded: 3,
+        blocks_copied: 5,
         peak_open_blocks: 1,
     });
     assert_eq!(
         stats,
         RewriteStats {
             blocks_reencoded: 4,
+            blocks_copied: 7,
             peak_open_blocks: 1,
         }
     );

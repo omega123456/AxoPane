@@ -10,7 +10,7 @@ use super::format::{
     HEADER_BYTES, MAX_SEGMENT_NODES, NO_PARENT,
 };
 use crate::resource_coordinator::parallelism::scan_workers;
-use crate::size::index::names::block::{self, BLOCK_TARGET_BYTES};
+use crate::size::index::names::block::{self, EncodedBlock, BLOCK_TARGET_BYTES};
 use crate::size::index::names::file::{remove_if_present, NamesHeader};
 use crate::size::index::names::is_packed_list_or_empty;
 use crate::size::index::names::writer::{
@@ -159,6 +159,13 @@ impl TempFiles {
     }
 }
 
+fn checked_names(file_names: &[u8]) -> Result<&[u8], BuildError> {
+    if !is_packed_list_or_empty(file_names) {
+        return Err(BuildError::Malformed);
+    }
+    Ok(file_names)
+}
+
 pub struct SegmentBuilder {
     target: SegmentTarget,
     temps: TempFiles,
@@ -217,6 +224,27 @@ impl SegmentBuilder {
     }
 
     pub fn push(&mut self, entry: SegmentEntry<'_>) -> Result<u32, BuildError> {
+        let file_names = checked_names(entry.file_names)?;
+        let ordinal = self.push_row(entry)?;
+        self.names.push(ordinal, file_names)?;
+        Ok(ordinal)
+    }
+
+    pub fn push_names(&mut self, ordinal: u32, file_names: &[u8]) -> Result<(), BuildError> {
+        self.names.push(ordinal, checked_names(file_names)?)?;
+        Ok(())
+    }
+
+    pub fn copy_names_block(
+        &mut self,
+        first_ordinal: u32,
+        block: EncodedBlock,
+    ) -> Result<(), BuildError> {
+        self.names.append_copy(first_ordinal, block)?;
+        Ok(())
+    }
+
+    pub fn push_row(&mut self, entry: SegmentEntry<'_>) -> Result<u32, BuildError> {
         let ordinal = self.counts.nodes;
         let name_heap_bytes = u32::try_from(entry.name.len())
             .ok()
@@ -224,9 +252,6 @@ impl SegmentBuilder {
         let (Some(name_heap_bytes), true) = (name_heap_bytes, ordinal < MAX_SEGMENT_NODES) else {
             return Err(BuildError::TooLarge);
         };
-        if !is_packed_list_or_empty(entry.file_names) {
-            return Err(BuildError::Malformed);
-        }
         let parent = self.enter(entry.depth, entry.name)?;
         self.rows.append(&LoggedRow {
             parent,
@@ -234,7 +259,6 @@ impl SegmentBuilder {
             flags: entry.flags.bits(),
             name: entry.name.as_bytes(),
         })?;
-        self.names.push(ordinal, entry.file_names)?;
         self.counts.nodes += 1;
         self.counts.top_level += u32::from(parent == NO_PARENT);
         self.counts.name_heap_bytes = name_heap_bytes;

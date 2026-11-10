@@ -116,6 +116,7 @@ pub mod size_index_persist_integration;
 #[cfg(target_os = "macos")]
 pub mod size_index_scope_integration;
 pub mod size_index_segment_builder_integration;
+mod size_index_segment_rewrite_integration;
 pub mod size_index_segment_spill_integration;
 #[cfg(target_os = "macos")]
 pub mod size_index_service_integration;

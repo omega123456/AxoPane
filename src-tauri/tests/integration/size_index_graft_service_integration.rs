@@ -303,7 +303,11 @@ fn a_full_scan_flushes_a_forest_whenever_the_batch_is_full() {
     for relative in ["a", "s"] {
         let (state, bytes) = auto_size(&index, relative);
         assert_eq!(state, SizeStateKind::Ready, "{relative}");
-        assert_eq!(bytes, Some(fresh_total(&index.path(relative))), "{relative}");
+        assert_eq!(
+            bytes,
+            Some(fresh_total(&index.path(relative))),
+            "{relative}"
+        );
     }
 }
 

@@ -400,6 +400,13 @@ impl IdRanges {
         &self.ranges
     }
 
+    pub fn intersects(&self, ids: &Range<NodeId>) -> bool {
+        let first_reaching = self.ranges.partition_point(|range| range.end <= ids.start);
+        self.ranges
+            .get(first_reaching)
+            .is_some_and(|range| range.start < ids.end)
+    }
+
     pub fn contains(&self, id: NodeId) -> bool {
         let after = self.ranges.partition_point(|range| range.start <= id);
         let candidate = after.checked_sub(1).map(|position| &self.ranges[position]);

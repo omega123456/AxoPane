@@ -9,12 +9,14 @@ use crate::resource_coordinator::scan_pool::map_parts_in_order;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RewriteStats {
     pub blocks_reencoded: u64,
+    pub blocks_copied: u64,
     pub peak_open_blocks: u64,
 }
 
 impl RewriteStats {
     pub fn absorb(&mut self, other: Self) {
         self.blocks_reencoded += other.blocks_reencoded;
+        self.blocks_copied += other.blocks_copied;
         self.peak_open_blocks = self.peak_open_blocks.max(other.peak_open_blocks);
     }
 }
@@ -45,11 +47,36 @@ pub(crate) struct FinishedNames {
     pub(crate) stats: RewriteStats,
 }
 
+enum PendingBlock {
+    Encode(BlockBuilder),
+    Copied(EncodedBlock),
+}
+
+impl PendingBlock {
+    fn encoded_with(self, encoder: &mut NamesEncoder) -> io::Result<EncodedBlock> {
+        match self {
+            Self::Encode(builder) => builder.finish(encoder),
+            Self::Copied(block) => Ok(block),
+        }
+    }
+
+    fn encoded_alone(self) -> io::Result<EncodedBlock> {
+        match self {
+            Self::Encode(builder) => encode_with_own_encoder(builder),
+            Self::Copied(block) => Ok(block),
+        }
+    }
+
+    fn is_copy(&self) -> bool {
+        matches!(self, Self::Copied(_))
+    }
+}
+
 pub(crate) struct BlockOutput {
     writer: NamesFileWriter,
     encoder: NamesEncoder,
     open: Option<BlockBuilder>,
-    filled: Vec<BlockBuilder>,
+    filled: Vec<PendingBlock>,
     block_target: usize,
     compress_batch: usize,
     stats: RewriteStats,
@@ -105,7 +132,22 @@ impl BlockOutput {
             self.open = Some(builder);
             return Ok(());
         }
-        self.filled.push(builder);
+        self.queue(PendingBlock::Encode(builder))
+    }
+
+    pub(crate) fn append_copy(
+        &mut self,
+        first_ordinal: u32,
+        mut block: EncodedBlock,
+    ) -> Result<(), RewriteError> {
+        self.filled
+            .extend(self.open.take().map(PendingBlock::Encode));
+        block.span.first_ordinal = first_ordinal;
+        self.queue(PendingBlock::Copied(block))
+    }
+
+    fn queue(&mut self, pending: PendingBlock) -> Result<(), RewriteError> {
+        self.filled.push(pending);
         if self.filled.len() >= self.compress_batch {
             return self.write_filled();
         }
@@ -113,30 +155,33 @@ impl BlockOutput {
     }
 
     fn close_open_block(&mut self) -> Result<(), RewriteError> {
-        self.filled.extend(self.open.take());
+        self.filled
+            .extend(self.open.take().map(PendingBlock::Encode));
         self.write_filled()
     }
 
     fn write_filled(&mut self) -> Result<(), RewriteError> {
         let filled = std::mem::take(&mut self.filled);
-        let written = filled.len() as u64;
-        for encoded in self.encode(filled)? {
+        let copied = filled.iter().filter(|pending| pending.is_copy()).count() as u64;
+        let encoded = filled.len() as u64 - copied;
+        for block in self.encode(filled)? {
             self.writer
-                .append(encoded.stored(), encoded.span.first_ordinal)?;
+                .append(block.stored(), block.span.first_ordinal)?;
         }
-        self.open_blocks -= written;
-        self.stats.blocks_reencoded += written;
+        self.open_blocks -= encoded;
+        self.stats.blocks_reencoded += encoded;
+        self.stats.blocks_copied += copied;
         Ok(())
     }
 
-    fn encode(&mut self, filled: Vec<BlockBuilder>) -> io::Result<Vec<EncodedBlock>> {
+    fn encode(&mut self, filled: Vec<PendingBlock>) -> io::Result<Vec<EncodedBlock>> {
         if self.compress_batch == ONE_BLOCK_AT_A_TIME {
             return filled
                 .into_iter()
-                .map(|builder| builder.finish(&mut self.encoder))
+                .map(|pending| pending.encoded_with(&mut self.encoder))
                 .collect();
         }
-        map_parts_in_order(filled, encode_with_own_encoder)
+        map_parts_in_order(filled, PendingBlock::encoded_alone)
             .into_iter()
             .collect()
     }
