@@ -13,8 +13,7 @@ use segments::SegmentTable;
 use crate::size::index::persist::{put_count, put_ids, put_u32, Reader};
 use crate::size::index::segment::{MappedSegment, NodeFlags};
 
-pub(crate) use overlay::DeadRanges;
-pub use overlay::{TreeOverlayStats, OVERLAY_CAP_DEAD_RANGES, OVERLAY_CAP_FOLDERS};
+pub use overlay::{IdRanges, TreeOverlayStats, OVERLAY_CAP_DEAD_RANGES, OVERLAY_CAP_FOLDERS};
 pub(crate) use segments::Children;
 
 type NodeId = u32;
@@ -201,7 +200,7 @@ struct Removed {
 pub struct FolderSizeTree {
     segments: SegmentTable,
     patches: BTreeMap<NodeId, Patch>,
-    dead: DeadRanges,
+    dead: IdRanges,
     heap: HeapNodes,
     roots: Vec<NodeId>,
     changed: Vec<NodeId>,
@@ -391,7 +390,7 @@ impl FolderSizeTree {
     }
 
     pub fn node_count(&self) -> usize {
-        self.heap.live_count() + self.segments.node_count() - self.dead.dead_folders()
+        self.heap.live_count() + self.segments.node_count() - self.dead.covered_ids()
     }
 
     pub fn overlay_stats(&self) -> TreeOverlayStats {
@@ -921,7 +920,8 @@ impl FolderSizeTree {
         }
         let patch = self.patches.entry(id).or_default();
         patch.delta = patch.delta.plus(delta);
-        self.segments.facts(id).parent
+        let moved_to = patch.parent;
+        moved_to.unwrap_or_else(|| self.segments.facts(id).parent)
     }
 
     fn mark_dirty(&mut self, id: NodeId) {
@@ -1098,6 +1098,40 @@ impl FolderSizeTree {
         slots
     }
 
+    pub fn subtree_ranges(&self, id: u32) -> IdRanges {
+        let mut ranges = IdRanges::default();
+        if !self.is_live(id) {
+            return ranges;
+        }
+        let mut stack = vec![id];
+        while let Some(next) = stack.pop() {
+            let descend_into = self.add_subtree_part(next, &mut ranges);
+            stack.extend(descend_into);
+        }
+        ranges
+    }
+
+    fn add_subtree_part(&self, id: NodeId, ranges: &mut IdRanges) -> Vec<NodeId> {
+        if let Some(whole) = self.unrelinked_mapped_subtree(id) {
+            ranges.add(whole);
+            return Vec::new();
+        }
+        ranges.add(id..id + 1);
+        self.children(id).iter().collect()
+    }
+
+    fn unrelinked_mapped_subtree(&self, id: NodeId) -> Option<Range<NodeId>> {
+        if is_heap(id) {
+            return None;
+        }
+        let subtree = self.segments.subtree(id);
+        let relinked = self
+            .patches
+            .range(subtree.clone())
+            .any(|(_, patch)| patch.children.is_some());
+        (!relinked).then_some(subtree)
+    }
+
     pub(crate) fn child_ids(&self, id: u32) -> Children<'_> {
         if !self.is_live(id) {
             return Children::default();
@@ -1153,7 +1187,7 @@ impl FolderSizeTree {
         let patches = (0..reader.u32()?)
             .map(|_| Some((reader.u32()?, Patch::read(reader)?)))
             .collect::<Option<BTreeMap<NodeId, Patch>>>()?;
-        let dead = DeadRanges::read(reader)?;
+        let dead = IdRanges::read(reader)?;
         self.heap = heap;
         let patched_ids_are_mapped = patches.keys().all(|&id| self.segments.contains(id));
         let patched_parents: Vec<NodeId> =

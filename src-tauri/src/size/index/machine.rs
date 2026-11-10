@@ -568,7 +568,7 @@ impl Machine {
         for root in &self.shared.roots {
             tree.add_root(root);
         }
-        self.shared.view_mut().tree = tree;
+        self.shared.view_mut().replace_tree(tree);
     }
 
     pub(super) fn handle(&mut self, message: Message) {
@@ -859,6 +859,11 @@ impl Machine {
 }
 
 impl View {
+    pub(super) fn replace_tree(&mut self, tree: FolderSizeTree) {
+        self.tree = tree;
+        self.generation += 1;
+    }
+
     fn merge_record(&mut self, record: DirRecord) {
         let DirRecord {
             path,

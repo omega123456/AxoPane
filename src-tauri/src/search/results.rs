@@ -13,35 +13,40 @@ pub const LISTED_TIER: u8 = EXACT;
 
 const POOL_PRUNE_THRESHOLD: usize = 2 * CANDIDATE_CAP;
 
-pub struct TieredCandidate {
+pub struct Tiered<Item> {
     pub tier: u8,
-    pub candidate: Candidate,
+    pub item: Item,
 }
 
-#[derive(Default)]
-pub struct CandidatePool {
-    found: Vec<TieredCandidate>,
+pub type TieredCandidate = Tiered<Candidate>;
+
+pub struct KeptTiers<Item> {
+    pub items: Vec<Tiered<Item>>,
+    pub truncated: bool,
+}
+
+pub struct TieredPool<Item> {
+    found: Vec<Tiered<Item>>,
     truncated: bool,
 }
 
-impl CandidatePool {
-    pub fn extend(&mut self, hits: impl IntoIterator<Item = TieredCandidate>) {
+pub type CandidatePool = TieredPool<Candidate>;
+
+impl<Item> Default for TieredPool<Item> {
+    fn default() -> Self {
+        Self {
+            found: Vec::new(),
+            truncated: false,
+        }
+    }
+}
+
+impl<Item> TieredPool<Item> {
+    pub fn extend(&mut self, hits: impl IntoIterator<Item = Tiered<Item>>) {
         self.found.extend(hits);
         if self.found.len() > POOL_PRUNE_THRESHOLD {
             self.keep_best();
         }
-    }
-
-    pub fn push_listed(&mut self, candidate: Candidate) -> bool {
-        if self.is_full() {
-            self.truncated = true;
-            return false;
-        }
-        self.found.push(TieredCandidate {
-            tier: LISTED_TIER,
-            candidate,
-        });
-        true
     }
 
     pub fn is_over_cap(&self) -> bool {
@@ -56,12 +61,12 @@ impl CandidatePool {
         self.truncated = true;
     }
 
-    pub fn into_batch(mut self) -> CandidateBatch {
-        if self.found.len() > CANDIDATE_CAP {
+    pub fn into_kept(mut self) -> KeptTiers<Item> {
+        if self.is_over_cap() {
             self.keep_best();
         }
-        CandidateBatch {
-            candidates: self.found.into_iter().map(|hit| hit.candidate).collect(),
+        KeptTiers {
+            items: self.found,
             truncated: self.truncated,
         }
     }
@@ -70,6 +75,28 @@ impl CandidatePool {
         self.found.sort_by_key(|hit| hit.tier);
         self.found.truncate(CANDIDATE_CAP);
         self.truncated = true;
+    }
+}
+
+impl TieredPool<Candidate> {
+    pub fn push_listed(&mut self, candidate: Candidate) -> bool {
+        if self.is_full() {
+            self.truncated = true;
+            return false;
+        }
+        self.found.push(Tiered {
+            tier: LISTED_TIER,
+            item: candidate,
+        });
+        true
+    }
+
+    pub fn into_batch(self) -> CandidateBatch {
+        let kept = self.into_kept();
+        CandidateBatch {
+            candidates: kept.items.into_iter().map(|hit| hit.item).collect(),
+            truncated: kept.truncated,
+        }
     }
 }
 

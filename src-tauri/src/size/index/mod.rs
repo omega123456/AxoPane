@@ -50,4 +50,5 @@ pub struct IndexRead<'view> {
     pub tree: &'view FolderSizeTree,
     pub names: &'view FileNameStore,
     pub blocked: &'view [PathBuf],
+    pub generation: u64,
 }

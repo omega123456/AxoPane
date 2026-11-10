@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::iter;
 use std::ops::ControlFlow;
 
@@ -9,7 +8,7 @@ use super::results::{CandidatePool, TieredCandidate, LISTED_TIER};
 use super::tree_scan::{TreeSearchRun, VisibleTree};
 use super::{Candidate, SearchError};
 use crate::size::index::names::{FileNameStore, FolderNames, NamesScratch, NamesUnreadable};
-use crate::size::index::tree::FolderSizeTree;
+use crate::size::index::tree::{FolderSizeTree, IdRanges};
 use crate::size::index::IndexRead;
 
 pub const BLOCKS_PER_READ: usize = 8;
@@ -113,7 +112,7 @@ impl FileScanner<'_, '_> {
 }
 
 struct ScanPlan {
-    members: Option<SlotSet>,
+    members: Option<IdRanges>,
     blocks: Vec<usize>,
 }
 
@@ -122,7 +121,7 @@ impl ScanPlan {
         if !view.names.is_available() {
             return None;
         }
-        let members = SlotSet::selected(view.tree, selection);
+        let members = selected_members(view.tree, selection);
         let blocks = selected_blocks(view.names, members.as_ref());
         Some(Self { members, blocks })
     }
@@ -133,69 +132,41 @@ impl ScanPlan {
     }
 }
 
-fn selected_blocks(names: &FileNameStore, members: Option<&SlotSet>) -> Vec<usize> {
+fn selected_blocks(names: &FileNameStore, members: Option<&IdRanges>) -> Vec<usize> {
     let Some(members) = members else {
         return (0..names.block_count()).collect();
     };
-    names.blocks_for_slots(&members.slots)
+    names.blocks_covering(members.ranges())
 }
 
-#[derive(Default)]
-struct SlotSet {
-    present: HashSet<u32>,
-    slots: Vec<u32>,
+fn selected_members(tree: &FolderSizeTree, selection: &FileSelection) -> Option<IdRanges> {
+    match selection {
+        FileSelection::Everywhere => None,
+        FileSelection::Below(roots) => Some(subtrees_below(tree, roots)),
+        FileSelection::Directly(folders) => Some(live_folders(tree, folders)),
+    }
 }
 
-impl SlotSet {
-    fn selected(tree: &FolderSizeTree, selection: &FileSelection) -> Option<Self> {
-        match selection {
-            FileSelection::Everywhere => None,
-            FileSelection::Below(roots) => Some(Self::below(tree, roots)),
-            FileSelection::Directly(folders) => Some(Self::of(tree, folders)),
+fn subtrees_below(tree: &FolderSizeTree, roots: &[u32]) -> IdRanges {
+    let mut members = IdRanges::default();
+    for &root in roots {
+        if !members.contains(root) {
+            members.add_all(tree.subtree_ranges(root));
         }
     }
+    members
+}
 
-    fn of(tree: &FolderSizeTree, folders: &[u32]) -> Self {
-        let mut set = Self::default();
-        let live_folders = folders
-            .iter()
-            .copied()
-            .filter(|&folder| tree.live_node(folder).is_some());
-        set.extend(live_folders);
-        set
+fn live_folders(tree: &FolderSizeTree, folders: &[u32]) -> IdRanges {
+    let mut members = IdRanges::default();
+    let live = folders
+        .iter()
+        .copied()
+        .filter(|&folder| tree.live_node(folder).is_some());
+    for folder in live {
+        members.add(folder..folder + 1);
     }
-
-    fn below(tree: &FolderSizeTree, roots: &[u32]) -> Self {
-        let mut set = Self::default();
-        for &root in roots {
-            set.extend_below(tree, root);
-        }
-        set
-    }
-
-    fn extend_below(&mut self, tree: &FolderSizeTree, root: u32) {
-        if self.contains(root) {
-            return;
-        }
-        self.extend(tree.subtree_slots(root));
-    }
-
-    fn extend(&mut self, slots: impl IntoIterator<Item = u32>) {
-        for slot in slots {
-            self.insert(slot);
-        }
-    }
-
-    fn insert(&mut self, slot: u32) {
-        let is_new = self.present.insert(slot);
-        if is_new {
-            self.slots.push(slot);
-        }
-    }
-
-    fn contains(&self, slot: u32) -> bool {
-        self.present.contains(&slot)
-    }
+    members
 }
 
 #[derive(Clone, Copy)]
@@ -261,7 +232,7 @@ fn collect(
 struct FileMatcher<'scan> {
     visible: VisibleTree<'scan>,
     name: Option<&'scan Segment>,
-    members: Option<&'scan SlotSet>,
+    members: Option<&'scan IdRanges>,
 }
 
 struct NameHit {
@@ -322,7 +293,7 @@ impl FileMatcher<'_> {
         }
         Some(TieredCandidate {
             tier: hit.tier,
-            candidate: Candidate {
+            item: Candidate {
                 path,
                 is_dir: false,
                 modified: None,

@@ -305,7 +305,7 @@ impl Machine {
             built.node_count
         );
         let mut view = self.shared.view_mut();
-        view.tree = tree;
+        view.replace_tree(tree);
         view.names.adopt_base(names, built.names);
         drop(view);
         self.compactor.segments = vec![SegmentRef { sequence, token }];

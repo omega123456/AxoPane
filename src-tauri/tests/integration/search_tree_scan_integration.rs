@@ -25,6 +25,7 @@ pub(crate) struct Source {
     pub(crate) blocked: Vec<PathBuf>,
     reads: AtomicUsize,
     pub(crate) fail: Option<SearchError>,
+    pub(crate) compactions_after_reads: Vec<usize>,
 }
 
 impl Source {
@@ -43,6 +44,7 @@ impl Source {
             blocked: Vec::new(),
             reads: AtomicUsize::new(0),
             fail: None,
+            compactions_after_reads: Vec::new(),
         }
     }
 
@@ -56,13 +58,19 @@ impl FolderTreeSource for Source {
         if let Some(error) = &self.fail {
             return Err(error.clone());
         }
-        self.reads.fetch_add(1, Ordering::SeqCst);
+        let read_number = self.reads.fetch_add(1, Ordering::SeqCst) + 1;
+        let compactions_so_far = self
+            .compactions_after_reads
+            .iter()
+            .filter(|&&after| after < read_number)
+            .count();
         let tree = self.tree.lock().unwrap();
         let names = self.names.lock().unwrap();
         read(IndexRead {
             tree: &tree,
             names: &names,
             blocked: &self.blocked,
+            generation: compactions_so_far as u64,
         });
         Ok(())
     }
@@ -165,8 +173,8 @@ fn name_scans_return_matching_folders_as_posix_paths() {
     assert!(!batch.truncated);
     assert_eq!(
         source.reads(),
-        2,
-        "one folder chunk plus the file names check"
+        3,
+        "one folder chunk, one path read for the kept hits and the file names check"
     );
     assert_eq!(SLOTS_PER_READ, 32_768);
 }
@@ -435,4 +443,33 @@ fn listing_a_huge_folder_stops_at_the_cap() {
     let batch = run(&source, "/bulk/", &VISIBLE);
     assert!(batch.truncated);
     assert_eq!(batch.candidates.len(), CANDIDATE_CAP);
+}
+
+#[test]
+fn a_compaction_during_a_query_restarts_it_once_with_the_same_hits() {
+    let steady = Source::new(LIBRARY);
+    let expected = sorted(&run(&steady, "inv", &VISIBLE)).join(",");
+    let reads_per_query = steady.reads();
+    let mut compacted = Source::new(LIBRARY);
+    compacted.compactions_after_reads = vec![1];
+
+    let batch = run(&compacted, "inv", &VISIBLE);
+
+    assert_eq!(sorted(&batch).join(","), expected);
+    assert!(!batch.truncated);
+    assert_eq!(compacted.reads(), 2 * reads_per_query, "one restart");
+}
+
+#[test]
+fn a_second_compaction_during_the_restart_marks_the_hits_truncated() {
+    let steady = Source::new(LIBRARY);
+    run(&steady, "inv", &VISIBLE);
+    let reads_per_query = steady.reads();
+    let mut compacted = Source::new(LIBRARY);
+    compacted.compactions_after_reads = vec![1, reads_per_query + 1];
+
+    let batch = run(&compacted, "inv", &VISIBLE);
+
+    assert!(batch.truncated);
+    assert_eq!(compacted.reads(), 2 * reads_per_query, "never a third try");
 }

@@ -16,7 +16,7 @@ use file::{remove_if_present, spill_path, MappedNames};
 use writer::RewriteStats;
 
 use super::persist::{put_bytes, put_count, put_u32, Reader};
-use super::tree::DeadRanges;
+use super::tree::IdRanges;
 
 pub const NAME_TERMINATOR: u8 = 0;
 pub const OVERLAY_THRESHOLD_BYTES: usize = 4 * 1024 * 1024;
@@ -228,6 +228,20 @@ struct PlacedSource<'store> {
     first_block: usize,
 }
 
+impl PlacedSource<'_> {
+    fn blocks_covering(&self, slots: &Range<u32>) -> Range<usize> {
+        let source_slots = &self.source.slots;
+        let start = slots.start.max(source_slots.start);
+        let end = slots.end.min(source_slots.end);
+        if start >= end {
+            return 0..0;
+        }
+        let ordinals = start - source_slots.start..end - source_slots.start;
+        let blocks = self.source.file.blocks_covering(ordinals);
+        self.first_block + blocks.start..self.first_block + blocks.end
+    }
+}
+
 struct LocatedFolder<'store> {
     source: &'store SegmentNames,
     ordinal: u32,
@@ -284,7 +298,7 @@ impl ReadFailure {
 pub struct SavedNames {
     segments: Vec<SegmentNames>,
     overlay: Overlay,
-    dead: DeadRanges,
+    dead: IdRanges,
 }
 
 impl SavedNames {
@@ -298,7 +312,7 @@ impl SavedNames {
             let entry = OverlayEntry::read(reader)?;
             self.overlay.insert(slot, entry);
         }
-        self.dead = DeadRanges::read(reader)?;
+        self.dead = IdRanges::read(reader)?;
         Some(())
     }
 }
@@ -320,7 +334,7 @@ pub struct FileNameStore {
     path: PathBuf,
     segments: Vec<SegmentNames>,
     overlay: Overlay,
-    dead: DeadRanges,
+    dead: IdRanges,
     failure: ReadFailure,
     blocks_decompressed: AtomicU64,
     rewrites: RewriteStats,
@@ -333,7 +347,7 @@ impl FileNameStore {
             path,
             segments: Vec::new(),
             overlay: Overlay::default(),
-            dead: DeadRanges::default(),
+            dead: IdRanges::default(),
             failure: ReadFailure::default(),
             blocks_decompressed: AtomicU64::new(0),
             rewrites: RewriteStats::default(),
@@ -421,10 +435,18 @@ impl FileNameStore {
     }
 
     pub fn blocks_for_slots(&self, slots: &[u32]) -> Vec<usize> {
-        let mut blocks: Vec<usize> = slots
-            .iter()
-            .filter_map(|&slot| self.locate(slot))
-            .map(|folder| folder.block())
+        let single_slots: Vec<Range<u32>> = slots.iter().map(|&slot| slot..slot + 1).collect();
+        self.blocks_covering(&single_slots)
+    }
+
+    pub fn blocks_covering(&self, slot_ranges: &[Range<u32>]) -> Vec<usize> {
+        let mut blocks: Vec<usize> = self
+            .placed_sources()
+            .flat_map(|placed| {
+                slot_ranges
+                    .iter()
+                    .flat_map(move |slots| placed.blocks_covering(slots))
+            })
             .collect();
         blocks.sort_unstable();
         blocks.dedup();

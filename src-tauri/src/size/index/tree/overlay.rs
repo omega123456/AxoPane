@@ -382,36 +382,51 @@ fn read_if_present<'bytes, T>(
 }
 
 #[derive(Debug, Default, Clone)]
-pub(crate) struct DeadRanges {
+pub struct IdRanges {
     ranges: Vec<Range<NodeId>>,
-    dead_folders: usize,
+    covered_ids: usize,
 }
 
-impl DeadRanges {
+impl IdRanges {
     pub(crate) fn len(&self) -> usize {
         self.ranges.len()
     }
 
-    pub(crate) fn dead_folders(&self) -> usize {
-        self.dead_folders
+    pub(crate) fn covered_ids(&self) -> usize {
+        self.covered_ids
     }
 
-    pub(crate) fn contains(&self, id: NodeId) -> bool {
+    pub fn ranges(&self) -> &[Range<NodeId>] {
+        &self.ranges
+    }
+
+    pub fn contains(&self, id: NodeId) -> bool {
         let after = self.ranges.partition_point(|range| range.start <= id);
         let candidate = after.checked_sub(1).map(|position| &self.ranges[position]);
         candidate.is_some_and(|range| range.contains(&id))
     }
 
-    pub(crate) fn add(&mut self, dead: Range<NodeId>) {
-        let first = self.ranges.partition_point(|range| range.end < dead.start);
-        let after = self.ranges.partition_point(|range| range.start <= dead.end);
-        let mut joined = dead;
+    pub(crate) fn add(&mut self, added: Range<NodeId>) {
+        if added.is_empty() {
+            return;
+        }
+        let first = self.ranges.partition_point(|range| range.end < added.start);
+        let after = self
+            .ranges
+            .partition_point(|range| range.start <= added.end);
+        let mut joined = added;
         for touching in self.ranges.drain(first..after) {
-            self.dead_folders -= touching.len();
+            self.covered_ids -= touching.len();
             joined = joined.start.min(touching.start)..joined.end.max(touching.end);
         }
-        self.dead_folders += joined.len();
+        self.covered_ids += joined.len();
         self.ranges.insert(first, joined);
+    }
+
+    pub(crate) fn add_all(&mut self, other: Self) {
+        for range in other.ranges {
+            self.add(range);
+        }
     }
 
     pub(crate) fn write(&self, out: &mut Vec<u8>) {
@@ -419,11 +434,11 @@ impl DeadRanges {
     }
 
     pub(crate) fn read(reader: &mut Reader<'_>) -> Option<Self> {
-        let mut dead = Self::default();
+        let mut read = Self::default();
         for range in reader.ranges()? {
-            dead.add(range);
+            read.add(range);
         }
-        Some(dead)
+        Some(read)
     }
 
     pub(crate) fn last_end(&self) -> NodeId {

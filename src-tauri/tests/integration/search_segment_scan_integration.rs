@@ -161,9 +161,10 @@ fn the_folder_pass_walks_segment_ids_and_then_overlay_ids_in_chunks() {
     let folder_count = fixture.source.tree.lock().unwrap().node_count();
     let segment_chunks = (folder_count - 1).div_ceil(TINY_CHUNK);
     let overlay_chunks = 1;
+    let path_reads = 1;
     assert_eq!(
         fixture.source.reads() - reads_before,
-        segment_chunks + overlay_chunks
+        segment_chunks + overlay_chunks + path_reads
     );
 }
 

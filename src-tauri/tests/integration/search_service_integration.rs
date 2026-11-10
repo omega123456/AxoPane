@@ -247,6 +247,7 @@ impl FolderTreeSource for Tree {
             tree: &self.tree,
             names: &self.names,
             blocked: &[],
+            generation: 0,
         });
         Ok(())
     }

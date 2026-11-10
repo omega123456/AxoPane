@@ -1,12 +1,21 @@
+use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock, PoisonError};
+
+use rayon::prelude::*;
+use rayon::{ThreadPool, ThreadPoolBuilder};
 
 use super::file_scan::{self, FileScan, FileSelection};
 use super::matcher::NameKind;
 use super::path_style::PathStyle;
 use super::query::{ParsedQuery, Segment};
-use super::results::{rank_candidates, CandidatePool, TieredCandidate, BROWSE_PARENT_CAP};
+use super::results::{
+    rank_candidates, CandidatePool, Tiered, TieredCandidate, TieredPool, BROWSE_PARENT_CAP,
+};
 use super::source::FolderTreeSource;
 use super::{Candidate, CandidateBatch, SearchError, SearchRun, SearchScope};
+use crate::resource_coordinator::parallelism::scan_workers;
 use crate::size::index::tree::FolderSizeTree;
 use crate::size::index::IndexRead;
 
@@ -16,7 +25,7 @@ const FIRST_ID: u32 = 0;
 const HIDDEN_NAME_PREFIX: char = '.';
 const PATH_SEPARATOR: char = '/';
 
-pub type TreeSearchRun<'run> = SearchRun<'run, dyn FolderTreeSource>;
+pub type TreeSearchRun<'run> = SearchRun<'run, dyn FolderTreeSource + 'run>;
 
 pub fn candidates(
     run: &TreeSearchRun<'_>,
@@ -26,6 +35,79 @@ pub fn candidates(
 }
 
 pub fn candidates_in_chunks(
+    run: &TreeSearchRun<'_>,
+    query: &ParsedQuery,
+    slots_per_read: usize,
+) -> Result<CandidateBatch, SearchError> {
+    let first = attempt(run, query, slots_per_read)?;
+    if first.saw_one_generation {
+        return Ok(first.batch);
+    }
+    let mut second = attempt(run, query, slots_per_read)?;
+    second.batch.truncated |= !second.saw_one_generation;
+    Ok(second.batch)
+}
+
+struct Attempt {
+    batch: CandidateBatch,
+    saw_one_generation: bool,
+}
+
+fn attempt(
+    run: &TreeSearchRun<'_>,
+    query: &ParsedQuery,
+    slots_per_read: usize,
+) -> Result<Attempt, SearchError> {
+    let watched = GenerationWatch::over(run.source);
+    let watched_run = SearchRun {
+        source: &watched as &dyn FolderTreeSource,
+        options: run.options,
+        control: run.control,
+    };
+    let batch = collect_candidates(&watched_run, query, slots_per_read)?;
+    Ok(Attempt {
+        batch,
+        saw_one_generation: !watched.changed.load(Ordering::Relaxed),
+    })
+}
+
+struct GenerationWatch<'source> {
+    source: &'source dyn FolderTreeSource,
+    first_seen: Mutex<Option<u64>>,
+    changed: AtomicBool,
+}
+
+impl<'source> GenerationWatch<'source> {
+    fn over(source: &'source dyn FolderTreeSource) -> Self {
+        Self {
+            source,
+            first_seen: Mutex::new(None),
+            changed: AtomicBool::new(false),
+        }
+    }
+
+    fn observe(&self, generation: u64) {
+        let mut first_seen = self
+            .first_seen
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let first = *first_seen.get_or_insert(generation);
+        if first != generation {
+            self.changed.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+impl FolderTreeSource for GenerationWatch<'_> {
+    fn read(&self, read: &mut dyn FnMut(IndexRead<'_>)) -> Result<(), SearchError> {
+        self.source.read(&mut |view| {
+            self.observe(view.generation);
+            read(view);
+        })
+    }
+}
+
+fn collect_candidates(
     run: &TreeSearchRun<'_>,
     query: &ParsedQuery,
     slots_per_read: usize,
@@ -160,7 +242,7 @@ impl FolderScan<'_, '_> {
     ) -> Result<Vec<u32>, SearchError> {
         let mut sweep = FolderSweep {
             pass,
-            pool,
+            found: TieredPool::default(),
             roots: Vec::new(),
         };
         if pass.is_idle() {
@@ -170,16 +252,36 @@ impl FolderScan<'_, '_> {
         while let Some(start) = next_start {
             next_start = self.sweep_chunk(&mut sweep, start)?;
         }
+        self.add_folder_hits(sweep.found, pool)?;
         Ok(sweep.roots)
+    }
+
+    fn add_folder_hits(
+        &self,
+        found: TieredPool<u32>,
+        pool: &mut CandidatePool,
+    ) -> Result<(), SearchError> {
+        let kept = found.into_kept();
+        if kept.truncated {
+            pool.mark_truncated();
+        }
+        let include_hidden = self.run.options.include_hidden;
+        let mut hits = Vec::new();
+        self.run.source.read(&mut |view| {
+            let visible = VisibleTree::new(&view, include_hidden);
+            hits = folder_hits(&visible, &kept.items);
+        })?;
+        pool.extend(hits);
+        Ok(())
     }
 
     fn sweep_chunk(
         &self,
-        sweep: &mut FolderSweep<'_, '_>,
+        sweep: &mut FolderSweep<'_>,
         start: u32,
     ) -> Result<Option<u32>, SearchError> {
         if !self.run.control.proceed()? {
-            sweep.pool.mark_truncated();
+            sweep.found.mark_truncated();
             return Ok(None);
         }
         let chunk = SlotChunk {
@@ -187,7 +289,7 @@ impl FolderScan<'_, '_> {
             len: self.slots_per_read,
         };
         let read = self.read_slot_chunk(sweep.pass, chunk)?;
-        sweep.pool.extend(read.hits);
+        sweep.found.extend(read.hits);
         sweep.roots.extend(read.roots);
         Ok(read.next_start)
     }
@@ -224,9 +326,9 @@ impl FolderPass<'_> {
     }
 }
 
-struct FolderSweep<'query, 'pool> {
+struct FolderSweep<'query> {
     pass: FolderPass<'query>,
-    pool: &'pool mut CandidatePool,
+    found: TieredPool<u32>,
     roots: Vec<u32>,
 }
 
@@ -240,7 +342,7 @@ struct SlotChunkRead<'query> {
     pass: FolderPass<'query>,
     chunk: SlotChunk,
     next_start: Option<u32>,
-    hits: Vec<TieredCandidate>,
+    hits: Vec<Tiered<u32>>,
     roots: Vec<u32>,
 }
 
@@ -261,17 +363,44 @@ impl<'query> SlotChunkRead<'query> {
         };
         let has_more = visible.tree.ids_from(ids.end, self.chunk.len).is_some();
         self.next_start = has_more.then_some(ids.end);
-        for id in ids {
-            self.inspect(visible, id);
+        let scan = PartScan {
+            pass: self.pass,
+            visible,
+        };
+        for part in inspect_in_parallel(scan, ids) {
+            self.hits.extend(part.hits);
+            self.roots.extend(part.roots);
         }
     }
+}
 
-    fn inspect(&mut self, visible: &VisibleTree<'_>, id: u32) {
-        let Some(node) = visible.tree.live_node(id) else {
+#[derive(Default)]
+struct InspectedPart {
+    hits: Vec<Tiered<u32>>,
+    roots: Vec<u32>,
+}
+
+#[derive(Clone, Copy)]
+struct PartScan<'scan, 'query> {
+    pass: FolderPass<'query>,
+    visible: &'scan VisibleTree<'scan>,
+}
+
+impl PartScan<'_, '_> {
+    fn inspect_range(self, ids: Range<u32>) -> InspectedPart {
+        let mut part = InspectedPart::default();
+        for id in ids {
+            self.inspect(id, &mut part);
+        }
+        part
+    }
+
+    fn inspect(self, id: u32, part: &mut InspectedPart) {
+        let Some(node) = self.visible.tree.live_node(id) else {
             return;
         };
         if self.pass.is_root(node.name) {
-            self.roots.push(id);
+            part.roots.push(id);
         }
         let Some(name) = self.pass.name else {
             return;
@@ -279,19 +408,75 @@ impl<'query> SlotChunkRead<'query> {
         let Some(found) = name.match_name(node.name, NameKind::Folder) else {
             return;
         };
-        let Some(path) = visible.path_of(id) else {
-            return;
-        };
-        self.hits.push(TieredCandidate {
-            tier: found.tier,
-            candidate: folder(path),
-        });
+        if self.visible.shows(id) {
+            part.hits.push(Tiered {
+                tier: found.tier,
+                item: id,
+            });
+        }
     }
+}
+
+fn scan_pool() -> Option<&'static ThreadPool> {
+    static POOL: OnceLock<Option<ThreadPool>> = OnceLock::new();
+    POOL.get_or_init(|| {
+        ThreadPoolBuilder::new()
+            .num_threads(scan_workers())
+            .thread_name(|index| format!("search-scan-{index}"))
+            .build()
+            .ok()
+    })
+    .as_ref()
+}
+
+fn split_ids(ids: Range<u32>, parts: usize) -> Vec<Range<u32>> {
+    let part_len = ids.len().div_ceil(parts.max(1)).max(1);
+    let part_len = u32::try_from(part_len).unwrap_or(u32::MAX);
+    let starts = (ids.start..ids.end).step_by(part_len as usize);
+    starts
+        .map(|start| start..start.saturating_add(part_len).min(ids.end))
+        .collect()
+}
+
+fn inspect_in_parallel(scan: PartScan<'_, '_>, ids: Range<u32>) -> Vec<InspectedPart> {
+    let parts = split_ids(ids, scan_workers());
+    let Some(pool) = scan_pool() else {
+        return parts
+            .into_iter()
+            .map(|part| scan.inspect_range(part))
+            .collect();
+    };
+    pool.install(|| {
+        parts
+            .into_par_iter()
+            .map(|part| scan.inspect_range(part))
+            .collect()
+    })
+}
+
+fn folder_hits(visible: &VisibleTree<'_>, kept: &[Tiered<u32>]) -> Vec<TieredCandidate> {
+    kept.iter()
+        .filter_map(|hit| {
+            let path = visible.path_of(hit.item)?;
+            Some(Tiered {
+                tier: hit.tier,
+                item: folder(path),
+            })
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LineageStep {
+    Shown,
+    Hidden,
+    Up(u32),
 }
 
 pub(crate) struct VisibleTree<'tree> {
     pub(crate) tree: &'tree FolderSizeTree,
     blocked: Vec<String>,
+    blocked_ids: Vec<u32>,
     include_hidden: bool,
 }
 
@@ -300,8 +485,38 @@ impl<'tree> VisibleTree<'tree> {
         Self {
             tree: view.tree,
             blocked: blocked_prefixes(view.blocked),
+            blocked_ids: view
+                .blocked
+                .iter()
+                .filter_map(|root| view.tree.lookup(root))
+                .collect(),
             include_hidden,
         }
+    }
+
+    fn shows(&self, id: u32) -> bool {
+        let mut step = self.lineage_step(id, id);
+        while let LineageStep::Up(parent) = step {
+            step = self.lineage_step(id, parent);
+        }
+        step == LineageStep::Shown
+    }
+
+    fn lineage_step(&self, id: u32, current: u32) -> LineageStep {
+        let Some(node) = self.tree.live_node(current) else {
+            return LineageStep::Hidden;
+        };
+        let is_blocked_ancestor = current != id && self.blocked_ids.contains(&current);
+        if is_blocked_ancestor {
+            return LineageStep::Hidden;
+        }
+        let Some(parent) = node.parent else {
+            return LineageStep::Shown;
+        };
+        if self.hides_name(node.name) {
+            return LineageStep::Hidden;
+        }
+        LineageStep::Up(parent)
     }
 
     pub(crate) fn hides_name(&self, name: &str) -> bool {

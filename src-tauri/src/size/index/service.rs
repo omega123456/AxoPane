@@ -243,6 +243,7 @@ pub(super) struct Shared {
 
 pub(super) struct View {
     pub(super) tree: FolderSizeTree,
+    pub(super) generation: u64,
     pub(super) names: FileNameStore,
     pub(super) keeps_file_names: bool,
     pub(super) visited: HashSet<PathBuf>,
@@ -300,6 +301,7 @@ impl FolderSizeIndex {
             tree: &view.tree,
             names: &view.names,
             blocked: &blocked,
+            generation: view.generation,
         });
         let names_failed = view.names.take_unreported_failure();
         let tree_failed = view.tree.is_corrupt();
@@ -512,6 +514,7 @@ impl Shared {
         Self {
             view: RwLock::new(View {
                 tree,
+                generation: 0,
                 names: FileNameStore::new(names_path_beside(&options.snapshot_path)),
                 keeps_file_names: options.collect_file_names,
                 visited: HashSet::new(),
