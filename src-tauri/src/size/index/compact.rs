@@ -60,7 +60,7 @@ pub(super) fn new_segment_target(directory: &Path, sequence: u64) -> SegmentTarg
 }
 
 fn compact(shared: &Shared, job: &CompactJob) -> Result<BuiltSegment, CompactError> {
-    let mut builder = SegmentBuilder::create(job.target.clone())?;
+    let mut builder = SegmentBuilder::for_compaction(job.target.clone())?;
     if let Err(error) = copy_folders(shared, &job.cancel, &mut builder) {
         builder.discard();
         return Err(error);

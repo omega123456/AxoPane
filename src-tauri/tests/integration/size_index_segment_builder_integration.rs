@@ -432,3 +432,85 @@ fn numbered_paths_differ_per_sequence_and_per_file() {
     assert_eq!(first.tree, directory.join("folder-tree-000001.bin"));
     assert_eq!(second.names, directory.join("file-names-000002.bin"));
 }
+
+const MANY_FOLDERS: usize = 4_000;
+const NAMES_PER_BIG_FOLDER: usize = 40;
+
+fn many_folder_names(folder: usize) -> PackedNames {
+    PackedNames::from_names(
+        (0..NAMES_PER_BIG_FOLDER)
+            .map(|file| format!("folder-{folder:05}-file-{file:03}-with-a-long-distinct-name.txt")),
+    )
+}
+
+fn build_many(builder: &mut SegmentBuilder) {
+    let root_names = PackedNames::default();
+    builder
+        .push(SegmentEntry {
+            depth: 0,
+            name: "/",
+            direct: 0,
+            flags: SCANNED,
+            file_names: root_names.as_bytes(),
+        })
+        .expect("root");
+    for folder in 0..MANY_FOLDERS {
+        let name = format!("folder-{folder:05}");
+        let names = many_folder_names(folder);
+        builder
+            .push(SegmentEntry {
+                depth: 1,
+                name: &name,
+                direct: folder as u64,
+                flags: SCANNED,
+                file_names: names.as_bytes(),
+            })
+            .expect("folder");
+    }
+}
+
+#[test]
+fn a_compaction_build_compresses_in_parallel_and_writes_the_same_files() {
+    let directory = tempdir().expect("temp dir");
+    let sequential_paths = paths_in(&directory.path().join("sequential"));
+    let parallel_paths = paths_in(&directory.path().join("parallel"));
+    let mut sequential = SegmentBuilder::create(SegmentTarget {
+        paths: sequential_paths.clone(),
+        token: TOKEN,
+    })
+    .expect("sequential builder");
+    let mut parallel = SegmentBuilder::for_compaction(SegmentTarget {
+        paths: parallel_paths.clone(),
+        token: TOKEN,
+    })
+    .expect("parallel builder");
+    build_many(&mut sequential);
+    build_many(&mut parallel);
+    let sequential_built = sequential.finish().expect("sequential");
+    let parallel_built = parallel.finish().expect("parallel");
+
+    assert_eq!(
+        parallel_built.names.blocks_reencoded,
+        sequential_built.names.blocks_reencoded
+    );
+    assert!(
+        sequential_built.names.blocks_reencoded > 16,
+        "enough blocks for several batches"
+    );
+    assert_eq!(
+        fs::read(&parallel_paths.names).expect("parallel names"),
+        fs::read(&sequential_paths.names).expect("sequential names")
+    );
+    assert_eq!(
+        fs::read(&parallel_paths.tree).expect("parallel tree"),
+        fs::read(&sequential_paths.tree).expect("sequential tree")
+    );
+    let segment = MappedSegment::open(&parallel_paths).expect("opens");
+    assert_eq!(
+        file_names_of(&segment, 1234),
+        many_folder_names(1233)
+            .names()
+            .map(|name| String::from_utf8_lossy(name).into_owned())
+            .collect::<Vec<String>>()
+    );
+}

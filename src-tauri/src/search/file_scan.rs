@@ -7,6 +7,7 @@ use super::query::Segment;
 use super::results::{CandidatePool, TieredCandidate, LISTED_TIER};
 use super::tree_scan::{TreeSearchRun, VisibleTree};
 use super::{Candidate, SearchError};
+use crate::resource_coordinator::scan_pool::{map_parts_in_order, split_slice};
 use crate::size::index::names::{FileNameStore, FolderNames, NamesScratch, NamesUnreadable};
 use crate::size::index::tree::{FolderSizeTree, IdRanges};
 use crate::size::index::IndexRead;
@@ -38,7 +39,6 @@ pub fn scan_files(
     let mut scanner = FileScanner {
         run,
         name: scan.name,
-        scratch: NamesScratch::default(),
         pool,
     };
     let Some(plan) = scanner.plan(&scan.selection)? else {
@@ -56,7 +56,6 @@ pub fn scan_files(
 struct FileScanner<'scan, 'run> {
     run: &'scan TreeSearchRun<'run>,
     name: Option<&'scan Segment>,
-    scratch: NamesScratch,
     pool: &'scan mut CandidatePool,
 }
 
@@ -80,7 +79,6 @@ impl FileScanner<'_, '_> {
         }
         let include_hidden = self.run.options.include_hidden;
         let name = self.name;
-        let scratch = &mut self.scratch;
         let mut collected = Collected::default();
         self.run.source.read(&mut |view| {
             let matcher = FileMatcher {
@@ -88,11 +86,7 @@ impl FileScanner<'_, '_> {
                 name,
                 members: plan.members.as_ref(),
             };
-            let reader = NamesReader {
-                names: view.names,
-                scratch: &mut *scratch,
-            };
-            collected = collect(chunk, reader, &matcher);
+            collected = collect(chunk, view.names, &matcher);
         })?;
         Ok(self.absorb(collected))
     }
@@ -175,54 +169,63 @@ enum NamesChunk<'plan> {
     Blocks(&'plan [usize]),
 }
 
-struct NamesReader<'read> {
-    names: &'read FileNameStore,
-    scratch: &'read mut NamesScratch,
-}
-
-impl NamesReader<'_> {
-    fn visit(
-        &mut self,
-        chunk: NamesChunk<'_>,
-        visit: &mut dyn FnMut(FolderNames<'_>),
-    ) -> Result<(), NamesUnreadable> {
-        match chunk {
-            NamesChunk::Overlay => {
-                self.names.visit_overlay(visit);
-                Ok(())
-            }
-            NamesChunk::Blocks(indexes) => self.visit_blocks(indexes, visit),
-        }
-    }
-
-    fn visit_blocks(
-        &mut self,
-        indexes: &[usize],
-        visit: &mut dyn FnMut(FolderNames<'_>),
-    ) -> Result<(), NamesUnreadable> {
-        let block_count = self.names.block_count();
-        let existing = indexes.iter().filter(|&&index| index < block_count);
-        for &index in existing {
-            let block = self.names.read_block(index, self.scratch)?;
-            block.folders().for_each(&mut *visit);
-        }
-        Ok(())
-    }
-}
-
 #[derive(Default)]
 struct Collected {
     hits: Vec<TieredCandidate>,
     unreadable: bool,
 }
 
-fn collect(
-    chunk: NamesChunk<'_>,
-    mut reader: NamesReader<'_>,
+impl Collected {
+    fn joined(parts: Vec<Self>) -> Self {
+        let unreadable = parts.iter().any(|part| part.unreadable);
+        let hits = parts.into_iter().flat_map(|part| part.hits).collect();
+        Self { hits, unreadable }
+    }
+}
+
+fn collect(chunk: NamesChunk<'_>, names: &FileNameStore, matcher: &FileMatcher<'_>) -> Collected {
+    match chunk {
+        NamesChunk::Overlay => collect_overlay(names, matcher),
+        NamesChunk::Blocks(indexes) => collect_blocks(names, indexes, matcher),
+    }
+}
+
+fn collect_overlay(names: &FileNameStore, matcher: &FileMatcher<'_>) -> Collected {
+    let mut hits = Vec::new();
+    names.visit_overlay(&mut |folder| matcher.collect_hits(folder, &mut hits));
+    Collected {
+        hits,
+        unreadable: false,
+    }
+}
+
+fn collect_blocks(
+    names: &FileNameStore,
+    indexes: &[usize],
     matcher: &FileMatcher<'_>,
 ) -> Collected {
+    let parts = map_parts_in_order(split_slice(indexes), |part| {
+        collect_block_part(names, part, matcher)
+    });
+    Collected::joined(parts)
+}
+
+fn collect_block_part(
+    names: &FileNameStore,
+    indexes: &[usize],
+    matcher: &FileMatcher<'_>,
+) -> Collected {
+    let mut scratch = NamesScratch::default();
     let mut hits = Vec::new();
-    let visited = reader.visit(chunk, &mut |folder| matcher.collect_hits(folder, &mut hits));
+    let block_count = names.block_count();
+    let mut existing = indexes.iter().filter(|&&index| index < block_count);
+    let visited = existing.try_for_each(|&index| {
+        let block = names.read_block(index, &mut scratch)?;
+        block
+            .folders()
+            .for_each(|folder| matcher.collect_hits(folder, &mut hits));
+        Ok::<(), NamesUnreadable>(())
+    });
     Collected {
         hits,
         unreadable: visited.is_err(),

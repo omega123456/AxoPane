@@ -1,10 +1,10 @@
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 
-use super::block::BlockBuilder;
+use super::block::{BlockBuilder, EncodedBlock};
 use super::codec::NamesEncoder;
 use super::file::{NamesFileWriter, NamesHeader};
+use crate::resource_coordinator::scan_pool::map_parts_in_order;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RewriteStats {
@@ -23,7 +23,6 @@ impl RewriteStats {
 pub enum RewriteError {
     Io(io::Error),
     Unreadable,
-    DeadlinePassed,
 }
 
 impl From<io::Error> for RewriteError {
@@ -32,26 +31,12 @@ impl From<io::Error> for RewriteError {
     }
 }
 
-fn finish_output(
-    output: NamesFileWriter,
-    header: NamesHeader,
-    deadline: Option<Instant>,
-) -> Result<PathBuf, RewriteError> {
-    if is_past(deadline) {
-        output.discard();
-        return Err(RewriteError::DeadlinePassed);
-    }
-    Ok(output.finish(header)?)
-}
-
-pub fn is_past(deadline: Option<Instant>) -> bool {
-    deadline.is_some_and(|deadline| Instant::now() >= deadline)
-}
+pub(crate) const ONE_BLOCK_AT_A_TIME: usize = 1;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct OutputLimits {
     pub(crate) block_target: usize,
-    pub(crate) deadline: Option<Instant>,
+    pub(crate) compress_batch: usize,
 }
 
 #[derive(Debug)]
@@ -64,10 +49,16 @@ pub(crate) struct BlockOutput {
     writer: NamesFileWriter,
     encoder: NamesEncoder,
     open: Option<BlockBuilder>,
+    filled: Vec<BlockBuilder>,
     block_target: usize,
-    deadline: Option<Instant>,
+    compress_batch: usize,
     stats: RewriteStats,
     open_blocks: u64,
+}
+
+fn encode_with_own_encoder(builder: BlockBuilder) -> io::Result<EncodedBlock> {
+    let mut encoder = NamesEncoder::new()?;
+    builder.finish(&mut encoder)
 }
 
 impl BlockOutput {
@@ -76,8 +67,9 @@ impl BlockOutput {
             writer: NamesFileWriter::create(path)?,
             encoder: NamesEncoder::new()?,
             open: None,
+            filled: Vec::new(),
             block_target: limits.block_target,
-            deadline: limits.deadline,
+            compress_batch: limits.compress_batch.max(ONE_BLOCK_AT_A_TIME),
             stats: RewriteStats::default(),
             open_blocks: 0,
         })
@@ -89,7 +81,7 @@ impl BlockOutput {
             return Err(error);
         }
         let stats = self.stats;
-        let temp = finish_output(self.writer, header, self.deadline)?;
+        let temp = self.writer.finish(header)?;
         Ok(FinishedNames { temp, stats })
     }
 
@@ -109,29 +101,43 @@ impl BlockOutput {
             None => self.start_block(ordinal),
         };
         builder.push(ordinal, names);
-        if builder.raw_len() >= self.block_target {
-            return self.finish_block(builder);
+        if builder.raw_len() < self.block_target {
+            self.open = Some(builder);
+            return Ok(());
         }
-        self.open = Some(builder);
+        self.filled.push(builder);
+        if self.filled.len() >= self.compress_batch {
+            return self.write_filled();
+        }
         Ok(())
     }
 
     fn close_open_block(&mut self) -> Result<(), RewriteError> {
-        let Some(builder) = self.open.take() else {
-            return Ok(());
-        };
-        self.finish_block(builder)
+        self.filled.extend(self.open.take());
+        self.write_filled()
     }
 
-    fn finish_block(&mut self, builder: BlockBuilder) -> Result<(), RewriteError> {
-        if is_past(self.deadline) {
-            return Err(RewriteError::DeadlinePassed);
+    fn write_filled(&mut self) -> Result<(), RewriteError> {
+        let filled = std::mem::take(&mut self.filled);
+        let written = filled.len() as u64;
+        for encoded in self.encode(filled)? {
+            self.writer
+                .append(encoded.stored(), encoded.span.first_ordinal)?;
         }
-        let encoded = builder.finish(&mut self.encoder)?;
-        self.writer
-            .append(encoded.stored(), encoded.span.first_ordinal)?;
-        self.open_blocks -= 1;
-        self.stats.blocks_reencoded += 1;
+        self.open_blocks -= written;
+        self.stats.blocks_reencoded += written;
         Ok(())
+    }
+
+    fn encode(&mut self, filled: Vec<BlockBuilder>) -> io::Result<Vec<EncodedBlock>> {
+        if self.compress_batch == ONE_BLOCK_AT_A_TIME {
+            return filled
+                .into_iter()
+                .map(|builder| builder.finish(&mut self.encoder))
+                .collect();
+        }
+        map_parts_in_order(filled, encode_with_own_encoder)
+            .into_iter()
+            .collect()
     }
 }

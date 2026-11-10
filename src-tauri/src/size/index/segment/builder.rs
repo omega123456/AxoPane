@@ -9,10 +9,13 @@ use super::format::{
     le_u32, le_u64, Cell, CellRun, Column, Counts, Layout, NodeFlags, SegmentPaths, TreeHeader,
     HEADER_BYTES, MAX_SEGMENT_NODES, NO_PARENT,
 };
+use crate::resource_coordinator::parallelism::scan_workers;
 use crate::size::index::names::block::{self, BLOCK_TARGET_BYTES};
 use crate::size::index::names::file::{remove_if_present, NamesHeader};
 use crate::size::index::names::is_packed_list_or_empty;
-use crate::size::index::names::writer::{BlockOutput, OutputLimits, RewriteError, RewriteStats};
+use crate::size::index::names::writer::{
+    BlockOutput, OutputLimits, RewriteError, RewriteStats, ONE_BLOCK_AT_A_TIME,
+};
 use crate::size::index::persist::{self, Reader};
 use crate::size::index::tree::OwnCounters;
 
@@ -170,15 +173,27 @@ impl SegmentBuilder {
         Self::with_block_target(target, BLOCK_TARGET_BYTES)
     }
 
+    pub fn for_compaction(target: SegmentTarget) -> Result<Self, BuildError> {
+        let limits = OutputLimits {
+            block_target: BLOCK_TARGET_BYTES,
+            compress_batch: scan_workers(),
+        };
+        Self::with_limits(target, limits)
+    }
+
     pub fn with_block_target(
         target: SegmentTarget,
         block_target: usize,
     ) -> Result<Self, BuildError> {
-        let temps = TempFiles::of(&target.paths);
         let limits = OutputLimits {
             block_target,
-            deadline: None,
+            compress_batch: ONE_BLOCK_AT_A_TIME,
         };
+        Self::with_limits(target, limits)
+    }
+
+    fn with_limits(target: SegmentTarget, limits: OutputLimits) -> Result<Self, BuildError> {
+        let temps = TempFiles::of(&target.paths);
         let rows = RowLog::create(temps.rows.clone())?;
         let names = match BlockOutput::create(&target.paths.names, limits) {
             Ok(names) => names,

@@ -1,5 +1,6 @@
 pub mod parallelism;
 pub mod queue;
+pub mod scan_pool;
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};

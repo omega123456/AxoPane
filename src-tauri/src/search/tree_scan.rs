@@ -1,10 +1,7 @@
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock, PoisonError};
-
-use rayon::prelude::*;
-use rayon::{ThreadPool, ThreadPoolBuilder};
+use std::sync::{Mutex, PoisonError};
 
 use super::file_scan::{self, FileScan, FileSelection};
 use super::matcher::NameKind;
@@ -15,7 +12,7 @@ use super::results::{
 };
 use super::source::FolderTreeSource;
 use super::{Candidate, CandidateBatch, SearchError, SearchRun, SearchScope};
-use crate::resource_coordinator::parallelism::scan_workers;
+use crate::resource_coordinator::scan_pool::{map_parts_in_order, split_range};
 use crate::size::index::tree::FolderSizeTree;
 use crate::size::index::IndexRead;
 
@@ -417,41 +414,8 @@ impl PartScan<'_, '_> {
     }
 }
 
-fn scan_pool() -> Option<&'static ThreadPool> {
-    static POOL: OnceLock<Option<ThreadPool>> = OnceLock::new();
-    POOL.get_or_init(|| {
-        ThreadPoolBuilder::new()
-            .num_threads(scan_workers())
-            .thread_name(|index| format!("search-scan-{index}"))
-            .build()
-            .ok()
-    })
-    .as_ref()
-}
-
-fn split_ids(ids: Range<u32>, parts: usize) -> Vec<Range<u32>> {
-    let part_len = ids.len().div_ceil(parts.max(1)).max(1);
-    let part_len = u32::try_from(part_len).unwrap_or(u32::MAX);
-    let starts = (ids.start..ids.end).step_by(part_len as usize);
-    starts
-        .map(|start| start..start.saturating_add(part_len).min(ids.end))
-        .collect()
-}
-
 fn inspect_in_parallel(scan: PartScan<'_, '_>, ids: Range<u32>) -> Vec<InspectedPart> {
-    let parts = split_ids(ids, scan_workers());
-    let Some(pool) = scan_pool() else {
-        return parts
-            .into_iter()
-            .map(|part| scan.inspect_range(part))
-            .collect();
-    };
-    pool.install(|| {
-        parts
-            .into_par_iter()
-            .map(|part| scan.inspect_range(part))
-            .collect()
-    })
+    map_parts_in_order(split_range(ids), |part| scan.inspect_range(part))
 }
 
 fn folder_hits(visible: &VisibleTree<'_>, kept: &[Tiered<u32>]) -> Vec<TieredCandidate> {

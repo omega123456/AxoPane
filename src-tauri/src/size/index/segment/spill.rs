@@ -6,8 +6,11 @@ use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 
+use rayon::slice::ParallelSliceMut;
+
 use super::assemble;
 use super::builder::{BuildError, BuiltSegment, SegmentTarget};
+use crate::resource_coordinator::scan_pool::run_on_scan_workers;
 use crate::size::index::names::file::remove_if_present;
 use crate::size::index::names::{PackedNames, NAME_TERMINATOR};
 use crate::size::index::persist::Reader;
@@ -118,7 +121,10 @@ impl Run {
 
     fn sort(&mut self) {
         let Self { arena, records } = self;
-        records.sort_by(|left, right| arena[left.key.clone()].cmp(&arena[right.key.clone()]));
+        let by_key = |left: &RunRecord, right: &RunRecord| {
+            arena[left.key.clone()].cmp(&arena[right.key.clone()])
+        };
+        run_on_scan_workers(|| records.par_sort_by(by_key));
     }
 
     fn record(&self, position: usize) -> &[u8] {
