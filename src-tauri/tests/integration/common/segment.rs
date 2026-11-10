@@ -1,11 +1,12 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use file_explorer_lib::size::index::names::block::decode;
 use file_explorer_lib::size::index::names::codec::DecodeScratch;
-use file_explorer_lib::size::index::names::{names_in, PackedNames};
+use file_explorer_lib::size::index::names::{names_in, FileNameStore, PackedNames, SavedNames};
 use file_explorer_lib::size::index::segment::{
-    BuildError, GraftTarget, MappedSegment, SegmentPaths, SegmentTarget, SpillOptions, SpillRecord,
-    WalkSpill, RUN_BYTES,
+    BaseRewrite, BuildError, GraftTarget, MappedSegment, RewriteProgress, RewriteSource,
+    SegmentBuilder, SegmentPaths, SegmentTarget, SpillOptions, SpillRecord, WalkSpill, RUN_BYTES,
 };
 use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
 
@@ -144,4 +145,46 @@ pub fn files_in(directory: &Path) -> Vec<String> {
         .collect();
     files.sort();
     files
+}
+
+pub struct Compaction<'index> {
+    pub tree: &'index FolderSizeTree,
+    pub names: &'index FileNameStore,
+    pub target: SegmentTarget,
+    pub block_target: usize,
+}
+
+/// Rewrites the whole index into one base segment, as a compaction does.
+pub fn compacted(compaction: Compaction<'_>) -> MappedSegment {
+    let Compaction {
+        tree,
+        names,
+        target,
+        block_target,
+    } = compaction;
+    let mut builder = SegmentBuilder::with_block_target(target, block_target).expect("builder");
+    let mut rewrite = BaseRewrite::of(tree);
+    let source = RewriteSource { tree, names };
+    let mut progress = RewriteProgress::MoreFolders;
+    while progress == RewriteProgress::MoreFolders {
+        progress = rewrite.copy_step(source, &mut builder).expect("copied");
+    }
+    MappedSegment::open(&builder.finish().expect("finish").paths).expect("opens")
+}
+
+pub struct SegmentBackedIndex {
+    pub tree: FolderSizeTree,
+    pub names: FileNameStore,
+}
+
+/// The index a relaunch sees right after a compaction: one base segment, empty overlays.
+pub fn index_over(segment: MappedSegment, names_path: &Path) -> SegmentBackedIndex {
+    let segment = Arc::new(segment);
+    let mut tree = FolderSizeTree::default();
+    let slots = tree.attach_base(Arc::clone(&segment)).expect("attached");
+    let mut base = SavedNames::default();
+    base.attach_segment(slots, segment.shared_file_names());
+    let mut names = FileNameStore::new(names_path.to_path_buf());
+    names.restore(base);
+    SegmentBackedIndex { tree, names }
 }

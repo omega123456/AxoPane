@@ -6,12 +6,13 @@ use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use file_explorer_lib::size::index::names::file::{spill_path, MappedNames, NamesHeader};
+use file_explorer_lib::size::index::names::file::spill_path;
 use file_explorer_lib::size::index::names::{
-    FileNameStore, NamesCounters, NamesScratch, PairExpectation, OVERLAY_THRESHOLD_FOLDERS,
+    FileNameStore, NamesCounters, NamesScratch, OVERLAY_THRESHOLD_FOLDERS,
 };
-use file_explorer_lib::size::index::persist::{self, temp_path, ChangeFlags};
+use file_explorer_lib::size::index::persist::{self, temp_path, ChangeFlags, SegmentRef, Snapshot};
 use file_explorer_lib::size::index::platform::{IndexPlatform, PowerSignal, RawEvent};
+use file_explorer_lib::size::index::segment::SegmentPaths;
 use file_explorer_lib::size::index::{names_path_beside, IndexRead};
 use file_explorer_lib::size::{IndexState, PaneSubscriptions};
 
@@ -20,7 +21,6 @@ use crate::size_index_service_integration::{wait_until, Harness};
 const POLL_INTERVAL: Duration = Duration::from_millis(2);
 const POLL_LIMIT: Duration = Duration::from_secs(1);
 const NAMES_HEADER_BYTES: u64 = 48;
-const FIRST_SLOT: u32 = 0;
 const BARRIER_PANE: &str = "names-barrier";
 const BARRIER_FOLDER: &str = "s";
 
@@ -113,17 +113,53 @@ fn blur(index: &Harness) {
     barrier(index);
 }
 
-fn snapshot_token(index: &Harness) -> u64 {
-    persist::load(&index.snapshot)
-        .expect("snapshot")
-        .meta
-        .pair_token
+fn saved(index: &Harness) -> Snapshot {
+    persist::load(&index.snapshot).expect("saved manifest")
 }
 
-fn names_header(index: &Harness) -> NamesHeader {
-    MappedNames::open(&names_file(index))
-        .expect("names file")
-        .header()
+fn is_saved(index: &Harness) -> bool {
+    persist::load(&index.snapshot).is_some()
+}
+
+fn base_segment(index: &Harness) -> SegmentRef {
+    let segments = saved(index).segments;
+    assert_eq!(segments.len(), 1, "one base segment");
+    segments[0]
+}
+
+fn paths_of(index: &Harness, segment: SegmentRef) -> SegmentPaths {
+    let directory = index.snapshot.parent().expect("cache directory");
+    SegmentPaths::numbered(directory, segment.sequence)
+}
+
+fn base_paths(index: &Harness) -> SegmentPaths {
+    paths_of(index, base_segment(index))
+}
+
+fn base_names_file(index: &Harness) -> PathBuf {
+    base_paths(index).names
+}
+
+fn wait_for_the_base(index: &Harness) {
+    poll_until("the base segment", || is_saved(index));
+}
+
+fn scan_and_save(index: &mut Harness) {
+    index.start();
+    index.wait_state(IndexState::UpToDate);
+    wait_for_the_base(index);
+}
+
+fn wait_for_a_new_base(index: &Harness, previous: SegmentRef) {
+    poll_until("a new base segment", || {
+        persist::load(&index.snapshot).is_some_and(|snapshot| snapshot.segments != [previous])
+    });
+}
+
+fn wait_for_the_spill_to_go(index: &Harness) {
+    poll_until("the spill is folded into the base", || {
+        !spill_path(&names_file(index)).exists()
+    });
 }
 
 fn indexing_runs(index: &Harness) -> usize {
@@ -184,11 +220,11 @@ fn a_full_scan_stores_every_folders_file_names_including_hidden_ones() {
     let mut index = Harness::new();
     fs::write(index.path("a/.hidden"), b"h").unwrap();
     symlink(index.path("top.bin"), index.path("a/link")).unwrap();
-    index.start();
-    index.wait_state(IndexState::UpToDate);
+    scan_and_save(&mut index);
 
-    assert!(names_file(&index).exists());
-    assert!(!spill_path(&names_file(&index)).exists());
+    assert!(base_names_file(&index).exists());
+    assert!(!names_file(&index).exists(), "no separate names file");
+    wait_for_the_spill_to_go(&index);
     assert!(names_available(&index));
     for relative in FOLDERS {
         assert_eq!(
@@ -203,7 +239,7 @@ fn a_full_scan_stores_every_folders_file_names_including_hidden_ones() {
         owned(&[]),
         "a protected folder is never read"
     );
-    assert_eq!(names_header(&index).pair_token, snapshot_token(&index));
+    assert!(saved(&index).meta.has_file_names);
     let first = index
         .statuses
         .lock()
@@ -218,9 +254,9 @@ fn a_full_scan_stores_every_folders_file_names_including_hidden_ones() {
 fn re_reads_update_names_without_a_rewrite_and_prunes_hide_them() {
     let mut index = Harness::new();
     fs::write(index.path("a/draft.txt"), b"d").unwrap();
-    index.start();
-    index.wait_state(IndexState::UpToDate);
-    let written = fs::read(names_file(&index)).unwrap();
+    scan_and_save(&mut index);
+    let base = base_segment(&index);
+    let written = fs::read(base_names_file(&index)).unwrap();
     let before = counters(&index);
 
     fs::write(index.path("a/new.txt"), b"n").unwrap();
@@ -244,18 +280,17 @@ fn re_reads_update_names_without_a_rewrite_and_prunes_hide_them() {
     });
     assert_eq!(hidden.map(|names| names.is_empty()), Some(true));
 
-    assert_eq!(fs::read(names_file(&index)).unwrap(), written, "no rewrite");
-    let after = counters(&index);
-    assert_eq!(after.blocks_reencoded, before.blocks_reencoded);
-    assert_eq!(after.blocks_copied, before.blocks_copied);
+    blur(&index);
+    assert_eq!(base_segment(&index), base, "no new segment");
+    assert_eq!(fs::read(base_names_file(&index)).unwrap(), written);
+    assert_eq!(counters(&index).blocks_reencoded, before.blocks_reencoded);
 }
 
 #[test]
 fn a_reload_restores_identical_names_without_rescanning() {
     let mut index = Harness::new();
     index.platform.set_event_id(500);
-    index.start();
-    index.wait_state(IndexState::UpToDate);
+    scan_and_save(&mut index);
     let before = all_names(&index);
 
     relaunch(&mut index);
@@ -270,13 +305,13 @@ fn a_reload_restores_identical_names_without_rescanning() {
 }
 
 #[test]
-fn a_corrupt_or_mismatched_pair_triggers_exactly_one_full_rescan() {
+fn a_corrupt_or_mismatched_segment_triggers_exactly_one_full_rescan() {
     let mut index = Harness::new();
-    index.start();
-    index.wait_state(IndexState::UpToDate);
+    scan_and_save(&mut index);
     let expected = all_names(&index);
+    index.stop();
 
-    corrupt(&names_file(&index), 0);
+    corrupt(&base_names_file(&index), 0);
     assert_eq!(
         relaunch_counting_rescans(&mut index),
         1,
@@ -284,33 +319,40 @@ fn a_corrupt_or_mismatched_pair_triggers_exactly_one_full_rescan() {
     );
     assert_eq!(index.platform.stream_starts().last(), Some(&None));
     assert_eq!(all_names(&index), expected);
+    wait_for_the_base(&index);
+    index.stop();
 
     corrupt(&index.snapshot, 0);
-    assert_eq!(relaunch_counting_rescans(&mut index), 1, "corrupt snapshot");
+    assert_eq!(relaunch_counting_rescans(&mut index), 1, "corrupt manifest");
     assert_eq!(all_names(&index), expected);
+    wait_for_the_base(&index);
 
-    let older_names = fs::read(names_file(&index)).unwrap();
-    fs::create_dir(index.path("s/extra")).unwrap();
-    index.event("s", ChangeFlags::default());
-    index.service().flush_index();
-    assert_ne!(fs::read(names_file(&index)).unwrap(), older_names);
+    let older = base_segment(&index);
+    let older_tree = fs::read(paths_of(&index, older).tree).unwrap();
+    let older_names = fs::read(paths_of(&index, older).names).unwrap();
+    index
+        .service()
+        .rebuild_folder_size_index()
+        .expect("index attached");
+    wait_for_a_new_base(&index, older);
     index.stop();
-    fs::write(names_file(&index), &older_names).unwrap();
+    let newer_paths = base_paths(&index);
+    fs::write(&newer_paths.tree, &older_tree).unwrap();
+    fs::write(&newer_paths.names, &older_names).unwrap();
     assert_eq!(
         relaunch_counting_rescans(&mut index),
         1,
         "mismatched tokens"
     );
-    assert_eq!(names_header(&index).pair_token, snapshot_token(&index));
+    assert_eq!(all_names(&index), expected);
 }
 
 #[test]
 fn a_block_that_fails_to_decode_disables_names_and_rescans_once() {
     let mut index = Harness::new();
-    index.start();
-    index.wait_state(IndexState::UpToDate);
+    scan_and_save(&mut index);
     index.stop();
-    corrupt(&names_file(&index), NAMES_HEADER_BYTES);
+    corrupt(&base_names_file(&index), NAMES_HEADER_BYTES);
 
     relaunch(&mut index);
     finish_replay(&index);
@@ -332,59 +374,64 @@ fn a_block_that_fails_to_decode_disables_names_and_rescans_once() {
 
     index.blocker.release(&index.path(""));
     index.wait_state(IndexState::UpToDate);
-    assert!(names_available(&index), "the rescan rebuilt the pair");
+    wait_until("the rescan rebuilt the names", || names_available(&index));
     assert_eq!(indexing_runs(&index), 1);
     assert_eq!(indexed_names(&index, "a"), files_on_disk(&index.path("a")));
 }
 
 #[test]
-fn a_pair_save_that_needs_a_corrupt_block_rescans_once() {
+fn a_compaction_that_needs_a_corrupt_block_rescans_once() {
     let mut index = Harness::new();
-    index.start();
-    index.wait_state(IndexState::UpToDate);
+    scan_and_save(&mut index);
     index.stop();
-    corrupt(&names_file(&index), NAMES_HEADER_BYTES);
+    corrupt(&base_names_file(&index), NAMES_HEADER_BYTES);
     relaunch(&mut index);
     finish_replay(&index);
     index.wait_state(IndexState::UpToDate);
 
     fs::write(index.path("a/more.txt"), b"m").unwrap();
     index.event("a", ChangeFlags::default());
-    index.service().flush_index();
+    index
+        .service()
+        .add_index_exclusions(&[index.path("s")])
+        .expect("index attached");
     wait_until("rescan", || {
         indexing_runs(&index) == 1 && index.state() == IndexState::UpToDate
     });
+    wait_until("names rebuilt", || names_available(&index));
     assert_eq!(indexed_names(&index, "a"), owned(&["a.bin", "more.txt"]));
-    assert!(names_available(&index));
 }
 
 #[test]
-fn size_only_changes_keep_the_pair_token_and_structural_changes_save_the_pair() {
+fn blur_saves_changes_in_the_manifest_and_leaves_the_segment_untouched() {
     let mut index = Harness::new();
-    index.start();
-    index.wait_state(IndexState::UpToDate);
-    let token = snapshot_token(&index);
-    let names_before = fs::read(names_file(&index)).unwrap();
+    scan_and_save(&mut index);
+    let base = base_segment(&index);
+    let names_before = fs::read(base_names_file(&index)).unwrap();
 
     fs::write(index.path("a/a.bin"), vec![0; 30]).unwrap();
+    fs::write(index.path("a/fresh.txt"), b"").unwrap();
     index.event("a", ChangeFlags::default());
     blur(&index);
-    let saved = persist::load(&index.snapshot).expect("snapshot");
-    assert_eq!(saved.tree.total(&index.path("a")).expect("a").bytes, 130);
-    assert_eq!(saved.meta.pair_token, token, "folder snapshot only");
-    assert_eq!(fs::read(names_file(&index)).unwrap(), names_before);
+    let resized = saved(&index);
+    assert_eq!(resized.tree.total(&index.path("a")).expect("a").bytes, 130);
+    assert_eq!(resized.segments, [base]);
 
     fs::create_dir(index.path("a/new")).unwrap();
     index.event("a", ChangeFlags::default());
     blur(&index);
-    let paired = snapshot_token(&index);
-    assert_ne!(paired, token, "a structural change saves the pair");
-    assert_eq!(names_header(&index).pair_token, paired);
+    let grown = saved(&index);
+    assert!(grown.tree.lookup(&index.path("a/new")).is_some());
+    assert_eq!(grown.segments, [base], "the overlay holds the new folder");
+    assert_eq!(fs::read(base_names_file(&index)).unwrap(), names_before);
+    assert_eq!(
+        names_saved_on_disk(&index, "a"),
+        ["a.bin", "fresh.txt"],
+        "overlay names are saved in the manifest"
+    );
 }
 
-#[test]
-fn blur_saves_the_pair_once_the_overlay_passes_its_threshold() {
-    let mut index = Harness::new();
+fn create_more_folders_than_the_overlay_holds(index: &Harness) -> Vec<PathBuf> {
     let many = index.path("many");
     let folders: Vec<PathBuf> = (0..=OVERLAY_THRESHOLD_FOLDERS)
         .map(|number| many.join(format!("d{number}")))
@@ -392,9 +439,15 @@ fn blur_saves_the_pair_once_the_overlay_passes_its_threshold() {
     for folder in &folders {
         fs::create_dir_all(folder).unwrap();
     }
-    index.start();
-    index.wait_state(IndexState::UpToDate);
-    let token = snapshot_token(&index);
+    folders
+}
+
+#[test]
+fn an_overlay_past_its_threshold_is_compacted_into_a_new_base() {
+    let mut index = Harness::new();
+    let folders = create_more_folders_than_the_overlay_holds(&index);
+    scan_and_save(&mut index);
+    let base = base_segment(&index);
 
     let events = folders
         .iter()
@@ -406,18 +459,19 @@ fn blur_saves_the_pair_once_the_overlay_passes_its_threshold() {
         })
         .collect();
     assert!(index.platform.emit(events));
-    blur(&index);
-    let paired = snapshot_token(&index);
-    assert_ne!(paired, token, "past the overlay threshold");
-    assert_eq!(names_header(&index).pair_token, paired);
+    wait_for_a_new_base(&index, base);
+    let overlay = read(&index, |view| view.names.overlay_stats());
+    assert_eq!(overlay.folders, 0, "the new base absorbed the overlay");
+    let old_base = paths_of(&index, base);
+    poll_until("the old base is swept", || !old_base.tree.exists());
+    assert!(!old_base.names.exists());
 }
 
 #[test]
-fn a_crash_with_names_only_in_the_overlay_replays_from_the_names_event_id() {
+fn a_relaunch_resumes_from_names_saved_in_the_manifest_overlay() {
     let mut index = Harness::new();
     index.platform.set_event_id(500);
-    index.start();
-    index.wait_state(IndexState::UpToDate);
+    scan_and_save(&mut index);
 
     fs::write(index.path("a/fresh.txt"), b"f").unwrap();
     let change = RawEvent {
@@ -426,23 +480,17 @@ fn a_crash_with_names_only_in_the_overlay_replays_from_the_names_event_id() {
         flags: ChangeFlags::default(),
         history_done: false,
     };
-    assert!(index.platform.emit(vec![change.clone()]));
+    assert!(index.platform.emit(vec![change]));
     blur(&index);
-    assert_eq!(persist::load(&index.snapshot).unwrap().meta.event_id, 600);
-    assert_eq!(names_header(&index).event_id, 500);
+    assert_eq!(saved(&index).meta.event_id, 600);
 
     index.platform.set_event_id(600);
     relaunch(&mut index);
-    assert_eq!(index.platform.stream_starts().last(), Some(&Some(500)));
-    assert_eq!(indexed_names(&index, "a"), owned(&["a.bin"]));
-    let done = RawEvent {
-        path: index.path(""),
-        history_done: true,
-        ..change.clone()
-    };
-    assert!(index.platform.emit(vec![change, done]));
-    index.wait_state(IndexState::UpToDate);
+    assert_eq!(index.platform.stream_starts().last(), Some(&Some(600)));
     assert_eq!(indexed_names(&index, "a"), owned(&["a.bin", "fresh.txt"]));
+    finish_replay(&index);
+    index.wait_state(IndexState::UpToDate);
+    assert_eq!(indexing_runs(&index), 0);
 }
 
 fn park_the_first_scan_after_a(index: &mut Harness) {
@@ -450,7 +498,7 @@ fn park_the_first_scan_after_a(index: &mut Harness) {
     index.start();
     wait_until("walk reaches a", || index.opened("a"));
     assert!(spill_path(&names_file(index)).exists());
-    assert!(!names_file(index).exists());
+    assert!(!index.snapshot.exists());
     wait_until("a spill counts as names", || names_available(index));
     index.platform.signal(PowerSignal::Conditions {
         low_power: true,
@@ -473,34 +521,37 @@ fn resume_power(index: &Harness) {
 }
 
 #[test]
-fn the_first_scan_spills_names_and_writes_the_final_pair_one_block_at_a_time() {
+fn the_first_scan_spills_names_and_writes_the_base_one_block_at_a_time() {
     let mut index = Harness::new();
     park_the_first_scan_after_a(&mut index);
     assert!(read(&index, |view| view.names.spill_len()).is_some_and(|len| len > 0));
     assert!(read(&index, |view| view.names.is_spilling()));
-    assert!(!read(&index, |view| view.names.has_names_file()));
+    assert!(!read(&index, |view| view.names.has_saved_names()));
     assert_eq!(counters(&index).peak_open_output_blocks, 0);
 
     resume_power(&index);
-    assert!(names_file(&index).exists());
-    assert!(!spill_path(&names_file(&index)).exists());
+    wait_for_the_base(&index);
+    assert!(base_names_file(&index).exists());
+    wait_for_the_spill_to_go(&index);
     assert_eq!(counters(&index).peak_open_output_blocks, 1);
     assert_eq!(indexed_names(&index, "a"), owned(&["a.bin"]));
 }
 
 #[test]
-fn blur_during_the_first_scan_saves_a_pair_and_keeps_spilling() {
+fn blur_during_the_first_scan_saves_a_base_and_keeps_spilling() {
     let mut index = Harness::new();
     park_the_first_scan_after_a(&mut index);
     index.service().window_focus_changed(false);
-    poll_until("mid-scan pair", || names_file(&index).exists());
+    wait_for_the_base(&index);
     poll_until("spill restarted", || {
         read(&index, |view| view.names.spill_len()) == Some(0)
     });
     assert_eq!(indexed_names(&index, "a"), owned(&["a.bin"]));
+    let mid_scan = base_segment(&index);
 
     resume_power(&index);
-    assert!(!spill_path(&names_file(&index)).exists());
+    wait_for_a_new_base(&index, mid_scan);
+    wait_for_the_spill_to_go(&index);
     for relative in FOLDERS {
         assert_eq!(
             indexed_names(&index, relative),
@@ -512,8 +563,7 @@ fn blur_during_the_first_scan_saves_a_pair_and_keeps_spilling() {
 #[test]
 fn a_stale_spill_found_at_launch_is_deleted() {
     let mut index = Harness::new();
-    index.start();
-    index.wait_state(IndexState::UpToDate);
+    scan_and_save(&mut index);
     index.stop();
     let spill = spill_path(&names_file(&index));
     fs::write(&spill, b"left over by a crash").unwrap();
@@ -538,64 +588,151 @@ fn scan_with_obstruction(target: impl Fn(&Harness) -> PathBuf) -> Harness {
 }
 
 #[test]
-fn pair_save_failures_never_leave_a_half_written_pair() {
-    let names_temp_blocked = scan_with_obstruction(|index| temp_path(&names_file(index)));
-    assert!(!names_file(&names_temp_blocked).exists());
-    assert!(!names_temp_blocked.snapshot.exists());
+fn manifest_save_failures_never_leave_a_half_written_manifest() {
+    let temp_blocked = scan_with_obstruction(|index| temp_path(&index.snapshot));
+    assert!(!temp_blocked.snapshot.exists());
+    assert_eq!(indexed_names(&temp_blocked, "a"), owned(&["a.bin"]));
 
-    let snapshot_temp_blocked = scan_with_obstruction(|index| temp_path(&index.snapshot));
-    assert!(!names_file(&snapshot_temp_blocked).exists());
-    assert!(!temp_path(&names_file(&snapshot_temp_blocked)).exists());
-    assert!(!snapshot_temp_blocked.snapshot.is_file());
-
-    let names_blocked = scan_with_obstruction(names_file);
-    assert!(!names_blocked.snapshot.exists());
-    assert!(!temp_path(&names_blocked.snapshot).exists());
-    assert!(names_blocked.snapshot.parent().unwrap().exists());
-
-    let snapshot_blocked = scan_with_obstruction(|index| index.snapshot.clone());
-    assert!(names_file(&snapshot_blocked).is_file());
-    assert!(snapshot_blocked.snapshot.is_dir());
-    assert!(!temp_path(&snapshot_blocked.snapshot).exists());
+    let manifest_blocked = scan_with_obstruction(|index| index.snapshot.clone());
+    assert!(manifest_blocked.snapshot.is_dir());
+    assert!(!temp_path(&manifest_blocked.snapshot).exists());
+    assert_eq!(indexed_names(&manifest_blocked, "a"), owned(&["a.bin"]));
 }
 
-fn names_saved_on_disk(index: &Harness) -> Vec<String> {
-    let header = names_header(index);
+fn names_saved_on_disk(index: &Harness, relative: &str) -> Vec<String> {
+    let Snapshot { tree, names, .. } = saved(index);
     let mut store = FileNameStore::new(names_file(index));
-    let expected = PairExpectation {
-        pair_token: header.pair_token,
-        first_slot: FIRST_SLOT,
-        folder_count: header.folder_count,
-    };
-    store.open_pair(expected).expect("saved pair");
+    store.restore(names);
+    let slot = tree.lookup(&index.path(relative)).expect("saved folder");
+    let saved_names = store.names_of(slot).expect("readable").expect("names");
+    sorted_strings(saved_names.names())
+}
+
+fn every_name_in_saved_blocks(index: &Harness) -> Vec<String> {
+    let mut store = FileNameStore::new(names_file(index));
+    store.restore(saved(index).names);
     let mut scratch = NamesScratch::default();
-    let mut saved = Vec::new();
+    let mut names = Vec::new();
     for block_index in 0..store.block_count() {
         let block = store.read_block(block_index, &mut scratch).expect("block");
         for folder in block.folders() {
-            saved.extend(sorted_strings(folder.names()));
+            names.extend(sorted_strings(folder.names()));
         }
     }
-    saved.sort();
-    saved
+    names.sort();
+    names
 }
 
 #[test]
 fn an_exclusion_removes_its_names_from_disk_without_waiting_for_blur() {
     let mut index = Harness::new();
-    index.start();
-    index.wait_state(IndexState::UpToDate);
-    let token = snapshot_token(&index);
-    assert!(names_saved_on_disk(&index).contains(&"b.bin".to_string()));
+    scan_and_save(&mut index);
+    let base = base_segment(&index);
+    assert!(every_name_in_saved_blocks(&index).contains(&"b.bin".to_string()));
 
     index
         .service()
         .add_index_exclusions(&[index.path("a")])
         .expect("index attached");
 
-    poll_until("pair saved", || snapshot_token(&index) != token);
-    assert_eq!(names_saved_on_disk(&index), ["h.bin", "s.bin", "top.bin"]);
-    let saved = persist::load(&index.snapshot).expect("snapshot");
+    wait_for_a_new_base(&index, base);
+    assert_eq!(
+        every_name_in_saved_blocks(&index),
+        ["h.bin", "s.bin", "top.bin"]
+    );
+    let saved = saved(&index);
     assert_eq!(saved.meta.exclusions, [index.path("a")]);
     assert!(saved.tree.lookup(&index.path("a/b")).is_none());
+}
+
+#[test]
+fn a_segment_left_by_a_crash_before_its_manifest_is_swept_at_launch() {
+    let mut index = Harness::new();
+    index.platform.set_event_id(500);
+    scan_and_save(&mut index);
+    index.stop();
+    let base = base_segment(&index);
+    let never_committed = SegmentRef {
+        sequence: base.sequence + 1,
+        ..base
+    };
+    let orphan = paths_of(&index, never_committed);
+    fs::copy(paths_of(&index, base).tree, &orphan.tree).unwrap();
+    fs::copy(paths_of(&index, base).names, &orphan.names).unwrap();
+
+    relaunch(&mut index);
+    assert_eq!(
+        index.platform.stream_starts().last(),
+        Some(&Some(500)),
+        "the manifest still resumes"
+    );
+    assert!(!orphan.tree.exists());
+    assert!(!orphan.names.exists());
+    assert_eq!(base_segment(&index), base);
+
+    index
+        .service()
+        .add_index_exclusions(&[index.path("s")])
+        .expect("index attached");
+    wait_for_a_new_base(&index, base);
+    assert!(
+        base_segment(&index).sequence > never_committed.sequence,
+        "a sequence seen on disk is never reused"
+    );
+}
+
+#[test]
+fn events_arriving_during_a_compaction_are_applied_after_it() {
+    let mut index = Harness::new();
+    create_more_folders_than_the_overlay_holds(&index);
+    scan_and_save(&mut index);
+    let base = base_segment(&index);
+
+    index
+        .service()
+        .add_index_exclusions(&[index.path("s")])
+        .expect("index attached");
+    fs::write(index.path("a/late.txt"), b"l").unwrap();
+    index.event("a", ChangeFlags::default());
+
+    wait_for_a_new_base(&index, base);
+    poll_until("the late event is applied", || {
+        indexed_names(&index, "a") == owned(&["a.bin", "late.txt"])
+    });
+    index.wait_state(IndexState::UpToDate);
+    assert!(!every_name_in_saved_blocks(&index).contains(&"s.bin".to_string()));
+}
+
+fn saved_base_is_purged_of(index: &Harness, file_name: &str) -> bool {
+    let Some(snapshot) = persist::load(&index.snapshot) else {
+        return false;
+    };
+    let holds_the_name = every_name_in_saved_blocks(index).contains(&file_name.to_string());
+    !snapshot.meta.names_purge_due && !holds_the_name
+}
+
+#[test]
+fn a_quit_during_a_compaction_saves_the_manifest_and_purges_at_the_next_launch() {
+    let mut index = Harness::new();
+    index.platform.set_event_id(500);
+    create_more_folders_than_the_overlay_holds(&index);
+    scan_and_save(&mut index);
+
+    index
+        .service()
+        .add_index_exclusions(&[index.path("a")])
+        .expect("index attached");
+    let asked = Instant::now();
+    index.service().flush_index();
+    assert!(asked.elapsed() < POLL_LIMIT, "the exit save never waits");
+    assert_eq!(saved(&index).meta.exclusions, [index.path("a")]);
+
+    relaunch(&mut index);
+    assert_eq!(index.platform.stream_starts().last(), Some(&Some(500)));
+    finish_replay(&index);
+    poll_until("the excluded names leave the disk", || {
+        saved_base_is_purged_of(&index, "b.bin")
+    });
+    index.wait_state(IndexState::UpToDate);
+    assert_eq!(indexing_runs(&index), 0, "no rescan");
 }

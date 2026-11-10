@@ -7,6 +7,8 @@ pub mod segment;
 pub mod tree;
 
 #[cfg(target_os = "macos")]
+mod compact;
+#[cfg(target_os = "macos")]
 mod host;
 #[cfg(target_os = "macos")]
 mod lanes;

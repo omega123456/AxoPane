@@ -21,8 +21,10 @@ use crate::size::{
     PaneSubscriptions, RequestMode, Route, SizeRequest, SizeSource, SizeStateKind, SizeUpdate,
 };
 
+use super::compact::run_compactions;
 use super::lanes::{run_background, run_boosts, BoostJob, Lanes, ScanJob};
-use super::machine::{ExclusionEdit, FlushRequest, Machine, Message};
+use super::machine::{ExclusionEdit, FlushRequest, Machine, MachineLinks, Message};
+use super::segment::sequence_of_segment_file;
 use super::subscriptions::SubscribedFolder;
 
 pub type SizeEmitter = Arc<dyn Fn(Vec<SizeUpdate>) + Send + Sync>;
@@ -151,16 +153,23 @@ fn counted_file_names(names: &FileNameStore) -> Option<u64> {
     names.count_saved_and_overlay_names().ok()
 }
 
-fn index_files(snapshot_path: &Path) -> [PathBuf; 3] {
-    let names_path = names_path_beside(snapshot_path);
-    let spill = spill_path(&names_path);
-    [snapshot_path.to_path_buf(), names_path, spill]
+fn is_index_file(path: &Path, snapshot_path: &Path) -> bool {
+    let spill = spill_path(&names_path_beside(snapshot_path));
+    let is_segment_file = path
+        .file_name()
+        .is_some_and(|name| sequence_of_segment_file(&name.to_string_lossy()).is_some());
+    is_segment_file || path == snapshot_path || path == spill
 }
 
-fn bytes_on_disk(paths: &[PathBuf]) -> u64 {
-    paths
-        .iter()
-        .filter_map(|path| fs::metadata(path).ok())
+fn index_bytes_on_disk(snapshot_path: &Path) -> u64 {
+    let directory = snapshot_path.parent().unwrap_or(snapshot_path);
+    let Ok(entries) = fs::read_dir(directory) else {
+        return 0;
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter(|entry| is_index_file(&entry.path(), snapshot_path))
+        .filter_map(|entry| entry.metadata().ok())
         .map(|metadata| metadata.len())
         .sum()
 }
@@ -195,49 +204,21 @@ pub(super) struct View {
 
 impl FolderSizeIndex {
     pub fn start(options: IndexOptions) -> Self {
-        let mut tree = FolderSizeTree::default();
-        for root in &options.roots {
-            tree.add_root(root);
-        }
-        let shared = Arc::new(Shared {
-            view: RwLock::new(View {
-                tree,
-                names: FileNameStore::new(names_path_beside(&options.snapshot_path)),
-                keeps_file_names: options.collect_file_names,
-                visited: HashSet::new(),
-                full_disk_access: false,
-                available: true,
-            }),
-            status: Mutex::new(FolderSizeIndexStatus::new(
-                IndexBackend::MacIndex,
-                true,
-                IndexState::NotReady,
-            )),
-            lanes: Mutex::new(Lanes::default()),
-            wake: Condvar::new(),
-            roots: options.roots.clone(),
-            excluded: options.excluded.clone(),
-            protected: options.protected.clone(),
-            exclusions: RwLock::new(ExclusionSet::new(options.user_exclusions.clone())),
-            exclusion_rules: ExclusionRules {
-                roots: options.roots.clone(),
-                always_skipped: options.excluded.clone(),
-                alias_prefix: Some(PathBuf::from(platform::DATA_VOLUME_PREFIX)),
-                home: options.home.clone(),
-            },
-            coordinator: Arc::clone(&options.coordinator),
-            collect_file_names: options.collect_file_names,
-            booted: AtomicBool::new(false),
-            #[cfg(feature = "test-utils")]
-            walk_hooks: options.walk_hooks.clone(),
-            #[cfg(feature = "test-utils")]
-            on_background_parked: Arc::clone(&options.on_background_parked),
-        });
+        let shared = Arc::new(Shared::starting_with(&options));
         let snapshot_path = options.snapshot_path.clone();
         let (sender, receiver) = unbounded();
-        let machine = Machine::new(Arc::clone(&shared), options, sender.clone());
+        let (compact_jobs, compact_queue) = unbounded();
+        let links = MachineLinks {
+            sender: sender.clone(),
+            compact_jobs,
+        };
+        let machine = Machine::new(Arc::clone(&shared), options, links);
         let threads = vec![
             spawn("size-index", move || machine.run(&receiver)),
+            spawn("size-index-compact", {
+                let (shared, sender) = (Arc::clone(&shared), sender.clone());
+                move || run_compactions(&shared, &compact_queue, &sender)
+            }),
             spawn("size-index-scan", {
                 let (shared, sender) = (Arc::clone(&shared), sender.clone());
                 move || run_background(&shared, &sender)
@@ -273,9 +254,13 @@ impl FolderSizeIndex {
             blocked: &blocked,
         });
         let names_failed = view.names.take_unreported_failure();
+        let tree_failed = view.tree.is_corrupt();
         drop(view);
         if names_failed {
             let _ = self.sender.send(Message::NamesUnreadable);
+        }
+        if tree_failed {
+            let _ = self.sender.send(Message::TreeUnreadable);
         }
         Ok(result)
     }
@@ -434,7 +419,7 @@ impl FolderSizeIndex {
         let directory = self.snapshot_path.parent().unwrap_or(&self.snapshot_path);
         FolderSizeIndexStorage {
             directory: directory.to_string_lossy().into_owned(),
-            size_bytes: bytes_on_disk(&index_files(&self.snapshot_path)),
+            size_bytes: index_bytes_on_disk(&self.snapshot_path),
             folder_count: items.as_ref().map(|items| items.folders),
             file_count: items.and_then(|items| items.files),
         }
@@ -472,6 +457,47 @@ pub(super) fn spawn(name: &str, body: impl FnOnce() + Send + 'static) -> JoinHan
 }
 
 impl Shared {
+    fn starting_with(options: &IndexOptions) -> Self {
+        let mut tree = FolderSizeTree::default();
+        for root in &options.roots {
+            tree.add_root(root);
+        }
+        Self {
+            view: RwLock::new(View {
+                tree,
+                names: FileNameStore::new(names_path_beside(&options.snapshot_path)),
+                keeps_file_names: options.collect_file_names,
+                visited: HashSet::new(),
+                full_disk_access: false,
+                available: true,
+            }),
+            status: Mutex::new(FolderSizeIndexStatus::new(
+                IndexBackend::MacIndex,
+                true,
+                IndexState::NotReady,
+            )),
+            lanes: Mutex::new(Lanes::default()),
+            wake: Condvar::new(),
+            roots: options.roots.clone(),
+            excluded: options.excluded.clone(),
+            protected: options.protected.clone(),
+            exclusions: RwLock::new(ExclusionSet::new(options.user_exclusions.clone())),
+            exclusion_rules: ExclusionRules {
+                roots: options.roots.clone(),
+                always_skipped: options.excluded.clone(),
+                alias_prefix: Some(PathBuf::from(platform::DATA_VOLUME_PREFIX)),
+                home: options.home.clone(),
+            },
+            coordinator: Arc::clone(&options.coordinator),
+            collect_file_names: options.collect_file_names,
+            booted: AtomicBool::new(false),
+            #[cfg(feature = "test-utils")]
+            walk_hooks: options.walk_hooks.clone(),
+            #[cfg(feature = "test-utils")]
+            on_background_parked: Arc::clone(&options.on_background_parked),
+        }
+    }
+
     fn is_booted(&self) -> bool {
         self.booted.load(Ordering::Acquire)
     }

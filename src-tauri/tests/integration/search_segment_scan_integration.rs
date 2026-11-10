@@ -1,16 +1,15 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use file_explorer_lib::search::path_style::PathStyle;
 use file_explorer_lib::search::query::parse;
 use file_explorer_lib::search::tree_scan::{candidates_in_chunks, TreeSearchRun};
 use file_explorer_lib::search::{Control, SearchOptions};
-use file_explorer_lib::size::index::names::{FileNameStore, PackedNames};
-use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
+use file_explorer_lib::size::index::names::PackedNames;
+use file_explorer_lib::size::index::tree::DirectoryListing;
 use tempfile::{tempdir, TempDir};
 
-use crate::common::segment::{walked, walked_segment, SegmentPlace, Walked};
+use crate::common::segment::{index_over, walked, walked_segment, SegmentPlace, Walked};
 use crate::search_file_scan_integration::{
     library, packed, ranked, Fixture, Folder, FILES, FOLDERS, WITH_HIDDEN,
 };
@@ -77,13 +76,10 @@ fn segment_backed(folders: &[Folder]) -> SegmentBacked {
         root: Path::new(ROOT),
         token: TOKEN,
     };
-    let segment = Arc::new(walked_segment(place, &walk_of(folders)));
-    let mut tree = FolderSizeTree::default();
-    let ids = tree.attach_base(Arc::clone(&segment)).expect("attached");
-    let mut names = FileNameStore::new(directory.path().join(UNUSED_NAMES_FILE));
-    names.attach_segment(ids, segment.shared_file_names());
+    let segment = walked_segment(place, &walk_of(folders));
+    let index = index_over(segment, &directory.path().join(UNUSED_NAMES_FILE));
     SegmentBacked {
-        source: Source::with_names(tree, names),
+        source: Source::with_names(index.tree, index.names),
         _directory: directory,
     }
 }
@@ -125,10 +121,7 @@ fn a_segment_backed_index_finds_what_the_heap_index_finds() {
     }
     let names = fixture.source.names.lock().unwrap();
     assert!(names.is_available());
-    assert!(
-        !names.has_names_file(),
-        "no snapshot pair, only the segment"
-    );
+    assert!(names.has_saved_names());
     assert_eq!(names.block_count(), 1);
     let files_in_the_library: usize = library().iter().map(|folder| folder.files.len()).sum();
     assert_eq!(

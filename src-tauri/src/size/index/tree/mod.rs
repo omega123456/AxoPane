@@ -10,7 +10,8 @@ use std::sync::Arc;
 use overlay::{is_heap, Delta, Facts, HeapNode, HeapNodes, OwnSize, Patch};
 use segments::SegmentTable;
 
-use crate::size::index::segment::MappedSegment;
+use crate::size::index::persist::{put_count, put_ids, put_u32, Reader};
+use crate::size::index::segment::{MappedSegment, NodeFlags};
 
 pub(crate) use overlay::DeadRanges;
 pub use overlay::{TreeOverlayStats, OVERLAY_CAP_DEAD_RANGES, OVERLAY_CAP_FOLDERS};
@@ -110,18 +111,6 @@ impl<'listing, S> DirectoryListing<'listing, S> {
     }
 }
 
-pub(crate) struct ImportedNode {
-    pub(crate) parent: u32,
-    pub(crate) name: Box<str>,
-    pub(crate) direct: u64,
-    pub(crate) flags: u8,
-}
-
-struct ImportedLink<'name> {
-    parent_order: u32,
-    name: &'name str,
-}
-
 #[derive(Clone, Copy)]
 struct PathLookup<'path> {
     path: &'path Path,
@@ -144,10 +133,24 @@ struct UnscannedTopsWalk {
     stack: Vec<NodeId>,
 }
 
-#[derive(Clone, Copy)]
-struct DepthFirstVisit {
+#[derive(Debug, Clone, Copy)]
+struct PendingVisit {
     id: NodeId,
-    parent_order: u32,
+    depth: usize,
+}
+
+#[derive(Debug, Default)]
+pub struct DepthFirstCursor {
+    pending: Vec<PendingVisit>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VisitedFolder<'tree> {
+    pub slot: u32,
+    pub depth: usize,
+    pub name: &'tree str,
+    pub direct: u64,
+    pub flags: NodeFlags,
 }
 
 pub(crate) struct LiveNode<'tree> {
@@ -192,13 +195,17 @@ impl FolderSizeTree {
         true
     }
 
+    pub(crate) fn attach_segment(&mut self, segment: Arc<MappedSegment>) -> Option<Range<u32>> {
+        self.segments.attach(segment)
+    }
+
     pub fn attach_base(&mut self, segment: Arc<MappedSegment>) -> Option<Range<u32>> {
         let holds_folders = !self.roots.is_empty();
         if holds_folders {
             return None;
         }
         let top_level = segment.top_level().ok()?;
-        let ids = self.segments.attach(segment)?;
+        let ids = self.attach_segment(segment)?;
         self.roots = top_level
             .into_iter()
             .map(|ordinal| ids.start + ordinal)
@@ -220,6 +227,10 @@ impl FolderSizeTree {
 
     pub fn is_corrupt(&self) -> bool {
         self.segments.is_corrupt()
+    }
+
+    pub fn take_unreported_corruption(&self) -> bool {
+        self.segments.take_unreported_corruption()
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -902,90 +913,87 @@ impl FolderSizeTree {
         self.children(id)
     }
 
-    pub(crate) fn export(&self, mut visit: impl FnMut(u32, &str, u64, u8)) {
-        self.visit_depth_first(|visited| {
-            let facts = self.facts(visited.id);
-            visit(
-                visited.parent_order,
-                self.name(visited.id),
-                facts.direct,
-                facts.flags,
-            );
-        });
+    pub fn depth_first(&self) -> DepthFirstCursor {
+        let roots = self.roots.iter().rev();
+        DepthFirstCursor {
+            pending: roots.map(|&id| PendingVisit { id, depth: 0 }).collect(),
+        }
+    }
+
+    pub fn next_folder(&self, cursor: &mut DepthFirstCursor) -> Option<VisitedFolder<'_>> {
+        let visit = cursor.pending.pop()?;
+        let children = self.children(visit.id).iter().rev();
+        cursor.pending.extend(children.map(|id| PendingVisit {
+            id,
+            depth: visit.depth + 1,
+        }));
+        let facts = self.facts(visit.id);
+        Some(VisitedFolder {
+            slot: visit.id,
+            depth: visit.depth,
+            name: self.name(visit.id),
+            direct: facts.direct,
+            flags: NodeFlags::from_bits(facts.flags).unwrap_or_default(),
+        })
     }
 
     pub fn export_slots(&self) -> Vec<u32> {
-        let mut slots = Vec::with_capacity(self.node_count());
-        self.visit_depth_first(|visited| slots.push(visited.id));
-        slots
+        let mut cursor = self.depth_first();
+        std::iter::from_fn(|| self.next_folder(&mut cursor))
+            .map(|folder| folder.slot)
+            .collect()
     }
 
-    fn visit_depth_first(&self, mut visit: impl FnMut(DepthFirstVisit)) {
-        let mut order = 0_u32;
-        let mut stack: Vec<DepthFirstVisit> = self
-            .roots
+    pub(crate) fn write_overlay(&self, out: &mut Vec<u8>) {
+        put_ids(out, &self.roots);
+        self.heap.write(out);
+        put_count(out, self.patches.len());
+        for (&id, patch) in &self.patches {
+            put_u32(out, id);
+            patch.write(out);
+        }
+        self.dead.write(out);
+    }
+
+    pub(crate) fn read_overlay(&mut self, reader: &mut Reader<'_>) -> Option<()> {
+        let roots = reader.ids()?;
+        let heap = HeapNodes::read(reader)?;
+        let patches = (0..reader.u32()?)
+            .map(|_| Some((reader.u32()?, Patch::read(reader)?)))
+            .collect::<Option<BTreeMap<NodeId, Patch>>>()?;
+        let dead = DeadRanges::read(reader)?;
+        self.heap = heap;
+        let patched_ids_are_mapped = patches.keys().all(|&id| self.segments.contains(id));
+        let dead_ids_are_mapped = dead.last_end() <= self.segments.end();
+        let linked_ids = roots
             .iter()
-            .rev()
-            .map(|&root| DepthFirstVisit {
-                id: root,
-                parent_order: NONE,
-            })
-            .collect();
-        while let Some(visited) = stack.pop() {
-            let children = self.children(visited.id).iter().rev();
-            stack.extend(children.map(|child| DepthFirstVisit {
-                id: child,
-                parent_order: order,
-            }));
-            visit(visited);
-            order += 1;
-        }
-    }
-
-    pub(crate) fn import_node(&mut self, imported: ImportedNode) -> Option<()> {
-        let ImportedNode {
-            parent,
-            name,
-            direct,
-            flags,
-        } = imported;
-        if name.is_empty() {
+            .chain(self.heap.live().flat_map(|(_, node)| &node.children))
+            .chain(
+                patches
+                    .values()
+                    .filter_map(|patch| patch.children.as_ref())
+                    .flatten(),
+            );
+        let links_resolve = linked_ids.copied().all(|id| self.holds(id))
+            && self
+                .heap
+                .live()
+                .all(|(_, node)| self.holds_parent(node.parent));
+        if !(patched_ids_are_mapped && dead_ids_are_mapped && links_resolve) {
             return None;
         }
-        let has_unknown_flags = flags & !PERSISTED_FLAGS != 0;
-        if has_unknown_flags {
-            return None;
-        }
-        let parent = self.attach_imported(ImportedLink {
-            parent_order: parent,
-            name: &name,
-        })?;
-        self.heap.push(HeapNode {
-            direct,
-            flags,
-            ..HeapNode::named(parent, name)
-        });
+        self.roots = roots;
+        self.patches = patches;
+        self.dead = dead;
         Some(())
     }
 
-    fn attach_imported(&mut self, link: ImportedLink<'_>) -> Option<NodeId> {
-        let ImportedLink { parent_order, name } = link;
-        let id = self.heap.next_id();
-        if parent_order == NONE {
-            self.roots.push(id);
-            return Some(NONE);
-        }
-        let parent = HeapNodes::id_of_order(parent_order)?;
-        let siblings = &self.heap.find(parent)?.children;
-        let slot = siblings
-            .binary_search_by(|&sibling| self.name(sibling).cmp(name))
-            .err()?;
-        self.heap.get_mut(parent).children.insert(slot, id);
-        Some(parent)
+    fn holds(&self, id: NodeId) -> bool {
+        self.heap.find(id).is_some() || self.segments.contains(id)
     }
 
-    pub(crate) fn finish_import(&mut self) {
-        self.heap.roll_up_imported();
+    fn holds_parent(&self, parent: NodeId) -> bool {
+        parent == NONE || self.holds(parent)
     }
 }
 

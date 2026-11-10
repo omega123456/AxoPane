@@ -6,10 +6,12 @@ use std::time::{Instant, SystemTime};
 
 use crossbeam_channel::{Receiver, Sender};
 
+use super::compact::{CompactJob, Compactor, FinishedCompaction};
 use super::exclusions;
 use super::exclusions::plan_reconcile;
-use super::names::file::{remove_if_present, NamesHeader};
-use super::names::{PackedNames, PairExpectation};
+use super::names::file::remove_if_present;
+use super::names::writer::RewriteStats;
+use super::names::{PackedNames, SavedNames};
 use super::persist::{self, ChangeEvent, ReplayOutcome, Snapshot, SnapshotMeta};
 use super::platform::{self, IndexPlatform, PowerSignal, RawEvent, StreamHandle, StreamRequest};
 use super::snapshot::SaveTrigger;
@@ -35,7 +37,11 @@ struct RescanStart {
 struct Resume {
     snapshot: Snapshot,
     current_id: u64,
-    names_event_id: u64,
+}
+
+pub(super) struct MachineLinks {
+    pub(super) sender: Sender<Message>,
+    pub(super) compact_jobs: Sender<CompactJob>,
 }
 
 pub(super) struct ExclusionEdit {
@@ -82,7 +88,23 @@ pub(super) enum Message {
     Rebuild(Sender<()>),
     Save(SaveTrigger),
     NamesUnreadable,
+    TreeUnreadable,
+    Compacted(FinishedCompaction),
     Shutdown,
+}
+
+impl Message {
+    fn runs_during_compaction(&self) -> bool {
+        matches!(
+            self,
+            Self::Request { .. }
+                | Self::Subscribe { .. }
+                | Self::Power(_)
+                | Self::Flush(_)
+                | Self::Compacted(_)
+                | Self::Shutdown
+        )
+    }
 }
 
 pub(super) struct FullScan {
@@ -148,6 +170,9 @@ pub(super) struct Machine {
     pub(super) meta_dirty: bool,
     pub(super) last_applied_id: u64,
     pub(super) full: Option<FullScan>,
+    pub(super) rescan_after_full: bool,
+    pub(super) compactor: Compactor,
+    pub(super) purge_saved_names: bool,
     pub(super) background_inflight: usize,
     pub(super) items_scanned: u64,
     pub(super) subscriptions: HashMap<String, Vec<SubscribedFolder>>,
@@ -158,10 +183,13 @@ pub(super) struct Machine {
 }
 
 impl Machine {
-    pub(super) fn new(shared: Arc<Shared>, options: IndexOptions, sender: Sender<Message>) -> Self {
+    pub(super) fn new(shared: Arc<Shared>, options: IndexOptions, links: MachineLinks) -> Self {
         Self {
             shared,
-            sender,
+            sender: links.sender,
+            compactor: Compactor::new(links.compact_jobs, &options.snapshot_path),
+            rescan_after_full: false,
+            purge_saved_names: false,
             platform: options.platform,
             clock: options.clock,
             emit_sizes: options.emit_sizes,
@@ -197,20 +225,81 @@ impl Machine {
         while let Ok(message) = receiver.recv() {
             match message {
                 Message::Shutdown => break,
-                message => self.handle(message),
+                message => self.receive(message),
             }
             self.after_change();
+            self.rescan_if_tree_unreadable();
+            self.compact_if_overlay_is_full();
         }
+        self.stop_compaction();
         log::info!("size index: stopped");
+    }
+
+    fn receive(&mut self, message: Message) {
+        if message.runs_during_compaction() {
+            return self.handle(message);
+        }
+        if let Some(message) = self.compactor.defer(message) {
+            self.handle(message);
+        }
     }
 
     pub(super) fn boot(&mut self) {
         self.observe_power();
         let since = self.restore_snapshot();
+        self.compactor.skip_sequences_on_disk();
+        self.compactor.sweep_unreferenced_files();
         self.apply_privacy();
         self.reconcile_exclusions();
         self.shared.booted.store(true, Ordering::Release);
         self.start_index(since);
+        if self.purge_saved_names {
+            self.start_compaction();
+        }
+    }
+
+    fn can_compact(&self) -> bool {
+        let is_live = self.stream.is_some() && !matches!(self.phase, Phase::Booting);
+        is_live && self.full.is_none() && !self.compactor.is_running()
+    }
+
+    fn compact_if_overlay_is_full(&mut self) {
+        if !self.can_compact() {
+            return;
+        }
+        let view = self.shared.view();
+        let overlay_is_full = view.tree.overlay_stats().exceeds_cap()
+            || view.names.overlay_stats().exceeds_threshold();
+        drop(view);
+        if overlay_is_full {
+            self.start_compaction();
+        }
+    }
+
+    fn rescan_if_tree_unreadable(&mut self) {
+        if self.shared.view().tree.take_unreported_corruption() {
+            self.tree_unreadable();
+        }
+    }
+
+    pub(super) fn tree_unreadable(&mut self) {
+        log::warn!("size index: the folder tree is unreadable, starting a full rescan");
+        let deferred = self.compactor.cancel_running();
+        self.compactor.segments.clear();
+        self.purge_saved_names = false;
+        self.load_tree(FolderSizeTree::default());
+        self.shared
+            .view_mut()
+            .names
+            .adopt_base(SavedNames::default(), RewriteStats::default());
+        self.apply_privacy();
+        self.meta_dirty = true;
+        self.rescan_after_full = self.full.is_some();
+        self.restart_spill_if_scanning();
+        self.start_full_scan();
+        for message in deferred {
+            self.handle(message);
+        }
     }
 
     fn start_index(&mut self, since: Option<u64>) {
@@ -267,6 +356,9 @@ impl Machine {
         for path in &plan.prune {
             self.exclude_folder(path);
         }
+        if !plan.prune.is_empty() {
+            self.purge_saved_names = true;
+        }
         for path in &plan.walk {
             self.shared.view_mut().tree.include_subtree(path);
         }
@@ -283,6 +375,10 @@ impl Machine {
         for path in &edit.added {
             self.cancel_walks_within(path);
             self.exclude_folder(path);
+        }
+        if !edit.added.is_empty() {
+            self.purge_saved_names = true;
+            self.meta_dirty = true;
         }
         for path in &edit.removed {
             self.include_folder(path);
@@ -354,37 +450,34 @@ impl Machine {
         let snapshot = persist::load(&self.snapshot_path);
         self.restore_access(snapshot.as_ref());
         self.discard_stale_spill();
-        self.discard_saved_names_when_off();
-        let names_event_id = snapshot
-            .as_ref()
-            .and_then(|snapshot| self.names_resume_point(snapshot));
-        match (snapshot, names_event_id) {
-            (Some(snapshot), Some(names_event_id))
-                if is_resumable(&snapshot.meta, &identity, current_id) =>
-            {
+        self.discard_legacy_names();
+        let start = RescanStart {
+            identity,
+            current_id,
+        };
+        match snapshot {
+            Some(snapshot) if self.resumes(&snapshot.meta, &start) => {
                 log::info!(
                     "size index: resuming from saved snapshot ({} folders, event {})",
                     snapshot.tree.node_count(),
-                    snapshot.meta.event_id.min(names_event_id)
+                    snapshot.meta.event_id
                 );
                 Some(self.resume_from(Resume {
                     snapshot,
                     current_id,
-                    names_event_id,
                 }))
             }
-            (stale, names) => {
-                log_rescan_reason(stale.as_ref(), names.is_some());
-                self.rescan_from(
-                    stale,
-                    RescanStart {
-                        identity,
-                        current_id,
-                    },
-                );
+            stale => {
+                log_rescan_reason(stale.as_ref(), self.shared.collect_file_names);
+                self.rescan_from(stale, start);
                 None
             }
         }
+    }
+
+    fn resumes(&self, saved: &SnapshotMeta, start: &RescanStart) -> bool {
+        let names_missing = self.shared.collect_file_names && !saved.has_file_names;
+        !names_missing && is_resumable(saved, &start.identity, start.current_id)
     }
 
     fn restore_access(&mut self, snapshot: Option<&Snapshot>) {
@@ -402,56 +495,38 @@ impl Machine {
         }
     }
 
-    fn names_resume_point(&self, snapshot: &Snapshot) -> Option<u64> {
-        if !self.shared.collect_file_names {
-            return Some(snapshot.meta.event_id);
-        }
-        self.open_names_pair(snapshot).map(|names| names.event_id)
-    }
-
-    fn discard_saved_names_when_off(&self) {
-        if self.shared.collect_file_names {
-            return;
-        }
-        let names_path = self.shared.view().names.path().to_path_buf();
-        if let Err(error) = remove_if_present(&names_path) {
-            log::warn!("size index: saved file names could not be removed: {error}");
+    fn discard_legacy_names(&self) {
+        let legacy_names = self.shared.view().names.path().to_path_buf();
+        if let Err(error) = remove_if_present(&legacy_names) {
+            log::warn!("size index: the old file-name file could not be removed: {error}");
         }
     }
 
-    fn unpair_when_file_names_are_off(&mut self) {
-        let is_paired = self.meta.pair_token != persist::NO_PAIR;
-        let pair_is_obsolete = is_paired && !self.shared.collect_file_names;
-        if pair_is_obsolete {
-            self.meta.pair_token = persist::NO_PAIR;
-            self.meta_dirty = true;
+    fn adopt_snapshot(&mut self, snapshot: Snapshot) -> SnapshotMeta {
+        let Snapshot {
+            meta,
+            segments,
+            tree,
+            names,
+        } = snapshot;
+        self.load_tree(tree);
+        self.compactor.segments = segments;
+        let keeps_saved_names = self.shared.collect_file_names && meta.has_file_names;
+        if keeps_saved_names {
+            self.shared.view_mut().names.restore(names);
         }
-    }
-
-    fn open_names_pair(&self, snapshot: &Snapshot) -> Option<NamesHeader> {
-        let imported_slots = snapshot.tree.heap_ids();
-        let expected = PairExpectation {
-            pair_token: snapshot.meta.pair_token,
-            first_slot: imported_slots.start,
-            folder_count: imported_slots.len() as u32,
-        };
-        if expected.pair_token == persist::NO_PAIR {
-            return None;
-        }
-        self.shared.view_mut().names.open_pair(expected)
+        let stopped_collecting_names = meta.has_file_names && !self.shared.collect_file_names;
+        self.purge_saved_names = meta.names_purge_due || stopped_collecting_names;
+        meta
     }
 
     fn resume_from(&mut self, resume: Resume) -> u64 {
         let Resume {
             snapshot,
             current_id,
-            names_event_id,
         } = resume;
-        let mut saved = snapshot.meta;
-        saved.event_id = saved.event_id.min(names_event_id);
-        self.load_tree(snapshot.tree);
+        let saved = self.adopt_snapshot(snapshot);
         self.meta = saved.clone();
-        self.unpair_when_file_names_are_off();
         self.last_applied_id = saved.event_id;
         self.phase = Phase::replaying_history(saved, current_id);
         self.meta.event_id
@@ -464,8 +539,7 @@ impl Machine {
         } = start;
         let mut identity = identity;
         if let Some(snapshot) = stale {
-            identity.exclusions = snapshot.meta.exclusions;
-            self.load_tree(snapshot.tree);
+            identity.exclusions = self.adopt_snapshot(snapshot).exclusions;
         }
         self.meta = identity;
         self.last_applied_id = current_id;
@@ -507,6 +581,7 @@ impl Machine {
             Message::Focus(true) => self.focused(),
             Message::Focus(false) => self.save_snapshot(SaveTrigger::Blur),
             Message::Flush(request) => {
+                self.cancel_compaction();
                 self.save_snapshot(SaveTrigger::Exit(request.deadline));
                 let _ = request.ack.send(());
             }
@@ -525,6 +600,8 @@ impl Machine {
             }
             Message::Save(trigger) => self.save_snapshot(trigger),
             Message::NamesUnreadable => self.names_unreadable(),
+            Message::TreeUnreadable => self.rescan_if_tree_unreadable(),
+            Message::Compacted(finished) => self.compacted(finished),
             Message::Shutdown => {}
         }
     }
@@ -756,18 +833,22 @@ impl Machine {
     }
 
     pub(super) fn finish_full_scan(&mut self) {
-        if let Some(full) = self.full.take() {
-            log::info!(
-                "size index: full scan finished, {} items in {}s",
-                self.items_scanned,
-                full.started.elapsed().as_secs()
-            );
-            self.meta.event_id = full.captured_id;
-            self.last_applied_id = full.captured_id;
-            self.meta.last_full_scan_secs = unix_secs((self.clock)());
-            self.meta_dirty = true;
-            self.save_snapshot(SaveTrigger::ScanComplete);
+        let Some(full) = self.full.take() else {
+            return;
+        };
+        if std::mem::take(&mut self.rescan_after_full) {
+            return self.start_full_scan();
         }
+        log::info!(
+            "size index: full scan finished, {} items in {}s",
+            self.items_scanned,
+            full.started.elapsed().as_secs()
+        );
+        self.meta.event_id = full.captured_id;
+        self.last_applied_id = full.captured_id;
+        self.meta.last_full_scan_secs = unix_secs((self.clock)());
+        self.meta_dirty = true;
+        self.save_snapshot(SaveTrigger::ScanComplete);
     }
 
     pub(super) fn boost_done(&mut self, job: BoostJob, outcome: WalkOutcome) {
@@ -902,17 +983,18 @@ impl View {
     }
 }
 
-fn log_rescan_reason(stale: Option<&Snapshot>, names_paired: bool) {
-    let reason = rescan_reason(stale, names_paired);
+fn log_rescan_reason(stale: Option<&Snapshot>, collects_file_names: bool) {
+    let reason = rescan_reason(stale, collects_file_names);
     log::info!("size index: a full scan is needed, {reason}");
 }
 
-fn rescan_reason(stale: Option<&Snapshot>, names_paired: bool) -> &'static str {
-    if stale.is_none() {
+fn rescan_reason(stale: Option<&Snapshot>, collects_file_names: bool) -> &'static str {
+    let Some(stale) = stale else {
         return "no usable snapshot";
-    }
-    if !names_paired {
-        return "the file-name file is missing or does not match the snapshot";
+    };
+    let names_missing = collects_file_names && !stale.meta.has_file_names;
+    if names_missing {
+        return "the saved index holds no file names";
     }
     "the snapshot is not resumable (volume, OS build or event history changed)"
 }

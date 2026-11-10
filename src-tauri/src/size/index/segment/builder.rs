@@ -167,9 +167,16 @@ pub struct SegmentBuilder {
 
 impl SegmentBuilder {
     pub fn create(target: SegmentTarget) -> Result<Self, BuildError> {
+        Self::with_block_target(target, BLOCK_TARGET_BYTES)
+    }
+
+    pub fn with_block_target(
+        target: SegmentTarget,
+        block_target: usize,
+    ) -> Result<Self, BuildError> {
         let temps = TempFiles::of(&target.paths);
         let limits = OutputLimits {
-            block_target: BLOCK_TARGET_BYTES,
+            block_target,
             deadline: None,
         };
         let rows = RowLog::create(temps.rows.clone())?;

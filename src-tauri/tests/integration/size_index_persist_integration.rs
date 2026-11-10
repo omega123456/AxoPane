@@ -1,12 +1,19 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use file_explorer_lib::size::index::names::{FileNameStore, PackedNames, SavedNames};
 use file_explorer_lib::size::index::persist::{
-    decode, encode, load, plan_batch, plan_catch_up, save, save_encoded, temp_path, write_temp,
-    ChangeEvent, ChangeFlags, CurrentVolume, ReplayOutcome, SnapshotMeta, FORMAT_VERSION, NO_PAIR,
+    decode, encode, load, plan_batch, plan_catch_up, save_encoded, temp_path, write_temp,
+    ChangeEvent, ChangeFlags, CurrentVolume, Manifest, ReplayOutcome, SegmentRef, Snapshot,
+    SnapshotMeta, FORMAT_VERSION,
 };
 use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
-use tempfile::tempdir;
+use tempfile::{tempdir, TempDir};
+
+use crate::common::segment::{
+    strings, walked, walked_segment, SegmentPlace, Walked, FIRST_SEQUENCE,
+};
 
 fn path_of(parts: &[&str]) -> PathBuf {
     std::iter::once("idx")
@@ -15,6 +22,14 @@ fn path_of(parts: &[&str]) -> PathBuf {
 }
 
 const BUILD: &str = "25A123";
+const TOKEN: u64 = 77;
+const OVERLAY_ID_BIT: u32 = 1 << 31;
+const NO_PARENT: u32 = u32::MAX;
+const SCANNED: u8 = 1;
+const UNKNOWN_FLAG: u8 = 0x80;
+const NO_FILE_NAMES: u8 = 0;
+const NO_NAMES_PURGE_DUE: u8 = 0;
+const NAMES_FILE: &str = "unused-names.bin";
 
 fn meta() -> SnapshotMeta {
     SnapshotMeta {
@@ -23,7 +38,8 @@ fn meta() -> SnapshotMeta {
         event_id: 500,
         last_full_scan_secs: 1_760_000_000,
         visited_roots: vec![path_of(&["home", "Desktop"])],
-        pair_token: 0x1234_5678_9abc_def0,
+        has_file_names: true,
+        names_purge_due: true,
         exclusions: vec![
             path_of(&["build-cache"]),
             path_of(&["home", "node_modules"]),
@@ -68,7 +84,47 @@ fn sample_tree() -> FolderSizeTree {
         &["second", "x"].iter().collect::<PathBuf>(),
         DirectoryListing::scanned(9, &[]),
     );
+    tree.prune(&path_of(&["home", "zeta"]));
     tree
+}
+
+fn names_store() -> FileNameStore {
+    FileNameStore::new(PathBuf::from(NAMES_FILE))
+}
+
+fn sample_names(tree: &FolderSizeTree) -> FileNameStore {
+    let mut names = names_store();
+    let home = tree.lookup(&path_of(&["home"])).expect("home");
+    let alpha = tree.lookup(&path_of(&["home", "alpha"])).expect("alpha");
+    names.set_names(home, PackedNames::from_names(["notes.txt", "todo.md"]));
+    names.tombstone(alpha);
+    names
+}
+
+fn encoded(tree: &FolderSizeTree, names: &FileNameStore) -> Vec<u8> {
+    encode(&Manifest {
+        meta: &meta(),
+        segments: &[],
+        tree,
+        names,
+    })
+}
+
+fn sample_bytes() -> Vec<u8> {
+    let tree = sample_tree();
+    encoded(&tree, &sample_names(&tree))
+}
+
+fn decoded(bytes: &[u8]) -> Option<Snapshot> {
+    decode(bytes, Path::new("no-segments-here"))
+}
+
+fn restored_names(
+    snapshot_names: file_explorer_lib::size::index::names::SavedNames,
+) -> FileNameStore {
+    let mut names = names_store();
+    names.restore(snapshot_names);
+    names
 }
 
 fn fnv1a(bytes: &[u8]) -> u64 {
@@ -77,9 +133,20 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     })
 }
 
+fn put_u32(out: &mut Vec<u8>, value: u32) {
+    out.extend_from_slice(&value.to_le_bytes());
+}
+
 fn put_str(out: &mut Vec<u8>, value: &[u8]) {
-    out.extend_from_slice(&(value.len() as u32).to_le_bytes());
+    put_u32(out, value.len() as u32);
     out.extend_from_slice(value);
+}
+
+fn put_ids(out: &mut Vec<u8>, ids: &[u32]) {
+    put_u32(out, ids.len() as u32);
+    for &id in ids {
+        put_u32(out, id);
+    }
 }
 
 fn current<'volume>(
@@ -94,163 +161,547 @@ fn current<'volume>(
     }
 }
 
-#[derive(Clone, Copy)]
-struct CraftedHeader {
+fn overlay_id(index: u32) -> u32 {
+    OVERLAY_ID_BIT | index
+}
+
+struct CraftedFolder {
+    id: u32,
+    parent: u32,
+    name: &'static [u8],
+    flags: u8,
+    children: Vec<u32>,
+}
+
+fn root_folder() -> CraftedFolder {
+    CraftedFolder {
+        id: overlay_id(0),
+        parent: NO_PARENT,
+        name: b"idx",
+        flags: SCANNED,
+        children: Vec::new(),
+    }
+}
+
+/// A checksummed manifest holding only what a test sets, so each test can
+/// isolate one defect at a time.
+struct Crafted {
     version: u32,
     visited: u32,
     exclusions: u32,
-    node_count: u32,
+    segments: u32,
+    roots: Vec<u32>,
+    folders: Vec<CraftedFolder>,
+    free_slots: Vec<u32>,
+    patched_ids: Vec<u32>,
+    dead_ranges: Vec<(u32, u32)>,
+    names: Vec<u8>,
+    trailing: Vec<u8>,
 }
 
-fn header(version: u32, visited: u32, node_count: u32) -> CraftedHeader {
-    CraftedHeader {
-        version,
-        visited,
+fn crafted() -> Crafted {
+    Crafted {
+        version: FORMAT_VERSION,
+        visited: 0,
         exclusions: 0,
-        node_count,
+        segments: 0,
+        roots: vec![overlay_id(0)],
+        folders: vec![root_folder()],
+        free_slots: Vec::new(),
+        patched_ids: Vec::new(),
+        dead_ranges: Vec::new(),
+        names: 0_u32.to_le_bytes().to_vec(),
+        trailing: Vec::new(),
     }
 }
 
-/// A checksummed file with an empty header and the given node bytes, so a
-/// test can isolate one defect at a time.
-fn crafted(header: CraftedHeader, nodes: &[u8]) -> Vec<u8> {
-    let CraftedHeader {
-        version,
-        visited,
-        exclusions,
-        node_count,
-    } = header;
-    let mut out = b"AXOSIZE\0".to_vec();
-    out.extend_from_slice(&version.to_le_bytes());
-    put_str(&mut out, b"uuid");
-    put_str(&mut out, b"build");
-    out.extend_from_slice(&[0; 16]);
-    out.extend_from_slice(&visited.to_le_bytes());
-    out.extend_from_slice(&[0; 8]);
-    out.extend_from_slice(&exclusions.to_le_bytes());
-    out.extend_from_slice(&node_count.to_le_bytes());
-    out.extend_from_slice(nodes);
-    let checksum = fnv1a(&out);
-    out.extend_from_slice(&checksum.to_le_bytes());
-    out
+impl Crafted {
+    fn put_folder(out: &mut Vec<u8>, folder: &CraftedFolder) {
+        put_u32(out, folder.id);
+        put_u32(out, folder.parent);
+        put_str(out, folder.name);
+        out.extend_from_slice(&5_u64.to_le_bytes());
+        out.push(folder.flags);
+        out.extend_from_slice(&[0; 20]);
+        put_ids(out, &folder.children);
+    }
+
+    fn put_patch(out: &mut Vec<u8>, id: u32) {
+        put_u32(out, id);
+        out.extend_from_slice(&[0; 20]);
+        out.extend_from_slice(&[0, 0]);
+    }
+
+    fn bytes(&self) -> Vec<u8> {
+        let mut out = b"AXOSIZE\0".to_vec();
+        put_u32(&mut out, self.version);
+        put_str(&mut out, b"uuid");
+        put_str(&mut out, b"build");
+        out.extend_from_slice(&[0; 16]);
+        put_u32(&mut out, self.visited);
+        out.extend([NO_FILE_NAMES, NO_NAMES_PURGE_DUE]);
+        put_u32(&mut out, self.exclusions);
+        put_u32(&mut out, self.segments);
+        put_ids(&mut out, &self.roots);
+        put_u32(&mut out, self.folders.len() as u32);
+        for folder in &self.folders {
+            Self::put_folder(&mut out, folder);
+        }
+        put_ids(&mut out, &self.free_slots);
+        put_u32(&mut out, self.patched_ids.len() as u32);
+        for &id in &self.patched_ids {
+            Self::put_patch(&mut out, id);
+        }
+        put_u32(&mut out, self.dead_ranges.len() as u32);
+        for &(start, end) in &self.dead_ranges {
+            put_u32(&mut out, start);
+            put_u32(&mut out, end);
+        }
+        out.extend_from_slice(&self.names);
+        put_u32(&mut out, 0);
+        out.extend_from_slice(&self.trailing);
+        let checksum = fnv1a(&out);
+        out.extend_from_slice(&checksum.to_le_bytes());
+        out
+    }
+
+    fn decodes(&self) -> bool {
+        decoded(&self.bytes()).is_some()
+    }
 }
 
-fn node(parent: u32, name: &[u8], flags: u8) -> Vec<u8> {
-    let mut out = parent.to_le_bytes().to_vec();
-    put_str(&mut out, name);
-    out.extend_from_slice(&5_u64.to_le_bytes());
-    out.push(flags);
-    out
-}
+const COMPARED_FOLDERS: [&[&str]; 7] = [
+    &[],
+    &["home"],
+    &["home", "alpha"],
+    &["home", "locked"],
+    &["home", "Desktop"],
+    &["home", "zeta"],
+    &["pending"],
+];
 
-#[test]
-fn round_trip_is_byte_exact_and_restores_totals() {
-    let tree = sample_tree();
-    let bytes = encode(&meta(), &tree);
-    let snapshot = decode(&bytes).expect("decodes");
-    assert_eq!(snapshot.meta, meta());
-    assert_eq!(encode(&snapshot.meta, &snapshot.tree), bytes);
-    assert!(!snapshot.tree.is_dirty());
-    assert_eq!(snapshot.tree.node_count(), tree.node_count());
-    for parts in [
-        &[][..],
-        &["home"][..],
-        &["home", "alpha"][..],
-        &["home", "locked"][..],
-        &["home", "Desktop"][..],
-        &["pending"][..],
-    ] {
+fn assert_same_totals(restored: &FolderSizeTree, saved: &FolderSizeTree) {
+    for parts in COMPARED_FOLDERS {
         assert_eq!(
-            snapshot.tree.total(&path_of(parts)),
-            tree.total(&path_of(parts)),
+            restored.total(&path_of(parts)),
+            saved.total(&path_of(parts)),
             "{parts:?}"
         );
     }
+    assert_eq!(restored.node_count(), saved.node_count());
+    assert_eq!(restored.unscanned_tops(), saved.unscanned_tops());
+}
+
+#[test]
+fn round_trip_is_byte_exact_and_restores_totals_and_overlay_names() {
+    let tree = sample_tree();
+    let names = sample_names(&tree);
+    let bytes = encoded(&tree, &names);
+    let snapshot = decoded(&bytes).expect("decodes");
+    assert_eq!(snapshot.meta, meta());
+    assert!(snapshot.segments.is_empty());
+    assert!(!snapshot.tree.is_dirty());
+    assert_same_totals(&snapshot.tree, &tree);
     let second: PathBuf = ["second"].iter().collect();
     assert_eq!(
         snapshot.tree.total(&second).map(|total| total.bytes),
         Some(9)
     );
     let home = snapshot.tree.total(&path_of(&["home"])).expect("home");
-    assert_eq!(home.bytes, 4320);
+    assert_eq!(home.bytes, 4020);
     assert_eq!(home.lower_bound.expect("bound").denied_count, 1);
     // Pending placeholders survive, so an interrupted scan can resume.
-    assert_eq!(snapshot.tree.unscanned_tops(), tree.unscanned_tops(),);
     assert!(!snapshot.tree.unscanned_tops().is_empty());
+
+    let home_slot = snapshot.tree.lookup(&path_of(&["home"])).expect("home");
+    let alpha_slot = snapshot.tree.lookup(&path_of(&["home", "alpha"]));
+    let restored = restored_names(snapshot.names);
+    assert_eq!(encoded(&snapshot.tree, &restored), bytes);
+    assert!(!restored.has_unsaved_changes());
+    assert_eq!(
+        restored.names_of(home_slot),
+        Ok(Some(PackedNames::from_names(["notes.txt", "todo.md"])))
+    );
+    assert_eq!(
+        restored.names_of(alpha_slot.expect("alpha")),
+        Ok(Some(PackedNames::default()))
+    );
+}
+
+#[test]
+fn a_freed_overlay_slot_is_reused_after_a_round_trip() {
+    let mut restored = decoded(&sample_bytes()).expect("decodes").tree;
+    let before = restored.heap_ids();
+    assert!(restored.merge_record::<&str>(
+        &path_of(&["home", "again"]),
+        DirectoryListing::scanned(1, &[])
+    ));
+    assert_eq!(restored.heap_ids(), before, "the pruned folder's slot");
+}
+
+struct SegmentBacked {
+    directory: TempDir,
+    segments: Vec<SegmentRef>,
+    tree: FolderSizeTree,
+    names: FileNameStore,
+}
+
+fn base_walk() -> Vec<Walked> {
+    vec![
+        Walked {
+            subdirs: strings(&["home", "pending"]),
+            files: strings(&["root.txt"]),
+            ..walked(path_of(&[]), 1)
+        },
+        Walked {
+            subdirs: strings(&["alpha", "zeta", "locked", "Desktop"]),
+            files: strings(&["home.txt"]),
+            ..walked(path_of(&["home"]), 20)
+        },
+        Walked {
+            files: strings(&["a1", "a2"]),
+            ..walked(path_of(&["home", "alpha"]), 4000)
+        },
+        walked(path_of(&["home", "zeta"]), 300),
+        Walked {
+            denied: true,
+            ..walked(path_of(&["home", "locked"]), 0)
+        },
+    ]
+}
+
+/// A base segment with every kind of overlay change on top of it.
+fn segment_backed() -> SegmentBacked {
+    let directory = tempdir().expect("temp dir");
+    let place = SegmentPlace {
+        directory: directory.path(),
+        root: &path_of(&[]),
+        token: TOKEN,
+    };
+    let segment = Arc::new(walked_segment(place, &base_walk()));
+    let mut tree = FolderSizeTree::default();
+    let slots = tree.attach_base(Arc::clone(&segment)).expect("attached");
+    let mut base_names = SavedNames::default();
+    base_names.attach_segment(slots, segment.shared_file_names());
+    let mut names = names_store();
+    names.restore(base_names);
+
+    let home = tree.lookup(&path_of(&["home"])).expect("home");
+    tree.apply_listing(
+        &path_of(&["home"]),
+        DirectoryListing::scanned(25, &["alpha", "locked", "Desktop", "added"]),
+    );
+    for slots in tree.take_removed_ranges() {
+        names.tombstone_range(slots);
+    }
+    names.set_names(home, PackedNames::from_names(["home-v2.txt"]));
+    tree.merge_record::<&str>(
+        &path_of(&["home", "added", "deeper"]),
+        DirectoryListing::scanned(6, &[]),
+    );
+    tree.set_skipped(&path_of(&["home", "Desktop"]), true);
+    SegmentBacked {
+        segments: vec![SegmentRef {
+            sequence: FIRST_SEQUENCE,
+            token: TOKEN,
+        }],
+        directory,
+        tree,
+        names,
+    }
+}
+
+impl SegmentBacked {
+    fn bytes(&self) -> Vec<u8> {
+        encode(&Manifest {
+            meta: &meta(),
+            segments: &self.segments,
+            tree: &self.tree,
+            names: &self.names,
+        })
+    }
+
+    fn names_of(names: &FileNameStore, tree: &FolderSizeTree, parts: &[&str]) -> Vec<String> {
+        let slot = tree.lookup(&path_of(parts)).expect("folder");
+        let packed = names.names_of(slot).expect("readable").unwrap_or_default();
+        packed
+            .names()
+            .map(|name| String::from_utf8_lossy(name).into_owned())
+            .collect()
+    }
+}
+
+#[test]
+fn a_manifest_over_a_base_segment_restores_patches_dead_ranges_and_names() {
+    let saved = segment_backed();
+    let bytes = saved.bytes();
+    let snapshot = decode(&bytes, saved.directory.path()).expect("decodes");
+    assert_eq!(snapshot.segments, saved.segments);
+    assert_same_totals(&snapshot.tree, &saved.tree);
+    assert_eq!(
+        snapshot.tree.total(&path_of(&["home", "added", "deeper"])),
+        saved.tree.total(&path_of(&["home", "added", "deeper"]))
+    );
+    assert_eq!(snapshot.tree.overlay_stats(), saved.tree.overlay_stats());
+    assert!(snapshot.tree.total(&path_of(&["home", "zeta"])).is_none());
+
+    let restored = restored_names(snapshot.names);
+    assert!(restored.is_available());
+    assert_eq!(
+        SegmentBacked::names_of(&restored, &snapshot.tree, &["home"]),
+        ["home-v2.txt"]
+    );
+    assert_eq!(
+        SegmentBacked::names_of(&restored, &snapshot.tree, &["home", "alpha"]),
+        ["a1", "a2"]
+    );
+    assert_eq!(restored.count_saved_and_overlay_names(), Ok(4));
+    assert_eq!(
+        encode(&Manifest {
+            meta: &snapshot.meta,
+            segments: &snapshot.segments,
+            tree: &snapshot.tree,
+            names: &restored,
+        }),
+        bytes
+    );
+}
+
+#[test]
+fn a_manifest_needs_every_segment_it_names_with_the_recorded_token() {
+    let saved = segment_backed();
+    let bytes = saved.bytes();
+    assert!(decoded(&bytes).is_none(), "segment files are elsewhere");
+
+    let other_token = vec![SegmentRef {
+        sequence: FIRST_SEQUENCE,
+        token: TOKEN + 1,
+    }];
+    let mismatched = encode(&Manifest {
+        meta: &meta(),
+        segments: &other_token,
+        tree: &saved.tree,
+        names: &saved.names,
+    });
+    assert!(decode(&mismatched, saved.directory.path()).is_none());
+
+    let path = saved.directory.path().join("folder-size-index.bin");
+    save_encoded(&path, &bytes).expect("saved");
+    assert_eq!(load(&path).expect("loads").segments, saved.segments);
 }
 
 #[test]
 fn save_is_atomic_and_load_reads_it_back() {
     let dir = tempdir().expect("temp dir");
     let path = dir.path().join("cache").join("size-index.bin");
-    save(&path, &SnapshotMeta::default(), &FolderSizeTree::default()).expect("first save");
-    save(&path, &meta(), &sample_tree()).expect("overwrite");
-    assert_eq!(
-        fs::read(&path).expect("written"),
-        encode(&meta(), &sample_tree())
-    );
+    let empty = encoded(&FolderSizeTree::default(), &names_store());
+    save_encoded(&path, &empty).expect("first save");
+    save_encoded(&path, &sample_bytes()).expect("overwrite");
+    assert_eq!(fs::read(&path).expect("written"), sample_bytes());
     assert!(!path.with_extension("tmp").exists());
     assert_eq!(load(&path).expect("loads").meta, meta());
 
     assert!(load(&dir.path().join("missing.bin")).is_none());
     let blocked = dir.path().join("file");
     fs::write(&blocked, b"x").expect("file");
-    assert!(save(&blocked.join("snap.bin"), &meta(), &sample_tree()).is_err());
+    assert!(save_encoded(&blocked.join("snap.bin"), &sample_bytes()).is_err());
 }
 
 #[test]
 fn any_corrupted_byte_or_truncation_yields_none() {
-    let bytes = encode(&meta(), &sample_tree());
+    let bytes = sample_bytes();
     for at in 0..bytes.len() {
         let mut corrupt = bytes.clone();
         corrupt[at] ^= 0x41;
-        assert!(decode(&corrupt).is_none(), "flip at {at}");
+        assert!(decoded(&corrupt).is_none(), "flip at {at}");
     }
     for len in 0..bytes.len() {
-        assert!(decode(&bytes[..len]).is_none(), "truncated to {len}");
+        assert!(decoded(&bytes[..len]).is_none(), "truncated to {len}");
     }
     let mut longer = bytes.clone();
     longer.push(0);
-    assert!(decode(&longer).is_none());
+    assert!(decoded(&longer).is_none());
 }
 
 #[test]
-fn old_version_and_malformed_content_yield_none_even_with_a_valid_checksum() {
-    let root = node(u32::MAX, b"idx", 1);
-    assert!(
-        decode(&crafted(header(FORMAT_VERSION, 0, 1), &root,)).is_some(),
-        "control"
-    );
-
-    assert!(decode(&crafted(header(FORMAT_VERSION - 1, 0, 1), &root,)).is_none());
-    assert!(decode(&crafted(header(FORMAT_VERSION + 1, 0, 1), &root,)).is_none());
-    assert!(
-        decode(&crafted(header(FORMAT_VERSION, 0, 0), &root,)).is_none(),
-        "trailing"
-    );
-    assert!(decode(&crafted(header(FORMAT_VERSION, 2_000, 0), &[],)).is_none());
-    let too_many_exclusions = CraftedHeader {
-        exclusions: 2_000,
-        ..header(FORMAT_VERSION, 0, 0)
-    };
-    assert!(decode(&crafted(too_many_exclusions, &[])).is_none());
-    assert!(decode(&crafted(header(FORMAT_VERSION, 1, 0), &[0xFF; 4],)).is_none());
-    assert!(decode(&crafted(header(FORMAT_VERSION, 0, u32::MAX), &root,)).is_none());
-
-    let mut huge_name = u32::MAX.to_le_bytes().to_vec();
-    huge_name.extend_from_slice(&u32::MAX.to_le_bytes());
-    assert!(decode(&crafted(header(FORMAT_VERSION, 0, 1), &huge_name,)).is_none());
-
-    for bad in [
-        node(u32::MAX, b"", 1),
-        node(u32::MAX, b"idx", 0x80),
-        node(u32::MAX, &[0xC3, 0x28], 1),
-        node(7, b"orphan", 1),
-    ] {
-        assert!(decode(&crafted(header(FORMAT_VERSION, 0, 1), &bad,)).is_none());
+fn other_versions_and_oversized_lists_yield_none_even_with_a_valid_checksum() {
+    assert!(crafted().decodes(), "control");
+    assert_eq!(FORMAT_VERSION, 4);
+    for version in [FORMAT_VERSION - 1, FORMAT_VERSION + 1] {
+        let other_version = Crafted {
+            version,
+            ..crafted()
+        };
+        assert!(!other_version.decodes(), "upgrading users rescan once");
     }
-    let duplicate = [root.clone(), node(0, b"a", 1), node(0, b"a", 1)].concat();
-    assert!(decode(&crafted(header(FORMAT_VERSION, 0, 3), &duplicate,)).is_none());
+    let trailing = Crafted {
+        trailing: vec![0],
+        ..crafted()
+    };
+    assert!(!trailing.decodes());
+    let too_many_visited = Crafted {
+        visited: 2_000,
+        ..crafted()
+    };
+    assert!(!too_many_visited.decodes());
+    let too_many_exclusions = Crafted {
+        exclusions: 2_000,
+        ..crafted()
+    };
+    assert!(!too_many_exclusions.decodes());
+    let too_many_segments = Crafted {
+        segments: 2_000,
+        ..crafted()
+    };
+    assert!(!too_many_segments.decodes());
+    let missing_segment = Crafted {
+        segments: 1,
+        ..crafted()
+    };
+    assert!(!missing_segment.decodes());
+}
+
+fn with_root(root: CraftedFolder) -> Crafted {
+    Crafted {
+        folders: vec![root],
+        ..crafted()
+    }
+}
+
+#[test]
+fn overlay_folders_that_do_not_link_up_yield_none() {
+    let nameless = with_root(CraftedFolder {
+        name: b"",
+        ..root_folder()
+    });
+    assert!(!nameless.decodes());
+    let unknown_flag = with_root(CraftedFolder {
+        flags: UNKNOWN_FLAG,
+        ..root_folder()
+    });
+    assert!(!unknown_flag.decodes());
+    let not_text = with_root(CraftedFolder {
+        name: &[0xC3, 0x28],
+        ..root_folder()
+    });
+    assert!(!not_text.decodes());
+    let orphan = with_root(CraftedFolder {
+        parent: overlay_id(7),
+        ..root_folder()
+    });
+    assert!(!orphan.decodes());
+    let missing_child = with_root(CraftedFolder {
+        children: vec![overlay_id(3)],
+        ..root_folder()
+    });
+    assert!(!missing_child.decodes());
+    let slot_out_of_range = with_root(CraftedFolder {
+        id: overlay_id(5),
+        ..root_folder()
+    });
+    assert!(!slot_out_of_range.decodes());
+    let mapped_id_as_overlay_folder = with_root(CraftedFolder {
+        id: 0,
+        ..root_folder()
+    });
+    assert!(!mapped_id_as_overlay_folder.decodes());
+
+    let unknown_root = Crafted {
+        roots: vec![overlay_id(0), 9],
+        ..crafted()
+    };
+    assert!(!unknown_root.decodes());
+    let free_slot_in_use = Crafted {
+        free_slots: vec![overlay_id(0)],
+        ..crafted()
+    };
+    assert!(!free_slot_in_use.decodes());
+    let spare_slot = Crafted {
+        free_slots: vec![overlay_id(1)],
+        ..crafted()
+    };
+    assert!(spare_slot.decodes(), "a free slot beside the root");
+}
+
+#[test]
+fn patches_and_dead_ranges_must_point_into_a_segment() {
+    let patch_without_segment = Crafted {
+        patched_ids: vec![3],
+        ..crafted()
+    };
+    assert!(!patch_without_segment.decodes());
+    let dead_without_segment = Crafted {
+        dead_ranges: vec![(1, 4)],
+        ..crafted()
+    };
+    assert!(!dead_without_segment.decodes());
+    let backwards_range = Crafted {
+        dead_ranges: vec![(4, 4)],
+        ..crafted()
+    };
+    assert!(!backwards_range.decodes());
+}
+
+fn overlay_names(has_names: u8, packed: &[u8]) -> Vec<u8> {
+    let mut out = 1_u32.to_le_bytes().to_vec();
+    put_u32(&mut out, overlay_id(0));
+    out.push(has_names);
+    put_str(&mut out, packed);
+    out
+}
+
+#[test]
+fn overlay_names_must_be_a_packed_list_or_an_empty_tombstone() {
+    let cases = [
+        (overlay_names(1, b"a.txt\0b.txt\0"), true),
+        (overlay_names(1, b""), true),
+        (overlay_names(0, b""), true),
+        (overlay_names(0, b"a.txt\0"), false),
+        (overlay_names(1, b"unterminated"), false),
+        (overlay_names(1, b"\0\0"), false),
+    ];
+    for (names, accepted) in cases {
+        let manifest = Crafted {
+            names: names.clone(),
+            ..crafted()
+        };
+        assert_eq!(manifest.decodes(), accepted, "{names:?}");
+    }
+}
+
+#[test]
+fn file_name_presence_and_exclusions_round_trip() {
+    let saved = meta();
+    let decoded_meta = decoded(&sample_bytes()).expect("decodes").meta;
+    assert!(decoded_meta.has_file_names);
+    assert!(decoded_meta.names_purge_due);
+    assert_eq!(decoded_meta.exclusions, saved.exclusions);
+    assert_eq!(decoded_meta.os_build, BUILD);
+    let empty = SnapshotMeta::default();
+    assert!(!empty.has_file_names && empty.exclusions.is_empty());
+    let empty_bytes = encode(&Manifest {
+        meta: &empty,
+        segments: &[],
+        tree: &FolderSizeTree::default(),
+        names: &names_store(),
+    });
+    assert_eq!(decoded(&empty_bytes).expect("decodes").meta, empty);
+}
+
+#[test]
+fn write_temp_leaves_the_target_alone_until_renamed() {
+    let dir = tempdir().expect("temp dir");
+    let path = dir.path().join("cache").join("size-index.bin");
+    let empty = encoded(&FolderSizeTree::default(), &names_store());
+    save_encoded(&path, &empty).expect("first save");
+    let bytes = sample_bytes();
+    let temp = write_temp(&path, &bytes).expect("temp written");
+    assert_eq!(temp, temp_path(&path));
+    assert_eq!(fs::read(&path).expect("unchanged"), empty);
+    assert_eq!(fs::read(&temp).expect("temp"), bytes);
+    save_encoded(&path, &bytes).expect("encoded save");
+    assert_eq!(load(&path).expect("loads").meta, meta());
+    assert!(!temp.exists());
 }
 
 fn event(parts: &[&str], flags: ChangeFlags) -> ChangeEvent {
@@ -347,7 +798,7 @@ fn catch_up_falls_back_to_a_full_rescan() {
 }
 
 #[test]
-fn a_different_os_build_forces_a_full_rescan_and_round_trips() {
+fn a_different_os_build_forces_a_full_rescan() {
     let saved = meta();
     assert_eq!(
         plan_catch_up(&saved, current("0A1B-UUID", "25B456", 500), &[],),
@@ -357,44 +808,6 @@ fn a_different_os_build_forces_a_full_rescan_and_round_trips() {
         plan_catch_up(&saved, current("0A1B-UUID", "", 900), &[plain(&["a"])],),
         ReplayOutcome::FullRescan
     );
-    let decoded = decode(&encode(&saved, &sample_tree())).expect("decodes");
-    assert_eq!(decoded.meta.os_build, BUILD);
-    // Version 3 added the pair token and the exclusion list.
-    assert_eq!(FORMAT_VERSION, 3);
-}
-
-#[test]
-fn the_pair_token_and_exclusion_list_round_trip_and_older_versions_are_rejected() {
-    let saved = meta();
-    let decoded = decode(&encode(&saved, &sample_tree())).expect("decodes");
-    assert_eq!(decoded.meta.pair_token, saved.pair_token);
-    assert_eq!(decoded.meta.exclusions, saved.exclusions);
-    let empty = SnapshotMeta::default();
-    assert_eq!(empty.pair_token, NO_PAIR);
-    assert!(empty.exclusions.is_empty());
-    let decoded_empty = decode(&encode(&empty, &FolderSizeTree::default())).expect("decodes");
-    assert_eq!(decoded_empty.meta, empty);
-    let version_two = crafted(header(2, 0, 1), &node(u32::MAX, b"idx", 1));
-    assert!(
-        decode(&version_two).is_none(),
-        "upgrading users rescan once"
-    );
-}
-
-#[test]
-fn write_temp_leaves_the_target_alone_until_renamed() {
-    let dir = tempdir().expect("temp dir");
-    let path = dir.path().join("cache").join("size-index.bin");
-    save(&path, &SnapshotMeta::default(), &FolderSizeTree::default()).expect("first save");
-    let before = fs::read(&path).expect("first");
-    let bytes = encode(&meta(), &sample_tree());
-    let temp = write_temp(&path, &bytes).expect("temp written");
-    assert_eq!(temp, temp_path(&path));
-    assert_eq!(fs::read(&path).expect("unchanged"), before);
-    assert_eq!(fs::read(&temp).expect("temp"), bytes);
-    save_encoded(&path, &bytes).expect("encoded save");
-    assert_eq!(load(&path).expect("loads").meta, meta());
-    assert!(!temp.exists());
 }
 
 #[test]

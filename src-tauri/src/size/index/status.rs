@@ -43,6 +43,7 @@ impl Machine {
         let mut status =
             FolderSizeIndexStatus::new(IndexBackend::MacIndex, true, IndexState::NotReady);
         let background = self.full.is_some() || self.background_inflight > 0;
+        let rewriting_the_base = self.compactor.is_running();
         status.state = match (&self.phase, self.pause_reason()) {
             (Phase::Booting, _) => IndexState::NotReady,
             (_, Some(reason)) if background => {
@@ -54,7 +55,7 @@ impl Machine {
                 IndexState::Indexing
             }
             (Phase::ReplayingHistory(_), _) => IndexState::Updating,
-            _ if background => IndexState::Updating,
+            _ if background || rewriting_the_base => IndexState::Updating,
             _ => IndexState::UpToDate,
         };
         status.file_names_available = self.shared.view().names.is_available();

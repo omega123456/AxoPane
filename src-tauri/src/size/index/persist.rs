@@ -1,16 +1,20 @@
 use std::fs;
 use std::io::{self, Write};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use super::tree::{FolderSizeTree, ImportedNode};
+use super::names::{FileNameStore, SavedNames};
+use super::segment::{MappedSegment, SegmentPaths};
+use super::tree::FolderSizeTree;
 
-pub const FORMAT_VERSION: u32 = 3;
+pub const FORMAT_VERSION: u32 = 4;
 const MAGIC: &[u8; 8] = b"AXOSIZE\0";
 const MAX_STRING_BYTES: usize = 64 * 1024;
 const MAX_VISITED_ROOTS: u32 = 1024;
 const MAX_EXCLUSIONS: u32 = 1024;
+const MAX_SEGMENTS: u32 = 1024;
 const TEMP_EXTENSION: &str = "tmp";
-pub const NO_PAIR: u64 = 0;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SnapshotMeta {
@@ -19,43 +23,62 @@ pub struct SnapshotMeta {
     pub event_id: u64,
     pub last_full_scan_secs: u64,
     pub visited_roots: Vec<PathBuf>,
-    pub pair_token: u64,
+    pub has_file_names: bool,
+    pub names_purge_due: bool,
     pub exclusions: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SegmentRef {
+    pub sequence: u64,
+    pub token: u64,
+}
+
+pub struct Manifest<'index> {
+    pub meta: &'index SnapshotMeta,
+    pub segments: &'index [SegmentRef],
+    pub tree: &'index FolderSizeTree,
+    pub names: &'index FileNameStore,
 }
 
 #[derive(Debug)]
 pub struct Snapshot {
     pub meta: SnapshotMeta,
+    pub segments: Vec<SegmentRef>,
     pub tree: FolderSizeTree,
+    pub names: SavedNames,
 }
 
-pub fn encode(meta: &SnapshotMeta, tree: &FolderSizeTree) -> Vec<u8> {
+pub fn encode(manifest: &Manifest<'_>) -> Vec<u8> {
+    let Manifest {
+        meta,
+        segments,
+        tree,
+        names,
+    } = manifest;
     let mut out = MAGIC.to_vec();
-    out.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
+    put_u32(&mut out, FORMAT_VERSION);
     put_str(&mut out, &meta.volume_uuid);
     put_str(&mut out, &meta.os_build);
-    out.extend_from_slice(&meta.event_id.to_le_bytes());
-    out.extend_from_slice(&meta.last_full_scan_secs.to_le_bytes());
+    put_u64(&mut out, meta.event_id);
+    put_u64(&mut out, meta.last_full_scan_secs);
     put_paths(&mut out, &meta.visited_roots);
-    out.extend_from_slice(&meta.pair_token.to_le_bytes());
+    out.push(u8::from(meta.has_file_names));
+    out.push(u8::from(meta.names_purge_due));
     put_paths(&mut out, &meta.exclusions);
-    let count_at = out.len();
-    out.extend_from_slice(&0_u32.to_le_bytes());
-    let mut count = 0_u32;
-    tree.export(|parent, name, direct, flags| {
-        out.extend_from_slice(&parent.to_le_bytes());
-        put_str(&mut out, name);
-        out.extend_from_slice(&direct.to_le_bytes());
-        out.push(flags);
-        count += 1;
-    });
-    out[count_at..count_at + size_of::<u32>()].copy_from_slice(&count.to_le_bytes());
+    put_count(&mut out, segments.len());
+    for segment in *segments {
+        put_u64(&mut out, segment.sequence);
+        put_u64(&mut out, segment.token);
+    }
+    tree.write_overlay(&mut out);
+    names.write_overlay(&mut out);
     let checksum = fnv1a(&out);
-    out.extend_from_slice(&checksum.to_le_bytes());
+    put_u64(&mut out, checksum);
     out
 }
 
-pub fn decode(bytes: &[u8]) -> Option<Snapshot> {
+pub fn decode(bytes: &[u8], directory: &Path) -> Option<Snapshot> {
     let (body, checksum) = bytes.split_last_chunk::<{ size_of::<u64>() }>()?;
     let checksum_matches = fnv1a(body) == u64::from_le_bytes(*checksum);
     if !checksum_matches {
@@ -70,51 +93,50 @@ pub fn decode(bytes: &[u8]) -> Option<Snapshot> {
     if !version_matches {
         return None;
     }
-    let volume_uuid = reader.string()?;
-    let os_build = reader.string()?;
-    let event_id = reader.u64()?;
-    let last_full_scan_secs = reader.u64()?;
-    let visited_roots = reader.paths(MAX_VISITED_ROOTS)?;
-    let pair_token = reader.u64()?;
-    let exclusions = reader.paths(MAX_EXCLUSIONS)?;
+    let meta = SnapshotMeta {
+        volume_uuid: reader.string()?,
+        os_build: reader.string()?,
+        event_id: reader.u64()?,
+        last_full_scan_secs: reader.u64()?,
+        visited_roots: reader.paths(MAX_VISITED_ROOTS)?,
+        has_file_names: reader.byte()? != 0,
+        names_purge_due: reader.byte()? != 0,
+        exclusions: reader.paths(MAX_EXCLUSIONS)?,
+    };
+    let segments = reader.segment_refs()?;
     let mut tree = FolderSizeTree::default();
-    for _ in 0..reader.u32()? {
-        let parent = reader.u32()?;
-        let name = reader.string()?;
-        let direct = reader.u64()?;
-        let flags = reader.take(1)?[0];
-        tree.import_node(ImportedNode {
-            parent,
-            name: name.into(),
-            direct,
-            flags,
-        })?;
+    let mut names = SavedNames::default();
+    for segment in &segments {
+        let mapped = open_segment(directory, *segment)?;
+        let file_names = mapped.shared_file_names();
+        let ids = tree.attach_segment(Arc::new(mapped))?;
+        names.attach_segment(ids, file_names);
     }
+    tree.read_overlay(&mut reader)?;
+    names.read_overlay(&mut reader)?;
     if !reader.is_exhausted() {
         return None;
     }
-    tree.finish_import();
     Some(Snapshot {
-        meta: SnapshotMeta {
-            volume_uuid,
-            os_build,
-            event_id,
-            last_full_scan_secs,
-            visited_roots,
-            pair_token,
-            exclusions,
-        },
+        meta,
+        segments,
         tree,
+        names,
     })
 }
 
-pub fn save(path: &Path, meta: &SnapshotMeta, tree: &FolderSizeTree) -> io::Result<()> {
-    save_encoded(path, &encode(meta, tree))
+fn open_segment(directory: &Path, segment: SegmentRef) -> Option<MappedSegment> {
+    let mapped = MappedSegment::open(&SegmentPaths::numbered(directory, segment.sequence))?;
+    (mapped.token() == segment.token).then_some(mapped)
 }
 
 pub fn save_encoded(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let temp = write_temp(path, bytes)?;
-    fs::rename(&temp, path)
+    let renamed = fs::rename(&temp, path);
+    if renamed.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    renamed
 }
 
 pub fn write_temp(path: &Path, bytes: &[u8]) -> io::Result<PathBuf> {
@@ -155,7 +177,7 @@ pub(crate) fn sync(_file: &fs::File) -> io::Result<()> {
 }
 
 pub fn load(path: &Path) -> Option<Snapshot> {
-    decode(&fs::read(path).ok()?)
+    decode(&fs::read(path).ok()?, path.parent()?)
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -258,15 +280,46 @@ fn outermost(mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
 }
 
 fn put_paths(out: &mut Vec<u8>, paths: &[PathBuf]) {
-    out.extend_from_slice(&(paths.len() as u32).to_le_bytes());
+    put_count(out, paths.len());
     for path in paths {
         put_str(out, &path.to_string_lossy());
     }
 }
 
-fn put_str(out: &mut Vec<u8>, value: &str) {
-    out.extend_from_slice(&(value.len() as u32).to_le_bytes());
-    out.extend_from_slice(value.as_bytes());
+pub(crate) fn put_u32(out: &mut Vec<u8>, value: u32) {
+    out.extend_from_slice(&value.to_le_bytes());
+}
+
+pub(crate) fn put_u64(out: &mut Vec<u8>, value: u64) {
+    out.extend_from_slice(&value.to_le_bytes());
+}
+
+pub(crate) fn put_count(out: &mut Vec<u8>, count: usize) {
+    put_u32(out, count as u32);
+}
+
+pub(crate) fn put_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
+    put_count(out, bytes.len());
+    out.extend_from_slice(bytes);
+}
+
+pub(crate) fn put_str(out: &mut Vec<u8>, value: &str) {
+    put_bytes(out, value.as_bytes());
+}
+
+pub(crate) fn put_ids(out: &mut Vec<u8>, ids: &[u32]) {
+    put_count(out, ids.len());
+    for &id in ids {
+        put_u32(out, id);
+    }
+}
+
+pub(crate) fn put_ranges(out: &mut Vec<u8>, ranges: &[Range<u32>]) {
+    put_count(out, ranges.len());
+    for range in ranges {
+        put_u32(out, range.start);
+        put_u32(out, range.end);
+    }
 }
 
 const FNV1A_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
@@ -303,12 +356,50 @@ impl<'a> Reader<'a> {
         ))
     }
 
-    pub(crate) fn string(&mut self) -> Option<String> {
+    pub(crate) fn byte(&mut self) -> Option<u8> {
+        Some(self.take(1)?[0])
+    }
+
+    pub(crate) fn bytes(&mut self) -> Option<&'a [u8]> {
         let byte_count = self.u32()? as usize;
-        if byte_count > MAX_STRING_BYTES {
+        self.take(byte_count)
+    }
+
+    pub(crate) fn string(&mut self) -> Option<String> {
+        let bytes = self.bytes()?;
+        if bytes.len() > MAX_STRING_BYTES {
             return None;
         }
-        String::from_utf8(self.take(byte_count)?.to_vec()).ok()
+        String::from_utf8(bytes.to_vec()).ok()
+    }
+
+    pub(crate) fn ids(&mut self) -> Option<Vec<u32>> {
+        (0..self.u32()?).map(|_| self.u32()).collect()
+    }
+
+    pub(crate) fn ranges(&mut self) -> Option<Vec<Range<u32>>> {
+        (0..self.u32()?).map(|_| self.range()).collect()
+    }
+
+    fn range(&mut self) -> Option<Range<u32>> {
+        let start = self.u32()?;
+        let end = self.u32()?;
+        (start < end).then_some(start..end)
+    }
+
+    fn segment_refs(&mut self) -> Option<Vec<SegmentRef>> {
+        let count = self.u32()?;
+        if count > MAX_SEGMENTS {
+            return None;
+        }
+        (0..count).map(|_| self.segment_ref()).collect()
+    }
+
+    fn segment_ref(&mut self) -> Option<SegmentRef> {
+        Some(SegmentRef {
+            sequence: self.u64()?,
+            token: self.u64()?,
+        })
     }
 
     fn paths(&mut self, max_count: u32) -> Option<Vec<PathBuf>> {

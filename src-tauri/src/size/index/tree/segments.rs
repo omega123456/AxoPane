@@ -1,9 +1,9 @@
 use std::ops::Range;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use super::overlay::Facts;
 use super::{NodeId, HEAP_BIT, NONE};
+use crate::size::index::names::ReadFailure;
 use crate::size::index::segment::{ChildIds, MappedSegment, SegmentCorrupt};
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -52,12 +52,12 @@ impl Located<'_> {
 #[derive(Debug, Default)]
 pub(super) struct SegmentTable {
     attached: Vec<Attached>,
-    corrupt: AtomicBool,
+    corruption: ReadFailure,
 }
 
 impl SegmentTable {
     pub(super) fn attach(&mut self, segment: Arc<MappedSegment>) -> Option<Range<NodeId>> {
-        let start = self.attached.last().map_or(0, |last| last.ids.end);
+        let start = self.end();
         let end = start
             .checked_add(segment.node_count())
             .filter(|&end| end <= HEAP_BIT)?;
@@ -80,8 +80,16 @@ impl SegmentTable {
         self.locate(id).is_some()
     }
 
+    pub(super) fn end(&self) -> NodeId {
+        self.attached.last().map_or(0, |last| last.ids.end)
+    }
+
     pub(super) fn is_corrupt(&self) -> bool {
-        self.corrupt.load(Ordering::Relaxed)
+        self.corruption.is_failed()
+    }
+
+    pub(super) fn take_unreported_corruption(&self) -> bool {
+        self.corruption.take_unreported()
     }
 
     pub(super) fn facts(&self, id: NodeId) -> Facts {
@@ -147,7 +155,7 @@ impl SegmentTable {
 
     fn checked<T: Default>(&self, read: Result<T, SegmentCorrupt>) -> T {
         if read.is_err() {
-            self.corrupt.store(true, Ordering::Relaxed);
+            self.corruption.mark();
         }
         read.unwrap_or_default()
     }

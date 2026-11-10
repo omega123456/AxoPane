@@ -1,6 +1,9 @@
 use std::ops::Range;
 
-use super::{NodeId, OwnCounters, HEAP_BIT, NONE};
+use super::{NodeId, OwnCounters, HEAP_BIT, NONE, PERSISTED_FLAGS};
+use crate::size::index::persist::{
+    put_count, put_ids, put_ranges, put_str, put_u32, put_u64, Reader,
+};
 
 pub const OVERLAY_CAP_FOLDERS: usize = 100_000;
 pub const OVERLAY_CAP_DEAD_RANGES: usize = 10_000;
@@ -27,6 +30,20 @@ pub(super) fn is_heap(id: NodeId) -> bool {
 pub(super) struct OwnSize {
     pub(super) direct: u64,
     pub(super) flags: u8,
+}
+
+impl OwnSize {
+    fn write(&self, out: &mut Vec<u8>) {
+        put_u64(out, self.direct);
+        out.push(self.flags);
+    }
+
+    fn read(reader: &mut Reader<'_>) -> Option<Self> {
+        let direct = reader.u64()?;
+        let flags = reader.byte()?;
+        let has_unknown_flags = flags & !PERSISTED_FLAGS != 0;
+        (!has_unknown_flags).then_some(Self { direct, flags })
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +90,22 @@ impl Delta {
             skipped: self.skipped + other.skipped,
             denied: self.denied + other.denied,
         }
+    }
+
+    fn write(&self, out: &mut Vec<u8>) {
+        put_u64(out, self.bytes as u64);
+        put_u32(out, self.pending as u32);
+        put_u32(out, self.skipped as u32);
+        put_u32(out, self.denied as u32);
+    }
+
+    fn read(reader: &mut Reader<'_>) -> Option<Self> {
+        Some(Self {
+            bytes: reader.u64()? as i64,
+            pending: reader.u32()? as i32,
+            skipped: reader.u32()? as i32,
+            denied: reader.u32()? as i32,
+        })
     }
 }
 
@@ -159,12 +192,31 @@ impl HeapNode {
         self.denied = changed.denied;
     }
 
-    fn reset_to_own_totals(&mut self) {
-        let own = OwnCounters::of(self.flags);
-        self.total = self.direct;
-        self.pending = own.pending;
-        self.skipped = own.skipped;
-        self.denied = own.denied;
+    fn write(&self, out: &mut Vec<u8>) {
+        put_u32(out, self.parent);
+        put_str(out, &self.name);
+        self.facts().own().write(out);
+        Delta::of_subtree(&self.facts()).write(out);
+        put_ids(out, &self.children);
+    }
+
+    fn read(reader: &mut Reader<'_>) -> Option<Self> {
+        let parent = reader.u32()?;
+        let name = reader.string()?;
+        let own = OwnSize::read(reader)?;
+        let subtree = Delta::read(reader)?;
+        let children = reader.ids()?;
+        if name.is_empty() {
+            return None;
+        }
+        let mut node = Self {
+            direct: own.direct,
+            flags: own.flags,
+            children,
+            ..Self::named(parent, name.into())
+        };
+        node.add(subtree);
+        Some(node)
     }
 }
 
@@ -183,16 +235,8 @@ pub(super) struct HeapNodes {
 }
 
 impl HeapNodes {
-    pub(super) fn id_of_order(order: u32) -> Option<NodeId> {
-        (order < HEAP_BIT).then_some(order | HEAP_BIT)
-    }
-
     pub(super) fn ids(&self) -> Range<NodeId> {
-        HEAP_BIT..self.next_id()
-    }
-
-    pub(super) fn next_id(&self) -> NodeId {
-        id_at(self.nodes.len())
+        HEAP_BIT..id_at(self.nodes.len())
     }
 
     pub(super) fn live_count(&self) -> usize {
@@ -219,16 +263,11 @@ impl HeapNodes {
 
     pub(super) fn alloc(&mut self, node: HeapNode) -> NodeId {
         let Some(reused) = self.free.pop() else {
-            return self.push(node);
+            self.nodes.push(node);
+            return id_at(self.nodes.len() - 1);
         };
         *self.get_mut(reused) = node;
         reused
-    }
-
-    pub(super) fn push(&mut self, node: HeapNode) -> NodeId {
-        let id = self.next_id();
-        self.nodes.push(node);
-        id
     }
 
     pub(super) fn release(&mut self, id: NodeId) -> HeapNode {
@@ -236,23 +275,40 @@ impl HeapNodes {
         std::mem::take(self.get_mut(id))
     }
 
-    pub(super) fn roll_up_imported(&mut self) {
-        for node in &mut self.nodes {
-            node.reset_to_own_totals();
-        }
-        for index in (0..self.nodes.len()).rev() {
-            self.roll_up_into_parent(index);
-        }
+    pub(super) fn live(&self) -> impl Iterator<Item = (NodeId, &HeapNode)> {
+        let numbered = self.nodes.iter().enumerate();
+        numbered
+            .filter(|(_, node)| !node.name.is_empty())
+            .map(|(index, node)| (id_at(index), node))
     }
 
-    fn roll_up_into_parent(&mut self, index: usize) {
-        let child = &self.nodes[index];
-        if child.parent == NONE {
-            return;
+    pub(super) fn write(&self, out: &mut Vec<u8>) {
+        put_count(out, self.live_count());
+        for (id, node) in self.live() {
+            put_u32(out, id);
+            node.write(out);
         }
-        let subtree = Delta::of_subtree(&child.facts());
-        let parent = child.parent;
-        self.get_mut(parent).add(subtree);
+        put_ids(out, &self.free);
+    }
+
+    pub(super) fn read(reader: &mut Reader<'_>) -> Option<Self> {
+        let live = (0..reader.u32()?)
+            .map(|_| Some((reader.u32()?, HeapNode::read(reader)?)))
+            .collect::<Option<Vec<_>>>()?;
+        let free = reader.ids()?;
+        let slot_count = live.len() + free.len();
+        let mut heap = Self {
+            nodes: (0..slot_count).map(|_| HeapNode::default()).collect(),
+            free,
+        };
+        for (id, node) in live {
+            *heap.find_mut(id)? = node;
+        }
+        let every_free_slot_is_empty = heap
+            .free
+            .iter()
+            .all(|&id| heap.find(id).is_some_and(|node| node.name.is_empty()));
+        every_free_slot_is_empty.then_some(heap)
     }
 }
 
@@ -279,6 +335,41 @@ impl Patch {
         };
         patched.with_delta(self.delta)
     }
+
+    pub(super) fn write(&self, out: &mut Vec<u8>) {
+        self.delta.write(out);
+        out.push(u8::from(self.own.is_some()));
+        if let Some(own) = self.own {
+            own.write(out);
+        }
+        out.push(u8::from(self.children.is_some()));
+        if let Some(children) = &self.children {
+            put_ids(out, children);
+        }
+    }
+
+    pub(super) fn read(reader: &mut Reader<'_>) -> Option<Self> {
+        let delta = Delta::read(reader)?;
+        let own = read_if_present(reader, OwnSize::read)?;
+        let children = read_if_present(reader, |reader| reader.ids())?;
+        Some(Self {
+            own,
+            delta,
+            children,
+            dirty: false,
+        })
+    }
+}
+
+fn read_if_present<'bytes, T>(
+    reader: &mut Reader<'bytes>,
+    read: impl FnOnce(&mut Reader<'bytes>) -> Option<T>,
+) -> Option<Option<T>> {
+    let is_present = reader.byte()? != 0;
+    if !is_present {
+        return Some(None);
+    }
+    read(reader).map(Some)
 }
 
 #[derive(Debug, Default, Clone)]
@@ -312,5 +403,21 @@ impl DeadRanges {
         }
         self.dead_folders += joined.len();
         self.ranges.insert(first, joined);
+    }
+
+    pub(crate) fn write(&self, out: &mut Vec<u8>) {
+        put_ranges(out, &self.ranges);
+    }
+
+    pub(crate) fn read(reader: &mut Reader<'_>) -> Option<Self> {
+        let mut dead = Self::default();
+        for range in reader.ranges()? {
+            dead.add(range);
+        }
+        Some(dead)
+    }
+
+    pub(crate) fn last_end(&self) -> NodeId {
+        self.ranges.last().map_or(0, |range| range.end)
     }
 }

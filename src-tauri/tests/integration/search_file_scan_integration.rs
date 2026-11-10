@@ -10,16 +10,17 @@ use file_explorer_lib::search::source::FolderTreeSource;
 use file_explorer_lib::search::tree_scan::{candidates, TreeSearchRun};
 use file_explorer_lib::search::{CandidateBatch, Control, SearchError, SearchOptions, SearchScope};
 use file_explorer_lib::size::index::names::file::NAMES_FILE;
-use file_explorer_lib::size::index::names::writer::{write_names, PairStamp};
-use file_explorer_lib::size::index::names::{FileNameStore, PackedNames, PairExpectation};
+use file_explorer_lib::size::index::names::{FileNameStore, PackedNames};
+use file_explorer_lib::size::index::segment::{MappedSegment, SegmentTarget};
 use file_explorer_lib::size::index::tree::FolderSizeTree;
 use tempfile::{tempdir, TempDir};
 
+use crate::common::segment::{compacted, index_over, paths_in, Compaction};
 use crate::search_tree_scan_integration::{build, never, parsed, run, sorted, Source, VISIBLE};
 
 const SMALL_BLOCK_TARGET: usize = 64;
 const LARGE_BLOCK_TARGET: usize = 256 * 1024;
-const PAIR_TOKEN: u64 = 7;
+const SEGMENT_TOKEN: u64 = 7;
 const HEADER_BYTES: u64 = 48;
 const CORRUPTION: [u8; 4] = [0xEE; 4];
 
@@ -80,8 +81,7 @@ pub(crate) const FOLDERS: SearchOptions = SearchOptions {
 };
 
 pub(crate) struct Fixture {
-    _dir: TempDir,
-    names_path: PathBuf,
+    dir: TempDir,
     pub(crate) source: Source,
 }
 
@@ -93,16 +93,14 @@ impl Fixture {
     fn with_block_target(folders: &[Folder], block_target: usize) -> Self {
         let tree = tree_of(folders);
         let dir = tempdir().expect("temp dir");
-        let names_path = dir.path().join(NAMES_FILE);
-        let mut names = FileNameStore::with_block_target(names_path.clone(), block_target);
+        let mut names = FileNameStore::new(dir.path().join(NAMES_FILE));
         for folder in folders {
             names.set_names(slot(&tree, &folder.path), packed(&folder.files));
         }
-        write_pair(&mut names, tree.export_slots());
+        let unsaved = UnsavedIndex { tree, names };
         Self {
-            _dir: dir,
-            names_path,
-            source: Source::with_names(tree, names),
+            source: saved_in_a_segment(dir.path(), unsaved, block_target),
+            dir,
         }
     }
 
@@ -137,14 +135,27 @@ pub(crate) fn packed<Name: AsRef<str>>(files: &[Name]) -> PackedNames {
     PackedNames::from_names(files.iter().map(|file| file.as_ref().as_bytes()))
 }
 
-fn write_pair(names: &mut FileNameStore, order: Vec<u32>) {
-    let stamp = PairStamp {
-        event_id: 1,
-        pair_token: PAIR_TOKEN,
-        deadline: None,
-    };
-    let written = write_names(names.capture(order), stamp).expect("written");
-    names.install(written, || Ok(())).expect("installed");
+struct UnsavedIndex {
+    tree: FolderSizeTree,
+    names: FileNameStore,
+}
+
+fn source_over(segment: MappedSegment, directory: &Path) -> Source {
+    let index = index_over(segment, &directory.join(NAMES_FILE));
+    Source::with_names(index.tree, index.names)
+}
+
+fn saved_in_a_segment(directory: &Path, unsaved: UnsavedIndex, block_target: usize) -> Source {
+    let segment = compacted(Compaction {
+        tree: &unsaved.tree,
+        names: &unsaved.names,
+        target: SegmentTarget {
+            paths: paths_in(directory),
+            token: SEGMENT_TOKEN,
+        },
+        block_target,
+    });
+    source_over(segment, directory)
 }
 
 pub(crate) fn ranked(source: &Source, raw: &str, options: &SearchOptions) -> Vec<String> {
@@ -376,8 +387,8 @@ fn bulk_source(count: usize) -> (TempDir, Source) {
         slot(&tree, "/bulk"),
         PackedNames::from_names(files.iter().map(String::as_bytes)),
     );
-    write_pair(&mut names, tree.export_slots());
-    (dir, Source::with_names(tree, names))
+    let source = saved_in_a_segment(dir.path(), UnsavedIndex { tree, names }, LARGE_BLOCK_TARGET);
+    (dir, source)
 }
 
 #[test]
@@ -462,20 +473,12 @@ fn privacy_blocked_roots_hide_their_files_but_not_themselves() {
 #[test]
 fn a_corrupt_block_falls_back_to_folders_and_marks_results_truncated() {
     let fixture = Fixture::new(&library());
-    let folder_count = fixture.source.tree.lock().unwrap().node_count() as u32;
-    let names_path = fixture.names_path.clone();
-    let Fixture { _dir, source, .. } = fixture;
-    let tree = source.tree.into_inner().unwrap();
-    drop(source.names);
-    corrupt(&names_path);
-    let mut names = FileNameStore::new(names_path);
-    let expectation = PairExpectation {
-        pair_token: PAIR_TOKEN,
-        first_slot: tree.heap_ids().start,
-        folder_count,
-    };
-    assert!(names.open_pair(expectation).is_some());
-    let source = Source::with_names(tree, names);
+    let Fixture { dir, source } = fixture;
+    drop(source);
+    let segment_paths = paths_in(dir.path());
+    corrupt(&segment_paths.names);
+    let segment = MappedSegment::open(&segment_paths).expect("the header still opens");
+    let source = source_over(segment, dir.path());
     assert!(source.file_names_available());
 
     let batch = run(&source, "invoice", &VISIBLE);

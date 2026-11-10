@@ -11,7 +11,7 @@ use file_explorer_lib::search::source::FolderTreeSource;
 use file_explorer_lib::search::SearchError;
 use file_explorer_lib::size::index::names::file::spill_path;
 use file_explorer_lib::size::index::names_path_beside;
-use file_explorer_lib::size::index::persist::{self, ChangeFlags};
+use file_explorer_lib::size::index::persist::{self, ChangeFlags, SnapshotMeta};
 use file_explorer_lib::size::index::platform::RawEvent;
 use file_explorer_lib::size::{
     FolderSizeIndexStatus, IndexBackend, IndexScope, IndexState, IndexUnsupported, SizeBackend,
@@ -36,9 +36,20 @@ fn names_file(index: &Harness) -> PathBuf {
     names_path_beside(&index.snapshot)
 }
 
-fn saved_pair_token(index: &Harness) -> u64 {
-    let snapshot = persist::load(&index.snapshot).expect("saved snapshot");
-    snapshot.meta.pair_token
+fn saved_meta(index: &Harness) -> Option<SnapshotMeta> {
+    Some(persist::load(&index.snapshot)?.meta)
+}
+
+fn saved_file_names_flag(index: &Harness) -> Option<bool> {
+    Some(saved_meta(index)?.has_file_names)
+}
+
+fn saved_names_are_purged(index: &Harness) -> bool {
+    saved_meta(index).is_some_and(|meta| !meta.has_file_names && !meta.names_purge_due)
+}
+
+fn saves_file_names(index: &Harness) -> bool {
+    saved_file_names_flag(index).expect("saved manifest")
 }
 
 fn status(index: &Harness) -> FolderSizeIndexStatus {
@@ -119,7 +130,7 @@ fn a_folder_only_index_sizes_folders_and_saves_no_file_names() {
     assert_eq!(storage.expect("index running").file_count, None);
 
     index.service().flush_index();
-    assert_eq!(saved_pair_token(&index), persist::NO_PAIR);
+    assert!(!saves_file_names(&index));
     assert!(!names_file(&index).exists());
     assert!(!spill_path(&names_file(&index)).exists());
 }
@@ -166,7 +177,7 @@ fn a_folder_only_index_follows_removed_and_excluded_folders() {
 
     let saved = persist::load(&index.snapshot).expect("saved snapshot");
     assert_eq!(saved.meta.exclusions, [index.path("s")]);
-    assert_eq!(saved.meta.pair_token, persist::NO_PAIR);
+    assert!(!saved.meta.has_file_names);
     assert!(!names_file(&index).exists());
 }
 
@@ -187,8 +198,9 @@ fn turning_the_file_index_on_rescans_and_saves_the_file_names() {
         indexed_file_names(&index, "a"),
         Some(vec!["a.bin".to_string()])
     );
-    assert!(names_file(&index).exists());
-    assert_ne!(saved_pair_token(&index), persist::NO_PAIR);
+    wait_until("the names are saved", || {
+        saved_file_names_flag(&index) == Some(true)
+    });
 }
 
 #[test]
@@ -196,7 +208,9 @@ fn turning_the_file_index_off_removes_saved_names_and_keeps_the_sizes() {
     let mut index = Harness::new();
     index.start();
     index.wait_state(IndexState::UpToDate);
-    assert!(names_file(&index).exists());
+    wait_until("the names are saved", || {
+        saved_file_names_flag(&index) == Some(true)
+    });
     forget_opened_folders(&index);
 
     restart_with_scope(&index, IndexScope::Folders);
@@ -207,8 +221,9 @@ fn turning_the_file_index_off_removes_saved_names_and_keeps_the_sizes() {
     assert!(!status(&index).file_names_available);
     assert!(!index.opened(""), "sizes resume from the snapshot");
     assert_eq!(ready(&index, "a"), BYTES_IN_A);
-    index.service().flush_index();
-    assert_eq!(saved_pair_token(&index), persist::NO_PAIR);
+    wait_until("the saved names are purged", || {
+        saved_names_are_purged(&index)
+    });
 }
 
 #[test]

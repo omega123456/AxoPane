@@ -4,6 +4,8 @@ use std::path::Path;
 use file_explorer_lib::ipc::commands;
 use file_explorer_lib::size::index::names::file::spill_path;
 use file_explorer_lib::size::index::names_path_beside;
+use file_explorer_lib::size::index::persist::{self, SegmentRef};
+use file_explorer_lib::size::index::segment::SegmentPaths;
 use file_explorer_lib::size::{FolderSizeIndexStorage, IndexState};
 
 use crate::ipc_state_manager_integration::as_state;
@@ -28,8 +30,19 @@ fn file_bytes(path: &Path) -> u64 {
     fs::metadata(path).map_or(0, |metadata| metadata.len())
 }
 
-fn bytes_of_saved_pair(index: &Harness) -> u64 {
-    file_bytes(&index.snapshot) + file_bytes(&names_path_beside(&index.snapshot))
+fn segment_bytes(index: &Harness, segment: &SegmentRef) -> u64 {
+    let directory = index.snapshot.parent().expect("cache directory");
+    let paths = SegmentPaths::numbered(directory, segment.sequence);
+    file_bytes(&paths.tree) + file_bytes(&paths.names)
+}
+
+fn bytes_of_saved_index(index: &Harness) -> u64 {
+    let segments = persist::load(&index.snapshot).map_or_else(Vec::new, |saved| saved.segments);
+    let bytes_in_segments: u64 = segments
+        .iter()
+        .map(|segment| segment_bytes(index, segment))
+        .sum();
+    file_bytes(&index.snapshot) + bytes_in_segments
 }
 
 fn rebuild(index: &Harness) {
@@ -58,8 +71,8 @@ fn storage_reports_the_cache_folder_its_bytes_and_every_indexed_item() {
     let reported = storage(&index);
 
     assert_eq!(reported.directory, cache_directory(&index));
-    assert!(bytes_of_saved_pair(&index) > 0);
-    assert_eq!(reported.size_bytes, bytes_of_saved_pair(&index));
+    assert!(bytes_of_saved_index(&index) > 0);
+    assert_eq!(reported.size_bytes, bytes_of_saved_index(&index));
     assert_eq!(reported.folder_count, Some(INDEXED_FOLDERS));
     assert_eq!(reported.file_count, Some(INDEXED_FILES));
 }
@@ -72,7 +85,7 @@ fn storage_counts_the_spill_bytes_but_no_files_while_the_first_scan_spills() {
     wait_until("walk reaches a", || index.opened("a"));
     let spill = spill_path(&names_path_beside(&index.snapshot));
     assert!(spill.exists());
-    assert_eq!(bytes_of_saved_pair(&index), 0, "no pair saved yet");
+    assert_eq!(bytes_of_saved_index(&index), 0, "nothing saved yet");
 
     let spilled_before = file_bytes(&spill);
     let reported = storage(&index);

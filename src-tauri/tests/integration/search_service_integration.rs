@@ -11,14 +11,19 @@ use file_explorer_lib::search::{SearchError, SearchScope};
 use file_explorer_lib::size::everything::{
     EverythingHandle, EverythingQuery, EverythingQueryResult, EverythingRow,
 };
+use file_explorer_lib::size::index::names::block::BLOCK_TARGET_BYTES;
 use file_explorer_lib::size::index::names::file::NAMES_FILE;
-use file_explorer_lib::size::index::names::writer::{write_names, PairStamp};
 use file_explorer_lib::size::index::names::{FileNameStore, PackedNames};
+use file_explorer_lib::size::index::segment::SegmentTarget;
 use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
 use file_explorer_lib::size::index::IndexRead;
 use file_explorer_lib::size::SizeService;
 use serde_json::json;
 use tempfile::tempdir;
+
+use crate::common::segment::{compacted, index_over, paths_in, Compaction};
+
+const SEGMENT_TOKEN: u64 = 1;
 
 struct RowKind {
     is_folder: bool,
@@ -262,7 +267,7 @@ fn tree_at(root: &Path, children: &[&str]) -> Arc<Tree> {
     })
 }
 
-/// A tree whose root folder holds `files` in a written names file.
+/// A tree whose root folder holds `files` in a saved segment.
 fn tree_with_files(root: &Path, files: &[&str]) -> Arc<Tree> {
     let tree = folder_tree(root, &["documents"]);
     let mut names = FileNameStore::new(root.join(NAMES_FILE));
@@ -271,16 +276,19 @@ fn tree_with_files(root: &Path, files: &[&str]) -> Arc<Tree> {
         root_slot,
         PackedNames::from_names(files.iter().map(|file| file.as_bytes())),
     );
-    let stamp = PairStamp {
-        event_id: 1,
-        pair_token: 1,
-        deadline: None,
-    };
-    let written = write_names(names.capture(tree.export_slots()), stamp).expect("written");
-    names.install(written, || Ok(())).expect("installed");
+    let segment = compacted(Compaction {
+        tree: &tree,
+        names: &names,
+        target: SegmentTarget {
+            paths: paths_in(root),
+            token: SEGMENT_TOKEN,
+        },
+        block_target: BLOCK_TARGET_BYTES,
+    });
+    let index = index_over(segment, &root.join(NAMES_FILE));
     Arc::new(Tree {
-        tree,
-        names,
+        tree: index.tree,
+        names: index.names,
         during_read: Mutex::new(None),
     })
 }

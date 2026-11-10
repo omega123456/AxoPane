@@ -1,23 +1,27 @@
 use std::fs::{self, OpenOptions};
-use std::io::{self, Seek, SeekFrom, Write};
-use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::io::{Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
 
-use file_explorer_lib::size::index::names::file::{NamesHeader, NAMES_FILE};
-use file_explorer_lib::size::index::names::writer::{
-    is_past, write_names, PairStamp, RewriteError, RewriteStats,
-};
+use file_explorer_lib::size::index::names::file::NAMES_FILE;
+use file_explorer_lib::size::index::names::writer::RewriteStats;
 use file_explorer_lib::size::index::names::{
-    names_in, FileNameStore, FolderNames, InstallError, NamesCounters, NamesScratch,
-    NamesUnreadable, OverlayStats, PackedNames, PairExpectation, OVERLAY_THRESHOLD_BYTES,
+    names_in, FileNameStore, FolderNames, NamesCounters, NamesCursor, NamesScratch,
+    NamesUnreadable, OverlayStats, PackedNames, SavedNames, OVERLAY_THRESHOLD_BYTES,
     OVERLAY_THRESHOLD_FOLDERS,
 };
-use file_explorer_lib::size::index::persist::temp_path;
+use file_explorer_lib::size::index::segment::{
+    MappedSegment, NodeFlags, SegmentBuilder, SegmentEntry, SegmentTarget,
+};
 use tempfile::{tempdir, TempDir};
 
+use crate::common::segment::paths_in;
+
 const SMALL_BLOCK_TARGET: usize = 64;
-const HEADER_BYTES: u64 = 48;
-const FIRST_SLOT: u32 = 0;
+const NAMES_HEADER_BYTES: u64 = 48;
+const TOKEN: u64 = 3;
+const ROOT_SLOT: u32 = 0;
+const FOLDER_COUNT: u32 = 4;
+const NAMES_PER_FOLDER: u64 = 3;
 
 fn packed(names: &[&str]) -> PackedNames {
     PackedNames::from_names(names.iter().map(|name| name.as_bytes()))
@@ -41,7 +45,7 @@ fn names_for(slot: u32) -> PackedNames {
 }
 
 struct Fixture {
-    _dir: TempDir,
+    dir: TempDir,
     path: PathBuf,
 }
 
@@ -49,37 +53,76 @@ impl Fixture {
     fn new() -> Self {
         let dir = tempdir().expect("temp dir");
         let path = dir.path().join("cache").join(NAMES_FILE);
-        Self { _dir: dir, path }
+        Self { dir, path }
     }
 
     fn store(&self) -> FileNameStore {
-        FileNameStore::with_block_target(self.path.clone(), SMALL_BLOCK_TARGET)
+        FileNameStore::new(self.path.clone())
+    }
+
+    fn segment_directory(&self) -> PathBuf {
+        self.dir.path().join("segments")
+    }
+
+    fn segment_names_file(&self) -> PathBuf {
+        paths_in(&self.segment_directory()).names
     }
 }
 
-fn stamp(pair_token: u64) -> PairStamp {
-    PairStamp {
-        event_id: 900,
-        pair_token,
-        deadline: None,
+fn entry<'entry>(
+    depth: usize,
+    name: &'entry str,
+    files: &'entry PackedNames,
+) -> SegmentEntry<'entry> {
+    SegmentEntry {
+        depth,
+        name,
+        direct: 0,
+        flags: NodeFlags::default(),
+        file_names: files.as_bytes(),
     }
 }
 
-/// Writes the store's current names in `order` and installs the file.
-fn rewrite(store: &mut FileNameStore, order: Vec<u32>, pair_token: u64) -> RewriteStats {
-    let written = write_names(store.capture(order), stamp(pair_token)).expect("written");
-    let stats = written.stats;
-    store.install(written, || Ok(())).expect("installed");
-    stats
+/// A segment whose folder with slot `n` holds `names_for(n)`: a root and its children.
+fn write_segment(directory: &Path, folder_count: u32) {
+    let target = SegmentTarget {
+        paths: paths_in(directory),
+        token: TOKEN,
+    };
+    let mut builder =
+        SegmentBuilder::with_block_target(target, SMALL_BLOCK_TARGET).expect("builder");
+    builder
+        .push(entry(0, "root", &names_for(ROOT_SLOT)))
+        .expect("root");
+    for slot in 1..folder_count {
+        let name = format!("folder-{slot:04}");
+        builder
+            .push(entry(1, &name, &names_for(slot)))
+            .expect("child");
+    }
+    builder.finish().expect("finish");
 }
 
-/// A store whose names file holds `slots` (each with `names_for`).
-fn written_store(fixture: &Fixture, slots: &[u32]) -> FileNameStore {
+fn saved_names(directory: &Path) -> SavedNames {
+    let segment = MappedSegment::open(&paths_in(directory)).expect("opens");
+    let mut saved = SavedNames::default();
+    saved.attach_segment(0..segment.node_count(), segment.shared_file_names());
+    saved
+}
+
+/// A store reading the names of `folder_count` folders from one mapped segment.
+fn segment_store(fixture: &Fixture, folder_count: u32) -> FileNameStore {
+    write_segment(&fixture.segment_directory(), folder_count);
     let mut store = fixture.store();
-    for &slot in slots {
-        store.set_names(slot, names_for(slot));
-    }
-    rewrite(&mut store, slots.to_vec(), 1);
+    store.restore(saved_names(&fixture.segment_directory()));
+    store
+}
+
+fn corrupt_segment_store(fixture: &Fixture) -> FileNameStore {
+    write_segment(&fixture.segment_directory(), FOLDER_COUNT);
+    corrupt_byte_at(&fixture.segment_names_file(), NAMES_HEADER_BYTES);
+    let mut store = fixture.store();
+    store.restore(saved_names(&fixture.segment_directory()));
     store
 }
 
@@ -96,10 +139,23 @@ fn block_folders(store: &FileNameStore, index: usize) -> Vec<u32> {
     block.folders().map(|folder| folder.slot).collect()
 }
 
-fn corrupt_byte_at(path: &PathBuf, offset: u64) {
+fn every_block_folder(store: &FileNameStore) -> Vec<u32> {
+    (0..store.block_count())
+        .flat_map(|index| block_folders(store, index))
+        .collect()
+}
+
+fn corrupt_byte_at(path: &Path, offset: u64) {
     let mut file = OpenOptions::new().write(true).open(path).expect("open");
     file.seek(SeekFrom::Start(offset)).expect("seek");
     file.write_all(&[0xEE, 0xEE, 0xEE, 0xEE]).expect("corrupt");
+}
+
+fn rewritten(store: &FileNameStore, slot: u32, cursor: &mut NamesCursor) -> Vec<String> {
+    let packed = store.names_for_rewrite(slot, cursor).expect("readable");
+    names_in(packed)
+        .map(|name| String::from_utf8_lossy(name).into_owned())
+        .collect()
 }
 
 #[test]
@@ -139,22 +195,19 @@ fn sorting_packed_names_orders_them_bytewise_and_keeps_every_name() {
 }
 
 #[test]
-fn a_fresh_store_has_no_names_until_a_file_or_spill_exists() {
+fn a_fresh_store_has_no_names_until_a_segment_or_spill_exists() {
     let fixture = Fixture::new();
-    let store = FileNameStore::new(fixture.path.clone());
+    let store = fixture.store();
     assert_eq!(store.path(), fixture.path);
     assert!(!store.is_available());
-    assert!(!store.has_names_file());
+    assert!(!store.has_saved_names());
     assert!(!store.is_spilling());
+    assert!(!store.has_spilled_names());
     assert_eq!(store.spill_len(), None);
-    assert_eq!(store.names_header(), None);
     assert_eq!(store.block_count(), 0);
-    assert_eq!(store.blocks_covering(0..10), 0..0);
     assert!(store.blocks_for_slots(&[1, 2]).is_empty());
-    assert_eq!(store.ordinal_of(0), None);
-    assert_eq!(store.slot_of(0), None);
     assert_eq!(store.names_of(4), Ok(None));
-    assert!(!store.has_unsaved_names());
+    assert!(!store.has_unsaved_changes());
     assert_eq!(store.counters(), NamesCounters::default());
     let mut scratch = NamesScratch::default();
     assert!(store.read_block(0, &mut scratch).is_err());
@@ -163,24 +216,26 @@ fn a_fresh_store_has_no_names_until_a_file_or_spill_exists() {
         .visit_spill(&mut scratch, &mut |_| visited += 1)
         .expect("no spill");
     assert_eq!(visited, 0);
+    let mut cursor = NamesCursor::default();
+    assert!(rewritten(&store, 4, &mut cursor).is_empty());
 }
 
 #[test]
 fn the_overlay_beats_blocks_and_tombstones_hide_pruned_folders() {
     let fixture = Fixture::new();
-    let mut store = written_store(&fixture, &[0, 1, 2, 3]);
-    assert!(store.is_available());
-    assert!(
-        !store.has_unsaved_names(),
-        "the rewrite cleared the overlay"
-    );
+    let mut store = segment_store(&fixture, FOLDER_COUNT);
+    assert!(store.is_available() && store.has_saved_names());
+    assert!(!store.has_unsaved_changes());
     assert_eq!(current(&store, 2), Some(strings(&names_for(2))));
+    assert_eq!(current(&store, FOLDER_COUNT), None, "past the segment");
 
     store.set_names(2, packed(&["fresh.txt"]));
     store.tombstone(3);
     assert_eq!(current(&store, 2), Some(vec!["fresh.txt".to_string()]));
     assert_eq!(current(&store, 3), Some(Vec::new()), "pruned");
-    assert!(store.has_unsaved_names());
+    assert!(store.has_unsaved_changes());
+    store.mark_saved();
+    assert!(!store.has_unsaved_changes());
     assert_eq!(
         store.overlay_stats(),
         OverlayStats {
@@ -188,10 +243,11 @@ fn the_overlay_beats_blocks_and_tombstones_hide_pruned_folders() {
             name_bytes: "fresh.txt\0".len(),
         }
     );
-    let shown: Vec<u32> = (0..store.block_count())
-        .flat_map(|index| block_folders(&store, index))
-        .collect();
-    assert_eq!(shown, [0, 1], "blocks skip folders the overlay replaced");
+    assert_eq!(
+        every_block_folder(&store),
+        [0, 1],
+        "blocks skip folders the overlay replaced"
+    );
     let mut overlay = Vec::new();
     store.visit_overlay(&mut |folder| overlay.push(folder.slot));
     assert_eq!(overlay, [2], "tombstones carry no names");
@@ -203,113 +259,93 @@ fn the_overlay_beats_blocks_and_tombstones_hide_pruned_folders() {
 }
 
 #[test]
-fn a_rewrite_copies_unchanged_blocks_and_re_encodes_only_the_changed_one() {
+fn a_dead_range_hides_its_folders_and_drops_their_overlay_names() {
     let fixture = Fixture::new();
-    let slots: Vec<u32> = (0..12).collect();
-    let mut store = fixture.store();
-    for &slot in &slots {
-        store.set_names(slot, names_for(slot));
-    }
-    let first = rewrite(&mut store, slots.clone(), 1);
-    assert_eq!(first.blocks_copied, 0);
-    assert_eq!(first.blocks_reencoded as usize, store.block_count());
-    assert!(store.block_count() >= 6, "{} blocks", store.block_count());
+    let mut store = segment_store(&fixture, FOLDER_COUNT);
+    store.set_names(2, packed(&["fresh.txt"]));
+    store.mark_saved();
+    store.tombstone_range(1..3);
+    assert!(store.has_unsaved_changes());
+    assert_eq!(current(&store, 1), Some(Vec::new()));
+    assert_eq!(current(&store, 2), Some(Vec::new()));
+    assert_eq!(current(&store, 3), Some(strings(&names_for(3))));
+    assert_eq!(store.overlay_stats(), OverlayStats::default());
+    assert_eq!(every_block_folder(&store), [0, 3]);
+    assert_eq!(
+        store.count_saved_and_overlay_names(),
+        Ok(2 * NAMES_PER_FOLDER)
+    );
+    let mut cursor = NamesCursor::default();
+    assert!(rewritten(&store, 2, &mut cursor).is_empty());
+}
 
-    let changed = 7;
-    let changed_ordinal = store.ordinal_of(changed).expect("ordinal");
-    let containing = store.blocks_covering(changed_ordinal..changed_ordinal + 1);
-    store.set_names(changed, packed(&["edited.txt"]));
-    let before = store.counters();
-    let second = rewrite(&mut store, slots.clone(), 2);
-    assert_eq!(second.blocks_reencoded, containing.len() as u64);
+#[test]
+fn small_blocks_split_the_folders_and_each_slot_maps_to_its_block() {
+    let fixture = Fixture::new();
+    let folder_count = 12;
+    let store = segment_store(&fixture, folder_count);
+    assert!(store.block_count() > 3, "roughly one block per folder");
     assert_eq!(
-        second.blocks_copied as usize,
-        store.block_count() - containing.len()
+        every_block_folder(&store),
+        (0..folder_count).collect::<Vec<u32>>()
     );
-    let after = store.counters();
-    assert_eq!(
-        after.blocks_reencoded - before.blocks_reencoded,
-        second.blocks_reencoded
-    );
-    assert_eq!(
-        after.blocks_copied - before.blocks_copied,
-        second.blocks_copied
-    );
-    assert_eq!(after.peak_open_output_blocks, 1);
-    for &slot in &slots {
+    let first_and_last = store.blocks_for_slots(&[folder_count - 1, 0, 0, folder_count]);
+    assert_eq!(first_and_last, [0, store.block_count() - 1]);
+    for block in 0..store.block_count() {
+        let folders = block_folders(&store, block);
+        assert_eq!(store.blocks_for_slots(&folders), [block]);
+    }
+}
+
+#[test]
+fn a_rewrite_cursor_reads_every_source_and_decodes_each_block_once() {
+    let fixture = Fixture::new();
+    let folder_count = 12;
+    let mut store = segment_store(&fixture, folder_count);
+    store.set_names(5, packed(&["overlay.txt"]));
+    store.tombstone(6);
+    store.begin_spill().expect("spill");
+    store.spill_names(7, packed(&["spilled.txt"]));
+    let new_slot = folder_count + 20;
+    store.set_names(new_slot, packed(&["brand-new.txt"]));
+
+    let mut cursor = NamesCursor::default();
+    for slot in 0..folder_count {
         let expected = match slot {
-            7 => vec!["edited.txt".to_string()],
+            5 => vec!["overlay.txt".to_string()],
+            6 => Vec::new(),
+            7 => vec!["spilled.txt".to_string()],
             _ => strings(&names_for(slot)),
         };
-        assert_eq!(current(&store, slot), Some(expected), "slot {slot}");
+        assert_eq!(
+            rewritten(&store, slot, &mut cursor),
+            expected,
+            "slot {slot}"
+        );
     }
+    assert_eq!(rewritten(&store, new_slot, &mut cursor), ["brand-new.txt"]);
+    assert!(rewritten(&store, new_slot + 1, &mut cursor).is_empty());
+    let decoded = store.counters().blocks_decompressed;
+    assert!(decoded <= store.block_count() as u64, "{decoded} decodes");
+    assert_eq!(rewritten(&store, 0, &mut cursor), strings(&names_for(0)));
 }
 
 #[test]
-fn a_new_folder_shifts_later_blocks_which_are_still_copied() {
-    let fixture = Fixture::new();
-    let slots: Vec<u32> = (0..10).collect();
-    let mut store = written_store(&fixture, &slots);
-    let blocks_before = store.block_count();
-
-    let new_slot = 40;
-    store.set_names(new_slot, names_for(new_slot));
-    let mut order = slots.clone();
-    order.insert(3, new_slot);
-    let stats = rewrite(&mut store, order.clone(), 2);
-    assert!(
-        stats.blocks_copied as usize >= blocks_before - 2,
-        "{stats:?}"
-    );
-    assert!(stats.blocks_reencoded <= 2, "{stats:?}");
-    assert_eq!(store.ordinal_of(new_slot), Some(3));
-    assert_eq!(store.slot_of(4), Some(3));
-    for &slot in &order {
-        assert_eq!(current(&store, slot), Some(strings(&names_for(slot))));
-    }
-}
-
-#[test]
-fn the_translation_table_maps_file_ordinals_to_drifted_slots() {
-    let fixture = Fixture::new();
-    let order = vec![9, 4, 7, 1];
-    let mut store = fixture.store();
-    for &slot in &order {
-        store.set_names(slot, names_for(slot));
-    }
-    rewrite(&mut store, order.clone(), 1);
-    for (ordinal, &slot) in order.iter().enumerate() {
-        assert_eq!(store.ordinal_of(slot), Some(ordinal as u32));
-        assert_eq!(store.slot_of(ordinal as u32), Some(slot));
-        assert_eq!(current(&store, slot), Some(strings(&names_for(slot))));
-    }
-    assert_eq!(store.ordinal_of(5), None, "never written");
-    assert_eq!(store.slot_of(99), None);
-    assert_eq!(current(&store, 5), None);
-    let blocks = store.blocks_for_slots(&[1, 9, 5]);
-    assert_eq!(blocks.first(), Some(&0));
-    assert_eq!(blocks.last(), Some(&(store.block_count() - 1)));
-    let mut scratch = NamesScratch::default();
-    let last = store
-        .read_block(store.block_count() - 1, &mut scratch)
-        .expect("block");
-    assert_eq!(last.span().end(), order.len() as u32);
-    assert_eq!(store.counters().blocks_decompressed, 1 + order.len() as u64);
-}
-
-#[test]
-fn the_spill_serves_reads_during_a_scan_and_streams_into_one_block_at_a_time() {
+fn the_spill_serves_reads_during_a_scan_until_a_new_base_is_adopted() {
     let fixture = Fixture::new();
     let mut store = fixture.store();
     store.begin_spill().expect("spill");
     assert!(store.is_available(), "names exist once a spill exists");
-    assert!(store.is_spilling());
+    assert!(store.is_spilling() && !store.has_spilled_names());
     assert_eq!(store.spill_len(), Some(0));
     for slot in 0..8 {
         store.spill_names(slot, names_for(slot));
     }
-    let grown = store.spill_len().expect("spill");
-    assert!(grown > 0);
+    assert!(store.has_spilled_names());
+    assert!(
+        !store.has_unsaved_changes(),
+        "the spill is not in the manifest"
+    );
     assert!(store.spill_path().exists());
     assert_eq!(current(&store, 5), Some(strings(&names_for(5))));
 
@@ -319,44 +355,32 @@ fn the_spill_serves_reads_during_a_scan_and_streams_into_one_block_at_a_time() {
     assert_eq!(current(&store, 6), Some(Vec::new()));
     store.spill_names(6, packed(&["reused.slot"]));
     assert_eq!(current(&store, 6), Some(vec!["reused.slot".to_string()]));
+    store.tombstone_range(0..2);
+    assert_eq!(current(&store, 1), Some(Vec::new()));
 
     let mut scratch = NamesScratch::default();
     let mut spilled = Vec::new();
     store
         .visit_spill(&mut scratch, &mut |folder| spilled.push(folder.slot))
         .expect("spill readable");
-    assert_eq!(spilled, [0, 1, 2, 3, 4, 6, 7], "the overlay shadows slot 5");
+    assert_eq!(spilled, [2, 3, 4, 6, 7], "the overlay shadows slot 5");
 
-    let stats = rewrite(&mut store, (0..8).collect(), 1);
-    assert_eq!(stats.peak_open_blocks, 1);
+    write_segment(&fixture.segment_directory(), FOLDER_COUNT);
+    let stats = RewriteStats {
+        blocks_reencoded: 4,
+        peak_open_blocks: 1,
+    };
+    store.adopt_base(saved_names(&fixture.segment_directory()), stats);
     assert!(!store.is_spilling());
     assert!(
         !store.spill_path().exists(),
-        "the spill is removed after the pair"
+        "the spill goes with the old base"
     );
-    assert_eq!(current(&store, 6), Some(vec!["reused.slot".to_string()]));
-    assert_eq!(current(&store, 5), Some(vec!["newer.txt".to_string()]));
+    assert_eq!(store.overlay_stats(), OverlayStats::default());
+    assert!(!store.has_unsaved_changes());
+    assert_eq!(current(&store, 1), Some(strings(&names_for(1))));
+    assert_eq!(store.counters().blocks_reencoded, 4);
     assert_eq!(store.counters().peak_open_output_blocks, 1);
-}
-
-#[test]
-fn a_pair_save_during_a_scan_reads_spilled_folders_between_folders_of_one_mapped_block() {
-    let fixture = Fixture::new();
-    let slots = [0, 1, 2];
-    let mut store = FileNameStore::new(fixture.path.clone());
-    for slot in slots {
-        store.set_names(slot, names_for(slot));
-    }
-    rewrite(&mut store, slots.to_vec(), 1);
-    assert_eq!(store.block_count(), 1, "every folder shares one block");
-
-    store.begin_spill().expect("spill");
-    store.spill_names(1, packed(&["spilled.txt"]));
-    rewrite(&mut store, slots.to_vec(), 2);
-
-    assert_eq!(current(&store, 0), Some(strings(&names_for(0))));
-    assert_eq!(current(&store, 1), Some(vec!["spilled.txt".to_string()]));
-    assert_eq!(current(&store, 2), Some(strings(&names_for(2))));
 }
 
 #[test]
@@ -381,131 +405,32 @@ fn spilling_without_a_spill_falls_back_to_the_overlay_and_stale_spills_are_remov
 }
 
 #[test]
-fn open_pair_accepts_only_a_matching_token_and_folder_count() {
-    let fixture = Fixture::new();
-    let written = written_store(&fixture, &[0, 1, 2]);
-    let header = written.names_header().expect("header");
-    assert_eq!(
-        header,
-        NamesHeader {
-            event_id: 900,
-            pair_token: 1,
-            folder_count: 3,
-        }
-    );
-    drop(written);
-
-    let mut store = fixture.store();
-    let mismatched_token = PairExpectation {
-        pair_token: 2,
-        first_slot: FIRST_SLOT,
-        folder_count: 3,
-    };
-    assert_eq!(store.open_pair(mismatched_token), None);
-    let mismatched_count = PairExpectation {
-        pair_token: 1,
-        first_slot: FIRST_SLOT,
-        folder_count: 4,
-    };
-    assert_eq!(store.open_pair(mismatched_count), None);
-    assert!(!store.has_names_file());
-    let matching = PairExpectation {
-        pair_token: 1,
-        first_slot: FIRST_SLOT,
-        folder_count: 3,
-    };
-    assert_eq!(store.open_pair(matching), Some(header));
-    assert_eq!(
-        store.ordinal_of(2),
-        Some(2),
-        "slots equal ordinals after load"
-    );
-    assert_eq!(current(&store, 1), Some(strings(&names_for(1))));
-}
-
-#[test]
-fn replacing_the_names_file_while_it_is_mapped_succeeds() {
-    let fixture = Fixture::new();
-    let mut store = written_store(&fixture, &[0, 1]);
-    assert!(store.has_names_file());
-    store.set_names(1, packed(&["replacement.txt"]));
-    rewrite(&mut store, vec![0, 1], 2);
-    assert_eq!(
-        store.names_header().map(|header| header.pair_token),
-        Some(2)
-    );
-    assert_eq!(
-        current(&store, 1),
-        Some(vec!["replacement.txt".to_string()])
-    );
-    rewrite(&mut store, vec![1], 3);
-    assert_eq!(
-        store.names_header().map(|header| header.folder_count),
-        Some(1)
-    );
-    assert_eq!(
-        current(&store, 1),
-        Some(vec!["replacement.txt".to_string()])
-    );
-}
-
-#[test]
 fn a_corrupt_block_flips_availability_and_is_reported_once() {
     let fixture = Fixture::new();
-    drop(written_store(&fixture, &[0, 1, 2, 3]));
-    corrupt_byte_at(&fixture.path, HEADER_BYTES);
-    let mut store = fixture.store();
-    let expected = PairExpectation {
-        pair_token: 1,
-        first_slot: FIRST_SLOT,
-        folder_count: 4,
-    };
-    assert!(store.open_pair(expected).is_some(), "the header is intact");
-    assert!(store.is_available());
+    let mut store = corrupt_segment_store(&fixture);
+    assert!(store.is_available(), "the header is intact");
     let mut scratch = NamesScratch::default();
     assert!(store.read_block(0, &mut scratch).is_err());
     assert!(!store.is_available());
     assert!(store.take_unreported_failure());
     assert!(!store.take_unreported_failure(), "reported once");
     assert!(store.names_of(0).is_err());
+    let mut cursor = NamesCursor::default();
+    assert_eq!(
+        store.names_for_rewrite(0, &mut cursor),
+        Err(NamesUnreadable)
+    );
 
-    let capture = store.capture(vec![0, 1, 2, 3]);
-    let rebuilt = write_names(capture, stamp(5)).expect("written without the broken file");
-    store.install(rebuilt, || Ok(())).expect("installed");
-    assert!(store.is_available(), "a fresh pair clears the failure");
-    assert_eq!(current(&store, 2), Some(Vec::new()));
+    store.adopt_base(SavedNames::default(), RewriteStats::default());
+    assert!(!store.is_available(), "nothing saved yet");
+    store.begin_spill().expect("spill");
+    assert!(store.is_available(), "a fresh base clears the failure");
 
     store.mark_unreadable();
     assert!(!store.is_available());
     store.fail_and_discard();
-    assert!(!store.has_names_file());
+    assert!(!store.has_saved_names());
     assert!(!store.take_unreported_failure(), "already handled");
-}
-
-#[test]
-fn rewrites_that_need_a_corrupt_block_fail_as_unreadable() {
-    let fixture = Fixture::new();
-    drop(written_store(&fixture, &[0, 1, 2, 3]));
-    corrupt_byte_at(&fixture.path, HEADER_BYTES);
-    let expected = PairExpectation {
-        pair_token: 1,
-        first_slot: FIRST_SLOT,
-        folder_count: 4,
-    };
-
-    let mut copying = fixture.store();
-    copying.open_pair(expected).expect("open");
-    let copy_failure = write_names(copying.capture(vec![0, 1, 2, 3]), stamp(2));
-    assert!(matches!(copy_failure, Err(RewriteError::Unreadable)));
-    assert!(
-        !temp_path(&fixture.path).exists(),
-        "the temp file is discarded"
-    );
-
-    let mut reencoding = fixture.store();
-    reencoding.open_pair(expected).expect("open");
-    let reordered = write_names(reencoding.capture(vec![1, 0, 2, 3]), stamp(2));
-    assert!(matches!(reordered, Err(RewriteError::Unreadable)));
 }
 
 #[test]
@@ -518,71 +443,11 @@ fn a_damaged_spill_fails_reads_and_rewrites() {
     assert!(store.names_of(0).is_err());
     let mut scratch = NamesScratch::default();
     assert!(store.visit_spill(&mut scratch, &mut |_| {}).is_err());
-    let failed = write_names(store.capture(vec![0]), stamp(1));
-    assert!(matches!(failed, Err(RewriteError::Unreadable)));
-}
-
-#[test]
-fn an_expired_deadline_abandons_the_rewrite_before_anything_is_renamed() {
-    let fixture = Fixture::new();
-    let mut store = written_store(&fixture, &[0, 1, 2]);
-    store.set_names(1, packed(&["late.txt"]));
-    let expired = PairStamp {
-        deadline: Some(Instant::now()),
-        ..stamp(2)
-    };
-    assert!(is_past(expired.deadline));
-    assert!(!is_past(None));
-    assert!(!is_past(Some(Instant::now() + Duration::from_secs(60))));
-    let failed = write_names(store.capture(vec![0, 1, 2]), expired);
-    assert!(matches!(failed, Err(RewriteError::DeadlinePassed)));
-    let empty = write_names(store.capture(Vec::new()), expired);
-    assert!(matches!(empty, Err(RewriteError::DeadlinePassed)));
-    assert!(!temp_path(&fixture.path).exists());
+    let mut cursor = NamesCursor::default();
     assert_eq!(
-        store.names_header().map(|header| header.pair_token),
-        Some(1)
+        store.names_for_rewrite(0, &mut cursor),
+        Err(NamesUnreadable)
     );
-}
-
-#[test]
-fn install_failures_keep_a_consistent_store() {
-    let fixture = Fixture::new();
-    let mut store = written_store(&fixture, &[0, 1]);
-    store.set_names(0, packed(&["kept.txt"]));
-
-    let written = write_names(store.capture(vec![0, 1]), stamp(2)).expect("written");
-    fs::remove_file(&written.temp).expect("lose the temp file");
-    let lost = store.install(written, || Ok(()));
-    assert!(matches!(lost, Err(InstallError::NamesNotReplaced(_))));
-    assert_eq!(
-        store.names_header().map(|header| header.pair_token),
-        Some(1)
-    );
-    assert_eq!(current(&store, 0), Some(vec!["kept.txt".to_string()]));
-    assert_eq!(current(&store, 1), Some(strings(&names_for(1))));
-
-    let written = write_names(store.capture(vec![0, 1]), stamp(3)).expect("written");
-    let snapshot_failed = store.install(written, || Err(io::Error::other("disk full")));
-    assert!(matches!(
-        snapshot_failed,
-        Err(InstallError::SnapshotNotReplaced(_))
-    ));
-    assert_eq!(
-        store.names_header().map(|header| header.pair_token),
-        Some(3)
-    );
-    assert!(!store.has_unsaved_names());
-
-    let blocked = fixture.path.parent().expect("dir").join("blocked");
-    fs::write(&blocked, b"x").expect("file");
-    let unwritable = FileNameStore::new(blocked.join(NAMES_FILE));
-    let io_failure = write_names(unwritable.capture(vec![0]), stamp(1));
-    assert!(matches!(io_failure, Err(RewriteError::Io(_))));
-    assert!(matches!(
-        RewriteError::from(io::Error::other("x")),
-        RewriteError::Io(_)
-    ));
 }
 
 #[test]
@@ -607,19 +472,16 @@ fn overlay_thresholds_count_folders_and_name_bytes() {
 
     let mut stats = RewriteStats {
         blocks_reencoded: 1,
-        blocks_copied: 2,
         peak_open_blocks: 1,
     };
     stats.absorb(RewriteStats {
         blocks_reencoded: 3,
-        blocks_copied: 4,
         peak_open_blocks: 1,
     });
     assert_eq!(
         stats,
         RewriteStats {
             blocks_reencoded: 4,
-            blocks_copied: 6,
             peak_open_blocks: 1,
         }
     );
@@ -628,12 +490,15 @@ fn overlay_thresholds_count_folders_and_name_bytes() {
 #[test]
 fn counting_names_adds_the_overlay_to_blocks_it_does_not_replace() {
     let fixture = Fixture::new();
-    let mut store = written_store(&fixture, &[0, 1, 2, 3]);
-    assert_eq!(store.count_saved_and_overlay_names(), Ok(12));
+    let mut store = segment_store(&fixture, FOLDER_COUNT);
+    assert_eq!(
+        store.count_saved_and_overlay_names(),
+        Ok(u64::from(FOLDER_COUNT) * NAMES_PER_FOLDER)
+    );
 
     store.set_names(2, packed(&["fresh.txt"]));
     store.tombstone(3);
-    store.set_names(4, packed(&["new-a", "new-b"]));
+    store.set_names(FOLDER_COUNT, packed(&["new-a", "new-b"]));
 
     assert_eq!(store.count_saved_and_overlay_names(), Ok(3 + 3 + 1 + 2));
 }
@@ -641,16 +506,7 @@ fn counting_names_adds_the_overlay_to_blocks_it_does_not_replace() {
 #[test]
 fn counting_names_fails_on_a_corrupt_block() {
     let fixture = Fixture::new();
-    drop(written_store(&fixture, &[0, 1, 2, 3]));
-    corrupt_byte_at(&fixture.path, HEADER_BYTES);
-    let mut store = fixture.store();
-    let expected = PairExpectation {
-        pair_token: 1,
-        first_slot: FIRST_SLOT,
-        folder_count: 4,
-    };
-    store.open_pair(expected).expect("the header is intact");
-
+    let store = corrupt_segment_store(&fixture);
     assert_eq!(store.count_saved_and_overlay_names(), Err(NamesUnreadable));
     assert!(store.take_unreported_failure());
 }

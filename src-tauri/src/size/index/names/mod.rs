@@ -4,18 +4,18 @@ pub mod file;
 pub mod writer;
 
 use std::collections::HashMap;
-use std::fs;
 use std::io;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use block::{BlockSpan, DecodedBlock, NamesCorrupt, BLOCK_TARGET_BYTES};
+use block::{BlockSpan, DecodedBlock, EntryRange, NamesCorrupt};
 use codec::DecodeScratch;
-use file::{remove_if_present, spill_path, MappedNames, NamesHeader, SpillFile, SpillLocation};
-use writer::{PairCapture, RewriteStats, WrittenNames};
+use file::{remove_if_present, spill_path, MappedNames, SpillFile, SpillLocation};
+use writer::RewriteStats;
 
+use super::persist::{put_bytes, put_count, put_u32, Reader};
 use super::tree::DeadRanges;
 
 pub const NAME_TERMINATOR: u8 = 0;
@@ -120,7 +120,6 @@ pub struct SpillRead<'read> {
 pub struct NamesCounters {
     pub blocks_decompressed: u64,
     pub blocks_reencoded: u64,
-    pub blocks_copied: u64,
     pub peak_open_output_blocks: u64,
 }
 
@@ -152,6 +151,20 @@ impl OverlayEntry {
 
     fn packed(&self) -> &[u8] {
         self.names().map_or(&[], PackedNames::as_bytes)
+    }
+
+    fn write(&self, out: &mut Vec<u8>) {
+        out.push(u8::from(self.names().is_some()));
+        put_bytes(out, self.packed());
+    }
+
+    fn read(reader: &mut Reader<'_>) -> Option<Self> {
+        let has_names = reader.byte()? != 0;
+        let packed = reader.bytes()?;
+        if !has_names {
+            return packed.is_empty().then_some(Self::Tombstone);
+        }
+        is_packed_list_or_empty(packed).then(|| Self::Names(PackedNames(packed.to_vec())))
     }
 }
 
@@ -234,72 +247,30 @@ pub(crate) struct Spill {
     pub(crate) index: SpillIndex,
 }
 
-#[derive(Debug, Clone, Default)]
-pub(crate) struct Translation {
-    to_slot: Vec<u32>,
-    to_ordinal: HashMap<u32, u32>,
+#[derive(Debug, Clone)]
+struct SegmentNames {
+    file: Arc<MappedNames>,
+    slots: Range<u32>,
 }
 
-impl Translation {
-    fn from_order(order: Vec<u32>) -> Self {
-        let to_ordinal = order
-            .iter()
-            .enumerate()
-            .map(|(ordinal, &slot)| (slot, ordinal as u32))
-            .collect();
-        Self {
-            to_slot: order,
-            to_ordinal,
-        }
-    }
-
+impl SegmentNames {
     fn slot_of(&self, ordinal: u32) -> Option<u32> {
-        self.to_slot.get(ordinal as usize).copied()
+        let slot = self.slots.start.checked_add(ordinal)?;
+        self.slots.contains(&slot).then_some(slot)
     }
 
     fn ordinal_of(&self, slot: u32) -> Option<u32> {
-        self.to_ordinal.get(&slot).copied()
+        self.slots.contains(&slot).then(|| slot - self.slots.start)
     }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum SlotMap {
-    Listed(Translation),
-    Contiguous(Range<u32>),
-}
-
-impl SlotMap {
-    pub(crate) fn slot_of(&self, ordinal: u32) -> Option<u32> {
-        match self {
-            Self::Listed(translation) => translation.slot_of(ordinal),
-            Self::Contiguous(slots) => slots
-                .start
-                .checked_add(ordinal)
-                .filter(|slot| slots.contains(slot)),
-        }
-    }
-
-    pub(crate) fn ordinal_of(&self, slot: u32) -> Option<u32> {
-        match self {
-            Self::Listed(translation) => translation.ordinal_of(slot),
-            Self::Contiguous(slots) => slots.contains(&slot).then(|| slot - slots.start),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct MappedState {
-    pub(crate) file: Arc<MappedNames>,
-    pub(crate) translation: SlotMap,
 }
 
 struct PlacedSource<'store> {
-    source: &'store MappedState,
+    source: &'store SegmentNames,
     first_block: usize,
 }
 
 struct LocatedFolder<'store> {
-    source: &'store MappedState,
+    source: &'store SegmentNames,
     ordinal: u32,
     first_block: usize,
 }
@@ -316,26 +287,26 @@ impl LocatedFolder<'_> {
 }
 
 struct LocatedBlock<'store> {
-    source: &'store MappedState,
+    source: &'store SegmentNames,
     index_in_source: usize,
 }
 
 #[derive(Debug, Default)]
-struct ReadFailure {
+pub(crate) struct ReadFailure {
     failed: AtomicBool,
     reported: AtomicBool,
 }
 
 impl ReadFailure {
-    fn mark(&self) {
+    pub(crate) fn mark(&self) {
         self.failed.store(true, Ordering::Release);
     }
 
-    fn is_failed(&self) -> bool {
+    pub(crate) fn is_failed(&self) -> bool {
         self.failed.load(Ordering::Acquire)
     }
 
-    fn take_unreported(&self) -> bool {
+    pub(crate) fn take_unreported(&self) -> bool {
         self.is_failed() && !self.reported.swap(true, Ordering::AcqRel)
     }
 
@@ -350,43 +321,59 @@ impl ReadFailure {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PairExpectation {
-    pub pair_token: u64,
-    pub first_slot: u32,
-    pub folder_count: u32,
+#[derive(Debug, Default)]
+pub struct SavedNames {
+    segments: Vec<SegmentNames>,
+    overlay: Overlay,
+    dead: DeadRanges,
 }
 
-#[derive(Debug)]
-pub enum InstallError {
-    NamesNotReplaced(io::Error),
-    SnapshotNotReplaced(io::Error),
+impl SavedNames {
+    pub fn attach_segment(&mut self, slots: Range<u32>, file: Arc<MappedNames>) {
+        self.segments.push(SegmentNames { file, slots });
+    }
+
+    pub(crate) fn read_overlay(&mut self, reader: &mut Reader<'_>) -> Option<()> {
+        for _ in 0..reader.u32()? {
+            let slot = reader.u32()?;
+            let entry = OverlayEntry::read(reader)?;
+            self.overlay.insert(slot, entry);
+        }
+        self.dead = DeadRanges::read(reader)?;
+        Some(())
+    }
+}
+
+struct LoadedBlock {
+    index: usize,
+    span: BlockSpan,
+    entries: Vec<EntryRange>,
+}
+
+#[derive(Default)]
+pub struct NamesCursor {
+    block_scratch: DecodeScratch,
+    spill_scratch: NamesScratch,
+    loaded: Option<LoadedBlock>,
 }
 
 #[derive(Debug)]
 pub struct FileNameStore {
     path: PathBuf,
-    block_target: usize,
-    mapped: Option<MappedState>,
-    segments: Vec<MappedState>,
+    segments: Vec<SegmentNames>,
     overlay: Overlay,
     dead: DeadRanges,
     spill: Option<Spill>,
     failure: ReadFailure,
     blocks_decompressed: AtomicU64,
     rewrites: RewriteStats,
+    unsaved: bool,
 }
 
 impl FileNameStore {
     pub fn new(path: PathBuf) -> Self {
-        Self::with_block_target(path, BLOCK_TARGET_BYTES)
-    }
-
-    pub fn with_block_target(path: PathBuf, block_target: usize) -> Self {
         Self {
             path,
-            block_target,
-            mapped: None,
             segments: Vec::new(),
             overlay: Overlay::default(),
             dead: DeadRanges::default(),
@@ -394,6 +381,7 @@ impl FileNameStore {
             failure: ReadFailure::default(),
             blocks_decompressed: AtomicU64::new(0),
             rewrites: RewriteStats::default(),
+            unsaved: false,
         }
     }
 
@@ -406,13 +394,12 @@ impl FileNameStore {
     }
 
     pub fn is_available(&self) -> bool {
-        let has_mapped_source = self.sources().next().is_some();
-        let has_source = has_mapped_source || self.spill.is_some();
+        let has_source = self.has_saved_names() || self.spill.is_some();
         has_source && !self.failure.is_failed()
     }
 
-    pub fn has_names_file(&self) -> bool {
-        self.mapped.is_some()
+    pub fn has_saved_names(&self) -> bool {
+        !self.segments.is_empty()
     }
 
     pub fn is_spilling(&self) -> bool {
@@ -423,37 +410,33 @@ impl FileNameStore {
         self.spill.as_ref().map(|spill| spill.file.len())
     }
 
-    pub fn names_header(&self) -> Option<NamesHeader> {
-        self.mapped.as_ref().map(|mapped| mapped.file.header())
-    }
-
     pub fn overlay_stats(&self) -> OverlayStats {
         self.overlay.stats()
     }
 
-    pub fn has_unsaved_names(&self) -> bool {
-        !self.overlay.entries.is_empty() || self.spill.is_some()
+    pub fn has_unsaved_changes(&self) -> bool {
+        self.unsaved
+    }
+
+    pub fn mark_saved(&mut self) {
+        self.unsaved = false;
+    }
+
+    pub fn has_spilled_names(&self) -> bool {
+        self.spill_len()
+            .is_some_and(|spilled_bytes| spilled_bytes > 0)
     }
 
     pub fn counters(&self) -> NamesCounters {
         NamesCounters {
             blocks_decompressed: self.blocks_decompressed.load(Ordering::Relaxed),
             blocks_reencoded: self.rewrites.blocks_reencoded,
-            blocks_copied: self.rewrites.blocks_copied,
             peak_open_output_blocks: self.rewrites.peak_open_blocks,
         }
     }
 
-    pub fn ordinal_of(&self, slot: u32) -> Option<u32> {
-        self.mapped.as_ref()?.translation.ordinal_of(slot)
-    }
-
-    pub fn slot_of(&self, ordinal: u32) -> Option<u32> {
-        self.mapped.as_ref()?.translation.slot_of(ordinal)
-    }
-
-    fn sources(&self) -> impl Iterator<Item = &MappedState> {
-        self.mapped.iter().chain(&self.segments)
+    fn sources(&self) -> impl Iterator<Item = &SegmentNames> {
+        self.segments.iter()
     }
 
     fn placed_sources(&self) -> impl Iterator<Item = PlacedSource<'_>> {
@@ -469,7 +452,7 @@ impl FileNameStore {
 
     fn locate(&self, slot: u32) -> Option<LocatedFolder<'_>> {
         self.placed_sources().find_map(|placed| {
-            let ordinal = placed.source.translation.ordinal_of(slot)?;
+            let ordinal = placed.source.ordinal_of(slot)?;
             Some(LocatedFolder {
                 source: placed.source,
                 ordinal,
@@ -489,21 +472,8 @@ impl FileNameStore {
         })
     }
 
-    pub fn attach_segment(&mut self, slots: Range<u32>, file: Arc<MappedNames>) {
-        self.segments.push(MappedState {
-            file,
-            translation: SlotMap::Contiguous(slots),
-        });
-    }
-
     pub fn block_count(&self) -> usize {
         self.sources().map(|source| source.file.block_count()).sum()
-    }
-
-    pub fn blocks_covering(&self, ordinals: Range<u32>) -> Range<usize> {
-        self.mapped
-            .as_ref()
-            .map_or(0..0, |mapped| mapped.file.blocks_covering(ordinals))
     }
 
     pub fn blocks_for_slots(&self, slots: &[u32]) -> Vec<usize> {
@@ -526,7 +496,7 @@ impl FileNameStore {
         let decoded = self.decode_block(&block, &mut scratch.decode)?;
         Ok(BlockNames {
             store: self,
-            slots: &block.source.translation,
+            source: block.source,
             decoded,
         })
     }
@@ -680,9 +650,11 @@ impl FileNameStore {
 
     pub fn set_names(&mut self, slot: u32, names: PackedNames) {
         self.overlay.insert(slot, OverlayEntry::Names(names));
+        self.unsaved = true;
     }
 
     pub fn tombstone(&mut self, slot: u32) {
+        self.unsaved = true;
         self.overlay.insert(slot, OverlayEntry::Tombstone);
         if let Some(spill) = &mut self.spill {
             spill.index.clear(slot);
@@ -695,6 +667,7 @@ impl FileNameStore {
             spill.index.clear_range(&slots);
         }
         self.dead.add(slots);
+        self.unsaved = true;
     }
 
     pub fn spill_names(&mut self, slot: u32, names: PackedNames) {
@@ -736,76 +709,110 @@ impl FileNameStore {
         remove_if_present(&self.spill_path())
     }
 
-    pub fn open_pair(&mut self, expected: PairExpectation) -> Option<NamesHeader> {
-        let file = MappedNames::open(&self.path)?;
-        let header = file.header();
-        let token_matches = header.pair_token == expected.pair_token;
-        let count_matches = header.folder_count == expected.folder_count;
-        if !(token_matches && count_matches) {
-            return None;
-        }
-        let first_slot = expected.first_slot;
-        self.mapped = Some(MappedState {
-            file: Arc::new(file),
-            translation: SlotMap::Contiguous(first_slot..first_slot + header.folder_count),
-        });
-        self.failure.clear();
-        Some(header)
-    }
-
     pub fn fail_and_discard(&mut self) {
         self.failure.mark_handled();
-        self.mapped = None;
+        self.segments.clear();
     }
 
-    pub fn capture(&self, order: Vec<u32>) -> PairCapture {
-        PairCapture {
-            path: self.path.clone(),
-            block_target: self.block_target,
-            order,
-            overlay: self.overlay.clone(),
-            spill: self.spill.clone(),
-            mapped: self.mapped.clone().filter(|_| !self.failure.is_failed()),
-        }
-    }
-
-    pub fn install(
-        &mut self,
-        written: WrittenNames,
-        commit_snapshot: impl FnOnce() -> io::Result<()>,
-    ) -> Result<(), InstallError> {
-        let previous_slots = self.mapped.take().map(|state| state.translation);
-        if let Err(error) = fs::rename(&written.temp, &self.path) {
-            let _ = remove_if_present(&written.temp);
-            self.mapped = previous_slots.and_then(|slots| self.remapped(slots));
-            return Err(InstallError::NamesNotReplaced(error));
-        }
-        let committed = commit_snapshot();
-        self.adopt(written);
-        committed.map_err(InstallError::SnapshotNotReplaced)
-    }
-
-    fn remapped(&self, translation: SlotMap) -> Option<MappedState> {
-        let file = MappedNames::open(&self.path)?;
-        Some(MappedState {
-            file: Arc::new(file),
-            translation,
-        })
-    }
-
-    fn adopt(&mut self, written: WrittenNames) {
-        let WrittenNames { order, stats, .. } = written;
-        self.rewrites.absorb(stats);
-        self.mapped = self.remapped(SlotMap::Listed(Translation::from_order(order)));
-        self.overlay = Overlay::default();
-        self.close_spill();
+    pub fn restore(&mut self, saved: SavedNames) {
+        let SavedNames {
+            segments,
+            overlay,
+            dead,
+        } = saved;
+        self.segments = segments;
+        self.overlay = overlay;
+        self.dead = dead;
+        self.unsaved = false;
         self.failure.clear();
+    }
+
+    pub fn adopt_base(&mut self, base: SavedNames, stats: RewriteStats) {
+        self.rewrites.absorb(stats);
+        self.close_spill();
+        self.restore(base);
+    }
+
+    pub(crate) fn write_overlay(&self, out: &mut Vec<u8>) {
+        let mut slots: Vec<u32> = self.overlay.entries.keys().copied().collect();
+        slots.sort_unstable();
+        put_count(out, slots.len());
+        for slot in slots {
+            put_u32(out, slot);
+            self.overlay.entries[&slot].write(out);
+        }
+        self.dead.write(out);
+    }
+
+    pub fn names_for_rewrite<'read>(
+        &'read self,
+        slot: u32,
+        cursor: &'read mut NamesCursor,
+    ) -> Result<&'read [u8], NamesUnreadable> {
+        if let Some(entry) = self.overlay.get(slot) {
+            return Ok(entry.packed());
+        }
+        if self.dead.contains(slot) {
+            return Ok(&[]);
+        }
+        if let (Some(spill), Some(location)) = (&self.spill, self.spill_location(slot)) {
+            let spilled = spill.file.read(location, &mut cursor.spill_scratch);
+            return spilled.map_err(|corrupt| self.unreadable(corrupt));
+        }
+        let Some(folder) = self.locate(slot) else {
+            return Ok(&[]);
+        };
+        self.cached_block_names(&folder, cursor)
+    }
+
+    fn cached_block_names<'read>(
+        &self,
+        folder: &LocatedFolder<'_>,
+        cursor: &'read mut NamesCursor,
+    ) -> Result<&'read [u8], NamesUnreadable> {
+        let index = folder.block();
+        let is_loaded = cursor
+            .loaded
+            .as_ref()
+            .is_some_and(|loaded| loaded.index == index);
+        if !is_loaded {
+            self.load_block(folder, cursor)?;
+        }
+        let Some(loaded) = &cursor.loaded else {
+            return Ok(&[]);
+        };
+        let relative_id = folder.ordinal - loaded.span.first_ordinal;
+        let found = loaded
+            .entries
+            .binary_search_by_key(&relative_id, |entry| entry.relative_id)
+            .ok()
+            .map(|position| loaded.entries[position].names.clone());
+        Ok(found.map_or(&[], |range| &cursor.block_scratch.raw()[range]))
+    }
+
+    fn load_block(
+        &self,
+        folder: &LocatedFolder<'_>,
+        cursor: &mut NamesCursor,
+    ) -> Result<(), NamesUnreadable> {
+        cursor.loaded = None;
+        let block = LocatedBlock {
+            source: folder.source,
+            index_in_source: folder.block_in_source(),
+        };
+        let decoded = self.decode_block(&block, &mut cursor.block_scratch)?;
+        cursor.loaded = Some(LoadedBlock {
+            index: folder.block(),
+            span: decoded.span,
+            entries: decoded.entry_ranges(),
+        });
+        Ok(())
     }
 }
 
 pub struct BlockNames<'read> {
     store: &'read FileNameStore,
-    slots: &'read SlotMap,
+    source: &'read SegmentNames,
     decoded: DecodedBlock<'read>,
 }
 
@@ -817,7 +824,7 @@ impl<'read> BlockNames<'read> {
     pub fn folders(&self) -> impl Iterator<Item = FolderNames<'read>> + '_ {
         let first_ordinal = self.decoded.span.first_ordinal;
         self.decoded.entries().filter_map(move |entry| {
-            let slot = self.slots.slot_of(first_ordinal + entry.relative_id)?;
+            let slot = self.source.slot_of(first_ordinal + entry.relative_id)?;
             let shadowed = self.store.overrides(slot);
             (!shadowed).then_some(FolderNames {
                 slot,
