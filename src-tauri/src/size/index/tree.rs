@@ -4,9 +4,9 @@ use std::path::{Component, Path, PathBuf};
 type NodeId = u32;
 const NONE: NodeId = NodeId::MAX;
 
-const SCANNED: u8 = 1;
-const DENIED: u8 = 2;
-const SKIPPED: u8 = 4;
+pub(crate) const SCANNED: u8 = 1;
+pub(crate) const DENIED: u8 = 2;
+pub(crate) const SKIPPED: u8 = 4;
 pub(crate) const PERSISTED_FLAGS: u8 = SCANNED | DENIED | SKIPPED;
 const DIRTY: u8 = 8;
 
@@ -41,6 +41,23 @@ struct Node {
     flags: u8,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OwnCounters {
+    pub(crate) pending: u32,
+    pub(crate) skipped: u32,
+    pub(crate) denied: u32,
+}
+
+impl OwnCounters {
+    pub(crate) fn of(flags: u8) -> Self {
+        Self {
+            pending: u32::from(flags & (SCANNED | SKIPPED) == 0),
+            skipped: u32::from(flags & SKIPPED != 0),
+            denied: u32::from(flags & DENIED != 0),
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct Delta {
     bytes: i64,
@@ -51,11 +68,12 @@ struct Delta {
 
 impl Delta {
     fn own(direct: u64, flags: u8) -> Self {
+        let own = OwnCounters::of(flags);
         Self {
             bytes: direct as i64,
-            pending: i32::from(flags & (SCANNED | SKIPPED) == 0),
-            skipped: i32::from(flags & SKIPPED != 0),
-            denied: i32::from(flags & DENIED != 0),
+            pending: own.pending as i32,
+            skipped: own.skipped as i32,
+            denied: own.denied as i32,
         }
     }
 

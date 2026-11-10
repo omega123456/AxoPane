@@ -1,5 +1,5 @@
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use super::block::{self, BlockBuilder, BlockSpan, EntryRange, StoredBlock};
@@ -61,6 +61,10 @@ impl From<io::Error> for RewriteError {
 }
 
 pub fn write_names(capture: PairCapture, stamp: PairStamp) -> Result<WrittenNames, RewriteError> {
+    let limits = OutputLimits {
+        block_target: capture.block_target,
+        deadline: stamp.deadline,
+    };
     let mut rewrite = Rewrite {
         sources: Sources {
             overlay: &capture.overlay,
@@ -68,20 +72,10 @@ pub fn write_names(capture: PairCapture, stamp: PairStamp) -> Result<WrittenName
             mapped: capture.mapped.as_ref(),
         },
         reader: NameReader::default(),
-        output: BlockOutput {
-            writer: NamesFileWriter::create(&capture.path)?,
-            encoder: NamesEncoder::new()?,
-            open: None,
-            block_target: capture.block_target,
-            deadline: stamp.deadline,
-            stats: RewriteStats::default(),
-            open_blocks: 0,
-        },
+        output: BlockOutput::create(&capture.path, limits)?,
     };
-    let result = rewrite.run(&capture.order);
-    let BlockOutput { writer, stats, .. } = rewrite.output;
-    if let Err(error) = result {
-        writer.discard();
+    if let Err(error) = rewrite.run(&capture.order) {
+        rewrite.output.discard();
         return Err(error);
     }
     let header = NamesHeader {
@@ -89,12 +83,12 @@ pub fn write_names(capture: PairCapture, stamp: PairStamp) -> Result<WrittenName
         pair_token: stamp.pair_token,
         folder_count: capture.order.len() as u32,
     };
-    let temp = finish_output(writer, header, stamp.deadline)?;
+    let finished = rewrite.output.finish(header)?;
     Ok(WrittenNames {
-        temp,
+        temp: finished.temp,
         order: capture.order,
         header,
-        stats,
+        stats: finished.stats,
     })
 }
 
@@ -277,7 +271,19 @@ impl NameReader {
     }
 }
 
-struct BlockOutput {
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct OutputLimits {
+    pub(crate) block_target: usize,
+    pub(crate) deadline: Option<Instant>,
+}
+
+#[derive(Debug)]
+pub(crate) struct FinishedNames {
+    pub(crate) temp: PathBuf,
+    pub(crate) stats: RewriteStats,
+}
+
+pub(crate) struct BlockOutput {
     writer: NamesFileWriter,
     encoder: NamesEncoder,
     open: Option<BlockBuilder>,
@@ -288,13 +294,39 @@ struct BlockOutput {
 }
 
 impl BlockOutput {
+    pub(crate) fn create(path: &Path, limits: OutputLimits) -> io::Result<Self> {
+        Ok(Self {
+            writer: NamesFileWriter::create(path)?,
+            encoder: NamesEncoder::new()?,
+            open: None,
+            block_target: limits.block_target,
+            deadline: limits.deadline,
+            stats: RewriteStats::default(),
+            open_blocks: 0,
+        })
+    }
+
+    pub(crate) fn finish(mut self, header: NamesHeader) -> Result<FinishedNames, RewriteError> {
+        if let Err(error) = self.close_open_block() {
+            self.discard();
+            return Err(error);
+        }
+        let stats = self.stats;
+        let temp = finish_output(self.writer, header, self.deadline)?;
+        Ok(FinishedNames { temp, stats })
+    }
+
+    pub(crate) fn discard(self) {
+        self.writer.discard();
+    }
+
     fn start_block(&mut self, ordinal: u32) -> BlockBuilder {
         self.open_blocks += 1;
         self.stats.peak_open_blocks = self.stats.peak_open_blocks.max(self.open_blocks);
         BlockBuilder::new(ordinal)
     }
 
-    fn push(&mut self, ordinal: u32, names: &[u8]) -> Result<(), RewriteError> {
+    pub(crate) fn push(&mut self, ordinal: u32, names: &[u8]) -> Result<(), RewriteError> {
         let mut builder = match self.open.take() {
             Some(open) => open,
             None => self.start_block(ordinal),

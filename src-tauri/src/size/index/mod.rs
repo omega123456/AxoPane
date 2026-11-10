@@ -3,6 +3,7 @@ pub mod names;
 pub mod persist;
 #[cfg(target_os = "macos")]
 pub mod platform;
+pub mod segment;
 pub mod tree;
 
 #[cfg(target_os = "macos")]
