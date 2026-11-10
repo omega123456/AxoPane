@@ -7,10 +7,12 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use file_explorer_lib::resource_coordinator::parallelism::{
+    walker_helper_budget, walker_job_threads,
+};
 use file_explorer_lib::size::fast_walk::{
     helper_threads_for_tests, list_dir, subtree_records, subtree_total, DirHook, DirRecord,
-    HelperThreadCounts, Qos, WalkOptions, INDEX_EXCLUDED_ROOTS, MAX_HELPER_THREADS,
-    MAX_JOB_THREADS,
+    HelperThreadCounts, Qos, WalkOptions, INDEX_EXCLUDED_ROOTS,
 };
 use file_explorer_lib::size::index::names::PackedNames;
 use file_explorer_lib::size::index::platform::DATA_VOLUME_PREFIX;
@@ -90,8 +92,8 @@ fn subtree_total_matches_the_previous_walker_with_multi_fill_buffers() {
 
     for (threads, buffer_size) in [
         (1, 512),
-        (MAX_JOB_THREADS, 512),
-        (MAX_JOB_THREADS, 128 * 1024),
+        (walker_job_threads(), 512),
+        (walker_job_threads(), 128 * 1024),
     ] {
         let mut options = options();
         options.threads = threads;
@@ -405,9 +407,11 @@ fn concurrent_jobs_never_exceed_the_process_helper_cap() {
     seed_tree(&root);
     let expected = previous_total(&root);
 
-    // Four jobs want 3 helpers each (12 > 8). Each parks at its root until
-    // released, so every job holds its helpers at the same moment.
-    let jobs = 4;
+    // One job more than the budget can fully serve. Each parks at its root
+    // until released, so every job holds its helpers at the same moment.
+    let helpers_per_job = walker_job_threads() - 1;
+    let jobs = walker_helper_budget() / helpers_per_job + 1;
+    assert!(jobs * helpers_per_job > walker_helper_budget());
     let entered = Arc::new(Barrier::new(jobs + 1));
     let release = Arc::new(Barrier::new(jobs + 1));
     let handles: Vec<_> = (0..jobs)
@@ -423,7 +427,7 @@ fn concurrent_jobs_never_exceed_the_process_helper_cap() {
         .collect();
 
     entered.wait();
-    assert_eq!(helper_threads_for_tests().in_use, MAX_HELPER_THREADS);
+    assert_eq!(helper_threads_for_tests().in_use, walker_helper_budget());
     // With the budget exhausted a job still completes on its own thread.
     assert_eq!(
         subtree_total(&root, &options()).expect("unhelped"),
@@ -438,7 +442,7 @@ fn concurrent_jobs_never_exceed_the_process_helper_cap() {
         helper_threads_for_tests(),
         HelperThreadCounts {
             in_use: 0,
-            peak: MAX_HELPER_THREADS
+            peak: walker_helper_budget()
         }
     );
 }

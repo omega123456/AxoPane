@@ -7,8 +7,9 @@ use crossbeam_channel::Sender;
 
 use super::exclusions;
 use super::platform;
+use crate::resource_coordinator::parallelism::walker_job_threads;
 use crate::resource_coordinator::{JobClass, JobHandle, JobSpec};
-use crate::size::fast_walk::{self, DirRecord, Qos, WalkOptions, MAX_JOB_THREADS};
+use crate::size::fast_walk::{self, DirRecord, Qos, WalkOptions};
 use crate::size::manual::ManualSizeError;
 
 use super::machine::Message;
@@ -205,7 +206,7 @@ impl Lane {
                     Arc::clone(cancel),
                     WalkTuning {
                         qos: Qos::UserInitiated,
-                        threads: MAX_JOB_THREADS,
+                        threads: walker_job_threads(),
                     },
                 ),
                 full: false,

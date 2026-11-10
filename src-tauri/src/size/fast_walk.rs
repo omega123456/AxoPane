@@ -14,9 +14,8 @@ use std::time::Instant;
 use super::index::names::PackedNames;
 use super::index::platform::DATA_VOLUME_PREFIX;
 use super::manual::ManualSizeError;
+use crate::resource_coordinator::parallelism::{walker_helper_budget, walker_job_threads};
 
-pub const MAX_HELPER_THREADS: usize = 8;
-pub const MAX_JOB_THREADS: usize = 4;
 pub const INDEX_EXCLUDED_ROOTS: [&str; 3] = ["/System/Volumes", "/Volumes", "/dev"];
 
 const BUFFER_SIZE: usize = 128 * 1024;
@@ -130,7 +129,7 @@ impl WalkOptions {
         Self {
             cancel,
             deadline,
-            threads: MAX_JOB_THREADS,
+            threads: walker_job_threads(),
             qos: Qos::UserInitiated,
             excluded: HashSet::new(),
             stay_on_device: false,
@@ -270,7 +269,7 @@ fn walk(root: &Path, options: &WalkOptions, sink: RecordSink<'_>) -> Result<(), 
         wake: Condvar::new(),
     };
 
-    let helpers = acquire_helpers(options.threads.clamp(1, MAX_JOB_THREADS) - 1);
+    let helpers = acquire_helpers(options.threads.clamp(1, walker_job_threads()) - 1);
     thread::scope(|scope| {
         for _ in 0..helpers {
             let permit = HelperPermit;
@@ -599,13 +598,14 @@ fn read_u64(bytes: &[u8], offset: usize) -> Option<u64> {
 }
 
 fn acquire_helpers(wanted: usize) -> usize {
+    let budget = walker_helper_budget();
     let Ok(previous) = HELPERS_IN_USE.fetch_update(Ordering::AcqRel, Ordering::Acquire, |in_use| {
-        let granted = wanted.min(MAX_HELPER_THREADS.saturating_sub(in_use));
+        let granted = wanted.min(budget.saturating_sub(in_use));
         (granted > 0).then_some(in_use + granted)
     }) else {
         return 0;
     };
-    let granted = wanted.min(MAX_HELPER_THREADS - previous);
+    let granted = wanted.min(budget - previous);
     #[cfg(feature = "test-utils")]
     PEAK_HELPERS.fetch_max(previous + granted, Ordering::AcqRel);
     granted

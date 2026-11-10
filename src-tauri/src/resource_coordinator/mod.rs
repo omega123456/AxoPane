@@ -1,38 +1,19 @@
+pub mod parallelism;
 pub mod queue;
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
-use std::thread::{available_parallelism, JoinHandle};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crossbeam_channel::{bounded, unbounded, Receiver, RecvTimeoutError, Sender};
 
 use queue::{AdmitOutcome, JobRequest, SchedulerState};
 
-const MIN_THROUGHPUT_SLOTS: usize = 2;
-const MAX_THROUGHPUT_SLOTS: usize = 8;
-const THROUGHPUT_CPU_DIVISOR: usize = 4;
-
-fn throughput_slots_for_parallelism(available: Option<usize>) -> usize {
-    available.map_or(MIN_THROUGHPUT_SLOTS, |available| {
-        available
-            .div_ceil(THROUGHPUT_CPU_DIVISOR)
-            .clamp(MIN_THROUGHPUT_SLOTS, MAX_THROUGHPUT_SLOTS)
-    })
-}
-
-pub fn max_throughput_slots() -> usize {
-    static SLOTS: OnceLock<usize> = OnceLock::new();
-    *SLOTS.get_or_init(|| {
-        throughput_slots_for_parallelism(available_parallelism().ok().map(|value| value.get()))
-    })
-}
-
+pub use parallelism::max_throughput_slots;
 #[cfg(feature = "test-utils")]
-pub fn throughput_slots_for_parallelism_for_tests(available: Option<usize>) -> usize {
-    throughput_slots_for_parallelism(available)
-}
+pub use parallelism::throughput_slots_for_parallelism_for_tests;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum JobClass {

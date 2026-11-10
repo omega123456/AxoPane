@@ -87,6 +87,7 @@ pub mod persist_storage_integration;
 pub mod pixels_integration;
 pub mod reconcile_coordinator_integration;
 pub mod resource_coordinator_integration;
+pub mod resource_coordinator_parallelism_integration;
 pub mod search_commands_integration;
 pub mod search_everything_plan_integration;
 pub mod search_everything_strategy_integration;
