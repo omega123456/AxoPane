@@ -2,7 +2,6 @@ use std::fs::{self, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -11,7 +10,7 @@ use file_explorer_lib::size::index::names::{
     FileNameStore, NamesCounters, NamesScratch, OVERLAY_THRESHOLD_FOLDERS,
 };
 use file_explorer_lib::size::index::persist::{self, temp_path, ChangeFlags, SegmentRef, Snapshot};
-use file_explorer_lib::size::index::platform::{IndexPlatform, PowerSignal, RawEvent};
+use file_explorer_lib::size::index::platform::{IndexPlatform, RawEvent};
 use file_explorer_lib::size::index::segment::SegmentPaths;
 use file_explorer_lib::size::index::{names_path_beside, IndexRead};
 use file_explorer_lib::size::{IndexState, PaneSubscriptions};
@@ -24,7 +23,7 @@ const NAMES_HEADER_BYTES: u64 = 48;
 const BARRIER_PANE: &str = "names-barrier";
 const BARRIER_FOLDER: &str = "s";
 
-fn poll_until(what: &str, mut condition: impl FnMut() -> bool) {
+pub(crate) fn poll_until(what: &str, mut condition: impl FnMut() -> bool) {
     let deadline = Instant::now() + POLL_LIMIT;
     while !condition() {
         assert!(Instant::now() < deadline, "timed out waiting for {what}");
@@ -36,7 +35,7 @@ fn names_file(index: &Harness) -> PathBuf {
     names_path_beside(&index.snapshot)
 }
 
-fn read<R>(index: &Harness, read: impl FnOnce(IndexRead<'_>) -> R) -> R {
+pub(crate) fn read<R>(index: &Harness, read: impl FnOnce(IndexRead<'_>) -> R) -> R {
     index
         .service()
         .folder_size_index()
@@ -53,7 +52,7 @@ fn sorted_strings<'name>(names: impl Iterator<Item = &'name [u8]>) -> Vec<String
     listed
 }
 
-fn indexed_names(index: &Harness, relative: &str) -> Option<Vec<String>> {
+pub(crate) fn indexed_names(index: &Harness, relative: &str) -> Option<Vec<String>> {
     let path = index.path(relative);
     read(index, |view| {
         let slot = view.tree.lookup(&path)?;
@@ -62,11 +61,11 @@ fn indexed_names(index: &Harness, relative: &str) -> Option<Vec<String>> {
     })
 }
 
-fn owned(names: &[&str]) -> Option<Vec<String>> {
+pub(crate) fn owned(names: &[&str]) -> Option<Vec<String>> {
     Some(names.iter().map(|name| name.to_string()).collect())
 }
 
-fn files_on_disk(dir: &Path) -> Option<Vec<String>> {
+pub(crate) fn files_on_disk(dir: &Path) -> Option<Vec<String>> {
     let mut names: Vec<String> = fs::read_dir(dir)
         .expect("fixture folder")
         .map(|entry| entry.expect("entry"))
@@ -77,7 +76,7 @@ fn files_on_disk(dir: &Path) -> Option<Vec<String>> {
     Some(names)
 }
 
-fn names_available(index: &Harness) -> bool {
+pub(crate) fn names_available(index: &Harness) -> bool {
     index
         .service()
         .folder_size_index_status()
@@ -96,7 +95,7 @@ fn barrier_subscription(folders: Vec<String>) -> PaneSubscriptions {
     }
 }
 
-fn barrier(index: &Harness) {
+pub(crate) fn barrier(index: &Harness) {
     let before = index.live_for(BARRIER_FOLDER).len();
     let subscribed = barrier_subscription(vec![index.key(BARRIER_FOLDER)]);
     index.service().set_subscriptions(subscribed);
@@ -108,12 +107,12 @@ fn barrier(index: &Harness) {
         .set_subscriptions(barrier_subscription(Vec::new()));
 }
 
-fn blur(index: &Harness) {
+pub(crate) fn blur(index: &Harness) {
     index.service().window_focus_changed(false);
     barrier(index);
 }
 
-fn saved(index: &Harness) -> Snapshot {
+pub(crate) fn saved(index: &Harness) -> Snapshot {
     persist::load(&index.snapshot).expect("saved manifest")
 }
 
@@ -121,13 +120,13 @@ fn is_saved(index: &Harness) -> bool {
     persist::load(&index.snapshot).is_some()
 }
 
-fn base_segment(index: &Harness) -> SegmentRef {
+pub(crate) fn base_segment(index: &Harness) -> SegmentRef {
     let segments = saved(index).segments;
     assert_eq!(segments.len(), 1, "one base segment");
     segments[0]
 }
 
-fn paths_of(index: &Harness, segment: SegmentRef) -> SegmentPaths {
+pub(crate) fn paths_of(index: &Harness, segment: SegmentRef) -> SegmentPaths {
     let directory = index.snapshot.parent().expect("cache directory");
     SegmentPaths::numbered(directory, segment.sequence)
 }
@@ -144,7 +143,7 @@ fn wait_for_the_base(index: &Harness) {
     poll_until("the base segment", || is_saved(index));
 }
 
-fn scan_and_save(index: &mut Harness) {
+pub(crate) fn scan_and_save(index: &mut Harness) {
     index.start();
     index.wait_state(IndexState::UpToDate);
     wait_for_the_base(index);
@@ -156,13 +155,7 @@ fn wait_for_a_new_base(index: &Harness, previous: SegmentRef) {
     });
 }
 
-fn wait_for_the_spill_to_go(index: &Harness) {
-    poll_until("the spill is folded into the base", || {
-        !spill_path(&names_file(index)).exists()
-    });
-}
-
-fn indexing_runs(index: &Harness) -> usize {
+pub(crate) fn indexing_runs(index: &Harness) -> usize {
     let statuses = index.statuses.lock().unwrap();
     let previous =
         std::iter::once(IndexState::NotReady).chain(statuses.iter().map(|status| status.state));
@@ -181,7 +174,7 @@ fn corrupt(path: &Path, offset: u64) {
     file.write_all(&[0xEE; 4]).expect("corrupt");
 }
 
-fn finish_replay(index: &Harness) {
+pub(crate) fn finish_replay(index: &Harness) {
     let done = RawEvent {
         path: index.path(""),
         id: index.platform.current_event_id(),
@@ -191,7 +184,7 @@ fn finish_replay(index: &Harness) {
     assert!(index.platform.emit(vec![done]), "stream running");
 }
 
-fn relaunch(index: &mut Harness) {
+pub(crate) fn relaunch(index: &mut Harness) {
     index.stop();
     index.statuses.lock().unwrap().clear();
     index.opened.lock().unwrap().clear();
@@ -224,7 +217,6 @@ fn a_full_scan_stores_every_folders_file_names_including_hidden_ones() {
 
     assert!(base_names_file(&index).exists());
     assert!(!names_file(&index).exists(), "no separate names file");
-    wait_for_the_spill_to_go(&index);
     assert!(names_available(&index));
     for relative in FOLDERS {
         assert_eq!(
@@ -493,75 +485,8 @@ fn a_relaunch_resumes_from_names_saved_in_the_manifest_overlay() {
     assert_eq!(indexing_runs(&index), 0);
 }
 
-fn park_the_first_scan_after_a(index: &mut Harness) {
-    index.blocker.block(&index.path("a"));
-    index.start();
-    wait_until("walk reaches a", || index.opened("a"));
-    assert!(spill_path(&names_file(index)).exists());
-    assert!(!index.snapshot.exists());
-    wait_until("a spill counts as names", || names_available(index));
-    index.platform.signal(PowerSignal::Conditions {
-        low_power: true,
-        thermal_pressure: false,
-    });
-    wait_until("paused", || index.state() == IndexState::Paused);
-    index.blocker.release(&index.path("a"));
-    wait_until("walk parked", || index.parked.load(Ordering::SeqCst) > 0);
-    poll_until("spilled names", || {
-        indexed_names(index, "a") == owned(&["a.bin"])
-    });
-}
-
-fn resume_power(index: &Harness) {
-    index.platform.signal(PowerSignal::Conditions {
-        low_power: false,
-        thermal_pressure: false,
-    });
-    index.wait_state(IndexState::UpToDate);
-}
-
 #[test]
-fn the_first_scan_spills_names_and_writes_the_base_one_block_at_a_time() {
-    let mut index = Harness::new();
-    park_the_first_scan_after_a(&mut index);
-    assert!(read(&index, |view| view.names.spill_len()).is_some_and(|len| len > 0));
-    assert!(read(&index, |view| view.names.is_spilling()));
-    assert!(!read(&index, |view| view.names.has_saved_names()));
-    assert_eq!(counters(&index).peak_open_output_blocks, 0);
-
-    resume_power(&index);
-    wait_for_the_base(&index);
-    assert!(base_names_file(&index).exists());
-    wait_for_the_spill_to_go(&index);
-    assert_eq!(counters(&index).peak_open_output_blocks, 1);
-    assert_eq!(indexed_names(&index, "a"), owned(&["a.bin"]));
-}
-
-#[test]
-fn blur_during_the_first_scan_saves_a_base_and_keeps_spilling() {
-    let mut index = Harness::new();
-    park_the_first_scan_after_a(&mut index);
-    index.service().window_focus_changed(false);
-    wait_for_the_base(&index);
-    poll_until("spill restarted", || {
-        read(&index, |view| view.names.spill_len()) == Some(0)
-    });
-    assert_eq!(indexed_names(&index, "a"), owned(&["a.bin"]));
-    let mid_scan = base_segment(&index);
-
-    resume_power(&index);
-    wait_for_a_new_base(&index, mid_scan);
-    wait_for_the_spill_to_go(&index);
-    for relative in FOLDERS {
-        assert_eq!(
-            indexed_names(&index, relative),
-            files_on_disk(&index.path(relative))
-        );
-    }
-}
-
-#[test]
-fn a_stale_spill_found_at_launch_is_deleted() {
+fn a_legacy_spill_found_at_launch_is_deleted() {
     let mut index = Harness::new();
     scan_and_save(&mut index);
     index.stop();

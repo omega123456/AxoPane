@@ -4,12 +4,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 
 use crossbeam_channel::{bounded, unbounded, Sender};
 
 use super::exclusions::{ExclusionChange, ExclusionRules, ExclusionSet};
-use super::names::file::{spill_path, NAMES_FILE};
+use super::names::file::NAMES_FILE;
 use super::names::FileNameStore;
 use super::platform::{self, IndexPlatform};
 use super::tree::{FolderSizeTree, FolderTotal, LowerBound};
@@ -23,7 +23,7 @@ use crate::size::{
 
 use super::compact::run_compactions;
 use super::lanes::{run_background, run_boosts, BoostJob, Lanes, ScanJob};
-use super::machine::{ExclusionEdit, FlushRequest, Machine, MachineLinks, Message};
+use super::machine::{ExclusionEdit, Machine, MachineLinks, Message};
 use super::segment::sequence_of_segment_file;
 use super::subscriptions::SubscribedFolder;
 
@@ -33,10 +33,48 @@ pub type Clock = Arc<dyn Fn() -> SystemTime + Send + Sync>;
 
 pub const SNAPSHOT_FILE: &str = "folder-size-index.bin";
 pub const READMIT_EVERY_DIRS: u64 = 1_000;
+pub const HEAP_BATCH_RECORDS: usize = 4_096;
 pub(super) const RECORD_BATCH: usize = 256;
 pub(super) const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
 pub(super) const WEEK: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 pub(super) const FLUSH_TIMEOUT: Duration = Duration::from_secs(3);
+
+const FIRST_SEQUENCE: u64 = 1;
+
+pub(super) struct SegmentSequences {
+    next: u64,
+    building: Vec<u64>,
+}
+
+impl Default for SegmentSequences {
+    fn default() -> Self {
+        Self {
+            next: FIRST_SEQUENCE,
+            building: Vec::new(),
+        }
+    }
+}
+
+impl SegmentSequences {
+    pub(super) fn claim(&mut self) -> u64 {
+        let sequence = self.next;
+        self.next += 1;
+        self.building.push(sequence);
+        sequence
+    }
+
+    pub(super) fn release(&mut self, sequence: u64) {
+        self.building.retain(|&building| building != sequence);
+    }
+
+    pub(super) fn is_building(&self, sequence: u64) -> bool {
+        self.building.contains(&sequence)
+    }
+
+    pub(super) fn skip_past(&mut self, used: u64) {
+        self.next = self.next.max(used + 1);
+    }
+}
 
 #[derive(Clone)]
 pub struct IndexOptions {
@@ -48,6 +86,7 @@ pub struct IndexOptions {
     pub user_exclusions: Vec<PathBuf>,
     pub home: Option<PathBuf>,
     pub snapshot_path: PathBuf,
+    pub heap_batch_records: usize,
     pub platform: Arc<dyn IndexPlatform>,
     pub clock: Clock,
     pub coordinator: Arc<ResourceCoordinator>,
@@ -105,6 +144,7 @@ impl IndexOptions {
             user_exclusions,
             home,
             snapshot_path: cache_dir.join(SNAPSHOT_FILE),
+            heap_batch_records: HEAP_BATCH_RECORDS,
             platform: Arc::new(platform::MacPlatform),
             clock: Arc::new(SystemTime::now),
             coordinator,
@@ -118,6 +158,13 @@ impl IndexOptions {
 pub enum TreeUnavailable {
     NotReady,
     Unavailable,
+}
+
+fn segment_directory_of(snapshot_path: &Path) -> PathBuf {
+    snapshot_path
+        .parent()
+        .unwrap_or(snapshot_path)
+        .to_path_buf()
 }
 
 pub fn names_path_beside(snapshot_path: &Path) -> PathBuf {
@@ -146,19 +193,17 @@ impl IndexedItems {
 }
 
 fn counted_file_names(names: &FileNameStore) -> Option<u64> {
-    let complete_without_spill = names.is_available() && !names.is_spilling();
-    if !complete_without_spill {
+    if !names.is_available() {
         return None;
     }
     names.count_saved_and_overlay_names().ok()
 }
 
 fn is_index_file(path: &Path, snapshot_path: &Path) -> bool {
-    let spill = spill_path(&names_path_beside(snapshot_path));
     let is_segment_file = path
         .file_name()
         .is_some_and(|name| sequence_of_segment_file(&name.to_string_lossy()).is_some());
-    is_segment_file || path == snapshot_path || path == spill
+    is_segment_file || path == snapshot_path
 }
 
 fn index_bytes_on_disk(snapshot_path: &Path) -> u64 {
@@ -186,6 +231,9 @@ pub(super) struct Shared {
     pub(super) exclusion_rules: ExclusionRules,
     pub(super) coordinator: Arc<ResourceCoordinator>,
     pub(super) collect_file_names: bool,
+    pub(super) heap_batch_records: usize,
+    pub(super) segment_directory: PathBuf,
+    pub(super) sequences: Mutex<SegmentSequences>,
     pub(super) booted: AtomicBool,
     #[cfg(feature = "test-utils")]
     pub(super) walk_hooks: fast_walk::TestHooks,
@@ -403,8 +451,7 @@ impl FolderSizeIndex {
     }
 
     pub fn flush(&self) {
-        let deadline = Instant::now() + FLUSH_TIMEOUT;
-        self.send_and_wait(|ack| Message::Flush(FlushRequest { ack, deadline }));
+        self.send_and_wait(Message::Flush);
     }
 
     fn send_and_wait(&self, message: impl FnOnce(Sender<()>) -> Message) {
@@ -490,6 +537,9 @@ impl Shared {
             },
             coordinator: Arc::clone(&options.coordinator),
             collect_file_names: options.collect_file_names,
+            heap_batch_records: options.heap_batch_records,
+            segment_directory: segment_directory_of(&options.snapshot_path),
+            sequences: Mutex::new(SegmentSequences::default()),
             booted: AtomicBool::new(false),
             #[cfg(feature = "test-utils")]
             walk_hooks: options.walk_hooks.clone(),
@@ -544,6 +594,10 @@ impl Shared {
 
     pub(super) fn view_mut(&self) -> std::sync::RwLockWriteGuard<'_, View> {
         self.view.write().expect("index view lock")
+    }
+
+    pub(super) fn sequences(&self) -> MutexGuard<'_, SegmentSequences> {
+        self.sequences.lock().expect("index sequences lock")
     }
 
     pub(super) fn lanes(&self) -> MutexGuard<'_, Lanes> {
@@ -646,12 +700,16 @@ impl Shared {
         self.wake.notify_all();
     }
 
-    pub(super) fn queue_background(&self, root: PathBuf, full: bool) -> bool {
+    pub(super) fn queue_background(&self, job: ScanJob) -> bool {
         let mut lanes = self.lanes();
-        if lanes.background.iter().any(|job| job.root == root) {
+        if lanes
+            .background
+            .iter()
+            .any(|queued| queued.root == job.root)
+        {
             return false;
         }
-        lanes.background.push_back(ScanJob { root, full });
+        lanes.background.push_back(job);
         self.wake.notify_all();
         true
     }

@@ -25,6 +25,7 @@ pub struct SnapshotMeta {
     pub visited_roots: Vec<PathBuf>,
     pub has_file_names: bool,
     pub names_purge_due: bool,
+    pub full_scan_running: bool,
     pub exclusions: Vec<PathBuf>,
 }
 
@@ -65,6 +66,7 @@ pub fn encode(manifest: &Manifest<'_>) -> Vec<u8> {
     put_paths(&mut out, &meta.visited_roots);
     out.push(u8::from(meta.has_file_names));
     out.push(u8::from(meta.names_purge_due));
+    out.push(u8::from(meta.full_scan_running));
     put_paths(&mut out, &meta.exclusions);
     put_count(&mut out, segments.len());
     for segment in *segments {
@@ -101,6 +103,7 @@ pub fn decode(bytes: &[u8], directory: &Path) -> Option<Snapshot> {
         visited_roots: reader.paths(MAX_VISITED_ROOTS)?,
         has_file_names: reader.byte()? != 0,
         names_purge_due: reader.byte()? != 0,
+        full_scan_running: reader.byte()? != 0,
         exclusions: reader.paths(MAX_EXCLUSIONS)?,
     };
     let segments = reader.segment_refs()?;

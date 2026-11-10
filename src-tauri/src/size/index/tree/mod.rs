@@ -7,7 +7,7 @@ use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-use overlay::{is_heap, Delta, Facts, HeapNode, HeapNodes, OwnSize, Patch};
+use overlay::{is_heap, Delta, Facts, HeapNode, HeapNodes, KeptRanges, OwnSize, Patch};
 use segments::SegmentTable;
 
 use crate::size::index::persist::{put_count, put_ids, put_u32, Reader};
@@ -123,6 +123,20 @@ struct NameLookup<'name> {
     fold_case: bool,
 }
 
+#[derive(Clone, Copy)]
+struct GraftSite<'graft> {
+    path: &'graft Path,
+    kept: &'graft [PathBuf],
+    graft_root: NodeId,
+}
+
+#[derive(Clone, Copy)]
+struct GraftedOver<'graft> {
+    replaced: NodeId,
+    graft_root: NodeId,
+    path: &'graft Path,
+}
+
 struct RootedRest<'path> {
     root: NodeId,
     rest: std::path::Components<'path>,
@@ -158,6 +172,25 @@ pub(crate) struct LiveNode<'tree> {
     pub(crate) parent: Option<u32>,
 }
 
+pub struct Graft<'graft> {
+    pub path: &'graft Path,
+    pub segment: Arc<MappedSegment>,
+    pub kept: &'graft [PathBuf],
+}
+
+#[derive(Debug, Clone, Copy)]
+struct KeptSubtree {
+    root: NodeId,
+    placeholder: NodeId,
+    subtree: Delta,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct GraftPlace {
+    replaced: Option<NodeId>,
+    parent: NodeId,
+}
+
 #[derive(Debug, Default)]
 struct Removed {
     slots: Vec<NodeId>,
@@ -173,6 +206,7 @@ pub struct FolderSizeTree {
     roots: Vec<NodeId>,
     changed: Vec<NodeId>,
     removed: Removed,
+    kept_while_replacing: KeptRanges,
     dirty: bool,
     structure_changed: bool,
 }
@@ -211,6 +245,149 @@ impl FolderSizeTree {
             .map(|ordinal| ids.start + ordinal)
             .collect();
         Some(ids)
+    }
+
+    pub fn folder_name(&self, path: &Path) -> Option<&str> {
+        self.find(path).map(|id| self.name(id))
+    }
+
+    pub fn install_graft(&mut self, graft: Graft<'_>) -> Option<Range<u32>> {
+        let Graft {
+            path,
+            segment,
+            kept,
+        } = graft;
+        let holds_one_subtree = segment.top_level().ok()?.len() == 1;
+        if !holds_one_subtree {
+            return None;
+        }
+        let place = self.graft_place(path)?;
+        let ids = self.attach_segment(segment)?;
+        let graft_root = ids.start;
+        let site = GraftSite {
+            path,
+            kept,
+            graft_root,
+        };
+        let kept_subtrees = self.kept_subtrees(place, site);
+        for kept_subtree in &kept_subtrees {
+            self.detach(kept_subtree.root, kept_subtree.subtree);
+        }
+        self.remove_replaced(place, &kept_subtrees);
+        self.link_graft_root(place.parent, graft_root);
+        for kept_subtree in kept_subtrees {
+            self.move_under_graft(kept_subtree);
+        }
+        self.dirty = true;
+        self.structure_changed = true;
+        Some(ids)
+    }
+
+    fn graft_place(&mut self, path: &Path) -> Option<GraftPlace> {
+        if let Some(replaced) = self.find(path) {
+            return Some(GraftPlace {
+                replaced: Some(replaced),
+                parent: self.facts(replaced).parent,
+            });
+        }
+        let parent = self.ensure(path.parent()?)?;
+        Some(GraftPlace {
+            replaced: None,
+            parent,
+        })
+    }
+
+    fn kept_subtrees(&self, place: GraftPlace, site: GraftSite<'_>) -> Vec<KeptSubtree> {
+        let Some(replaced) = place.replaced else {
+            return Vec::new();
+        };
+        let grafted = GraftedOver {
+            replaced,
+            graft_root: site.graft_root,
+            path: site.path,
+        };
+        site.kept
+            .iter()
+            .filter_map(|kept_path| self.kept_subtree(grafted, kept_path))
+            .collect()
+    }
+
+    fn kept_subtree(&self, grafted: GraftedOver<'_>, kept_path: &Path) -> Option<KeptSubtree> {
+        let root = self.find(kept_path)?;
+        let is_below_replaced = root != grafted.replaced && self.is_within(root, grafted.replaced);
+        if !is_below_replaced {
+            return None;
+        }
+        let below_graft = kept_path.strip_prefix(grafted.path).ok()?;
+        let placeholder = self.descend(grafted.graft_root, below_graft)?;
+        let was_walked_again = self.facts(placeholder).flags & SCANNED != 0;
+        if was_walked_again || placeholder == grafted.graft_root {
+            return None;
+        }
+        Some(KeptSubtree {
+            root,
+            placeholder,
+            subtree: Delta::of_subtree(&self.facts(root)),
+        })
+    }
+
+    fn descend(&self, from: NodeId, relative: &Path) -> Option<NodeId> {
+        relative.components().try_fold(from, |id, component| {
+            self.child(id, &normal_name(component)?)
+        })
+    }
+
+    fn remove_replaced(&mut self, place: GraftPlace, kept_subtrees: &[KeptSubtree]) {
+        let Some(replaced) = place.replaced else {
+            return;
+        };
+        let kept_mapped_ranges = kept_subtrees
+            .iter()
+            .filter(|kept| !is_heap(kept.root))
+            .map(|kept| self.segments.subtree(kept.root))
+            .collect();
+        self.kept_while_replacing = KeptRanges::of(kept_mapped_ranges);
+        self.remove(replaced);
+        self.kept_while_replacing = KeptRanges::default();
+    }
+
+    fn link_graft_root(&mut self, parent: NodeId, graft_root: NodeId) {
+        if parent == NONE {
+            self.roots.push(graft_root);
+            self.mark_dirty(graft_root);
+            return;
+        }
+        self.attach(parent, graft_root);
+        self.bump(parent, Delta::of_subtree(&self.facts(graft_root)));
+    }
+
+    fn move_under_graft(&mut self, kept: KeptSubtree) {
+        let KeptSubtree {
+            root,
+            placeholder,
+            subtree,
+        } = kept;
+        let placeholder_facts = self.facts(placeholder);
+        let parent = placeholder_facts.parent;
+        let siblings = self.children_mut(parent);
+        if let Some(sibling) = siblings.iter_mut().find(|sibling| **sibling == placeholder) {
+            *sibling = root;
+        }
+        let placeholder_ids = placeholder..placeholder + 1;
+        self.patches.remove(&placeholder);
+        self.dead.add(placeholder_ids.clone());
+        self.removed.ranges.push(placeholder_ids);
+        self.set_parent(root, parent);
+        let placeholder_subtree = Delta::of_subtree(&placeholder_facts);
+        self.bump(parent, subtree.minus(placeholder_subtree));
+    }
+
+    fn set_parent(&mut self, id: NodeId, parent: NodeId) {
+        if let Some(node) = self.heap.find_mut(id) {
+            node.parent = parent;
+            return;
+        }
+        self.patches.entry(id).or_default().parent = Some(parent);
     }
 
     pub fn node_count(&self) -> usize {
@@ -637,7 +814,7 @@ impl FolderSizeTree {
         let name = self.name(id);
         let siblings = self.listed_children(parent).unwrap_or_default();
         let slot = siblings.partition_point(|&sibling| self.name(sibling) < name);
-        self.heap.get_mut(id).parent = parent;
+        self.set_parent(id, parent);
         self.children_mut(parent).insert(slot, id);
     }
 
@@ -676,20 +853,35 @@ impl FolderSizeTree {
 
     fn release_mapped_subtree(&mut self, id: NodeId) -> Vec<NodeId> {
         let subtree = self.segments.subtree(id);
+        let released = self
+            .kept_while_replacing
+            .uncovered_parts_of(subtree.clone());
+        let mut attached_from_outside = Vec::new();
+        for ids in released {
+            let attached = self.release_mapped_ids(ids);
+            attached_from_outside.extend(
+                attached
+                    .into_iter()
+                    .filter(|child| !subtree.contains(child)),
+            );
+        }
+        attached_from_outside
+    }
+
+    fn release_mapped_ids(&mut self, ids: Range<NodeId>) -> Vec<NodeId> {
         let patched: Vec<NodeId> = self
             .patches
-            .range(subtree.clone())
+            .range(ids.clone())
             .map(|(&patched_id, _)| patched_id)
             .collect();
-        let attached_from_outside = patched
+        let listed_children = patched
             .into_iter()
             .filter_map(|patched_id| self.patches.remove(&patched_id)?.children)
             .flatten()
-            .filter(|child| !subtree.contains(child))
             .collect();
-        self.dead.add(subtree.clone());
-        self.removed.ranges.push(subtree);
-        attached_from_outside
+        self.dead.add(ids.clone());
+        self.removed.ranges.push(ids);
+        listed_children
     }
 
     fn set_own(&mut self, id: NodeId, own: OwnSize) {
@@ -964,6 +1156,8 @@ impl FolderSizeTree {
         let dead = DeadRanges::read(reader)?;
         self.heap = heap;
         let patched_ids_are_mapped = patches.keys().all(|&id| self.segments.contains(id));
+        let patched_parents: Vec<NodeId> =
+            patches.values().filter_map(|patch| patch.parent).collect();
         let dead_ids_are_mapped = dead.last_end() <= self.segments.end();
         let linked_ids = roots
             .iter()
@@ -978,7 +1172,8 @@ impl FolderSizeTree {
             && self
                 .heap
                 .live()
-                .all(|(_, node)| self.holds_parent(node.parent));
+                .all(|(_, node)| self.holds_parent(node.parent))
+            && patched_parents.iter().all(|&parent| self.holds(parent));
         if !(patched_ids_are_mapped && dead_ids_are_mapped && links_resolve) {
             return None;
         }

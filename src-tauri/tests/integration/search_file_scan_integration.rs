@@ -433,14 +433,13 @@ fn fresh_overlay_names_and_tombstones_win_over_blocks() {
 }
 
 #[test]
-fn names_spilled_during_a_first_scan_are_searchable() {
+fn names_held_only_in_the_overlay_are_searchable() {
     let folders = library();
     let tree = tree_of(&folders);
     let dir = tempdir().expect("temp dir");
     let mut names = FileNameStore::new(dir.path().join(NAMES_FILE));
-    names.begin_spill().expect("spill");
     for folder in &folders {
-        names.spill_names(slot(&tree, &folder.path), packed(&folder.files));
+        names.set_names(slot(&tree, &folder.path), packed(&folder.files));
     }
     let source = Source::with_names(tree, names);
     assert!(source.file_names_available());

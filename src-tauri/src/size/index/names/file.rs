@@ -1,15 +1,11 @@
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{self, BufWriter, Seek, SeekFrom, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, PoisonError};
 
 use memmap2::Mmap;
 
-use super::block::{self, BlockSpan, NamesCorrupt, StoredBlock};
-use super::codec::NamesEncoder;
-use super::{is_packed_list_or_empty, NamesScratch};
+use super::block::{self, BlockSpan, StoredBlock};
 use crate::size::index::persist::{self, Reader, TempFile};
 
 pub const NAMES_FILE: &str = "file-names.bin";
@@ -22,7 +18,6 @@ const DIRECTORY_ENTRY_BYTES: usize = 32;
 const CHECKSUM_BYTES: usize = size_of::<u64>();
 const RESERVED_HEADER_FIELD: u32 = 0;
 const MAX_BLOCK_RAW_BYTES: u32 = 256 * 1024 * 1024;
-const CHUNK_LENGTH_BYTES: usize = size_of::<u32>();
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NamesHeader {
@@ -321,125 +316,9 @@ pub fn spill_path(names_path: &Path) -> PathBuf {
     PathBuf::from(spill)
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct SpillLocation {
-    offset: u64,
-    length: u32,
-}
-
-impl SpillLocation {
-    pub const ABSENT: Self = Self {
-        offset: 0,
-        length: 0,
-    };
-
-    pub fn is_present(&self) -> bool {
-        self.length > 0
-    }
-}
-
-#[derive(Debug)]
-pub struct SpillFile {
-    file: File,
-    path: PathBuf,
-    length: AtomicU64,
-    encoder: Mutex<NamesEncoder>,
-}
-
-impl SpillFile {
-    pub fn create(path: &Path) -> io::Result<Self> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        remove_if_present(path)?;
-        let file = OpenOptions::new()
-            .read(true)
-            .append(true)
-            .create(true)
-            .open(path)?;
-        Ok(Self {
-            file,
-            path: path.to_path_buf(),
-            length: AtomicU64::new(0),
-            encoder: Mutex::new(NamesEncoder::new()?),
-        })
-    }
-
-    pub fn len(&self) -> u64 {
-        self.length.load(Ordering::Acquire)
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    pub fn append(&self, names: &[u8]) -> io::Result<SpillLocation> {
-        let mut chunk = (names.len() as u32).to_le_bytes().to_vec();
-        chunk.extend_from_slice(&self.compress(names)?);
-        (&self.file).write_all(&chunk)?;
-        let offset = self.length.fetch_add(chunk.len() as u64, Ordering::AcqRel);
-        Ok(SpillLocation {
-            offset,
-            length: chunk.len() as u32,
-        })
-    }
-
-    fn compress(&self, names: &[u8]) -> io::Result<Vec<u8>> {
-        let mut encoder = self.encoder.lock().unwrap_or_else(PoisonError::into_inner);
-        encoder.compress(names)
-    }
-
-    pub fn read<'scratch>(
-        &self,
-        location: SpillLocation,
-        scratch: &'scratch mut NamesScratch,
-    ) -> Result<&'scratch [u8], NamesCorrupt> {
-        let NamesScratch { compressed, decode } = scratch;
-        compressed.clear();
-        compressed.resize(location.length as usize, 0);
-        read_exact_at(&self.file, compressed, location.offset).map_err(|_| NamesCorrupt)?;
-        let (length_bytes, body) = compressed
-            .split_at_checked(CHUNK_LENGTH_BYTES)
-            .ok_or(NamesCorrupt)?;
-        let raw_len = u32::from_le_bytes(length_bytes.try_into().map_err(|_| NamesCorrupt)?);
-        if raw_len > MAX_BLOCK_RAW_BYTES {
-            return Err(NamesCorrupt);
-        }
-        let raw = decode.decompress(body, raw_len as usize)?;
-        is_packed_list_or_empty(raw)
-            .then_some(raw)
-            .ok_or(NamesCorrupt)
-    }
-
-    pub fn close_and_remove(self) -> io::Result<()> {
-        let Self { file, path, .. } = self;
-        drop(file);
-        remove_if_present(&path)
-    }
-}
-
 pub fn remove_if_present(path: &Path) -> io::Result<()> {
     match fs::remove_file(path) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         result => result,
     }
-}
-
-#[cfg(unix)]
-fn read_exact_at(file: &File, buffer: &mut [u8], offset: u64) -> io::Result<()> {
-    std::os::unix::fs::FileExt::read_exact_at(file, buffer, offset)
-}
-
-#[cfg(windows)]
-fn read_exact_at(file: &File, buffer: &mut [u8], offset: u64) -> io::Result<()> {
-    use std::os::windows::fs::FileExt;
-    let mut filled = 0;
-    while filled < buffer.len() {
-        let read = file.seek_read(&mut buffer[filled..], offset + filled as u64)?;
-        if read == 0 {
-            return Err(io::ErrorKind::UnexpectedEof.into());
-        }
-        filled += read;
-    }
-    Ok(())
 }

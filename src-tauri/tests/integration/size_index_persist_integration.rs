@@ -29,6 +29,7 @@ const SCANNED: u8 = 1;
 const UNKNOWN_FLAG: u8 = 0x80;
 const NO_FILE_NAMES: u8 = 0;
 const NO_NAMES_PURGE_DUE: u8 = 0;
+const NO_FULL_SCAN_RUNNING: u8 = 0;
 const NAMES_FILE: &str = "unused-names.bin";
 
 fn meta() -> SnapshotMeta {
@@ -40,6 +41,7 @@ fn meta() -> SnapshotMeta {
         visited_roots: vec![path_of(&["home", "Desktop"])],
         has_file_names: true,
         names_purge_due: true,
+        full_scan_running: true,
         exclusions: vec![
             path_of(&["build-cache"]),
             path_of(&["home", "node_modules"]),
@@ -97,7 +99,7 @@ fn sample_names(tree: &FolderSizeTree) -> FileNameStore {
     let home = tree.lookup(&path_of(&["home"])).expect("home");
     let alpha = tree.lookup(&path_of(&["home", "alpha"])).expect("alpha");
     names.set_names(home, PackedNames::from_names(["notes.txt", "todo.md"]));
-    names.tombstone(alpha);
+    names.set_names(alpha, PackedNames::default());
     names
 }
 
@@ -229,7 +231,7 @@ impl Crafted {
     fn put_patch(out: &mut Vec<u8>, id: u32) {
         put_u32(out, id);
         out.extend_from_slice(&[0; 20]);
-        out.extend_from_slice(&[0, 0]);
+        out.extend_from_slice(&[0, 0, 0]);
     }
 
     fn bytes(&self) -> Vec<u8> {
@@ -239,7 +241,7 @@ impl Crafted {
         put_str(&mut out, b"build");
         out.extend_from_slice(&[0; 16]);
         put_u32(&mut out, self.visited);
-        out.extend([NO_FILE_NAMES, NO_NAMES_PURGE_DUE]);
+        out.extend([NO_FILE_NAMES, NO_NAMES_PURGE_DUE, NO_FULL_SCAN_RUNNING]);
         put_u32(&mut out, self.exclusions);
         put_u32(&mut out, self.segments);
         put_ids(&mut out, &self.roots);
@@ -675,6 +677,7 @@ fn file_name_presence_and_exclusions_round_trip() {
     let decoded_meta = decoded(&sample_bytes()).expect("decodes").meta;
     assert!(decoded_meta.has_file_names);
     assert!(decoded_meta.names_purge_due);
+    assert!(decoded_meta.full_scan_running);
     assert_eq!(decoded_meta.exclusions, saved.exclusions);
     assert_eq!(decoded_meta.os_build, BUILD);
     let empty = SnapshotMeta::default();

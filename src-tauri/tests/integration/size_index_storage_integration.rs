@@ -2,8 +2,6 @@ use std::fs;
 use std::path::Path;
 
 use file_explorer_lib::ipc::commands;
-use file_explorer_lib::size::index::names::file::spill_path;
-use file_explorer_lib::size::index::names_path_beside;
 use file_explorer_lib::size::index::persist::{self, SegmentRef};
 use file_explorer_lib::size::index::segment::SegmentPaths;
 use file_explorer_lib::size::{FolderSizeIndexStorage, IndexState};
@@ -78,23 +76,21 @@ fn storage_reports_the_cache_folder_its_bytes_and_every_indexed_item() {
 }
 
 #[test]
-fn storage_counts_the_spill_bytes_but_no_files_while_the_first_scan_spills() {
+fn storage_counts_no_files_until_the_first_scan_delivers_names() {
     let mut index = Harness::new();
     index.blocker.block(&index.path("a"));
     index.start();
-    wait_until("walk reaches a", || index.opened("a"));
-    let spill = spill_path(&names_path_beside(&index.snapshot));
-    assert!(spill.exists());
-    assert_eq!(bytes_of_saved_index(&index), 0, "nothing saved yet");
+    wait_until("the scan reaches a", || index.opened("a"));
 
-    let spilled_before = file_bytes(&spill);
     let reported = storage(&index);
-    let spilled_after = file_bytes(&spill);
 
-    assert!((spilled_before..=spilled_after).contains(&reported.size_bytes));
-    assert!(reported.folder_count.is_some());
-    assert_eq!(reported.file_count, None, "spilled names are not counted");
     index.blocker.release(&index.path("a"));
+    assert_eq!(reported.size_bytes, 0, "nothing saved yet");
+    assert!(
+        reported.folder_count < Some(INDEXED_FOLDERS),
+        "the scan is not done"
+    );
+    assert_eq!(reported.file_count, None, "no names yet");
     index.wait_state(IndexState::UpToDate);
     assert_eq!(storage(&index).file_count, Some(INDEXED_FILES));
 }

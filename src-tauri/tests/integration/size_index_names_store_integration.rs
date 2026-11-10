@@ -2,7 +2,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use file_explorer_lib::size::index::names::file::NAMES_FILE;
+use file_explorer_lib::size::index::names::file::{NAMES_FILE, SPILL_SUFFIX};
 use file_explorer_lib::size::index::names::writer::RewriteStats;
 use file_explorer_lib::size::index::names::{
     names_in, FileNameStore, FolderNames, NamesCounters, NamesCursor, NamesScratch,
@@ -195,15 +195,12 @@ fn sorting_packed_names_orders_them_bytewise_and_keeps_every_name() {
 }
 
 #[test]
-fn a_fresh_store_has_no_names_until_a_segment_or_spill_exists() {
+fn a_fresh_store_has_no_names_until_a_segment_or_overlay_exists() {
     let fixture = Fixture::new();
     let store = fixture.store();
     assert_eq!(store.path(), fixture.path);
     assert!(!store.is_available());
     assert!(!store.has_saved_names());
-    assert!(!store.is_spilling());
-    assert!(!store.has_spilled_names());
-    assert_eq!(store.spill_len(), None);
     assert_eq!(store.block_count(), 0);
     assert!(store.blocks_for_slots(&[1, 2]).is_empty());
     assert_eq!(store.names_of(4), Ok(None));
@@ -211,11 +208,6 @@ fn a_fresh_store_has_no_names_until_a_segment_or_spill_exists() {
     assert_eq!(store.counters(), NamesCounters::default());
     let mut scratch = NamesScratch::default();
     assert!(store.read_block(0, &mut scratch).is_err());
-    let mut visited = 0;
-    store
-        .visit_spill(&mut scratch, &mut |_| visited += 1)
-        .expect("no spill");
-    assert_eq!(visited, 0);
     let mut cursor = NamesCursor::default();
     assert!(rewritten(&store, 4, &mut cursor).is_empty());
 }
@@ -304,8 +296,6 @@ fn a_rewrite_cursor_reads_every_source_and_decodes_each_block_once() {
     let mut store = segment_store(&fixture, folder_count);
     store.set_names(5, packed(&["overlay.txt"]));
     store.tombstone(6);
-    store.begin_spill().expect("spill");
-    store.spill_names(7, packed(&["spilled.txt"]));
     let new_slot = folder_count + 20;
     store.set_names(new_slot, packed(&["brand-new.txt"]));
 
@@ -314,7 +304,6 @@ fn a_rewrite_cursor_reads_every_source_and_decodes_each_block_once() {
         let expected = match slot {
             5 => vec!["overlay.txt".to_string()],
             6 => Vec::new(),
-            7 => vec!["spilled.txt".to_string()],
             _ => strings(&names_for(slot)),
         };
         assert_eq!(
@@ -331,77 +320,72 @@ fn a_rewrite_cursor_reads_every_source_and_decodes_each_block_once() {
 }
 
 #[test]
-fn the_spill_serves_reads_during_a_scan_until_a_new_base_is_adopted() {
+fn an_attached_segment_serves_the_names_of_its_own_id_range() {
     let fixture = Fixture::new();
-    let mut store = fixture.store();
-    store.begin_spill().expect("spill");
-    assert!(store.is_available(), "names exist once a spill exists");
-    assert!(store.is_spilling() && !store.has_spilled_names());
-    assert_eq!(store.spill_len(), Some(0));
-    for slot in 0..8 {
-        store.spill_names(slot, names_for(slot));
-    }
-    assert!(store.has_spilled_names());
+    let mut store = segment_store(&fixture, FOLDER_COUNT);
+    store.mark_saved();
+    let graft_directory = fixture.dir.path().join("graft");
+    write_segment(&graft_directory, FOLDER_COUNT);
+    let graft = MappedSegment::open(&paths_in(&graft_directory)).expect("opens");
+    let graft_ids = FOLDER_COUNT..FOLDER_COUNT + graft.node_count();
+    store.attach_segment(graft_ids.clone(), graft.shared_file_names());
     assert!(
-        !store.has_unsaved_changes(),
-        "the spill is not in the manifest"
+        store.has_unsaved_changes(),
+        "the manifest must list the graft"
     );
-    assert!(store.spill_path().exists());
-    assert_eq!(current(&store, 5), Some(strings(&names_for(5))));
-
-    store.set_names(5, packed(&["newer.txt"]));
-    assert_eq!(current(&store, 5), Some(vec!["newer.txt".to_string()]));
-    store.tombstone(6);
-    assert_eq!(current(&store, 6), Some(Vec::new()));
-    store.spill_names(6, packed(&["reused.slot"]));
-    assert_eq!(current(&store, 6), Some(vec!["reused.slot".to_string()]));
-    store.tombstone_range(0..2);
-    assert_eq!(current(&store, 1), Some(Vec::new()));
-
-    let mut scratch = NamesScratch::default();
-    let mut spilled = Vec::new();
-    store
-        .visit_spill(&mut scratch, &mut |folder| spilled.push(folder.slot))
-        .expect("spill readable");
-    assert_eq!(spilled, [2, 3, 4, 6, 7], "the overlay shadows slot 5");
-
-    write_segment(&fixture.segment_directory(), FOLDER_COUNT);
-    let stats = RewriteStats {
-        blocks_reencoded: 4,
-        peak_open_blocks: 1,
-    };
-    store.adopt_base(saved_names(&fixture.segment_directory()), stats);
-    assert!(!store.is_spilling());
-    assert!(
-        !store.spill_path().exists(),
-        "the spill goes with the old base"
-    );
-    assert_eq!(store.overlay_stats(), OverlayStats::default());
-    assert!(!store.has_unsaved_changes());
     assert_eq!(current(&store, 1), Some(strings(&names_for(1))));
-    assert_eq!(store.counters().blocks_reencoded, 4);
-    assert_eq!(store.counters().peak_open_output_blocks, 1);
+    assert_eq!(
+        current(&store, graft_ids.start + 2),
+        Some(strings(&names_for(2))),
+        "ordinal 2 of the graft"
+    );
+    assert_eq!(current(&store, graft_ids.end), None, "past every segment");
+    assert_eq!(
+        store.count_saved_and_overlay_names(),
+        Ok(2 * u64::from(FOLDER_COUNT) * NAMES_PER_FOLDER)
+    );
+
+    store.tombstone_range(graft_ids.start + 1..graft_ids.start + 2);
+    assert_eq!(current(&store, graft_ids.start + 1), Some(Vec::new()));
+    let mut cursor = NamesCursor::default();
+    assert_eq!(
+        rewritten(&store, graft_ids.start + 3, &mut cursor),
+        strings(&names_for(3))
+    );
 }
 
 #[test]
-fn spilling_without_a_spill_falls_back_to_the_overlay_and_stale_spills_are_removed() {
+fn tombstoning_a_folder_without_saved_names_only_drops_its_overlay_entry() {
     let fixture = Fixture::new();
-    let mut store = fixture.store();
-    store.spill_names(3, packed(&["a"]));
-    assert_eq!(current(&store, 3), Some(vec!["a".to_string()]));
+    let mut store = segment_store(&fixture, FOLDER_COUNT);
+    let heap_slot = FOLDER_COUNT + 9;
+    store.set_names(heap_slot, packed(&["a"]));
     assert_eq!(store.overlay_stats().folders, 1);
+    store.tombstone(heap_slot);
+    assert_eq!(store.overlay_stats(), OverlayStats::default());
+    assert_eq!(current(&store, heap_slot), None);
+    store.tombstone(1);
+    assert_eq!(
+        store.overlay_stats().folders,
+        1,
+        "a saved folder needs a tombstone"
+    );
+    assert_eq!(current(&store, 1), Some(Vec::new()));
+}
 
-    fs::create_dir_all(fixture.path.parent().expect("dir")).expect("dir");
-    fs::write(store.spill_path(), b"left over by a crash").expect("stale");
-    store.remove_stale_spill().expect("removed");
-    assert!(!store.spill_path().exists());
-    store.remove_stale_spill().expect("nothing to remove");
-
-    store.begin_spill().expect("first");
-    store.spill_names(1, packed(&["first"]));
-    store.begin_spill().expect("restarted");
-    assert_eq!(store.spill_len(), Some(0), "a restart begins empty");
-    assert_eq!(current(&store, 1), None);
+#[test]
+fn legacy_files_from_older_formats_are_removed() {
+    let fixture = Fixture::new();
+    let store = fixture.store();
+    let directory = fixture.path.parent().expect("dir");
+    fs::create_dir_all(directory).expect("dir");
+    let legacy_spill = directory.join(format!("{NAMES_FILE}{SPILL_SUFFIX}"));
+    fs::write(&fixture.path, b"old names").expect("legacy names");
+    fs::write(&legacy_spill, b"left over by a crash").expect("legacy spill");
+    store.remove_legacy_files().expect("removed");
+    assert!(!fixture.path.exists());
+    assert!(!legacy_spill.exists());
+    store.remove_legacy_files().expect("nothing to remove");
 }
 
 #[test]
@@ -423,7 +407,7 @@ fn a_corrupt_block_flips_availability_and_is_reported_once() {
 
     store.adopt_base(SavedNames::default(), RewriteStats::default());
     assert!(!store.is_available(), "nothing saved yet");
-    store.begin_spill().expect("spill");
+    store.set_names(0, packed(&["fresh"]));
     assert!(store.is_available(), "a fresh base clears the failure");
 
     store.mark_unreadable();
@@ -431,23 +415,6 @@ fn a_corrupt_block_flips_availability_and_is_reported_once() {
     store.fail_and_discard();
     assert!(!store.has_saved_names());
     assert!(!store.take_unreported_failure(), "already handled");
-}
-
-#[test]
-fn a_damaged_spill_fails_reads_and_rewrites() {
-    let fixture = Fixture::new();
-    let mut store = fixture.store();
-    store.begin_spill().expect("spill");
-    store.spill_names(0, packed(&["one"]));
-    fs::write(store.spill_path(), b"").expect("truncate the spill");
-    assert!(store.names_of(0).is_err());
-    let mut scratch = NamesScratch::default();
-    assert!(store.visit_spill(&mut scratch, &mut |_| {}).is_err());
-    let mut cursor = NamesCursor::default();
-    assert_eq!(
-        store.names_for_rewrite(0, &mut cursor),
-        Err(NamesUnreadable)
-    );
 }
 
 #[test]

@@ -18,6 +18,7 @@ const HEADER_FIELD_BYTES: usize = HEADER_BYTES - CHECKSUM_BYTES;
 const RESERVED_HEADER_FIELD: u32 = 0;
 const TREE_FILE_PREFIX: &str = "folder-tree-";
 const NAMES_FILE_PREFIX: &str = "file-names-";
+const WALK_SPILL_PREFIX: &str = "walk-spill-";
 const SEGMENT_FILE_SUFFIX: &str = ".bin";
 const EXTENSION_SEPARATOR: char = '.';
 const NO_FLAGS: u8 = 0;
@@ -39,8 +40,14 @@ impl SegmentPaths {
     }
 }
 
+pub fn walk_spill_path(directory: &Path, sequence: u64) -> PathBuf {
+    directory.join(format!(
+        "{WALK_SPILL_PREFIX}{sequence:06}{SEGMENT_FILE_SUFFIX}"
+    ))
+}
+
 pub fn sequence_of_segment_file(file_name: &str) -> Option<u64> {
-    let numbered = [TREE_FILE_PREFIX, NAMES_FILE_PREFIX]
+    let numbered = [TREE_FILE_PREFIX, NAMES_FILE_PREFIX, WALK_SPILL_PREFIX]
         .into_iter()
         .find_map(|prefix| file_name.strip_prefix(prefix))?;
     let (sequence, _extension) = numbered.split_once(EXTENSION_SEPARATOR)?;

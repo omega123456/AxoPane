@@ -3,7 +3,6 @@ use std::hash::{BuildHasher, RandomState};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
 
 use crossbeam_channel::{Receiver, Sender};
 
@@ -18,32 +17,17 @@ use super::segment::{
 use super::service::Shared;
 use super::tree::FolderSizeTree;
 
-const FIRST_SEQUENCE: u64 = 1;
-
-#[derive(Debug, Clone)]
-pub(super) enum StopSignal {
-    Cancelled(Arc<AtomicBool>),
-    Deadline(Instant),
-}
-
-impl StopSignal {
-    fn is_raised(&self) -> bool {
-        match self {
-            Self::Cancelled(cancelled) => cancelled.load(Ordering::Relaxed),
-            Self::Deadline(deadline) => Instant::now() >= *deadline,
-        }
-    }
-}
+pub(super) const SEGMENT_CAP: usize = 64;
 
 pub(super) struct CompactJob {
     pub(super) sequence: u64,
     pub(super) target: SegmentTarget,
-    pub(super) stop: StopSignal,
+    pub(super) cancel: Arc<AtomicBool>,
 }
 
 #[derive(Debug)]
 pub(super) enum CompactError {
-    Stopped,
+    Cancelled,
     NamesUnreadable,
     Build(BuildError),
 }
@@ -68,9 +52,16 @@ pub(super) struct FinishedCompaction {
     pub(super) result: Result<BuiltSegment, CompactError>,
 }
 
+pub(super) fn new_segment_target(directory: &Path, sequence: u64) -> SegmentTarget {
+    SegmentTarget {
+        paths: SegmentPaths::numbered(directory, sequence),
+        token: RandomState::new().hash_one(sequence),
+    }
+}
+
 fn compact(shared: &Shared, job: &CompactJob) -> Result<BuiltSegment, CompactError> {
     let mut builder = SegmentBuilder::create(job.target.clone())?;
-    if let Err(error) = copy_folders(shared, &job.stop, &mut builder) {
+    if let Err(error) = copy_folders(shared, &job.cancel, &mut builder) {
         builder.discard();
         return Err(error);
     }
@@ -79,14 +70,14 @@ fn compact(shared: &Shared, job: &CompactJob) -> Result<BuiltSegment, CompactErr
 
 fn copy_folders(
     shared: &Shared,
-    stop: &StopSignal,
+    cancel: &AtomicBool,
     builder: &mut SegmentBuilder,
 ) -> Result<(), CompactError> {
     let mut rewrite = BaseRewrite::of(&shared.view().tree);
     let mut progress = RewriteProgress::MoreFolders;
     while progress == RewriteProgress::MoreFolders {
-        if stop.is_raised() {
-            return Err(CompactError::Stopped);
+        if cancel.load(Ordering::Relaxed) {
+            return Err(CompactError::Cancelled);
         }
         let view = shared.view();
         let source = RewriteSource {
@@ -120,26 +111,25 @@ pub(super) struct RunningCompaction {
 
 pub(super) struct Compactor {
     jobs: Sender<CompactJob>,
-    directory: PathBuf,
     running: Option<RunningCompaction>,
     pub(super) segments: Vec<SegmentRef>,
-    next_sequence: u64,
 }
 
 impl Compactor {
-    pub(super) fn new(jobs: Sender<CompactJob>, snapshot_path: &Path) -> Self {
-        let directory = snapshot_path.parent().unwrap_or(snapshot_path);
+    pub(super) fn new(jobs: Sender<CompactJob>) -> Self {
         Self {
             jobs,
-            directory: directory.to_path_buf(),
             running: None,
             segments: Vec::new(),
-            next_sequence: FIRST_SEQUENCE,
         }
     }
 
     pub(super) fn is_running(&self) -> bool {
         self.running.is_some()
+    }
+
+    pub(super) fn holds_too_many_segments(&self) -> bool {
+        self.segments.len() > SEGMENT_CAP
     }
 
     pub(super) fn defer(&mut self, message: Message) -> Option<Message> {
@@ -162,78 +152,46 @@ impl Compactor {
         self.running.take_if(|running| running.sequence == sequence)
     }
 
-    fn next_job(&mut self, stop: StopSignal) -> CompactJob {
-        let sequence = self.next_sequence;
-        self.next_sequence += 1;
-        CompactJob {
-            sequence,
-            target: SegmentTarget {
-                paths: SegmentPaths::numbered(&self.directory, sequence),
-                token: RandomState::new().hash_one(sequence),
-            },
-            stop,
-        }
-    }
-
-    fn start(&mut self) {
+    fn start(&mut self, sequence: u64, directory: &Path) {
         let cancel = Arc::new(AtomicBool::new(false));
-        let job = self.next_job(StopSignal::Cancelled(Arc::clone(&cancel)));
         self.running = Some(RunningCompaction {
-            sequence: job.sequence,
-            cancel,
+            sequence,
+            cancel: Arc::clone(&cancel),
             deferred: Vec::new(),
         });
-        let _ = self.jobs.send(job);
+        let _ = self.jobs.send(CompactJob {
+            sequence,
+            target: new_segment_target(directory, sequence),
+            cancel,
+        });
     }
 
-    fn is_in_use(&self, sequence: u64) -> bool {
-        let is_referenced = self
-            .segments
+    fn references(&self, sequence: u64) -> bool {
+        self.segments
             .iter()
-            .any(|segment| segment.sequence == sequence);
-        let is_being_built = self
-            .running
-            .as_ref()
-            .is_some_and(|running| running.sequence == sequence);
-        is_referenced || is_being_built
-    }
-
-    fn segment_files(&self) -> Vec<SegmentFile> {
-        let Ok(entries) = fs::read_dir(&self.directory) else {
-            return Vec::new();
-        };
-        entries
-            .filter_map(Result::ok)
-            .filter_map(|entry| {
-                let sequence = sequence_of_segment_file(&entry.file_name().to_string_lossy())?;
-                Some(SegmentFile {
-                    path: entry.path(),
-                    sequence,
-                })
-            })
-            .collect()
-    }
-
-    pub(super) fn skip_sequences_on_disk(&mut self) {
-        let used = self.segment_files().into_iter().map(|file| file.sequence);
-        let after_last_used = used.max().map_or(FIRST_SEQUENCE, |last| last + 1);
-        self.next_sequence = self.next_sequence.max(after_last_used);
-    }
-
-    pub(super) fn sweep_unreferenced_files(&self) {
-        let unreferenced = self
-            .segment_files()
-            .into_iter()
-            .filter(|file| !self.is_in_use(file.sequence));
-        for file in unreferenced {
-            remove_segment_file(&file.path);
-        }
+            .any(|segment| segment.sequence == sequence)
     }
 }
 
 struct SegmentFile {
     path: PathBuf,
     sequence: u64,
+}
+
+fn segment_files(directory: &Path) -> Vec<SegmentFile> {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let sequence = sequence_of_segment_file(&entry.file_name().to_string_lossy())?;
+            Some(SegmentFile {
+                path: entry.path(),
+                sequence,
+            })
+        })
+        .collect()
 }
 
 fn remove_segment_file(path: &Path) {
@@ -245,12 +203,15 @@ fn remove_segment_file(path: &Path) {
     }
 }
 
+pub(super) fn discard_segment(paths: &SegmentPaths) {
+    remove_segment_file(&paths.tree);
+    remove_segment_file(&paths.names);
+}
+
 fn discard_built(result: Result<BuiltSegment, CompactError>) {
-    let Ok(built) = result else {
-        return;
-    };
-    remove_segment_file(&built.paths.tree);
-    remove_segment_file(&built.paths.names);
+    if let Ok(built) = result {
+        discard_segment(&built.paths);
+    }
 }
 
 struct NewBase {
@@ -259,21 +220,34 @@ struct NewBase {
 }
 
 impl Machine {
+    pub(super) fn skip_sequences_on_disk(&self) {
+        let used = segment_files(&self.shared.segment_directory)
+            .into_iter()
+            .map(|file| file.sequence);
+        if let Some(last_used) = used.max() {
+            self.shared.sequences().skip_past(last_used);
+        }
+    }
+
+    pub(super) fn sweep_unreferenced_files(&self) {
+        let sequences = self.shared.sequences();
+        let unreferenced = segment_files(&self.shared.segment_directory)
+            .into_iter()
+            .filter(|file| !self.compactor.references(file.sequence))
+            .filter(|file| !sequences.is_building(file.sequence));
+        for file in unreferenced {
+            remove_segment_file(&file.path);
+        }
+    }
+
     pub(super) fn start_compaction(&mut self) {
         if self.compactor.is_running() {
             return;
         }
         log::info!("size index: compaction started");
-        self.compactor.start();
-    }
-
-    pub(super) fn compact_before(&mut self, deadline: Instant) {
-        let job = self.compactor.next_job(StopSignal::Deadline(deadline));
-        let finished = FinishedCompaction {
-            sequence: job.sequence,
-            result: compact(&self.shared, &job),
-        };
-        self.finish_compaction(finished);
+        let sequence = self.shared.sequences().claim();
+        self.compactor
+            .start(sequence, &self.shared.segment_directory);
     }
 
     pub(super) fn cancel_compaction(&mut self) {
@@ -287,6 +261,7 @@ impl Machine {
     }
 
     pub(super) fn compacted(&mut self, finished: FinishedCompaction) {
+        self.shared.sequences().release(finished.sequence);
         let Some(running) = self.compactor.take_if_current(finished.sequence) else {
             return discard_built(finished.result);
         };
@@ -300,7 +275,7 @@ impl Machine {
         let FinishedCompaction { sequence, result } = finished;
         match result {
             Ok(built) => self.install_base(NewBase { sequence, built }),
-            Err(CompactError::Stopped) => log::info!("size index: compaction stopped early"),
+            Err(CompactError::Cancelled) => log::info!("size index: compaction cancelled"),
             Err(CompactError::NamesUnreadable) => self.names_unreadable(),
             Err(CompactError::Build(error)) => {
                 log::warn!("size index: compaction failed: {error:?}");
@@ -312,14 +287,14 @@ impl Machine {
         let NewBase { sequence, built } = base;
         let Some(segment) = MappedSegment::open(&built.paths) else {
             log::warn!("size index: the compacted segment could not be opened");
-            return discard_built(Ok(built));
+            return discard_segment(&built.paths);
         };
         let token = segment.token();
         let file_names = segment.shared_file_names();
         let mut tree = FolderSizeTree::default();
         let Some(slots) = tree.attach_base(Arc::new(segment)) else {
             log::warn!("size index: the compacted segment could not be attached");
-            return discard_built(Ok(built));
+            return discard_segment(&built.paths);
         };
         let mut names = SavedNames::default();
         if self.shared.collect_file_names {
@@ -337,6 +312,5 @@ impl Machine {
         self.purge_saved_names = false;
         self.meta_dirty = true;
         self.save_manifest();
-        self.restart_spill_if_scanning();
     }
 }

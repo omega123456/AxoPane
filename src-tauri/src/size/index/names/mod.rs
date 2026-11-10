@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use block::{BlockSpan, DecodedBlock, EntryRange, NamesCorrupt};
 use codec::DecodeScratch;
-use file::{remove_if_present, spill_path, MappedNames, SpillFile, SpillLocation};
+use file::{remove_if_present, spill_path, MappedNames};
 use writer::RewriteStats;
 
 use super::persist::{put_bytes, put_count, put_u32, Reader};
@@ -107,13 +107,7 @@ pub struct NamesUnreadable;
 
 #[derive(Debug, Default)]
 pub struct NamesScratch {
-    pub(crate) compressed: Vec<u8>,
     pub(crate) decode: DecodeScratch,
-}
-
-pub struct SpillRead<'read> {
-    pub slots: &'read [u32],
-    pub scratch: &'read mut NamesScratch,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -210,41 +204,6 @@ impl Overlay {
             name_bytes: self.name_bytes,
         }
     }
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct SpillIndex {
-    locations: HashMap<u32, SpillLocation>,
-}
-
-impl SpillIndex {
-    pub(crate) fn location(&self, slot: u32) -> Option<SpillLocation> {
-        self.locations.get(&slot).copied()
-    }
-
-    fn set(&mut self, slot: u32, location: SpillLocation) {
-        self.locations.insert(slot, location);
-    }
-
-    fn clear(&mut self, slot: u32) {
-        self.locations.remove(&slot);
-    }
-
-    fn clear_range(&mut self, slots: &Range<u32>) {
-        self.locations.retain(|slot, _| !slots.contains(slot));
-    }
-
-    fn slots(&self) -> Vec<u32> {
-        let mut slots: Vec<u32> = self.locations.keys().copied().collect();
-        slots.sort_unstable();
-        slots
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct Spill {
-    pub(crate) file: Arc<SpillFile>,
-    pub(crate) index: SpillIndex,
 }
 
 #[derive(Debug, Clone)]
@@ -353,7 +312,6 @@ struct LoadedBlock {
 #[derive(Default)]
 pub struct NamesCursor {
     block_scratch: DecodeScratch,
-    spill_scratch: NamesScratch,
     loaded: Option<LoadedBlock>,
 }
 
@@ -363,7 +321,6 @@ pub struct FileNameStore {
     segments: Vec<SegmentNames>,
     overlay: Overlay,
     dead: DeadRanges,
-    spill: Option<Spill>,
     failure: ReadFailure,
     blocks_decompressed: AtomicU64,
     rewrites: RewriteStats,
@@ -377,7 +334,6 @@ impl FileNameStore {
             segments: Vec::new(),
             overlay: Overlay::default(),
             dead: DeadRanges::default(),
-            spill: None,
             failure: ReadFailure::default(),
             blocks_decompressed: AtomicU64::new(0),
             rewrites: RewriteStats::default(),
@@ -389,25 +345,18 @@ impl FileNameStore {
         &self.path
     }
 
-    pub fn spill_path(&self) -> PathBuf {
-        spill_path(&self.path)
-    }
-
     pub fn is_available(&self) -> bool {
-        let has_source = self.has_saved_names() || self.spill.is_some();
-        has_source && !self.failure.is_failed()
+        let holds_names = self.has_saved_names() || self.overlay.stats().folders > 0;
+        holds_names && !self.failure.is_failed()
     }
 
     pub fn has_saved_names(&self) -> bool {
         !self.segments.is_empty()
     }
 
-    pub fn is_spilling(&self) -> bool {
-        self.spill.is_some()
-    }
-
-    pub fn spill_len(&self) -> Option<u64> {
-        self.spill.as_ref().map(|spill| spill.file.len())
+    pub fn attach_segment(&mut self, slots: Range<u32>, file: Arc<MappedNames>) {
+        self.segments.push(SegmentNames { file, slots });
+        self.unsaved = true;
     }
 
     pub fn overlay_stats(&self) -> OverlayStats {
@@ -420,11 +369,6 @@ impl FileNameStore {
 
     pub fn mark_saved(&mut self) {
         self.unsaved = false;
-    }
-
-    pub fn has_spilled_names(&self) -> bool {
-        self.spill_len()
-            .is_some_and(|spilled_bytes| spilled_bytes > 0)
     }
 
     pub fn counters(&self) -> NamesCounters {
@@ -547,45 +491,6 @@ impl FileNameStore {
         Ok(count)
     }
 
-    pub fn visit_spill(
-        &self,
-        scratch: &mut NamesScratch,
-        visit: &mut dyn FnMut(FolderNames<'_>),
-    ) -> Result<(), NamesUnreadable> {
-        let Some(spill) = &self.spill else {
-            return Ok(());
-        };
-        let spilled = spill.index.slots();
-        let request = SpillRead {
-            slots: &spilled,
-            scratch,
-        };
-        self.visit_spilled(request, visit)
-    }
-
-    pub fn visit_spilled(
-        &self,
-        request: SpillRead<'_>,
-        visit: &mut dyn FnMut(FolderNames<'_>),
-    ) -> Result<(), NamesUnreadable> {
-        let Some(spill) = &self.spill else {
-            return Ok(());
-        };
-        let unshadowed = request
-            .slots
-            .iter()
-            .filter(|&&slot| self.overlay.get(slot).is_none())
-            .filter_map(|&slot| Some((slot, spill.index.location(slot)?)));
-        for (slot, location) in unshadowed {
-            let packed = spill
-                .file
-                .read(location, request.scratch)
-                .map_err(|corrupt| self.unreadable(corrupt))?;
-            visit(FolderNames { slot, packed });
-        }
-        Ok(())
-    }
-
     pub fn names_of(&self, slot: u32) -> Result<Option<PackedNames>, NamesUnreadable> {
         if let Some(entry) = self.overlay.get(slot) {
             return Ok(Some(PackedNames(entry.packed().to_vec())));
@@ -594,27 +499,7 @@ impl FileNameStore {
             return Ok(Some(PackedNames::default()));
         }
         let mut scratch = NamesScratch::default();
-        if let Some(location) = self.spill_location(slot) {
-            return self.spilled_names(location, &mut scratch).map(Some);
-        }
         self.block_names_of(slot, &mut scratch)
-    }
-
-    fn spill_location(&self, slot: u32) -> Option<SpillLocation> {
-        self.spill.as_ref()?.index.location(slot)
-    }
-
-    fn spilled_names(
-        &self,
-        location: SpillLocation,
-        scratch: &mut NamesScratch,
-    ) -> Result<PackedNames, NamesUnreadable> {
-        let spill = self.spill.as_ref().ok_or(NamesUnreadable)?;
-        let packed = spill
-            .file
-            .read(location, scratch)
-            .map_err(|corrupt| self.unreadable(corrupt))?;
-        Ok(PackedNames(packed.to_vec()))
     }
 
     fn block_names_of(
@@ -635,9 +520,7 @@ impl FileNameStore {
     }
 
     fn overrides(&self, slot: u32) -> bool {
-        let has_newer_names =
-            self.overlay.get(slot).is_some() || self.spill_location(slot).is_some();
-        has_newer_names || self.dead.contains(slot)
+        self.overlay.get(slot).is_some() || self.dead.contains(slot)
     }
 
     pub fn take_unreported_failure(&self) -> bool {
@@ -655,58 +538,23 @@ impl FileNameStore {
 
     pub fn tombstone(&mut self, slot: u32) {
         self.unsaved = true;
-        self.overlay.insert(slot, OverlayEntry::Tombstone);
-        if let Some(spill) = &mut self.spill {
-            spill.index.clear(slot);
+        let shadows_saved_names = self.locate(slot).is_some();
+        if !shadows_saved_names {
+            self.overlay.remove(slot);
+            return;
         }
+        self.overlay.insert(slot, OverlayEntry::Tombstone);
     }
 
     pub fn tombstone_range(&mut self, slots: Range<u32>) {
         self.overlay.remove_range(&slots);
-        if let Some(spill) = &mut self.spill {
-            spill.index.clear_range(&slots);
-        }
         self.dead.add(slots);
         self.unsaved = true;
     }
 
-    pub fn spill_names(&mut self, slot: u32, names: PackedNames) {
-        let appended = self
-            .spill
-            .as_ref()
-            .map(|spill| spill.file.append(names.as_bytes()));
-        let Some(Ok(location)) = appended else {
-            self.set_names(slot, names);
-            return;
-        };
-        self.overlay.remove(slot);
-        if let Some(spill) = &mut self.spill {
-            spill.index.set(slot, location);
-        }
-    }
-
-    pub fn begin_spill(&mut self) -> io::Result<()> {
-        self.close_spill();
-        let file = SpillFile::create(&self.spill_path())?;
-        self.spill = Some(Spill {
-            file: Arc::new(file),
-            index: SpillIndex::default(),
-        });
-        Ok(())
-    }
-
-    fn close_spill(&mut self) {
-        let Some(spill) = self.spill.take() else {
-            return;
-        };
-        let removed = Arc::try_unwrap(spill.file).map(SpillFile::close_and_remove);
-        if let Ok(Err(error)) = removed {
-            log::warn!("size index: spill file removal failed: {error}");
-        }
-    }
-
-    pub fn remove_stale_spill(&self) -> io::Result<()> {
-        remove_if_present(&self.spill_path())
+    pub fn remove_legacy_files(&self) -> io::Result<()> {
+        remove_if_present(&spill_path(&self.path))?;
+        remove_if_present(&self.path)
     }
 
     pub fn fail_and_discard(&mut self) {
@@ -729,7 +577,6 @@ impl FileNameStore {
 
     pub fn adopt_base(&mut self, base: SavedNames, stats: RewriteStats) {
         self.rewrites.absorb(stats);
-        self.close_spill();
         self.restore(base);
     }
 
@@ -754,10 +601,6 @@ impl FileNameStore {
         }
         if self.dead.contains(slot) {
             return Ok(&[]);
-        }
-        if let (Some(spill), Some(location)) = (&self.spill, self.spill_location(slot)) {
-            let spilled = spill.file.read(location, &mut cursor.spill_scratch);
-            return spilled.map_err(|corrupt| self.unreadable(corrupt));
         }
         let Some(folder) = self.locate(slot) else {
             return Ok(&[]);

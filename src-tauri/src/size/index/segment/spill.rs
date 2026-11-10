@@ -279,6 +279,24 @@ impl SortedRecords for Merge {
     }
 }
 
+struct Stoppable<'build> {
+    sorted: Box<dyn SortedRecords>,
+    is_stopped: &'build dyn Fn() -> bool,
+}
+
+impl SortedRecords for Stoppable<'_> {
+    fn advance(&mut self) -> io::Result<bool> {
+        if (self.is_stopped)() {
+            return Err(io::Error::from(io::ErrorKind::Interrupted));
+        }
+        self.sorted.advance()
+    }
+
+    fn current(&self) -> &[u8] {
+        self.sorted.current()
+    }
+}
+
 pub struct WalkSpill {
     root: PathBuf,
     run_bytes: usize,
@@ -337,8 +355,19 @@ impl WalkSpill {
     }
 
     pub fn build(self, target: GraftTarget) -> Result<BuiltSegment, BuildError> {
-        let mut sorted = self.into_sorted()?;
-        assemble::build_graft(sorted.as_mut(), target)
+        self.build_unless_stopped(target, &|| false)
+    }
+
+    pub fn build_unless_stopped(
+        self,
+        target: GraftTarget,
+        is_stopped: &dyn Fn() -> bool,
+    ) -> Result<BuiltSegment, BuildError> {
+        let mut stoppable = Stoppable {
+            sorted: self.into_sorted()?,
+            is_stopped,
+        };
+        assemble::build_graft(&mut stoppable, target)
     }
 
     fn into_sorted(mut self) -> io::Result<Box<dyn SortedRecords>> {

@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use file_explorer_lib::size::index::names::block::{checksum, decode, BlockBuilder, EncodedBlock};
 use file_explorer_lib::size::index::names::codec::{DecodeScratch, NamesEncoder};
 use file_explorer_lib::size::index::names::file::{
-    remove_if_present, spill_path, MappedNames, NamesFileWriter, NamesHeader, SpillFile,
-    NAMES_FILE, NAMES_FORMAT_VERSION, SPILL_SUFFIX,
+    remove_if_present, spill_path, MappedNames, NamesFileWriter, NamesHeader, NAMES_FILE,
+    NAMES_FORMAT_VERSION, SPILL_SUFFIX,
 };
-use file_explorer_lib::size::index::names::{NamesScratch, PackedNames};
+use file_explorer_lib::size::index::names::PackedNames;
 use file_explorer_lib::size::index::persist::temp_path;
 use tempfile::{tempdir, TempDir};
 
@@ -380,7 +380,7 @@ fn a_discarded_writer_leaves_no_temp_file() {
 }
 
 #[test]
-fn the_spill_appends_chunks_and_reads_them_back_by_position() {
+fn the_legacy_spill_sits_beside_the_names_file_and_removal_tolerates_absence() {
     let fixture = fixture();
     let path = spill_path(&fixture.path);
     assert!(path.to_string_lossy().ends_with(SPILL_SUFFIX));
@@ -390,65 +390,8 @@ fn the_spill_appends_chunks_and_reads_them_back_by_position() {
     );
     fs::create_dir_all(path.parent().expect("dir")).expect("dir");
     fs::write(&path, b"stale content").expect("stale spill");
-
-    let spill = SpillFile::create(&path).expect("spill");
-    assert!(spill.is_empty(), "a stale spill is replaced");
-    let first = spill
-        .append(packed(&["one", "two"]).as_bytes())
-        .expect("first");
-    let after_first = spill.len();
-    assert!(after_first > 0);
-    let empty = spill.append(&[]).expect("empty list");
-    assert!(empty.is_present(), "an empty list still has a chunk");
-    let third = spill
-        .append(packed(&[".hidden"]).as_bytes())
-        .expect("third");
-    assert!(spill.len() > after_first, "the spill grows");
-    assert_eq!(fs::metadata(&path).expect("spill").len(), spill.len());
-
-    let mut scratch = NamesScratch::default();
-    assert_eq!(
-        spill.read(third, &mut scratch).expect("third"),
-        packed(&[".hidden"]).as_bytes()
-    );
-    assert_eq!(
-        spill.read(first, &mut scratch).expect("first"),
-        packed(&["one", "two"]).as_bytes()
-    );
-    assert_eq!(spill.read(empty, &mut scratch).expect("empty"), b"");
-
-    spill.close_and_remove().expect("removed");
+    remove_if_present(&path).expect("removed");
     assert!(!path.exists());
     remove_if_present(&path).expect("already gone is fine");
     assert!(remove_if_present(fixture.path.parent().expect("dir")).is_err());
-}
-
-#[test]
-fn a_damaged_spill_chunk_is_unreadable() {
-    let fixture = fixture();
-    let path = spill_path(&fixture.path);
-    let spill = SpillFile::create(&path).expect("spill");
-    let location = spill
-        .append(packed(&["alpha", "beta"]).as_bytes())
-        .expect("append");
-    let mut scratch = NamesScratch::default();
-    assert!(spill.read(location, &mut scratch).is_ok());
-
-    let mut file = OpenOptions::new().write(true).open(&path).expect("open");
-    file.write_all(&u32::MAX.to_le_bytes())
-        .expect("absurd length");
-    drop(file);
-    assert!(
-        spill.read(location, &mut scratch).is_err(),
-        "implausible size"
-    );
-
-    let mut file = OpenOptions::new().write(true).open(&path).expect("open");
-    file.write_all(&3_u32.to_le_bytes()).expect("short length");
-    drop(file);
-    assert!(spill.read(location, &mut scratch).is_err(), "size mismatch");
-
-    fs::write(&path, b"").expect("truncate");
-    assert!(spill.read(location, &mut scratch).is_err(), "past the end");
-    assert!(SpillFile::create(&path.join("nested")).is_err());
 }

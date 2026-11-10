@@ -21,7 +21,9 @@ use file_explorer_lib::size::index::platform::{
     normalize, protected_roots, stream_exclusions, FakePlatform, PowerSignal, RawEvent,
     DATA_VOLUME_PREFIX,
 };
-use file_explorer_lib::size::index::{IndexOptions, LaneSnapshot, TreeUnavailable, SNAPSHOT_FILE};
+use file_explorer_lib::size::index::{
+    IndexOptions, LaneSnapshot, TreeUnavailable, HEAP_BATCH_RECORDS, SNAPSHOT_FILE,
+};
 use file_explorer_lib::size::{
     FolderSizeIndexStatus, IndexBackend, IndexState, NaReason, PaneSubscriptions, PauseReason,
     RequestMode, SizeBackend, SizeRequest, SizeRequestWithVolumes, SizeService, SizeSource,
@@ -100,6 +102,7 @@ pub(crate) struct Harness {
     pub(crate) user_exclusions: Vec<PathBuf>,
     pub(crate) home: Option<PathBuf>,
     pub(crate) collect_file_names: bool,
+    pub(crate) heap_batch_records: usize,
     pub(crate) service: Option<SizeService>,
 }
 
@@ -138,6 +141,7 @@ impl Harness {
             user_exclusions: Vec::new(),
             home: None,
             collect_file_names: true,
+            heap_batch_records: HEAP_BATCH_RECORDS,
             service: None,
         }
     }
@@ -157,6 +161,7 @@ impl Harness {
             user_exclusions: self.user_exclusions.clone(),
             home: self.home.clone(),
             snapshot_path: self.snapshot.clone(),
+            heap_batch_records: self.heap_batch_records,
             platform: self.platform.clone(),
             clock: Arc::new(move || *now.lock().unwrap()),
             coordinator: Arc::new(ResourceCoordinator::new()),
@@ -806,6 +811,7 @@ fn progress_is_throttled_by_the_injected_clock() {
     fs::create_dir_all(second.join("d")).unwrap();
     fs::write(second.join("d/f.bin"), vec![0; 4]).unwrap();
     index.roots.push(second.clone());
+    index.collect_file_names = false;
     index.blocker.block(&second);
     index.start();
     let scanned = |index: &Harness| -> Vec<u64> {
@@ -823,12 +829,13 @@ fn progress_is_throttled_by_the_injected_clock() {
         index.opened.lock().unwrap().contains(&second)
     });
     index.service().flush_index();
-    assert_eq!(scanned(&index), vec![0], "only the transition");
+    let throttled = scanned(&index);
 
     // A second later, the next records report progress: folders plus files
     // (idx: 5 folders, 5 files; second: 2 folders, 1 file).
     *index.now.lock().unwrap() += Duration::from_secs(1);
     index.blocker.release(&second);
+    assert_eq!(throttled, vec![0], "only the transition");
     index.wait_state(IndexState::UpToDate);
     assert_eq!(scanned(&index), vec![0, 13]);
 }

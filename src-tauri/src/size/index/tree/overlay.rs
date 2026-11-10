@@ -317,18 +317,21 @@ pub(super) struct Patch {
     pub(super) own: Option<OwnSize>,
     pub(super) delta: Delta,
     pub(super) children: Option<Vec<NodeId>>,
+    pub(super) parent: Option<NodeId>,
     pub(super) dirty: bool,
 }
 
 impl Patch {
     pub(super) fn changes_nothing(&self) -> bool {
         let keeps_base_size = self.own.is_none() && self.delta == Delta::default();
-        keeps_base_size && self.children.is_none() && !self.dirty
+        let keeps_base_links = self.children.is_none() && self.parent.is_none();
+        keeps_base_size && keeps_base_links && !self.dirty
     }
 
     pub(super) fn applied_to(&self, base: Facts) -> Facts {
         let own = self.own.unwrap_or(base.own());
         let patched = Facts {
+            parent: self.parent.unwrap_or(base.parent),
             direct: own.direct,
             flags: own.flags,
             ..base
@@ -346,16 +349,22 @@ impl Patch {
         if let Some(children) = &self.children {
             put_ids(out, children);
         }
+        out.push(u8::from(self.parent.is_some()));
+        if let Some(parent) = self.parent {
+            put_u32(out, parent);
+        }
     }
 
     pub(super) fn read(reader: &mut Reader<'_>) -> Option<Self> {
         let delta = Delta::read(reader)?;
         let own = read_if_present(reader, OwnSize::read)?;
         let children = read_if_present(reader, |reader| reader.ids())?;
+        let parent = read_if_present(reader, |reader| reader.u32())?;
         Some(Self {
             own,
             delta,
             children,
+            parent,
             dirty: false,
         })
     }
@@ -419,5 +428,33 @@ impl DeadRanges {
 
     pub(crate) fn last_end(&self) -> NodeId {
         self.ranges.last().map_or(0, |range| range.end)
+    }
+}
+
+#[derive(Debug, Default)]
+pub(super) struct KeptRanges {
+    sorted: Vec<Range<NodeId>>,
+}
+
+impl KeptRanges {
+    pub(super) fn of(mut ranges: Vec<Range<NodeId>>) -> Self {
+        ranges.sort_by_key(|range| range.start);
+        Self { sorted: ranges }
+    }
+
+    pub(super) fn uncovered_parts_of(&self, whole: Range<NodeId>) -> Vec<Range<NodeId>> {
+        let mut uncovered = Vec::new();
+        let mut next_start = whole.start;
+        let inside = self
+            .sorted
+            .iter()
+            .filter(|kept| kept.start >= whole.start && kept.end <= whole.end);
+        for kept in inside {
+            uncovered.push(next_start..kept.start);
+            next_start = kept.end;
+        }
+        uncovered.push(next_start..whole.end);
+        uncovered.retain(|part| !part.is_empty());
+        uncovered
     }
 }

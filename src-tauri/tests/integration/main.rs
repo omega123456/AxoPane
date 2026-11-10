@@ -105,6 +105,7 @@ pub mod size_everything_run_query_integration;
 pub mod size_fast_walk_integration;
 #[cfg(target_os = "macos")]
 pub mod size_index_exclusions_integration;
+mod size_index_graft_service_integration;
 pub mod size_index_names_block_integration;
 pub mod size_index_names_file_integration;
 #[cfg(target_os = "macos")]

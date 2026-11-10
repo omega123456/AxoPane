@@ -8,14 +8,11 @@ use super::query::Segment;
 use super::results::{CandidatePool, TieredCandidate, LISTED_TIER};
 use super::tree_scan::{TreeSearchRun, VisibleTree};
 use super::{Candidate, SearchError};
-use crate::size::index::names::{
-    FileNameStore, FolderNames, NamesScratch, NamesUnreadable, SpillRead,
-};
+use crate::size::index::names::{FileNameStore, FolderNames, NamesScratch, NamesUnreadable};
 use crate::size::index::tree::FolderSizeTree;
 use crate::size::index::IndexRead;
 
 pub const BLOCKS_PER_READ: usize = 8;
-pub const SPILLED_FOLDERS_PER_READ: usize = 4_096;
 
 pub enum FileSelection {
     Everywhere,
@@ -118,7 +115,6 @@ impl FileScanner<'_, '_> {
 struct ScanPlan {
     members: Option<SlotSet>,
     blocks: Vec<usize>,
-    spilled: Vec<u32>,
 }
 
 impl ScanPlan {
@@ -128,21 +124,12 @@ impl ScanPlan {
         }
         let members = SlotSet::selected(view.tree, selection);
         let blocks = selected_blocks(view.names, members.as_ref());
-        let spilled = spilled_slots(view, members.as_ref());
-        Some(Self {
-            members,
-            blocks,
-            spilled,
-        })
+        Some(Self { members, blocks })
     }
 
     fn chunks(&self) -> impl Iterator<Item = NamesChunk<'_>> {
         let blocks = self.blocks.chunks(BLOCKS_PER_READ).map(NamesChunk::Blocks);
-        let spilled = self
-            .spilled
-            .chunks(SPILLED_FOLDERS_PER_READ)
-            .map(NamesChunk::Spilled);
-        iter::once(NamesChunk::Overlay).chain(blocks).chain(spilled)
+        iter::once(NamesChunk::Overlay).chain(blocks)
     }
 }
 
@@ -151,16 +138,6 @@ fn selected_blocks(names: &FileNameStore, members: Option<&SlotSet>) -> Vec<usiz
         return (0..names.block_count()).collect();
     };
     names.blocks_for_slots(&members.slots)
-}
-
-fn spilled_slots(view: &IndexRead<'_>, members: Option<&SlotSet>) -> Vec<u32> {
-    if !view.names.is_spilling() {
-        return Vec::new();
-    }
-    let Some(members) = members else {
-        return view.tree.id_ranges().into_iter().flatten().collect();
-    };
-    members.slots.clone()
 }
 
 #[derive(Default)]
@@ -225,7 +202,6 @@ impl SlotSet {
 enum NamesChunk<'plan> {
     Overlay,
     Blocks(&'plan [usize]),
-    Spilled(&'plan [u32]),
 }
 
 struct NamesReader<'read> {
@@ -245,13 +221,6 @@ impl NamesReader<'_> {
                 Ok(())
             }
             NamesChunk::Blocks(indexes) => self.visit_blocks(indexes, visit),
-            NamesChunk::Spilled(slots) => {
-                let request = SpillRead {
-                    slots,
-                    scratch: self.scratch,
-                };
-                self.names.visit_spilled(request, visit)
-            }
         }
     }
 

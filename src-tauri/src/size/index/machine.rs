@@ -9,7 +9,7 @@ use crossbeam_channel::{Receiver, Sender};
 use super::compact::{CompactJob, Compactor, FinishedCompaction};
 use super::exclusions;
 use super::exclusions::plan_reconcile;
-use super::names::file::remove_if_present;
+use super::grafts::{FinishedWalk, WalkEnd, WalkLogs};
 use super::names::writer::RewriteStats;
 use super::names::{PackedNames, SavedNames};
 use super::persist::{self, ChangeEvent, ReplayOutcome, Snapshot, SnapshotMeta};
@@ -20,7 +20,7 @@ use crate::size::fast_walk::{self, DirListing, DirRecord, Qos};
 use crate::size::manual::ManualSizeError;
 use crate::size::{SizeRequest, SizeSource, SizeStateKind, SizeUpdate};
 
-use super::lanes::{BoostJob, ScanJob, WalkOutcome};
+use super::lanes::{BoostJob, Lane, ScanJob, ScanKind, WalkOutcome};
 use super::service::{
     unix_secs, unknown, BoostRequest, Clock, IndexOptions, Shared, SizeEmitter, StatusEmitter,
     View, WalkTuning,
@@ -49,11 +49,6 @@ pub(super) struct ExclusionEdit {
     pub(super) removed: Vec<PathBuf>,
 }
 
-pub(super) struct FlushRequest {
-    pub(super) ack: Sender<()>,
-    pub(super) deadline: Instant,
-}
-
 pub(super) enum Message {
     Events(Vec<RawEvent>),
     Power(PowerSignal),
@@ -61,6 +56,12 @@ pub(super) enum Message {
         records: Vec<DirRecord>,
         full: bool,
     },
+    WalkStarted {
+        root: PathBuf,
+        lane: Lane,
+    },
+    Progress(u64),
+    ScanTops(Vec<PathBuf>),
     ScanDone {
         job: ScanJob,
         outcome: WalkOutcome,
@@ -79,7 +80,7 @@ pub(super) enum Message {
     },
     Visited(PathBuf),
     Focus(bool),
-    Flush(FlushRequest),
+    Flush(Sender<()>),
     Exclusions {
         edit: ExclusionEdit,
         ack: Sender<()>,
@@ -100,6 +101,7 @@ impl Message {
             Self::Request { .. }
                 | Self::Subscribe { .. }
                 | Self::Power(_)
+                | Self::Progress(_)
                 | Self::Flush(_)
                 | Self::Compacted(_)
                 | Self::Shutdown
@@ -172,6 +174,7 @@ pub(super) struct Machine {
     pub(super) full: Option<FullScan>,
     pub(super) rescan_after_full: bool,
     pub(super) compactor: Compactor,
+    pub(super) walk_logs: WalkLogs,
     pub(super) purge_saved_names: bool,
     pub(super) background_inflight: usize,
     pub(super) items_scanned: u64,
@@ -187,7 +190,8 @@ impl Machine {
         Self {
             shared,
             sender: links.sender,
-            compactor: Compactor::new(links.compact_jobs, &options.snapshot_path),
+            compactor: Compactor::new(links.compact_jobs),
+            walk_logs: WalkLogs::default(),
             rescan_after_full: false,
             purge_saved_names: false,
             platform: options.platform,
@@ -229,7 +233,7 @@ impl Machine {
             }
             self.after_change();
             self.rescan_if_tree_unreadable();
-            self.compact_if_overlay_is_full();
+            self.compact_if_overlay_or_segments_are_full();
         }
         self.stop_compaction();
         log::info!("size index: stopped");
@@ -247,8 +251,8 @@ impl Machine {
     pub(super) fn boot(&mut self) {
         self.observe_power();
         let since = self.restore_snapshot();
-        self.compactor.skip_sequences_on_disk();
-        self.compactor.sweep_unreferenced_files();
+        self.skip_sequences_on_disk();
+        self.sweep_unreferenced_files();
         self.apply_privacy();
         self.reconcile_exclusions();
         self.shared.booted.store(true, Ordering::Release);
@@ -263,7 +267,7 @@ impl Machine {
         is_live && self.full.is_none() && !self.compactor.is_running()
     }
 
-    fn compact_if_overlay_is_full(&mut self) {
+    fn compact_if_overlay_or_segments_are_full(&mut self) {
         if !self.can_compact() {
             return;
         }
@@ -271,7 +275,7 @@ impl Machine {
         let overlay_is_full = view.tree.overlay_stats().exceeds_cap()
             || view.names.overlay_stats().exceeds_threshold();
         drop(view);
-        if overlay_is_full {
+        if overlay_is_full || self.compactor.holds_too_many_segments() {
             self.start_compaction();
         }
     }
@@ -295,7 +299,6 @@ impl Machine {
         self.apply_privacy();
         self.meta_dirty = true;
         self.rescan_after_full = self.full.is_some();
-        self.restart_spill_if_scanning();
         self.start_full_scan();
         for message in deferred {
             self.handle(message);
@@ -312,7 +315,15 @@ impl Machine {
         }
         log::info!("size index: FSEvents stream started");
         self.shared.view_mut().available = true;
-        if since.is_none() || self.weekly_due() {
+        if since.is_none() {
+            self.start_full_scan();
+            return;
+        }
+        if self.meta.full_scan_running {
+            self.resume_full_scan();
+            return;
+        }
+        if self.weekly_due() {
             self.start_full_scan();
             return;
         }
@@ -449,8 +460,7 @@ impl Machine {
         let current_id = self.platform.current_event_id();
         let snapshot = persist::load(&self.snapshot_path);
         self.restore_access(snapshot.as_ref());
-        self.discard_stale_spill();
-        self.discard_legacy_names();
+        self.discard_legacy_files();
         let start = RescanStart {
             identity,
             current_id,
@@ -489,16 +499,9 @@ impl Machine {
         }
     }
 
-    fn discard_stale_spill(&self) {
-        if let Err(error) = self.shared.view().names.remove_stale_spill() {
-            log::warn!("size index: stale file-name spill removal failed: {error}");
-        }
-    }
-
-    fn discard_legacy_names(&self) {
-        let legacy_names = self.shared.view().names.path().to_path_buf();
-        if let Err(error) = remove_if_present(&legacy_names) {
-            log::warn!("size index: the old file-name file could not be removed: {error}");
+    fn discard_legacy_files(&self) {
+        if let Err(error) = self.shared.view().names.remove_legacy_files() {
+            log::warn!("size index: the old file-name files could not be removed: {error}");
         }
     }
 
@@ -573,6 +576,11 @@ impl Machine {
             Message::Events(events) => self.events(events),
             Message::Power(signal) => self.power(signal),
             Message::Records { records, full } => self.records(records, full),
+            Message::WalkStarted { root, lane } => self.walk_started(root, lane),
+            Message::Progress(items) => self.count_scanned(items),
+            Message::ScanTops(tops) => {
+                self.queue_scan_tops(tops);
+            }
             Message::ScanDone { job, outcome } => self.scan_done(job, outcome),
             Message::BoostDone { job, outcome } => self.boost_done(job, outcome),
             Message::Request { request, emitter } => self.shared.request(request, emitter),
@@ -580,10 +588,10 @@ impl Machine {
             Message::Visited(root) => self.visited(root),
             Message::Focus(true) => self.focused(),
             Message::Focus(false) => self.save_snapshot(SaveTrigger::Blur),
-            Message::Flush(request) => {
+            Message::Flush(ack) => {
                 self.cancel_compaction();
-                self.save_snapshot(SaveTrigger::Exit(request.deadline));
-                let _ = request.ack.send(());
+                self.save_snapshot(SaveTrigger::Exit);
+                let _ = ack.send(());
             }
             Message::Exclusions { edit, ack } => {
                 self.exclusions_changed(edit);
@@ -662,6 +670,7 @@ impl Machine {
     }
 
     pub(super) fn reread(&mut self, dir: &Path) {
+        self.note_reread(dir);
         if !self.can_reread(dir) {
             return;
         }
@@ -730,54 +739,12 @@ impl Machine {
         self.start_full_scan();
     }
 
-    fn begin_spill(&self) {
-        if !self.shared.collect_file_names {
-            return;
-        }
-        if let Err(error) = self.shared.view_mut().names.begin_spill() {
-            log::warn!("size index: file-name spill could not start: {error}");
-            return;
-        }
-        log::info!("size index: file-name spill started");
-    }
-
-    pub(super) fn restart_spill_if_scanning(&self) {
-        if self.full.is_some() {
-            self.begin_spill();
-        }
-    }
-
-    pub(super) fn start_full_scan(&mut self) {
-        if self.full.is_some() {
-            return;
-        }
-        self.items_scanned = 0;
-        self.full = Some(FullScan {
-            captured_id: self.platform.current_event_id(),
-            remaining: 0,
-            started: Instant::now(),
-        });
-        self.begin_spill();
-        let queued_roots = self
-            .shared
-            .roots
-            .clone()
-            .into_iter()
-            .map(|root| self.shared.queue_background(root, true))
-            .filter(|queued| *queued)
-            .count();
-        self.background_inflight += queued_roots;
-        log::info!("size index: full scan started with {queued_roots} roots queued");
-        if let Some(full) = &mut self.full {
-            full.remaining += queued_roots;
-        }
-        if self.full.as_ref().is_some_and(|full| full.remaining == 0) {
-            self.finish_full_scan();
-        }
-    }
-
     pub(super) fn queue_background(&mut self, root: PathBuf) {
-        if self.shared.queue_background(root, false) {
+        let job = ScanJob {
+            root,
+            kind: ScanKind::Update,
+        };
+        if self.shared.queue_background(job) {
             self.background_inflight += 1;
         }
     }
@@ -787,18 +754,15 @@ impl Machine {
             .iter()
             .map(|record| 1 + record.file_count)
             .sum::<u64>();
-        let spill = full && self.full.is_some();
-        self.merge_records(records, spill);
+        self.merge_records(records);
         self.reskip_protected();
         self.reskip_excluded();
         if full {
-            let scanned_before = self.items_scanned;
-            self.items_scanned += scanned_items;
-            self.log_scan_progress(scanned_before);
+            self.count_scanned(scanned_items);
         }
     }
 
-    fn log_scan_progress(&self, scanned_before: u64) {
+    pub(super) fn log_scan_progress(&self, scanned_before: u64) {
         let step_before = scanned_before / SCAN_PROGRESS_LOG_STEP;
         let step_now = self.items_scanned / SCAN_PROGRESS_LOG_STEP;
         if step_now != step_before {
@@ -806,30 +770,32 @@ impl Machine {
         }
     }
 
-    fn merge_records(&self, records: Vec<DirRecord>, spill: bool) {
+    fn merge_records(&self, records: Vec<DirRecord>) {
         let kept: Vec<DirRecord> = records
             .into_iter()
             .filter(|record| !self.shared.user_excludes(&record.path))
             .collect();
         let mut view = self.shared.view_mut();
         for record in kept {
-            view.merge_record(record, spill);
+            view.merge_record(record);
         }
     }
 
     pub(super) fn scan_done(&mut self, job: ScanJob, outcome: WalkOutcome) {
         self.background_inflight = self.background_inflight.saturating_sub(1);
-        self.walk_finished(&job.root, &outcome);
-        if !job.full {
+        let is_full = job.kind.is_full();
+        self.end_walk(FinishedWalk {
+            root: &job.root,
+            lane: Lane::Background { full: is_full },
+            outcome,
+        });
+        if !is_full {
             return;
         }
-        let Some(full) = &mut self.full else {
-            return;
-        };
-        full.remaining = full.remaining.saturating_sub(1);
-        if full.remaining == 0 {
-            self.finish_full_scan();
+        if let Some(full) = &mut self.full {
+            full.remaining = full.remaining.saturating_sub(1);
         }
+        self.finish_full_scan_if_done();
     }
 
     pub(super) fn finish_full_scan(&mut self) {
@@ -839,6 +805,7 @@ impl Machine {
         if std::mem::take(&mut self.rescan_after_full) {
             return self.start_full_scan();
         }
+        self.prune_unscanned_roots();
         log::info!(
             "size index: full scan finished, {} items in {}s",
             self.items_scanned,
@@ -851,17 +818,30 @@ impl Machine {
         self.save_snapshot(SaveTrigger::ScanComplete);
     }
 
+    fn prune_unscanned_roots(&self) {
+        let mut view = self.shared.view_mut();
+        for root in &self.shared.roots {
+            view.prune_unscanned(root);
+        }
+    }
+
     pub(super) fn boost_done(&mut self, job: BoostJob, outcome: WalkOutcome) {
         let path = platform::normalize(Path::new(&job.path));
-        self.walk_finished(&path, &outcome);
+        let end = self.end_walk(FinishedWalk {
+            root: &path,
+            lane: Lane::Boost {
+                refresh: job.refresh,
+            },
+            outcome,
+        });
         if self.shared.user_excludes(&path) {
             answer_waiters(job.waiters, &unknown(&job.path));
             return;
         }
-        let update = match &outcome {
-            WalkOutcome::Failed(ManualSizeError::Cancelled) => return,
-            WalkOutcome::Failed(_) => size_error(&job.path),
-            WalkOutcome::Walked | WalkOutcome::Skipped => self.walked_update(&job.path, &path),
+        let update = match end {
+            WalkEnd::Cancelled => return,
+            WalkEnd::Failed => size_error(&job.path),
+            WalkEnd::Indexed | WalkEnd::Skipped => self.walked_update(&job.path, &path),
         };
         answer_waiters(job.waiters, &update);
     }
@@ -876,24 +856,10 @@ impl Machine {
             |total| self.shared.update_from_total(display_path, &total),
         )
     }
-
-    pub(super) fn walk_finished(&mut self, root: &Path, outcome: &WalkOutcome) {
-        match outcome {
-            WalkOutcome::Walked => {
-                self.shared.view_mut().prune_unscanned(root);
-            }
-            WalkOutcome::Failed(ManualSizeError::Io(error))
-                if error.kind() == std::io::ErrorKind::NotFound =>
-            {
-                self.prune(root);
-            }
-            WalkOutcome::Skipped | WalkOutcome::Failed(_) => {}
-        }
-    }
 }
 
 impl View {
-    fn merge_record(&mut self, record: DirRecord, spill: bool) {
+    fn merge_record(&mut self, record: DirRecord) {
         let DirRecord {
             path,
             direct_bytes,
@@ -909,14 +875,9 @@ impl View {
         };
         let slot = self.tree.merge_record_slot(&path, listing);
         self.tombstone_removed();
-        let (Some(slot), Some(names)) = (slot, file_names) else {
-            return;
-        };
-        if spill {
-            self.names.spill_names(slot, names);
-            return;
+        if let (Some(slot), Some(names)) = (slot, file_names) {
+            self.names.set_names(slot, names);
         }
-        self.names.set_names(slot, names);
     }
 
     fn apply_listing(&mut self, dir: &Path, listing: DirListing) -> Option<Vec<PathBuf>> {
@@ -957,7 +918,7 @@ impl View {
         self.tombstone_removed();
     }
 
-    fn prune_unscanned(&mut self, path: &Path) {
+    pub(super) fn prune_unscanned(&mut self, path: &Path) {
         self.tree.prune_unscanned(path);
         self.tombstone_removed();
     }
@@ -968,7 +929,7 @@ impl View {
         }
     }
 
-    fn tombstone_removed(&mut self) {
+    pub(super) fn tombstone_removed(&mut self) {
         let removed_slots = self.tree.take_removed_slots();
         let removed_ranges = self.tree.take_removed_ranges();
         if !self.keeps_file_names {

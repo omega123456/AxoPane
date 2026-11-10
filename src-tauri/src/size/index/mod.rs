@@ -9,6 +9,8 @@ pub mod tree;
 #[cfg(target_os = "macos")]
 mod compact;
 #[cfg(target_os = "macos")]
+mod grafts;
+#[cfg(target_os = "macos")]
 mod host;
 #[cfg(target_os = "macos")]
 mod lanes;
@@ -20,6 +22,8 @@ mod privacy;
 mod service;
 #[cfg(target_os = "macos")]
 mod snapshot;
+#[cfg(target_os = "macos")]
+mod split;
 #[cfg(target_os = "macos")]
 mod status;
 #[cfg(target_os = "macos")]
@@ -39,7 +43,7 @@ pub use service::MacIndexSetup;
 #[cfg(target_os = "macos")]
 pub use service::{
     names_path_beside, Clock, FolderSizeIndex, IndexOptions, SizeEmitter, StatusEmitter,
-    TreeUnavailable, READMIT_EVERY_DIRS, SNAPSHOT_FILE,
+    TreeUnavailable, HEAP_BATCH_RECORDS, READMIT_EVERY_DIRS, SNAPSHOT_FILE,
 };
 
 pub struct IndexRead<'view> {

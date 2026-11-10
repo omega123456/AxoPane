@@ -5,8 +5,15 @@ use std::sync::{Arc, Mutex};
 
 use crossbeam_channel::Sender;
 
+use super::compact::new_segment_target;
 use super::exclusions;
+use super::names::PackedNames;
 use super::platform;
+use super::segment::{
+    walk_spill_path, BuildError, BuiltSegment, GraftTarget, SpillOptions, SpillRecord, WalkSpill,
+    RUN_BYTES,
+};
+use super::tree::{DirectoryListing, FolderSizeTree};
 use crate::resource_coordinator::parallelism::walker_job_threads;
 use crate::resource_coordinator::{JobClass, JobHandle, JobSpec};
 use crate::size::fast_walk::{self, DirRecord, Qos, WalkOptions};
@@ -14,6 +21,9 @@ use crate::size::manual::ManualSizeError;
 
 use super::machine::Message;
 use super::service::{Shared, SizeEmitter, WalkTuning, READMIT_EVERY_DIRS, RECORD_BATCH};
+use super::split::split_root;
+
+const ITEMS_PER_PROGRESS_REPORT: u64 = 10_000;
 
 #[derive(Default)]
 pub(super) struct Lanes {
@@ -99,9 +109,22 @@ fn wait_for_job<Job>(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ScanKind {
+    Update,
+    FullSubtree,
+    FullRoot,
+}
+
+impl ScanKind {
+    pub(super) fn is_full(self) -> bool {
+        self != Self::Update
+    }
+}
+
 pub(super) struct ScanJob {
     pub(super) root: PathBuf,
-    pub(super) full: bool,
+    pub(super) kind: ScanKind,
 }
 
 pub(super) struct BoostJob {
@@ -110,10 +133,19 @@ pub(super) struct BoostJob {
     pub(super) waiters: Vec<SizeEmitter>,
 }
 
+pub(super) struct BuiltGraft {
+    pub(super) sequence: u64,
+    pub(super) built: BuiltSegment,
+    pub(super) kept: Vec<PathBuf>,
+}
+
 pub(super) enum WalkOutcome {
     Walked,
+    Built(BuiltGraft),
+    Split,
     Skipped,
     Failed(ManualSizeError),
+    BuildFailed,
 }
 
 #[derive(Clone, Copy)]
@@ -131,12 +163,7 @@ pub(super) struct LaneWalk<'walk> {
 pub(super) fn run_background(shared: &Shared, sender: &Sender<Message>) {
     let context = LaneContext { shared, sender };
     while let Some(ClaimedJob { job, cancel }) = wait_for_job(shared, Lanes::claim_background) {
-        let lane_walk = LaneWalk {
-            root: &job.root,
-            lane: Lane::Background { full: job.full },
-            cancel: &cancel,
-        };
-        let outcome = walk(context, lane_walk);
+        let outcome = background_scan(context, &job, &cancel);
         shared.lanes().running_background = None;
         let _ = sender.send(Message::ScanDone { job, outcome });
     }
@@ -150,6 +177,24 @@ pub(super) fn run_boosts(shared: &Shared, sender: &Sender<Message>) {
         shared.wake.notify_all();
         let _ = sender.send(Message::BoostDone { job, outcome });
     }
+}
+
+fn background_scan(
+    context: LaneContext<'_>,
+    job: &ScanJob,
+    cancel: &Arc<AtomicBool>,
+) -> WalkOutcome {
+    let lane_walk = LaneWalk {
+        root: &job.root,
+        lane: Lane::Background {
+            full: job.kind.is_full(),
+        },
+        cancel,
+    };
+    if job.kind == ScanKind::FullRoot {
+        return split_root(context, lane_walk);
+    }
+    walk(context, lane_walk)
 }
 
 fn admitted_boost_walk(
@@ -181,14 +226,21 @@ pub(super) enum Lane {
     Boost { refresh: bool },
 }
 
-struct WalkPlan {
-    options: WalkOptions,
+#[derive(Default)]
+struct GraftPlan {
+    root_name: String,
+    kept: Vec<PathBuf>,
+}
+
+pub(super) struct WalkPlan {
+    pub(super) options: WalkOptions,
     full: bool,
     skip_indexed: bool,
+    graft: GraftPlan,
 }
 
 impl Lane {
-    fn plan(self, shared: &Shared, cancel: &Arc<AtomicBool>) -> WalkPlan {
+    pub(super) fn plan(self, shared: &Shared, cancel: &Arc<AtomicBool>) -> WalkPlan {
         match self {
             Lane::Background { full } => WalkPlan {
                 options: shared.walk_options(
@@ -200,6 +252,7 @@ impl Lane {
                 ),
                 full,
                 skip_indexed: false,
+                graft: GraftPlan::default(),
             },
             Lane::Boost { refresh } => WalkPlan {
                 options: shared.walk_options(
@@ -211,12 +264,21 @@ impl Lane {
                 ),
                 full: false,
                 skip_indexed: !refresh,
+                graft: GraftPlan::default(),
             },
         }
     }
 }
 
-fn narrow_walk(shared: &Shared, root: &Path, plan: &mut WalkPlan) -> bool {
+fn root_name_in(tree: &FolderSizeTree, root: &Path) -> String {
+    if let Some(indexed_name) = tree.folder_name(root) {
+        return indexed_name.to_string();
+    }
+    let own_name = root.file_name().unwrap_or(root.as_os_str());
+    own_name.to_string_lossy().into_owned()
+}
+
+pub(super) fn narrow_walk(shared: &Shared, root: &Path, plan: &mut WalkPlan) -> bool {
     if shared.user_excludes(root) {
         return false;
     }
@@ -229,6 +291,7 @@ fn narrow_walk(shared: &Shared, root: &Path, plan: &mut WalkPlan) -> bool {
             .excluded
             .extend(shared.unvisited_protected(&view));
     }
+    plan.graft.root_name = root_name_in(&view.tree, root);
     if !plan.skip_indexed {
         return true;
     }
@@ -239,10 +302,198 @@ fn narrow_walk(shared: &Shared, root: &Path, plan: &mut WalkPlan) -> bool {
     if already_indexed {
         return false;
     }
+    plan.graft.kept = view.tree.indexed_subtrees_under(root);
     plan.options
         .excluded
-        .extend(view.tree.indexed_subtrees_under(root));
+        .extend(plan.graft.kept.iter().cloned());
     true
+}
+
+struct ClaimedSpill {
+    sequence: u64,
+    spill: WalkSpill,
+}
+
+impl ClaimedSpill {
+    fn claim(shared: &Shared, root: &Path) -> Self {
+        let sequence = shared.sequences().claim();
+        Self {
+            sequence,
+            spill: WalkSpill::create(SpillOptions {
+                runs_path: walk_spill_path(&shared.segment_directory, sequence),
+                root: root.to_path_buf(),
+                run_bytes: RUN_BYTES,
+            }),
+        }
+    }
+
+    fn append(&mut self, record: &DirRecord) -> Result<(), BuildError> {
+        let no_file_names = PackedNames::default();
+        let file_names = record.file_names.as_ref().unwrap_or(&no_file_names);
+        self.spill.append(SpillRecord {
+            path: &record.path,
+            listing: DirectoryListing {
+                direct_bytes: record.direct_bytes,
+                subdirs: &record.subdirs,
+                denied: record.denied,
+            },
+            file_names: file_names.as_bytes(),
+        })
+    }
+}
+
+enum GraftFailure {
+    Walk(ManualSizeError),
+    Spill(BuildError),
+    Build(BuildError),
+}
+
+struct RecordSink<'walk> {
+    context: LaneContext<'walk>,
+    lane_walk: &'walk LaneWalk<'walk>,
+    full: bool,
+    buffered: Vec<DirRecord>,
+    spill: Option<ClaimedSpill>,
+    spill_failure: Option<BuildError>,
+    unreported_items: u64,
+}
+
+impl<'walk> RecordSink<'walk> {
+    fn new(context: LaneContext<'walk>, lane_walk: &'walk LaneWalk<'walk>, full: bool) -> Self {
+        Self {
+            context,
+            lane_walk,
+            full,
+            buffered: Vec::new(),
+            spill: None,
+            spill_failure: None,
+            unreported_items: 0,
+        }
+    }
+
+    fn accept(&mut self, record: DirRecord) {
+        if self.spill_failure.is_some() {
+            return;
+        }
+        let heap_batch_records = self.context.shared.heap_batch_records;
+        let fits_in_heap_batch = self.spill.is_none() && self.buffered.len() < heap_batch_records;
+        if fits_in_heap_batch {
+            self.buffered.push(record);
+            return;
+        }
+        if let Err(error) = self.spill_record(record) {
+            self.spill_failure = Some(error);
+            self.lane_walk.cancel.store(true, Ordering::Relaxed);
+        }
+    }
+
+    fn spill_record(&mut self, record: DirRecord) -> Result<(), BuildError> {
+        let LaneContext { shared, .. } = self.context;
+        let root = self.lane_walk.root;
+        let claimed = self
+            .spill
+            .get_or_insert_with(|| ClaimedSpill::claim(shared, root));
+        let mut spilled_items = 0;
+        for spilled in self.buffered.drain(..).chain([record]) {
+            claimed.append(&spilled)?;
+            spilled_items += 1 + spilled.file_count;
+        }
+        self.report_progress(spilled_items);
+        Ok(())
+    }
+
+    fn report_progress(&mut self, spilled_items: u64) {
+        self.unreported_items += spilled_items;
+        if self.unreported_items >= ITEMS_PER_PROGRESS_REPORT {
+            self.send_progress();
+        }
+    }
+
+    fn send_progress(&mut self) {
+        let items = std::mem::take(&mut self.unreported_items);
+        if self.full && items > 0 {
+            let _ = self.context.sender.send(Message::Progress(items));
+        }
+    }
+
+    fn finish(mut self, walked: Result<(), ManualSizeError>, graft: GraftPlan) -> WalkOutcome {
+        self.send_progress();
+        let Some(claimed) = self.spill.take() else {
+            return self.finish_in_the_heap(walked);
+        };
+        let sequence = claimed.sequence;
+        let GraftPlan { root_name, kept } = graft;
+        let built = self
+            .spilled_walk(walked)
+            .and_then(|()| self.build_graft(claimed, root_name));
+        match built {
+            Ok(built) => WalkOutcome::Built(BuiltGraft {
+                sequence,
+                built,
+                kept,
+            }),
+            Err(failure) => self.abandon_graft(sequence, failure),
+        }
+    }
+
+    fn finish_in_the_heap(self, walked: Result<(), ManualSizeError>) -> WalkOutcome {
+        send_records(self.context, self.buffered, self.full);
+        match walked {
+            Ok(()) => WalkOutcome::Walked,
+            Err(error) => WalkOutcome::Failed(error),
+        }
+    }
+
+    fn spilled_walk(&mut self, walked: Result<(), ManualSizeError>) -> Result<(), GraftFailure> {
+        if let Some(error) = self.spill_failure.take() {
+            return Err(GraftFailure::Spill(error));
+        }
+        walked.map_err(GraftFailure::Walk)
+    }
+
+    fn build_graft(
+        &self,
+        claimed: ClaimedSpill,
+        root_name: String,
+    ) -> Result<BuiltSegment, GraftFailure> {
+        let directory = &self.context.shared.segment_directory;
+        let target = GraftTarget {
+            segment: new_segment_target(directory, claimed.sequence),
+            root_name,
+        };
+        let cancel = self.lane_walk.cancel;
+        let is_cancelled = || cancel.load(Ordering::Relaxed);
+        claimed
+            .spill
+            .build_unless_stopped(target, &is_cancelled)
+            .map_err(GraftFailure::Build)
+    }
+
+    fn abandon_graft(&self, sequence: u64, failure: GraftFailure) -> WalkOutcome {
+        self.context.shared.sequences().release(sequence);
+        let was_cancelled = self.lane_walk.cancel.load(Ordering::Relaxed);
+        match failure {
+            GraftFailure::Walk(error) => WalkOutcome::Failed(error),
+            GraftFailure::Build(_) if was_cancelled => {
+                WalkOutcome::Failed(ManualSizeError::Cancelled)
+            }
+            GraftFailure::Spill(error) | GraftFailure::Build(error) => {
+                log::warn!(
+                    "size index: the walk of {} could not be saved: {error:?}",
+                    self.lane_walk.root.display()
+                );
+                WalkOutcome::BuildFailed
+            }
+        }
+    }
+}
+
+pub(super) fn send_records(context: LaneContext<'_>, records: Vec<DirRecord>, full: bool) {
+    let mut unsent = records.into_iter().peekable();
+    while unsent.peek().is_some() {
+        let records = unsent.by_ref().take(RECORD_BATCH).collect();
+        let _ = context.sender.send(Message::Records { records, full });
+    }
 }
 
 pub(super) fn walk(context: LaneContext<'_>, lane_walk: LaneWalk<'_>) -> WalkOutcome {
@@ -252,35 +503,24 @@ pub(super) fn walk(context: LaneContext<'_>, lane_walk: LaneWalk<'_>) -> WalkOut
     if !narrow_walk(shared, root, &mut plan) {
         return WalkOutcome::Skipped;
     }
-
-    let full = plan.full;
-    let batch = Mutex::new(Vec::with_capacity(RECORD_BATCH));
-    let flush = |batch: &mut Vec<DirRecord>| {
-        if !batch.is_empty() {
-            let records = std::mem::take(batch);
-            let _ = sender.send(Message::Records { records, full });
-        }
-    };
+    let _ = sender.send(Message::WalkStarted {
+        root: root.to_path_buf(),
+        lane,
+    });
+    let sink = Mutex::new(RecordSink::new(context, &lane_walk, plan.full));
     let gentle =
         matches!(lane, Lane::Background { .. }).then(|| Mutex::new(Gentle::admit(shared, cancel)));
-    let result = fast_walk::subtree_records(root, &plan.options, |record| {
-        let mut pending = batch.lock().expect("record batch lock");
-        pending.push(record);
-        if pending.len() >= RECORD_BATCH {
-            flush(&mut pending);
-        }
+    let walked = fast_walk::subtree_records(root, &plan.options, |record| {
+        sink.lock().expect("record sink lock").accept(record);
         if let Some(gentle) = &gentle {
             gentle
                 .lock()
                 .expect("gentle walk lock")
-                .after_record(BackgroundTurn { shared, cancel }, || flush(&mut pending));
+                .after_record(BackgroundTurn { shared, cancel });
         }
     });
-    flush(&mut batch.lock().expect("record batch lock"));
-    match result {
-        Ok(()) => WalkOutcome::Walked,
-        Err(error) => WalkOutcome::Failed(error),
-    }
+    let sink = sink.into_inner().expect("record sink lock");
+    sink.finish(walked, plan.graft)
 }
 
 #[derive(Clone, Copy)]
@@ -312,7 +552,7 @@ impl Gentle {
         }
     }
 
-    pub(super) fn after_record(&mut self, turn: BackgroundTurn<'_>, flush: impl FnOnce()) {
+    pub(super) fn after_record(&mut self, turn: BackgroundTurn<'_>) {
         let BackgroundTurn { shared, cancel } = turn;
         self.since_admitted += 1;
         let must_wait = shared.lanes().background_must_wait();
@@ -320,7 +560,6 @@ impl Gentle {
         if !turn_due {
             return;
         }
-        flush();
         self.admission = None;
         wait_for_background_turn(shared);
         *self = Self::admit(shared, cancel);

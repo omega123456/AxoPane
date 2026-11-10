@@ -172,13 +172,44 @@ pub fn subtree_records(
 }
 
 pub fn list_dir(dir: &Path, options: &WalkOptions) -> Result<DirListing, ManualSizeError> {
-    let mut buffer = vec![0_u8; buffer_size(options)];
-    let scope = ReadScope {
-        options,
-        allowed_devs: None,
-    };
-    read_dir(dir, scope, &mut buffer)?
-        .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound).into())
+    let any_device = DeviceBoundary { allowed_devs: None };
+    any_device.list_dir(dir, options)
+}
+
+pub struct DeviceBoundary {
+    allowed_devs: Option<Vec<u64>>,
+}
+
+impl DeviceBoundary {
+    pub fn of(root: &Path, options: &WalkOptions) -> Result<Self, ManualSizeError> {
+        Ok(Self {
+            allowed_devs: allowed_devices(options, root)?,
+        })
+    }
+
+    pub fn list_dir(
+        &self,
+        dir: &Path,
+        options: &WalkOptions,
+    ) -> Result<DirListing, ManualSizeError> {
+        let mut buffer = vec![0_u8; buffer_size(options)];
+        let scope = ReadScope {
+            options,
+            allowed_devs: self.allowed_devs.as_deref(),
+        };
+        read_dir(dir, scope, &mut buffer)?
+            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound).into())
+    }
+
+    pub fn holds(&self, dir: &Path, options: &WalkOptions) -> bool {
+        let Some(allowed) = &self.allowed_devs else {
+            return true;
+        };
+        let Ok(metadata) = std::fs::symlink_metadata(dir) else {
+            return false;
+        };
+        allowed.contains(&device_of(options, dir, metadata.dev()))
+    }
 }
 
 #[cfg(feature = "test-utils")]

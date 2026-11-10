@@ -11,36 +11,13 @@ pub(super) enum SaveTrigger {
     CatchUp,
     ExclusionEdit,
     ScanComplete,
-    Exit(Instant),
+    Exit,
 }
 
 impl SaveTrigger {
     fn rewrites_the_base(self) -> bool {
         matches!(self, Self::ExclusionEdit | Self::ScanComplete)
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SaveKind {
-    Skip,
-    Manifest,
-    Compact,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct SaveState {
-    names_spilled: bool,
-    unsaved: bool,
-}
-
-fn choose_save(trigger: SaveTrigger, state: SaveState) -> SaveKind {
-    if trigger.rewrites_the_base() || state.names_spilled {
-        return SaveKind::Compact;
-    }
-    if state.unsaved {
-        return SaveKind::Manifest;
-    }
-    SaveKind::Skip
 }
 
 impl Machine {
@@ -65,30 +42,19 @@ impl Machine {
         if matches!(self.phase, Phase::Booting) {
             return;
         }
-        match choose_save(trigger, self.save_state()) {
-            SaveKind::Skip => {}
-            SaveKind::Manifest => {
-                self.save_manifest();
-            }
-            SaveKind::Compact => self.compact_for(trigger),
+        if trigger.rewrites_the_base() {
+            return self.start_compaction();
+        }
+        if self.has_unsaved_changes() {
+            self.save_manifest();
         }
     }
 
-    fn compact_for(&mut self, trigger: SaveTrigger) {
-        let SaveTrigger::Exit(deadline) = trigger else {
-            return self.start_compaction();
-        };
-        self.compact_before(deadline);
-    }
-
-    fn save_state(&self) -> SaveState {
+    fn has_unsaved_changes(&self) -> bool {
         let view = self.shared.view();
         let index_changed = view.tree.is_dirty() || view.names.has_unsaved_changes();
         let meta_changed = self.meta_dirty || self.snapshot_event_id() != self.meta.event_id;
-        SaveState {
-            names_spilled: view.names.has_spilled_names(),
-            unsaved: index_changed || meta_changed,
-        }
+        index_changed || meta_changed
     }
 
     fn next_meta(&self) -> SnapshotMeta {
@@ -99,6 +65,7 @@ impl Machine {
             visited_roots: visited,
             has_file_names: self.shared.collect_file_names,
             names_purge_due: self.purge_saved_names,
+            full_scan_running: self.full.is_some(),
             ..self.meta.clone()
         }
     }
@@ -136,7 +103,7 @@ impl Machine {
         drop(view);
         self.meta = meta;
         self.meta_dirty = false;
-        self.compactor.sweep_unreferenced_files();
+        self.sweep_unreferenced_files();
         log::info!(
             "size index: manifest saved ({manifest_bytes} bytes) in {}ms",
             started.elapsed().as_millis()
