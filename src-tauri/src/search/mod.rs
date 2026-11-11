@@ -3,6 +3,7 @@ pub mod everything_strategy;
 pub mod file_scan;
 pub mod matcher;
 pub mod path_style;
+pub mod prefilter;
 pub mod query;
 pub mod rank;
 pub mod results;

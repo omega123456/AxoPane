@@ -1,3 +1,4 @@
+use std::fmt;
 use std::fs;
 use std::io::{self, Write};
 use std::ops::Range;
@@ -198,6 +199,76 @@ pub struct ChangeEvent {
     pub flags: ChangeFlags,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RescanReason {
+    UserDropped,
+    KernelDropped,
+    EventIdsWrapped,
+    RootChanged,
+    VolumeChanged,
+    OsBuildChanged,
+    HistoryRewound,
+    SubtreeDropped,
+    NoSnapshot,
+    NoFileNames,
+}
+
+impl RescanReason {
+    pub fn text(self) -> &'static str {
+        match self {
+            Self::UserDropped => "user-dropped events",
+            Self::KernelDropped => "kernel-dropped events",
+            Self::EventIdsWrapped => "event ids wrapped",
+            Self::RootChanged => "watched root changed",
+            Self::VolumeChanged => "volume changed",
+            Self::OsBuildChanged => "OS build changed",
+            Self::HistoryRewound => "event history rewound",
+            Self::SubtreeDropped => "subtree dropped during catch-up",
+            Self::NoSnapshot => "no usable snapshot",
+            Self::NoFileNames => "saved index holds no file names",
+        }
+    }
+}
+
+impl fmt::Display for RescanReason {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.text())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RescanCause {
+    pub reason: RescanReason,
+    pub path: Option<PathBuf>,
+}
+
+impl RescanCause {
+    fn of_volume(reason: RescanReason) -> Self {
+        Self { reason, path: None }
+    }
+
+    fn of_event(reason: RescanReason, event: &ChangeEvent) -> Self {
+        Self {
+            reason,
+            path: Some(event.path.clone()),
+        }
+    }
+}
+
+impl fmt::Display for RescanCause {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "event history needs a full rescan ({})",
+            self.reason
+        )?;
+        let Some(path) = &self.path else {
+            return Ok(());
+        };
+        write!(formatter, " at {}", path.display())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplayOutcome {
     UpToDate,
@@ -205,7 +276,7 @@ pub enum ReplayOutcome {
         reread: Vec<PathBuf>,
         rescan: Vec<PathBuf>,
     },
-    FullRescan,
+    FullRescan(RescanCause),
 }
 
 #[derive(Clone, Copy)]
@@ -215,33 +286,75 @@ pub struct CurrentVolume<'volume> {
     pub event_id: u64,
 }
 
+#[derive(Clone, Copy)]
+pub struct LaunchState<'launch> {
+    pub saved: Option<&'launch SnapshotMeta>,
+    pub current: CurrentVolume<'launch>,
+    pub collects_file_names: bool,
+}
+
+pub fn flags_rescan_reason(flags: ChangeFlags) -> Option<RescanReason> {
+    if flags.user_dropped {
+        return Some(RescanReason::UserDropped);
+    }
+    if flags.kernel_dropped {
+        return Some(RescanReason::KernelDropped);
+    }
+    if flags.event_ids_wrapped {
+        return Some(RescanReason::EventIdsWrapped);
+    }
+    flags.root_changed.then_some(RescanReason::RootChanged)
+}
+
+pub fn volume_rescan_reason(
+    saved: &SnapshotMeta,
+    current: CurrentVolume<'_>,
+) -> Option<RescanReason> {
+    if saved.volume_uuid != current.uuid {
+        return Some(RescanReason::VolumeChanged);
+    }
+    if saved.os_build != current.os_build {
+        return Some(RescanReason::OsBuildChanged);
+    }
+    let history_rewound = saved.event_id > current.event_id;
+    history_rewound.then_some(RescanReason::HistoryRewound)
+}
+
+pub fn launch_rescan_reason(launch: LaunchState<'_>) -> Option<RescanReason> {
+    let Some(saved) = launch.saved else {
+        return Some(RescanReason::NoSnapshot);
+    };
+    let names_missing = launch.collects_file_names && !saved.has_file_names;
+    if names_missing {
+        return Some(RescanReason::NoFileNames);
+    }
+    volume_rescan_reason(saved, launch.current)
+}
+
 pub fn plan_catch_up(
     saved: &SnapshotMeta,
     current: CurrentVolume<'_>,
     events: &[ChangeEvent],
 ) -> ReplayOutcome {
-    let CurrentVolume {
-        uuid: current_uuid,
-        os_build: current_os_build,
-        event_id: current_event_id,
-    } = current;
-    let volume_changed = saved.volume_uuid != current_uuid;
-    let os_changed = saved.os_build != current_os_build;
-    let history_rewound = saved.event_id > current_event_id;
-    let subtree_dropped = events.iter().any(|event| event.flags.must_scan_sub_dirs);
-    let needs_full_rescan = volume_changed || os_changed || history_rewound || subtree_dropped;
-    if needs_full_rescan {
-        return ReplayOutcome::FullRescan;
+    if let Some(reason) = volume_rescan_reason(saved, current) {
+        return ReplayOutcome::FullRescan(RescanCause::of_volume(reason));
     }
-    if saved.event_id == current_event_id {
+    let subtree_dropped = events.iter().find(|event| event.flags.must_scan_sub_dirs);
+    if let Some(event) = subtree_dropped {
+        return ReplayOutcome::FullRescan(RescanCause::of_event(
+            RescanReason::SubtreeDropped,
+            event,
+        ));
+    }
+    if saved.event_id == current.event_id {
         return ReplayOutcome::UpToDate;
     }
     plan_batch(events)
 }
 
 pub fn plan_batch(events: &[ChangeEvent]) -> ReplayOutcome {
-    if events.iter().any(|event| forces_full_rescan(event.flags)) {
-        return ReplayOutcome::FullRescan;
+    if let Some(cause) = first_flag_cause(events) {
+        return ReplayOutcome::FullRescan(cause);
     }
     let (rescans, rereads): (Vec<_>, Vec<_>) = events
         .iter()
@@ -266,8 +379,11 @@ pub fn plan_batch(events: &[ChangeEvent]) -> ReplayOutcome {
     ReplayOutcome::Apply { reread, rescan }
 }
 
-fn forces_full_rescan(flags: ChangeFlags) -> bool {
-    flags.user_dropped || flags.kernel_dropped || flags.event_ids_wrapped || flags.root_changed
+fn first_flag_cause(events: &[ChangeEvent]) -> Option<RescanCause> {
+    events.iter().find_map(|event| {
+        let reason = flags_rescan_reason(event.flags)?;
+        Some(RescanCause::of_event(reason, event))
+    })
 }
 
 fn outermost(mut paths: Vec<PathBuf>) -> Vec<PathBuf> {

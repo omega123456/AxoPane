@@ -1,8 +1,10 @@
 use std::fmt::Debug;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::slice;
 use std::sync::Arc;
 
+use file_explorer_lib::size::index::names::signature::signature_of;
 use file_explorer_lib::size::index::segment::{
     MappedSegment, NodeFlags, SegmentBuilder, SegmentEntry, SegmentTarget,
 };
@@ -97,6 +99,10 @@ fn twins() -> Twins {
     }
 }
 
+fn signature_at(tree: &FolderSizeTree, path: &Path) -> Option<u32> {
+    tree.folder_signature(tree.lookup(path)?)
+}
+
 fn sorted(mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
     paths.sort();
     paths
@@ -132,6 +138,7 @@ impl Twins {
             );
         }
         assert_eq!(self.mapped.node_count(), self.heap.node_count());
+        self.assert_same_signatures();
         assert_eq!(
             sorted(self.mapped.unscanned_tops()),
             sorted(self.heap.unscanned_tops())
@@ -140,6 +147,22 @@ impl Twins {
             self.mapped.export_slots().len(),
             self.heap.export_slots().len()
         );
+    }
+
+    fn assert_same_signatures(&self) {
+        for parts in KNOWN_FOLDERS {
+            let path = self.path(parts);
+            let mapped = signature_at(&self.mapped, &path);
+            assert_eq!(mapped, signature_at(&self.heap, &path), "{parts:?}");
+            let expected = mapped.map(|_| self.expected_signature(parts));
+            assert_eq!(mapped, expected, "{parts:?}");
+        }
+    }
+
+    fn expected_signature(&self, parts: &[&str]) -> u32 {
+        let root_name = self.root.to_string_lossy();
+        let name = parts.last().copied().unwrap_or(root_name.as_ref());
+        signature_of(name.as_bytes())
     }
 
     fn drain_both(&mut self) -> Vec<PathBuf> {
@@ -444,4 +467,53 @@ fn a_damaged_segment_chunk_marks_the_tree_corrupt_and_reads_as_empty() {
     let total = tree.total(Path::new(WIDE_ROOT)).expect("root");
     assert_eq!(total.bytes, 0, "the damaged size columns read as empty");
     assert!(tree.is_corrupt());
+}
+
+#[test]
+fn dot_named_roots_open_no_hidden_range_but_their_nested_dot_folders_do() {
+    let directory = tempdir().expect("temp dir");
+    let target = SegmentTarget {
+        paths: paths_in(directory.path()),
+        token: TOKEN,
+    };
+    let mut builder = SegmentBuilder::create(target).expect("builder");
+    builder.push(scanned_entry(0, ".dot-root")).expect("root");
+    builder.push(scanned_entry(1, ".nested")).expect("child");
+    builder.push(scanned_entry(2, ".deeper")).expect("deeper");
+    builder.push(scanned_entry(1, "shown")).expect("sibling");
+    let built = builder.finish().expect("finish");
+    let segment = MappedSegment::open(&built.paths).expect("opens");
+    let nested_ordinal = 1;
+    let nested_subtree = segment.subtree(nested_ordinal).expect("nested subtree");
+    let nested_end = nested_subtree.end;
+    assert_eq!(
+        segment.hidden_ranges().expect("hidden"),
+        [nested_subtree],
+        "only the top-most dot folder below the root opens a range"
+    );
+
+    let mut tree = FolderSizeTree::default();
+    let ids = tree.attach_base(Arc::new(segment)).expect("attached");
+    let root = Path::new(".dot-root");
+    let nested = tree.lookup(&root.join(".nested")).expect("nested folder");
+    let nested_ids = nested..ids.start + nested_end;
+    assert_eq!(tree.hidden_ranges().ranges(), slice::from_ref(&nested_ids));
+    let root_id = tree.lookup(root).expect("root");
+    assert!(!tree.hidden_ranges().contains(root_id), "roots always show");
+
+    tree.apply_listing(
+        root,
+        DirectoryListing::scanned(1, &[".nested", ".heap", "shown"]),
+    );
+    let heap_folder = tree.lookup(&root.join(".heap")).expect("heap folder");
+    assert!(tree.heap_ids().contains(&heap_folder));
+    assert_eq!(
+        tree.hidden_ranges().ranges(),
+        [nested_ids],
+        "heap folders add no range"
+    );
+    assert_eq!(
+        tree.folder_signature(heap_folder),
+        Some(signature_of(b".heap"))
+    );
 }

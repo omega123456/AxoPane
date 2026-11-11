@@ -1,20 +1,20 @@
 use std::cmp::Ordering as NameOrder;
 use std::fs::File;
 use std::ops::Range;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use memmap2::Mmap;
 
 use super::format::{
-    le_u32, le_u64, Cell, CellRun, Column, Layout, NodeFlags, OpenedTree, SegmentPaths, TreeHeader,
-    NO_PARENT,
+    decode_range, le_u32, le_u64, Cell, CellRun, Column, Layout, NodeFlags, OpenedTree,
+    SegmentPaths, TreeHeader, NO_PARENT,
 };
 use crate::size::index::names::block;
 use crate::size::index::names::file::MappedNames;
+use crate::size::index::verified::VerifiedSet;
 
 const CHILD_ID_BYTES: usize = size_of::<u32>();
-const BITS_PER_WORD: usize = u64::BITS as usize;
+const FIRST_ORDINAL: u32 = 0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SegmentCorrupt;
@@ -56,38 +56,11 @@ impl<'segment> ChildIds<'segment> {
 }
 
 #[derive(Debug)]
-struct VerifiedChunks {
-    words: Vec<AtomicU64>,
-}
-
-impl VerifiedChunks {
-    fn none_of(chunk_count: usize) -> Self {
-        let word_count = chunk_count.div_ceil(BITS_PER_WORD);
-        Self {
-            words: (0..word_count).map(|_| AtomicU64::new(0)).collect(),
-        }
-    }
-
-    fn contains(&self, chunk: usize) -> bool {
-        let word = self.words[chunk / BITS_PER_WORD].load(Ordering::Relaxed);
-        word & bit_of(chunk) != 0
-    }
-
-    fn insert(&self, chunk: usize) {
-        self.words[chunk / BITS_PER_WORD].fetch_or(bit_of(chunk), Ordering::Relaxed);
-    }
-}
-
-fn bit_of(chunk: usize) -> u64 {
-    1 << (chunk % BITS_PER_WORD)
-}
-
-#[derive(Debug)]
 pub struct MappedSegment {
     map: Mmap,
     header: TreeHeader,
     layout: Layout,
-    verified: VerifiedChunks,
+    verified: VerifiedSet,
     names: Arc<MappedNames>,
 }
 
@@ -105,7 +78,7 @@ impl MappedSegment {
             return None;
         }
         Some(Self {
-            verified: VerifiedChunks::none_of(layout.chunk_count()),
+            verified: VerifiedSet::none_of(layout.chunk_count()),
             map,
             header,
             layout,
@@ -177,6 +150,39 @@ impl MappedSegment {
             count: end.checked_sub(start).ok_or(SegmentCorrupt)?,
         })?;
         std::str::from_utf8(bytes).map_err(|_| SegmentCorrupt)
+    }
+
+    pub fn signature(&self, id: u32) -> Result<u32, SegmentCorrupt> {
+        self.u32_at(Column::Signature.at(id))
+    }
+
+    pub fn hidden_ranges(&self) -> Result<Vec<Range<u32>>, SegmentCorrupt> {
+        let mut ranges: Vec<Range<u32>> = Vec::new();
+        for index in 0..self.header.counts.hidden_ranges {
+            let previous_end = ranges.last().map_or(FIRST_ORDINAL, |previous| previous.end);
+            ranges.push(self.hidden_range_after(index, previous_end)?);
+        }
+        Ok(ranges)
+    }
+
+    fn hidden_range_after(
+        &self,
+        index: u32,
+        previous_end: u32,
+    ) -> Result<Range<u32>, SegmentCorrupt> {
+        let range = self.hidden_range(index)?;
+        let follows_previous = range.start >= previous_end;
+        let spans_one_subtree = self.subtree(range.start)? == range;
+        let is_well_placed = follows_previous && spans_one_subtree;
+        if !is_well_placed {
+            return Err(SegmentCorrupt);
+        }
+        Ok(range)
+    }
+
+    fn hidden_range(&self, index: u32) -> Result<Range<u32>, SegmentCorrupt> {
+        let bytes = self.verified(self.cell(Column::HiddenRanges.at(index))?)?;
+        decode_range(bytes).ok_or(SegmentCorrupt)
     }
 
     pub fn children(&self, id: u32) -> Result<ChildIds<'_>, SegmentCorrupt> {

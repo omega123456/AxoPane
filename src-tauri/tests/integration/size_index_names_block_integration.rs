@@ -1,63 +1,83 @@
 use file_explorer_lib::size::index::names::block::{
-    checksum, decode, BlockBuilder, BlockEntry, BlockSpan, EncodedBlock, NamesCorrupt,
-    BLOCK_TARGET_BYTES,
+    checksum, BlockBuilder, BlockFolder, BlockSpan, BlockView, BuiltBlock, NamesCorrupt,
+    StoredBlock, BLOCK_TARGET_BYTES,
 };
-use file_explorer_lib::size::index::names::codec::{
-    DecodeScratch, NamesEncoder, COMPRESSION_LEVEL,
-};
-use file_explorer_lib::size::index::names::PackedNames;
+use file_explorer_lib::size::index::names::signature::signature_of;
+use file_explorer_lib::size::index::names::{names_in, PackedNames};
 
 fn packed(names: &[&str]) -> PackedNames {
     PackedNames::from_names(names.iter().map(|name| name.as_bytes()))
 }
 
-fn encoder() -> NamesEncoder {
-    NamesEncoder::new().expect("encoder")
-}
-
-fn finished(builder: BlockBuilder) -> EncodedBlock {
-    builder.finish(&mut encoder()).expect("compresses")
-}
-
 /// Folders 10..16 where 11, 13 and 15 hold no files.
-fn sample_block() -> EncodedBlock {
+fn sample_block() -> BuiltBlock {
     let mut builder = BlockBuilder::new(10);
-    builder.push(10, packed(&["a.txt", ".hidden"]).as_bytes());
+    builder.push(10, packed(&[".hidden", "a.txt"]).as_bytes());
     builder.push(11, &[]);
     builder.push(12, packed(&["invoice.pdf"]).as_bytes());
-    builder.push(14, packed(&["Ünïcödé.md", "b"]).as_bytes());
+    builder.push(14, packed(&["b", "Ünïcödé.md"]).as_bytes());
     builder.push(15, &[]);
-    finished(builder)
+    builder.finish()
 }
 
-fn raw_entry(relative_id: u32, names: &[u8]) -> Vec<u8> {
-    let mut out = relative_id.to_le_bytes().to_vec();
-    out.extend_from_slice(&(names.len() as u32).to_le_bytes());
-    out.extend_from_slice(names);
-    out
+fn verified(block: &BuiltBlock) -> BlockView<'_> {
+    BlockView::verified(block.stored()).expect("verifies")
 }
 
-/// A block with a valid checksum over arbitrary raw content.
-fn crafted(raw: &[u8], folder_count: u32) -> EncodedBlock {
-    let compressed = encoder().compress(raw).expect("compresses");
-    EncodedBlock {
-        span: BlockSpan {
-            first_ordinal: 0,
-            folder_count,
-        },
-        raw_len: raw.len() as u32,
-        checksum: checksum(&compressed),
-        compressed,
+fn signatures_of(packed: &[u8]) -> Vec<u32> {
+    names_in(packed).map(signature_of).collect()
+}
+
+struct RawBlock {
+    folders: Vec<(u32, u32)>,
+    offsets: Vec<u32>,
+    names: Vec<u8>,
+    name_count: u32,
+    folder_count: u32,
+}
+
+impl RawBlock {
+    fn valid() -> Self {
+        Self {
+            folders: vec![(0, 0), (2, 2)],
+            offsets: vec![0, 2, 4],
+            names: b"a\0b\0c\0".to_vec(),
+            name_count: 3,
+            folder_count: 3,
+        }
+    }
+
+    fn built(&self) -> BuiltBlock {
+        let mut bytes = (self.folders.len() as u32).to_le_bytes().to_vec();
+        for (relative_id, first_name) in &self.folders {
+            bytes.extend_from_slice(&relative_id.to_le_bytes());
+            bytes.extend_from_slice(&first_name.to_le_bytes());
+        }
+        for _ in 0..self.offsets.len() {
+            bytes.extend_from_slice(&0_u32.to_le_bytes());
+        }
+        for offset in &self.offsets {
+            bytes.extend_from_slice(&offset.to_le_bytes());
+        }
+        bytes.extend_from_slice(&self.names);
+        BuiltBlock {
+            span: BlockSpan {
+                first_ordinal: 0,
+                folder_count: self.folder_count,
+            },
+            name_count: self.name_count,
+            checksum: checksum(&bytes),
+            bytes,
+        }
+    }
+
+    fn verifies(&self) -> bool {
+        BlockView::verified(self.built().stored()).is_ok()
     }
 }
 
-fn decodes(block: &EncodedBlock) -> bool {
-    let mut scratch = DecodeScratch::default();
-    decode(block.stored(), &mut scratch).is_ok()
-}
-
 #[test]
-fn a_block_round_trips_with_ids_relative_to_its_first_folder() {
+fn a_block_round_trips_folders_names_and_signatures_relative_to_its_first_folder() {
     let block = sample_block();
     assert_eq!(
         block.span,
@@ -68,133 +88,180 @@ fn a_block_round_trips_with_ids_relative_to_its_first_folder() {
     );
     assert_eq!(block.span.end(), 16);
     assert_eq!(block.span.ordinals(), 10..16);
+    assert_eq!(block.name_count, 5);
 
-    let mut scratch = DecodeScratch::default();
-    let decoded = decode(block.stored(), &mut scratch).expect("decodes");
-    let entries: Vec<BlockEntry<'_>> = decoded.entries().collect();
+    let view = verified(&block);
+    let folders: Vec<BlockFolder<'_>> = view.folders().collect();
     assert_eq!(
-        entries
+        folders
             .iter()
-            .map(|entry| entry.relative_id)
+            .map(|folder| folder.relative_id)
             .collect::<Vec<_>>(),
         [0, 2, 4],
         "empty folders take no entry"
     );
-    assert_eq!(
-        decoded.names_of(12),
-        Some(packed(&["invoice.pdf"]).as_bytes())
-    );
-    assert_eq!(decoded.names_of(11), None);
-    assert_eq!(decoded.names_of(9), None, "before the block");
-    let ranges = decoded.entry_ranges();
-    assert_eq!(ranges.len(), 3);
-    for (range, entry) in ranges.iter().zip(&entries) {
-        assert_eq!(range.relative_id, entry.relative_id);
-        assert_eq!(&decoded.raw()[range.names.clone()], entry.names);
+    let expected = [
+        packed(&[".hidden", "a.txt"]),
+        packed(&["invoice.pdf"]),
+        packed(&["b", "Ünïcödé.md"]),
+    ];
+    for (folder, names) in folders.iter().zip(&expected) {
+        assert_eq!(folder.packed, names.as_bytes());
+        assert_eq!(folder.signatures.len(), names.names().count());
+        assert!(!folder.signatures.is_empty());
+        assert_eq!(
+            folder.signatures.iter().collect::<Vec<_>>(),
+            signatures_of(names.as_bytes())
+        );
     }
+    assert_eq!(view.names_of(12), Some(expected[1].as_bytes()));
+    assert_eq!(view.names_of(14), Some(expected[2].as_bytes()));
+    assert_eq!(view.names_of(10), Some(expected[0].as_bytes()));
+    assert_eq!(view.names_of(11), None);
+    assert_eq!(view.names_of(15), None);
+    assert_eq!(view.names_of(99), None, "past the block");
+    assert_eq!(view.names_of(9), None, "before the block");
+    assert_eq!(
+        view.folder(4).map(|folder| folder.packed),
+        Some(expected[2].as_bytes())
+    );
 }
 
 #[test]
 fn a_block_copied_to_another_position_keeps_its_bytes() {
     let block = sample_block();
-    let moved = EncodedBlock {
+    let moved = StoredBlock {
         span: BlockSpan {
             first_ordinal: 500,
             ..block.span
         },
+        ..block.stored()
+    };
+    let view = BlockView::verified(moved).expect("verifies");
+    assert_eq!(
+        view.names_of(502),
+        Some(packed(&["invoice.pdf"]).as_bytes())
+    );
+}
+
+#[test]
+fn a_flipped_byte_anywhere_fails_verification_but_not_a_trusting_read() {
+    let block = sample_block();
+    for at in 0..block.bytes.len() {
+        let mut flipped = block.clone();
+        flipped.bytes[at] ^= 0x41;
+        assert_eq!(
+            BlockView::verified(flipped.stored()).map(|_| ()),
+            Err(NamesCorrupt),
+            "flip at {at}"
+        );
+    }
+    let mut renamed = block.clone();
+    let last_name_byte = renamed.bytes.len() - 2;
+    renamed.bytes[last_name_byte] = b'X';
+    let trusted = BlockView::trusting(renamed.stored()).expect("trusted as is");
+    assert_eq!(
+        trusted.names_of(14),
+        Some("b\0Ünïcödé.mX\0".as_bytes()),
+        "a trusting read never hashes"
+    );
+}
+
+#[test]
+fn layouts_too_short_for_their_tables_are_refused() {
+    let block = sample_block();
+    let mut more_names = block.clone();
+    more_names.name_count = 1_000;
+    assert!(BlockView::trusting(more_names.stored()).is_err());
+    let empty = BuiltBlock {
+        bytes: vec![0, 0],
+        checksum: checksum(&[0, 0]),
         ..block.clone()
     };
-    let mut scratch = DecodeScratch::default();
-    let decoded = decode(moved.stored(), &mut scratch).expect("decodes");
-    assert_eq!(
-        decoded.names_of(502),
-        Some(packed(&["invoice.pdf"]).as_bytes())
-    );
+    assert!(BlockView::trusting(empty.stored()).is_err());
+    let mut many_folders = block;
+    many_folders.bytes[0] = 0xFF;
+    assert!(BlockView::trusting(many_folders.stored()).is_err());
 }
 
 #[test]
-fn checksum_and_decode_failures_are_rejected() {
-    let block = sample_block();
-    assert!(decodes(&block));
-    let mut flipped = block.clone();
-    flipped.compressed[0] ^= 0x41;
-    let mut scratch = DecodeScratch::default();
-    assert_eq!(
-        decode(flipped.stored(), &mut scratch).map(|_| ()),
-        Err(NamesCorrupt)
-    );
-
-    let mut garbage = block.clone();
-    garbage.compressed = vec![0xF0; 4];
-    garbage.checksum = checksum(&garbage.compressed);
-    assert!(!decodes(&garbage), "not a zstd frame");
-
-    let mut short = block.clone();
-    short.raw_len += 7;
-    assert!(!decodes(&short), "fewer bytes than the directory promised");
-
-    let mut long = block.clone();
-    long.raw_len -= 1;
-    assert!(!decodes(&long), "more bytes than the directory promised");
+fn an_empty_block_and_a_crafted_block_verify() {
+    assert!(RawBlock::valid().verifies(), "control");
+    let empty = RawBlock {
+        folders: Vec::new(),
+        offsets: Vec::new(),
+        names: Vec::new(),
+        name_count: 0,
+        folder_count: 4,
+    };
+    assert!(empty.verifies(), "a block of empty folders");
+    let built = empty.built();
+    let view = BlockView::verified(built.stored()).expect("verifies");
+    assert_eq!(view.folders().count(), 0);
 }
 
 #[test]
-fn one_scratch_decodes_many_blocks_and_recovers_after_a_failure() {
-    let block = sample_block();
-    let mut garbage = block.clone();
-    garbage.compressed = vec![0xF0; 4];
-    garbage.checksum = checksum(&garbage.compressed);
-    let mut scratch = DecodeScratch::default();
-    assert!(decode(block.stored(), &mut scratch).is_ok());
-    assert!(decode(garbage.stored(), &mut scratch).is_err());
-    let decoded = decode(block.stored(), &mut scratch).expect("decodes again");
-    assert_eq!(
-        decoded.names_of(12),
-        Some(packed(&["invoice.pdf"]).as_bytes())
-    );
-    assert_eq!(scratch.raw().len(), block.raw_len as usize);
-    assert!(format!("{scratch:?}").contains("DecodeScratch"));
+fn malformed_folder_directories_are_rejected_even_with_a_valid_checksum() {
+    let rejected = [
+        (vec![(2, 0), (0, 2)], "ids out of order"),
+        (vec![(0, 0), (0, 2)], "repeated folder"),
+        (vec![(0, 0), (3, 2)], "outside the span"),
+        (vec![(0, 1), (2, 2)], "first folder skips names"),
+        (vec![(0, 0), (2, 0)], "a folder without names"),
+        (vec![(0, 0), (2, 3)], "first name past the name count"),
+    ];
+    for (folders, what) in rejected {
+        let raw = RawBlock {
+            folders,
+            ..RawBlock::valid()
+        };
+        assert!(!raw.verifies(), "{what}");
+    }
+    let names_without_folders = RawBlock {
+        folders: Vec::new(),
+        ..RawBlock::valid()
+    };
+    assert!(!names_without_folders.verifies(), "names without folders");
+    let folders_without_names = RawBlock {
+        offsets: Vec::new(),
+        names: Vec::new(),
+        name_count: 0,
+        ..RawBlock::valid()
+    };
+    assert!(!folders_without_names.verifies(), "folders without names");
 }
 
 #[test]
-fn blocks_use_fast_zstd_and_shrink_repetitive_names() {
-    assert_eq!(COMPRESSION_LEVEL, 1);
-    let mut encoder = encoder();
-    assert!(format!("{encoder:?}").contains("NamesEncoder"));
-    let names: Vec<String> = (0..500)
-        .map(|index| format!("thumbnail-{index}.thumb"))
-        .collect();
-    let mut builder = BlockBuilder::new(0);
-    builder.push(0, PackedNames::from_names(&names).as_bytes());
-    let raw_len = builder.raw_len();
-    let block = builder.finish(&mut encoder).expect("compresses");
-    assert!(
-        block.compressed.len() * 3 < raw_len,
-        "zstd shrinks repetitive names"
-    );
-    assert!(decodes(&block));
-}
-
-#[test]
-fn malformed_entries_are_rejected_even_with_a_valid_checksum() {
-    let good = raw_entry(0, b"a\0b\0");
-    assert!(decodes(&crafted(&good, 1)), "control");
-    assert!(decodes(&crafted(&[], 3)), "a block of empty folders");
-
-    let out_of_order = [raw_entry(1, b"a\0"), raw_entry(0, b"b\0")].concat();
-    let repeated = [raw_entry(0, b"a\0"), raw_entry(0, b"b\0")].concat();
-    for (raw, folder_count, what) in [
-        (out_of_order, 2, "out of order"),
-        (repeated, 2, "repeated folder"),
-        (raw_entry(3, b"a\0"), 2, "outside the span"),
-        (raw_entry(0, b""), 1, "an empty list is never stored"),
-        (raw_entry(0, b"a"), 1, "unterminated"),
-        (raw_entry(0, b"\0a\0"), 1, "empty first name"),
-        (raw_entry(0, b"a\0\0b\0"), 1, "empty middle name"),
-        (good[..good.len() - 1].to_vec(), 1, "truncated names"),
-        (good[..5].to_vec(), 1, "truncated header"),
-    ] {
-        assert!(!decodes(&crafted(&raw, folder_count)), "{what}");
+fn malformed_name_areas_are_rejected_even_with_a_valid_checksum() {
+    let rejected = [
+        (
+            vec![1, 2, 4],
+            b"a\0b\0c\0".to_vec(),
+            "first name not at zero",
+        ),
+        (vec![0, 3, 4], b"a\0b\0c\0".to_vec(), "offset inside a name"),
+        (vec![0, 4, 2], b"a\0b\0c\0".to_vec(), "offsets out of order"),
+        (
+            vec![0, 2, 40],
+            b"a\0b\0c\0".to_vec(),
+            "offset beyond the area",
+        ),
+        (vec![0, 2, 4], b"a\0b\0c".to_vec(), "unterminated last name"),
+        (vec![0, 1, 3], b"\0b\0c\0".to_vec(), "empty first name"),
+        (vec![0, 2, 4], b"a\0b\0c\0d\0".to_vec(), "trailing bytes"),
+        (
+            vec![0, 2, 6],
+            b"a\0b\0x\0c\0".to_vec(),
+            "two names behind one offset",
+        ),
+    ];
+    for (offsets, names, what) in rejected {
+        let raw = RawBlock {
+            offsets,
+            names,
+            ..RawBlock::valid()
+        };
+        assert!(!raw.verifies(), "{what}");
     }
 }
 
@@ -212,12 +279,14 @@ fn checksums_cover_every_byte_and_the_length() {
 }
 
 #[test]
-fn the_block_target_is_a_quarter_mebibyte_of_names() {
+fn the_payload_counts_directory_tables_and_names_against_the_target() {
     assert_eq!(BLOCK_TARGET_BYTES, 256 * 1024);
     let mut builder = BlockBuilder::new(0);
-    assert_eq!(builder.raw_len(), 0);
+    assert_eq!(builder.payload_len(), 4, "the folder count");
     builder.push(0, packed(&["x"]).as_bytes());
-    assert_eq!(builder.raw_len(), 8 + 2);
+    assert_eq!(builder.payload_len(), 4 + 8 + 4 + 4 + 2);
+    let block = builder.finish();
+    assert_eq!(block.bytes.len(), 22);
     let span = BlockSpan {
         first_ordinal: u32::MAX,
         folder_count: 5,

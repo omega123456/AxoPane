@@ -8,7 +8,8 @@ use super::results::{CandidatePool, TieredCandidate, LISTED_TIER};
 use super::tree_scan::{TreeSearchRun, VisibleTree};
 use super::{Candidate, SearchError};
 use crate::resource_coordinator::scan_pool::{map_parts_in_order, split_slice};
-use crate::size::index::names::{FileNameStore, FolderNames, NamesScratch, NamesUnreadable};
+use crate::size::index::names::signature::SignedName;
+use crate::size::index::names::{FileNameStore, FolderNames, NamesUnreadable};
 use crate::size::index::tree::{FolderSizeTree, IdRanges};
 use crate::size::index::IndexRead;
 
@@ -23,6 +24,10 @@ pub enum FileSelection {
 impl FileSelection {
     pub fn nothing() -> Self {
         Self::Directly(Vec::new())
+    }
+
+    fn reaches_subtrees(&self) -> bool {
+        matches!(self, Self::Everywhere | Self::Below(_))
     }
 }
 
@@ -61,10 +66,11 @@ struct FileScanner<'scan, 'run> {
 
 impl FileScanner<'_, '_> {
     fn plan(&self, selection: &FileSelection) -> Result<Option<ScanPlan>, SearchError> {
+        let include_hidden = self.run.options.include_hidden;
         let mut plan = None;
-        self.run
-            .source
-            .read(&mut |view| plan = ScanPlan::for_view(&view, selection))?;
+        self.run.source.read(&mut |view| {
+            plan = ScanPlan::for_view(&view, selection, include_hidden);
+        })?;
         Ok(plan)
     }
 
@@ -85,6 +91,7 @@ impl FileScanner<'_, '_> {
                 visible: VisibleTree::new(&view, include_hidden),
                 name,
                 members: plan.members.as_ref(),
+                excluded: &plan.excluded,
             };
             collected = collect(chunk, view.names, &matcher);
         })?;
@@ -107,17 +114,27 @@ impl FileScanner<'_, '_> {
 
 struct ScanPlan {
     members: Option<IdRanges>,
+    excluded: IdRanges,
     blocks: Vec<usize>,
 }
 
 impl ScanPlan {
-    fn for_view(view: &IndexRead<'_>, selection: &FileSelection) -> Option<Self> {
+    fn for_view(
+        view: &IndexRead<'_>,
+        selection: &FileSelection,
+        include_hidden: bool,
+    ) -> Option<Self> {
         if !view.names.is_available() {
             return None;
         }
         let members = selected_members(view.tree, selection);
-        let blocks = selected_blocks(view.names, members.as_ref());
-        Some(Self { members, blocks })
+        let excluded = excluded_ranges(view, selection, include_hidden);
+        let blocks = selected_blocks(view.names, members.as_ref(), &excluded);
+        Some(Self {
+            members,
+            excluded,
+            blocks,
+        })
     }
 
     fn chunks(&self) -> impl Iterator<Item = NamesChunk<'_>> {
@@ -126,7 +143,31 @@ impl ScanPlan {
     }
 }
 
-fn selected_blocks(names: &FileNameStore, members: Option<&IdRanges>) -> Vec<usize> {
+fn excluded_ranges(
+    view: &IndexRead<'_>,
+    selection: &FileSelection,
+    include_hidden: bool,
+) -> IdRanges {
+    let mut excluded = view.names.dead_slots().clone();
+    let skips_hidden_subtrees = !include_hidden && selection.reaches_subtrees();
+    if skips_hidden_subtrees {
+        excluded.add_all(view.tree.hidden_ranges());
+    }
+    excluded
+}
+
+fn selected_blocks(
+    names: &FileNameStore,
+    members: Option<&IdRanges>,
+    excluded: &IdRanges,
+) -> Vec<usize> {
+    let excluded_blocks = names.blocks_within(excluded);
+    let candidates = member_blocks(names, members).into_iter();
+    let kept = candidates.filter(|block| excluded_blocks.binary_search(block).is_err());
+    kept.collect()
+}
+
+fn member_blocks(names: &FileNameStore, members: Option<&IdRanges>) -> Vec<usize> {
     let Some(members) = members else {
         return (0..names.block_count()).collect();
     };
@@ -215,12 +256,11 @@ fn collect_block_part(
     indexes: &[usize],
     matcher: &FileMatcher<'_>,
 ) -> Collected {
-    let mut scratch = NamesScratch::default();
     let mut hits = Vec::new();
     let block_count = names.block_count();
     let mut existing = indexes.iter().filter(|&&index| index < block_count);
     let visited = existing.try_for_each(|&index| {
-        let block = names.read_block(index, &mut scratch)?;
+        let block = names.read_block(index)?;
         block
             .folders()
             .for_each(|folder| matcher.collect_hits(folder, &mut hits));
@@ -236,6 +276,7 @@ struct FileMatcher<'scan> {
     visible: VisibleTree<'scan>,
     name: Option<&'scan Segment>,
     members: Option<&'scan IdRanges>,
+    excluded: &'scan IdRanges,
 }
 
 struct NameHit {
@@ -248,10 +289,7 @@ impl FileMatcher<'_> {
         if !self.selects(folder.slot) {
             return;
         }
-        let matched: Vec<NameHit> = folder
-            .names()
-            .filter_map(|raw| self.match_name(raw))
-            .collect();
+        let matched = self.matched_names(folder);
         if matched.is_empty() {
             return;
         }
@@ -265,28 +303,50 @@ impl FileMatcher<'_> {
     }
 
     fn selects(&self, slot: u32) -> bool {
+        if self.excluded.contains(slot) {
+            return false;
+        }
         self.members.is_none_or(|members| members.contains(slot))
     }
 
-    fn match_name(&self, raw: &[u8]) -> Option<NameHit> {
-        let name = String::from_utf8_lossy(raw);
-        if self.visible.hides_name(&name) {
+    fn matched_names(&self, folder: FolderNames<'_>) -> Vec<NameHit> {
+        let Some(segment) = self.name else {
+            return self.listed_names(folder);
+        };
+        let mut matched = Vec::new();
+        folder.visit_admitted(segment.prefilter(), &mut |name| {
+            matched.extend(self.matched_name(segment, name));
+        });
+        matched
+    }
+
+    fn listed_names(&self, folder: FolderNames<'_>) -> Vec<NameHit> {
+        let listed = folder
+            .names()
+            .filter_map(|raw| self.shown_hit(raw, LISTED_TIER));
+        listed.collect()
+    }
+
+    fn matched_name(&self, segment: &Segment, name: SignedName<'_>) -> Option<NameHit> {
+        if self.visible.hides_name(name.bytes) {
             return None;
         }
-        let tier = self.tier_of(&name)?;
+        let matched = segment.match_raw(name, NameKind::File)?;
+        Some(NameHit {
+            name: matched.text.into_owned(),
+            tier: matched.found.tier,
+        })
+    }
+
+    fn shown_hit(&self, raw: &[u8], tier: u8) -> Option<NameHit> {
+        if self.visible.hides_name(raw) {
+            return None;
+        }
+        let name = String::from_utf8_lossy(raw);
         Some(NameHit {
             name: name.into_owned(),
             tier,
         })
-    }
-
-    fn tier_of(&self, name: &str) -> Option<u8> {
-        let Some(segment) = self.name else {
-            return Some(LISTED_TIER);
-        };
-        segment
-            .match_name(name, NameKind::File)
-            .map(|found| found.tier)
     }
 
     fn candidate(&self, folder_path: &str, hit: NameHit) -> Option<TieredCandidate> {

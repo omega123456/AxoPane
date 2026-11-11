@@ -1,12 +1,12 @@
 use std::fs::{self, OpenOptions};
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use file_explorer_lib::size::index::names::file::{NAMES_FILE, SPILL_SUFFIX};
 use file_explorer_lib::size::index::names::writer::RewriteStats;
 use file_explorer_lib::size::index::names::{
-    names_in, FileNameStore, FolderNames, NamesCounters, NamesCursor, NamesScratch,
-    NamesUnreadable, OverlayStats, PackedNames, SavedNames, OVERLAY_THRESHOLD_BYTES,
+    names_in, FileNameStore, FolderNames, NamesCounters, NamesCursor, NamesUnreadable,
+    OverlayStats, OverlayThreshold, PackedNames, SavedNames, OVERLAY_THRESHOLD_BYTES,
     OVERLAY_THRESHOLD_FOLDERS,
 };
 use file_explorer_lib::size::index::segment::{
@@ -17,6 +17,7 @@ use tempfile::{tempdir, TempDir};
 use crate::common::segment::paths_in;
 
 const SMALL_BLOCK_TARGET: usize = 64;
+const LARGE_BLOCK_TARGET: usize = 64 * 1024;
 const NAMES_HEADER_BYTES: u64 = 48;
 const TOKEN: u64 = 3;
 const ROOT_SLOT: u32 = 0;
@@ -84,12 +85,15 @@ fn entry<'entry>(
 }
 
 fn write_segment(directory: &Path, folder_count: u32) {
+    write_segment_in_blocks(directory, folder_count, SMALL_BLOCK_TARGET);
+}
+
+fn write_segment_in_blocks(directory: &Path, folder_count: u32, block_target: usize) {
     let target = SegmentTarget {
         paths: paths_in(directory),
         token: TOKEN,
     };
-    let mut builder =
-        SegmentBuilder::with_block_target(target, SMALL_BLOCK_TARGET).expect("builder");
+    let mut builder = SegmentBuilder::with_block_target(target, block_target).expect("builder");
     builder
         .push(entry(0, "root", &names_for(ROOT_SLOT)))
         .expect("root");
@@ -116,6 +120,17 @@ fn segment_store(fixture: &Fixture, folder_count: u32) -> FileNameStore {
     store
 }
 
+fn large_block_store(fixture: &Fixture, folder_count: u32) -> FileNameStore {
+    write_segment_in_blocks(
+        &fixture.segment_directory(),
+        folder_count,
+        LARGE_BLOCK_TARGET,
+    );
+    let mut store = fixture.store();
+    store.restore(saved_names(&fixture.segment_directory()));
+    store
+}
+
 fn corrupt_segment_store(fixture: &Fixture) -> FileNameStore {
     write_segment(&fixture.segment_directory(), FOLDER_COUNT);
     corrupt_byte_at(&fixture.segment_names_file(), NAMES_HEADER_BYTES);
@@ -132,8 +147,7 @@ fn current(store: &FileNameStore, slot: u32) -> Option<Vec<String>> {
 }
 
 fn block_folders(store: &FileNameStore, index: usize) -> Vec<u32> {
-    let mut scratch = NamesScratch::default();
-    let block = store.read_block(index, &mut scratch).expect("block");
+    let block = store.read_block(index).expect("block");
     block.folders().map(|folder| folder.slot).collect()
 }
 
@@ -147,6 +161,19 @@ fn corrupt_byte_at(path: &Path, offset: u64) {
     let mut file = OpenOptions::new().write(true).open(path).expect("open");
     file.seek(SeekFrom::Start(offset)).expect("seek");
     file.write_all(&[0xEE, 0xEE, 0xEE, 0xEE]).expect("corrupt");
+}
+
+fn flip_byte_at(path: &Path, offset: u64) {
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .expect("open");
+    file.seek(SeekFrom::Start(offset)).expect("seek");
+    let mut byte = [0_u8];
+    file.read_exact(&mut byte).expect("read");
+    file.seek(SeekFrom::Start(offset)).expect("seek back");
+    file.write_all(&[byte[0] ^ 0x01]).expect("flip");
 }
 
 fn rewritten(store: &FileNameStore, slot: u32, cursor: &mut NamesCursor) -> Vec<String> {
@@ -171,10 +198,7 @@ fn packed_names_keep_hidden_and_unicode_names_and_skip_impossible_ones() {
     assert!(PackedNames::default().is_empty());
     assert_eq!(names_in(b"").count(), 0);
     assert_eq!(names_in(b"a\0b\0").collect::<Vec<_>>(), [b"a", b"b"]);
-    let folder = FolderNames {
-        slot: 3,
-        packed: names.as_bytes(),
-    };
+    let folder = FolderNames::live(3, names.as_bytes());
     assert_eq!(folder.names().count(), 3);
 }
 
@@ -204,8 +228,8 @@ fn a_fresh_store_has_no_names_until_a_segment_or_overlay_exists() {
     assert_eq!(store.names_of(4), Ok(None));
     assert!(!store.has_unsaved_changes());
     assert_eq!(store.counters(), NamesCounters::default());
-    let mut scratch = NamesScratch::default();
-    assert!(store.read_block(0, &mut scratch).is_err());
+    assert!(store.read_block(0).is_err());
+    assert!(store.copied_block(0).is_err());
     let mut cursor = NamesCursor::default();
     assert!(rewritten(&store, 4, &mut cursor).is_empty());
 }
@@ -288,7 +312,7 @@ fn small_blocks_split_the_folders_and_each_slot_maps_to_its_block() {
 }
 
 #[test]
-fn a_rewrite_cursor_reads_every_source_and_decodes_each_block_once() {
+fn a_rewrite_cursor_reads_every_source_and_reads_each_block_once() {
     let fixture = Fixture::new();
     let folder_count = 12;
     let mut store = segment_store(&fixture, folder_count);
@@ -312,9 +336,87 @@ fn a_rewrite_cursor_reads_every_source_and_decodes_each_block_once() {
     }
     assert_eq!(rewritten(&store, new_slot, &mut cursor), ["brand-new.txt"]);
     assert!(rewritten(&store, new_slot + 1, &mut cursor).is_empty());
-    let decoded = store.counters().blocks_decompressed;
-    assert!(decoded <= store.block_count() as u64, "{decoded} decodes");
+    let read = store.counters().blocks_read;
+    assert!(read <= store.block_count() as u64, "{read} reads");
     assert_eq!(rewritten(&store, 0, &mut cursor), strings(&names_for(0)));
+}
+
+#[test]
+fn consecutive_folders_in_one_block_cost_one_block_read() {
+    let fixture = Fixture::new();
+    let folder_count = 12;
+    let store = large_block_store(&fixture, folder_count);
+    assert_eq!(store.block_count(), 1);
+    let mut cursor = NamesCursor::default();
+    for slot in 0..folder_count {
+        assert_eq!(
+            rewritten(&store, slot, &mut cursor),
+            strings(&names_for(slot))
+        );
+    }
+    assert_eq!(store.counters().blocks_read, 1);
+    assert_eq!(store.counters().blocks_verified, 1);
+    let mut fresh_cursor = NamesCursor::default();
+    assert_eq!(
+        rewritten(&store, 3, &mut fresh_cursor),
+        strings(&names_for(3))
+    );
+    assert_eq!(store.counters().blocks_read, 2, "a new cursor reads again");
+    assert_eq!(
+        store.counters().blocks_verified,
+        1,
+        "but never verifies again"
+    );
+}
+
+#[test]
+fn every_block_access_is_a_read_and_only_the_first_touch_verifies() {
+    let fixture = Fixture::new();
+    let store = segment_store(&fixture, FOLDER_COUNT);
+    assert!(store.block_count() > 1);
+    let before = store.counters();
+    assert_eq!(block_folders(&store, 0), [0]);
+    assert_eq!(block_folders(&store, 0), [0]);
+    let after = store.counters();
+    assert_eq!(after.blocks_read - before.blocks_read, 2);
+    assert_eq!(after.blocks_verified - before.blocks_verified, 1);
+
+    assert_eq!(current(&store, 0), Some(strings(&names_for(0))));
+    let copied = store.copied_block(0).expect("copied");
+    assert_eq!(copied.span.first_ordinal, 0);
+    assert_eq!(store.counters().blocks_read - before.blocks_read, 4);
+    assert_eq!(store.counters().blocks_verified - before.blocks_verified, 1);
+    assert!(store.copied_block(store.block_count()).is_err());
+}
+
+#[test]
+fn one_flipped_byte_is_refused_at_first_touch_and_fails_the_store() {
+    let fixture = Fixture::new();
+    write_segment(&fixture.segment_directory(), FOLDER_COUNT);
+    let names_file = fixture.segment_names_file();
+    let byte_inside_first_block = NAMES_HEADER_BYTES + 20;
+    flip_byte_at(&names_file, byte_inside_first_block);
+    let mut store = fixture.store();
+    store.restore(saved_names(&fixture.segment_directory()));
+    assert!(store.is_available());
+    assert_eq!(block_folders(&store, 1), [1], "other blocks still verify");
+    assert!(store.copied_block(0).is_err());
+    assert!(!store.is_available());
+    assert_eq!(store.counters().blocks_verified, 1);
+    assert!(store.take_unreported_failure());
+}
+
+#[test]
+fn a_folder_larger_than_the_block_target_is_one_block() {
+    let fixture = Fixture::new();
+    let store = segment_store(&fixture, 2);
+    assert_eq!(
+        store.block_count(),
+        2,
+        "each folder overflows the target alone"
+    );
+    assert_eq!(block_folders(&store, 0), [0]);
+    assert_eq!(block_folders(&store, 1), [1]);
 }
 
 #[test]
@@ -391,8 +493,7 @@ fn a_corrupt_block_flips_availability_and_is_reported_once() {
     let fixture = Fixture::new();
     let mut store = corrupt_segment_store(&fixture);
     assert!(store.is_available(), "the header is intact");
-    let mut scratch = NamesScratch::default();
-    assert!(store.read_block(0, &mut scratch).is_err());
+    assert!(store.read_block(0).is_err());
     assert!(!store.is_available());
     assert!(store.take_unreported_failure());
     assert!(!store.take_unreported_failure(), "reported once");
@@ -423,34 +524,31 @@ fn overlay_thresholds_count_folders_and_name_bytes() {
         folders: OVERLAY_THRESHOLD_FOLDERS,
         name_bytes: OVERLAY_THRESHOLD_BYTES,
     };
-    assert!(!small.exceeds_threshold());
+    assert!(!small.exceeds(OverlayThreshold::default()));
     assert!(OverlayStats {
         folders: OVERLAY_THRESHOLD_FOLDERS + 1,
         ..small
     }
-    .exceeds_threshold());
+    .exceeds(OverlayThreshold::default()));
     assert!(OverlayStats {
         name_bytes: OVERLAY_THRESHOLD_BYTES + 1,
         ..small
     }
-    .exceeds_threshold());
+    .exceeds(OverlayThreshold::default()));
 
     let mut stats = RewriteStats {
-        blocks_reencoded: 1,
+        blocks_rebuilt: 1,
         blocks_copied: 2,
-        peak_open_blocks: 1,
     };
     stats.absorb(RewriteStats {
-        blocks_reencoded: 3,
+        blocks_rebuilt: 3,
         blocks_copied: 5,
-        peak_open_blocks: 1,
     });
     assert_eq!(
         stats,
         RewriteStats {
-            blocks_reencoded: 4,
+            blocks_rebuilt: 4,
             blocks_copied: 7,
-            peak_open_blocks: 1,
         }
     );
 }

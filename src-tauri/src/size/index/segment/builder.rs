@@ -6,23 +6,22 @@ use std::path::PathBuf;
 use memmap2::MmapMut;
 
 use super::format::{
-    le_u32, le_u64, Cell, CellRun, Column, Counts, Layout, NodeFlags, SegmentPaths, TreeHeader,
-    HEADER_BYTES, MAX_SEGMENT_NODES, NO_PARENT,
+    encode_range, le_u32, le_u64, Cell, CellRun, Column, Counts, Layout, NodeFlags, SegmentPaths,
+    TreeHeader, HEADER_BYTES, MAX_SEGMENT_NODES, NO_PARENT,
 };
-use crate::resource_coordinator::parallelism::scan_workers;
-use crate::size::index::names::block::{self, EncodedBlock, BLOCK_TARGET_BYTES};
+use crate::size::index::names::block::{self, StoredBlock, BLOCK_TARGET_BYTES};
 use crate::size::index::names::file::{remove_if_present, NamesHeader};
 use crate::size::index::names::is_packed_list_or_empty;
-use crate::size::index::names::writer::{
-    BlockOutput, OutputLimits, RewriteError, RewriteStats, ONE_BLOCK_AT_A_TIME,
-};
+use crate::size::index::names::signature::signature_of;
+use crate::size::index::names::writer::{BlockOutput, RewriteError, RewriteStats};
 use crate::size::index::persist::{self, Reader};
-use crate::size::index::tree::OwnCounters;
+use crate::size::index::tree::{is_hidden_name, OwnCounters};
 
 const ROWS_EXTENSION: &str = "rows";
 const ROW_HEAD_BYTES: usize =
     size_of::<u32>() + size_of::<u64>() + size_of::<u8>() + size_of::<u32>();
 const SEGMENT_EVENT_ID: u64 = 0;
+const ROOT_DEPTH: usize = 0;
 
 #[derive(Debug)]
 pub enum BuildError {
@@ -137,6 +136,53 @@ struct OpenFrame {
     last_child: String,
 }
 
+struct OpenHiddenSubtree {
+    depth: usize,
+    start: u32,
+}
+
+#[derive(Default)]
+struct HiddenSubtrees {
+    open: Option<OpenHiddenSubtree>,
+    closed: Vec<Range<u32>>,
+}
+
+impl HiddenSubtrees {
+    fn enter(&mut self, ordinal: u32, entry: &SegmentEntry<'_>) {
+        self.close_from_depth(entry.depth, ordinal);
+        if self.opens_at(entry) {
+            self.open = Some(OpenHiddenSubtree {
+                depth: entry.depth,
+                start: ordinal,
+            });
+        }
+    }
+
+    fn opens_at(&self, entry: &SegmentEntry<'_>) -> bool {
+        let is_segment_top = entry.depth == ROOT_DEPTH;
+        if is_segment_top {
+            return false;
+        }
+        let lies_in_an_open_subtree = self.open.is_some();
+        if lies_in_an_open_subtree {
+            return false;
+        }
+        is_hidden_name(entry.name.as_bytes())
+    }
+
+    fn close_from_depth(&mut self, depth: usize, end: u32) {
+        let Some(open) = self.open.take_if(|open| open.depth >= depth) else {
+            return;
+        };
+        self.closed.push(open.start..end);
+    }
+
+    fn finish(mut self, node_count: u32) -> Vec<Range<u32>> {
+        self.close_from_depth(ROOT_DEPTH, node_count);
+        self.closed
+    }
+}
+
 struct TempFiles {
     rows: PathBuf,
     tree: PathBuf,
@@ -172,6 +218,7 @@ pub struct SegmentBuilder {
     rows: RowLog,
     names: BlockOutput,
     open: Vec<OpenFrame>,
+    hidden: HiddenSubtrees,
     counts: Counts,
 }
 
@@ -180,29 +227,13 @@ impl SegmentBuilder {
         Self::with_block_target(target, BLOCK_TARGET_BYTES)
     }
 
-    pub fn for_compaction(target: SegmentTarget) -> Result<Self, BuildError> {
-        let limits = OutputLimits {
-            block_target: BLOCK_TARGET_BYTES,
-            compress_batch: scan_workers(),
-        };
-        Self::with_limits(target, limits)
-    }
-
     pub fn with_block_target(
         target: SegmentTarget,
         block_target: usize,
     ) -> Result<Self, BuildError> {
-        let limits = OutputLimits {
-            block_target,
-            compress_batch: ONE_BLOCK_AT_A_TIME,
-        };
-        Self::with_limits(target, limits)
-    }
-
-    fn with_limits(target: SegmentTarget, limits: OutputLimits) -> Result<Self, BuildError> {
         let temps = TempFiles::of(&target.paths);
         let rows = RowLog::create(temps.rows.clone())?;
-        let names = match BlockOutput::create(&target.paths.names, limits) {
+        let names = match BlockOutput::create(&target.paths.names, block_target) {
             Ok(names) => names,
             Err(error) => {
                 temps.remove_leftovers();
@@ -215,6 +246,7 @@ impl SegmentBuilder {
             rows,
             names,
             open: Vec::new(),
+            hidden: HiddenSubtrees::default(),
             counts: Counts::default(),
         })
     }
@@ -238,7 +270,7 @@ impl SegmentBuilder {
     pub fn copy_names_block(
         &mut self,
         first_ordinal: u32,
-        block: EncodedBlock,
+        block: StoredBlock<'_>,
     ) -> Result<(), BuildError> {
         self.names.append_copy(first_ordinal, block)?;
         Ok(())
@@ -259,6 +291,7 @@ impl SegmentBuilder {
             flags: entry.flags.bits(),
             name: entry.name.as_bytes(),
         })?;
+        self.hidden.enter(ordinal, &entry);
         self.counts.nodes += 1;
         self.counts.top_level += u32::from(parent == NO_PARENT);
         self.counts.name_heap_bytes = name_heap_bytes;
@@ -293,13 +326,17 @@ impl SegmentBuilder {
             temps,
             rows,
             names,
-            counts,
+            hidden,
+            mut counts,
             ..
         } = self;
+        let hidden_ranges = hidden.finish(counts.nodes);
+        counts.hidden_ranges = u32::try_from(hidden_ranges.len()).unwrap_or(u32::MAX);
         let segment = PendingSegment {
             target,
             temps: &temps,
             counts,
+            hidden_ranges,
         };
         let built = segment.write(rows, names);
         temps.remove_leftovers();
@@ -320,6 +357,7 @@ struct PendingSegment<'temps> {
     target: SegmentTarget,
     temps: &'temps TempFiles,
     counts: Counts,
+    hidden_ranges: Vec<Range<u32>>,
 }
 
 impl PendingSegment<'_> {
@@ -359,6 +397,7 @@ impl PendingSegment<'_> {
         columns.roll_up();
         columns.assign_child_offsets();
         columns.list_children();
+        columns.list_hidden_ranges(&self.hidden_ranges);
         columns.seal(TreeHeader {
             counts: self.counts,
             token: self.target.token,
@@ -438,6 +477,7 @@ impl ColumnsMut<'_> {
         self.set_u32(Column::Skipped.at(ordinal), own.skipped);
         self.set_u32(Column::Denied.at(ordinal), own.denied);
         self.set_u32(Column::SubtreeEnd.at(ordinal), ordinal + 1);
+        self.set_u32(Column::Signature.at(ordinal), signature_of(row.name));
         self.set_u32(Column::NameEnds.at(ordinal + 1), name_end);
         let name = self.layout.run(CellRun {
             column: Column::NameHeap,
@@ -497,6 +537,13 @@ impl ColumnsMut<'_> {
         let position = self.u32(Column::ChildOffset.at(parent)) + listed_so_far;
         self.set_u32(Column::Children.at(position), ordinal);
         self.add_u32(Column::ChildCount.at(parent), 1);
+    }
+
+    fn list_hidden_ranges(&mut self, hidden_ranges: &[Range<u32>]) {
+        for (index, range) in (0..).zip(hidden_ranges) {
+            let cell = self.cell(Column::HiddenRanges.at(index));
+            self.bytes[cell].copy_from_slice(&encode_range(range));
+        }
     }
 
     fn seal(&mut self, header: TreeHeader) {

@@ -27,6 +27,8 @@ pub(crate) const PERSISTED_FLAGS: u8 = SCANNED | DENIED | SKIPPED;
 
 const NO_FLAGS: u8 = 0;
 
+const HIDDEN_NAME_PREFIX: &[u8] = b".";
+
 const MAX_SKIPPED_NAMES: usize = 3;
 
 const UNSCANNED: OwnSize = OwnSize {
@@ -38,6 +40,10 @@ const EXCLUDED: OwnSize = OwnSize {
     direct: 0,
     flags: SKIPPED,
 };
+
+pub(crate) fn is_hidden_name(name: &[u8]) -> bool {
+    name.starts_with(HIDDEN_NAME_PREFIX)
+}
 
 fn denied_flag(denied: bool) -> u8 {
     if denied {
@@ -1138,6 +1144,50 @@ impl FolderSizeTree {
             name: self.name(id),
             parent: (parent != NONE).then_some(parent),
         })
+    }
+
+    pub fn folder_signature(&self, id: u32) -> Option<u32> {
+        if !self.is_live(id) {
+            return None;
+        }
+        if let Some(node) = self.heap.find(id) {
+            return Some(node.signature());
+        }
+        Some(self.segments.signature(id))
+    }
+
+    pub fn hidden_ranges(&self) -> IdRanges {
+        let mut hidden = IdRanges::default();
+        let segment_ranges = self.segments.hidden_ranges();
+        for range in segment_ranges.filter(|range| !self.is_root(range.start)) {
+            hidden.add(range);
+        }
+        let relinked_tops = self.relinked_mapped_tops();
+        for top in relinked_tops.filter(|&top| self.lies_in_hidden_folder(top)) {
+            hidden.add(self.segments.subtree(top));
+        }
+        hidden
+    }
+
+    fn relinked_mapped_tops(&self) -> impl Iterator<Item = NodeId> + '_ {
+        let relinked = self
+            .patches
+            .iter()
+            .filter(|(_, patch)| patch.parent.is_some());
+        relinked.map(|(&id, _)| id)
+    }
+
+    fn lies_in_hidden_folder(&self, id: NodeId) -> bool {
+        self.self_and_ancestors(id)
+            .any(|current| self.is_hidden_folder(current))
+    }
+
+    fn is_hidden_folder(&self, id: NodeId) -> bool {
+        !self.is_root(id) && is_hidden_name(self.name(id).as_bytes())
+    }
+
+    fn is_root(&self, id: NodeId) -> bool {
+        self.facts(id).parent == NONE
     }
 
     pub fn lookup(&self, path: &Path) -> Option<u32> {

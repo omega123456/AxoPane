@@ -4,15 +4,17 @@ use std::sync::Arc;
 
 use file_explorer_lib::size::index::names::{FileNameStore, PackedNames, SavedNames};
 use file_explorer_lib::size::index::persist::{
-    decode, encode, load, plan_batch, plan_catch_up, save_encoded, temp_path, write_temp,
-    ChangeEvent, ChangeFlags, CurrentVolume, Manifest, ReplayOutcome, SegmentRef, Snapshot,
-    SnapshotMeta, FORMAT_VERSION,
+    decode, encode, flags_rescan_reason, launch_rescan_reason, load, plan_batch, plan_catch_up,
+    save_encoded, temp_path, volume_rescan_reason, write_temp, ChangeEvent, ChangeFlags,
+    CurrentVolume, LaunchState, Manifest, ReplayOutcome, RescanCause, RescanReason, SegmentRef,
+    Snapshot, SnapshotMeta, FORMAT_VERSION,
 };
 use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
 use tempfile::{tempdir, TempDir};
 
 use crate::common::segment::{
-    strings, walked, walked_segment, SegmentPlace, Walked, FIRST_SEQUENCE,
+    paths_in, rewrite_as_format_one, strings, walked, walked_segment, SegmentPlace, Walked,
+    FIRST_SEQUENCE,
 };
 
 fn path_of(parts: &[&str]) -> PathBuf {
@@ -490,6 +492,26 @@ fn a_manifest_needs_every_segment_it_names_with_the_recorded_token() {
 }
 
 #[test]
+fn a_manifest_over_a_format_one_tree_segment_takes_the_full_rescan_path() {
+    let saved = segment_backed();
+    let bytes = saved.bytes();
+    let path = saved.directory.path().join("folder-size-index.bin");
+    save_encoded(&path, &bytes).expect("saved");
+    assert!(load(&path).is_some(), "the current format loads");
+
+    rewrite_as_format_one(&paths_in(saved.directory.path()).tree);
+    assert!(decode(&bytes, saved.directory.path()).is_none());
+    let loaded = load(&path);
+    assert!(loaded.is_none());
+    let same = current("0A1B-UUID", BUILD, 900);
+    let saved_meta = loaded.as_ref().map(|snapshot| &snapshot.meta);
+    assert_eq!(
+        launch_rescan_reason(launch(saved_meta, same)),
+        Some(RescanReason::NoSnapshot)
+    );
+}
+
+#[test]
 fn save_is_atomic_and_load_reads_it_back() {
     let dir = tempdir().expect("temp dir");
     let path = dir.path().join("cache").join("size-index.bin");
@@ -749,51 +771,75 @@ fn catch_up_advanced_id_rereads_reported_directories() {
     );
 }
 
+fn volume_rescan(reason: RescanReason) -> ReplayOutcome {
+    ReplayOutcome::FullRescan(RescanCause { reason, path: None })
+}
+
+fn event_rescan(reason: RescanReason, parts: &[&str]) -> ReplayOutcome {
+    ReplayOutcome::FullRescan(RescanCause {
+        reason,
+        path: Some(path_of(parts)),
+    })
+}
+
+fn flagged(reason: RescanReason) -> ChangeFlags {
+    let flags = ChangeFlags::default();
+    match reason {
+        RescanReason::UserDropped => ChangeFlags {
+            user_dropped: true,
+            ..flags
+        },
+        RescanReason::KernelDropped => ChangeFlags {
+            kernel_dropped: true,
+            ..flags
+        },
+        RescanReason::EventIdsWrapped => ChangeFlags {
+            event_ids_wrapped: true,
+            ..flags
+        },
+        _ => ChangeFlags {
+            root_changed: true,
+            ..flags
+        },
+    }
+}
+
+const FLAG_REASONS: [RescanReason; 4] = [
+    RescanReason::UserDropped,
+    RescanReason::KernelDropped,
+    RescanReason::EventIdsWrapped,
+    RescanReason::RootChanged,
+];
+
 #[test]
-fn catch_up_falls_back_to_a_full_rescan() {
+fn catch_up_falls_back_to_a_full_rescan_and_names_why() {
     let saved = meta();
     let uuid = "0A1B-UUID";
     assert_eq!(
         plan_catch_up(&saved, current("OTHER", BUILD, 900), &[],),
-        ReplayOutcome::FullRescan
+        volume_rescan(RescanReason::VolumeChanged)
     );
     assert_eq!(
         plan_catch_up(&saved, current(uuid, BUILD, 499), &[],),
-        ReplayOutcome::FullRescan
+        volume_rescan(RescanReason::HistoryRewound)
     );
     assert_eq!(
         plan_catch_up(
             &saved,
             current(uuid, BUILD, 900),
-            &[plain(&["a"]), must_scan(&["b"])],
+            &[plain(&["a"]), must_scan(&["b"]), must_scan(&["c"])],
         ),
-        ReplayOutcome::FullRescan
+        event_rescan(RescanReason::SubtreeDropped, &["b"])
     );
-    for flags in [
-        ChangeFlags {
-            user_dropped: true,
-            ..ChangeFlags::default()
-        },
-        ChangeFlags {
-            kernel_dropped: true,
-            ..ChangeFlags::default()
-        },
-        ChangeFlags {
-            event_ids_wrapped: true,
-            ..ChangeFlags::default()
-        },
-        ChangeFlags {
-            root_changed: true,
-            ..ChangeFlags::default()
-        },
-    ] {
-        let events = [plain(&["a"]), event(&[], flags)];
+    for reason in FLAG_REASONS {
+        let events = [plain(&["a"]), event(&["z"], flagged(reason))];
+        let expected = event_rescan(reason, &["z"]);
         assert_eq!(
             plan_catch_up(&saved, current(uuid, BUILD, 900), &events,),
-            ReplayOutcome::FullRescan,
-            "{flags:?}"
+            expected,
+            "{reason:?}"
         );
-        assert_eq!(plan_batch(&events), ReplayOutcome::FullRescan, "{flags:?}");
+        assert_eq!(plan_batch(&events), expected, "{reason:?}");
     }
 }
 
@@ -802,11 +848,164 @@ fn a_different_os_build_forces_a_full_rescan() {
     let saved = meta();
     assert_eq!(
         plan_catch_up(&saved, current("0A1B-UUID", "25B456", 500), &[],),
-        ReplayOutcome::FullRescan
+        volume_rescan(RescanReason::OsBuildChanged)
     );
     assert_eq!(
         plan_catch_up(&saved, current("0A1B-UUID", "", 900), &[plain(&["a"])],),
-        ReplayOutcome::FullRescan
+        volume_rescan(RescanReason::OsBuildChanged)
+    );
+}
+
+#[test]
+fn the_first_flag_that_forces_a_rescan_wins_in_a_fixed_order() {
+    assert_eq!(flags_rescan_reason(ChangeFlags::default()), None);
+    assert_eq!(
+        flags_rescan_reason(ChangeFlags {
+            must_scan_sub_dirs: true,
+            ..ChangeFlags::default()
+        }),
+        None,
+        "a dropped subtree is rescanned on its own while live"
+    );
+    for reason in FLAG_REASONS {
+        assert_eq!(flags_rescan_reason(flagged(reason)), Some(reason));
+    }
+    let every_flag = ChangeFlags {
+        must_scan_sub_dirs: true,
+        user_dropped: true,
+        kernel_dropped: true,
+        event_ids_wrapped: true,
+        root_changed: true,
+    };
+    assert_eq!(
+        flags_rescan_reason(every_flag),
+        Some(RescanReason::UserDropped)
+    );
+    let live = [
+        plain(&["a"]),
+        event(&["k"], flagged(RescanReason::KernelDropped)),
+    ];
+    assert_eq!(
+        plan_batch(&live),
+        event_rescan(RescanReason::KernelDropped, &["k"])
+    );
+}
+
+#[test]
+fn volume_state_is_checked_uuid_first_then_os_build_then_history() {
+    let saved = meta();
+    assert_eq!(
+        volume_rescan_reason(&saved, current("0A1B-UUID", BUILD, 500)),
+        None
+    );
+    assert_eq!(
+        volume_rescan_reason(&saved, current("0A1B-UUID", BUILD, 900)),
+        None
+    );
+    assert_eq!(
+        volume_rescan_reason(&saved, current("OTHER", "25B456", 1)),
+        Some(RescanReason::VolumeChanged)
+    );
+    assert_eq!(
+        volume_rescan_reason(&saved, current("0A1B-UUID", "25B456", 1)),
+        Some(RescanReason::OsBuildChanged)
+    );
+    assert_eq!(
+        volume_rescan_reason(&saved, current("0A1B-UUID", BUILD, 1)),
+        Some(RescanReason::HistoryRewound)
+    );
+}
+
+fn launch<'launch>(
+    saved: Option<&'launch SnapshotMeta>,
+    current: CurrentVolume<'launch>,
+) -> LaunchState<'launch> {
+    LaunchState {
+        saved,
+        current,
+        collects_file_names: true,
+    }
+}
+
+#[test]
+fn a_launch_resumes_only_a_matching_snapshot_and_otherwise_names_why() {
+    let saved = meta();
+    let same = current("0A1B-UUID", BUILD, 900);
+    assert_eq!(launch_rescan_reason(launch(Some(&saved), same)), None);
+    assert_eq!(
+        launch_rescan_reason(launch(None, same)),
+        Some(RescanReason::NoSnapshot)
+    );
+    assert_eq!(
+        launch_rescan_reason(launch(Some(&saved), current("OTHER", BUILD, 900))),
+        Some(RescanReason::VolumeChanged)
+    );
+    assert_eq!(
+        launch_rescan_reason(launch(Some(&saved), current("0A1B-UUID", "25B456", 900))),
+        Some(RescanReason::OsBuildChanged)
+    );
+    assert_eq!(
+        launch_rescan_reason(launch(Some(&saved), current("0A1B-UUID", BUILD, 499))),
+        Some(RescanReason::HistoryRewound)
+    );
+    let without_names = SnapshotMeta {
+        has_file_names: false,
+        ..meta()
+    };
+    assert_eq!(
+        launch_rescan_reason(launch(Some(&without_names), same)),
+        Some(RescanReason::NoFileNames)
+    );
+    let ignoring_names = LaunchState {
+        collects_file_names: false,
+        ..launch(Some(&without_names), same)
+    };
+    assert_eq!(launch_rescan_reason(ignoring_names), None);
+}
+
+#[test]
+fn every_rescan_reason_renders_its_documented_text() {
+    let expected = [
+        (RescanReason::UserDropped, "user-dropped events"),
+        (RescanReason::KernelDropped, "kernel-dropped events"),
+        (RescanReason::EventIdsWrapped, "event ids wrapped"),
+        (RescanReason::RootChanged, "watched root changed"),
+        (RescanReason::VolumeChanged, "volume changed"),
+        (RescanReason::OsBuildChanged, "OS build changed"),
+        (RescanReason::HistoryRewound, "event history rewound"),
+        (
+            RescanReason::SubtreeDropped,
+            "subtree dropped during catch-up",
+        ),
+        (RescanReason::NoSnapshot, "no usable snapshot"),
+        (RescanReason::NoFileNames, "saved index holds no file names"),
+    ];
+    for (reason, text) in expected {
+        assert_eq!(reason.text(), text);
+        assert_eq!(reason.to_string(), text);
+    }
+}
+
+#[test]
+fn a_rescan_cause_names_its_reason_and_any_triggering_path() {
+    let volume = RescanCause {
+        reason: RescanReason::VolumeChanged,
+        path: None,
+    };
+    assert_eq!(
+        volume.to_string(),
+        "event history needs a full rescan (volume changed)"
+    );
+    let kernel = RescanCause {
+        reason: RescanReason::KernelDropped,
+        path: Some(path_of(&["a", "b"])),
+    };
+    assert_eq!(
+        kernel.to_string(),
+        format!(
+            "event history needs a full rescan (kernel-dropped events) at {}",
+            path_of(&["a", "b"]).display()
+        )
     );
 }
 

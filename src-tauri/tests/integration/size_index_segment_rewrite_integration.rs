@@ -2,6 +2,7 @@ use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
+use file_explorer_lib::size::index::names::file::MappedNames;
 use file_explorer_lib::size::index::names::writer::RewriteStats;
 use file_explorer_lib::size::index::names::{FileNameStore, PackedNames};
 use file_explorer_lib::size::index::segment::{
@@ -109,7 +110,7 @@ fn rewrite(fixture: &Fixture, index: &SegmentBackedIndex) -> Result<Rewritten, R
         paths: fixture.paths(REWRITE_SEQUENCE),
         token: TOKEN,
     };
-    let mut builder = SegmentBuilder::for_compaction(target).expect("builder");
+    let mut builder = SegmentBuilder::create(target).expect("builder");
     let mut rewrite = BaseRewrite::of(&index.tree);
     let source = RewriteSource {
         tree: &index.tree,
@@ -157,7 +158,15 @@ fn an_unchanged_base_is_rewritten_by_copying_every_block() {
     let rewritten = rewrite(&fixture, &base).expect("rewritten");
 
     assert_eq!(rewritten.stats.blocks_copied, block_count);
-    assert_eq!(rewritten.stats.blocks_reencoded, 0);
+    assert_eq!(rewritten.stats.blocks_rebuilt, 0);
+    let base_file = MappedNames::open(&fixture.paths(BASE_SEQUENCE).names).expect("base");
+    let copy_file = MappedNames::open(&fixture.paths(REWRITE_SEQUENCE).names).expect("copy");
+    assert_eq!(copy_file.block_count(), base_file.block_count());
+    for index in 0..base_file.block_count() {
+        let base_block = base_file.block(index).expect("base block");
+        let copied_block = copy_file.block(index).expect("copied block");
+        assert_eq!(copied_block, base_block, "block {index} copied verbatim");
+    }
     assert_every_folder_keeps_its_names(&fixture, &rewritten.index);
     assert_eq!(
         names_at(&rewritten.index, &fixture.folder(EDITED)),
@@ -166,7 +175,7 @@ fn an_unchanged_base_is_rewritten_by_copying_every_block() {
 }
 
 #[test]
-fn only_blocks_touched_by_the_overlay_are_reencoded() {
+fn only_blocks_touched_by_the_overlay_are_rebuilt() {
     let fixture = Fixture::new();
     let mut base = fixture.base(ONE_FOLDER_PER_BLOCK);
     let block_count = base.names.block_count() as u64;
@@ -176,7 +185,7 @@ fn only_blocks_touched_by_the_overlay_are_reencoded() {
 
     let rewritten = rewrite(&fixture, &base).expect("rewritten");
 
-    assert!(rewritten.stats.blocks_reencoded >= 1);
+    assert!(rewritten.stats.blocks_rebuilt >= 1);
     assert!(rewritten.stats.blocks_copied >= block_count - 2);
     assert_eq!(
         names_at(&rewritten.index, &fixture.folder(EDITED)),
@@ -186,7 +195,7 @@ fn only_blocks_touched_by_the_overlay_are_reencoded() {
 }
 
 #[test]
-fn a_folder_inserted_inside_a_block_falls_back_to_reencoding_it() {
+fn a_folder_inserted_inside_a_block_falls_back_to_rebuilding_it() {
     let fixture = Fixture::new();
     let mut base = fixture.base(A_FEW_FOLDERS_PER_BLOCK);
     let inserted = fixture.folder(EDITED).join("inserted");
@@ -204,7 +213,7 @@ fn a_folder_inserted_inside_a_block_falls_back_to_reencoding_it() {
 
     let rewritten = rewrite(&fixture, &base).expect("rewritten");
 
-    assert!(rewritten.stats.blocks_reencoded >= 1);
+    assert!(rewritten.stats.blocks_rebuilt >= 1);
     assert_eq!(names_at(&rewritten.index, &inserted), ["inner.txt"]);
     assert_eq!(
         names_at(&rewritten.index, &fixture.folder(EDITED)),

@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use file_explorer_lib::size::index::names::signature::signature_of;
 use file_explorer_lib::size::index::segment::{
     GraftTarget, MappedSegment, NodeFlags, SegmentBuilder, SegmentEntry, SegmentTarget,
     SpillOptions, WalkSpill, RUN_BYTES,
@@ -68,6 +70,10 @@ struct Fixture {
 }
 
 fn fixture() -> Fixture {
+    fixture_over(base_walk)
+}
+
+fn fixture_over(walk: fn(&Path) -> Vec<Walked>) -> Fixture {
     let directory = tempdir().expect("temp dir");
     let root = directory.path().join("graft-root");
     let base = walked_segment(
@@ -76,7 +82,7 @@ fn fixture() -> Fixture {
             root: &root,
             token: BASE_TOKEN,
         },
-        &base_walk(&root),
+        &walk(&root),
     );
     let mut mapped = FolderSizeTree::default();
     mapped.attach_base(Arc::new(base)).expect("attached");
@@ -418,4 +424,150 @@ fn a_forest_outside_every_root_is_refused() {
     });
     assert!(refused.is_none());
     assert_eq!(fixture.total("s"), Some(5));
+}
+
+fn walk_with_a_dot_folder(root: &Path) -> Vec<Walked> {
+    let dot = root.join(".dot");
+    vec![
+        Walked {
+            subdirs: strings(&["a", ".dot", "s"]),
+            ..walked(root.to_path_buf(), 1)
+        },
+        Walked {
+            subdirs: strings(&["inner"]),
+            ..walked(dot.clone(), 2)
+        },
+        walked(dot.join("inner"), 3),
+        Walked {
+            subdirs: strings(&["b"]),
+            ..walked(root.join("a"), 10)
+        },
+        walked(root.join("a").join("b"), 100),
+        walked(root.join("s"), 5),
+    ]
+}
+
+fn graft_walk(top: PathBuf) -> Vec<Walked> {
+    vec![
+        Walked {
+            subdirs: strings(&["x"]),
+            ..walked(top.clone(), 7)
+        },
+        walked(top.join("x"), 8),
+    ]
+}
+
+impl Fixture {
+    fn graft_new(&mut self, relative: &str) -> Range<u32> {
+        let path = self.path(relative);
+        let segment = self.graft_segment(relative, &graft_walk(path.clone()));
+        self.mapped
+            .install_graft(Graft {
+                path: &path,
+                segment,
+                kept: &[],
+            })
+            .expect("installed")
+    }
+
+    fn hides_whole(&self, ids: Range<u32>) -> bool {
+        let hidden = self.mapped.hidden_ranges();
+        ids.into_iter().all(|id| hidden.contains(id))
+    }
+
+    fn assert_signatures_follow_names(&self) {
+        let mut cursor = self.mapped.depth_first();
+        while let Some(folder) = self.mapped.next_folder(&mut cursor) {
+            let signature = self.mapped.folder_signature(folder.slot);
+            assert_eq!(
+                signature,
+                Some(signature_of(folder.name.as_bytes())),
+                "{}",
+                folder.name
+            );
+        }
+    }
+}
+
+#[test]
+fn grafts_below_mapped_or_heap_dot_folders_are_hidden_whole() {
+    let mut fixture = fixture_over(walk_with_a_dot_folder);
+    let dot = fixture.mapped.lookup(&fixture.path(".dot")).expect(".dot");
+    let inner = fixture
+        .mapped
+        .lookup(&fixture.path(".dot/inner"))
+        .expect("inner");
+    let dot_subtree = dot..inner + 1;
+    assert_eq!(fixture.mapped.hidden_ranges().ranges(), [dot_subtree]);
+
+    let below_mapped_dot = fixture.graft_new(".dot/g");
+    let heap_dot_listing = DirectoryListing::scanned(5, &[".heap"]);
+    fixture
+        .mapped
+        .apply_listing(&fixture.path("s"), heap_dot_listing);
+    let below_heap_dot = fixture.graft_new("s/.heap/g");
+    let below_visible = fixture.graft_new("a/b/g");
+
+    assert!(fixture.hides_whole(below_mapped_dot.clone()));
+    assert!(fixture.hides_whole(below_heap_dot.clone()));
+    assert!(!fixture.mapped.hidden_ranges().intersects(&below_visible));
+    fixture.assert_signatures_follow_names();
+
+    let heap_dot = fixture.path("s/.heap");
+    assert!(fixture.mapped.rename(&heap_dot, &fixture.path("s/shown")));
+    let hidden = fixture.mapped.hidden_ranges();
+    assert!(
+        !hidden.intersects(&below_heap_dot),
+        "the lineage is checked per query"
+    );
+    assert!(fixture.hides_whole(below_mapped_dot));
+    fixture.assert_signatures_follow_names();
+}
+
+#[test]
+fn a_graft_of_a_dot_folder_is_hidden_whole_and_buries_the_old_ids() {
+    let mut fixture = fixture_over(walk_with_a_dot_folder);
+    let old_inner = fixture
+        .mapped
+        .lookup(&fixture.path(".dot/inner"))
+        .expect("inner");
+    let regrafted = fixture.graft_new(".dot");
+
+    assert!(fixture.hides_whole(regrafted));
+    assert_eq!(fixture.mapped.folder_signature(old_inner), None);
+    assert_eq!(fixture.mapped.folder_signature(u32::MAX), None);
+    fixture.assert_signatures_follow_names();
+}
+
+#[test]
+fn a_forest_top_below_a_dot_folder_is_hidden_whole() {
+    let mut fixture = fixture_over(walk_with_a_dot_folder);
+    let records = vec![
+        Walked {
+            subdirs: strings(&["deeper"]),
+            ..walked(fixture.path(".dot/inner"), 30)
+        },
+        walked(fixture.path(".dot/inner/deeper"), 40),
+        walked(fixture.path("a/b"), 300),
+    ];
+    let segment = fixture.forest_segment(&records);
+    let tops = vec![fixture.path(".dot/inner"), fixture.path("a/b")];
+    fixture
+        .mapped
+        .install_forest(Forest {
+            root: &fixture.root,
+            tops: &tops,
+            segment,
+        })
+        .expect("installed");
+
+    let inner = fixture.mapped.lookup(&tops[0]).expect("inner");
+    let visible = fixture.mapped.lookup(&tops[1]).expect("b");
+    let hidden = fixture.mapped.hidden_ranges();
+    for id in fixture.mapped.subtree_slots(inner) {
+        assert!(hidden.contains(id), "{id}");
+    }
+    assert!(!hidden.contains(visible));
+    assert_eq!(fixture.total(".dot/inner"), Some(70));
+    fixture.assert_signatures_follow_names();
 }

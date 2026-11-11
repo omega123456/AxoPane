@@ -12,7 +12,10 @@ use super::exclusions::plan_reconcile;
 use super::grafts::{FinishedWalk, WalkEnd, WalkLogs};
 use super::names::writer::RewriteStats;
 use super::names::{PackedNames, SavedNames};
-use super::persist::{self, ChangeEvent, ReplayOutcome, Snapshot, SnapshotMeta};
+use super::persist::{
+    self, ChangeEvent, CurrentVolume, LaunchState, ReplayOutcome, RescanReason, Snapshot,
+    SnapshotMeta,
+};
 use super::platform::{self, IndexPlatform, PowerSignal, RawEvent, StreamHandle, StreamRequest};
 use super::snapshot::SaveTrigger;
 use super::tree::{DirectoryListing, FolderSizeTree};
@@ -275,7 +278,10 @@ impl Machine {
         }
         let view = self.shared.view();
         let overlay_is_full = view.tree.overlay_stats().exceeds_cap()
-            || view.names.overlay_stats().exceeds_threshold();
+            || view
+                .names
+                .overlay_stats()
+                .exceeds(self.shared.overlay_threshold);
         drop(view);
         if overlay_is_full || self.compactor.holds_too_many_segments() {
             self.start_compaction();
@@ -467,29 +473,37 @@ impl Machine {
             identity,
             current_id,
         };
-        match snapshot {
-            Some(snapshot) if self.resumes(&snapshot.meta, &start) => {
-                log::info!(
-                    "size index: resuming from saved snapshot ({} folders, event {})",
-                    snapshot.tree.node_count(),
-                    snapshot.meta.event_id
-                );
-                Some(self.resume_from(Resume {
-                    snapshot,
-                    current_id,
-                }))
-            }
-            stale => {
-                log_rescan_reason(stale.as_ref(), self.shared.collect_file_names);
-                self.rescan_from(stale, start);
-                None
-            }
+        if let Some(reason) = self.launch_rescan_reason(snapshot.as_ref(), &start) {
+            log::info!("size index: a full scan is needed, {reason}");
+            self.rescan_from(snapshot, start);
+            return None;
         }
+        let snapshot = snapshot?;
+        log::info!(
+            "size index: resuming from saved snapshot ({} folders, event {})",
+            snapshot.tree.node_count(),
+            snapshot.meta.event_id
+        );
+        Some(self.resume_from(Resume {
+            snapshot,
+            current_id,
+        }))
     }
 
-    fn resumes(&self, saved: &SnapshotMeta, start: &RescanStart) -> bool {
-        let names_missing = self.shared.collect_file_names && !saved.has_file_names;
-        !names_missing && is_resumable(saved, &start.identity, start.current_id)
+    fn launch_rescan_reason(
+        &self,
+        snapshot: Option<&Snapshot>,
+        start: &RescanStart,
+    ) -> Option<RescanReason> {
+        persist::launch_rescan_reason(LaunchState {
+            saved: snapshot.map(|snapshot| &snapshot.meta),
+            current: CurrentVolume {
+                uuid: &start.identity.volume_uuid,
+                os_build: &start.identity.os_build,
+                event_id: start.current_id,
+            },
+            collects_file_names: self.shared.collect_file_names,
+        })
     }
 
     fn restore_access(&mut self, snapshot: Option<&Snapshot>) {
@@ -641,7 +655,7 @@ impl Machine {
             replayed.events.len(),
             replayed.saved.event_id
         );
-        let current = persist::CurrentVolume {
+        let current = CurrentVolume {
             uuid: &self.meta.volume_uuid,
             os_build: &self.meta.os_build,
             event_id: replayed.current_id,
@@ -655,8 +669,8 @@ impl Machine {
     pub(super) fn apply_plan(&mut self, outcome: ReplayOutcome) {
         match outcome {
             ReplayOutcome::UpToDate => {}
-            ReplayOutcome::FullRescan => {
-                log::info!("size index: event history needs a full rescan");
+            ReplayOutcome::FullRescan(cause) => {
+                log::info!("size index: {cause}");
                 self.start_full_scan();
             }
             ReplayOutcome::Apply { reread, rescan } => self.apply_changes(reread, rescan),
@@ -952,28 +966,6 @@ impl View {
     }
 }
 
-fn log_rescan_reason(stale: Option<&Snapshot>, collects_file_names: bool) {
-    let reason = rescan_reason(stale, collects_file_names);
-    log::info!("size index: a full scan is needed, {reason}");
-}
-
-fn rescan_reason(stale: Option<&Snapshot>, collects_file_names: bool) -> &'static str {
-    let Some(stale) = stale else {
-        return "no usable snapshot";
-    };
-    let names_missing = collects_file_names && !stale.meta.has_file_names;
-    if names_missing {
-        return "the saved index holds no file names";
-    }
-    "the snapshot is not resumable (volume, OS build or event history changed)"
-}
-
-fn is_resumable(saved: &SnapshotMeta, identity: &SnapshotMeta, current_id: u64) -> bool {
-    saved.volume_uuid == identity.volume_uuid
-        && saved.os_build == identity.os_build
-        && saved.event_id <= current_id
-}
-
 fn answer_waiters(waiters: Vec<SizeEmitter>, update: &SizeUpdate) {
     for waiter in waiters {
         waiter(vec![update.clone()]);
@@ -1000,10 +992,7 @@ impl RawEventBatch {
         self.max_id = self.max_id.max(event.id);
         let flags = event.flags;
         let path = platform::normalize(&event.path);
-        let forces_full_rescan = flags.user_dropped
-            || flags.kernel_dropped
-            || flags.event_ids_wrapped
-            || flags.root_changed;
+        let forces_full_rescan = persist::flags_rescan_reason(flags).is_some();
         let should_record = forces_full_rescan || shared.indexes(&path);
         if should_record {
             self.live.push(ChangeEvent { path, flags });

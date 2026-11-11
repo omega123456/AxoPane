@@ -16,6 +16,7 @@ use file_explorer_lib::search::service::{
 use file_explorer_lib::search::source::FolderTreeSource;
 use file_explorer_lib::search::{SearchError, SearchScope};
 use file_explorer_lib::size::fast_walk::{subtree_total, TestHooks, WalkOptions};
+use file_explorer_lib::size::index::names::OverlayThreshold;
 use file_explorer_lib::size::index::persist::{self, ChangeFlags};
 use file_explorer_lib::size::index::platform::{
     normalize, protected_roots, stream_exclusions, FakePlatform, PowerSignal, RawEvent,
@@ -32,6 +33,7 @@ use file_explorer_lib::size::{
 use tempfile::{tempdir, TempDir};
 
 const WAIT: Duration = Duration::from_secs(1);
+const GATE_POLL: Duration = Duration::from_millis(2);
 
 /// Bumped by every fake, hook and emitter callback, so waits re-check their
 /// condition on each change instead of polling.
@@ -84,6 +86,42 @@ impl Blocker {
     }
 }
 
+#[derive(Default)]
+pub(crate) struct CompactionGate {
+    held: Mutex<bool>,
+    changed: Condvar,
+    started: AtomicUsize,
+}
+
+impl CompactionGate {
+    pub(crate) fn hold(&self) {
+        *self.held.lock().unwrap() = true;
+    }
+
+    pub(crate) fn release(&self) {
+        *self.held.lock().unwrap() = false;
+        self.changed.notify_all();
+    }
+
+    pub(crate) fn started(&self) -> usize {
+        self.started.load(Ordering::SeqCst)
+    }
+
+    fn pass(&self, cancelled: &AtomicBool) {
+        self.started.fetch_add(1, Ordering::SeqCst);
+        notify();
+        let mut held = self.held.lock().unwrap();
+        while keeps_compaction_waiting(*held, cancelled) {
+            held = self.changed.wait_timeout(held, GATE_POLL).unwrap().0;
+        }
+    }
+}
+
+fn keeps_compaction_waiting(held: bool, cancelled: &AtomicBool) -> bool {
+    let is_cancelled = cancelled.load(Ordering::Relaxed);
+    held && !is_cancelled
+}
+
 pub(crate) struct Harness {
     pub(crate) _dir: TempDir,
     pub(crate) root: PathBuf,
@@ -103,6 +141,8 @@ pub(crate) struct Harness {
     pub(crate) home: Option<PathBuf>,
     pub(crate) collect_file_names: bool,
     pub(crate) batching: WalkBatching,
+    pub(crate) overlay_threshold: OverlayThreshold,
+    pub(crate) compactions: Arc<CompactionGate>,
     pub(crate) service: Option<SizeService>,
 }
 
@@ -142,6 +182,8 @@ impl Harness {
             home: None,
             collect_file_names: true,
             batching: WalkBatching::default(),
+            overlay_threshold: OverlayThreshold::default(),
+            compactions: Arc::default(),
             service: None,
         }
     }
@@ -152,6 +194,7 @@ impl Harness {
         let (opened, blocker) = (Arc::clone(&self.opened), Arc::clone(&self.blocker));
         let (now, parked) = (Arc::clone(&self.now), Arc::clone(&self.parked));
         let (live, statuses) = (Arc::clone(&self.live), Arc::clone(&self.statuses));
+        let compactions = Arc::clone(&self.compactions);
         let options = IndexOptions {
             collect_file_names: self.collect_file_names,
             roots: self.roots.clone(),
@@ -162,6 +205,7 @@ impl Harness {
             home: self.home.clone(),
             snapshot_path: self.snapshot.clone(),
             batching: self.batching,
+            overlay_threshold: self.overlay_threshold,
             platform: self.platform.clone(),
             clock: Arc::new(move || *now.lock().unwrap()),
             coordinator: Arc::new(ResourceCoordinator::new()),
@@ -186,6 +230,7 @@ impl Harness {
                 parked.fetch_add(1, Ordering::SeqCst);
                 notify();
             }),
+            on_compaction_started: Arc::new(move |cancelled| compactions.pass(cancelled)),
         };
         self.service = Some(SizeService::with_folder_size_index_for_tests(
             Duration::from_secs(1),

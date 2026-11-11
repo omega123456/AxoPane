@@ -94,6 +94,7 @@ pub mod search_everything_strategy_integration;
 pub mod search_file_scan_integration;
 pub mod search_matcher_integration;
 pub mod search_path_style_integration;
+pub mod search_prefilter_integration;
 pub mod search_query_parse_integration;
 pub mod search_rank_integration;
 pub mod search_results_integration;
@@ -111,6 +112,7 @@ pub mod size_index_names_block_integration;
 pub mod size_index_names_file_integration;
 #[cfg(target_os = "macos")]
 pub mod size_index_names_service_integration;
+pub mod size_index_names_signature_integration;
 pub mod size_index_names_store_integration;
 pub mod size_index_persist_integration;
 #[cfg(target_os = "macos")]

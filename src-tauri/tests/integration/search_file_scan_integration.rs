@@ -1,7 +1,9 @@
 use std::cell::Cell;
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use file_explorer_lib::search::file_scan::BLOCKS_PER_READ;
 use file_explorer_lib::search::path_style::PathStyle;
@@ -12,26 +14,34 @@ use file_explorer_lib::search::{CandidateBatch, Control, SearchError, SearchOpti
 use file_explorer_lib::size::index::names::file::NAMES_FILE;
 use file_explorer_lib::size::index::names::{FileNameStore, PackedNames};
 use file_explorer_lib::size::index::segment::{MappedSegment, SegmentTarget};
-use file_explorer_lib::size::index::tree::FolderSizeTree;
+use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree, Graft};
 use tempfile::{tempdir, TempDir};
 
-use crate::common::segment::{compacted, index_over, paths_in, Compaction};
+use crate::common::segment::{
+    compacted, graft_walk_segment, index_over, paths_in, Compaction, SegmentPlace, Walked,
+};
 use crate::search_tree_scan_integration::{build, never, parsed, run, sorted, Source, VISIBLE};
 
-const SMALL_BLOCK_TARGET: usize = 64;
+pub(crate) const SMALL_BLOCK_TARGET: usize = 64;
 const LARGE_BLOCK_TARGET: usize = 256 * 1024;
 const SEGMENT_TOKEN: u64 = 7;
+const GRAFT_TOKEN: u64 = 8;
+const PATH_SEPARATOR: char = '/';
+const GRAFT_DIRECTORY_PREFIX: &str = "graft";
 const HEADER_BYTES: u64 = 48;
 const CORRUPTION: [u8; 4] = [0xEE; 4];
 
 const FILLER_FOLDERS: usize = 40;
+const DOT_ROOT: &str = ".dot-root";
+const DOT_ROOT_CACHE: &str = ".dot-root/.cache";
+const DOT_ROOT_DOCS: &str = ".dot-root/docs";
 
 pub(crate) struct Folder {
     pub(crate) path: String,
     pub(crate) files: Vec<String>,
 }
 
-fn folder(path: &str, files: &[&str]) -> Folder {
+pub(crate) fn folder(path: &str, files: &[&str]) -> Folder {
     Folder {
         path: path.to_owned(),
         files: files.iter().map(|file| (*file).to_owned()).collect(),
@@ -90,8 +100,11 @@ impl Fixture {
         Self::with_block_target(folders, LARGE_BLOCK_TARGET)
     }
 
-    fn with_block_target(folders: &[Folder], block_target: usize) -> Self {
-        let tree = tree_of(folders);
+    pub(crate) fn with_block_target(folders: &[Folder], block_target: usize) -> Self {
+        Self::over_tree(tree_of(folders), folders, block_target)
+    }
+
+    fn over_tree(tree: FolderSizeTree, folders: &[Folder], block_target: usize) -> Self {
         let dir = tempdir().expect("temp dir");
         let mut names = FileNameStore::new(dir.path().join(NAMES_FILE));
         for folder in folders {
@@ -104,22 +117,83 @@ impl Fixture {
         }
     }
 
-    fn slot(&self, path: &str) -> u32 {
+    pub(crate) fn slot(&self, path: &str) -> u32 {
         slot(&self.source.tree.lock().unwrap(), path)
     }
 
-    fn blocks_decompressed(&self) -> u64 {
-        self.source
-            .names
-            .lock()
-            .unwrap()
-            .counters()
-            .blocks_decompressed
+    fn blocks_read(&self) -> u64 {
+        self.source.names.lock().unwrap().counters().blocks_read
+    }
+
+    fn block_count(&self) -> u64 {
+        self.source.names.lock().unwrap().block_count() as u64
+    }
+
+    pub(crate) fn graft(&self, top: &str, folders: &[Folder]) -> Range<u32> {
+        let directory = self.graft_directory(top);
+        let place = SegmentPlace {
+            directory: &directory,
+            root: Path::new(top),
+            token: GRAFT_TOKEN,
+        };
+        let segment = Arc::new(graft_walk_segment(place, &walk_records(folders)));
+        let file_names = segment.shared_file_names();
+        let mut tree = self.source.tree.lock().unwrap();
+        let mut names = self.source.names.lock().unwrap();
+        let ids = tree
+            .install_graft(Graft {
+                path: Path::new(top),
+                segment,
+                kept: &[],
+            })
+            .expect("graft installed");
+        names.attach_segment(ids.clone(), file_names);
+        for removed in tree.take_removed_slots() {
+            names.tombstone(removed);
+        }
+        for removed in tree.take_removed_ranges() {
+            names.tombstone_range(removed);
+        }
+        ids
+    }
+
+    fn graft_directory(&self, top: &str) -> PathBuf {
+        let flattened = top.replace(PATH_SEPARATOR, "-");
+        let directory = self
+            .dir
+            .path()
+            .join(format!("{GRAFT_DIRECTORY_PREFIX}{flattened}"));
+        std::fs::create_dir_all(&directory).expect("graft directory");
+        directory
     }
 
     fn ranked(&self, raw: &str, options: &SearchOptions) -> Vec<String> {
         ranked(&self.source, raw, options)
     }
+}
+
+fn walk_records(folders: &[Folder]) -> Vec<Walked> {
+    folders
+        .iter()
+        .map(|walked| Walked {
+            path: PathBuf::from(&walked.path),
+            direct: 0,
+            denied: false,
+            subdirs: child_names(folders, &walked.path),
+            files: walked.files.clone(),
+        })
+        .collect()
+}
+
+fn child_names(folders: &[Folder], parent: &str) -> Vec<String> {
+    let children = folders
+        .iter()
+        .map(|folder| Path::new(&folder.path))
+        .filter(|path| path.parent() == Some(Path::new(parent)));
+    children
+        .filter_map(|path| path.file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        .collect()
 }
 
 fn tree_of(folders: &[Folder]) -> FolderSizeTree {
@@ -277,11 +351,11 @@ fn scopes_pick_files_folders_or_both_ranked_together() {
             "/Users/alex/Documents/invoice-2026.pdf",
         ]
     );
-    let before_folders = fixture.blocks_decompressed();
+    let before_folders = fixture.blocks_read();
     let folders = run(&fixture.source, "invoice", &FOLDERS);
     assert_eq!(sorted(&folders), ["/Users/alex/Invoices"]);
     assert_eq!(
-        fixture.blocks_decompressed(),
+        fixture.blocks_read(),
         before_folders,
         "folder scope reads no file names"
     );
@@ -307,7 +381,7 @@ fn file_scope_folder_segments_still_resolve_matching_subtrees() {
 }
 
 #[test]
-fn path_scoped_queries_decompress_only_blocks_covering_matching_subtrees() {
+fn path_scoped_queries_read_only_blocks_covering_matching_subtrees() {
     let folders = wide_library();
     let fixture = Fixture::with_block_target(&folders, SMALL_BLOCK_TARGET);
     let project = fixture.slot("/Users/alex/project");
@@ -319,16 +393,166 @@ fn path_scoped_queries_decompress_only_blocks_covering_matching_subtrees() {
     assert!(covering > 0);
     assert!(covering < block_count / 2, "{covering} of {block_count}");
 
-    let before = fixture.blocks_decompressed();
+    let before = fixture.blocks_read();
     assert_eq!(fixture.ranked("project/*.md", &FILES).len(), 3);
-    assert_eq!(fixture.blocks_decompressed() - before, covering);
+    assert_eq!(fixture.blocks_read() - before, covering);
 
-    let before_global = fixture.blocks_decompressed();
+    let before_global = fixture.blocks_read();
     assert_eq!(fixture.ranked("record", &FILES).len(), FILLER_FOLDERS);
-    assert_eq!(fixture.blocks_decompressed() - before_global, block_count);
+    assert_eq!(fixture.blocks_read() - before_global, block_count);
     assert!(
         block_count as usize > BLOCKS_PER_READ,
         "global reads are chunked"
+    );
+}
+
+fn library_with_a_full_hidden_block() -> Vec<Folder> {
+    let mut folders = library();
+    let plans = folders
+        .iter_mut()
+        .find(|folder| folder.path.ends_with("/.agent/plans"))
+        .expect("plans folder");
+    plans
+        .files
+        .extend(["roadmap-2026.md", "retro-notes.md"].map(String::from));
+    folders
+}
+
+fn blocks_read_by(fixture: &Fixture, raw: &str, options: &SearchOptions) -> u64 {
+    let before = fixture.blocks_read();
+    fixture.ranked(raw, options);
+    fixture.blocks_read() - before
+}
+
+#[test]
+fn with_hidden_files_off_blocks_inside_hidden_subtrees_are_never_read() {
+    let fixture =
+        Fixture::with_block_target(&library_with_a_full_hidden_block(), SMALL_BLOCK_TARGET);
+    let hidden_blocks = {
+        let tree = fixture.source.tree.lock().unwrap();
+        let names = fixture.source.names.lock().unwrap();
+        names.blocks_within(&tree.hidden_ranges())
+    };
+    assert_eq!(hidden_blocks.len(), 1, "the .agent subtree fills one block");
+    let block_count = fixture.block_count();
+
+    assert_eq!(blocks_read_by(&fixture, "*.md", &FILES), block_count - 1);
+    let with_hidden_files = SearchOptions {
+        scope: SearchScope::Files,
+        ..WITH_HIDDEN
+    };
+    assert_eq!(
+        blocks_read_by(&fixture, "*.md", &with_hidden_files),
+        block_count
+    );
+    assert!(fixture
+        .ranked("roadmap", &with_hidden_files)
+        .contains(&"/Users/alex/project/.agent/plans/roadmap-2026.md".to_owned()));
+    assert!(fixture.ranked("roadmap", &FILES).is_empty());
+    assert_eq!(
+        blocks_read_by(&fixture, "/Users/alex/project/.agent/plans/", &FILES),
+        1,
+        "listings read the blocks of the listed folders"
+    );
+}
+
+fn dot_rooted_library() -> Vec<Folder> {
+    vec![
+        folder(
+            DOT_ROOT,
+            &[
+                "root-notes-one.txt",
+                "root-notes-two.txt",
+                "root-notes-three.txt",
+            ],
+        ),
+        folder(
+            DOT_ROOT_CACHE,
+            &["cached-alpha.md", "cached-beta.md", "cached-gamma.md"],
+        ),
+        folder(DOT_ROOT_DOCS, &["guide.md"]),
+    ]
+}
+
+fn dot_rooted_tree(folders: &[Folder]) -> FolderSizeTree {
+    let mut tree = FolderSizeTree::default();
+    assert!(tree.add_root(Path::new(DOT_ROOT)));
+    for folder in folders {
+        let children = child_names(folders, &folder.path);
+        let listing = DirectoryListing::scanned(0, &children);
+        assert!(tree.merge_record(Path::new(&folder.path), listing));
+    }
+    tree
+}
+
+#[test]
+fn below_a_dot_named_root_hidden_subtrees_are_still_skipped_whole() {
+    let folders = dot_rooted_library();
+    let fixture = Fixture::over_tree(dot_rooted_tree(&folders), &folders, SMALL_BLOCK_TARGET);
+    let hidden_blocks = {
+        let tree = fixture.source.tree.lock().unwrap();
+        let names = fixture.source.names.lock().unwrap();
+        names.blocks_within(&tree.hidden_ranges())
+    };
+    assert_eq!(hidden_blocks.len(), 1, "the .cache subtree fills one block");
+    let block_count = fixture.block_count();
+
+    assert_eq!(blocks_read_by(&fixture, "*.md", &FILES), block_count - 1);
+    assert_eq!(
+        sorted_ranked(&fixture, "*.md", &FILES),
+        [".dot-root/docs/guide.md"],
+        "the root shows and its hidden subtree does not"
+    );
+    let with_hidden_files = SearchOptions {
+        scope: SearchScope::Files,
+        ..WITH_HIDDEN
+    };
+    assert_eq!(
+        blocks_read_by(&fixture, "*.md", &with_hidden_files),
+        block_count
+    );
+    assert_eq!(
+        sorted_ranked(&fixture, "*.md", &with_hidden_files),
+        [
+            ".dot-root/.cache/cached-alpha.md",
+            ".dot-root/.cache/cached-beta.md",
+            ".dot-root/.cache/cached-gamma.md",
+            ".dot-root/docs/guide.md",
+        ]
+    );
+}
+
+#[test]
+fn blocks_inside_the_dead_range_of_a_replaced_subtree_are_never_read() {
+    let fixture = Fixture::with_block_target(&wide_library(), SMALL_BLOCK_TARGET);
+    let block_count_before = fixture.block_count();
+    let replacement = [
+        folder("/Users/alex/archive", &[]),
+        folder("/Users/alex/archive/box-new", &["record-new.md"]),
+    ];
+    fixture.graft("/Users/alex/archive", &replacement);
+    let dead_blocks = {
+        let names = fixture.source.names.lock().unwrap();
+        names.blocks_within(names.dead_slots())
+    };
+    assert!(dead_blocks.len() > 1, "{dead_blocks:?}");
+    let block_count = fixture.block_count();
+    assert!(
+        block_count > block_count_before,
+        "the graft adds its own block"
+    );
+
+    let with_hidden_files = SearchOptions {
+        scope: SearchScope::Files,
+        ..WITH_HIDDEN
+    };
+    assert_eq!(
+        fixture.ranked("record", &with_hidden_files),
+        ["/Users/alex/archive/box-new/record-new.md"]
+    );
+    assert_eq!(
+        blocks_read_by(&fixture, "record", &with_hidden_files),
+        block_count - dead_blocks.len() as u64
     );
 }
 
@@ -345,7 +569,7 @@ fn cancellation_and_budget_expiry_stop_file_scanning() {
         run_with(&fixture.source, "record", &cancelled),
         Err(SearchError::Cancelled)
     );
-    assert_eq!(fixture.blocks_decompressed(), 0);
+    assert_eq!(fixture.blocks_read(), 0);
 
     let checks = Cell::new(0);
     let after_overlay = || {
@@ -359,7 +583,7 @@ fn cancellation_and_budget_expiry_stop_file_scanning() {
     let partial = run_with(&fixture.source, "record", &expiring).expect("partial");
     assert!(partial.truncated);
     assert!(partial.candidates.is_empty());
-    assert_eq!(fixture.blocks_decompressed(), 0);
+    assert_eq!(fixture.blocks_read(), 0);
 
     let checks = Cell::new(0);
     let after_first_blocks = || {
@@ -372,7 +596,7 @@ fn cancellation_and_budget_expiry_stop_file_scanning() {
     };
     let partial = run_with(&fixture.source, "record", &expiring).expect("partial");
     assert!(partial.truncated);
-    assert_eq!(fixture.blocks_decompressed(), BLOCKS_PER_READ as u64);
+    assert_eq!(fixture.blocks_read(), BLOCKS_PER_READ as u64);
 }
 
 fn bulk_source(count: usize) -> (TempDir, Source) {

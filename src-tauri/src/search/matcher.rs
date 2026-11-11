@@ -86,16 +86,6 @@ impl Pattern {
         self.chars.iter().collect()
     }
 
-    pub fn ascii_subsequence_of(&self, name: &str) -> bool {
-        let mut lowered_name = name
-            .bytes()
-            .map(|byte| char::from(byte.to_ascii_lowercase()));
-        self.chars
-            .iter()
-            .filter(|character| !matches!(character, '*' | '?'))
-            .all(|wanted| lowered_name.any(|character| character == *wanted))
-    }
-
     pub fn equals(&self, name: &FoldedName) -> bool {
         self.chars == name.chars
     }
@@ -121,6 +111,11 @@ impl Token {
         match self {
             Self::Literal(pattern) | Self::Glob(pattern) => pattern,
         }
+    }
+
+    pub fn literal_chars(&self) -> impl Iterator<Item = char> + '_ {
+        let chars = self.pattern().chars.iter().copied();
+        chars.filter(|character| !GLOB_WILDCARDS.contains(character))
     }
 }
 

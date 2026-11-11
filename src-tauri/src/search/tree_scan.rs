@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use super::file_scan::{self, FileScan, FileSelection};
-use super::matcher::NameKind;
+use super::matcher::{Match, NameKind};
 use super::path_style::PathStyle;
 use super::query::{ParsedQuery, Segment};
 use super::results::{
@@ -13,13 +13,13 @@ use super::results::{
 use super::source::FolderTreeSource;
 use super::{Candidate, CandidateBatch, SearchError, SearchRun, SearchScope};
 use crate::resource_coordinator::scan_pool::{map_parts_in_order, split_range};
-use crate::size::index::tree::FolderSizeTree;
+use crate::size::index::names::signature::SignedName;
+use crate::size::index::tree::{is_hidden_name, FolderSizeTree};
 use crate::size::index::IndexRead;
 
 pub const SLOTS_PER_READ: usize = 32_768;
 
 const FIRST_ID: u32 = 0;
-const HIDDEN_NAME_PREFIX: char = '.';
 const PATH_SEPARATOR: char = '/';
 
 pub type TreeSearchRun<'run> = SearchRun<'run, dyn FolderTreeSource + 'run>;
@@ -317,9 +317,23 @@ impl FolderPass<'_> {
         self.name.is_none() && self.root_segment.is_none()
     }
 
-    fn is_root(&self, name: &str) -> bool {
+    fn segments(&self) -> impl Iterator<Item = &Segment> {
+        self.name.into_iter().chain(self.root_segment)
+    }
+
+    fn may_match(&self, signature: u32) -> bool {
+        self.segments()
+            .any(|segment| segment.prefilter().admits_signature(signature))
+    }
+
+    fn is_root(&self, name: SignedName<'_>) -> bool {
         self.root_segment
-            .is_some_and(|segment| segment.match_name(name, NameKind::Folder).is_some())
+            .is_some_and(|segment| segment.match_raw(name, NameKind::Folder).is_some())
+    }
+
+    fn name_match(&self, name: SignedName<'_>) -> Option<Match> {
+        let matched = self.name?.match_raw(name, NameKind::Folder)?;
+        Some(matched.found)
     }
 }
 
@@ -393,16 +407,23 @@ impl PartScan<'_, '_> {
     }
 
     fn inspect(self, id: u32, part: &mut InspectedPart) {
+        let Some(signature) = self.visible.tree.folder_signature(id) else {
+            return;
+        };
+        if !self.pass.may_match(signature) {
+            return;
+        }
         let Some(node) = self.visible.tree.live_node(id) else {
             return;
         };
-        if self.pass.is_root(node.name) {
+        let name = SignedName {
+            bytes: node.name.as_bytes(),
+            signature,
+        };
+        if self.pass.is_root(name) {
             part.roots.push(id);
         }
-        let Some(name) = self.pass.name else {
-            return;
-        };
-        let Some(found) = name.match_name(node.name, NameKind::Folder) else {
+        let Some(found) = self.pass.name_match(name) else {
             return;
         };
         if self.visible.shows(id) {
@@ -477,14 +498,14 @@ impl<'tree> VisibleTree<'tree> {
         let Some(parent) = node.parent else {
             return LineageStep::Shown;
         };
-        if self.hides_name(node.name) {
+        if self.hides_name(node.name.as_bytes()) {
             return LineageStep::Hidden;
         }
         LineageStep::Up(parent)
     }
 
-    pub(crate) fn hides_name(&self, name: &str) -> bool {
-        !self.include_hidden && name.starts_with(HIDDEN_NAME_PREFIX)
+    pub(crate) fn hides_name(&self, name: &[u8]) -> bool {
+        !self.include_hidden && is_hidden_name(name)
     }
 
     pub(crate) fn is_blocked(&self, path: &str) -> bool {
@@ -503,7 +524,9 @@ impl<'tree> VisibleTree<'tree> {
         }
         let (root, rest) = names.split_last()?;
         let components: Vec<&str> = rest.iter().rev().copied().collect();
-        let has_hidden_component = components.iter().any(|name| self.hides_name(name));
+        let has_hidden_component = components
+            .iter()
+            .any(|name| self.hides_name(name.as_bytes()));
         if has_hidden_component {
             return None;
         }

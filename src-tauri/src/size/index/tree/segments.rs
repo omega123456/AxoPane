@@ -6,6 +6,8 @@ use super::{NodeId, HEAP_BIT, NONE};
 use crate::size::index::names::ReadFailure;
 use crate::size::index::segment::{ChildIds, MappedSegment, SegmentCorrupt};
 
+const UNKNOWN_SIGNATURE: u32 = 0;
+
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Children<'tree> {
     listed: &'tree [NodeId],
@@ -113,6 +115,23 @@ impl SegmentTable {
             return "";
         };
         self.checked(located.segment.name(located.ordinal))
+    }
+
+    pub(super) fn signature(&self, id: NodeId) -> u32 {
+        let Some(located) = self.locate(id) else {
+            return UNKNOWN_SIGNATURE;
+        };
+        self.checked(located.segment.signature(located.ordinal))
+    }
+
+    pub(super) fn hidden_ranges(&self) -> impl Iterator<Item = Range<NodeId>> + '_ {
+        self.attached.iter().flat_map(|attached| {
+            let first_id = attached.ids.start;
+            let ordinals = self.checked(attached.segment.hidden_ranges());
+            ordinals
+                .into_iter()
+                .map(move |range| first_id + range.start..first_id + range.end)
+        })
     }
 
     pub(super) fn children(&self, id: NodeId) -> Children<'_> {

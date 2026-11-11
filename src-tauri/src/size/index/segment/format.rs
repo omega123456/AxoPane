@@ -5,7 +5,7 @@ use crate::size::index::names::block;
 use crate::size::index::persist::Reader;
 use crate::size::index::tree::{DENIED, PERSISTED_FLAGS, SCANNED, SKIPPED};
 
-pub const TREE_FORMAT_VERSION: u32 = 1;
+pub const TREE_FORMAT_VERSION: u32 = 2;
 pub const CHUNK_BYTES: usize = 64 * 1024;
 pub const MAX_SEGMENT_NODES: u32 = 1 << 31;
 
@@ -16,6 +16,8 @@ const MAGIC: &[u8; 8] = b"AXOTREE\0";
 const CHECKSUM_BYTES: usize = size_of::<u64>();
 const HEADER_FIELD_BYTES: usize = HEADER_BYTES - CHECKSUM_BYTES;
 const RESERVED_HEADER_FIELD: u32 = 0;
+const RANGE_BOUND_BYTES: usize = size_of::<u32>();
+const HIDDEN_RANGE_BYTES: usize = 2 * RANGE_BOUND_BYTES;
 const TREE_FILE_PREFIX: &str = "folder-tree-";
 const NAMES_FILE_PREFIX: &str = "file-names-";
 const WALK_SPILL_PREFIX: &str = "walk-spill-";
@@ -91,6 +93,15 @@ pub(crate) struct Counts {
     pub(crate) nodes: u32,
     pub(crate) top_level: u32,
     pub(crate) name_heap_bytes: u32,
+    pub(crate) hidden_ranges: u32,
+}
+
+impl Counts {
+    fn is_consistent(&self) -> bool {
+        let top_level_fits = self.top_level <= self.nodes;
+        let hidden_ranges_fit = self.hidden_ranges <= self.nodes;
+        top_level_fits && hidden_ranges_fit
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,9 +120,11 @@ pub(crate) enum Column {
     NameEnds,
     Flags,
     NameHeap,
+    Signature,
+    HiddenRanges,
 }
 
-const COLUMN_COUNT: usize = 13;
+const COLUMN_COUNT: usize = 15;
 
 impl Column {
     const IN_FILE_ORDER: [Self; COLUMN_COUNT] = [
@@ -128,6 +141,8 @@ impl Column {
         Self::NameEnds,
         Self::Flags,
         Self::NameHeap,
+        Self::Signature,
+        Self::HiddenRanges,
     ];
 
     pub(crate) fn at(self, index: u32) -> Cell {
@@ -141,6 +156,7 @@ impl Column {
         match self {
             Self::Direct | Self::Total => size_of::<u64>(),
             Self::Flags | Self::NameHeap => size_of::<u8>(),
+            Self::HiddenRanges => HIDDEN_RANGE_BYTES,
             _ => size_of::<u32>(),
         }
     }
@@ -150,6 +166,7 @@ impl Column {
             Self::Children => u64::from(counts.nodes - counts.top_level),
             Self::NameEnds => u64::from(counts.nodes) + 1,
             Self::NameHeap => u64::from(counts.name_heap_bytes),
+            Self::HiddenRanges => u64::from(counts.hidden_ranges),
             _ => u64::from(counts.nodes),
         }
     }
@@ -176,7 +193,7 @@ pub(crate) struct Layout {
 
 impl Layout {
     pub(crate) fn for_counts(counts: Counts) -> Option<Self> {
-        if counts.top_level > counts.nodes {
+        if !counts.is_consistent() {
             return None;
         }
         let mut sections = Vec::with_capacity(COLUMN_COUNT);
@@ -265,7 +282,7 @@ impl TreeHeader {
         out.extend_from_slice(&self.counts.top_level.to_le_bytes());
         out.extend_from_slice(&self.counts.name_heap_bytes.to_le_bytes());
         out.extend_from_slice(&self.token.to_le_bytes());
-        out.extend_from_slice(&RESERVED_HEADER_FIELD.to_le_bytes());
+        out.extend_from_slice(&self.counts.hidden_ranges.to_le_bytes());
         out.extend_from_slice(&RESERVED_HEADER_FIELD.to_le_bytes());
         out
     }
@@ -284,12 +301,16 @@ impl TreeHeader {
         if !(magic_matches && version_matches) {
             return None;
         }
-        let counts = Counts {
-            nodes: reader.u32()?,
-            top_level: reader.u32()?,
-            name_heap_bytes: reader.u32()?,
-        };
+        let nodes = reader.u32()?;
+        let top_level = reader.u32()?;
+        let name_heap_bytes = reader.u32()?;
         let token = reader.u64()?;
+        let counts = Counts {
+            nodes,
+            top_level,
+            name_heap_bytes,
+            hidden_ranges: reader.u32()?,
+        };
         Some(Self { counts, token })
     }
 
@@ -313,6 +334,19 @@ fn header_checksum(fields: &[u8], chunk_table: &[u8]) -> u64 {
     let mut covered = fields.to_vec();
     covered.extend_from_slice(chunk_table);
     block::checksum(&covered)
+}
+
+pub(crate) fn encode_range(range: &Range<u32>) -> [u8; HIDDEN_RANGE_BYTES] {
+    let mut encoded = [0; HIDDEN_RANGE_BYTES];
+    let (start, end) = encoded.split_at_mut(RANGE_BOUND_BYTES);
+    start.copy_from_slice(&range.start.to_le_bytes());
+    end.copy_from_slice(&range.end.to_le_bytes());
+    encoded
+}
+
+pub(crate) fn decode_range(bytes: &[u8]) -> Option<Range<u32>> {
+    let (start, end) = bytes.split_at_checked(RANGE_BOUND_BYTES)?;
+    Some(le_u32(start)?..le_u32(end)?)
 }
 
 pub(crate) fn le_u32(bytes: &[u8]) -> Option<u32> {

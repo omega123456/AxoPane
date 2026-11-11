@@ -1,6 +1,10 @@
+use std::borrow::Cow;
+
 use super::matcher::{self, FoldedName, Match, NameKind, Pattern, Token};
 use super::path_style::PathStyle;
+use super::prefilter::Prefilter;
 use crate::path_text::strip_home_prefix;
+use crate::size::index::names::signature::SignedName;
 
 pub const MIN_QUERY_CHARS: usize = 3;
 
@@ -10,11 +14,17 @@ pub enum ParseError {
     TooShort,
 }
 
+pub struct RawMatch<'name> {
+    pub text: Cow<'name, str>,
+    pub found: Match,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Segment {
     pub raw: String,
     phrase: Option<Pattern>,
     tokens: Vec<Token>,
+    prefilter: Prefilter,
 }
 
 impl Segment {
@@ -24,12 +34,17 @@ impl Segment {
         Self {
             raw: raw.to_owned(),
             phrase,
+            prefilter: Prefilter::of(&tokens),
             tokens,
         }
     }
 
     pub fn tokens(&self) -> &[Token] {
         &self.tokens
+    }
+
+    pub fn prefilter(&self) -> &Prefilter {
+        &self.prefilter
     }
 
     pub fn matches(&self, name: &FoldedName, kind: NameKind) -> Option<Match> {
@@ -40,19 +55,17 @@ impl Segment {
         matcher::match_words(words, name, kind)
     }
 
-    pub fn match_name(&self, name: &str, kind: NameKind) -> Option<Match> {
-        if !self.may_match(name) {
+    pub fn match_raw<'name>(
+        &self,
+        name: SignedName<'name>,
+        kind: NameKind,
+    ) -> Option<RawMatch<'name>> {
+        if !self.prefilter.admits_name(name) {
             return None;
         }
-        self.matches(&FoldedName::new(&matcher::nfc(name)), kind)
-    }
-
-    pub fn may_match(&self, name: &str) -> bool {
-        !name.is_ascii()
-            || self
-                .tokens
-                .iter()
-                .all(|token| token.pattern().ascii_subsequence_of(name))
+        let text = String::from_utf8_lossy(name.bytes);
+        let found = self.matches(&FoldedName::new(&matcher::nfc(&text)), kind)?;
+        Some(RawMatch { text, found })
     }
 }
 

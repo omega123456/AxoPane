@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use file_explorer_lib::size::index::names::file::spill_path;
 use file_explorer_lib::size::index::names::{
-    FileNameStore, NamesCounters, NamesScratch, OVERLAY_THRESHOLD_FOLDERS,
+    FileNameStore, NamesCounters, OverlayThreshold, OVERLAY_THRESHOLD_BYTES,
 };
 use file_explorer_lib::size::index::persist::{self, temp_path, ChangeFlags, SegmentRef, Snapshot};
 use file_explorer_lib::size::index::platform::{IndexPlatform, RawEvent};
@@ -22,6 +22,10 @@ const POLL_LIMIT: Duration = Duration::from_secs(1);
 const NAMES_HEADER_BYTES: u64 = 48;
 const BARRIER_PANE: &str = "names-barrier";
 const BARRIER_FOLDER: &str = "s";
+const SMALL_OVERLAY: OverlayThreshold = OverlayThreshold {
+    folders: 8,
+    name_bytes: OVERLAY_THRESHOLD_BYTES,
+};
 
 pub(crate) fn poll_until(what: &str, mut condition: impl FnMut() -> bool) {
     let deadline = Instant::now() + POLL_LIMIT;
@@ -275,7 +279,7 @@ fn re_reads_update_names_without_a_rewrite_and_prunes_hide_them() {
     blur(&index);
     assert_eq!(base_segment(&index), base, "no new segment");
     assert_eq!(fs::read(base_names_file(&index)).unwrap(), written);
-    assert_eq!(counters(&index).blocks_reencoded, before.blocks_reencoded);
+    assert_eq!(counters(&index).blocks_rebuilt, before.blocks_rebuilt);
 }
 
 #[test]
@@ -423,9 +427,16 @@ fn blur_saves_changes_in_the_manifest_and_leaves_the_segment_untouched() {
     );
 }
 
-fn create_more_folders_than_the_overlay_holds(index: &Harness) -> Vec<PathBuf> {
+fn is_swept(segment: &SegmentPaths) -> bool {
+    let tree_is_gone = !segment.tree.exists();
+    let names_are_gone = !segment.names.exists();
+    tree_is_gone && names_are_gone
+}
+
+pub(crate) fn create_more_folders_than_a_small_overlay_holds(index: &mut Harness) -> Vec<PathBuf> {
+    index.overlay_threshold = SMALL_OVERLAY;
     let many = index.path("many");
-    let folders: Vec<PathBuf> = (0..=OVERLAY_THRESHOLD_FOLDERS)
+    let folders: Vec<PathBuf> = (0..=SMALL_OVERLAY.folders)
         .map(|number| many.join(format!("d{number}")))
         .collect();
     for folder in &folders {
@@ -437,7 +448,7 @@ fn create_more_folders_than_the_overlay_holds(index: &Harness) -> Vec<PathBuf> {
 #[test]
 fn an_overlay_past_its_threshold_is_compacted_into_a_new_base() {
     let mut index = Harness::new();
-    let folders = create_more_folders_than_the_overlay_holds(&index);
+    let folders = create_more_folders_than_a_small_overlay_holds(&mut index);
     scan_and_save(&mut index);
     let base = base_segment(&index);
 
@@ -455,8 +466,7 @@ fn an_overlay_past_its_threshold_is_compacted_into_a_new_base() {
     let overlay = read(&index, |view| view.names.overlay_stats());
     assert_eq!(overlay.folders, 0, "the new base absorbed the overlay");
     let old_base = paths_of(&index, base);
-    poll_until("the old base is swept", || !old_base.tree.exists());
-    assert!(!old_base.names.exists());
+    poll_until("the old base is swept", || is_swept(&old_base));
 }
 
 #[test]
@@ -536,10 +546,9 @@ fn names_saved_on_disk(index: &Harness, relative: &str) -> Vec<String> {
 fn every_name_in_saved_blocks(index: &Harness) -> Vec<String> {
     let mut store = FileNameStore::new(names_file(index));
     store.restore(saved(index).names);
-    let mut scratch = NamesScratch::default();
     let mut names = Vec::new();
     for block_index in 0..store.block_count() {
-        let block = store.read_block(block_index, &mut scratch).expect("block");
+        let block = store.read_block(block_index).expect("block");
         for folder in block.folders() {
             names.extend(sorted_strings(folder.names()));
         }
@@ -609,23 +618,34 @@ fn a_segment_left_by_a_crash_before_its_manifest_is_swept_at_launch() {
 #[test]
 fn events_arriving_during_a_compaction_are_applied_after_it() {
     let mut index = Harness::new();
-    create_more_folders_than_the_overlay_holds(&index);
     scan_and_save(&mut index);
     let base = base_segment(&index);
 
+    let compactions_before = index.compactions.started();
+    index.compactions.hold();
     index
         .service()
-        .add_index_exclusions(&[index.path("s")])
+        .add_index_exclusions(&[index.path("a/b")])
         .expect("index attached");
+    wait_until("the compaction starts", || {
+        index.compactions.started() > compactions_before
+    });
     fs::write(index.path("a/late.txt"), b"l").unwrap();
     index.event("a", ChangeFlags::default());
+    barrier(&index);
+    assert_eq!(
+        indexed_names(&index, "a"),
+        owned(&["a.bin"]),
+        "the event waits for the compaction"
+    );
 
+    index.compactions.release();
     wait_for_a_new_base(&index, base);
     poll_until("the late event is applied", || {
         indexed_names(&index, "a") == owned(&["a.bin", "late.txt"])
     });
     index.wait_state(IndexState::UpToDate);
-    assert!(!every_name_in_saved_blocks(&index).contains(&"s.bin".to_string()));
+    assert!(!every_name_in_saved_blocks(&index).contains(&"b.bin".to_string()));
 }
 
 fn saved_base_is_purged_of(index: &Harness, file_name: &str) -> bool {
@@ -640,18 +660,26 @@ fn saved_base_is_purged_of(index: &Harness, file_name: &str) -> bool {
 fn a_quit_during_a_compaction_saves_the_manifest_and_purges_at_the_next_launch() {
     let mut index = Harness::new();
     index.platform.set_event_id(500);
-    create_more_folders_than_the_overlay_holds(&index);
     scan_and_save(&mut index);
 
+    let compactions_before = index.compactions.started();
+    index.compactions.hold();
     index
         .service()
         .add_index_exclusions(&[index.path("a")])
         .expect("index attached");
+    wait_until("the compaction starts", || {
+        index.compactions.started() > compactions_before
+    });
     let asked = Instant::now();
     index.service().flush_index();
     assert!(asked.elapsed() < POLL_LIMIT, "the exit save never waits");
-    assert_eq!(saved(&index).meta.exclusions, [index.path("a")]);
+    let exit_save = saved(&index).meta;
+    assert_eq!(exit_save.exclusions, [index.path("a")]);
+    assert!(exit_save.names_purge_due, "the purge is still pending");
 
+    index.stop();
+    index.compactions.release();
     relaunch(&mut index);
     assert_eq!(index.platform.stream_starts().last(), Some(&Some(500)));
     finish_replay(&index);

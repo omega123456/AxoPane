@@ -10,7 +10,7 @@ use crossbeam_channel::{bounded, unbounded, Sender};
 
 use super::exclusions::{ExclusionChange, ExclusionRules, ExclusionSet};
 use super::names::file::NAMES_FILE;
-use super::names::FileNameStore;
+use super::names::{FileNameStore, OverlayThreshold};
 use super::platform::{self, IndexPlatform};
 use super::tree::{FolderSizeTree, FolderTotal, LowerBound};
 use super::IndexRead;
@@ -103,6 +103,7 @@ pub struct IndexOptions {
     pub home: Option<PathBuf>,
     pub snapshot_path: PathBuf,
     pub batching: WalkBatching,
+    pub overlay_threshold: OverlayThreshold,
     pub platform: Arc<dyn IndexPlatform>,
     pub clock: Clock,
     pub coordinator: Arc<ResourceCoordinator>,
@@ -112,6 +113,8 @@ pub struct IndexOptions {
     pub walk_hooks: fast_walk::TestHooks,
     #[cfg(feature = "test-utils")]
     pub on_background_parked: Arc<dyn Fn() + Send + Sync>,
+    #[cfg(feature = "test-utils")]
+    pub on_compaction_started: Arc<dyn Fn(&AtomicBool) + Send + Sync>,
 }
 
 #[cfg(feature = "test-utils")]
@@ -161,6 +164,7 @@ impl IndexOptions {
             home,
             snapshot_path: cache_dir.join(SNAPSHOT_FILE),
             batching: WalkBatching::default(),
+            overlay_threshold: OverlayThreshold::default(),
             platform: Arc::new(platform::MacPlatform),
             clock: Arc::new(SystemTime::now),
             coordinator,
@@ -248,6 +252,7 @@ pub(super) struct Shared {
     pub(super) coordinator: Arc<ResourceCoordinator>,
     pub(super) collect_file_names: bool,
     pub(super) batching: WalkBatching,
+    pub(super) overlay_threshold: OverlayThreshold,
     pub(super) segment_directory: PathBuf,
     pub(super) sequences: Mutex<SegmentSequences>,
     pub(super) booted: AtomicBool,
@@ -255,6 +260,8 @@ pub(super) struct Shared {
     pub(super) walk_hooks: fast_walk::TestHooks,
     #[cfg(feature = "test-utils")]
     pub(super) on_background_parked: Arc<dyn Fn() + Send + Sync>,
+    #[cfg(feature = "test-utils")]
+    pub(super) on_compaction_started: Arc<dyn Fn(&AtomicBool) + Send + Sync>,
 }
 
 pub(super) struct View {
@@ -557,6 +564,7 @@ impl Shared {
             coordinator: Arc::clone(&options.coordinator),
             collect_file_names: options.collect_file_names,
             batching: options.batching,
+            overlay_threshold: options.overlay_threshold,
             segment_directory: segment_directory_of(&options.snapshot_path),
             sequences: Mutex::new(SegmentSequences::default()),
             booted: AtomicBool::new(false),
@@ -564,6 +572,8 @@ impl Shared {
             walk_hooks: options.walk_hooks.clone(),
             #[cfg(feature = "test-utils")]
             on_background_parked: Arc::clone(&options.on_background_parked),
+            #[cfg(feature = "test-utils")]
+            on_compaction_started: Arc::clone(&options.on_compaction_started),
         }
     }
 

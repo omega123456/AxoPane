@@ -1,20 +1,27 @@
 use std::fs;
 use std::path::Path;
 
-use file_explorer_lib::size::index::names::PackedNames;
+use file_explorer_lib::size::index::names::signature::{is_non_ascii, signature_of, DOT_BIT};
+use file_explorer_lib::size::index::names::{names_in, PackedNames};
 use file_explorer_lib::size::index::persist::temp_path;
 use file_explorer_lib::size::index::segment::{
     BuildError, MappedSegment, NodeFlags, SegmentBuilder, SegmentCorrupt, SegmentEntry,
-    SegmentPaths, SegmentTarget, CHUNK_BYTES,
+    SegmentPaths, SegmentTarget, CHUNK_BYTES, TREE_FORMAT_VERSION,
 };
 use tempfile::{tempdir, TempDir};
 
 use crate::common::segment::{
-    child_names, descend, file_names_of, files_in, names_to, paths_in, FIRST_SEQUENCE,
+    child_names, descend, file_names_of, files_in, names_to, paths_in, put_u32_at,
+    resealed_single_chunk, CHECKSUM_BYTES, FIRST_SEQUENCE, FIRST_TREE_FORMAT, TREE_VERSION_OFFSET,
 };
 
 const TOKEN: u64 = 77;
 const HEADER_BYTES: usize = 48;
+const HIDDEN_RANGE_COUNT_OFFSET: usize = 32;
+const HIDDEN_RANGE_BYTES: usize = 8;
+const RANGE_BOUND_BYTES: usize = 4;
+const HIDDEN_PLAN_RANGES: usize = 2;
+const KELVIN: &str = "\u{212A}ELVIN";
 const SCANNED: NodeFlags = NodeFlags {
     scanned: true,
     denied: false,
@@ -223,6 +230,7 @@ fn ids_outside_the_segment_are_reported_as_corrupt() {
     assert_eq!(segment.subtree(10), Err(SegmentCorrupt));
     assert_eq!(segment.name(10), Err(SegmentCorrupt));
     assert_eq!(segment.name(u32::MAX), Err(SegmentCorrupt));
+    assert_eq!(segment.signature(10), Err(SegmentCorrupt));
     assert!(segment.children(10).is_err());
     assert!(segment.child_named(10, "alpha").is_err());
 }
@@ -470,42 +478,30 @@ fn build_many(builder: &mut SegmentBuilder) {
 }
 
 #[test]
-fn a_compaction_build_compresses_in_parallel_and_writes_the_same_files() {
+fn a_large_build_writes_many_verified_blocks_whose_signatures_match_their_names() {
     let directory = tempdir().expect("temp dir");
-    let sequential_paths = paths_in(&directory.path().join("sequential"));
-    let parallel_paths = paths_in(&directory.path().join("parallel"));
-    let mut sequential = SegmentBuilder::create(SegmentTarget {
-        paths: sequential_paths.clone(),
+    let paths = paths_in(directory.path());
+    let mut builder = SegmentBuilder::create(SegmentTarget {
+        paths: paths.clone(),
         token: TOKEN,
     })
-    .expect("sequential builder");
-    let mut parallel = SegmentBuilder::for_compaction(SegmentTarget {
-        paths: parallel_paths.clone(),
-        token: TOKEN,
-    })
-    .expect("parallel builder");
-    build_many(&mut sequential);
-    build_many(&mut parallel);
-    let sequential_built = sequential.finish().expect("sequential");
-    let parallel_built = parallel.finish().expect("parallel");
+    .expect("builder");
+    build_many(&mut builder);
+    let built = builder.finish().expect("built");
+    assert!(built.names.blocks_rebuilt > 16, "several blocks");
+    assert_eq!(built.names.blocks_copied, 0);
 
-    assert_eq!(
-        parallel_built.names.blocks_reencoded,
-        sequential_built.names.blocks_reencoded
-    );
-    assert!(
-        sequential_built.names.blocks_reencoded > 16,
-        "enough blocks for several batches"
-    );
-    assert_eq!(
-        fs::read(&parallel_paths.names).expect("parallel names"),
-        fs::read(&sequential_paths.names).expect("sequential names")
-    );
-    assert_eq!(
-        fs::read(&parallel_paths.tree).expect("parallel tree"),
-        fs::read(&sequential_paths.tree).expect("sequential tree")
-    );
-    let segment = MappedSegment::open(&parallel_paths).expect("opens");
+    let segment = MappedSegment::open(&paths).expect("opens");
+    let names = segment.file_names();
+    assert_eq!(names.block_count() as u64, built.names.blocks_rebuilt);
+    for index in 0..names.block_count() {
+        let touched = names.touch_block(index).expect("verifies");
+        assert!(touched.newly_verified);
+        for folder in touched.view.folders() {
+            let expected: Vec<u32> = names_in(folder.packed).map(signature_of).collect();
+            assert_eq!(folder.signatures.iter().collect::<Vec<u32>>(), expected);
+        }
+    }
     assert_eq!(
         file_names_of(&segment, 1234),
         many_folder_names(1233)
@@ -513,4 +509,140 @@ fn a_compaction_build_compresses_in_parallel_and_writes_the_same_files() {
             .map(|name| String::from_utf8_lossy(name).into_owned())
             .collect::<Vec<String>>()
     );
+}
+
+fn hidden_plan() -> Vec<Planned> {
+    vec![
+        planned(0, "/data", 1),
+        planned(1, ".git", 2),
+        planned(2, ".inner", 3),
+        planned(2, "hooks", 4),
+        planned(2, "objects", 5),
+        planned(3, "pack", 6),
+        planned(1, "Résumé", 7),
+        planned(1, "src", 8),
+        planned(2, ".cache", 9),
+        planned(3, "deep", 10),
+        planned(2, "main", 11),
+        planned(1, KELVIN, 12),
+    ]
+}
+
+#[test]
+fn every_folder_carries_its_name_signature_and_top_most_dot_folders_are_hidden_ranges() {
+    let entries = hidden_plan();
+    let fixture = built(&entries);
+    let segment = &fixture.segment;
+    for (ordinal, entry) in (0..).zip(&entries) {
+        let stored = segment.signature(ordinal).expect("signature");
+        assert_eq!(
+            stored,
+            signature_of(entry.name.as_bytes()),
+            "{}",
+            entry.name
+        );
+    }
+    assert_ne!(segment.signature(1).expect(".git") & DOT_BIT, 0);
+    assert!(is_non_ascii(segment.signature(6).expect("Résumé")));
+    assert!(is_non_ascii(segment.signature(11).expect("kelvin")));
+    assert!(!is_non_ascii(segment.signature(7).expect("src")));
+
+    let git_subtree = segment.subtree(1).expect(".git subtree");
+    let cache_subtree = segment.subtree(8).expect(".cache subtree");
+    assert_eq!((git_subtree.clone(), cache_subtree.clone()), (1..6, 8..10));
+    assert_eq!(
+        segment.hidden_ranges().expect("hidden ranges"),
+        [git_subtree, cache_subtree]
+    );
+}
+
+#[test]
+fn a_dot_named_top_level_folder_opens_no_range_but_its_nested_dot_folders_do() {
+    let fixture = built(&[
+        planned(0, "/data", 1),
+        planned(1, "visible", 2),
+        planned(0, ".top", 3),
+        planned(1, ".nested", 4),
+        planned(2, ".deeper", 5),
+        planned(1, "child", 6),
+    ]);
+    let nested_subtree = fixture.segment.subtree(3).expect("nested subtree");
+    assert_eq!(nested_subtree, 3..5);
+    assert_eq!(
+        fixture.segment.hidden_ranges().expect("hidden"),
+        [nested_subtree]
+    );
+    assert!(built(&plan())
+        .segment
+        .hidden_ranges()
+        .expect("none")
+        .is_empty());
+}
+
+struct RewrittenTree {
+    directory: TempDir,
+    original: Vec<u8>,
+}
+
+impl RewrittenTree {
+    fn of(entries: &[Planned]) -> Self {
+        let Built { directory, segment } = built(entries);
+        drop(segment);
+        let original = fs::read(paths_in(directory.path()).tree).expect("read");
+        Self {
+            directory,
+            original,
+        }
+    }
+
+    fn reopened_with(&self, change: impl Fn(&mut Vec<u8>)) -> Option<MappedSegment> {
+        let mut bytes = self.original.clone();
+        change(&mut bytes);
+        let tree = paths_in(self.directory.path()).tree;
+        fs::write(tree, resealed_single_chunk(bytes)).expect("write");
+        reopened(self.directory.path())
+    }
+
+    fn hidden_entry_offset(&self, index: usize) -> usize {
+        let table_end = self.original.len() - CHECKSUM_BYTES;
+        table_end - (HIDDEN_PLAN_RANGES - index) * HIDDEN_RANGE_BYTES
+    }
+
+    fn assert_hidden_table_corrupt(&self, change: impl Fn(&mut Vec<u8>)) {
+        let damaged = self.reopened_with(change).expect("checksums still match");
+        assert_eq!(damaged.hidden_ranges(), Err(SegmentCorrupt));
+        assert_eq!(damaged.signature(0), Ok(signature_of(b"/data")));
+    }
+}
+
+#[test]
+fn a_format_one_tree_file_is_refused_even_with_valid_checksums() {
+    assert_eq!(TREE_FORMAT_VERSION, FIRST_TREE_FORMAT + 1);
+    let rewritten = RewrittenTree::of(&plan());
+    let unchanged = rewritten.reopened_with(|_| {});
+    assert!(unchanged.is_some(), "resealing alone keeps the file valid");
+
+    let format_one =
+        rewritten.reopened_with(|bytes| put_u32_at(bytes, TREE_VERSION_OFFSET, FIRST_TREE_FORMAT));
+    assert!(format_one.is_none());
+}
+
+#[test]
+fn a_hidden_ranges_table_that_breaks_its_invariants_reads_as_corrupt() {
+    let rewritten = RewrittenTree::of(&hidden_plan());
+    let first = rewritten.hidden_entry_offset(0);
+    let second = rewritten.hidden_entry_offset(1);
+    let inside_the_git_subtree = 4;
+    rewritten.assert_hidden_table_corrupt(|bytes| {
+        put_u32_at(bytes, first + RANGE_BOUND_BYTES, inside_the_git_subtree)
+    });
+    rewritten.assert_hidden_table_corrupt(|bytes| {
+        let first_entry = bytes[first..second].to_vec();
+        bytes.copy_within(second..second + HIDDEN_RANGE_BYTES, first);
+        bytes[second..second + HIDDEN_RANGE_BYTES].copy_from_slice(&first_entry);
+    });
+    rewritten.assert_hidden_table_corrupt(|bytes| put_u32_at(bytes, second, u32::MAX));
+
+    let too_many = |bytes: &mut Vec<u8>| put_u32_at(bytes, HIDDEN_RANGE_COUNT_OFFSET, u32::MAX);
+    assert!(rewritten.reopened_with(too_many).is_none());
 }

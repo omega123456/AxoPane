@@ -2,8 +2,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use file_explorer_lib::size::index::names::block::{checksum, decode, BlockBuilder, EncodedBlock};
-use file_explorer_lib::size::index::names::codec::{DecodeScratch, NamesEncoder};
+use file_explorer_lib::size::index::names::block::{checksum, BlockBuilder, BuiltBlock};
 use file_explorer_lib::size::index::names::file::{
     remove_if_present, spill_path, MappedNames, NamesFileWriter, NamesHeader, NAMES_FILE,
     NAMES_FORMAT_VERSION, SPILL_SUFFIX,
@@ -19,13 +18,8 @@ fn packed(names: &[&str]) -> PackedNames {
     PackedNames::from_names(names.iter().map(|name| name.as_bytes()))
 }
 
-fn finished(builder: BlockBuilder) -> EncodedBlock {
-    let mut encoder = NamesEncoder::new().expect("encoder");
-    builder.finish(&mut encoder).expect("compresses")
-}
-
 /// One block per folder range: 0..2, 2..5, 5..6.
-fn blocks() -> Vec<EncodedBlock> {
+fn blocks() -> Vec<BuiltBlock> {
     let mut first = BlockBuilder::new(0);
     first.push(0, packed(&["root.txt"]).as_bytes());
     first.push(1, packed(&["a.md", ".env"]).as_bytes());
@@ -34,7 +28,7 @@ fn blocks() -> Vec<EncodedBlock> {
     second.push(4, packed(&["deep.rs"]).as_bytes());
     let mut third = BlockBuilder::new(5);
     third.push(5, packed(&["last"]).as_bytes());
-    vec![finished(first), finished(second), finished(third)]
+    vec![first.finish(), second.finish(), third.finish()]
 }
 
 const HEADER: NamesHeader = NamesHeader {
@@ -54,7 +48,7 @@ fn fixture() -> Fixture {
     Fixture { _dir: dir, path }
 }
 
-fn write_file(path: &Path, blocks: &[EncodedBlock], header: NamesHeader) {
+fn write_file(path: &Path, blocks: &[BuiltBlock], header: NamesHeader) {
     let mut writer = NamesFileWriter::create(path).expect("writer");
     for block in blocks {
         writer
@@ -68,15 +62,17 @@ fn write_file(path: &Path, blocks: &[EncodedBlock], header: NamesHeader) {
 
 fn names_at(file: &MappedNames, ordinal: u32) -> Option<Vec<u8>> {
     let index = file.blocks_covering(ordinal..ordinal + 1).start;
-    let mut scratch = DecodeScratch::default();
-    let decoded = decode(file.block(index)?, &mut scratch).expect("decodes");
-    decoded.names_of(ordinal).map(<[u8]>::to_vec)
+    let touched = file.touch_block(index).expect("verifies");
+    touched.view.names_of(ordinal).map(<[u8]>::to_vec)
 }
 
 #[test]
 fn a_written_file_maps_and_locates_blocks_by_folder_range() {
     let fixture = fixture();
     write_file(&fixture.path, &blocks(), HEADER);
+    let bytes = fs::read(&fixture.path).expect("written");
+    let version = u32::from_le_bytes(bytes[8..12].try_into().expect("version field"));
+    assert_eq!(version, 3, "format 3 on disk");
     let file = MappedNames::open(&fixture.path).expect("opens");
     assert_eq!(file.header(), HEADER);
     assert_eq!(file.block_count(), 3);
@@ -132,7 +128,7 @@ fn any_header_or_directory_corruption_rejects_the_file() {
     let fixture = fixture();
     write_file(&fixture.path, &blocks(), HEADER);
     let bytes = fs::read(&fixture.path).expect("written");
-    let blocks_len: usize = blocks().iter().map(|block| block.compressed.len()).sum();
+    let blocks_len: usize = blocks().iter().map(|block| block.bytes.len()).sum();
     let directory_start = HEADER_BYTES + blocks_len;
     let covered = (0..HEADER_BYTES).chain(directory_start..bytes.len());
     for at in covered {
@@ -168,17 +164,39 @@ fn a_corrupt_block_still_maps_but_fails_its_own_checksum() {
     file.write_all(&[0xEE]).expect("corrupt block byte");
     drop(file);
     let mapped = MappedNames::open(&fixture.path).expect("header still valid");
-    let mut scratch = DecodeScratch::default();
-    assert!(decode(mapped.block(0).expect("block"), &mut scratch).is_err());
-    assert!(decode(mapped.block(1).expect("block"), &mut scratch).is_ok());
+    assert!(mapped.touch_block(0).is_err());
+    assert!(
+        mapped.touch_block(0).is_err(),
+        "a failed block is never trusted"
+    );
+    assert!(mapped.touch_block(3).is_err(), "no such block");
+    let first_touch = mapped.touch_block(1).expect("verifies");
+    assert!(first_touch.newly_verified);
+    let second_touch = mapped.touch_block(1).expect("trusted");
+    assert!(!second_touch.newly_verified, "verified once per mapping");
+    assert_eq!(
+        second_touch.view.names_of(4),
+        Some(packed(&["deep.rs"]).as_bytes())
+    );
+}
+
+#[test]
+fn a_fresh_mapping_verifies_its_blocks_again() {
+    let fixture = fixture();
+    write_file(&fixture.path, &blocks(), HEADER);
+    let first = MappedNames::open(&fixture.path).expect("opens");
+    assert!(first.touch_block(2).expect("verifies").newly_verified);
+    let second = MappedNames::open(&fixture.path).expect("opens");
+    assert!(second.touch_block(2).expect("verifies").newly_verified);
+    assert!(!first.touch_block(2).expect("trusted").newly_verified);
 }
 
 struct CraftedEntry {
     offset: u64,
-    compressed_len: u32,
-    raw_len: u32,
+    byte_len: u32,
     first: u32,
     count: u32,
+    name_count: u32,
 }
 
 struct Crafted {
@@ -189,11 +207,11 @@ struct Crafted {
     entries: Vec<CraftedEntry>,
 }
 
-fn one_block() -> EncodedBlock {
+fn one_block() -> BuiltBlock {
     let mut builder = BlockBuilder::new(0);
     builder.push(0, packed(&["x"]).as_bytes());
     builder.push(1, &[]);
-    finished(builder)
+    builder.finish()
 }
 
 fn valid_crafted() -> Crafted {
@@ -205,10 +223,10 @@ fn valid_crafted() -> Crafted {
         directory_offset: None,
         entries: vec![CraftedEntry {
             offset: HEADER_BYTES as u64,
-            compressed_len: block.compressed.len() as u32,
-            raw_len: block.raw_len,
+            byte_len: block.bytes.len() as u32,
             first: 0,
             count: 2,
+            name_count: block.name_count,
         }],
     }
 }
@@ -216,7 +234,7 @@ fn valid_crafted() -> Crafted {
 /// Lays out a names file by hand with a correct header checksum.
 fn crafted_bytes(crafted: &Crafted) -> Vec<u8> {
     let block = one_block();
-    let natural_offset = (HEADER_BYTES + block.compressed.len()) as u64;
+    let natural_offset = (HEADER_BYTES + block.bytes.len()) as u64;
     let mut header = crafted.magic.to_vec();
     header.extend_from_slice(&crafted.version.to_le_bytes());
     header.extend_from_slice(&crafted.folder_count.to_le_bytes());
@@ -233,16 +251,16 @@ fn crafted_bytes(crafted: &Crafted) -> Vec<u8> {
     let mut directory = Vec::new();
     for entry in &crafted.entries {
         directory.extend_from_slice(&entry.offset.to_le_bytes());
-        directory.extend_from_slice(&entry.compressed_len.to_le_bytes());
-        directory.extend_from_slice(&entry.raw_len.to_le_bytes());
+        directory.extend_from_slice(&entry.byte_len.to_le_bytes());
         directory.extend_from_slice(&entry.first.to_le_bytes());
         directory.extend_from_slice(&entry.count.to_le_bytes());
+        directory.extend_from_slice(&entry.name_count.to_le_bytes());
         directory.extend_from_slice(&block.checksum.to_le_bytes());
     }
     let mut covered = header.clone();
     covered.extend_from_slice(&directory);
     let mut out = header;
-    out.extend_from_slice(&block.compressed);
+    out.extend_from_slice(&block.bytes);
     out.extend_from_slice(&directory);
     out.extend_from_slice(&checksum(&covered).to_le_bytes());
     out
@@ -265,7 +283,7 @@ fn with_entry(edit: impl FnOnce(&mut CraftedEntry)) -> Crafted {
 fn header_violations_are_rejected_even_with_a_valid_checksum() {
     assert!(crafted_opens(&valid_crafted()), "control");
     assert_eq!(DIRECTORY_ENTRY_BYTES, 32);
-    assert_eq!(NAMES_FORMAT_VERSION, 2, "zstd blocks");
+    assert_eq!(NAMES_FORMAT_VERSION, 3, "raw signature blocks");
     let rejected = [
         (
             Crafted {
@@ -286,7 +304,7 @@ fn header_violations_are_rejected_even_with_a_valid_checksum() {
                 version: NAMES_FORMAT_VERSION - 1,
                 ..valid_crafted()
             },
-            "older LZ4 version",
+            "older zstd version",
         ),
         (
             Crafted {
@@ -325,12 +343,8 @@ fn directory_entry_violations_are_rejected_even_with_a_valid_checksum() {
             "block inside the header",
         ),
         (
-            with_entry(|entry| entry.compressed_len += 4096),
+            with_entry(|entry| entry.byte_len += 4096),
             "block beyond the block area",
-        ),
-        (
-            with_entry(|entry| entry.raw_len = u32::MAX),
-            "implausible raw length",
         ),
         (
             with_entry(|entry| {
@@ -352,10 +366,10 @@ fn a_gap_between_blocks_is_rejected() {
     crafted.folder_count = 5;
     crafted.entries.push(CraftedEntry {
         offset: HEADER_BYTES as u64,
-        compressed_len: block.compressed.len() as u32,
-        raw_len: block.raw_len,
+        byte_len: block.bytes.len() as u32,
         first: 3,
         count: 2,
+        name_count: block.name_count,
     });
     assert!(!crafted_opens(&crafted));
     crafted.entries[1].first = 2;

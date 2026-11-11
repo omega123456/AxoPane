@@ -3,15 +3,14 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
-use file_explorer_lib::size::index::names::OVERLAY_THRESHOLD_FOLDERS;
 use file_explorer_lib::size::index::persist::{self, ChangeFlags};
 use file_explorer_lib::size::index::platform::{PowerSignal, RawEvent};
 use file_explorer_lib::size::index::HEAP_BATCH_RECORDS;
 use file_explorer_lib::size::{IndexState, RequestMode, SizeStateKind};
 
 use crate::size_index_names_service_integration::{
-    barrier, base_segment, blur, files_on_disk, finish_replay, indexed_names, indexing_runs, owned,
-    relaunch, saved, scan_and_save,
+    barrier, base_segment, blur, create_more_folders_than_a_small_overlay_holds, files_on_disk,
+    finish_replay, indexed_names, indexing_runs, owned, relaunch, saved, scan_and_save,
 };
 use crate::size_index_service_integration::{fresh_total, terminal, wait_until, Harness};
 
@@ -314,9 +313,7 @@ fn a_full_scan_flushes_a_forest_whenever_the_batch_is_full() {
 #[test]
 fn a_full_overlay_is_compacted_while_the_scan_is_still_running() {
     let mut index = deep_harness();
-    for number in 0..=OVERLAY_THRESHOLD_FOLDERS {
-        fs::create_dir_all(index.path(&format!("many/d{number}"))).unwrap();
-    }
+    create_more_folders_than_a_small_overlay_holds(&mut index);
     index.blocker.block(&index.path("a/b/c"));
     index.start();
     wait_until("the scan reaches the subtree c", || index.opened("a/b/c"));

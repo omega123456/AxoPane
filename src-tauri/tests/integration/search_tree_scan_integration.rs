@@ -180,6 +180,38 @@ fn name_scans_return_matching_folders_as_posix_paths() {
 }
 
 #[test]
+fn folder_signatures_keep_non_ascii_and_case_folded_names_matchable() {
+    let source = Source::new(&[
+        "/Users/alex/Cafe\u{301}/Invoices",
+        "/Users/alex/\u{212A}elvin",
+        "/Users/alex/Résumé",
+        "/Users/alex/Resume",
+        "/Users/alex/KELP",
+    ]);
+    assert_eq!(
+        sorted(&run(&source, "café", &VISIBLE)),
+        ["/Users/alex/Cafe\u{301}"]
+    );
+    assert_eq!(
+        sorted(&run(&source, "kelvin", &VISIBLE)),
+        ["/Users/alex/\u{212A}elvin"]
+    );
+    assert_eq!(
+        sorted(&run(&source, "résumé", &VISIBLE)),
+        ["/Users/alex/Résumé"]
+    );
+    assert_eq!(
+        sorted(&run(&source, "kelp", &VISIBLE)),
+        ["/Users/alex/KELP"]
+    );
+    assert!(run(&source, "kelpz", &VISIBLE).candidates.is_empty());
+    assert_eq!(
+        sorted(&run(&source, "café/inv", &VISIBLE)),
+        ["/Users/alex/Cafe\u{301}/Invoices"]
+    );
+}
+
+#[test]
 fn hidden_folders_follow_the_option() {
     let source = Source::new(LIBRARY);
     let with_hidden = SearchOptions {

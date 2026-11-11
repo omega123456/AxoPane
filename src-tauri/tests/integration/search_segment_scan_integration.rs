@@ -19,7 +19,7 @@ const TOKEN: u64 = 11;
 const ROOT: &str = "/";
 const UNUSED_NAMES_FILE: &str = "no-pair-file.bin";
 const TINY_CHUNK: usize = 3;
-const QUERIES: [&str; 7] = [
+const QUERIES: [&str; 11] = [
     "*.md",
     "project/*.md",
     "inv",
@@ -27,6 +27,10 @@ const QUERIES: [&str; 7] = [
     "/Users/alex/project/",
     "alex/",
     "readme",
+    "plan",
+    "plans/*.md",
+    ".agent/",
+    "zzzqqq",
 ];
 const EVERY_SCOPE: [&SearchOptions; 4] = [&VISIBLE, &WITH_HIDDEN, &FILES, &FOLDERS];
 

@@ -5,6 +5,7 @@ pub mod persist;
 pub mod platform;
 pub mod segment;
 pub mod tree;
+pub mod verified;
 
 #[cfg(target_os = "macos")]
 mod compact;

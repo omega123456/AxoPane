@@ -5,11 +5,12 @@ use std::path::{Path, PathBuf};
 
 use memmap2::Mmap;
 
-use super::block::{self, BlockSpan, StoredBlock};
+use super::block::{self, BlockSpan, BlockView, NamesCorrupt, StoredBlock};
 use crate::size::index::persist::{self, Reader, TempFile};
+use crate::size::index::verified::VerifiedSet;
 
 pub const NAMES_FILE: &str = "file-names.bin";
-pub const NAMES_FORMAT_VERSION: u32 = 2;
+pub const NAMES_FORMAT_VERSION: u32 = 3;
 pub const SPILL_SUFFIX: &str = ".building";
 
 const MAGIC: &[u8; 8] = b"AXONAME\0";
@@ -17,7 +18,6 @@ const HEADER_BYTES: usize = 48;
 const DIRECTORY_ENTRY_BYTES: usize = 32;
 const CHECKSUM_BYTES: usize = size_of::<u64>();
 const RESERVED_HEADER_FIELD: u32 = 0;
-const MAX_BLOCK_RAW_BYTES: u32 = 256 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NamesHeader {
@@ -29,36 +29,36 @@ pub struct NamesHeader {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct DirectoryEntry {
     offset: u64,
-    compressed_len: u32,
-    raw_len: u32,
+    byte_len: u32,
     span: BlockSpan,
+    name_count: u32,
     checksum: u64,
 }
 
 impl DirectoryEntry {
     fn bytes(&self) -> Range<usize> {
         let start = self.offset as usize;
-        start..start + self.compressed_len as usize
+        start..start + self.byte_len as usize
     }
 
     fn encode(&self, out: &mut Vec<u8>) {
         out.extend_from_slice(&self.offset.to_le_bytes());
-        out.extend_from_slice(&self.compressed_len.to_le_bytes());
-        out.extend_from_slice(&self.raw_len.to_le_bytes());
+        out.extend_from_slice(&self.byte_len.to_le_bytes());
         out.extend_from_slice(&self.span.first_ordinal.to_le_bytes());
         out.extend_from_slice(&self.span.folder_count.to_le_bytes());
+        out.extend_from_slice(&self.name_count.to_le_bytes());
         out.extend_from_slice(&self.checksum.to_le_bytes());
     }
 
     fn decode(reader: &mut Reader<'_>) -> Option<Self> {
         Some(Self {
             offset: reader.u64()?,
-            compressed_len: reader.u32()?,
-            raw_len: reader.u32()?,
+            byte_len: reader.u32()?,
             span: BlockSpan {
                 first_ordinal: reader.u32()?,
                 folder_count: reader.u32()?,
             },
+            name_count: reader.u32()?,
             checksum: reader.u64()?,
         })
     }
@@ -113,6 +113,13 @@ pub struct MappedNames {
     map: Mmap,
     header: NamesHeader,
     directory: Vec<DirectoryEntry>,
+    verified: VerifiedSet,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TouchedBlock<'bytes> {
+    pub view: BlockView<'bytes>,
+    pub newly_verified: bool,
 }
 
 impl MappedNames {
@@ -124,6 +131,7 @@ impl MappedNames {
         Some(Self {
             map,
             header: layout.header,
+            verified: VerifiedSet::none_of(layout.directory.len()),
             directory: layout.directory,
         })
     }
@@ -140,9 +148,25 @@ impl MappedNames {
         let entry = self.directory.get(index)?;
         Some(StoredBlock {
             span: entry.span,
-            raw_len: entry.raw_len,
+            name_count: entry.name_count,
             checksum: entry.checksum,
-            compressed: &self.map[entry.bytes()],
+            bytes: &self.map[entry.bytes()],
+        })
+    }
+
+    pub fn touch_block(&self, index: usize) -> Result<TouchedBlock<'_>, NamesCorrupt> {
+        let stored = self.block(index).ok_or(NamesCorrupt)?;
+        if self.verified.contains(index) {
+            let view = BlockView::trusting(stored)?;
+            return Ok(TouchedBlock {
+                view,
+                newly_verified: false,
+            });
+        }
+        let view = BlockView::verified(stored)?;
+        Ok(TouchedBlock {
+            view,
+            newly_verified: self.verified.insert(index),
         })
     }
 
@@ -232,8 +256,7 @@ impl DirectoryBounds {
             .first_ordinal
             .checked_add(entry.span.folder_count)
             .is_some();
-        let raw_len_sane = entry.raw_len <= MAX_BLOCK_RAW_BYTES;
-        inside_block_area && contiguous && covers_folders && span_fits && raw_len_sane
+        inside_block_area && contiguous && covers_folders && span_fits
     }
 }
 
@@ -264,18 +287,18 @@ impl NamesFileWriter {
     }
 
     pub fn append(&mut self, block: StoredBlock<'_>, first_ordinal: u32) -> io::Result<()> {
-        self.file.write_all(block.compressed)?;
+        self.file.write_all(block.bytes)?;
         self.directory.push(DirectoryEntry {
             offset: self.offset,
-            compressed_len: block.compressed.len() as u32,
-            raw_len: block.raw_len,
+            byte_len: block.bytes.len() as u32,
             span: BlockSpan {
                 first_ordinal,
                 folder_count: block.span.folder_count,
             },
+            name_count: block.name_count,
             checksum: block.checksum,
         });
-        self.offset += block.compressed.len() as u64;
+        self.offset += block.bytes.len() as u64;
         Ok(())
     }
 

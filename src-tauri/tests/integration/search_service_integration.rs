@@ -326,6 +326,69 @@ fn the_tree_backend_finds_files_once_file_names_exist() {
     assert!(files.items.iter().all(|hit| !hit.is_dir));
 }
 
+fn tree_with_hidden_files(root: &Path) -> Arc<Tree> {
+    let tree = folder_tree(root, &[".cache", "documents"]);
+    let mut names = FileNameStore::new(root.join(NAMES_FILE));
+    let file_names = [
+        (".cache", vec!["report-cache.md", "re\u{301}sume\u{301}.md"]),
+        ("documents", vec!["report.md", ".report-draft.md"]),
+    ];
+    for (folder, files) in file_names {
+        let slot = tree.lookup(&root.join(folder)).expect("folder slot");
+        names.set_names(
+            slot,
+            PackedNames::from_names(files.iter().map(|file| file.as_bytes())),
+        );
+    }
+    let segment = compacted(Compaction {
+        tree: &tree,
+        names: &names,
+        target: SegmentTarget {
+            paths: paths_in(root),
+            token: SEGMENT_TOKEN,
+        },
+        block_target: BLOCK_TARGET_BYTES,
+    });
+    let index = index_over(segment, &root.join(NAMES_FILE));
+    Arc::new(Tree {
+        tree: index.tree,
+        names: index.names,
+        during_read: Mutex::new(None),
+    })
+}
+
+fn file_names_found(service: &SearchService, query: &SearchQueryRequest) -> Vec<String> {
+    let page = service.run(live(service.begin()), query).expect("page");
+    let mut names: Vec<String> = page.items.into_iter().map(|hit| hit.name).collect();
+    names.sort_unstable();
+    names
+}
+
+#[test]
+fn the_tree_backend_skips_hidden_files_and_subtrees_unless_asked() {
+    let dir = tempdir().expect("temp dir");
+    let tree = tree_with_hidden_files(dir.path());
+    let service = SearchService::new(SearchBackend::Tree(tree), None);
+    let files = SearchQueryRequest {
+        scope: SearchScope::Files,
+        ..request("report")
+    };
+    assert_eq!(
+        file_names_found(&service, &files),
+        [".report-draft.md", "report-cache.md", "report.md"]
+    );
+    let shown_only = SearchQueryRequest {
+        include_hidden: false,
+        ..files
+    };
+    assert_eq!(file_names_found(&service, &shown_only), ["report.md"]);
+    let accented = SearchQueryRequest {
+        scope: SearchScope::Files,
+        ..request("résumé")
+    };
+    assert_eq!(file_names_found(&service, &accented), ["résumé.md"]);
+}
+
 #[test]
 fn tree_hits_are_stat_ed_when_their_page_is_served() {
     let dir = tempdir().expect("temp dir");

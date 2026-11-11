@@ -1,6 +1,7 @@
 use std::ops::Range;
 
 use super::{NodeId, OwnCounters, HEAP_BIT, NONE, PERSISTED_FLAGS};
+use crate::size::index::names::signature::signature_of;
 use crate::size::index::persist::{
     put_count, put_ids, put_ranges, put_str, put_u32, put_u64, Reader,
 };
@@ -182,6 +183,10 @@ impl HeapNode {
             denied: self.denied,
             flags: self.flags,
         }
+    }
+
+    pub(super) fn signature(&self) -> u32 {
+        signature_of(self.name.as_bytes())
     }
 
     pub(super) fn add(&mut self, delta: Delta) {
@@ -408,9 +413,18 @@ impl IdRanges {
     }
 
     pub fn contains(&self, id: NodeId) -> bool {
+        self.range_holding(id)
+            .is_some_and(|range| range.contains(&id))
+    }
+
+    pub fn covers(&self, ids: &Range<NodeId>) -> bool {
+        self.range_holding(ids.start)
+            .is_some_and(|range| reaches_across(range, ids))
+    }
+
+    fn range_holding(&self, id: NodeId) -> Option<&Range<NodeId>> {
         let after = self.ranges.partition_point(|range| range.start <= id);
-        let candidate = after.checked_sub(1).map(|position| &self.ranges[position]);
-        candidate.is_some_and(|range| range.contains(&id))
+        after.checked_sub(1).map(|position| &self.ranges[position])
     }
 
     pub(crate) fn add(&mut self, added: Range<NodeId>) {
@@ -451,6 +465,12 @@ impl IdRanges {
     pub(crate) fn last_end(&self) -> NodeId {
         self.ranges.last().map_or(0, |range| range.end)
     }
+}
+
+fn reaches_across(outer: &Range<NodeId>, inner: &Range<NodeId>) -> bool {
+    let starts_inside = outer.contains(&inner.start);
+    let ends_inside = outer.end >= inner.end;
+    starts_inside && ends_inside
 }
 
 #[derive(Debug, Default)]

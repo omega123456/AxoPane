@@ -1,6 +1,6 @@
 pub mod block;
-pub mod codec;
 pub mod file;
+pub mod signature;
 pub mod writer;
 
 use std::collections::HashMap;
@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use block::{BlockSpan, DecodedBlock, EncodedBlock, EntryRange, NamesCorrupt};
-use codec::DecodeScratch;
+use block::{BlockFolder, BlockSpan, BlockView, NamesCorrupt, StoredBlock};
 use file::{remove_if_present, spill_path, MappedNames};
+use signature::{SignatureFilter, SignedName};
 use writer::RewriteStats;
 
 use super::persist::{put_bytes, put_count, put_u32, Reader};
@@ -86,14 +86,59 @@ pub(crate) fn is_packed_list_or_empty(bytes: &[u8]) -> bool {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FolderSignatures<'names> {
+    Stored(BlockFolder<'names>),
+    Live,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FolderNames<'names> {
     pub slot: u32,
     pub packed: &'names [u8],
+    signatures: FolderSignatures<'names>,
 }
 
 impl<'names> FolderNames<'names> {
+    pub fn live(slot: u32, packed: &'names [u8]) -> Self {
+        Self {
+            slot,
+            packed,
+            signatures: FolderSignatures::Live,
+        }
+    }
+
+    fn stored(slot: u32, folder: BlockFolder<'names>) -> Self {
+        Self {
+            slot,
+            packed: folder.packed,
+            signatures: FolderSignatures::Stored(folder),
+        }
+    }
+
     pub fn names(&self) -> impl Iterator<Item = &'names [u8]> {
         names_in(self.packed)
+    }
+
+    pub fn visit_admitted(
+        &self,
+        filter: &dyn SignatureFilter,
+        visit: &mut dyn FnMut(SignedName<'names>),
+    ) {
+        match self.signatures {
+            FolderSignatures::Stored(folder) => folder.admitted_names(filter).for_each(visit),
+            FolderSignatures::Live => self.live_admitted_names(filter).for_each(visit),
+        }
+    }
+
+    fn live_admitted_names<'filter>(
+        &self,
+        filter: &'filter dyn SignatureFilter,
+    ) -> impl Iterator<Item = SignedName<'names>> + 'filter
+    where
+        'names: 'filter,
+    {
+        let signed = self.names().map(SignedName::of);
+        signed.filter(move |name| filter.admits(name.signature))
     }
 
     pub fn name_count(&self) -> u64 {
@@ -105,17 +150,12 @@ impl<'names> FolderNames<'names> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NamesUnreadable;
 
-#[derive(Debug, Default)]
-pub struct NamesScratch {
-    pub(crate) decode: DecodeScratch,
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NamesCounters {
-    pub blocks_decompressed: u64,
-    pub blocks_reencoded: u64,
+    pub blocks_read: u64,
+    pub blocks_verified: u64,
+    pub blocks_rebuilt: u64,
     pub blocks_copied: u64,
-    pub peak_open_output_blocks: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,9 +177,26 @@ pub struct OverlayStats {
     pub name_bytes: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OverlayThreshold {
+    pub folders: usize,
+    pub name_bytes: usize,
+}
+
+impl Default for OverlayThreshold {
+    fn default() -> Self {
+        Self {
+            folders: OVERLAY_THRESHOLD_FOLDERS,
+            name_bytes: OVERLAY_THRESHOLD_BYTES,
+        }
+    }
+}
+
 impl OverlayStats {
-    pub fn exceeds_threshold(&self) -> bool {
-        self.name_bytes > OVERLAY_THRESHOLD_BYTES || self.folders > OVERLAY_THRESHOLD_FOLDERS
+    pub fn exceeds(&self, threshold: OverlayThreshold) -> bool {
+        let holds_too_many_bytes = self.name_bytes > threshold.name_bytes;
+        let holds_too_many_folders = self.folders > threshold.folders;
+        holds_too_many_bytes || holds_too_many_folders
     }
 }
 
@@ -258,6 +315,20 @@ impl PlacedSource<'_> {
         let blocks = self.source.file.blocks_covering(ordinals);
         self.first_block + blocks.start..self.first_block + blocks.end
     }
+
+    fn blocks_within(&self, slot_ranges: &IdRanges) -> Vec<usize> {
+        let indexes = 0..self.source.file.block_count();
+        let inside = indexes.filter(|&index| self.block_lies_within(index, slot_ranges));
+        inside.map(|index| self.first_block + index).collect()
+    }
+
+    fn block_lies_within(&self, index: usize, slot_ranges: &IdRanges) -> bool {
+        let Some(span) = self.source.file.span(index) else {
+            return false;
+        };
+        let first_slot = self.source.slots.start + span.first_ordinal;
+        slot_ranges.covers(&(first_slot..first_slot + span.folder_count))
+    }
 }
 
 struct LocatedFolder<'store> {
@@ -266,20 +337,31 @@ struct LocatedFolder<'store> {
     first_block: usize,
 }
 
-impl LocatedFolder<'_> {
+impl<'store> LocatedFolder<'store> {
     fn block_in_source(&self) -> usize {
         let own_ordinal = self.ordinal..self.ordinal + 1;
         self.source.file.blocks_covering(own_ordinal).start
     }
 
-    fn block(&self) -> usize {
-        self.first_block + self.block_in_source()
+    fn located_block(&self) -> LocatedBlock<'store> {
+        LocatedBlock {
+            source: self.source,
+            first_block: self.first_block,
+            index_in_source: self.block_in_source(),
+        }
     }
 }
 
 struct LocatedBlock<'store> {
     source: &'store SegmentNames,
+    first_block: usize,
     index_in_source: usize,
+}
+
+impl LocatedBlock<'_> {
+    fn global_index(&self) -> usize {
+        self.first_block + self.index_in_source
+    }
 }
 
 #[derive(Debug, Default)]
@@ -335,16 +417,9 @@ impl SavedNames {
     }
 }
 
-struct LoadedBlock {
-    index: usize,
-    span: BlockSpan,
-    entries: Vec<EntryRange>,
-}
-
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct NamesCursor {
-    block_scratch: DecodeScratch,
-    loaded: Option<LoadedBlock>,
+    last_block: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -354,7 +429,8 @@ pub struct FileNameStore {
     overlay: Overlay,
     dead: IdRanges,
     failure: ReadFailure,
-    blocks_decompressed: AtomicU64,
+    blocks_read: AtomicU64,
+    blocks_verified: AtomicU64,
     rewrites: RewriteStats,
     unsaved: bool,
 }
@@ -367,7 +443,8 @@ impl FileNameStore {
             overlay: Overlay::default(),
             dead: IdRanges::default(),
             failure: ReadFailure::default(),
-            blocks_decompressed: AtomicU64::new(0),
+            blocks_read: AtomicU64::new(0),
+            blocks_verified: AtomicU64::new(0),
             rewrites: RewriteStats::default(),
             unsaved: false,
         }
@@ -405,10 +482,10 @@ impl FileNameStore {
 
     pub fn counters(&self) -> NamesCounters {
         NamesCounters {
-            blocks_decompressed: self.blocks_decompressed.load(Ordering::Relaxed),
-            blocks_reencoded: self.rewrites.blocks_reencoded,
+            blocks_read: self.blocks_read.load(Ordering::Relaxed),
+            blocks_verified: self.blocks_verified.load(Ordering::Relaxed),
+            blocks_rebuilt: self.rewrites.blocks_rebuilt,
             blocks_copied: self.rewrites.blocks_copied,
-            peak_open_output_blocks: self.rewrites.peak_open_blocks,
         }
     }
 
@@ -452,22 +529,14 @@ impl FileNameStore {
         is_unchanged.then_some(block)
     }
 
-    pub fn copied_block(&self, index: usize) -> Result<EncodedBlock, NamesUnreadable> {
+    pub fn copied_block(&self, index: usize) -> Result<StoredBlock<'_>, NamesUnreadable> {
         let located = self.locate_block(index).ok_or(NamesUnreadable)?;
-        let stored = located
+        self.read_located(&located)?;
+        located
             .source
             .file
             .block(located.index_in_source)
-            .ok_or(NamesUnreadable)?;
-        if block::checksum(stored.compressed) != stored.checksum {
-            return Err(self.unreadable(NamesCorrupt));
-        }
-        Ok(EncodedBlock {
-            span: stored.span,
-            raw_len: stored.raw_len,
-            checksum: stored.checksum,
-            compressed: stored.compressed.to_vec(),
-        })
+            .ok_or(NamesUnreadable)
     }
 
     fn locate_block(&self, index: usize) -> Option<LocatedBlock<'_>> {
@@ -476,6 +545,7 @@ impl FileNameStore {
             let is_in_source = index_in_source < placed.source.file.block_count();
             is_in_source.then_some(LocatedBlock {
                 source: placed.source,
+                first_block: placed.first_block,
                 index_in_source,
             })
         })
@@ -504,32 +574,48 @@ impl FileNameStore {
         blocks
     }
 
-    pub fn read_block<'read>(
-        &'read self,
-        index: usize,
-        scratch: &'read mut NamesScratch,
-    ) -> Result<BlockNames<'read>, NamesUnreadable> {
+    pub fn blocks_within(&self, slot_ranges: &IdRanges) -> Vec<usize> {
+        let placed = self.placed_sources();
+        placed
+            .flat_map(|source| source.blocks_within(slot_ranges))
+            .collect()
+    }
+
+    pub fn dead_slots(&self) -> &IdRanges {
+        &self.dead
+    }
+
+    pub fn read_block(&self, index: usize) -> Result<BlockNames<'_>, NamesUnreadable> {
         let block = self.locate_block(index).ok_or(NamesUnreadable)?;
-        let decoded = self.decode_block(&block, &mut scratch.decode)?;
+        let view = self.read_located(&block)?;
         Ok(BlockNames {
             store: self,
             source: block.source,
-            decoded,
+            view,
         })
     }
 
-    fn decode_block<'raw>(
+    fn read_located<'store>(
         &self,
-        block: &LocatedBlock<'_>,
-        scratch: &'raw mut DecodeScratch,
-    ) -> Result<DecodedBlock<'raw>, NamesUnreadable> {
-        let stored = block
+        block: &LocatedBlock<'store>,
+    ) -> Result<BlockView<'store>, NamesUnreadable> {
+        self.blocks_read.fetch_add(1, Ordering::Relaxed);
+        self.view_of(block)
+    }
+
+    fn view_of<'store>(
+        &self,
+        block: &LocatedBlock<'store>,
+    ) -> Result<BlockView<'store>, NamesUnreadable> {
+        let touched = block
             .source
             .file
-            .block(block.index_in_source)
-            .ok_or(NamesUnreadable)?;
-        self.blocks_decompressed.fetch_add(1, Ordering::Relaxed);
-        block::decode(stored, scratch).map_err(|corrupt| self.unreadable(corrupt))
+            .touch_block(block.index_in_source)
+            .map_err(|corrupt| self.unreadable(corrupt))?;
+        if touched.newly_verified {
+            self.blocks_verified.fetch_add(1, Ordering::Relaxed);
+        }
+        Ok(touched.view)
     }
 
     fn unreadable(&self, _corrupt: NamesCorrupt) -> NamesUnreadable {
@@ -540,10 +626,7 @@ impl FileNameStore {
     pub fn visit_overlay(&self, visit: &mut dyn FnMut(FolderNames<'_>)) {
         let named = self.overlay.entries.iter().filter_map(|(&slot, entry)| {
             let names = entry.names()?;
-            Some(FolderNames {
-                slot,
-                packed: names.as_bytes(),
-            })
+            Some(FolderNames::live(slot, names.as_bytes()))
         });
         for folder in named {
             visit(folder);
@@ -553,9 +636,8 @@ impl FileNameStore {
     pub fn count_saved_and_overlay_names(&self) -> Result<u64, NamesUnreadable> {
         let mut count = 0;
         self.visit_overlay(&mut |folder| count += folder.name_count());
-        let mut scratch = NamesScratch::default();
         for index in 0..self.block_count() {
-            let block = self.read_block(index, &mut scratch)?;
+            let block = self.read_block(index)?;
             count += block
                 .folders()
                 .map(|folder| folder.name_count())
@@ -571,24 +653,15 @@ impl FileNameStore {
         if self.dead.contains(slot) {
             return Ok(Some(PackedNames::default()));
         }
-        let mut scratch = NamesScratch::default();
-        self.block_names_of(slot, &mut scratch)
+        self.block_names_of(slot)
     }
 
-    fn block_names_of(
-        &self,
-        slot: u32,
-        scratch: &mut NamesScratch,
-    ) -> Result<Option<PackedNames>, NamesUnreadable> {
+    fn block_names_of(&self, slot: u32) -> Result<Option<PackedNames>, NamesUnreadable> {
         let Some(folder) = self.locate(slot) else {
             return Ok(None);
         };
-        let block = LocatedBlock {
-            source: folder.source,
-            index_in_source: folder.block_in_source(),
-        };
-        let decoded = self.decode_block(&block, &mut scratch.decode)?;
-        let packed = decoded.names_of(folder.ordinal).unwrap_or_default();
+        let view = self.read_located(&folder.located_block())?;
+        let packed = view.names_of(folder.ordinal).unwrap_or_default();
         Ok(Some(PackedNames(packed.to_vec())))
     }
 
@@ -664,11 +737,11 @@ impl FileNameStore {
         self.dead.write(out);
     }
 
-    pub fn names_for_rewrite<'read>(
-        &'read self,
+    pub fn names_for_rewrite(
+        &self,
         slot: u32,
-        cursor: &'read mut NamesCursor,
-    ) -> Result<&'read [u8], NamesUnreadable> {
+        cursor: &mut NamesCursor,
+    ) -> Result<&[u8], NamesUnreadable> {
         if let Some(entry) = self.overlay.get(slot) {
             return Ok(entry.packed());
         }
@@ -681,71 +754,49 @@ impl FileNameStore {
         self.cached_block_names(&folder, cursor)
     }
 
-    fn cached_block_names<'read>(
-        &self,
-        folder: &LocatedFolder<'_>,
-        cursor: &'read mut NamesCursor,
-    ) -> Result<&'read [u8], NamesUnreadable> {
-        let index = folder.block();
-        let is_loaded = cursor
-            .loaded
-            .as_ref()
-            .is_some_and(|loaded| loaded.index == index);
-        if !is_loaded {
-            self.load_block(folder, cursor)?;
-        }
-        let Some(loaded) = &cursor.loaded else {
-            return Ok(&[]);
-        };
-        let relative_id = folder.ordinal - loaded.span.first_ordinal;
-        let found = loaded
-            .entries
-            .binary_search_by_key(&relative_id, |entry| entry.relative_id)
-            .ok()
-            .map(|position| loaded.entries[position].names.clone());
-        Ok(found.map_or(&[], |range| &cursor.block_scratch.raw()[range]))
+    fn cached_block_names<'store>(
+        &'store self,
+        folder: &LocatedFolder<'store>,
+        cursor: &mut NamesCursor,
+    ) -> Result<&'store [u8], NamesUnreadable> {
+        let block = folder.located_block();
+        let view = self.cursor_view(&block, cursor)?;
+        Ok(view.names_of(folder.ordinal).unwrap_or_default())
     }
 
-    fn load_block(
+    fn cursor_view<'store>(
         &self,
-        folder: &LocatedFolder<'_>,
+        block: &LocatedBlock<'store>,
         cursor: &mut NamesCursor,
-    ) -> Result<(), NamesUnreadable> {
-        cursor.loaded = None;
-        let block = LocatedBlock {
-            source: folder.source,
-            index_in_source: folder.block_in_source(),
-        };
-        let decoded = self.decode_block(&block, &mut cursor.block_scratch)?;
-        cursor.loaded = Some(LoadedBlock {
-            index: folder.block(),
-            span: decoded.span,
-            entries: decoded.entry_ranges(),
-        });
-        Ok(())
+    ) -> Result<BlockView<'store>, NamesUnreadable> {
+        let index = block.global_index();
+        if cursor.last_block == Some(index) {
+            return self.view_of(block);
+        }
+        cursor.last_block = None;
+        let view = self.read_located(block)?;
+        cursor.last_block = Some(index);
+        Ok(view)
     }
 }
 
 pub struct BlockNames<'read> {
     store: &'read FileNameStore,
     source: &'read SegmentNames,
-    decoded: DecodedBlock<'read>,
+    view: BlockView<'read>,
 }
 
 impl<'read> BlockNames<'read> {
     pub fn span(&self) -> BlockSpan {
-        self.decoded.span
+        self.view.span
     }
 
     pub fn folders(&self) -> impl Iterator<Item = FolderNames<'read>> + '_ {
-        let first_ordinal = self.decoded.span.first_ordinal;
-        self.decoded.entries().filter_map(move |entry| {
-            let slot = self.source.slot_of(first_ordinal + entry.relative_id)?;
+        let first_ordinal = self.view.span.first_ordinal;
+        self.view.folders().filter_map(move |folder| {
+            let slot = self.source.slot_of(first_ordinal + folder.relative_id)?;
             let shadowed = self.store.overrides(slot);
-            (!shadowed).then_some(FolderNames {
-                slot,
-                packed: entry.names,
-            })
+            (!shadowed).then_some(FolderNames::stored(slot, folder))
         })
     }
 }
