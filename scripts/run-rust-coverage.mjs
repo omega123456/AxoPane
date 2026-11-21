@@ -17,6 +17,7 @@ import path from 'node:path'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const rustCoverageTargetDir = path.join(root, 'src-tauri', 'target', 'llvm-cov-target')
+const executableExtension = process.platform === 'win32' ? '.exe' : ''
 
 function tryReadCommand(command, args) {
   try {
@@ -51,9 +52,8 @@ function ensureRustCoverageTools(env) {
   }
 
   const llvmBinDir = path.join(rustupHome, 'toolchains', toolchain, 'lib', 'rustlib', host, 'bin')
-  const ext = process.platform === 'win32' ? '.exe' : ''
-  const llvmCov = path.join(llvmBinDir, `llvm-cov${ext}`)
-  const llvmProfdata = path.join(llvmBinDir, `llvm-profdata${ext}`)
+  const llvmCov = path.join(llvmBinDir, `llvm-cov${executableExtension}`)
+  const llvmProfdata = path.join(llvmBinDir, `llvm-profdata${executableExtension}`)
 
   if (!existsSync(llvmCov) || !existsSync(llvmProfdata)) {
     return env
@@ -86,9 +86,8 @@ function pruneForeignCoverageBinaries(targetDir) {
       continue
     }
 
-    // Compiled artifacts all carry an extension; test and app binaries do not.
     const binaries = readdirSync(depsDir)
-      .filter((name) => !name.includes('.'))
+      .filter((name) => path.extname(name) === executableExtension)
       .map((name) => path.join(depsDir, name))
       .filter((candidate) => statSync(candidate).isFile())
     const newestTestBinary = binaries

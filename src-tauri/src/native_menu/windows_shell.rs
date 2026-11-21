@@ -43,7 +43,7 @@ pub(crate) struct OwnedPidl(*mut ITEMIDLIST);
 
 impl OwnedPidl {
     pub(crate) fn from_path(path: &str) -> windows::core::Result<Self> {
-        let wide = wide_nul(path);
+        let wide = wide_nul(crate::path_text::strip_verbatim_prefix(path));
         let mut pidl = null_mut();
         unsafe {
             SHParseDisplayName(PCWSTR(wide.as_ptr()), None, &mut pidl, 0, None)?;

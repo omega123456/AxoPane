@@ -7,6 +7,7 @@ import {
   searchActivationForEvent,
 } from '@/lib/search-actions'
 import type { SearchHit } from '@/lib/types/ipc'
+import { useErrorToastStore } from '@/stores/error-toast-store'
 import { usePanesStore } from '@/stores/panes-store'
 
 const folder: SearchHit = {
@@ -84,6 +85,8 @@ describe('activateSearchHit', () => {
     ipc.override('open_path', () => Promise.reject(new Error('no app')))
     await expect(activateSearchHit(file, 'open')).resolves.toBeUndefined()
     expect(navigatePane).not.toHaveBeenCalled()
+    expect(useErrorToastStore.getState().message).toBe('no app')
+    useErrorToastStore.getState().dismiss()
   })
 
   it('falls back to the path itself for a root-level file', async () => {

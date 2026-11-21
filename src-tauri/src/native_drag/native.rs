@@ -2,10 +2,6 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::oneshot;
 
-fn drag_image() -> drag::Image {
-    drag::Image::Raw(include_bytes!("../../icons/32x32.png").to_vec())
-}
-
 fn signal(sender: &Mutex<Option<oneshot::Sender<()>>>) {
     if let Ok(mut slot) = sender.lock() {
         if let Some(sender) = slot.take() {
@@ -14,6 +10,12 @@ fn signal(sender: &Mutex<Option<oneshot::Sender<()>>>) {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn drag_image() -> drag::Image {
+    drag::Image::Raw(include_bytes!("../../icons/32x32.png").to_vec())
+}
+
+#[cfg(target_os = "macos")]
 fn run_session(
     window: tauri::WebviewWindow,
     paths: Vec<std::path::PathBuf>,
@@ -44,9 +46,78 @@ fn run_session(
     }
 }
 
+// The `drag` crate re-canonicalizes paths into `\\?\UNC\...` form for network shares and
+// mapped drives, which the shell rejects, and then panics on the failed lookup. Building the
+// shell data object from our own PIDLs keeps those paths draggable.
+#[cfg(windows)]
+#[windows::core::implement(windows::Win32::System::Ole::IDropSource)]
+struct DropSource;
+
+#[cfg(windows)]
+impl windows::Win32::System::Ole::IDropSource_Impl for DropSource_Impl {
+    fn QueryContinueDrag(
+        &self,
+        escape_pressed: windows::core::BOOL,
+        key_state: windows::Win32::System::SystemServices::MODIFIERKEYS_FLAGS,
+    ) -> windows::core::HRESULT {
+        use windows::Win32::{
+            Foundation::{DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, S_OK},
+            System::SystemServices::MK_LBUTTON,
+        };
+
+        if escape_pressed.as_bool() {
+            return DRAGDROP_S_CANCEL;
+        }
+        if (key_state & MK_LBUTTON).0 == 0 {
+            return DRAGDROP_S_DROP;
+        }
+        S_OK
+    }
+
+    fn GiveFeedback(
+        &self,
+        _effect: windows::Win32::System::Ole::DROPEFFECT,
+    ) -> windows::core::HRESULT {
+        windows::Win32::Foundation::DRAGDROP_S_USEDEFAULTCURSORS
+    }
+}
+
+#[cfg(windows)]
+fn run_windows_session(
+    paths: &[std::path::PathBuf],
+) -> windows::core::Result<windows::Win32::System::Ole::DROPEFFECT> {
+    use crate::native_menu::windows_shell::OwnedPidl;
+    use windows::Win32::{
+        System::{
+            Com::{CoCreateInstance, IDataObject, CLSCTX_INPROC_SERVER},
+            Ole::{DoDragDrop, IDropSource, DROPEFFECT, DROPEFFECT_COPY},
+        },
+        UI::Shell::{
+            BHID_DataObject, CLSID_DragDropHelper, IDragSourceHelper,
+            SHCreateShellItemArrayFromIDLists,
+        },
+    };
+
+    let pidls = paths
+        .iter()
+        .map(|path| OwnedPidl::from_path(&path.to_string_lossy()))
+        .collect::<windows::core::Result<Vec<_>>>()?;
+    let pointers: Vec<_> = pidls.iter().map(OwnedPidl::as_ptr).collect();
+    let items = unsafe { SHCreateShellItemArrayFromIDLists(&pointers) }?;
+    let data: IDataObject = unsafe { items.BindToHandler(None, &BHID_DataObject) }?;
+    if let Ok(helper) = unsafe {
+        CoCreateInstance::<_, IDragSourceHelper>(&CLSID_DragDropHelper, None, CLSCTX_INPROC_SERVER)
+    } {
+        let _ = unsafe { helper.InitializeFromWindow(None, None, &data) };
+    }
+    let source: IDropSource = DropSource.into();
+    let mut effect = DROPEFFECT::default();
+    unsafe { DoDragDrop(&data, &source, DROPEFFECT_COPY, &mut effect) }.ok()?;
+    Ok(effect)
+}
+
 #[cfg(windows)]
 type WindowsDragJob = (
-    tauri::WebviewWindow,
     Vec<std::path::PathBuf>,
     Arc<Mutex<Option<oneshot::Sender<()>>>>,
     u32,
@@ -60,7 +131,7 @@ struct WindowsDragWorker {
 
 #[cfg(windows)]
 fn start_windows_drag(
-    window: tauri::WebviewWindow,
+    window: &tauri::WebviewWindow,
     paths: Vec<std::path::PathBuf>,
     finished: Arc<Mutex<Option<oneshot::Sender<()>>>>,
 ) -> Result<(), String> {
@@ -85,11 +156,7 @@ fn start_windows_drag(
     if !unsafe { AttachThreadInput(worker.thread_id, ui_thread, true) }.as_bool() {
         return Err("Failed to attach the native drag input queue".to_string());
     }
-    if worker
-        .sender
-        .send((window, paths, finished, ui_thread))
-        .is_err()
-    {
+    if worker.sender.send((paths, finished, ui_thread)).is_err() {
         let _ = unsafe { AttachThreadInput(worker.thread_id, ui_thread, false) };
         return Err("native drag worker stopped unexpectedly".to_string());
     }
@@ -108,30 +175,44 @@ fn spawn_windows_drag_worker() -> Result<WindowsDragWorker, String> {
         .map_err(|error| format!("Failed to start the native drag worker: {error}"))?;
     let thread_id = thread_id
         .recv()
-        .map_err(|_| "native drag worker stopped during initialization".to_string())?;
+        .map_err(|_| "native drag worker stopped during initialization".to_string())??;
     Ok(WindowsDragWorker { sender, thread_id })
 }
 
 #[cfg(windows)]
 fn run_windows_drag_worker(
     receiver: &std::sync::mpsc::Receiver<WindowsDragJob>,
-    ready: &std::sync::mpsc::SyncSender<u32>,
+    ready: &std::sync::mpsc::SyncSender<Result<u32, String>>,
 ) {
     use windows::Win32::{
-        System::Threading::{AttachThreadInput, GetCurrentThreadId},
+        System::{
+            Ole::OleInitialize,
+            Threading::{AttachThreadInput, GetCurrentThreadId},
+        },
         UI::WindowsAndMessaging::{PeekMessageW, MSG, PM_NOREMOVE},
     };
 
+    if let Err(error) = unsafe { OleInitialize(None) } {
+        let _ = ready.send(Err(format!(
+            "Failed to initialize OLE for the native drag: {error}"
+        )));
+        return;
+    }
     let mut message = MSG::default();
     unsafe {
         let _ = PeekMessageW(&mut message, None, 0, 0, PM_NOREMOVE);
     }
     let id = unsafe { GetCurrentThreadId() };
-    if ready.send(id).is_err() {
+    if ready.send(Ok(id)).is_err() {
         return;
     }
-    while let Ok((window, paths, finished, ui_thread)) = receiver.recv() {
-        run_session(window, paths, finished);
+    while let Ok((paths, finished, ui_thread)) = receiver.recv() {
+        log::info!("native drag: starting session for {} path(s)", paths.len());
+        match run_windows_session(&paths) {
+            Ok(effect) => log::info!("native drag: session ended with effect {}", effect.0),
+            Err(error) => log::error!("Failed to start the native drag: {error}"),
+        }
+        signal(&finished);
         if !unsafe { AttachThreadInput(id, ui_thread, false) }.as_bool() {
             log::warn!("Failed to detach native drag input queues");
         }
@@ -144,15 +225,17 @@ pub async fn start(
 ) -> Result<(), String> {
     let (sender, receiver) = oneshot::channel();
     let sender = Arc::new(Mutex::new(Some(sender)));
-    let drag_window = window.clone();
 
     #[cfg(target_os = "macos")]
-    window
-        .run_on_main_thread(move || run_session(drag_window, paths, sender))
-        .map_err(|error| format!("Failed to start the native drag: {error}"))?;
+    {
+        let drag_window = window.clone();
+        window
+            .run_on_main_thread(move || run_session(drag_window, paths, sender))
+            .map_err(|error| format!("Failed to start the native drag: {error}"))?;
+    }
 
     #[cfg(windows)]
-    start_windows_drag(drag_window, paths, sender)?;
+    start_windows_drag(&window, paths, sender)?;
 
     let mut receiver = receiver;
     let mut streamed = 0_u32;

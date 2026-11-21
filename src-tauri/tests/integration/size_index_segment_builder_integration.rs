@@ -621,6 +621,7 @@ fn a_format_one_tree_file_is_refused_even_with_valid_checksums() {
     let rewritten = RewrittenTree::of(&plan());
     let unchanged = rewritten.reopened_with(|_| {});
     assert!(unchanged.is_some(), "resealing alone keeps the file valid");
+    drop(unchanged);
 
     let format_one =
         rewritten.reopened_with(|bytes| put_u32_at(bytes, TREE_VERSION_OFFSET, FIRST_TREE_FORMAT));

@@ -498,9 +498,12 @@ fn a_manifest_over_a_format_one_tree_segment_takes_the_full_rescan_path() {
     let path = saved.directory.path().join("folder-size-index.bin");
     save_encoded(&path, &bytes).expect("saved");
     assert!(load(&path).is_some(), "the current format loads");
+    let directory = saved.directory;
+    drop(saved.tree);
+    drop(saved.names);
 
-    rewrite_as_format_one(&paths_in(saved.directory.path()).tree);
-    assert!(decode(&bytes, saved.directory.path()).is_none());
+    rewrite_as_format_one(&paths_in(directory.path()).tree);
+    assert!(decode(&bytes, directory.path()).is_none());
     let loaded = load(&path);
     assert!(loaded.is_none());
     let same = current("0A1B-UUID", BUILD, 900);

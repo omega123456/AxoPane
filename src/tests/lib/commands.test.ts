@@ -586,17 +586,18 @@ describe('command failure logging', () => {
     )
   })
 
-  it('logs a failed launch of the focused file', async () => {
+  it('logs and toasts a failed launch of the focused file without the admin prompt', async () => {
     const frontendLog = vi.fn(() => undefined)
+    const failure = 'Failed to open "C:\\root\\Beta": Access is denied. (os error 5)'
     ipc.override('log_frontend', frontendLog)
-    ipc.override('open_path', () => Promise.reject(new Error('no handler')) as never)
+    ipc.override('open_path', () => Promise.reject(failure) as never)
 
     executeCommand('open', 'left', 'Beta')
 
-    await waitFor(() =>
-      expect(frontendLog).toHaveBeenCalledWith(
-        expect.objectContaining({ message: 'open command failed' }),
-      ),
+    await waitFor(() => expect(useErrorToastStore.getState().message).toBe(failure))
+    expect(useActionDialogStore.getState().dialog).toBeNull()
+    expect(frontendLog).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'open command failed' }),
     )
   })
 

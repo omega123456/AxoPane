@@ -77,6 +77,10 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+export function showOpenFailure(error: unknown) {
+  useErrorToastStore.getState().show(errorMessage(error), { offerAdminRestart: false })
+}
+
 function toDeleteTargets(entries: DirectoryEntry[]): DeleteTarget[] {
   return entries.map((item) => ({
     id: item.id,
@@ -115,6 +119,7 @@ function openEntry(context: CommandContext, focused: DirectoryEntry) {
   }
   void openPath({ path: focused.path }).catch((error) => {
     log.error('open command failed', { paneId: context.paneId, path: focused.path, error })
+    showOpenFailure(error)
   })
 }
 

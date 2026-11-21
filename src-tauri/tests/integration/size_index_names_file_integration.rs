@@ -114,6 +114,7 @@ fn an_empty_file_is_valid_and_missing_or_foreign_files_are_not() {
     let file = MappedNames::open(&fixture.path).expect("opens");
     assert_eq!(file.block_count(), 0);
     assert_eq!(file.blocks_covering(0..10), 0..0);
+    drop(file);
 
     assert!(MappedNames::open(&fixture.path.with_file_name("missing.bin")).is_none());
     assert!(MappedNames::open(fixture.path.parent().expect("dir")).is_none());

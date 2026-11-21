@@ -1,4 +1,5 @@
 import { log } from '@/lib/app-log-commands'
+import { showOpenFailure } from '@/lib/commands'
 import { openPath } from '@/lib/ipc/commands'
 import { resolveCommandForEvent } from '@/lib/keymap'
 import type { CommandId, SearchHit, Shortcut } from '@/lib/types/ipc'
@@ -16,6 +17,7 @@ export async function activateSearchHit(hit: SearchHit, how: SearchActivation) {
   if (launchesFile) {
     await openPath({ path: hit.path }).catch((error: unknown) => {
       log.error('search open failed', { path: hit.path, error })
+      showOpenFailure(error)
     })
     return
   }

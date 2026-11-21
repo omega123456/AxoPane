@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use file_explorer_lib::search::service::{
-    RunTicket, SearchBackend, SearchBackendKind, SearchCapabilities, SearchPageRequest,
-    SearchQueryRequest, SearchRejection, SearchService, SearchTicket,
+    RunTicket, SearchBackend, SearchBackendKind, SearchCapabilities, SearchHit, SearchPage,
+    SearchPageRequest, SearchQueryRequest, SearchRejection, SearchService, SearchTicket,
 };
 use file_explorer_lib::search::source::FolderTreeSource;
 use file_explorer_lib::search::{SearchError, SearchScope};
@@ -91,11 +91,15 @@ fn live(ticket: SearchTicket) -> RunTicket<'static> {
     }
 }
 
-fn search(
-    service: &SearchService,
-    query: &str,
-) -> Result<file_explorer_lib::search::service::SearchPage, SearchRejection> {
+fn search(service: &SearchService, query: &str) -> Result<SearchPage, SearchRejection> {
     service.run(live(service.begin()), &request(query))
+}
+
+fn hit_named<'page>(page: &'page SearchPage, name: &str) -> &'page SearchHit {
+    page.items
+        .iter()
+        .find(|hit| hit.name == name)
+        .unwrap_or_else(|| panic!("no hit named {name}"))
 }
 
 #[test]
@@ -405,10 +409,9 @@ fn tree_hits_are_stat_ed_when_their_page_is_served() {
     let page = search(&service, "do").err();
     assert_eq!(page, Some(SearchRejection::TooShort));
     let page = search(&service, "docu").expect("page");
-    assert_eq!(page.items.len(), 1);
-    assert!(page.items[0].modified_at.is_some());
+    assert!(hit_named(&page, "documents").modified_at.is_some());
     let gone = search(&service, "downloads").expect("page");
-    assert_eq!(gone.items[0].modified_at, None);
+    assert_eq!(hit_named(&gone, "downloads-gone").modified_at, None);
 }
 
 #[test]
