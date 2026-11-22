@@ -10,10 +10,10 @@
 
 use std::sync::Arc;
 
+use axopane_lib::volumes::VolumeInfo;
 use axopane_lib::volumes::registry::{
     RegistrySnapshot, VolumeAvailability, VolumeRegistry, VolumeResourceKind,
 };
-use axopane_lib::volumes::VolumeInfo;
 
 #[derive(Clone, Copy)]
 struct VolumeFlags {
@@ -81,10 +81,12 @@ fn simulated_add_event_increments_revision_and_updates_the_snapshot() {
 
     assert_eq!(after.revision, before.revision + 1);
     assert_eq!(after.volumes.len(), before.volumes.len() + 1);
-    assert!(after
-        .volumes
-        .iter()
-        .any(|volume| volume.primary_path == "/Volumes/added-drive"));
+    assert!(
+        after
+            .volumes
+            .iter()
+            .any(|volume| volume.primary_path == "/Volumes/added-drive")
+    );
 }
 
 #[test]

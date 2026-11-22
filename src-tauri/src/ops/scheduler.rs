@@ -3,9 +3,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use super::execution::{run_operation, WorkerRuntime};
+use super::execution::{WorkerRuntime, run_operation};
 use super::service::Inner;
-use super::{archive, worker, LockOperation, OpStatus, RemovedEmitter};
+use super::{LockOperation, OpStatus, RemovedEmitter, archive, worker};
 use crate::resource_coordinator::JobSpec;
 
 pub(super) fn admit_and_run_operation(

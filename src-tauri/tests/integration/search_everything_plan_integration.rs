@@ -1,10 +1,10 @@
 use std::time::{Duration, SystemTime};
 
 use axopane_lib::search::everything_plan::{
-    browse_children_queries, passes, row_to_candidate, EverythingPass,
+    EverythingPass, browse_children_queries, passes, row_to_candidate,
 };
 use axopane_lib::search::path_style::PathStyle;
-use axopane_lib::search::query::{parse, ParsedQuery};
+use axopane_lib::search::query::{ParsedQuery, parse};
 use axopane_lib::search::{SearchOptions, SearchScope};
 use axopane_lib::size::everything::EverythingRow;
 

@@ -16,23 +16,23 @@ use crate::native_menu::types::{
     LoadNativeMenuRequest, NativeMenuIcon, NativeMenuIconKind, NativeMenuTargetKind,
 };
 use crate::native_menu::windows_shell::{
-    icon_resource_to_data_url, sanitize_menu_label, OwnedPidl,
+    OwnedPidl, icon_resource_to_data_url, sanitize_menu_label,
 };
 use crate::win32::wide_nul;
 
-use windows::core::{Interface, GUID, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{ERROR_SUCCESS, WIN32_ERROR};
 use windows::Win32::Storage::Packaging::Appx::GetPackagePathByFullName;
-use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_ALL};
+use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree};
 use windows::Win32::System::Registry::{
-    RegCloseKey, RegEnumKeyExW, RegEnumValueW, RegOpenKeyExW, RegQueryValueExW, HKEY,
-    HKEY_CLASSES_ROOT, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, REG_VALUE_TYPE,
+    HKEY, HKEY_CLASSES_ROOT, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, REG_VALUE_TYPE,
+    RegCloseKey, RegEnumKeyExW, RegEnumValueW, RegOpenKeyExW, RegQueryValueExW,
 };
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
-    IEnumExplorerCommand, IExplorerCommand, IShellItemArray, SHCreateShellItemArrayFromIDLists,
-    ECF_HASSUBCOMMANDS, ECS_DISABLED, ECS_HIDDEN,
+    ECF_HASSUBCOMMANDS, ECS_DISABLED, ECS_HIDDEN, IEnumExplorerCommand, IExplorerCommand,
+    IShellItemArray, SHCreateShellItemArrayFromIDLists,
 };
+use windows::core::{GUID, Interface, PCWSTR, PWSTR};
 
 const MAX_SUBMENU_DEPTH: usize = 1;
 const REGISTRY_KEY_NAME_UNITS: usize = 256;
@@ -567,8 +567,8 @@ unsafe fn take_pwstr(text: PWSTR) -> Option<String> {
     if text.is_null() {
         return None;
     }
-    let value = text.to_string().ok();
-    CoTaskMemFree(Some(text.0 as *const c_void));
+    let value = unsafe { text.to_string() }.ok();
+    unsafe { CoTaskMemFree(Some(text.0 as *const c_void)) };
     value
 }
 

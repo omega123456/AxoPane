@@ -85,7 +85,7 @@ pub use fake::FakePlatform;
 mod fake;
 
 #[cfg(not(feature = "test-utils"))]
-pub use mac::{home_dir, MacPlatform};
+pub use mac::{MacPlatform, home_dir};
 
 #[cfg(not(feature = "test-utils"))]
 #[path = "platform/mac.rs"]

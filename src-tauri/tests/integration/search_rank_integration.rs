@@ -1,11 +1,11 @@
 use std::cmp::Ordering;
 use std::time::{Duration, SystemTime};
 
-use axopane_lib::search::path_style::PathStyle;
-use axopane_lib::search::query::{parse, ParsedQuery};
-use axopane_lib::search::rank::{compare, score, Scored};
-use axopane_lib::search::results::rank_candidates;
 use axopane_lib::search::Candidate;
+use axopane_lib::search::path_style::PathStyle;
+use axopane_lib::search::query::{ParsedQuery, parse};
+use axopane_lib::search::rank::{Scored, compare, score};
+use axopane_lib::search::results::rank_candidates;
 
 const WIN: PathStyle = PathStyle::Windows;
 const POSIX: PathStyle = PathStyle::Posix;
@@ -91,9 +91,11 @@ fn browsing_lists_direct_children_of_matching_folders() {
             r"D:\Libraries\alex\invoice.pdf"
         ]
     );
-    assert!(!hits
-        .iter()
-        .any(|path| path.contains("Finance") || path.contains("0398")));
+    assert!(
+        !hits
+            .iter()
+            .any(|path| path.contains("Finance") || path.contains("0398"))
+    );
     assert!(hits.contains(&r"C:\Users\alexios\invoice.pdf".to_owned()));
     // A top-level item has no parent folder to match.
     assert!(ranked("alex/", WIN, vec![folder(r"C:\alex")]).is_empty());
@@ -122,12 +124,14 @@ fn alignment_prefers_better_tiers_then_the_nearest_folder() {
     )
     .expect("hit");
     assert_eq!((chained.penalty, chained.gap), (0, 1));
-    assert!(score(
-        &file(r"C:\alex\report.txt"),
-        &parsed("users/alex/report", WIN),
-        WIN
-    )
-    .is_none());
+    assert!(
+        score(
+            &file(r"C:\alex\report.txt"),
+            &parsed("users/alex/report", WIN),
+            WIN
+        )
+        .is_none()
+    );
 }
 
 #[test]

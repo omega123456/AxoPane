@@ -9,7 +9,7 @@ use super::coordinator::{
     self, CompactedBatch, MutationKind, RawMutation, WatchCoordinator, WatchId,
 };
 use super::tab_patch::{
-    diff_entries, resnapshot_tab, snapshot_for_watch_baseline, PatchLabel, SnapshotDraft,
+    PatchLabel, SnapshotDraft, diff_entries, resnapshot_tab, snapshot_for_watch_baseline,
 };
 use super::{WatchEmitters, WatchRuntime, WatchTarget, WatchedTab, WatchedTabs};
 use crate::error_text::StringifyError;

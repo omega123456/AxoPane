@@ -10,14 +10,10 @@
 
 use axopane_lib::ipc::types::{MenuActionStatus, OpenWithRequest, ShowPropertiesRequest};
 use axopane_lib::native_menu::helper_supervisor::HelperRole;
-use axopane_lib::native_menu::provider::{
-    NativeMenuProvider, ProviderInvocation, RoleMenuRequest,
-};
+use axopane_lib::native_menu::provider::{NativeMenuProvider, ProviderInvocation, RoleMenuRequest};
 use axopane_lib::native_menu::shell_executor::ShellExecutor;
 use axopane_lib::native_menu::types::{LoadNativeMenuRequest, NativeMenuTargetKind};
-use axopane_lib::native_menu::windows::{
-    open_with, show_properties, WindowsNativeMenuProvider,
-};
+use axopane_lib::native_menu::windows::{WindowsNativeMenuProvider, open_with, show_properties};
 
 fn sample_request() -> LoadNativeMenuRequest {
     LoadNativeMenuRequest {

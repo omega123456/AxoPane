@@ -5,8 +5,8 @@ use std::path::Path;
 use axopane_lib::thumbnails::platform_provider;
 use axopane_lib::thumbnails::provider::ProviderCapability;
 use axopane_lib::thumbnails::types::{
-    is_within_preview_bounds, ThumbnailCandidate, ThumbnailFingerprint, ThumbnailState,
-    MAX_PREVIEW_DIMENSION,
+    MAX_PREVIEW_DIMENSION, ThumbnailCandidate, ThumbnailFingerprint, ThumbnailState,
+    is_within_preview_bounds,
 };
 
 fn candidate(name: &str, is_directory: bool) -> ThumbnailCandidate {

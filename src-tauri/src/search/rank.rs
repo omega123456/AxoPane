@@ -2,10 +2,10 @@ use std::cmp::Ordering;
 use std::ops::Range;
 use std::time::SystemTime;
 
-use super::matcher::{nfc, FoldedName, Match, NameKind, EXACT};
+use super::Candidate;
+use super::matcher::{EXACT, FoldedName, Match, NameKind, nfc};
 use super::path_style::PathStyle;
 use super::query::{Anchor, ParsedQuery, Segment};
-use super::Candidate;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scored {

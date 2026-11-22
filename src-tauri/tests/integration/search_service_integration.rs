@@ -8,20 +8,20 @@ use axopane_lib::search::service::{
 };
 use axopane_lib::search::source::FolderTreeSource;
 use axopane_lib::search::{SearchError, SearchScope};
+use axopane_lib::size::SizeService;
 use axopane_lib::size::everything::{
     EverythingHandle, EverythingQuery, EverythingQueryResult, EverythingRow,
 };
+use axopane_lib::size::index::IndexRead;
 use axopane_lib::size::index::names::block::BLOCK_TARGET_BYTES;
 use axopane_lib::size::index::names::file::NAMES_FILE;
 use axopane_lib::size::index::names::{FileNameStore, PackedNames};
 use axopane_lib::size::index::segment::SegmentTarget;
 use axopane_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
-use axopane_lib::size::index::IndexRead;
-use axopane_lib::size::SizeService;
 use serde_json::json;
 use tempfile::tempdir;
 
-use crate::common::segment::{compacted, index_over, paths_in, Compaction};
+use crate::common::segment::{Compaction, compacted, index_over, paths_in};
 
 const SEGMENT_TOKEN: u64 = 1;
 

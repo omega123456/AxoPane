@@ -2,10 +2,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axopane_lib::size::index::names::block::checksum;
-use axopane_lib::size::index::names::{names_in, FileNameStore, PackedNames, SavedNames};
+use axopane_lib::size::index::names::{FileNameStore, PackedNames, SavedNames, names_in};
 use axopane_lib::size::index::segment::{
-    BaseRewrite, BuildError, GraftTarget, MappedSegment, RewriteProgress, RewriteSource,
-    SegmentBuilder, SegmentPaths, SegmentTarget, SpillOptions, SpillRecord, WalkSpill, RUN_BYTES,
+    BaseRewrite, BuildError, GraftTarget, MappedSegment, RUN_BYTES, RewriteProgress, RewriteSource,
+    SegmentBuilder, SegmentPaths, SegmentTarget, SpillOptions, SpillRecord, WalkSpill,
 };
 use axopane_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
 

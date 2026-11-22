@@ -5,10 +5,9 @@ use std::fs;
 use std::time::SystemTime;
 
 use axopane_lib::fs::{
-    collect_attributes, compare_entries, compare_optional_string, compare_optional_u64,
-    directory_entry_from_path, infer_type_label, natural_name_compare, platform_root,
-    read_item_count, system_time_to_rfc3339, validate_name, DirectoryEntry, SortDirection, SortKey,
-    SortOrder,
+    DirectoryEntry, SortDirection, SortKey, SortOrder, collect_attributes, compare_entries,
+    compare_optional_string, compare_optional_u64, directory_entry_from_path, infer_type_label,
+    natural_name_compare, platform_root, read_item_count, system_time_to_rfc3339, validate_name,
 };
 use tempfile::tempdir;
 
@@ -65,9 +64,11 @@ fn helper_validation_and_labels_cover_private_branches() {
     );
     assert_eq!(compare_optional_string(None, None), Ordering::Equal);
 
-    assert!(system_time_to_rfc3339(Some(SystemTime::UNIX_EPOCH))
-        .expect("timestamp")
-        .starts_with("1970-01-01T00:00:00"));
+    assert!(
+        system_time_to_rfc3339(Some(SystemTime::UNIX_EPOCH))
+            .expect("timestamp")
+            .starts_with("1970-01-01T00:00:00")
+    );
     assert_eq!(common::bootstrap_message(), "phase-1-common");
 }
 

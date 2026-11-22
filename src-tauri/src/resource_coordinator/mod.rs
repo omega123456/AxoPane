@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use crossbeam_channel::{bounded, unbounded, Receiver, RecvTimeoutError, Sender};
+use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded, unbounded};
 
 use queue::{AdmitOutcome, JobRequest, SchedulerState};
 

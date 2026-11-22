@@ -4,14 +4,14 @@ use std::ops::ControlFlow;
 use super::matcher::NameKind;
 use super::path_style::PathStyle;
 use super::query::Segment;
-use super::results::{CandidatePool, TieredCandidate, LISTED_TIER};
+use super::results::{CandidatePool, LISTED_TIER, TieredCandidate};
 use super::tree_scan::{TreeSearchRun, VisibleTree};
 use super::{Candidate, SearchError};
 use crate::resource_coordinator::scan_pool::{map_parts_in_order, split_slice};
+use crate::size::index::IndexRead;
 use crate::size::index::names::signature::SignedName;
 use crate::size::index::names::{FileNameStore, FolderNames, NamesUnreadable};
 use crate::size::index::tree::{FolderSizeTree, IdRanges};
-use crate::size::index::IndexRead;
 
 pub const BLOCKS_PER_READ: usize = 8;
 

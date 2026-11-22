@@ -120,7 +120,7 @@ mod platform {
     use windows::Win32::UI::Shell::IsUserAnAdmin;
 
     use super::OpenPathError;
-    use crate::win32::shell::{shell_execute, ShellExecuteRequest};
+    use crate::win32::shell::{ShellExecuteRequest, shell_execute};
 
     pub fn open_path(path: &Path) -> Result<(), OpenPathError> {
         let directory = super::launch_directory(path);

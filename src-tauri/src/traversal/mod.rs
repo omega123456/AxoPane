@@ -1,10 +1,10 @@
 mod ignore_backend;
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
-pub use ignore_backend::{walk, TraversalEntry, TraversalError, TraversalOptions};
+pub use ignore_backend::{TraversalEntry, TraversalError, TraversalOptions, walk};
 
 pub fn is_real_directory(metadata: &std::fs::Metadata) -> bool {
     metadata.is_dir() && !metadata.file_type().is_symlink()
@@ -46,6 +46,6 @@ fn reject_symlink_ancestor(ancestor: &Path, candidate: &Path) -> Result<(), Trav
 pub fn walk_without_links(
     root: &Path,
     cancel: &Arc<AtomicBool>,
-) -> Result<impl Iterator<Item = Result<TraversalEntry, TraversalError>>, TraversalError> {
+) -> Result<impl Iterator<Item = Result<TraversalEntry, TraversalError>> + use<>, TraversalError> {
     walk(root, TraversalOptions::default(), Arc::clone(cancel))
 }

@@ -1,18 +1,18 @@
 use std::path::Path;
 
-use axopane_lib::search::file_scan::{scan_files, FileScan, FileSelection};
-use axopane_lib::search::matcher::{nfc, FoldedName, NameKind};
+use axopane_lib::search::file_scan::{FileScan, FileSelection, scan_files};
+use axopane_lib::search::matcher::{FoldedName, NameKind, nfc};
 use axopane_lib::search::path_style::PathStyle;
 use axopane_lib::search::query::{ParsedQuery, Segment};
 use axopane_lib::search::rank::Scored;
-use axopane_lib::search::results::{rank_candidates, CandidatePool, BROWSE_PARENT_CAP};
+use axopane_lib::search::results::{BROWSE_PARENT_CAP, CandidatePool, rank_candidates};
 use axopane_lib::search::tree_scan::TreeSearchRun;
 use axopane_lib::search::{Candidate, Control, SearchOptions, SearchScope};
-use axopane_lib::size::index::names::signature::{signature_of, SignedName};
+use axopane_lib::size::index::names::signature::{SignedName, signature_of};
 use axopane_lib::size::index::tree::DirectoryListing;
 
-use crate::search_file_scan_integration::{folder, packed, Fixture, Folder, SMALL_BLOCK_TARGET};
-use crate::search_tree_scan_integration::{never, parsed, run, Source};
+use crate::search_file_scan_integration::{Fixture, Folder, SMALL_BLOCK_TARGET, folder, packed};
+use crate::search_tree_scan_integration::{Source, never, parsed, run};
 
 const HIDDEN_PREFIX: char = '.';
 const KELVIN_SIGN_NAME: &str = "\u{212A}elvin.txt";

@@ -2,7 +2,7 @@ use std::ffi::c_void;
 use std::ptr;
 
 use core_foundation_sys::array::CFArrayRef;
-use core_foundation_sys::base::{kCFAllocatorDefault, CFAllocatorRef, CFRelease, CFTypeRef};
+use core_foundation_sys::base::{CFAllocatorRef, CFRelease, CFTypeRef, kCFAllocatorDefault};
 use core_foundation_sys::dictionary::CFDictionaryRef;
 use dispatch2::{DispatchQueue, DispatchRetained};
 
@@ -26,7 +26,7 @@ type DiskDescriptionChangedCallback =
     extern "C" fn(disk: DADiskRef, keys: CFArrayRef, context: *mut c_void);
 
 #[link(name = "DiskArbitration", kind = "framework")]
-extern "C" {
+unsafe extern "C" {
     fn DASessionCreate(allocator: CFAllocatorRef) -> DASessionRef;
     fn DASessionSetDispatchQueue(session: DASessionRef, queue: *mut c_void);
     fn DARegisterDiskAppearedCallback(

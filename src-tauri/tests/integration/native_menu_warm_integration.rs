@@ -8,11 +8,11 @@ use axopane_lib::ipc::types::{
     InvokeNativeMenuRequest, LoadNativeMenuRequest, MenuActionStatus, NativeMenuTargetKind,
     WarmNativeMenusRequest,
 };
+use axopane_lib::native_menu::NativeMenuService;
 use axopane_lib::native_menu::provider::{
     NativeMenuProvider, ProviderInvocation, ProviderNativeMenuItem,
 };
 use axopane_lib::native_menu::shell_executor::ShellExecutor;
-use axopane_lib::native_menu::NativeMenuService;
 
 /// Provider that records every enumeration call so tests can assert warming
 /// dedupes by type instead of re-enumerating per path.

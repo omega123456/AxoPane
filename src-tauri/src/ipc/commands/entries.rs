@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::logged_error;
 #[cfg(not(feature = "test-utils"))]
-use super::{latency_filesystem_unless_cancelled, CancellableMutation};
+use super::{CancellableMutation, latency_filesystem_unless_cancelled};
 use crate::fs::DirectoryEntry;
 use crate::ipc::types::{CreateEntryRequest, RenameEntryRequest};
 #[cfg(not(feature = "test-utils"))]

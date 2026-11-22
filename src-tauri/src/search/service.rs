@@ -6,10 +6,10 @@ use serde::{Deserialize, Serialize};
 use super::path_style::PathStyle;
 use super::query::parse;
 use super::rank::Scored;
-use super::results::{rank_candidates, ResultSet};
+use super::results::{ResultSet, rank_candidates};
 use super::source::{EverythingSource, FolderTreeSource};
 use super::{
-    everything_strategy, tree_scan, Control, SearchError, SearchOptions, SearchRun, SearchScope,
+    Control, SearchError, SearchOptions, SearchRun, SearchScope, everything_strategy, tree_scan,
 };
 use crate::ipc::executor::Cancellation;
 use crate::size::SizeService;

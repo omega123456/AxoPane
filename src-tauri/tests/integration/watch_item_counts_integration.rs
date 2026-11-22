@@ -12,12 +12,12 @@ use std::sync::{Arc, Mutex};
 
 use axopane_lib::fs::{self, DirectoryEntry, SortDirection, SortKey};
 use axopane_lib::watch::{
-    create_runtime, diff_entries, handle_debounce_result_for_tests, insert_tab_for_tests,
-    snapshot_for_target, tab_snapshot_for_tests, DirPatch, PatchLabel, TabWatchArm, WatchEmitters,
-    WatchService, WatchTarget,
+    DirPatch, PatchLabel, TabWatchArm, WatchEmitters, WatchService, WatchTarget, create_runtime,
+    diff_entries, handle_debounce_result_for_tests, insert_tab_for_tests, snapshot_for_target,
+    tab_snapshot_for_tests,
 };
-use notify::event::EventKind;
 use notify::Event;
+use notify::event::EventKind;
 use tempfile::tempdir;
 
 fn base_target(tab_id: &str, path: &str, include_item_counts: bool) -> WatchTarget {

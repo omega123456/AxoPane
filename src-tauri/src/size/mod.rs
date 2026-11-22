@@ -17,14 +17,14 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::resource_coordinator::{max_throughput_slots, ResourceCoordinator};
+use crate::resource_coordinator::{ResourceCoordinator, max_throughput_slots};
 use crate::volumes::{self, VolumeInfo};
 
 use everything::{EverythingAvailability, EverythingHandle};
 use index::exclusions::ExclusionChange;
 #[cfg(target_os = "macos")]
-pub(crate) use route::{route_of, Route};
-use worker_pool::{spawn_manual_worker, QueuedWork};
+pub(crate) use route::{Route, route_of};
+use worker_pool::{QueuedWork, spawn_manual_worker};
 
 type UpdateEmitter = Arc<dyn Fn(Vec<SizeUpdate>) + Send + Sync>;
 

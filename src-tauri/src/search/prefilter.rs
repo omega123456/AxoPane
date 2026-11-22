@@ -1,5 +1,5 @@
 use super::matcher::Token;
-use crate::size::index::names::signature::{byte_bit, is_non_ascii, SignatureFilter, SignedName};
+use crate::size::index::names::signature::{SignatureFilter, SignedName, byte_bit, is_non_ascii};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Prefilter {

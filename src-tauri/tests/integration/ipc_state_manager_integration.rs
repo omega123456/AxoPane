@@ -14,11 +14,9 @@ use axopane_lib::ipc::types::{
     RemoveIndexExclusionRequest, ReorderOpsRequest, ResolveConflictRequest, SaveConfigRequest,
     SaveSessionRequest, SetTabWatchRequest, TrashEntriesRequest,
 };
-use axopane_lib::ops::{
-    ConflictResolution, OpItem, OpKind, OpStatus, OpsService, StartOpRequest,
-};
+use axopane_lib::ops::{ConflictResolution, OpItem, OpKind, OpStatus, OpsService, StartOpRequest};
 use axopane_lib::persist::{Config, PersistenceState, Session};
-use axopane_lib::size::{size_path_from_string, SizeService};
+use axopane_lib::size::{SizeService, size_path_from_string};
 use tempfile::tempdir;
 
 fn op_item(path: &Path) -> OpItem {
@@ -246,10 +244,7 @@ fn commands_report_unavailable_size_index_and_auto_sizing() {
         axopane_lib::size::IndexBackend::None
     };
     assert_eq!(status.backend, backend);
-    assert_eq!(
-        status.state,
-        axopane_lib::size::IndexState::Unavailable
-    );
+    assert_eq!(status.state, axopane_lib::size::IndexState::Unavailable);
     commands::set_size_subscriptions(
         axopane_lib::ipc::types::SizeSubscriptionsRequest {
             pane_id: "left".to_string(),
@@ -325,9 +320,11 @@ fn commands_mark_network_folders_as_not_applicable() {
         .into_iter()
         .flatten()
         .collect::<Vec<_>>();
-    assert!(network_size_events
-        .iter()
-        .any(|event| event.path == size_root.to_string_lossy() && has_ready_or_na(event.state)));
+    assert!(
+        network_size_events
+            .iter()
+            .any(|event| event.path == size_root.to_string_lossy() && has_ready_or_na(event.state))
+    );
     assert!(network_size_events.iter().any(|event| {
         matches!(event.state, axopane_lib::size::SizeStateKind::Na)
             && event.source == axopane_lib::size::SizeSource::Network
@@ -341,10 +338,9 @@ fn commands_return_placeholder_icons_in_request_order() {
         path_text(&size_root.join("file-0.txt")),
         path_text(&size_root.join("file-1.txt")),
     ];
-    let icon_batches =
-        commands::request_icons(axopane_lib::ipc::types::RequestIconsRequest {
-            paths: icon_paths.clone(),
-        });
+    let icon_batches = commands::request_icons(axopane_lib::ipc::types::RequestIconsRequest {
+        paths: icon_paths.clone(),
+    });
     let icon_events: Vec<_> = icon_batches.into_iter().flatten().collect();
     assert_eq!(
         icon_events
@@ -353,9 +349,11 @@ fn commands_return_placeholder_icons_in_request_order() {
             .collect::<Vec<_>>(),
         icon_paths
     );
-    assert!(icon_events
-        .iter()
-        .all(|event| event.icon_data_url.is_none()));
+    assert!(
+        icon_events
+            .iter()
+            .all(|event| event.icon_data_url.is_none())
+    );
 }
 
 fn thumbnail_candidate(path: &Path) -> axopane_lib::ipc::types::ThumbnailCandidateRequest {
@@ -372,9 +370,9 @@ fn thumbnail_candidate(path: &Path) -> axopane_lib::ipc::types::ThumbnailCandida
 #[test]
 fn commands_request_and_cancel_thumbnails() {
     let (_fixture, size_root) = size_fixture();
-    let thumbnail_service = Arc::new(axopane_lib::thumbnails::ThumbnailService::new(
-        Arc::new(axopane_lib::resource_coordinator::ResourceCoordinator::new()),
-    ));
+    let thumbnail_service = Arc::new(axopane_lib::thumbnails::ThumbnailService::new(Arc::new(
+        axopane_lib::resource_coordinator::ResourceCoordinator::new(),
+    )));
     commands::request_thumbnails(
         axopane_lib::ipc::types::RequestThumbnailsRequest {
             pane_id: "left".into(),
@@ -448,9 +446,8 @@ fn commands_reseed_and_clear_tab_watches() {
     write_file(&fixture.path().join("watch.txt"), b"watch");
     set_watch(&watch_service, Some(watch_target.clone()))
         .expect("reseed tab watch after file write");
-    let baseline =
-        axopane_lib::watch::tab_snapshot_for_tests(&watch_service, &watch_target.tab_id)
-            .expect("baseline recorded for tab");
+    let baseline = axopane_lib::watch::tab_snapshot_for_tests(&watch_service, &watch_target.tab_id)
+        .expect("baseline recorded for tab");
     assert!(baseline.keys().any(|path| path.ends_with("watch.txt")));
     set_watch(&watch_service, None).expect("clear tab watch");
 }

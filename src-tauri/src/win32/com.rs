@@ -1,4 +1,4 @@
-use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT};
+use windows::Win32::System::Com::{COINIT, CoInitializeEx, CoUninitialize};
 
 pub struct ComApartment {
     initialized: bool,

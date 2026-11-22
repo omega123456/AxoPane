@@ -87,7 +87,7 @@ pub trait NativeMenuProvider: Send + Sync {
     ) -> Vec<ProviderNativeMenuItem>;
 
     fn invoke(&self, invocation: &ProviderInvocation, executor: &ShellExecutor)
-        -> MenuActionStatus;
+    -> MenuActionStatus;
 
     fn load_menu_for_role(
         &self,

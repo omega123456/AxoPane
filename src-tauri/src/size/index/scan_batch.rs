@@ -1,13 +1,13 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::size::fast_walk::{self, DirRecord};
 
 use super::compact::new_segment_target;
 use super::lanes::{
-    narrow_walk, BackgroundTurn, ClaimedJob, ClaimedSpill, Gentle, Lane, LaneContext,
-    ProgressReport, ScanJob, ScanKind, WalkOutcome,
+    BackgroundTurn, ClaimedJob, ClaimedSpill, Gentle, Lane, LaneContext, ProgressReport, ScanJob,
+    ScanKind, WalkOutcome, narrow_walk,
 };
 use super::machine::Message;
 use super::segment::{BuildError, BuiltSegment, GraftTarget};

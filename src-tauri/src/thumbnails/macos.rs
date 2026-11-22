@@ -1,13 +1,13 @@
 use super::provider::{ProviderCapability, ThumbnailPreviewCallback, ThumbnailProvider};
 use super::types::{
-    is_within_preview_bounds, validated_png_data_url, ThumbnailCandidate, ThumbnailFingerprint,
-    ThumbnailState, MAX_PNG_BYTES, MAX_PREVIEW_DIMENSION,
+    MAX_PNG_BYTES, MAX_PREVIEW_DIMENSION, ThumbnailCandidate, ThumbnailFingerprint, ThumbnailState,
+    is_within_preview_bounds, validated_png_data_url,
 };
 use base64::Engine;
 use block2::RcBlock;
-use crossbeam_channel::{bounded, select, Receiver, RecvError, Sender};
-use objc2::rc::Retained;
+use crossbeam_channel::{Receiver, RecvError, Sender, bounded, select};
 use objc2::AnyThread;
+use objc2::rc::Retained;
 use objc2_core_foundation::{CGRect, CGSize};
 use objc2_core_graphics::{
     CGBitmapContextCreate, CGColorSpace, CGContext, CGImage, CGImageAlphaInfo,
@@ -19,8 +19,8 @@ use objc2_quick_look_thumbnailing::{
 };
 use png::{BitDepth, ColorType, Encoder};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -450,7 +450,7 @@ unsafe fn rgba_frame_from_representation(
     representation: &QLThumbnailRepresentation,
     representation_type: QLThumbnailRepresentationType,
 ) -> Option<RawFrame> {
-    let image = representation.CGImage();
+    let image = unsafe { representation.CGImage() };
     let width = CGImage::width(Some(&image));
     let height = CGImage::height(Some(&image));
     let (Ok(narrow_width), Ok(narrow_height)) = (u32::try_from(width), u32::try_from(height))
@@ -463,15 +463,17 @@ unsafe fn rgba_frame_from_representation(
     let row = width.checked_mul(4)?;
     let mut rgba = vec![0; row.checked_mul(height)?];
     let color_space = CGColorSpace::new_device_rgb()?;
-    let context = CGBitmapContextCreate(
-        rgba.as_mut_ptr().cast(),
-        width,
-        height,
-        8,
-        row,
-        Some(&color_space),
-        CGImageAlphaInfo::PremultipliedLast.0,
-    )?;
+    let context = unsafe {
+        CGBitmapContextCreate(
+            rgba.as_mut_ptr().cast(),
+            width,
+            height,
+            8,
+            row,
+            Some(&color_space),
+            CGImageAlphaInfo::PremultipliedLast.0,
+        )
+    }?;
     CGContext::draw_image(
         Some(&context),
         CGRect {

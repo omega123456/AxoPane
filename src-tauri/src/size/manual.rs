@@ -1,9 +1,9 @@
 use std::path::Path;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
-use crate::traversal::{is_real_directory, TraversalError};
+use crate::traversal::{TraversalError, is_real_directory};
 
 #[derive(Debug)]
 pub enum ManualSizeError {
@@ -95,7 +95,7 @@ fn subtree_total(path: &Path, stop: &StopConditions<'_>) -> Result<u64, ManualSi
         started_at,
         timeout,
     } = *stop;
-    use crate::traversal::{walk, TraversalOptions};
+    use crate::traversal::{TraversalOptions, walk};
     use std::sync::atomic::Ordering;
 
     let mut total = 0_u64;

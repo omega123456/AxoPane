@@ -7,7 +7,7 @@ use axopane_lib::size::index::segment::SegmentPaths;
 use axopane_lib::size::{FolderSizeIndexStorage, IndexState};
 
 use crate::ipc_state_manager_integration::as_state;
-use crate::size_index_service_integration::{wait_until, Harness};
+use crate::size_index_service_integration::{Harness, wait_until};
 
 const INDEXED_FOLDERS: u64 = 6;
 const INDEXED_FILES: u64 = 5;

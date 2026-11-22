@@ -10,9 +10,9 @@ use axopane_lib::size::index::segment::{
     SegmentPaths, SegmentTarget,
 };
 use axopane_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 
-use crate::common::segment::{compacted, index_over, Compaction, SegmentBackedIndex};
+use crate::common::segment::{Compaction, SegmentBackedIndex, compacted, index_over};
 
 const TOKEN: u64 = 31;
 const FOLDER_COUNT: usize = 40;

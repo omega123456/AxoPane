@@ -3,10 +3,9 @@ use std::fs;
 use tempfile::tempdir;
 
 use axopane_lib::directory_session::{
-    enumerate_snapshot_for_tests, BeginNavigationRequest, DirectorySessionService,
-    EnumerationAdmission, EnumerationTarget, GetSessionRangeRequest, PanePath, Reconciled,
-    ReleaseSessionRequest, ReviseSessionViewRequest, SessionRejection, ViewParams, WatchMutation,
-    SESSION_PAGE_SIZE,
+    BeginNavigationRequest, DirectorySessionService, EnumerationAdmission, EnumerationTarget,
+    GetSessionRangeRequest, PanePath, Reconciled, ReleaseSessionRequest, ReviseSessionViewRequest,
+    SESSION_PAGE_SIZE, SessionRejection, ViewParams, WatchMutation, enumerate_snapshot_for_tests,
 };
 use axopane_lib::watch::patch::SessionPatch;
 
@@ -129,8 +128,7 @@ fn capture_reconciliation_never_drops_a_racing_mutation_via_direct_unit_check() 
     let dir = tempdir().expect("temp dir");
     write_files(dir.path(), 2);
 
-    let capture =
-        axopane_lib::watch::capture_handle_for_tests(dir.path()).expect("begin capture");
+    let capture = axopane_lib::watch::capture_handle_for_tests(dir.path()).expect("begin capture");
     fs::write(dir.path().join("new-during-capture.txt"), b"x").expect("write file");
     // Give the OS watcher a brief, bounded moment to deliver the event before
     // we drain — this is not a fixed-delay wait for correctness (the
@@ -143,14 +141,14 @@ fn capture_reconciliation_never_drops_a_racing_mutation_via_direct_unit_check() 
     // meaning "resnapshot required"), a fresh enumeration afterward must
     // reflect the new file either way.
     let _ = mutated;
-    let entries = axopane_lib::directory_session::enumerate_snapshot_for_tests(
-        dir.path(),
-        &view_params(),
-    )
-    .expect("enumerate snapshot");
-    assert!(entries
-        .iter()
-        .any(|entry| entry.name == "new-during-capture.txt"));
+    let entries =
+        axopane_lib::directory_session::enumerate_snapshot_for_tests(dir.path(), &view_params())
+            .expect("enumerate snapshot");
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry.name == "new-during-capture.txt")
+    );
 }
 
 #[test]
@@ -169,11 +167,9 @@ fn a_definite_racing_mutation_still_resnapshots_instead_of_trusting_stale_entrie
     // Snapshot before the racing file exists, mirroring what a real
     // `enumerate_snapshot` read could return if it happened to race a
     // concurrent mutation and miss it (readdir is not guaranteed atomic).
-    let stale_entries = axopane_lib::directory_session::enumerate_snapshot_for_tests(
-        dir.path(),
-        &view_params(),
-    )
-    .expect("enumerate stale snapshot");
+    let stale_entries =
+        axopane_lib::directory_session::enumerate_snapshot_for_tests(dir.path(), &view_params())
+            .expect("enumerate stale snapshot");
     assert!(
         !stale_entries
             .iter()
@@ -467,9 +463,7 @@ fn revise_view_rejects_missing_session_wrong_tab_and_stale_session_id() {
     let result = service.revise_view(ReviseSessionViewRequest {
         pane_id: "left".to_string(),
         tab_id: "left-1".to_string(),
-        session_id: axopane_lib::directory_session::SessionId(
-            begin.baseline.session_id.0 + 999,
-        ),
+        session_id: axopane_lib::directory_session::SessionId(begin.baseline.session_id.0 + 999),
         view: view_params(),
     });
     assert_eq!(result, Err(SessionRejection::StaleSession));
@@ -718,15 +712,17 @@ fn apply_watch_mutation_is_a_no_op_for_unknown_pane_or_mismatched_path() {
     let path_string = dir.path().to_string_lossy().to_string();
 
     // No active session at all for this pane.
-    assert!(service
-        .apply_watch_mutation(
-            left_pane(&path_string),
-            WatchMutation {
-                changed_entries: Vec::new(),
-                removed_paths: Vec::new(),
-            },
-        )
-        .is_none());
+    assert!(
+        service
+            .apply_watch_mutation(
+                left_pane(&path_string),
+                WatchMutation {
+                    changed_entries: Vec::new(),
+                    removed_paths: Vec::new(),
+                },
+            )
+            .is_none()
+    );
 
     service
         .begin_navigation(
@@ -736,15 +732,17 @@ fn apply_watch_mutation_is_a_no_op_for_unknown_pane_or_mismatched_path() {
         .expect("begin navigation");
 
     // Path does not match the active session's path.
-    assert!(service
-        .apply_watch_mutation(
-            left_pane("/completely/different/path"),
-            WatchMutation {
-                changed_entries: Vec::new(),
-                removed_paths: Vec::new(),
-            },
-        )
-        .is_none());
+    assert!(
+        service
+            .apply_watch_mutation(
+                left_pane("/completely/different/path"),
+                WatchMutation {
+                    changed_entries: Vec::new(),
+                    removed_paths: Vec::new(),
+                },
+            )
+            .is_none()
+    );
 }
 
 #[test]
@@ -755,9 +753,11 @@ fn apply_metadata_only_builds_a_metadata_patch_and_rejects_bad_input() {
     let path_string = dir.path().to_string_lossy().to_string();
 
     // No active session yet.
-    assert!(service
-        .apply_metadata_only(left_pane(&path_string), Vec::new(),)
-        .is_none());
+    assert!(
+        service
+            .apply_metadata_only(left_pane(&path_string), Vec::new(),)
+            .is_none()
+    );
 
     let begin = service
         .begin_navigation(
@@ -767,9 +767,11 @@ fn apply_metadata_only_builds_a_metadata_patch_and_rejects_bad_input() {
         .expect("begin navigation");
 
     // Empty updates is always a no-op regardless of session state.
-    assert!(service
-        .apply_metadata_only(left_pane(&begin.path), Vec::new(),)
-        .is_none());
+    assert!(
+        service
+            .apply_metadata_only(left_pane(&begin.path), Vec::new(),)
+            .is_none()
+    );
 
     let snapshot = enumerate_snapshot_for_tests(dir.path(), &view_params()).expect("snapshot");
     let target = snapshot.first().expect("at least one entry").clone();
@@ -779,9 +781,11 @@ fn apply_metadata_only_builds_a_metadata_patch_and_rejects_bad_input() {
     }];
 
     // Mismatched path is a no-op.
-    assert!(service
-        .apply_metadata_only(left_pane("/mismatched/path"), updates.clone(),)
-        .is_none());
+    assert!(
+        service
+            .apply_metadata_only(left_pane("/mismatched/path"), updates.clone(),)
+            .is_none()
+    );
 
     let patch = service
         .apply_metadata_only(left_pane(&begin.path), updates)

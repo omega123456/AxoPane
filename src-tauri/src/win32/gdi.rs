@@ -1,13 +1,13 @@
 use std::mem::size_of;
 
 use windows::Win32::Graphics::Gdi::{
-    CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, GetObjectW, BITMAP, BITMAPINFO,
-    BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC,
+    BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC,
+    DeleteObject, GetDIBits, GetObjectW, HBITMAP, HDC,
 };
 use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON, ICONINFO};
 
 use crate::pixels::{
-    encode_rgba_png, png_data_url, premultiplied_bgra_to_rgba, RGBA_BYTES_PER_PIXEL,
+    RGBA_BYTES_PER_PIXEL, encode_rgba_png, png_data_url, premultiplied_bgra_to_rgba,
 };
 
 const BGRA_BITS_PER_PIXEL: u16 = 32;

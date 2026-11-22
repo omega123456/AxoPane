@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use axopane_lib::trash::{
-    delete_batch_with_adapter_for_tests, BatchCorrelation, ManifestBatch, StableFileIdentity,
-    SystemTrashAdapter, TrashFacts, TrashSnapshotEntry,
+    BatchCorrelation, ManifestBatch, StableFileIdentity, SystemTrashAdapter, TrashFacts,
+    TrashSnapshotEntry, delete_batch_with_adapter_for_tests,
 };
 
 #[derive(Default)]

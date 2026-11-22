@@ -6,8 +6,8 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use axopane_lib::ops::{
-    process_item_for_tests, ConflictResolution, CurrentFileProgress, OpItem, OpKind, OpProgress,
-    OpRuntime, OpState, OpStatus, WorkerContext,
+    ConflictResolution, CurrentFileProgress, OpItem, OpKind, OpProgress, OpRuntime, OpState,
+    OpStatus, WorkerContext, process_item_for_tests,
 };
 
 fn replace_all_state(kind: OpKind, destination_dir: &Path, source: &Path) -> OpState {
@@ -192,9 +192,11 @@ fn replace_merge_replaces_nested_symlink_without_writing_through_it() {
 
     assert_eq!(error, None);
     assert_eq!(read(&outside), "outside");
-    assert!(!fs::symlink_metadata(target.join("link.txt"))
-        .unwrap()
-        .file_type()
-        .is_symlink());
+    assert!(
+        !fs::symlink_metadata(target.join("link.txt"))
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
     assert_eq!(read(&target.join("link.txt")), "src-link");
 }

@@ -5,14 +5,14 @@ use std::sync::Arc;
 use axopane_lib::ipc::types::{
     InvokeNativeMenuRequest, LoadNativeMenuRequest, NativeMenuIconKind, NativeMenuTargetKind,
 };
+use axopane_lib::native_menu::NativeMenuService;
 use axopane_lib::native_menu::fake_provider::FakeNativeMenuProvider;
 use axopane_lib::native_menu::provider::{
-    dedupe_provider_items, NativeMenuProvider, ProviderInvocation, ProviderNativeMenuItem,
+    NativeMenuProvider, ProviderInvocation, ProviderNativeMenuItem, dedupe_provider_items,
 };
 use axopane_lib::native_menu::token_store::{IssuedInvocation, NativeMenuTokenStore};
 use axopane_lib::native_menu::types::NativeMenuCanonicalActionKind;
 use axopane_lib::native_menu::unsupported::{self, UnsupportedNativeMenuProvider};
-use axopane_lib::native_menu::NativeMenuService;
 
 fn fixture_folder_request(request_id: &str) -> LoadNativeMenuRequest {
     load_request(

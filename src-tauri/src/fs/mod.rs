@@ -9,8 +9,8 @@ use lexical_sort::natural_lexical_cmp;
 use rayon::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use serde::{Deserialize, Serialize};
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -167,10 +167,10 @@ pub fn display_path_from_text(path: &str) -> String {
 }
 
 pub fn default_start_dir() -> PathBuf {
-    if let Some(home) = home_dir() {
-        if home.is_dir() {
-            return home;
-        }
+    if let Some(home) = home_dir()
+        && home.is_dir()
+    {
+        return home;
     }
 
     if let Some(volume) = crate::volumes::list_volumes().into_iter().next() {

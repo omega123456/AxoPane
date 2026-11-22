@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender, TrySendError};
+use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, TrySendError, bounded};
 
 pub const RAW_LANE_CAPACITY: usize = 4096;
 

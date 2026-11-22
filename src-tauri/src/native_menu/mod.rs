@@ -27,7 +27,7 @@ use std::sync::Arc;
 use helper_supervisor::HelperRole;
 use menu_cache::MenuCache;
 use provider::{
-    dedupe_provider_items, NativeMenuProvider, ProviderNativeMenuItem, RoleMenuRequest,
+    NativeMenuProvider, ProviderNativeMenuItem, RoleMenuRequest, dedupe_provider_items,
 };
 use shell_executor::ShellExecutor;
 use token_store::NativeMenuTokenStore;

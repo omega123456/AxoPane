@@ -7,15 +7,15 @@ use std::collections::HashMap;
 use std::io;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use block::{BlockFolder, BlockSpan, BlockView, NamesCorrupt, StoredBlock};
-use file::{remove_if_present, spill_path, MappedNames};
+use file::{MappedNames, remove_if_present, spill_path};
 use signature::{SignatureFilter, SignedName};
 use writer::RewriteStats;
 
-use super::persist::{put_bytes, put_count, put_u32, Reader};
+use super::persist::{Reader, put_bytes, put_count, put_u32};
 use super::tree::IdRanges;
 
 pub const NAME_TERMINATOR: u8 = 0;
@@ -115,7 +115,7 @@ impl<'names> FolderNames<'names> {
         }
     }
 
-    pub fn names(&self) -> impl Iterator<Item = &'names [u8]> {
+    pub fn names(&self) -> impl Iterator<Item = &'names [u8]> + use<'names> {
         names_in(self.packed)
     }
 
@@ -133,7 +133,7 @@ impl<'names> FolderNames<'names> {
     fn live_admitted_names<'filter>(
         &self,
         filter: &'filter dyn SignatureFilter,
-    ) -> impl Iterator<Item = SignedName<'names>> + 'filter
+    ) -> impl Iterator<Item = SignedName<'names>> + use<'names, 'filter>
     where
         'names: 'filter,
     {

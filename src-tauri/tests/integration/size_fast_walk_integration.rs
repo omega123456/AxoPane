@@ -1,23 +1,21 @@
 use std::collections::HashMap;
 use std::fs;
-use std::os::unix::fs::{symlink, PermissionsExt};
+use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use axopane_lib::resource_coordinator::parallelism::{
-    walker_helper_budget, walker_job_threads,
-};
+use axopane_lib::resource_coordinator::parallelism::{walker_helper_budget, walker_job_threads};
 use axopane_lib::size::fast_walk::{
-    helper_threads_for_tests, list_dir, subtree_records, subtree_total, DirHook, DirRecord,
-    HelperThreadCounts, Qos, WalkOptions, INDEX_EXCLUDED_ROOTS,
+    DirHook, DirRecord, HelperThreadCounts, INDEX_EXCLUDED_ROOTS, Qos, WalkOptions,
+    helper_threads_for_tests, list_dir, subtree_records, subtree_total,
 };
 use axopane_lib::size::index::names::PackedNames;
 use axopane_lib::size::index::platform::DATA_VOLUME_PREFIX;
-use axopane_lib::size::manual::{calculate, ManualSizeError};
-use axopane_lib::traversal::{walk, TraversalOptions};
+use axopane_lib::size::manual::{ManualSizeError, calculate};
+use axopane_lib::traversal::{TraversalOptions, walk};
 use tempfile::tempdir;
 
 fn options() -> WalkOptions {
@@ -252,9 +250,11 @@ fn index_walks_stop_at_exclusions_and_device_boundaries() {
         INDEX_EXCLUDED_ROOTS,
         ["/System/Volumes", "/Volumes", "/dev"]
     );
-    assert!(INDEX_EXCLUDED_ROOTS
-        .iter()
-        .all(|excluded| index.excluded.contains(Path::new(excluded))));
+    assert!(
+        INDEX_EXCLUDED_ROOTS
+            .iter()
+            .all(|excluded| index.excluded.contains(Path::new(excluded)))
+    );
 
     // Fake devices: the walk root on 1, `a/b` on 2, `a/b/c` on 3, and the
     // Data volume on `data_dev`. Only the root's and the Data volume's
@@ -354,9 +354,11 @@ fn file_names_are_collected_sorted_only_for_index_walks_and_never_list_symlinks(
     let mut manual = options();
     manual.hooks.buffer_size = 512;
     assert!(!manual.collect_file_names, "manual size jobs opt out");
-    assert!(records(root, &manual)
-        .values()
-        .all(|record| record.file_names.is_none()));
+    assert!(
+        records(root, &manual)
+            .values()
+            .all(|record| record.file_names.is_none())
+    );
     assert_eq!(list_dir(root, &manual).expect("listing").file_names, None);
 
     let mut collecting = options();

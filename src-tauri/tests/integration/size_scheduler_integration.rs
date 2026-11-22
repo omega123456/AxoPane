@@ -1,8 +1,8 @@
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
 
-use axopane_lib::size::scheduler::{ScheduledJob, SizeScheduler, MAX_SIZE_METADATA_ENTRIES};
+use axopane_lib::size::scheduler::{MAX_SIZE_METADATA_ENTRIES, ScheduledJob, SizeScheduler};
 
 fn token() -> Arc<AtomicBool> {
     Arc::new(AtomicBool::new(false))

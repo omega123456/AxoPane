@@ -1,9 +1,9 @@
 use axopane_lib::size::index::names::block::{
-    checksum, BlockBuilder, BlockFolder, BlockSpan, BlockView, BuiltBlock, NamesCorrupt,
-    StoredBlock, BLOCK_TARGET_BYTES,
+    BLOCK_TARGET_BYTES, BlockBuilder, BlockFolder, BlockSpan, BlockView, BuiltBlock, NamesCorrupt,
+    StoredBlock, checksum,
 };
 use axopane_lib::size::index::names::signature::signature_of;
-use axopane_lib::size::index::names::{names_in, PackedNames};
+use axopane_lib::size::index::names::{PackedNames, names_in};
 
 fn packed(names: &[&str]) -> PackedNames {
     PackedNames::from_names(names.iter().map(|name| name.as_bytes()))

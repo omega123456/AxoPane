@@ -1,9 +1,9 @@
+use super::PaneTabKey;
 use super::model::{
-    GetSessionRangeRequest, SessionBaseline, SessionRangePage, SessionRangeResponse,
-    SessionRejection, SESSION_PAGE_SIZE,
+    GetSessionRangeRequest, SESSION_PAGE_SIZE, SessionBaseline, SessionRangePage,
+    SessionRangeResponse, SessionRejection,
 };
 use super::view::SessionView;
-use super::PaneTabKey;
 
 pub struct ExpectedSession<'session> {
     pub key: &'session PaneTabKey,

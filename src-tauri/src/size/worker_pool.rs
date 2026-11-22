@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 use super::{
-    scheduler, SizeService, SizeServiceInner, SizeSource, SizeStateKind, SizeUpdate, UpdateEmitter,
+    SizeService, SizeServiceInner, SizeSource, SizeStateKind, SizeUpdate, UpdateEmitter, scheduler,
 };
 use crate::resource_coordinator::{JobClass, JobSpec, ResourceCoordinator};
 

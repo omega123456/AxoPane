@@ -87,9 +87,6 @@ macro_rules! registered_commands {
 }
 
 pub fn run() {
-    #[cfg(target_os = "windows")]
-    use_fresh_webview2_profile();
-
     tauri::Builder::default()
         .plugin(prevent_default_plugin())
         .plugin(
@@ -117,20 +114,6 @@ fn flush_size_index(app: &tauri::AppHandle) {
     if let Some(sizes) = app.try_state::<SizeService>() {
         sizes.flush_index();
     }
-}
-
-#[cfg(target_os = "windows")]
-fn use_fresh_webview2_profile() {
-    if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_some() {
-        return;
-    }
-    let Some(local) = std::env::var_os("LOCALAPPDATA") else {
-        return;
-    };
-    let data_dir = std::path::Path::new(&local)
-        .join("com.axopane.app")
-        .join("EBWebView-v2");
-    std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", data_dir);
 }
 
 fn prevent_default_flags() -> tauri_plugin_prevent_default::Flags {

@@ -1,15 +1,15 @@
 use axopane_lib::fs::{SortDirection, SortKey};
 use axopane_lib::watch::coordinator::{CompactedBatch, MutationKind, WatchId};
 use axopane_lib::watch::{
-    add_watch, canonical_dir_for_tests, create_runtime, first_error_path_for_tests,
-    handle_debounce_result_for_tests, insert_tab_for_tests, noop_watch_error_for_tests,
-    process_compacted_batch_for_tests, raw_mutations_for_event_for_tests, remove_watch,
-    snapshot_for_target, DirPatch, WatchEmitters, WatchRuntime, WatchTarget,
+    DirPatch, WatchEmitters, WatchRuntime, WatchTarget, add_watch, canonical_dir_for_tests,
+    create_runtime, first_error_path_for_tests, handle_debounce_result_for_tests,
+    insert_tab_for_tests, noop_watch_error_for_tests, process_compacted_batch_for_tests,
+    raw_mutations_for_event_for_tests, remove_watch, snapshot_for_target,
 };
+use notify::Event;
 use notify::event::{
     AccessKind, CreateKind, DataChange, EventKind, ModifyKind, RemoveKind, RenameMode,
 };
-use notify::Event;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tempfile::tempdir;
@@ -421,14 +421,12 @@ fn process_compacted_batch_applies_targeted_and_dirty_batches_through_the_public
             error: Arc::new(|_, _| {}),
         },
     );
-    assert!(patches
-        .lock()
-        .expect("patches lock")
-        .iter()
-        .any(|patch| patch
+    assert!(patches.lock().expect("patches lock").iter().any(|patch| {
+        patch
             .changed
             .iter()
-            .any(|item| item.path.ends_with("new.txt"))));
+            .any(|item| item.path.ends_with("new.txt"))
+    }));
 
     // A dirty batch forces an authoritative resnapshot from disk.
     let dirty_patches = Arc::new(Mutex::new(Vec::<DirPatch>::new()));

@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::size::index::exclusions::{ExclusionVerdict, PathVerdict};
 use crate::size::IndexUnsupported;
+use crate::size::index::exclusions::{ExclusionVerdict, PathVerdict};
 
 pub use crate::app_picker::types::{
     GetDefaultApplicationRequest, GetDefaultApplicationResponse, ListApplicationsResponse, MacApp,
@@ -11,8 +11,8 @@ pub use crate::app_picker::types::{
 };
 pub use crate::directory_session::{
     BeginNavigationRequest, BeginNavigationResponse, GetSessionRangeRequest, ReleaseSessionRequest,
-    ReleaseSessionResponse, ReviseSessionViewRequest, SessionBaseline, SessionRangePage,
-    SessionRangeResponse, SessionRejection, ViewParams, SESSION_PAGE_SIZE,
+    ReleaseSessionResponse, ReviseSessionViewRequest, SESSION_PAGE_SIZE, SessionBaseline,
+    SessionRangePage, SessionRangeResponse, SessionRejection, ViewParams,
 };
 pub use crate::fs::{
     DirectoryEntry, ListDirOptions, ListDirResponse, ListTreeChildrenOptions,
@@ -33,11 +33,11 @@ pub use crate::ops::{
     StartOpRequest,
 };
 pub use crate::persist::{Config as AppConfig, Session as SessionState};
+pub use crate::search::SearchScope;
 pub use crate::search::service::{
     SearchBackendKind, SearchCapabilities, SearchHit, SearchPage, SearchPageRequest,
     SearchQueryRequest, SearchRejection,
 };
-pub use crate::search::SearchScope;
 pub use crate::size::{FolderSizeIndexStatus, NaReason, RequestMode, SizeSource, SizeStateKind};
 pub use crate::trash::TrashEntry;
 pub use crate::volumes::VolumeInfo;

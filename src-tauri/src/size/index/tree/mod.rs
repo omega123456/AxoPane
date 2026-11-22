@@ -7,13 +7,13 @@ use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-use overlay::{is_heap, Delta, Facts, HeapNode, HeapNodes, KeptRanges, OwnSize, Patch};
+use overlay::{Delta, Facts, HeapNode, HeapNodes, KeptRanges, OwnSize, Patch, is_heap};
 use segments::SegmentTable;
 
-use crate::size::index::persist::{put_count, put_ids, put_u32, Reader};
+use crate::size::index::persist::{Reader, put_count, put_ids, put_u32};
 use crate::size::index::segment::{MappedSegment, NodeFlags};
 
-pub use overlay::{IdRanges, TreeOverlayStats, OVERLAY_CAP_DEAD_RANGES, OVERLAY_CAP_FOLDERS};
+pub use overlay::{IdRanges, OVERLAY_CAP_DEAD_RANGES, OVERLAY_CAP_FOLDERS, TreeOverlayStats};
 pub(crate) use segments::Children;
 
 type NodeId = u32;

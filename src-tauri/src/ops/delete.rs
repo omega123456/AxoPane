@@ -2,11 +2,11 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use super::conflict::wait_while_paused;
-use super::execution::{is_operation_cancelled, WorkerContext};
-use super::paths::is_real_directory_type;
-use super::progress::{maybe_emit_delete, refresh_rate_locked_with_now, TransferThrottle};
 use super::LockOperation;
+use super::conflict::wait_while_paused;
+use super::execution::{WorkerContext, is_operation_cancelled};
+use super::paths::is_real_directory_type;
+use super::progress::{TransferThrottle, maybe_emit_delete, refresh_rate_locked_with_now};
 use crate::error_text::StringifyError;
 
 pub fn delete_path_with_progress(
@@ -96,7 +96,7 @@ pub(super) fn remove_clearing_readonly(
 ) -> io::Result<()> {
     use std::os::windows::fs::MetadataExt;
     use windows_sys::Win32::Storage::FileSystem::{
-        SetFileAttributesW, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_READONLY,
+        FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_READONLY, SetFileAttributesW,
     };
 
     let error = match remove(path) {

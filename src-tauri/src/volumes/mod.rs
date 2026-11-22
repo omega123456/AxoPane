@@ -22,8 +22,8 @@ use windows_sys::Win32::Foundation::{ERROR_MORE_DATA, ERROR_NO_MORE_ITEMS, ERROR
 
 #[cfg(all(not(feature = "test-utils"), windows))]
 use windows_sys::Win32::NetworkManagement::WNet::{
-    WNetCloseEnum, WNetEnumResourceW, WNetOpenEnumW, NETRESOURCEW, RESOURCETYPE_DISK,
-    RESOURCE_CONNECTED, RESOURCE_REMEMBERED,
+    NETRESOURCEW, RESOURCE_CONNECTED, RESOURCE_REMEMBERED, RESOURCETYPE_DISK, WNetCloseEnum,
+    WNetEnumResourceW, WNetOpenEnumW,
 };
 
 #[cfg(all(not(feature = "test-utils"), windows))]
@@ -34,11 +34,11 @@ use windows::Win32::Foundation::MAX_PATH;
 
 #[cfg(all(not(feature = "test-utils"), windows))]
 use windows::Win32::System::Com::{
-    CoCreateInstance, IPersistFile, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, STGM_READ,
+    CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, IPersistFile, STGM_READ,
 };
 
 #[cfg(all(not(feature = "test-utils"), windows))]
-use windows::Win32::UI::Shell::{IShellLinkW, ShellLink, SLGP_UNCPRIORITY};
+use windows::Win32::UI::Shell::{IShellLinkW, SLGP_UNCPRIORITY, ShellLink};
 
 #[cfg(all(not(feature = "test-utils"), windows))]
 use windows_sys::Win32::Storage::FileSystem::{
@@ -586,15 +586,15 @@ fn extend_network_shortcut_dir(volumes: &mut Vec<VolumeInfo>, path: &Path) {
 
 #[cfg(all(not(feature = "test-utils"), windows))]
 fn extend_network_shortcut_file(volumes: &mut Vec<VolumeInfo>, path: &Path, label: Option<&str>) {
-    if let Some(candidate) = resolve_shell_link_target(path) {
-        if let Some(mount_root) = normalize_network_mount_root("", &candidate) {
-            let candidate = NetworkVolumeCandidate {
-                mount_root,
-                label,
-                query_space: false,
-            };
-            push_network_volume(volumes, candidate);
-        }
+    if let Some(candidate) = resolve_shell_link_target(path)
+        && let Some(mount_root) = normalize_network_mount_root("", &candidate)
+    {
+        let candidate = NetworkVolumeCandidate {
+            mount_root,
+            label,
+            query_space: false,
+        };
+        push_network_volume(volumes, candidate);
     }
 }
 

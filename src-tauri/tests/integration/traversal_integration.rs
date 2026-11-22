@@ -1,9 +1,9 @@
 use std::fs;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use axopane_lib::traversal::{
-    is_real_directory, safe_destination, walk, walk_without_links, TraversalError, TraversalOptions,
+    TraversalError, TraversalOptions, is_real_directory, safe_destination, walk, walk_without_links,
 };
 use tempfile::tempdir;
 
@@ -36,20 +36,28 @@ fn serial_walk_includes_hidden_files_and_never_follows_directory_links() {
                 .to_path_buf()
         })
         .collect::<Vec<_>>();
-    assert!(names
-        .iter()
-        .any(|path| path == std::path::Path::new(".visible-to-axopane")));
-    assert!(names
-        .iter()
-        .any(|path| path == std::path::Path::new("nested/file.txt")));
+    assert!(
+        names
+            .iter()
+            .any(|path| path == std::path::Path::new(".visible-to-axopane"))
+    );
+    assert!(
+        names
+            .iter()
+            .any(|path| path == std::path::Path::new("nested/file.txt"))
+    );
     #[cfg(unix)]
-    assert!(names
-        .iter()
-        .any(|path| path == std::path::Path::new("nested/cycle")));
+    assert!(
+        names
+            .iter()
+            .any(|path| path == std::path::Path::new("nested/cycle"))
+    );
     #[cfg(unix)]
-    assert!(!names
-        .iter()
-        .any(|path| path.starts_with("nested/cycle/nested")));
+    assert!(
+        !names
+            .iter()
+            .any(|path| path.starts_with("nested/cycle/nested"))
+    );
 }
 
 #[test]
@@ -112,9 +120,11 @@ fn walk_without_links_serially_visits_the_tree_without_following_directory_links
         })
         .collect::<Vec<_>>();
 
-    assert!(names
-        .iter()
-        .any(|path| path == std::path::Path::new("nested/file.txt")));
+    assert!(
+        names
+            .iter()
+            .any(|path| path == std::path::Path::new("nested/file.txt"))
+    );
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use unicode_normalization::{is_nfc_quick, IsNormalized, UnicodeNormalization};
+use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfc_quick};
 
 pub const EXACT: u8 = 0;
 pub const PREFIX: u8 = 1;

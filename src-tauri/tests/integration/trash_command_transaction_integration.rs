@@ -71,9 +71,11 @@ fn purge_and_empty_each_finish_filesystem_work_before_one_manifest_commit() {
     fs::remove_dir(trash.path().join(".axopane-trash-manifest.json.tmp"))
         .expect("unblock manifest commits");
     empty_trash_for_tests(trash.path()).expect("empty already-purged trash");
-    assert!(list_trash_for_tests(trash.path())
-        .expect("list fake trash")
-        .is_empty());
+    assert!(
+        list_trash_for_tests(trash.path())
+            .expect("list fake trash")
+            .is_empty()
+    );
 }
 
 #[test]
@@ -97,9 +99,11 @@ fn empty_removes_file_and_directory_entries_before_clearing_the_manifest() {
 
     empty_trash_for_tests(trash.path()).expect("empty fake trash");
 
-    assert!(list_trash_for_tests(trash.path())
-        .expect("list emptied trash")
-        .is_empty());
+    assert!(
+        list_trash_for_tests(trash.path())
+            .expect("list emptied trash")
+            .is_empty()
+    );
     assert!(!trash.path().join("file.txt").exists());
     assert!(!trash.path().join("folder").exists());
 }

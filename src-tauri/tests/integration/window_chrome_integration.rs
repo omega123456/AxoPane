@@ -1,10 +1,10 @@
 use axopane_lib::ipc::commands;
 use axopane_lib::ipc::types::SetWindowThemeRequest;
 use axopane_lib::window_chrome::{
-    apply_backdrop, backdrop_for_build, current_backdrop, native_theme, WindowBackdrop,
-    MICA_MIN_BUILD,
+    MICA_MIN_BUILD, WindowBackdrop, apply_backdrop, backdrop_for_build, current_backdrop,
+    native_theme,
 };
-use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
+use tauri::test::{MockRuntime, mock_builder, mock_context, noop_assets};
 use tauri::{Theme, WebviewWindow};
 
 fn mock_window() -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) {

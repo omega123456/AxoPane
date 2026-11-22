@@ -1,6 +1,6 @@
 use crate::path_text::{
-    starts_with_drive_designator, strip_verbatim_prefix, DRIVE_DESIGNATOR_LEN, PATH_SEPARATORS,
-    UNC_PREFIX,
+    DRIVE_DESIGNATOR_LEN, PATH_SEPARATORS, UNC_PREFIX, starts_with_drive_designator,
+    strip_verbatim_prefix,
 };
 
 const UNC_ROOT_PARTS: usize = 3;

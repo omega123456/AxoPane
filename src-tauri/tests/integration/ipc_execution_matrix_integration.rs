@@ -1,9 +1,9 @@
 //! Execution-matrix regression coverage. These assertions exercise owned,
 //! in-memory executors only; `test-utils` never reaches machine-global APIs.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 

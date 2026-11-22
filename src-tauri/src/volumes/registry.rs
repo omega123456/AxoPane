@@ -5,7 +5,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use super::VolumeInfo;
-use crate::path_text::{strip_unc_prefix, PATH_SEPARATORS, POSIX_ROOT, VERBATIM_UNC_PREFIX};
+use crate::path_text::{PATH_SEPARATORS, POSIX_ROOT, VERBATIM_UNC_PREFIX, strip_unc_prefix};
 
 #[cfg(not(feature = "test-utils"))]
 use tauri::{AppHandle, Emitter};

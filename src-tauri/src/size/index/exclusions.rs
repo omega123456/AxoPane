@@ -98,7 +98,7 @@ impl ExclusionSet {
                 return PathVerdict {
                     path: candidate.to_path_buf(),
                     verdict,
-                }
+                };
             }
         };
         let verdict = self

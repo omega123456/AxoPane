@@ -1,13 +1,13 @@
 use crate::common;
 
 use std::fs;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use axopane_lib::ops::{
-    fallback_root, is_nested_copy_target, measure_tree_size, normalized_components, parent_dir,
-    remove_source, remove_target, requested_pop, split_name, unique_name, volume_root_for,
-    FileNameParts,
+    FileNameParts, fallback_root, is_nested_copy_target, measure_tree_size, normalized_components,
+    parent_dir, remove_source, remove_target, requested_pop, split_name, unique_name,
+    volume_root_for,
 };
 use axopane_lib::volumes::VolumeInfo;
 use tempfile::tempdir;

@@ -7,11 +7,11 @@ use std::sync::Arc;
 use axopane_lib::ipc::commands::{apply_log_level, read_logs, set_log_level};
 use axopane_lib::ipc::types::SetLogLevelRequest;
 use axopane_lib::logging::{
-    current_local_date, daily_log_file_name, format_log_line, FileLogger, LogLevel, LogMessage,
-    LoggingState,
+    FileLogger, LogLevel, LogMessage, LoggingState, current_local_date, daily_log_file_name,
+    format_log_line,
 };
 use axopane_lib::persist::PersistenceState;
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 
 fn as_state<'a, T: Send + Sync + 'static>(value: &'a T) -> tauri::State<'a, T> {
     // Safety: tauri::State is a transparent wrapper over an immutable reference

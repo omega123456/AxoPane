@@ -8,7 +8,7 @@ use axopane_lib::directory_session::model::{
 };
 use axopane_lib::fs::DirectoryEntry;
 use axopane_lib::watch::patch::{
-    classify_patch, ClassifyPatchInput, MetadataDelta, RowDelta, SessionPatch,
+    ClassifyPatchInput, MetadataDelta, RowDelta, SessionPatch, classify_patch,
 };
 
 fn baseline(revision: u64) -> SessionBaseline {

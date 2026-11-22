@@ -14,8 +14,8 @@ mod tests {
     use super::super::*;
     use std::collections::HashSet;
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::AtomicBool;
     use std::sync::Condvar;
+    use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
     use tempfile::tempdir;

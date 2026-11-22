@@ -14,10 +14,10 @@ use axopane_lib::ops::transfer::windows::WindowsCapabilities;
 use axopane_lib::ops::transfer::{
     AdapterSelection, PortableReason, TransferAdapter, TransferRequirements,
 };
-use axopane_lib::ops::worker::{rename_or_cross_device, transfer_admission, TransferPaths};
+use axopane_lib::ops::worker::{TransferPaths, rename_or_cross_device, transfer_admission};
 use axopane_lib::ops::{
-    adapter_selection_calls_for_tests, copy_path, move_path, CurrentFileProgress, OpItem, OpKind,
-    OpRuntime, OpState, WorkerContext,
+    CurrentFileProgress, OpItem, OpKind, OpRuntime, OpState, WorkerContext,
+    adapter_selection_calls_for_tests, copy_path, move_path,
 };
 use axopane_lib::resource_coordinator::JobClass;
 
@@ -253,10 +253,12 @@ fn rename_only_falls_back_for_confirmed_cross_device_errors() {
         )))
         .is_err()
     );
-    assert!(!rename_or_cross_device(paths, false, |_, _| panic!(
-        "cross-volume does not attempt rename"
-    ))
-    .expect("cross volume plan"));
+    assert!(
+        !rename_or_cross_device(paths, false, |_, _| panic!(
+            "cross-volume does not attempt rename"
+        ))
+        .expect("cross volume plan")
+    );
 }
 
 #[test]

@@ -74,14 +74,14 @@ mod windows_impl {
     use super::*;
     use std::mem::size_of;
 
-    use windows::core::PCWSTR;
     use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_NORMAL, FILE_FLAGS_AND_ATTRIBUTES};
     use windows::Win32::UI::Shell::{
-        SHGetFileInfoW, SHFILEINFOW, SHGFI_FLAGS, SHGFI_ICON, SHGFI_SMALLICON,
-        SHGFI_USEFILEATTRIBUTES,
+        SHFILEINFOW, SHGFI_FLAGS, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES,
+        SHGetFileInfoW,
     };
+    use windows::core::PCWSTR;
 
-    use crate::win32::gdi::{hicon_to_data_url, IconBitmapFallback, IconGuard};
+    use crate::win32::gdi::{IconBitmapFallback, IconGuard, hicon_to_data_url};
     use crate::win32::wide_nul;
 
     pub(super) fn icon_data_url_for_path(path: &Path) -> Option<String> {

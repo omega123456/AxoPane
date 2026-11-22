@@ -1,14 +1,14 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(all(target_os = "windows", not(feature = "test-utils")))]
 use std::any::Any;
+#[cfg(any(not(target_os = "windows"), feature = "test-utils"))]
+use std::sync::Mutex;
 #[cfg(all(target_os = "windows", not(feature = "test-utils")))]
 use std::sync::mpsc;
 #[cfg(all(target_os = "windows", not(feature = "test-utils")))]
 use std::sync::mpsc::Sender;
-#[cfg(any(not(target_os = "windows"), feature = "test-utils"))]
-use std::sync::Mutex;
 #[cfg(all(target_os = "windows", not(feature = "test-utils")))]
 use std::thread;
 

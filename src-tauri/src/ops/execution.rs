@@ -4,24 +4,24 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "test-utils")]
-use super::archive::{archive_root_name, archive_stem_for_item};
+use super::ConflictInfo;
 #[cfg(feature = "test-utils")]
-use super::progress::begin_file_progress;
+use super::archive::{archive_root_name, archive_stem_for_item};
 #[cfg(feature = "test-utils")]
 use super::progress::FileProgressStart;
 #[cfg(feature = "test-utils")]
-use super::ConflictInfo;
+use super::progress::begin_file_progress;
 
 use super::archive::{compress_item_with_progress, extract_item_with_progress};
-use super::conflict::{resolve_transfer_target, wait_while_paused, TransferTarget};
+use super::conflict::{TransferTarget, resolve_transfer_target, wait_while_paused};
 use super::copy::{
-    copy_path_with_total_discovery, move_merge_dir, move_path_with_total_discovery, TotalDiscovery,
+    TotalDiscovery, copy_path_with_total_discovery, move_merge_dir, move_path_with_total_discovery,
 };
 use super::delete::delete_path_with_progress;
 use super::paths::{is_nested_copy_target, is_real_directory};
 use super::progress::{
-    advance_item, emit_operation_progress, measure_totals_up_front, refresh_rate_locked_with_now,
-    RateClock,
+    RateClock, advance_item, emit_operation_progress, measure_totals_up_front,
+    refresh_rate_locked_with_now,
 };
 use super::service::Inner;
 use super::status::RunOutcome;

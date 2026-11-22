@@ -6,8 +6,8 @@ use std::thread;
 use super::everything::{EverythingError, EverythingHandle};
 use super::worker_pool::QueuedWork;
 use super::{
-    emit_non_empty, SizeService, SizeServiceInner, SizeSource, SizeStateKind, SizeUpdate,
-    UpdateEmitter,
+    SizeService, SizeServiceInner, SizeSource, SizeStateKind, SizeUpdate, UpdateEmitter,
+    emit_non_empty,
 };
 use crate::resource_coordinator::{JobClass, JobSpec, ResourceCoordinator};
 

@@ -4,9 +4,9 @@ use std::sync::Arc;
 use std::thread;
 
 use axopane_lib::logging::panic::{
-    install_panic_logging, NON_TEXT_PAYLOAD, PANIC_TARGET, UNNAMED_THREAD,
+    NON_TEXT_PAYLOAD, PANIC_TARGET, UNNAMED_THREAD, install_panic_logging,
 };
-use axopane_lib::logging::{current_local_date, read_current_day_logs, FileLogger, LogLevel};
+use axopane_lib::logging::{FileLogger, LogLevel, current_local_date, read_current_day_logs};
 use tempfile::tempdir;
 
 const WORKER_NAME: &str = "size-index";

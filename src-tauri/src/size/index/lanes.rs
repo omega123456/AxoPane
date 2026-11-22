@@ -10,8 +10,8 @@ use super::exclusions;
 use super::names::PackedNames;
 use super::platform;
 use super::segment::{
-    walk_spill_path, BuildError, BuiltSegment, GraftTarget, SpillOptions, SpillRecord, WalkSpill,
-    RUN_BYTES,
+    BuildError, BuiltSegment, GraftTarget, RUN_BYTES, SpillOptions, SpillRecord, WalkSpill,
+    walk_spill_path,
 };
 use super::tree::{DirectoryListing, FolderSizeTree};
 use crate::resource_coordinator::parallelism::walker_job_threads;
@@ -21,7 +21,7 @@ use crate::size::manual::ManualSizeError;
 
 use super::machine::Message;
 use super::scan_batch::BatchLane;
-use super::service::{Shared, SizeEmitter, WalkTuning, READMIT_EVERY_DIRS, RECORD_BATCH};
+use super::service::{READMIT_EVERY_DIRS, RECORD_BATCH, Shared, SizeEmitter, WalkTuning};
 use super::split::split_root;
 
 const ITEMS_PER_PROGRESS_REPORT: u64 = 10_000;

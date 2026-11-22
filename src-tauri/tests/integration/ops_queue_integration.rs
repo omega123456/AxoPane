@@ -34,7 +34,9 @@ fn seed_file(path: &Path, bytes: usize) -> OpItem {
     }
 }
 
-fn deterministic_instants(offsets_ms: &[u64]) -> impl Fn() -> Instant + Send + Sync + 'static {
+fn deterministic_instants(
+    offsets_ms: &[u64],
+) -> impl Fn() -> Instant + Send + Sync + 'static + use<> {
     let base = Instant::now();
     let mut instants = VecDeque::new();
     for offset_ms in offsets_ms {
@@ -398,9 +400,11 @@ fn delete_directory_progress_is_monotonic_and_coalesced() {
         progress.len() <= 6,
         "too many delete progress events: {progress:?}"
     );
-    assert!(progress
-        .iter()
-        .any(|snapshot| snapshot.status == OpStatus::Active && snapshot.total_bytes == 100));
+    assert!(
+        progress
+            .iter()
+            .any(|snapshot| snapshot.status == OpStatus::Active && snapshot.total_bytes == 100)
+    );
 
     for pair in progress.windows(2) {
         assert!(
@@ -461,9 +465,11 @@ fn copy_directory_progress_is_monotonic_and_coalesced() {
     // measured up front, not discovered piecemeal as each nested file copies —
     // otherwise `copied / total` races ahead of 100% and gets clamped there
     // long before the job is actually done.
-    assert!(progress
-        .iter()
-        .any(|snapshot| snapshot.status == OpStatus::Active && snapshot.total_bytes == 100));
+    assert!(
+        progress
+            .iter()
+            .any(|snapshot| snapshot.status == OpStatus::Active && snapshot.total_bytes == 100)
+    );
     assert!(
         progress
             .iter()
@@ -538,11 +544,13 @@ fn archive_jobs_compress_and_extract_through_the_queue() {
         b"queued archive"
     );
     assert!(extract_dir.is_dir());
-    assert!(!extract_dir
-        .join("payload")
-        .join("payload")
-        .join("inside.txt")
-        .exists());
+    assert!(
+        !extract_dir
+            .join("payload")
+            .join("payload")
+            .join("inside.txt")
+            .exists()
+    );
 }
 
 #[test]
@@ -590,10 +598,12 @@ fn archive_round_trip_preserves_permissions_and_links() {
 
     let out = extract_dir.join("payload");
     let extracted_locked = out.join("locked.txt");
-    assert!(fs::metadata(&extracted_locked)
-        .unwrap()
-        .permissions()
-        .readonly());
+    assert!(
+        fs::metadata(&extracted_locked)
+            .unwrap()
+            .permissions()
+            .readonly()
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -1189,10 +1199,12 @@ fn failed_jobs_persist_and_can_retry() {
 
     // It persists (retention does not remove failed ops).
     std::thread::sleep(Duration::from_millis(80));
-    assert!(service
-        .snapshot()
-        .iter()
-        .any(|snapshot| snapshot.progress.operation_id == id));
+    assert!(
+        service
+            .snapshot()
+            .iter()
+            .any(|snapshot| snapshot.progress.operation_id == id)
+    );
 
     // Now create the source and retry; it should succeed.
     fs::write(&missing, b"now-present").expect("create source");
@@ -1453,10 +1465,12 @@ fn rejects_copying_a_directory_into_its_own_descendant() {
         .find(|snapshot| snapshot.progress.operation_id == id)
         .expect("op")
         .progress;
-    assert!(progress
-        .error_message
-        .expect("error message")
-        .contains("descendants"));
+    assert!(
+        progress
+            .error_message
+            .expect("error message")
+            .contains("descendants")
+    );
     assert!(!source.join("nested").join("tree").exists());
 }
 
@@ -1619,8 +1633,7 @@ fn events_for_mid_copy_rate(rate_window: Duration) -> Vec<OpProgress> {
     wait_for(&service, &id, |progress| {
         progress.status == OpStatus::Completed
     });
-    let snapshots = events.lock().expect("events lock").clone();
-    snapshots
+    events.lock().expect("events lock").clone()
 }
 
 #[test]

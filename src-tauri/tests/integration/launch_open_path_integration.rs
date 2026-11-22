@@ -3,10 +3,10 @@ use std::fs;
 use std::path::Path;
 
 use axopane_lib::launch::{
+    FULL_DISK_ACCESS_SETTINGS_URL, OPEN_WITH_VERB, OpenPathError, RUNAS_VERB,
     elevation_failure_detail, launch_directory, launch_failure_detail,
     open_full_disk_access_settings, open_path, restart_as_admin, shell_execute_succeeded,
-    should_prompt_open_with, OpenPathError, FULL_DISK_ACCESS_SETTINGS_URL, OPEN_WITH_VERB,
-    RUNAS_VERB,
+    should_prompt_open_with,
 };
 use tempfile::tempdir;
 

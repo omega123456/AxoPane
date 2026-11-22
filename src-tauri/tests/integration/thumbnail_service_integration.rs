@@ -1,21 +1,19 @@
 use std::fs;
 use std::path::Path;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use base64::Engine;
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use axopane_lib::ipc::types::ThumbnailQuality;
 use axopane_lib::resource_coordinator::ResourceCoordinator;
 use axopane_lib::thumbnails::provider::{ProviderCapability, ThumbnailProvider};
 use axopane_lib::thumbnails::scheduler::ThumbnailSubscriber;
-use axopane_lib::thumbnails::types::{
-    ThumbnailCandidate, ThumbnailFingerprint, ThumbnailState,
-};
+use axopane_lib::thumbnails::types::{ThumbnailCandidate, ThumbnailFingerprint, ThumbnailState};
 use axopane_lib::thumbnails::{
-    ThumbnailService, MAX_RESULTS_PER_BATCH, MAX_RESULT_BYTES_PER_BATCH,
+    MAX_RESULT_BYTES_PER_BATCH, MAX_RESULTS_PER_BATCH, ThumbnailService,
 };
 use tempfile::tempdir;
 
@@ -90,9 +88,11 @@ fn fake_provider_emits_contextual_ready_and_negative_results_in_a_timed_batch() 
         std::thread::yield_now();
     }
     let events = events.lock().expect("events");
-    assert!(events
-        .iter()
-        .any(|event| event.tab_id == "ready" && event.data_url.is_some()));
+    assert!(
+        events
+            .iter()
+            .any(|event| event.tab_id == "ready" && event.data_url.is_some())
+    );
     assert!(events.iter().any(|event| event.tab_id == "none"));
     assert!(events.iter().any(|event| event.tab_id == "bad"));
 }

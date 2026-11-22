@@ -6,11 +6,11 @@ use std::time::{Duration, Instant};
 
 use axopane_lib::ops::manifest::ProgressiveManifest;
 use axopane_lib::ops::{
+    ConflictDecision, ConflictInfo, ConflictResolution, CurrentFileProgress, OpItem, OpKind,
+    OpRuntime, OpState, OpStatus, OpsService, RateSample, TreeCopy, WorkerContext,
     archive_root_name_for_tests, archive_stem_for_item_for_tests, begin_file_progress_for_tests,
     copy_dir_recursive, copy_file_with_progress, copy_path, delete_path_with_progress, move_path,
-    process_item_for_tests, ConflictDecision, ConflictInfo, ConflictResolution,
-    CurrentFileProgress, OpItem, OpKind, OpRuntime, OpState, OpStatus, OpsService, RateSample,
-    TreeCopy, WorkerContext,
+    process_item_for_tests,
 };
 use axopane_lib::volumes::VolumeInfo;
 
@@ -878,11 +878,13 @@ fn ops_service_release_and_reschedule_starts_the_next_pending_operation() {
     reschedule_service.release_and_reschedule_for_tests("done-op");
     std::thread::sleep(Duration::from_millis(40));
     assert!(!pending_file.exists());
-    assert!(removed
-        .lock()
-        .expect("removed lock")
-        .iter()
-        .any(|id| id == "done-op"));
+    assert!(
+        removed
+            .lock()
+            .expect("removed lock")
+            .iter()
+            .any(|id| id == "done-op")
+    );
 }
 
 #[test]

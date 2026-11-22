@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use super::everything_plan::{self as plan, EverythingPass};
 use super::path_style::PathStyle;
 use super::query::ParsedQuery;
-use super::results::{rank_candidates, BROWSE_PARENT_CAP, CANDIDATE_CAP};
+use super::results::{BROWSE_PARENT_CAP, CANDIDATE_CAP, rank_candidates};
 use super::source::EverythingSource;
 use super::{CandidateBatch, Control, SearchError, SearchOptions, SearchRun, SearchScope};
 use crate::size::everything::{EverythingQuery, EverythingSort};

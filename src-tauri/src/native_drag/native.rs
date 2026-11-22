@@ -3,10 +3,10 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
 fn signal(sender: &Mutex<Option<oneshot::Sender<()>>>) {
-    if let Ok(mut slot) = sender.lock() {
-        if let Some(sender) = slot.take() {
-            let _ = sender.send(());
-        }
+    if let Ok(mut slot) = sender.lock()
+        && let Some(sender) = slot.take()
+    {
+        let _ = sender.send(());
     }
 }
 
@@ -89,8 +89,8 @@ fn run_windows_session(
     use crate::native_menu::windows_shell::OwnedPidl;
     use windows::Win32::{
         System::{
-            Com::{CoCreateInstance, IDataObject, CLSCTX_INPROC_SERVER},
-            Ole::{DoDragDrop, IDropSource, DROPEFFECT, DROPEFFECT_COPY},
+            Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, IDataObject},
+            Ole::{DROPEFFECT, DROPEFFECT_COPY, DoDragDrop, IDropSource},
         },
         UI::Shell::{
             BHID_DataObject, CLSID_DragDropHelper, IDragSourceHelper,
@@ -189,7 +189,7 @@ fn run_windows_drag_worker(
             Ole::OleInitialize,
             Threading::{AttachThreadInput, GetCurrentThreadId},
         },
-        UI::WindowsAndMessaging::{PeekMessageW, MSG, PM_NOREMOVE},
+        UI::WindowsAndMessaging::{MSG, PM_NOREMOVE, PeekMessageW},
     };
 
     if let Err(error) = unsafe { OleInitialize(None) } {

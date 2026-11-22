@@ -41,6 +41,7 @@ pub mod app_picker_bundle_integration;
 pub mod app_picker_command_integration;
 pub mod app_picker_icns_integration;
 pub mod app_picker_scan_integration;
+pub mod app_window_config_integration;
 pub mod apphandle_smoke_integration;
 pub mod archive_zip_integration;
 pub mod fs_helpers_integration;

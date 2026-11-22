@@ -23,7 +23,7 @@ pub mod worker;
 
 #[cfg(feature = "test-utils")]
 pub use copy::adapter_selection_calls_for_tests;
-pub use copy::{copy_dir_recursive, copy_file_with_progress, copy_path, move_path, TreeCopy};
+pub use copy::{TreeCopy, copy_dir_recursive, copy_file_with_progress, copy_path, move_path};
 pub use delete::{delete_path_with_progress, remove_source, remove_target};
 pub use execution::WorkerContext;
 #[cfg(feature = "test-utils")]
@@ -33,11 +33,11 @@ pub use execution::{
 };
 pub use measure::measure_tree_size;
 pub use paths::{
-    fallback_root, is_nested_copy_target, normalized_components, parent_dir, split_name,
-    unique_name, volume_root_for, FileNameParts,
+    FileNameParts, fallback_root, is_nested_copy_target, normalized_components, parent_dir,
+    split_name, unique_name, volume_root_for,
 };
 pub use progress::TransferThrottle;
-pub use service::{requested_pop, OpsService};
+pub use service::{OpsService, requested_pop};
 use status::RunOutcome;
 
 pub const DEFAULT_COMPLETED_RETENTION: Duration = Duration::from_secs(4);

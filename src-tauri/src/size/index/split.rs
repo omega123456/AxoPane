@@ -5,7 +5,7 @@ use crate::size::fast_walk::{DeviceBoundary, DirListing, DirRecord, WalkOptions}
 use crate::size::manual::ManualSizeError;
 
 use super::lanes::{
-    narrow_walk, send_records, BackgroundTurn, Gentle, LaneContext, LaneWalk, WalkOutcome,
+    BackgroundTurn, Gentle, LaneContext, LaneWalk, WalkOutcome, narrow_walk, send_records,
 };
 use super::machine::Message;
 

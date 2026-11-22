@@ -1,23 +1,23 @@
 use super::provider::{ProviderCapability, ThumbnailPreviewCallback, ThumbnailProvider};
 use super::types::{
-    validated_png_data_url, ThumbnailCandidate, ThumbnailState, MAX_PNG_BYTES,
-    MAX_PREVIEW_DIMENSION, MAX_PREVIEW_PIXELS,
+    MAX_PNG_BYTES, MAX_PREVIEW_DIMENSION, MAX_PREVIEW_PIXELS, ThumbnailCandidate, ThumbnailState,
+    validated_png_data_url,
 };
 use crate::pixels::png_data_url;
 use crate::win32::com::ComApartment;
-use crate::win32::gdi::{bitmap_to_png_bytes, BitmapGuard};
+use crate::win32::gdi::{BitmapGuard, bitmap_to_png_bytes};
 use crate::win32::wide_nul;
-use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::sync::Mutex;
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
-use windows::core::PCWSTR;
 use windows::Win32::Foundation::SIZE;
 use windows::Win32::System::Com::COINIT_MULTITHREADED;
 use windows::Win32::UI::Shell::{
     IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_INCACHEONLY, SIIGBF_RESIZETOFIT,
     SIIGBF_THUMBNAILONLY,
 };
+use windows::core::PCWSTR;
 
 fn is_past(deadline: Instant) -> bool {
     Instant::now() >= deadline

@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use axopane_lib::size::index::tree::{
-    DirectoryListing, FolderSizeTree, FolderTotal, LowerBound,
-};
+use axopane_lib::size::index::tree::{DirectoryListing, FolderSizeTree, FolderTotal, LowerBound};
 
 /// A path under the relative root `idx`, built from components so it is
 /// valid on every OS.

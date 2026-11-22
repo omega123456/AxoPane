@@ -2,15 +2,15 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use axopane_lib::size::index::segment::{
-    BuildError, GraftTarget, MappedSegment, SegmentTarget, SpillOptions, SpillRecord, WalkSpill,
-    RUN_BYTES,
+    BuildError, GraftTarget, MappedSegment, RUN_BYTES, SegmentTarget, SpillOptions, SpillRecord,
+    WalkSpill,
 };
 use axopane_lib::size::index::tree::FolderSizeTree;
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 
 use crate::common::segment::{
-    append, child_names, descend, file_names_of, files_in, heap_of, listing, names_to, paths_in,
-    strings, walked, Walked,
+    Walked, append, child_names, descend, file_names_of, files_in, heap_of, listing, names_to,
+    paths_in, strings, walked,
 };
 
 const TOKEN: u64 = 9;

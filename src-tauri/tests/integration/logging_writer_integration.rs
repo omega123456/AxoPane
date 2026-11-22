@@ -4,8 +4,8 @@
 use std::fs;
 
 use axopane_lib::logging::{
-    current_local_date, daily_log_file_name, read_current_day_logs, FileLogger, LogLevel,
-    LogMessage,
+    FileLogger, LogLevel, LogMessage, current_local_date, daily_log_file_name,
+    read_current_day_logs,
 };
 use tempfile::tempdir;
 use time::{Date, Month, OffsetDateTime, Time};
@@ -71,14 +71,16 @@ fn write_entry_rolls_files_per_day_and_prunes_stale() {
         },
     );
 
-    assert!(dir
-        .path()
-        .join(daily_log_file_name(day_one.date()))
-        .exists());
-    assert!(dir
-        .path()
-        .join(daily_log_file_name(day_two.date()))
-        .exists());
+    assert!(
+        dir.path()
+            .join(daily_log_file_name(day_one.date()))
+            .exists()
+    );
+    assert!(
+        dir.path()
+            .join(daily_log_file_name(day_two.date()))
+            .exists()
+    );
     assert!(!dir.path().join(&stale).exists(), "stale file pruned");
 
     let day_one_logs = read_current_day_logs(dir.path(), day_one.date());

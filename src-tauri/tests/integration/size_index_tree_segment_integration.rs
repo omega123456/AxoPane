@@ -9,13 +9,13 @@ use axopane_lib::size::index::segment::{
     MappedSegment, NodeFlags, SegmentBuilder, SegmentEntry, SegmentTarget,
 };
 use axopane_lib::size::index::tree::{
-    DirectoryListing, FolderSizeTree, TreeOverlayStats, OVERLAY_CAP_DEAD_RANGES,
-    OVERLAY_CAP_FOLDERS,
+    DirectoryListing, FolderSizeTree, OVERLAY_CAP_DEAD_RANGES, OVERLAY_CAP_FOLDERS,
+    TreeOverlayStats,
 };
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 
 use crate::common::segment::{
-    heap_of, paths_in, strings, walked, walked_segment, SegmentPlace, Walked,
+    SegmentPlace, Walked, heap_of, paths_in, strings, walked, walked_segment,
 };
 
 const TOKEN: u64 = 5;
@@ -363,9 +363,11 @@ fn skipping_excluding_and_including_mapped_folders_matches_the_heap() {
 fn only_overlay_folders_can_be_moved() {
     let mut twins = twins();
     let mapped_folder = twins.path(&["a", "b"]);
-    assert!(!twins
-        .mapped
-        .rename(&mapped_folder, &twins.path(&["s", "b"])));
+    assert!(
+        !twins
+            .mapped
+            .rename(&mapped_folder, &twins.path(&["s", "b"]))
+    );
     assert_eq!(twins.mapped.overlay_stats(), TreeOverlayStats::default());
 
     let new = twins.path(&["a", "new"]);

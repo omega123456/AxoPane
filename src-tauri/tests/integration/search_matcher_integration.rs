@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
 use axopane_lib::search::matcher::{
-    match_token, match_words, merge_ranges, nfc, FoldedName, Match, NameKind, Pattern, Token,
-    Words, CONTAINS, EXACT, FUZZY, FUZZY_MIN_CHARS, PREFIX,
+    CONTAINS, EXACT, FUZZY, FUZZY_MIN_CHARS, FoldedName, Match, NameKind, PREFIX, Pattern, Token,
+    Words, match_token, match_words, merge_ranges, nfc,
 };
 
 fn token(word: &str, name: &str, kind: NameKind) -> Option<Match> {

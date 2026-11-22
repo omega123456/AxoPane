@@ -8,18 +8,18 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use axopane_lib::resource_coordinator::{
-    max_throughput_slots, JobClass, JobSpec, ResourceCoordinator,
+    JobClass, JobSpec, ResourceCoordinator, max_throughput_slots,
 };
 use axopane_lib::size::everything::EverythingAvailability;
 use axopane_lib::size::everything::{
-    build_exact_folder_or_queries, escape_exact_folder_query_path, join_everything_result_path,
-    map_everything_result_sizes, normalize_result_path, EverythingHandle,
-    EVERYTHING_BATCH_CHUNK_SIZE,
+    EVERYTHING_BATCH_CHUNK_SIZE, EverythingHandle, build_exact_folder_or_queries,
+    escape_exact_folder_query_path, join_everything_result_path, map_everything_result_sizes,
+    normalize_result_path,
 };
-use axopane_lib::size::manual::{calculate, ManualSizeError};
+use axopane_lib::size::manual::{ManualSizeError, calculate};
 use axopane_lib::size::{
-    RequestMode, SizeBackend, SizeRequest, SizeRequestWithVolumes, SizeService, SizeSource,
-    SizeStateKind, SizeUpdate, DEFAULT_MANUAL_SIZE_TIMEOUT,
+    DEFAULT_MANUAL_SIZE_TIMEOUT, RequestMode, SizeBackend, SizeRequest, SizeRequestWithVolumes,
+    SizeService, SizeSource, SizeStateKind, SizeUpdate,
 };
 use axopane_lib::volumes::VolumeInfo;
 use tempfile::tempdir;
@@ -157,15 +157,19 @@ fn everything_stub_reports_unavailable_under_test_utils() {
 
     let fixture = tempdir().expect("temp dir");
     fs::create_dir(fixture.path().join("folder")).expect("folder");
-    assert!(handle
-        .query_folder_size(&fixture.path().join("folder"))
-        .is_err());
-    assert!(handle
-        .query_folder_sizes(
-            &[fixture.path().join("folder").to_string_lossy().into_owned()],
-            &|| false,
-        )
-        .is_err());
+    assert!(
+        handle
+            .query_folder_size(&fixture.path().join("folder"))
+            .is_err()
+    );
+    assert!(
+        handle
+            .query_folder_sizes(
+                &[fixture.path().join("folder").to_string_lossy().into_owned()],
+                &|| false,
+            )
+            .is_err()
+    );
 }
 
 #[cfg(not(windows))]
@@ -190,9 +194,11 @@ fn everything_non_windows_stub_reports_unsupported_and_supports_in_memory_querie
             .expect("query"),
         Some(42),
     );
-    assert!(EverythingHandle::test_available_error()
-        .query_folder_sizes(&["/tmp/known".to_string()], &|| false)
-        .is_err());
+    assert!(
+        EverythingHandle::test_available_error()
+            .query_folder_sizes(&["/tmp/known".to_string()], &|| false)
+            .is_err()
+    );
 }
 
 #[cfg(windows)]
@@ -595,10 +601,7 @@ fn everything_backed_requests_emit_batched_ready_and_na_results() {
     let batches_for_emitter = batches.clone();
 
     let status = service.folder_size_index_status();
-    assert_eq!(
-        status.backend,
-        axopane_lib::size::IndexBackend::Everything
-    );
+    assert_eq!(status.backend, axopane_lib::size::IndexBackend::Everything);
     assert_eq!(status.state, axopane_lib::size::IndexState::UpToDate);
     assert!(status.is_available);
 
@@ -724,9 +727,12 @@ fn size_service_reports_missing_manual_path_as_error() {
     });
 
     let recorded = updates.lock().expect("updates lock").clone();
-    assert!(recorded
-        .iter()
-        .any(|update| update.source == SizeSource::Manual && update.state == SizeStateKind::Error));
+    assert!(
+        recorded
+            .iter()
+            .any(|update| update.source == SizeSource::Manual
+                && update.state == SizeStateKind::Error)
+    );
 }
 
 #[test]
@@ -955,13 +961,15 @@ fn size_service_manual_jobs_are_admitted_through_the_injected_coordinator() {
     // it must not have produced a terminal Ready/Error/Na state yet because
     // every throughput slot on the shared coordinator is still occupied.
     thread::sleep(Duration::from_millis(150));
-    assert!(updates
-        .lock()
-        .expect("updates lock")
-        .iter()
-        .all(|update| update.state != SizeStateKind::Ready
-            && update.state != SizeStateKind::Error
-            && update.state != SizeStateKind::Na));
+    assert!(
+        updates
+            .lock()
+            .expect("updates lock")
+            .iter()
+            .all(|update| update.state != SizeStateKind::Ready
+                && update.state != SizeStateKind::Error
+                && update.state != SizeStateKind::Na)
+    );
 
     // Releasing the external occupancy frees the shared coordinator's
     // throughput lane, letting the size worker's queued admission resolve

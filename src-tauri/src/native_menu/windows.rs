@@ -1,7 +1,7 @@
 #[cfg(not(feature = "test-utils"))]
 use super::helper_protocol::{HelperOperation, HelperResult};
 #[cfg(not(feature = "test-utils"))]
-use super::helper_supervisor::{HelperCall, HelperRole, DISCOVERY_DEADLINE, INVOCATION_DEADLINE};
+use super::helper_supervisor::{DISCOVERY_DEADLINE, HelperCall, HelperRole, INVOCATION_DEADLINE};
 use super::provider::{
     NativeMenuProvider, ProviderInvocation, ProviderNativeMenuItem, RoleMenuRequest,
 };

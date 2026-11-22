@@ -5,18 +5,18 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use super::execution::WorkerRuntime;
 #[cfg(feature = "test-utils")]
 use super::execution::run_operation;
-use super::execution::WorkerRuntime;
 use super::scheduler::{
-    admit_and_run_operation, collect_startable, release_and_reschedule, schedule_auto_remove,
-    AutoRemoval,
+    AutoRemoval, admit_and_run_operation, collect_startable, release_and_reschedule,
+    schedule_auto_remove,
 };
 use super::status::Cancellation;
 use super::{
-    volume_root_for, ConflictDecision, ConflictEmitter, InstantNow, LockOperation, OpKind,
-    OpRuntime, OpSnapshot, OpState, OpStatus, ProgressEmitter, RemovedEmitter, StartOpRequest,
-    DEFAULT_COMPLETED_RETENTION, DEFAULT_RATE_WINDOW,
+    ConflictDecision, ConflictEmitter, DEFAULT_COMPLETED_RETENTION, DEFAULT_RATE_WINDOW,
+    InstantNow, LockOperation, OpKind, OpRuntime, OpSnapshot, OpState, OpStatus, ProgressEmitter,
+    RemovedEmitter, StartOpRequest, volume_root_for,
 };
 use crate::volumes::VolumeInfo;
 

@@ -6,11 +6,12 @@ use axopane_lib::directory_session::{
 };
 use axopane_lib::fs::{self as explorer_fs, SortDirection, SortKey};
 use axopane_lib::item_counts::cache::{
-    CountResolution, ItemCountCache, ItemCountState, ITEM_COUNT_CACHE_LIMIT,
+    CountResolution, ITEM_COUNT_CACHE_LIMIT, ItemCountCache, ItemCountState,
 };
 use axopane_lib::item_counts::{
-    ActiveItemsSortRequest, ActiveItemsSortResponse, ItemCountRequestContext, ItemCountService,
-    VisibleItemCountsRequest, AUTO_ITEM_COUNT_LIMIT, MAX_AUTOMATIC_ITEM_COUNT_QUEUE,
+    AUTO_ITEM_COUNT_LIMIT, ActiveItemsSortRequest, ActiveItemsSortResponse,
+    ItemCountRequestContext, ItemCountService, MAX_AUTOMATIC_ITEM_COUNT_QUEUE,
+    VisibleItemCountsRequest,
 };
 use tempfile::tempdir;
 
@@ -53,15 +54,19 @@ fn automatic_requests_are_bounded_and_batched() {
         events.len() >= 2,
         "large requests should flush multiple batches"
     );
-    assert!(events
-        .iter()
-        .take(events.len() - 1)
-        .all(|event| !event.done));
+    assert!(
+        events
+            .iter()
+            .take(events.len() - 1)
+            .all(|event| !event.done)
+    );
     assert!(events.last().is_some_and(|event| event.done));
-    assert!(events
-        .iter()
-        .flat_map(|event| event.results.iter())
-        .all(|result| result.item_count == Some(1)));
+    assert!(
+        events
+            .iter()
+            .flat_map(|event| event.results.iter())
+            .all(|result| result.item_count == Some(1))
+    );
 }
 
 #[test]

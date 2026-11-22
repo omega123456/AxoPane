@@ -4,17 +4,17 @@ use std::sync::Arc;
 
 use axopane_lib::size::index::names::{FileNameStore, PackedNames, SavedNames};
 use axopane_lib::size::index::persist::{
-    decode, encode, flags_rescan_reason, launch_rescan_reason, load, plan_batch, plan_catch_up,
-    save_encoded, temp_path, volume_rescan_reason, write_temp, ChangeEvent, ChangeFlags,
-    CurrentVolume, LaunchState, Manifest, ReplayOutcome, RescanCause, RescanReason, SegmentRef,
-    Snapshot, SnapshotMeta, FORMAT_VERSION,
+    ChangeEvent, ChangeFlags, CurrentVolume, FORMAT_VERSION, LaunchState, Manifest, ReplayOutcome,
+    RescanCause, RescanReason, SegmentRef, Snapshot, SnapshotMeta, decode, encode,
+    flags_rescan_reason, launch_rescan_reason, load, plan_batch, plan_catch_up, save_encoded,
+    temp_path, volume_rescan_reason, write_temp,
 };
 use axopane_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 
 use crate::common::segment::{
-    paths_in, rewrite_as_format_one, strings, walked, walked_segment, SegmentPlace, Walked,
-    FIRST_SEQUENCE,
+    FIRST_SEQUENCE, SegmentPlace, Walked, paths_in, rewrite_as_format_one, strings, walked,
+    walked_segment,
 };
 
 fn path_of(parts: &[&str]) -> PathBuf {
@@ -123,9 +123,7 @@ fn decoded(bytes: &[u8]) -> Option<Snapshot> {
     decode(bytes, Path::new("no-segments-here"))
 }
 
-fn restored_names(
-    snapshot_names: axopane_lib::size::index::names::SavedNames,
-) -> FileNameStore {
+fn restored_names(snapshot_names: axopane_lib::size::index::names::SavedNames) -> FileNameStore {
     let mut names = names_store();
     names.restore(snapshot_names);
     names

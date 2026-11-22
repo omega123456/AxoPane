@@ -4,9 +4,9 @@ use std::fs;
 use std::path::Path;
 
 use axopane_lib::fs::{
+    ListDirOptions, ListTreeChildrenOptions, SortDirection, SortKey, TreeExpandability,
     canonicalize_dir, default_start_dir, display_path_from_text, expand_env_vars_with,
-    expand_home_path_with, list_dir, list_tree_children, ListDirOptions, ListTreeChildrenOptions,
-    SortDirection, SortKey, TreeExpandability,
+    expand_home_path_with, list_dir, list_tree_children,
 };
 use tempfile::tempdir;
 
@@ -90,20 +90,24 @@ fn keeps_folders_first_and_respects_hidden_toggle() {
     })
     .expect("list dir with hidden");
 
-    assert!(hidden_included
-        .entries
-        .iter()
-        .any(|entry| entry.name == ".secret"));
+    assert!(
+        hidden_included
+            .entries
+            .iter()
+            .any(|entry| entry.name == ".secret")
+    );
     let hidden_entry = hidden_included
         .entries
         .iter()
         .find(|entry| entry.name == ".secret")
         .expect("hidden entry");
     assert!(hidden_entry.is_hidden);
-    assert!(hidden_entry
-        .attributes
-        .iter()
-        .any(|attribute| attribute == "hidden"));
+    assert!(
+        hidden_entry
+            .attributes
+            .iter()
+            .any(|attribute| attribute == "hidden")
+    );
     assert_eq!(common::bootstrap_message(), "phase-1-common");
 }
 
@@ -261,10 +265,12 @@ fn list_tree_children_returns_only_lightweight_directory_nodes() {
         show_hidden: true,
     })
     .expect("tree children with hidden");
-    assert!(with_hidden
-        .children
-        .iter()
-        .any(|child| child.name == ".hidden"));
+    assert!(
+        with_hidden
+            .children
+            .iter()
+            .any(|child| child.name == ".hidden")
+    );
 }
 
 #[test]
@@ -558,10 +564,12 @@ fn list_dir_reports_readonly_and_plain_file_type_metadata() {
         .find(|entry| entry.name == "LICENSE")
         .expect("plain file");
     assert_eq!(entry.type_label, "File");
-    assert!(entry
-        .attributes
-        .iter()
-        .any(|attribute| attribute == "readonly"));
+    assert!(
+        entry
+            .attributes
+            .iter()
+            .any(|attribute| attribute == "readonly")
+    );
 
     // Restore write permission with an explicit mode so the file is not left
     // world-writable. Windows needs no restore: std's `remove_dir_all`, which

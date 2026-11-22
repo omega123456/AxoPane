@@ -1,14 +1,14 @@
 use std::fs;
 use std::path::Path;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
 use axopane_lib::fs::{self as app_fs, SortDirection, SortKey};
 use axopane_lib::watch::{
-    create_runtime, forward_notify_result_with_before_lock_for_tests, insert_tab_for_tests,
-    snapshot_for_target, tab_snapshot_for_tests, while_tabs_locked_for_tests, DirPatch,
-    TabWatchArm, WatchEmitters, WatchService, WatchTarget,
+    DirPatch, TabWatchArm, WatchEmitters, WatchService, WatchTarget, create_runtime,
+    forward_notify_result_with_before_lock_for_tests, insert_tab_for_tests, snapshot_for_target,
+    tab_snapshot_for_tests, while_tabs_locked_for_tests,
 };
 use notify::event::CreateKind;
 use notify::{Event, EventKind};
@@ -268,8 +268,10 @@ fn notify_callback_recovers_a_mutation_after_tabs_lock_contention() {
         .recv_timeout(Duration::from_secs(1))
         .expect("callback event must not be dropped while tab state is busy");
     assert_eq!(patch.path, watch_target.path);
-    assert!(patch
-        .changed
-        .iter()
-        .any(|entry| entry.path.ends_with("arrived.txt")));
+    assert!(
+        patch
+            .changed
+            .iter()
+            .any(|entry| entry.path.ends_with("arrived.txt"))
+    );
 }

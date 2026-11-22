@@ -7,15 +7,15 @@ use std::time::{Duration, Instant};
 
 use axopane_lib::size::index::names::file::spill_path;
 use axopane_lib::size::index::names::{
-    FileNameStore, NamesCounters, OverlayThreshold, OVERLAY_THRESHOLD_BYTES,
+    FileNameStore, NamesCounters, OVERLAY_THRESHOLD_BYTES, OverlayThreshold,
 };
-use axopane_lib::size::index::persist::{self, temp_path, ChangeFlags, SegmentRef, Snapshot};
+use axopane_lib::size::index::persist::{self, ChangeFlags, SegmentRef, Snapshot, temp_path};
 use axopane_lib::size::index::platform::{IndexPlatform, RawEvent};
 use axopane_lib::size::index::segment::SegmentPaths;
-use axopane_lib::size::index::{names_path_beside, IndexRead};
+use axopane_lib::size::index::{IndexRead, names_path_beside};
 use axopane_lib::size::{IndexState, PaneSubscriptions};
 
-use crate::size_index_service_integration::{wait_until, Harness};
+use crate::size_index_service_integration::{Harness, wait_until};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(2);
 const POLL_LIMIT: Duration = Duration::from_secs(1);

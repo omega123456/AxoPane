@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender};
+use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -424,7 +424,7 @@ where
 #[cfg(windows)]
 fn replace_file_atomic(source: &Path, target: &Path) -> Result<(), PersistError> {
     use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
     };
 
     let source_wide = crate::win32::wide_nul(source);

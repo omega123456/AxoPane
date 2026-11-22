@@ -18,8 +18,8 @@ mod tests {
     use std::collections::{HashMap, HashSet, VecDeque};
     use std::io::Cursor;
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Condvar;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
     use tempfile::tempdir;
@@ -224,9 +224,11 @@ mod tests {
 
         let progress = progress_log.lock().expect("progress log lock");
         assert!(!progress.is_empty());
-        assert!(progress
-            .iter()
-            .any(|entry| entry.current_file_total_bytes == 7));
+        assert!(
+            progress
+                .iter()
+                .any(|entry| entry.current_file_total_bytes == 7)
+        );
     }
 
     #[test]
@@ -243,41 +245,51 @@ mod tests {
         let (_shared_operation, _resolver, _progress_log, context) =
             make_context(operation_state(OpStatus::Active, &["/"]));
 
-        assert!(compress_item_with_progress(
-            native_paths(&source_file, &fixture.path().join("output.bin")),
-            &bad_archive_item,
-            &context,
-        )
-        .expect_err("invalid extension")
-        .contains(".zip"));
-        assert!(compress_item_with_progress(
-            native_paths(
-                &fixture.path().join("missing"),
-                &fixture.path().join("missing.zip")
-            ),
-            &bad_archive_item,
-            &context,
-        )
-        .expect_err("missing source")
-        .contains("does not exist"));
-        assert!(compress_item_with_progress(
-            native_paths(&source_file, &existing_archive),
-            &bad_archive_item,
-            &context,
-        )
-        .expect_err("existing archive")
-        .contains("already exists"));
+        assert!(
+            compress_item_with_progress(
+                native_paths(&source_file, &fixture.path().join("output.bin")),
+                &bad_archive_item,
+                &context,
+            )
+            .expect_err("invalid extension")
+            .contains(".zip")
+        );
+        assert!(
+            compress_item_with_progress(
+                native_paths(
+                    &fixture.path().join("missing"),
+                    &fixture.path().join("missing.zip")
+                ),
+                &bad_archive_item,
+                &context,
+            )
+            .expect_err("missing source")
+            .contains("does not exist")
+        );
+        assert!(
+            compress_item_with_progress(
+                native_paths(&source_file, &existing_archive),
+                &bad_archive_item,
+                &context,
+            )
+            .expect_err("existing archive")
+            .contains("already exists")
+        );
 
-        assert!(extract_item_with_progress(
-            native_paths(&source_file, &destination_file),
-            &bad_archive_item,
-            &context,
-        )
-        .expect_err("extract destination file")
-        .contains("not a folder"));
-        assert!(to_zip_path(Path::new(""))
-            .expect_err("empty zip path")
-            .contains("empty"));
+        assert!(
+            extract_item_with_progress(
+                native_paths(&source_file, &destination_file),
+                &bad_archive_item,
+                &context,
+            )
+            .expect_err("extract destination file")
+            .contains("not a folder")
+        );
+        assert!(
+            to_zip_path(Path::new(""))
+                .expect_err("empty zip path")
+                .contains("empty")
+        );
         assert_eq!(archive_stem_for_item(Path::new("")), "Archive");
         assert_eq!(archive_root_name(Path::new("")), PathBuf::from("Archive"));
     }
@@ -458,11 +470,13 @@ mod tests {
         process_item(&context, &item(&source, 3), &None);
 
         let state = shared_operation.lock().expect("op lock");
-        assert!(state
-            .runtime
-            .error_message
-            .as_deref()
-            .is_some_and(|message| message.contains("Cannot move")));
+        assert!(
+            state
+                .runtime
+                .error_message
+                .as_deref()
+                .is_some_and(|message| message.contains("Cannot move"))
+        );
         drop(state);
         assert!(!nested_dest.join("tree").exists());
     }
@@ -649,11 +663,13 @@ mod tests {
             pending_operation.lock().expect("pending lock").status,
             OpStatus::Completed
         );
-        assert!(removed
-            .lock()
-            .expect("removed lock")
-            .iter()
-            .any(|id| id == "op-1"));
+        assert!(
+            removed
+                .lock()
+                .expect("removed lock")
+                .iter()
+                .any(|id| id == "op-1")
+        );
     }
 
     struct DeleteSpec<'spec> {

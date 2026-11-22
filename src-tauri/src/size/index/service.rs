@@ -6,23 +6,24 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime};
 
-use crossbeam_channel::{bounded, unbounded, Sender};
+use crossbeam_channel::{Sender, bounded, unbounded};
 
+use super::IndexRead;
 use super::exclusions::{ExclusionChange, ExclusionRules, ExclusionSet};
 use super::names::file::NAMES_FILE;
 use super::names::{FileNameStore, OverlayThreshold};
 use super::platform::{self, IndexPlatform};
 use super::tree::{FolderSizeTree, FolderTotal, LowerBound};
-use super::IndexRead;
 use crate::resource_coordinator::ResourceCoordinator;
 use crate::size::fast_walk::{self, Qos, WalkOptions};
 use crate::size::{
-    route_of, FolderSizeIndexStatus, FolderSizeIndexStorage, IndexBackend, IndexState, NaReason,
+    FolderSizeIndexStatus, FolderSizeIndexStorage, IndexBackend, IndexState, NaReason,
     PaneSubscriptions, RequestMode, Route, SizeRequest, SizeSource, SizeStateKind, SizeUpdate,
+    route_of,
 };
 
 use super::compact::run_compactions;
-use super::lanes::{run_background, run_boosts, BoostJob, Lanes, ScanJob};
+use super::lanes::{BoostJob, Lanes, ScanJob, run_background, run_boosts};
 use super::machine::{ExclusionEdit, Machine, MachineLinks, Message};
 use super::segment::sequence_of_segment_file;
 use super::subscriptions::SubscribedFolder;

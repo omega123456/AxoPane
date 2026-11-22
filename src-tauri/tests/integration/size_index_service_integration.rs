@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::os::unix::fs::{symlink, PermissionsExt};
+use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -15,22 +15,22 @@ use axopane_lib::search::service::{
 };
 use axopane_lib::search::source::FolderTreeSource;
 use axopane_lib::search::{SearchError, SearchScope};
-use axopane_lib::size::fast_walk::{subtree_total, TestHooks, WalkOptions};
+use axopane_lib::size::fast_walk::{TestHooks, WalkOptions, subtree_total};
 use axopane_lib::size::index::names::OverlayThreshold;
 use axopane_lib::size::index::persist::{self, ChangeFlags};
 use axopane_lib::size::index::platform::{
-    normalize, protected_roots, stream_exclusions, FakePlatform, PowerSignal, RawEvent,
-    DATA_VOLUME_PREFIX,
+    DATA_VOLUME_PREFIX, FakePlatform, PowerSignal, RawEvent, normalize, protected_roots,
+    stream_exclusions,
 };
 use axopane_lib::size::index::{
-    IndexOptions, LaneSnapshot, TreeUnavailable, WalkBatching, SNAPSHOT_FILE,
+    IndexOptions, LaneSnapshot, SNAPSHOT_FILE, TreeUnavailable, WalkBatching,
 };
 use axopane_lib::size::{
     FolderSizeIndexStatus, IndexBackend, IndexState, NaReason, PaneSubscriptions, PauseReason,
     RequestMode, SizeBackend, SizeRequest, SizeRequestWithVolumes, SizeService, SizeSource,
     SizeStateKind, SizeUpdate,
 };
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 
 const WAIT: Duration = Duration::from_secs(1);
 const GATE_POLL: Duration = Duration::from_millis(2);
@@ -497,11 +497,13 @@ fn one_boost_runs_at_a_time_newest_first() {
     assert_eq!(terminal(&first, &index.key("a")).size_bytes, Some(110));
     assert_eq!(terminal(&fourth, &index.key("s")).size_bytes, Some(5));
     assert_eq!(terminal(&third, &index.key("home")).size_bytes, Some(7));
-    assert!(second
-        .lock()
-        .unwrap()
-        .iter()
-        .all(|update| update.state == SizeStateKind::Calculating));
+    assert!(
+        second
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|update| update.state == SizeStateKind::Calculating)
+    );
     let opened = index.opened.lock().unwrap().clone();
     let at = |path: PathBuf| {
         opened
@@ -1064,11 +1066,13 @@ fn missing_and_failed_walks_report_errors() {
     index.blocker.release(&index.path("a"));
     let after = index.request(&["s"], RequestMode::Refresh);
     terminal(&after, &index.key("s"));
-    assert!(cancelled
-        .lock()
-        .unwrap()
-        .iter()
-        .all(|update| update.state == SizeStateKind::Calculating));
+    assert!(
+        cancelled
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|update| update.state == SizeStateKind::Calculating)
+    );
 }
 
 #[test]

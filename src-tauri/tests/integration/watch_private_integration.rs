@@ -8,10 +8,10 @@ mod tests {
     use super::tab_patch::*;
     use super::*;
     use crate::fs;
+    use notify::Event;
     use notify::event::{
         CreateKind, DataChange, EventKind, Flag, ModifyKind, RemoveKind, RenameMode,
     };
-    use notify::Event;
     use std::collections::HashSet;
     use std::path::{Path, PathBuf};
     use tempfile::tempdir;
@@ -68,14 +68,18 @@ mod tests {
         );
         assert_eq!(patch.tab_id, "left-1");
         assert_eq!(patch.reason, "refresh");
-        assert!(patch
-            .changed
-            .iter()
-            .any(|item| item.path.ends_with("after.txt")));
-        assert!(patch
-            .removed
-            .iter()
-            .any(|path| path.ends_with("before.txt")));
+        assert!(
+            patch
+                .changed
+                .iter()
+                .any(|item| item.path.ends_with("after.txt"))
+        );
+        assert!(
+            patch
+                .removed
+                .iter()
+                .any(|path| path.ends_with("before.txt"))
+        );
     }
 
     #[test]
@@ -130,10 +134,12 @@ mod tests {
             &next,
         );
 
-        assert!(patch
-            .changed
-            .iter()
-            .any(|item| item.path == added_path && item.entry.is_some()));
+        assert!(
+            patch
+                .changed
+                .iter()
+                .any(|item| item.path == added_path && item.entry.is_some())
+        );
         assert!(patch.changed.iter().any(|item| item.path == changed_path
             && item.entry.as_ref().and_then(|entry| entry.size_bytes) == Some(2)));
         assert!(!patch.changed.iter().any(|item| item.path == unchanged_path));
@@ -198,10 +204,12 @@ mod tests {
         else {
             panic!("create should be targeted");
         };
-        assert!(patch
-            .changed
-            .iter()
-            .any(|item| item.path.ends_with("alpha.txt")));
+        assert!(
+            patch
+                .changed
+                .iter()
+                .any(|item| item.path.ends_with("alpha.txt"))
+        );
         assert!(snapshot.keys().any(|path| path.ends_with("alpha.txt")));
 
         std::fs::remove_file(&alpha).expect("remove alpha");
@@ -558,19 +566,23 @@ mod tests {
         draft
             .apply_change(&target, &hidden)
             .expect("hidden filtered");
-        assert!(draft
-            .removed
-            .iter()
-            .any(|path| path.ends_with(".hidden.txt")));
+        assert!(
+            draft
+                .removed
+                .iter()
+                .any(|path| path.ends_with(".hidden.txt"))
+        );
 
         std::fs::remove_file(&visible).expect("remove visible");
         draft
             .apply_change(&target, &visible)
             .expect("missing visible");
-        assert!(draft
-            .removed
-            .iter()
-            .any(|path| path.ends_with("visible.txt")));
+        assert!(
+            draft
+                .removed
+                .iter()
+                .any(|path| path.ends_with("visible.txt"))
+        );
 
         let direct = fs::display_path_from_path(&hidden);
         draft.next.insert(
@@ -814,10 +826,12 @@ mod tests {
 
         let emitted = patches.lock().unwrap();
         assert_eq!(emitted.len(), 1);
-        assert!(emitted[0]
-            .changed
-            .iter()
-            .any(|item| item.path.ends_with("new.txt")));
+        assert!(
+            emitted[0]
+                .changed
+                .iter()
+                .any(|item| item.path.ends_with("new.txt"))
+        );
         let guard = tabs.lock().unwrap();
         let stored_snapshot = &guard.get(&target.tab_id).unwrap().snapshot;
         assert!(stored_snapshot.keys().any(|path| path.ends_with("new.txt")));
@@ -868,9 +882,11 @@ mod tests {
 
         let guard = tabs.lock().unwrap();
         let stored_snapshot = &guard.get(&target.tab_id).unwrap().snapshot;
-        assert!(stored_snapshot
-            .keys()
-            .any(|path| path.ends_with("existing.txt")));
+        assert!(
+            stored_snapshot
+                .keys()
+                .any(|path| path.ends_with("existing.txt"))
+        );
     }
 
     fn vanished_entry(missing: &Path) -> DirectoryEntry {
@@ -929,10 +945,12 @@ mod tests {
 
         let emitted = patches.lock().unwrap();
         assert_eq!(emitted.len(), 1);
-        assert!(emitted[0]
-            .removed
-            .iter()
-            .any(|path| path.ends_with("never-existed.txt")));
+        assert!(
+            emitted[0]
+                .removed
+                .iter()
+                .any(|path| path.ends_with("never-existed.txt"))
+        );
         let guard = tabs.lock().unwrap();
         let stored_snapshot = &guard.get(&target.tab_id).unwrap().snapshot;
         assert!(stored_snapshot.is_empty());

@@ -1,7 +1,7 @@
 use std::io::{self, BufReader, BufWriter, Read, Write};
 
 use super::helper_protocol::{
-    read_frame, write_frame, HelperOperation, HelperRequest, HelperResponse, HelperResult,
+    HelperOperation, HelperRequest, HelperResponse, HelperResult, read_frame, write_frame,
 };
 
 #[cfg(all(target_os = "windows", not(feature = "test-utils")))]

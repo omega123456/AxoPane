@@ -456,10 +456,10 @@ fn read_unsorted_dir(
         Ok(file) => file,
         Err(error) => return Ok(absorb(error, &mut listing)?.then_some(listing)),
     };
-    if let Some(allowed) = allowed_devs {
-        if !allowed.contains(&device_of(options, dir, file.metadata()?.dev())) {
-            return Ok(None);
-        }
+    if let Some(allowed) = allowed_devs
+        && !allowed.contains(&device_of(options, dir, file.metadata()?.dev()))
+    {
+        return Ok(None);
     }
 
     let mut attributes = bulk_attributes();

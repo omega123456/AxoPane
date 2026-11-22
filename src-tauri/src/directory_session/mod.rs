@@ -4,19 +4,19 @@ pub mod view;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::fs::{self, DirectoryEntry, FsError};
 use crate::resource_coordinator::{JobClass, JobHandle, JobSpec, ResourceCoordinator};
-use crate::watch::patch::{classify_patch, ClassifyPatchInput, MetadataDelta, SessionPatch};
+use crate::watch::patch::{ClassifyPatchInput, MetadataDelta, SessionPatch, classify_patch};
 use crate::watch::{self, CaptureHandle};
 
 pub use model::{
     BeginNavigationRequest, BeginNavigationResponse, GetSessionRangeRequest, NavigationRevision,
     PaneId, ReleaseSessionRequest, ReleaseSessionResponse, ReviseSessionViewRequest,
-    SessionBaseline, SessionId, SessionRangePage, SessionRangeResponse, SessionRejection,
-    ViewParams, ViewRevision, WatchRevision, SESSION_PAGE_SIZE,
+    SESSION_PAGE_SIZE, SessionBaseline, SessionId, SessionRangePage, SessionRangeResponse,
+    SessionRejection, ViewParams, ViewRevision, WatchRevision,
 };
 use view::SessionView;
 

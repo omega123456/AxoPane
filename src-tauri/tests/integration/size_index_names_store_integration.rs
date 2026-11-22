@@ -5,14 +5,14 @@ use std::path::{Path, PathBuf};
 use axopane_lib::size::index::names::file::{NAMES_FILE, SPILL_SUFFIX};
 use axopane_lib::size::index::names::writer::RewriteStats;
 use axopane_lib::size::index::names::{
-    names_in, FileNameStore, FolderNames, NamesCounters, NamesCursor, NamesUnreadable,
-    OverlayStats, OverlayThreshold, PackedNames, SavedNames, OVERLAY_THRESHOLD_BYTES,
-    OVERLAY_THRESHOLD_FOLDERS,
+    FileNameStore, FolderNames, NamesCounters, NamesCursor, NamesUnreadable,
+    OVERLAY_THRESHOLD_BYTES, OVERLAY_THRESHOLD_FOLDERS, OverlayStats, OverlayThreshold,
+    PackedNames, SavedNames, names_in,
 };
 use axopane_lib::size::index::segment::{
     MappedSegment, NodeFlags, SegmentBuilder, SegmentEntry, SegmentTarget,
 };
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 
 use crate::common::segment::paths_in;
 
@@ -525,16 +525,20 @@ fn overlay_thresholds_count_folders_and_name_bytes() {
         name_bytes: OVERLAY_THRESHOLD_BYTES,
     };
     assert!(!small.exceeds(OverlayThreshold::default()));
-    assert!(OverlayStats {
-        folders: OVERLAY_THRESHOLD_FOLDERS + 1,
-        ..small
-    }
-    .exceeds(OverlayThreshold::default()));
-    assert!(OverlayStats {
-        name_bytes: OVERLAY_THRESHOLD_BYTES + 1,
-        ..small
-    }
-    .exceeds(OverlayThreshold::default()));
+    assert!(
+        OverlayStats {
+            folders: OVERLAY_THRESHOLD_FOLDERS + 1,
+            ..small
+        }
+        .exceeds(OverlayThreshold::default())
+    );
+    assert!(
+        OverlayStats {
+            name_bytes: OVERLAY_THRESHOLD_BYTES + 1,
+            ..small
+        }
+        .exceeds(OverlayThreshold::default())
+    );
 
     let mut stats = RewriteStats {
         blocks_rebuilt: 1,

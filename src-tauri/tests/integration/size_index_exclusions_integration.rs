@@ -7,21 +7,21 @@ use axopane_lib::ipc::types::{
     RemoveIndexExclusionRequest,
 };
 use axopane_lib::persist::PersistenceState;
-use axopane_lib::search::service::{SearchBackend, SearchService};
 use axopane_lib::search::SearchScope;
+use axopane_lib::search::service::{SearchBackend, SearchService};
 use axopane_lib::size::index::exclusions::{
-    is_within, plan_reconcile, same_path, ExclusionRules, ExclusionSet, ExclusionVerdict,
-    PathVerdict, ReconcilePlan,
+    ExclusionRules, ExclusionSet, ExclusionVerdict, PathVerdict, ReconcilePlan, is_within,
+    plan_reconcile, same_path,
 };
 use axopane_lib::size::index::persist;
-use axopane_lib::size::index::platform::{RawEvent, DATA_VOLUME_PREFIX};
+use axopane_lib::size::index::platform::{DATA_VOLUME_PREFIX, RawEvent};
 use axopane_lib::size::index::tree::FolderTotal;
 use axopane_lib::size::{IndexState, RequestMode, SizeSource, SizeStateKind};
 use tempfile::tempdir;
 
 use crate::ipc_state_manager_integration::as_state;
 use crate::size_index_service_integration::{
-    fresh_total, live_search, ready, terminal, wait_until, Harness,
+    Harness, fresh_total, live_search, ready, terminal, wait_until,
 };
 
 const MAC_ALWAYS_SKIPPED: [&str; 3] = ["/System/Volumes", "/Volumes", "/dev"];

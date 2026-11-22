@@ -1,9 +1,9 @@
 use std::ops::Range;
 
-use super::{NodeId, OwnCounters, HEAP_BIT, NONE, PERSISTED_FLAGS};
+use super::{HEAP_BIT, NONE, NodeId, OwnCounters, PERSISTED_FLAGS};
 use crate::size::index::names::signature::signature_of;
 use crate::size::index::persist::{
-    put_count, put_ids, put_ranges, put_str, put_u32, put_u64, Reader,
+    Reader, put_count, put_ids, put_ranges, put_str, put_u32, put_u64,
 };
 
 pub const OVERLAY_CAP_FOLDERS: usize = 100_000;

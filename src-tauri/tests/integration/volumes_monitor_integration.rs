@@ -1,4 +1,4 @@
-use axopane_lib::volumes::{volume_inventory_changed, VolumeInfo};
+use axopane_lib::volumes::{VolumeInfo, volume_inventory_changed};
 
 struct VolumeDetails {
     total_bytes: u64,

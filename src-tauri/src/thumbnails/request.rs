@@ -4,11 +4,11 @@ use crate::ipc::types::{
     RequestThumbnailsRequest, RequestThumbnailsResponse, ThumbnailCandidateRequest,
 };
 
+use super::ThumbnailService;
 use super::scheduler::{
-    DesiredThumbnail, ScopeRequest, ThumbnailSubscriber, MAX_DESIRED_PER_SCOPE,
+    DesiredThumbnail, MAX_DESIRED_PER_SCOPE, ScopeRequest, ThumbnailSubscriber,
 };
 use super::types::{ThumbnailCandidate, ThumbnailFingerprint};
-use super::ThumbnailService;
 
 const CANDIDATE_LIMIT_EXCEEDED: &str = "thumbnail scope exceeds the candidate limit";
 

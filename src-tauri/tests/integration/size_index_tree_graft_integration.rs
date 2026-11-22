@@ -5,14 +5,14 @@ use std::sync::Arc;
 
 use axopane_lib::size::index::names::signature::signature_of;
 use axopane_lib::size::index::segment::{
-    GraftTarget, MappedSegment, NodeFlags, SegmentBuilder, SegmentEntry, SegmentTarget,
-    SpillOptions, WalkSpill, RUN_BYTES,
+    GraftTarget, MappedSegment, NodeFlags, RUN_BYTES, SegmentBuilder, SegmentEntry, SegmentTarget,
+    SpillOptions, WalkSpill,
 };
 use axopane_lib::size::index::tree::{DirectoryListing, FolderSizeTree, Forest, Graft};
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 
 use crate::common::segment::{
-    append, heap_of, listing, paths_in, strings, walked, walked_segment, SegmentPlace, Walked,
+    SegmentPlace, Walked, append, heap_of, listing, paths_in, strings, walked, walked_segment,
 };
 
 const BASE_TOKEN: u64 = 11;

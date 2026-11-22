@@ -7,8 +7,8 @@ use std::sync::Arc;
 use axopane_lib::ipc::commands;
 use axopane_lib::ipc::types::SaveConfigRequest;
 use axopane_lib::persist::{Config, PersistenceState};
-use axopane_lib::search::source::FolderTreeSource;
 use axopane_lib::search::SearchError;
+use axopane_lib::search::source::FolderTreeSource;
 use axopane_lib::size::index::names::file::spill_path;
 use axopane_lib::size::index::names_path_beside;
 use axopane_lib::size::index::persist::{self, ChangeFlags, SnapshotMeta};
@@ -19,7 +19,7 @@ use axopane_lib::size::{
 use tempfile::tempdir;
 
 use crate::ipc_state_manager_integration::as_state;
-use crate::size_index_service_integration::{fresh_total, ready, wait_until, Harness};
+use crate::size_index_service_integration::{Harness, fresh_total, ready, wait_until};
 
 const FIRST_EVENT_ID: u64 = 100;
 const REPLAYED_EVENT_ID: u64 = 300;

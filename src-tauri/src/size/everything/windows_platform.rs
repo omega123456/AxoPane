@@ -1,6 +1,6 @@
 use super::{
-    build_exact_folder_or_queries, map_everything_result_sizes, EverythingQuery,
-    EverythingQueryResult, EverythingRow, EverythingSort, EVERYTHING_BATCH_CHUNK_SIZE,
+    EVERYTHING_BATCH_CHUNK_SIZE, EverythingQuery, EverythingQueryResult, EverythingRow,
+    EverythingSort, build_exact_folder_or_queries, map_everything_result_sizes,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -92,8 +92,7 @@ pub struct EverythingHandle {
 }
 
 unsafe fn symbol<T: Copy>(library: &Library, name: &[u8]) -> Result<T, EverythingError> {
-    library
-        .get::<T>(name)
+    unsafe { library.get::<T>(name) }
         .map(|symbol| *symbol)
         .map_err(|_| EverythingError::DllUnavailable)
 }
@@ -285,16 +284,16 @@ fn dll_candidates() -> Vec<PathBuf> {
         PathBuf::from("resources/windows/Everything64.dll"),
     ];
 
-    if let Ok(current_exe) = std::env::current_exe() {
-        if let Some(parent) = current_exe.parent() {
-            candidates.push(parent.join("Everything64.dll"));
-            candidates.push(
-                parent
-                    .join("resources")
-                    .join("windows")
-                    .join("Everything64.dll"),
-            );
-        }
+    if let Ok(current_exe) = std::env::current_exe()
+        && let Some(parent) = current_exe.parent()
+    {
+        candidates.push(parent.join("Everything64.dll"));
+        candidates.push(
+            parent
+                .join("resources")
+                .join("windows")
+                .join("Everything64.dll"),
+        );
     }
 
     candidates

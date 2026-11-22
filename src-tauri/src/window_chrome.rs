@@ -61,7 +61,7 @@ mod platform {
 mod platform {
     use tauri::window::{Effect, EffectsBuilder};
     use tauri::{Runtime, WebviewWindow};
-    use windows::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ};
+    use windows::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
 
     use super::WindowBackdrop;
 

@@ -2,10 +2,10 @@ use std::cell::Cell;
 use std::sync::Mutex;
 
 use axopane_lib::search::everything_strategy::{
-    candidates, EverythingSearchRun, FUZZY_PASS_THRESHOLD,
+    EverythingSearchRun, FUZZY_PASS_THRESHOLD, candidates,
 };
 use axopane_lib::search::path_style::PathStyle;
-use axopane_lib::search::query::{parse, ParsedQuery};
+use axopane_lib::search::query::{ParsedQuery, parse};
 use axopane_lib::search::results::BROWSE_PARENT_CAP;
 use axopane_lib::search::source::EverythingSource;
 use axopane_lib::search::{CandidateBatch, Control, SearchError, SearchOptions, SearchScope};
@@ -22,9 +22,9 @@ struct Source {
 impl Source {
     fn new(
         respond: impl Fn(&EverythingQuery) -> Result<EverythingQueryResult, SearchError>
-            + Send
-            + Sync
-            + 'static,
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         Self {
             respond: Box::new(respond),

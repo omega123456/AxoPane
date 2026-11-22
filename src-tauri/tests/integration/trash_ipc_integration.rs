@@ -1,22 +1,14 @@
 use std::fs;
 
 use axopane_lib::ipc::commands;
-use axopane_lib::ipc::types::{
-    DeleteFromTrashRequest, RestoreTrashRequest, TrashEntriesRequest,
-};
+use axopane_lib::ipc::types::{DeleteFromTrashRequest, RestoreTrashRequest, TrashEntriesRequest};
+use axopane_lib::trash::set_fake_trash_dir_for_tests;
 use tempfile::tempdir;
 
-/// `commands::list_trash`/`restore_from_trash`/`empty_trash` operate on the
-/// shared `fake_trash_dir()` (they can't take a directory override — their
-/// signatures must match the real `#[tauri::command]` IPC contract), and
-/// `empty_trash` wipes that entire directory. Point the fake trash dir at a
-/// private override (`AXOPANE_TEST_FAKE_TRASH_DIR`) for the lifetime of this
-/// process so it never races with another test's fixtures in the otherwise
-/// shared directory. This is safe because nextest runs every `#[test]` in its
-/// own process, so the env var never leaks across tests.
+// nextest runs each test in its own process, so this override never reaches another test.
 fn use_isolated_fake_trash_dir() -> tempfile::TempDir {
     let override_dir = tempdir().expect("override trash dir");
-    std::env::set_var("AXOPANE_TEST_FAKE_TRASH_DIR", override_dir.path());
+    set_fake_trash_dir_for_tests(override_dir.path());
     override_dir
 }
 
@@ -46,10 +38,12 @@ fn list_restore_and_empty_round_trip_through_the_command_layer() {
     })
     .expect("restore from trash");
     assert!(file.exists());
-    assert!(commands::list_trash()
-        .expect("list after restore")
-        .entries
-        .is_empty());
+    assert!(
+        commands::list_trash()
+            .expect("list after restore")
+            .entries
+            .is_empty()
+    );
 
     commands::move_to_trash(TrashEntriesRequest {
         paths: vec![file.to_string_lossy().into_owned()],
@@ -64,10 +58,12 @@ fn list_restore_and_empty_round_trip_through_the_command_layer() {
     );
 
     commands::empty_trash().expect("empty trash");
-    assert!(commands::list_trash()
-        .expect("list after empty")
-        .entries
-        .is_empty());
+    assert!(
+        commands::list_trash()
+            .expect("list after empty")
+            .entries
+            .is_empty()
+    );
 }
 
 #[test]
@@ -103,10 +99,12 @@ fn delete_from_trash_removes_the_item_through_the_command_layer() {
     })
     .expect("delete from trash");
 
-    assert!(commands::list_trash()
-        .expect("list after delete")
-        .entries
-        .is_empty());
+    assert!(
+        commands::list_trash()
+            .expect("list after delete")
+            .entries
+            .is_empty()
+    );
 }
 
 #[test]
@@ -126,7 +124,7 @@ fn list_trash_surfaces_errors_when_the_fake_trash_override_is_a_file() {
     let fixture = tempdir().expect("temp dir");
     let blocker = fixture.path().join("not-a-directory");
     fs::write(&blocker, b"blocker").expect("blocker file");
-    std::env::set_var("AXOPANE_TEST_FAKE_TRASH_DIR", &blocker);
+    set_fake_trash_dir_for_tests(&blocker);
 
     let error = commands::list_trash().expect_err("file override should fail");
 

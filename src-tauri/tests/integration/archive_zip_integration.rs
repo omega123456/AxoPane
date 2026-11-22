@@ -41,10 +41,12 @@ fn archive_work_is_queued_and_reports_completion_through_ops() {
             size_bytes: 0,
         }],
     });
-    assert!(service
-        .snapshot()
-        .iter()
-        .any(|entry| entry.progress.operation_id == id));
+    assert!(
+        service
+            .snapshot()
+            .iter()
+            .any(|entry| entry.progress.operation_id == id)
+    );
 
     let deadline = Instant::now() + Duration::from_secs(1);
     while Instant::now() < deadline {
@@ -56,11 +58,13 @@ fn archive_work_is_queued_and_reports_completion_through_ops() {
         thread::yield_now();
     }
     assert!(archive_dir.join("source.zip").exists());
-    assert!(service
-        .snapshot()
-        .iter()
-        .any(|entry| entry.progress.operation_id == id
-            && entry.progress.status == OpStatus::Completed));
+    assert!(
+        service
+            .snapshot()
+            .iter()
+            .any(|entry| entry.progress.operation_id == id
+                && entry.progress.status == OpStatus::Completed)
+    );
 }
 
 fn nested_payload(root: &std::path::Path) -> std::path::PathBuf {

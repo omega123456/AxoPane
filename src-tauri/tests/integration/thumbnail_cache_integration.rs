@@ -2,14 +2,12 @@ use crate::common;
 
 use std::path::Path;
 
-use base64::Engine;
-use axopane_lib::thumbnails::cache::{
-    ThumbnailCache, ThumbnailCacheEntry, NEGATIVE_TTL_SECONDS,
-};
+use axopane_lib::thumbnails::cache::{NEGATIVE_TTL_SECONDS, ThumbnailCache, ThumbnailCacheEntry};
 use axopane_lib::thumbnails::types::{
-    validated_png_data_url, ThumbnailCacheKey, ThumbnailFingerprint, ThumbnailState,
-    MAX_DATA_URL_BYTES,
+    MAX_DATA_URL_BYTES, ThumbnailCacheKey, ThumbnailFingerprint, ThumbnailState,
+    validated_png_data_url,
 };
+use base64::Engine;
 
 fn key(name: &str, modified: u64) -> ThumbnailCacheKey {
     ThumbnailCacheKey(ThumbnailFingerprint::from_metadata(

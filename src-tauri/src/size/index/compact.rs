@@ -1,18 +1,18 @@
 use std::fs;
 use std::hash::{BuildHasher, RandomState};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crossbeam_channel::{Receiver, Sender};
 
 use super::machine::{Machine, Message};
-use super::names::file::remove_if_present;
 use super::names::SavedNames;
+use super::names::file::remove_if_present;
 use super::persist::SegmentRef;
 use super::segment::{
-    sequence_of_segment_file, BaseRewrite, BuildError, BuiltSegment, MappedSegment, RewriteFailure,
-    RewriteProgress, RewriteSource, SegmentBuilder, SegmentPaths, SegmentTarget,
+    BaseRewrite, BuildError, BuiltSegment, MappedSegment, RewriteFailure, RewriteProgress,
+    RewriteSource, SegmentBuilder, SegmentPaths, SegmentTarget, sequence_of_segment_file,
 };
 use super::service::Shared;
 use super::tree::FolderSizeTree;

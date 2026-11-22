@@ -8,14 +8,14 @@ use super::matcher::{Match, NameKind};
 use super::path_style::PathStyle;
 use super::query::{ParsedQuery, Segment};
 use super::results::{
-    rank_candidates, CandidatePool, Tiered, TieredCandidate, TieredPool, BROWSE_PARENT_CAP,
+    BROWSE_PARENT_CAP, CandidatePool, Tiered, TieredCandidate, TieredPool, rank_candidates,
 };
 use super::source::FolderTreeSource;
 use super::{Candidate, CandidateBatch, SearchError, SearchRun, SearchScope};
 use crate::resource_coordinator::scan_pool::{map_parts_in_order, split_range};
-use crate::size::index::names::signature::SignedName;
-use crate::size::index::tree::{is_hidden_name, FolderSizeTree};
 use crate::size::index::IndexRead;
+use crate::size::index::names::signature::SignedName;
+use crate::size::index::tree::{FolderSizeTree, is_hidden_name};
 
 pub const SLOTS_PER_READ: usize = 32_768;
 

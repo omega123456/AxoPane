@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use super::execution::WorkerContext;
 use super::measure::measure_path_size;
 use super::{
-    CurrentFileProgress, LockOperation, OpItem, OpKind, OpState, ProgressEmitter, RateSample,
-    ETA_STABILIZATION_SAMPLES, PROGRESS_EMIT_INTERVAL,
+    CurrentFileProgress, ETA_STABILIZATION_SAMPLES, LockOperation, OpItem, OpKind, OpState,
+    PROGRESS_EMIT_INTERVAL, ProgressEmitter, RateSample,
 };
 
 pub struct TransferThrottle {

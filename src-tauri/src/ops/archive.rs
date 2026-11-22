@@ -10,11 +10,11 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use super::conflict::wait_while_paused;
-use super::copy::{copy_reader_with_progress, ChunkReporter};
-use super::execution::{is_operation_cancelled, NativeItemPaths, WorkerContext};
+use super::copy::{ChunkReporter, copy_reader_with_progress};
+use super::execution::{NativeItemPaths, WorkerContext, is_operation_cancelled};
 use super::progress::{
-    add_discovered_total, begin_file_progress, finish_file_progress, report_chunk_progress,
-    FileProgressStart, TransferThrottle,
+    FileProgressStart, TransferThrottle, add_discovered_total, begin_file_progress,
+    finish_file_progress, report_chunk_progress,
 };
 use super::{LockOperation, OpItem, OpKind};
 use crate::error_text::StringifyError;

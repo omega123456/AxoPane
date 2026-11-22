@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use time::{Date, OffsetDateTime};
 
 use super::{
-    current_local_date, current_local_datetime, daily_log_file_name, format_log_line,
-    format_timestamp, prune_old_logs, LogLevel, LogMessage, RETENTION_DAYS,
+    LogLevel, LogMessage, RETENTION_DAYS, current_local_date, current_local_datetime,
+    daily_log_file_name, format_log_line, format_timestamp, prune_old_logs,
 };
 
 struct OpenLogFile {

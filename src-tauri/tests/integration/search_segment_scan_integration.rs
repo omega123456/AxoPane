@@ -3,17 +3,17 @@ use std::path::{Path, PathBuf};
 
 use axopane_lib::search::path_style::PathStyle;
 use axopane_lib::search::query::parse;
-use axopane_lib::search::tree_scan::{candidates_in_chunks, TreeSearchRun};
+use axopane_lib::search::tree_scan::{TreeSearchRun, candidates_in_chunks};
 use axopane_lib::search::{Control, SearchOptions};
 use axopane_lib::size::index::names::PackedNames;
 use axopane_lib::size::index::tree::DirectoryListing;
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 
-use crate::common::segment::{index_over, walked, walked_segment, SegmentPlace, Walked};
+use crate::common::segment::{SegmentPlace, Walked, index_over, walked, walked_segment};
 use crate::search_file_scan_integration::{
-    library, packed, ranked, Fixture, Folder, FILES, FOLDERS, WITH_HIDDEN,
+    FILES, FOLDERS, Fixture, Folder, WITH_HIDDEN, library, packed, ranked,
 };
-use crate::search_tree_scan_integration::{never, sorted, Source, VISIBLE};
+use crate::search_tree_scan_integration::{Source, VISIBLE, never, sorted};
 
 const TOKEN: u64 = 11;
 const ROOT: &str = "/";

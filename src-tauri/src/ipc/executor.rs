@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use crossbeam_channel::{bounded, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, bounded};
 use tokio::sync::oneshot;
 
 use crate::resource_coordinator::{JobClass, JobSpec, ResourceCoordinator};

@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 
 use axopane_lib::fs::{DirectoryEntry, SortDirection, SortKey};
 use axopane_lib::watch::{
-    diff_entries, pane_scope, snapshot_for_target, DirPatch, PatchLabel, TabWatchArm,
-    WatchEmitters, WatchService, WatchTarget,
+    DirPatch, PatchLabel, TabWatchArm, WatchEmitters, WatchService, WatchTarget, diff_entries,
+    pane_scope, snapshot_for_target,
 };
 use tempfile::tempdir;
 
@@ -62,14 +62,18 @@ fn helper_scope_and_diff_functions_describe_changes() {
     );
     assert_eq!(patch.tab_id, "left-1");
     assert_eq!(patch.reason, "refresh");
-    assert!(patch
-        .changed
-        .iter()
-        .any(|item| item.path.ends_with("after.txt")));
-    assert!(patch
-        .removed
-        .iter()
-        .any(|path: &String| path.ends_with("before.txt")));
+    assert!(
+        patch
+            .changed
+            .iter()
+            .any(|item| item.path.ends_with("after.txt"))
+    );
+    assert!(
+        patch
+            .removed
+            .iter()
+            .any(|path: &String| path.ends_with("before.txt"))
+    );
     assert_eq!(common::bootstrap_message(), "phase-1-common");
 }
 
@@ -92,9 +96,11 @@ fn snapshot_helper_respects_filter_and_hidden_flags() {
     })
     .expect("filtered snapshot");
     assert_eq!(filtered.len(), 1);
-    assert!(filtered
-        .keys()
-        .any(|path: &String| path.ends_with("alpha.txt")));
+    assert!(
+        filtered
+            .keys()
+            .any(|path: &String| path.ends_with("alpha.txt"))
+    );
 
     let with_hidden = snapshot_for_target(&WatchTarget {
         tab_id: "left-1".to_string(),
@@ -106,9 +112,11 @@ fn snapshot_helper_respects_filter_and_hidden_flags() {
         include_item_counts: true,
     })
     .expect("hidden snapshot");
-    assert!(with_hidden
-        .keys()
-        .any(|path: &String| path.ends_with(".secret")));
+    assert!(
+        with_hidden
+            .keys()
+            .any(|path: &String| path.ends_with(".secret"))
+    );
 }
 
 #[test]

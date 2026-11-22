@@ -7,8 +7,8 @@ use std::time::Duration;
 use super::manual::{self, ManualSizeError};
 use super::worker_pool::{ManualJobRequest, ManualWork};
 use super::{
-    emit_non_empty, NaReason, RequestMode, SizeBackend, SizeRequest, SizeRequestWithVolumes,
-    SizeService, SizeSource, SizeStateKind, SizeUpdate, UpdateEmitter,
+    NaReason, RequestMode, SizeBackend, SizeRequest, SizeRequestWithVolumes, SizeService,
+    SizeSource, SizeStateKind, SizeUpdate, UpdateEmitter, emit_non_empty,
 };
 #[cfg(target_os = "macos")]
 use crate::volumes;

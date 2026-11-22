@@ -1,20 +1,20 @@
 use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use axopane_lib::search::path_style::PathStyle;
-use axopane_lib::search::query::{parse, ParsedQuery};
-use axopane_lib::search::results::{rank_candidates, CANDIDATE_CAP};
+use axopane_lib::search::query::{ParsedQuery, parse};
+use axopane_lib::search::results::{CANDIDATE_CAP, rank_candidates};
 use axopane_lib::search::source::FolderTreeSource;
 use axopane_lib::search::tree_scan::{
-    candidates, candidates_in_chunks, TreeSearchRun, SLOTS_PER_READ,
+    SLOTS_PER_READ, TreeSearchRun, candidates, candidates_in_chunks,
 };
 use axopane_lib::search::{CandidateBatch, Control, SearchError, SearchOptions, SearchScope};
+use axopane_lib::size::index::IndexRead;
 use axopane_lib::size::index::names::FileNameStore;
 use axopane_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
-use axopane_lib::size::index::IndexRead;
 
 const NO_NAMES_FILE: &str = "no-file-names.bin";
 
@@ -166,10 +166,12 @@ fn name_scans_return_matching_folders_as_posix_paths() {
             "/Users/alexios/Invoices",
         ]
     );
-    assert!(batch
-        .candidates
-        .iter()
-        .all(|candidate| candidate.is_dir && candidate.modified.is_none()));
+    assert!(
+        batch
+            .candidates
+            .iter()
+            .all(|candidate| candidate.is_dir && candidate.modified.is_none())
+    );
     assert!(!batch.truncated);
     assert_eq!(
         source.reads(),
@@ -228,9 +230,11 @@ fn blocked_protected_roots_hide_their_contents_only() {
     source.blocked = vec![PathBuf::from("/Users/alex/Documents/")];
     let hits = sorted(&run(&source, "doc", &VISIBLE)).join(",");
     assert_eq!(hits, "/Users/alex/Documents");
-    assert!(!sorted(&run(&source, "inv", &VISIBLE))
-        .iter()
-        .any(|path| path.contains("/Documents/")));
+    assert!(
+        !sorted(&run(&source, "inv", &VISIBLE))
+            .iter()
+            .any(|path| path.contains("/Documents/"))
+    );
 }
 
 #[test]
@@ -357,9 +361,11 @@ fn freed_slots_are_skipped_and_reused_slots_reported() {
     let mut tree = build(LIBRARY);
     assert!(tree.prune(Path::new("/Users/alex/Documents")));
     let source = Source::from_tree(tree);
-    assert!(!sorted(&run(&source, "inv", &VISIBLE))
-        .iter()
-        .any(|path| path.contains("Documents")));
+    assert!(
+        !sorted(&run(&source, "inv", &VISIBLE))
+            .iter()
+            .any(|path| path.contains("Documents"))
+    );
     {
         let mut tree = source.tree.lock().unwrap();
         assert!(tree.merge_record(
@@ -415,17 +421,19 @@ fn a_query_with_nothing_to_match_finds_nothing() {
         cancelled: &never,
         expired: &never,
     };
-    assert!(candidates(
-        &TreeSearchRun {
-            source: &source,
-            options: &VISIBLE,
-            control: &control
-        },
-        &empty
-    )
-    .expect("batch")
-    .candidates
-    .is_empty());
+    assert!(
+        candidates(
+            &TreeSearchRun {
+                source: &source,
+                options: &VISIBLE,
+                control: &control
+            },
+            &empty
+        )
+        .expect("batch")
+        .candidates
+        .is_empty()
+    );
 }
 
 fn bulk(count: usize, exact: usize) -> Source {

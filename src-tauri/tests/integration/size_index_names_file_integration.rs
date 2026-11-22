@@ -2,14 +2,14 @@ use std::fs::{self, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use axopane_lib::size::index::names::block::{checksum, BlockBuilder, BuiltBlock};
-use axopane_lib::size::index::names::file::{
-    remove_if_present, spill_path, MappedNames, NamesFileWriter, NamesHeader, NAMES_FILE,
-    NAMES_FORMAT_VERSION, SPILL_SUFFIX,
-};
 use axopane_lib::size::index::names::PackedNames;
+use axopane_lib::size::index::names::block::{BlockBuilder, BuiltBlock, checksum};
+use axopane_lib::size::index::names::file::{
+    MappedNames, NAMES_FILE, NAMES_FORMAT_VERSION, NamesFileWriter, NamesHeader, SPILL_SUFFIX,
+    remove_if_present, spill_path,
+};
 use axopane_lib::size::index::persist::temp_path;
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 
 const HEADER_BYTES: usize = 48;
 const DIRECTORY_ENTRY_BYTES: usize = 32;

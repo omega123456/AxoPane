@@ -1,6 +1,6 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use axopane_lib::ipc::types::ThumbnailPriority;
@@ -9,12 +9,10 @@ use axopane_lib::thumbnails::provider::{
     ProviderCapability, ThumbnailPreviewCallback, ThumbnailProvider,
 };
 use axopane_lib::thumbnails::scheduler::{
-    DesiredThumbnail, SchedulerCounts, SchedulerParts, ScopeRequest, ThumbnailScheduler,
-    ThumbnailSubscriber, MAX_ACTIVE_JOBS, MAX_DESIRED_PER_SCOPE,
+    DesiredThumbnail, MAX_ACTIVE_JOBS, MAX_DESIRED_PER_SCOPE, SchedulerCounts, SchedulerParts,
+    ScopeRequest, ThumbnailScheduler, ThumbnailSubscriber,
 };
-use axopane_lib::thumbnails::types::{
-    ThumbnailCandidate, ThumbnailFingerprint, ThumbnailState,
-};
+use axopane_lib::thumbnails::types::{ThumbnailCandidate, ThumbnailFingerprint, ThumbnailState};
 
 fn candidate(name: &str) -> ThumbnailCandidate {
     ThumbnailCandidate::new(

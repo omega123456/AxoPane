@@ -3,7 +3,7 @@ use std::panic::{self, PanicHookInfo};
 use std::sync::Arc;
 use std::thread;
 
-use super::{current_local_datetime, FileLogger, LogLevel, LogMessage};
+use super::{FileLogger, LogLevel, LogMessage, current_local_datetime};
 
 pub const PANIC_TARGET: &str = "panic";
 pub const UNNAMED_THREAD: &str = "<unnamed>";

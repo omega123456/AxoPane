@@ -155,11 +155,13 @@ fn file_rename_and_delete_commands_surface_errors_as_strings() {
     assert!(rename_error.contains("Failed to rename"));
 
     let delete_error = commands::move_to_trash(TrashEntriesRequest {
-        paths: vec![fixture
-            .path()
-            .join("missing.txt")
-            .to_string_lossy()
-            .into_owned()],
+        paths: vec![
+            fixture
+                .path()
+                .join("missing.txt")
+                .to_string_lossy()
+                .into_owned(),
+        ],
     })
     .expect_err("trash missing");
     assert!(delete_error.contains("Failed to move items to trash"));

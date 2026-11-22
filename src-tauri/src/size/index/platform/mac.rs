@@ -1,10 +1,10 @@
-use std::ffi::{c_char, c_void, CStr, CString, OsStr};
+use std::ffi::{CStr, CString, OsStr, c_char, c_void};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::thread::{self, JoinHandle};
 
 use block2::RcBlock;
@@ -29,7 +29,7 @@ const LATENCY_SECS: f64 = 1.0;
 const MAX_EXCLUSIONS: usize = 8;
 const SHORT_STRING_BUFFER_LEN: usize = 64;
 
-extern "C" {
+unsafe extern "C" {
     fn FSEventsCopyUUIDForDevice(dev: libc::dev_t) -> *const c_void;
 }
 
@@ -303,18 +303,18 @@ unsafe fn schedule_and_pump_stream(
     stopped: &AtomicBool,
     started: &mpsc::Sender<Option<usize>>,
 ) {
-    let run_loop = cf::CFRunLoopGetCurrent();
-    fse::FSEventStreamScheduleWithRunLoop(stream, run_loop, cf::kCFRunLoopDefaultMode);
-    let start_failed = fse::FSEventStreamStart(stream) == 0;
+    let run_loop = unsafe { cf::CFRunLoopGetCurrent() };
+    unsafe { fse::FSEventStreamScheduleWithRunLoop(stream, run_loop, cf::kCFRunLoopDefaultMode) };
+    let start_failed = unsafe { fse::FSEventStreamStart(stream) } == 0;
     if start_failed {
         let _ = started.send(None);
         return;
     }
     let _ = started.send(Some(run_loop as usize));
     while !stopped.load(Ordering::SeqCst) {
-        cf::CFRunLoopRun();
+        unsafe { cf::CFRunLoopRun() };
     }
-    fse::FSEventStreamStop(stream);
+    unsafe { fse::FSEventStreamStop(stream) };
 }
 
 extern "C" fn on_events(

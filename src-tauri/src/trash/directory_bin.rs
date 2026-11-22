@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::{manifest, TrashEntry};
+use super::{TrashEntry, manifest};
 
 pub struct OriginalLocation {
     pub original_path: String,

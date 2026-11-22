@@ -45,9 +45,9 @@ pub use service::LaneSnapshot;
 pub use service::MacIndexSetup;
 #[cfg(target_os = "macos")]
 pub use service::{
-    names_path_beside, Clock, FolderSizeIndex, IndexOptions, SizeEmitter, StatusEmitter,
-    TreeUnavailable, WalkBatching, FOREST_BATCH_RECORDS, HEAP_BATCH_RECORDS, READMIT_EVERY_DIRS,
-    SNAPSHOT_FILE,
+    Clock, FOREST_BATCH_RECORDS, FolderSizeIndex, HEAP_BATCH_RECORDS, IndexOptions,
+    READMIT_EVERY_DIRS, SNAPSHOT_FILE, SizeEmitter, StatusEmitter, TreeUnavailable, WalkBatching,
+    names_path_beside,
 };
 
 pub struct IndexRead<'view> {

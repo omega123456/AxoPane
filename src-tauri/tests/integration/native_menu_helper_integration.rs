@@ -3,15 +3,15 @@ use crate::common;
 use axopane_lib::ipc::types::{LoadNativeMenuRequest, NativeMenuTargetKind};
 use axopane_lib::native_menu::helper_entry::{dispatch_for_tests, run_framed_stdio};
 use axopane_lib::native_menu::helper_protocol::{
-    read_frame, write_frame, HelperOperation, HelperRequest, MAX_FRAME_BYTES,
+    HelperOperation, HelperRequest, MAX_FRAME_BYTES, read_frame, write_frame,
 };
 use axopane_lib::native_menu::helper_supervisor::{
-    HelperCall, HelperFailure, HelperRole, HelperSupervisor, DISCOVERY_DEADLINE,
+    DISCOVERY_DEADLINE, HelperCall, HelperFailure, HelperRole, HelperSupervisor,
 };
 use axopane_lib::native_menu::menu_cache::MenuCache;
 use std::io::Cursor;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::thread;
 
 fn request(id: &str, extension: &str) -> LoadNativeMenuRequest {
@@ -83,11 +83,10 @@ fn framed_stdio_dispatches_a_safe_test_utils_response_then_accepts_eof() {
     write_frame(&mut input, &request).expect("request frame");
     let mut output = Vec::new();
     run_framed_stdio(Cursor::new(input), &mut output).expect("stdio helper completes at EOF");
-    let response =
-        read_frame::<_, axopane_lib::native_menu::helper_protocol::HelperResponse>(
-            &mut Cursor::new(output),
-        )
-        .expect("response frame");
+    let response = read_frame::<_, axopane_lib::native_menu::helper_protocol::HelperResponse>(
+        &mut Cursor::new(output),
+    )
+    .expect("response frame");
     assert_eq!(response.request_id, 73);
     assert!(matches!(
         response.result,

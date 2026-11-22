@@ -23,9 +23,9 @@ use axopane_lib::size::{FolderSizeIndexStatus, IndexBackend, SizeService};
 use axopane_lib::thumbnails::ThumbnailService;
 use axopane_lib::watch::WatchService;
 use serde::Serialize;
-use serde_json::{json, Value};
-use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
-use tauri::{ipc::InvokeBody, Runtime, WebviewWindow};
+use serde_json::{Value, json};
+use tauri::test::{INVOKE_KEY, get_ipc_response, mock_builder, mock_context, noop_assets};
+use tauri::{Runtime, WebviewWindow, ipc::InvokeBody};
 use tempfile::tempdir;
 
 struct TestApp<R: Runtime> {
@@ -456,8 +456,7 @@ fn has_ready_or_na(batches: Vec<Vec<SizeStateEvent>>) -> bool {
     batches.into_iter().flatten().any(|event| {
         matches!(
             event.state,
-            axopane_lib::size::SizeStateKind::Ready
-                | axopane_lib::size::SizeStateKind::Na
+            axopane_lib::size::SizeStateKind::Ready | axopane_lib::size::SizeStateKind::Na
         )
     })
 }
@@ -513,9 +512,11 @@ fn ipc_commands_size_folders_and_return_icons() {
         .expect("request icons");
     let icon_events: Vec<IconStateEvent> = icon_batches.into_iter().flatten().collect();
     assert_eq!(icon_events.len(), icon_paths.len());
-    assert!(icon_events
-        .iter()
-        .all(|event| event.icon_data_url.is_none()));
+    assert!(
+        icon_events
+            .iter()
+            .all(|event| event.icon_data_url.is_none())
+    );
 }
 
 #[test]
@@ -644,7 +645,9 @@ fn ipc_commands_retry_failed_and_resume_paused_operations() {
         .expect("has unfinished");
     assert!(matches!(unfinished_after, false | true));
     let snapshots = test_app.queue_snapshot();
-    assert!(snapshots
-        .iter()
-        .any(|snapshot| snapshot.progress.operation_id == failed_id));
+    assert!(
+        snapshots
+            .iter()
+            .any(|snapshot| snapshot.progress.operation_id == failed_id)
+    );
 }

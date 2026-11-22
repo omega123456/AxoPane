@@ -6,16 +6,16 @@ use std::path::PathBuf;
 use memmap2::MmapMut;
 
 use super::format::{
-    encode_range, le_u32, le_u64, Cell, CellRun, Column, Counts, Layout, NodeFlags, SegmentPaths,
-    TreeHeader, HEADER_BYTES, MAX_SEGMENT_NODES, NO_PARENT,
+    Cell, CellRun, Column, Counts, HEADER_BYTES, Layout, MAX_SEGMENT_NODES, NO_PARENT, NodeFlags,
+    SegmentPaths, TreeHeader, encode_range, le_u32, le_u64,
 };
-use crate::size::index::names::block::{self, StoredBlock, BLOCK_TARGET_BYTES};
-use crate::size::index::names::file::{remove_if_present, NamesHeader};
+use crate::size::index::names::block::{self, BLOCK_TARGET_BYTES, StoredBlock};
+use crate::size::index::names::file::{NamesHeader, remove_if_present};
 use crate::size::index::names::is_packed_list_or_empty;
 use crate::size::index::names::signature::signature_of;
 use crate::size::index::names::writer::{BlockOutput, RewriteError, RewriteStats};
 use crate::size::index::persist::{self, Reader};
-use crate::size::index::tree::{is_hidden_name, OwnCounters};
+use crate::size::index::tree::{OwnCounters, is_hidden_name};
 
 const ROWS_EXTENSION: &str = "rows";
 const ROW_HEAD_BYTES: usize =

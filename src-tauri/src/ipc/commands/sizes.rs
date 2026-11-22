@@ -8,10 +8,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::ipc::types::{
-    path_strings, AddIndexExclusionRequest, AddIndexExclusionResponse, CancelSizeRequest,
-    CancelSizeResponse, CancelSizesRequest, CancelSizesResponse, FolderSizeRequest,
-    FolderSizesRequest, IndexCommandError, IndexExclusionsResponse, PickIndexExclusionsResponse,
-    RemoveIndexExclusionRequest, SizeStateEvent, SizeSubscriptionsRequest,
+    AddIndexExclusionRequest, AddIndexExclusionResponse, CancelSizeRequest, CancelSizeResponse,
+    CancelSizesRequest, CancelSizesResponse, FolderSizeRequest, FolderSizesRequest,
+    IndexCommandError, IndexExclusionsResponse, PickIndexExclusionsResponse,
+    RemoveIndexExclusionRequest, SizeStateEvent, SizeSubscriptionsRequest, path_strings,
 };
 use tauri::State;
 #[cfg(not(feature = "test-utils"))]
@@ -144,8 +144,7 @@ pub fn request_folder_sizes(
         std::thread::sleep(SIZE_UPDATE_POLL_INTERVAL);
     }
 
-    let recorded = updates.lock().expect("size updates lock").clone();
-    recorded
+    updates.lock().expect("size updates lock").clone()
 }
 
 pub fn size_state_event_from_update(update: crate::size::SizeUpdate) -> SizeStateEvent {

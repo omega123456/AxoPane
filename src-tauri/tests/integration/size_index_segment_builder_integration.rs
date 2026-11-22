@@ -1,18 +1,18 @@
 use std::fs;
 use std::path::Path;
 
-use axopane_lib::size::index::names::signature::{is_non_ascii, signature_of, DOT_BIT};
-use axopane_lib::size::index::names::{names_in, PackedNames};
+use axopane_lib::size::index::names::signature::{DOT_BIT, is_non_ascii, signature_of};
+use axopane_lib::size::index::names::{PackedNames, names_in};
 use axopane_lib::size::index::persist::temp_path;
 use axopane_lib::size::index::segment::{
-    BuildError, MappedSegment, NodeFlags, SegmentBuilder, SegmentCorrupt, SegmentEntry,
-    SegmentPaths, SegmentTarget, CHUNK_BYTES, TREE_FORMAT_VERSION,
+    BuildError, CHUNK_BYTES, MappedSegment, NodeFlags, SegmentBuilder, SegmentCorrupt,
+    SegmentEntry, SegmentPaths, SegmentTarget, TREE_FORMAT_VERSION,
 };
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 
 use crate::common::segment::{
-    child_names, descend, file_names_of, files_in, names_to, paths_in, put_u32_at,
-    resealed_single_chunk, CHECKSUM_BYTES, FIRST_SEQUENCE, FIRST_TREE_FORMAT, TREE_VERSION_OFFSET,
+    CHECKSUM_BYTES, FIRST_SEQUENCE, FIRST_TREE_FORMAT, TREE_VERSION_OFFSET, child_names, descend,
+    file_names_of, files_in, names_to, paths_in, put_u32_at, resealed_single_chunk,
 };
 
 const TOKEN: u64 = 77;
@@ -572,11 +572,13 @@ fn a_dot_named_top_level_folder_opens_no_range_but_its_nested_dot_folders_do() {
         fixture.segment.hidden_ranges().expect("hidden"),
         [nested_subtree]
     );
-    assert!(built(&plan())
-        .segment
-        .hidden_ranges()
-        .expect("none")
-        .is_empty());
+    assert!(
+        built(&plan())
+            .segment
+            .hidden_ranges()
+            .expect("none")
+            .is_empty()
+    );
 }
 
 struct RewrittenTree {

@@ -3,16 +3,16 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
+use axopane_lib::size::index::HEAP_BATCH_RECORDS;
 use axopane_lib::size::index::persist::{self, ChangeFlags};
 use axopane_lib::size::index::platform::{PowerSignal, RawEvent};
-use axopane_lib::size::index::HEAP_BATCH_RECORDS;
 use axopane_lib::size::{IndexState, RequestMode, SizeStateKind};
 
 use crate::size_index_names_service_integration::{
     barrier, base_segment, blur, create_more_folders_than_a_small_overlay_holds, files_on_disk,
     finish_replay, indexed_names, indexing_runs, owned, relaunch, saved, scan_and_save,
 };
-use crate::size_index_service_integration::{fresh_total, terminal, wait_until, Harness};
+use crate::size_index_service_integration::{Harness, fresh_total, terminal, wait_until};
 
 const SPILL_EVERY_SECOND_FOLDER: usize = 1;
 const EVENT_ID: u64 = 500;

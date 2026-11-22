@@ -13,8 +13,8 @@ use axopane_lib::ops::OpsService;
 use axopane_lib::persist::PersistenceState;
 use axopane_lib::size::SizeService;
 use axopane_lib::watch::WatchService;
-use tauri::test::{mock_builder, mock_context, noop_assets};
 use tauri::Manager;
+use tauri::test::{mock_builder, mock_context, noop_assets};
 use tempfile::tempdir;
 
 fn build_app() -> (tempfile::TempDir, tauri::App<tauri::test::MockRuntime>) {

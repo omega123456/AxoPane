@@ -1,10 +1,10 @@
-use super::matcher::{Pattern, Token, FUZZY_MIN_CHARS};
+use super::matcher::{FUZZY_MIN_CHARS, Pattern, Token};
 use super::path_style::PathStyle;
 use super::query::{ParsedQuery, Segment};
 use super::{Candidate, SearchOptions, SearchScope};
-use crate::path_text::{is_drive_designator, WINDOWS_SEPARATOR};
+use crate::path_text::{WINDOWS_SEPARATOR, is_drive_designator};
 use crate::size::everything::{
-    filetime_to_system_time, EverythingRow, EVERYTHING_BATCH_CHUNK_SIZE,
+    EVERYTHING_BATCH_CHUNK_SIZE, EverythingRow, filetime_to_system_time,
 };
 
 const PATH_FILTER: &str = "path:";

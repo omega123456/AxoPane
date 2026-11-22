@@ -4,9 +4,9 @@ use axopane_lib::ipc::types::{
     RequestThumbnailsRequest, ThumbnailCandidateRequest, ThumbnailPriority,
 };
 use axopane_lib::resource_coordinator::ResourceCoordinator;
+use axopane_lib::thumbnails::ThumbnailService;
 use axopane_lib::thumbnails::request::request_thumbnails;
 use axopane_lib::thumbnails::scheduler::MAX_DESIRED_PER_SCOPE;
-use axopane_lib::thumbnails::ThumbnailService;
 
 const REVISION: u64 = 3;
 

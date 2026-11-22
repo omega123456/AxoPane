@@ -5,14 +5,15 @@ use std::path::{Path, PathBuf};
 #[cfg(feature = "test-utils")]
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use super::COPY_BUFFER_BYTES;
 use super::conflict::wait_while_paused;
 use super::delete::{remove_clearing_readonly, remove_source, remove_target};
-use super::execution::{is_operation_cancelled, WorkerContext};
+use super::execution::{WorkerContext, is_operation_cancelled};
 use super::manifest::{DiscoveredFile, ProgressiveManifest};
 use super::paths::{is_real_directory, is_real_directory_type};
 use super::progress::{
-    add_discovered_total, begin_file_progress, finish_file_progress, report_chunk_progress,
-    FileProgressStart, TransferThrottle,
+    FileProgressStart, TransferThrottle, add_discovered_total, begin_file_progress,
+    finish_file_progress, report_chunk_progress,
 };
 #[cfg(target_os = "macos")]
 use super::transfer::macos::MacosCapabilities;
@@ -22,7 +23,6 @@ use super::transfer::portable::PortableAdapter;
 use super::transfer::windows::WindowsCapabilities;
 use super::transfer::{self, TransferRequirements};
 use super::worker::{self, TransferPaths};
-use super::COPY_BUFFER_BYTES;
 use crate::error_text::StringifyError;
 
 #[cfg(feature = "test-utils")]

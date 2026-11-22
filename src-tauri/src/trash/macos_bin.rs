@@ -4,7 +4,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use super::directory_bin::{self, OriginalLocation, TrashIndex};
-use super::{dsstore, manifest, TrashEntry};
+use super::{TrashEntry, dsstore, manifest};
 
 fn put_back_index(trash_dir: &Path) -> HashMap<String, dsstore::PutBack> {
     fs::read(trash_dir.join(".DS_Store"))

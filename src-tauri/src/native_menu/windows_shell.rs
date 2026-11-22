@@ -5,12 +5,12 @@ use std::ptr::null_mut;
 
 use crate::native_menu::types::LoadNativeMenuRequest;
 
-use windows::core::PCWSTR;
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{ILFree, SHDefExtractIconW, SHParseDisplayName};
 use windows::Win32::UI::WindowsAndMessaging::HICON;
+use windows::core::PCWSTR;
 
-use crate::win32::gdi::{hicon_to_data_url, IconBitmapFallback, IconGuard};
+use crate::win32::gdi::{IconBitmapFallback, IconGuard, hicon_to_data_url};
 use crate::win32::wide_nul;
 
 const MENU_ICON_EXTRACT_SIZE: u32 = 32;

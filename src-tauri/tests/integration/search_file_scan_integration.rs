@@ -7,20 +7,20 @@ use std::sync::Arc;
 
 use axopane_lib::search::file_scan::BLOCKS_PER_READ;
 use axopane_lib::search::path_style::PathStyle;
-use axopane_lib::search::results::{rank_candidates, CANDIDATE_CAP};
+use axopane_lib::search::results::{CANDIDATE_CAP, rank_candidates};
 use axopane_lib::search::source::FolderTreeSource;
-use axopane_lib::search::tree_scan::{candidates, TreeSearchRun};
+use axopane_lib::search::tree_scan::{TreeSearchRun, candidates};
 use axopane_lib::search::{CandidateBatch, Control, SearchError, SearchOptions, SearchScope};
 use axopane_lib::size::index::names::file::NAMES_FILE;
 use axopane_lib::size::index::names::{FileNameStore, PackedNames};
 use axopane_lib::size::index::segment::{MappedSegment, SegmentTarget};
 use axopane_lib::size::index::tree::{DirectoryListing, FolderSizeTree, Graft};
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 
 use crate::common::segment::{
-    compacted, graft_walk_segment, index_over, paths_in, Compaction, SegmentPlace, Walked,
+    Compaction, SegmentPlace, Walked, compacted, graft_walk_segment, index_over, paths_in,
 };
-use crate::search_tree_scan_integration::{build, never, parsed, run, sorted, Source, VISIBLE};
+use crate::search_tree_scan_integration::{Source, VISIBLE, build, never, parsed, run, sorted};
 
 pub(crate) const SMALL_BLOCK_TARGET: usize = 64;
 const LARGE_BLOCK_TARGET: usize = 256 * 1024;
@@ -302,10 +302,12 @@ fn plain_names_find_files_anywhere() {
     );
     let batch = run(&fixture.source, "readme", &VISIBLE);
     assert!(batch.candidates.iter().all(|candidate| !candidate.is_dir));
-    assert!(batch
-        .candidates
-        .iter()
-        .all(|candidate| candidate.modified.is_none()));
+    assert!(
+        batch
+            .candidates
+            .iter()
+            .all(|candidate| candidate.modified.is_none())
+    );
     assert!(!batch.truncated);
 }
 
@@ -335,8 +337,10 @@ fn anchored_and_browse_queries_include_files() {
             "/Users/alex/project/notes.txt",
         ]
     );
-    assert!(sorted_ranked(&fixture, "project/", &WITH_HIDDEN)
-        .contains(&"/Users/alex/project/.hidden.md".to_owned()));
+    assert!(
+        sorted_ranked(&fixture, "project/", &WITH_HIDDEN)
+            .contains(&"/Users/alex/project/.hidden.md".to_owned())
+    );
     assert!(fixture.ranked("/Nowhere/", &VISIBLE).is_empty());
 }
 
@@ -445,9 +449,11 @@ fn with_hidden_files_off_blocks_inside_hidden_subtrees_are_never_read() {
         blocks_read_by(&fixture, "*.md", &with_hidden_files),
         block_count
     );
-    assert!(fixture
-        .ranked("roadmap", &with_hidden_files)
-        .contains(&"/Users/alex/project/.agent/plans/roadmap-2026.md".to_owned()));
+    assert!(
+        fixture
+            .ranked("roadmap", &with_hidden_files)
+            .contains(&"/Users/alex/project/.agent/plans/roadmap-2026.md".to_owned())
+    );
     assert!(fixture.ranked("roadmap", &FILES).is_empty());
     assert_eq!(
         blocks_read_by(&fixture, "/Users/alex/project/.agent/plans/", &FILES),
@@ -621,10 +627,12 @@ fn file_hits_share_the_candidate_cap_and_keep_the_best_tiers() {
     let batch = run(&source, "inv", &FILES);
     assert!(batch.truncated);
     assert_eq!(batch.candidates.len(), CANDIDATE_CAP);
-    assert!(batch
-        .candidates
-        .iter()
-        .any(|candidate| candidate.path == "/bulk/inv"));
+    assert!(
+        batch
+            .candidates
+            .iter()
+            .any(|candidate| candidate.path == "/bulk/inv")
+    );
 
     let listing = run(&source, "/bulk/", &FILES);
     assert!(listing.truncated);

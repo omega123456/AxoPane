@@ -1,11 +1,11 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use axopane_lib::search::source::EverythingSource;
 use axopane_lib::search::SearchError;
+use axopane_lib::search::source::EverythingSource;
 use axopane_lib::size::everything::{
-    filetime_to_system_time, EverythingHandle, EverythingQuery, EverythingQueryResult,
-    EverythingRow, EverythingSort,
+    EverythingHandle, EverythingQuery, EverythingQueryResult, EverythingRow, EverythingSort,
+    filetime_to_system_time,
 };
 
 fn query(search: &str) -> EverythingQuery {
@@ -74,12 +74,16 @@ fn fake_handles_without_a_responder_return_nothing_or_fail() {
         empty.run_query(&query("x")).expect("empty"),
         EverythingQueryResult::default()
     );
-    assert!(EverythingHandle::test_available_error()
-        .run_query(&query("x"))
-        .is_err());
-    assert!(EverythingHandle::test_not_ready()
-        .run_query(&query("x"))
-        .is_err());
+    assert!(
+        EverythingHandle::test_available_error()
+            .run_query(&query("x"))
+            .is_err()
+    );
+    assert!(
+        EverythingHandle::test_not_ready()
+            .run_query(&query("x"))
+            .is_err()
+    );
 }
 
 #[test]

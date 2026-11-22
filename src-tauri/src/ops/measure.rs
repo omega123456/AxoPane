@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub fn measure_tree_size(path: &Path, cancel: &Arc<AtomicBool>, follow_symlinks: bool) -> u64 {
     if !follow_symlinks {

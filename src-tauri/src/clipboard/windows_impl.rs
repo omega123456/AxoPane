@@ -2,15 +2,15 @@ use super::{ClipboardError, ClipboardMode};
 use std::mem::size_of;
 use std::ptr::{copy_nonoverlapping, null_mut};
 
-use windows::core::PCWSTR;
 use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND};
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, RegisterClipboardFormatW,
     SetClipboardData,
 };
-use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
 use windows::Win32::System::Ole::CF_HDROP;
 use windows::Win32::UI::Shell::DROPFILES;
+use windows::core::PCWSTR;
 
 const DROPEFFECT_COPY: u32 = 1;
 const DROPEFFECT_MOVE: u32 = 2;

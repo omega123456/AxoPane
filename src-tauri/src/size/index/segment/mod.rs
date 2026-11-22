@@ -7,11 +7,11 @@ pub mod spill;
 
 pub use builder::{BuildError, BuiltSegment, SegmentBuilder, SegmentEntry, SegmentTarget};
 pub use format::{
-    sequence_of_segment_file, walk_spill_path, NodeFlags, SegmentPaths, CHUNK_BYTES,
-    MAX_SEGMENT_NODES, TREE_FORMAT_VERSION,
+    CHUNK_BYTES, MAX_SEGMENT_NODES, NodeFlags, SegmentPaths, TREE_FORMAT_VERSION,
+    sequence_of_segment_file, walk_spill_path,
 };
 pub use reader::{ChildIds, MappedSegment, SegmentCorrupt, SegmentRow};
 pub use rewrite::{
-    BaseRewrite, RewriteFailure, RewriteProgress, RewriteSource, FOLDERS_PER_REWRITE_STEP,
+    BaseRewrite, FOLDERS_PER_REWRITE_STEP, RewriteFailure, RewriteProgress, RewriteSource,
 };
-pub use spill::{GraftTarget, SpillOptions, SpillRecord, WalkSpill, RUN_BYTES};
+pub use spill::{GraftTarget, RUN_BYTES, SpillOptions, SpillRecord, WalkSpill};

@@ -2,7 +2,7 @@ use std::error::Error;
 use std::path::Path;
 use std::sync::Arc;
 
-use tauri::{App, Manager};
+use tauri::{App, Manager, WebviewWindow, WebviewWindowBuilder};
 
 use super::emitters::frontend_emitter;
 #[cfg(target_os = "macos")]
@@ -22,11 +22,13 @@ use crate::watch::WatchService;
 use crate::{fs, ipc, logging, resolved_app_config_dir, thumbnails, window_chrome};
 
 const LOG_DIRECTORY: &str = "logs";
+const MAIN_WINDOW_LABEL: &str = "main";
+#[cfg(target_os = "windows")]
+const FRESH_WEBVIEW2_PROFILE_DIRECTORY: &str = "EBWebView-v2";
 
 pub(super) fn setup(app: &mut App) -> Result<(), Box<dyn Error>> {
-    if let Some(window) = app.get_webview_window("main") {
-        window_chrome::apply_backdrop(&window);
-    }
+    let window = create_main_window(app)?;
+    window_chrome::apply_backdrop(&window);
     let config_dir = resolved_app_config_dir(&app.path().app_config_dir()?);
     let persistence = PersistenceState::load(&config_dir).map_err(boxed_error)?;
     manage_logging(app, &config_dir, &persistence)?;
@@ -39,6 +41,26 @@ pub(super) fn setup(app: &mut App) -> Result<(), Box<dyn Error>> {
     manage_sizes_and_search(app, &resource_coordinator)?;
     manage_operations(app, resource_coordinator);
     Ok(())
+}
+
+fn create_main_window(app: &App) -> Result<WebviewWindow, Box<dyn Error>> {
+    let main_window_config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window_config| window_config.label == MAIN_WINDOW_LABEL)
+        .ok_or("tauri.conf.json has no main window")?;
+    let builder = WebviewWindowBuilder::from_config(app.handle(), main_window_config)?;
+    #[cfg(target_os = "windows")]
+    let builder = builder.data_directory(fresh_webview2_profile_dir(app)?);
+    Ok(builder.build()?)
+}
+
+#[cfg(target_os = "windows")]
+fn fresh_webview2_profile_dir(app: &App) -> tauri::Result<std::path::PathBuf> {
+    let app_local_data_dir = app.path().app_local_data_dir()?;
+    Ok(app_local_data_dir.join(FRESH_WEBVIEW2_PROFILE_DIRECTORY))
 }
 
 fn boxed_error(error: impl Error + 'static) -> Box<dyn Error> {

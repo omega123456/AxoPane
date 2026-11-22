@@ -1,22 +1,22 @@
 use std::ptr;
-use std::sync::mpsc::Sender;
 use std::sync::Arc;
+use std::sync::mpsc::Sender;
 use std::thread::{self, JoinHandle};
 
-use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Shell::{
-    SHCNRF_InterruptLevel, SHCNRF_ShellLevel, SHChangeNotifyDeregister, SHChangeNotifyEntry,
-    SHChangeNotifyRegister, SHCNE_DRIVEADD, SHCNE_DRIVEREMOVED, SHCNE_MEDIAINSERTED,
-    SHCNE_MEDIAREMOVED, SHCNE_NETSHARE, SHCNE_NETUNSHARE,
+    SHCNE_DRIVEADD, SHCNE_DRIVEREMOVED, SHCNE_MEDIAINSERTED, SHCNE_MEDIAREMOVED, SHCNE_NETSHARE,
+    SHCNE_NETUNSHARE, SHCNRF_InterruptLevel, SHCNRF_ShellLevel, SHChangeNotifyDeregister,
+    SHChangeNotifyEntry, SHChangeNotifyRegister,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
-    GetWindowLongPtrW, PostThreadMessageW, RegisterClassExW, RegisterWindowMessageW,
-    SetWindowLongPtrW, TranslateMessage, GWLP_USERDATA, HWND_MESSAGE, MSG, WM_QUIT, WNDCLASSEXW,
-    WNDCLASS_STYLES, WS_OVERLAPPED,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GWLP_USERDATA, GetMessageW,
+    GetWindowLongPtrW, HWND_MESSAGE, MSG, PostThreadMessageW, RegisterClassExW,
+    RegisterWindowMessageW, SetWindowLongPtrW, TranslateMessage, WM_QUIT, WNDCLASS_STYLES,
+    WNDCLASSEXW, WS_OVERLAPPED,
 };
+use windows::core::PCWSTR;
 
 use super::registry::RegistryReconcileBridge;
 
@@ -122,25 +122,27 @@ unsafe fn create_message_window(class_name: PCWSTR) -> Result<HWND, String> {
         lpszClassName: class_name,
         ..Default::default()
     };
-    let registration_failed = RegisterClassExW(&class) == 0;
+    let registration_failed = unsafe { RegisterClassExW(&class) } == 0;
     if registration_failed {
         return Err("RegisterClassExW failed".to_string());
     }
 
-    CreateWindowExW(
-        Default::default(),
-        class_name,
-        class_name,
-        WS_OVERLAPPED,
-        0,
-        0,
-        0,
-        0,
-        Some(HWND_MESSAGE),
-        None,
-        None,
-        None,
-    )
+    unsafe {
+        CreateWindowExW(
+            Default::default(),
+            class_name,
+            class_name,
+            WS_OVERLAPPED,
+            0,
+            0,
+            0,
+            0,
+            Some(HWND_MESSAGE),
+            None,
+            None,
+            None,
+        )
+    }
     .map_err(|error| error.to_string())
 }
 
@@ -158,14 +160,16 @@ unsafe fn register_volume_notifications(hwnd: HWND, change_message: u32) -> u32 
         | SHCNE_NETUNSHARE)
         .0;
 
-    SHChangeNotifyRegister(
-        hwnd,
-        windows::Win32::UI::Shell::SHCNRF_SOURCE(sources),
-        events as i32,
-        change_message,
-        1,
-        &entry,
-    )
+    unsafe {
+        SHChangeNotifyRegister(
+            hwnd,
+            windows::Win32::UI::Shell::SHCNRF_SOURCE(sources),
+            events as i32,
+            change_message,
+            1,
+            &entry,
+        )
+    }
 }
 
 unsafe fn setup_window_and_registration(
@@ -174,10 +178,10 @@ unsafe fn setup_window_and_registration(
     let class_name = crate::win32::wide_nul(WINDOW_CLASS_NAME_STR);
     let class_name_ptr = PCWSTR(class_name.as_ptr());
 
-    let hwnd = create_message_window(class_name_ptr)?;
+    let hwnd = unsafe { create_message_window(class_name_ptr) }?;
 
     let change_message_name = crate::win32::wide_nul(CHANGE_MESSAGE_NAME);
-    let change_message = RegisterWindowMessageW(PCWSTR(change_message_name.as_ptr()));
+    let change_message = unsafe { RegisterWindowMessageW(PCWSTR(change_message_name.as_ptr())) };
     if change_message == 0 {
         return Err("RegisterWindowMessageW failed".to_string());
     }
@@ -186,12 +190,12 @@ unsafe fn setup_window_and_registration(
         bridge,
         change_message,
     }));
-    SetWindowLongPtrW(hwnd, GWLP_USERDATA, context as isize);
+    unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, context as isize) };
 
-    let notify_id = register_volume_notifications(hwnd, change_message);
+    let notify_id = unsafe { register_volume_notifications(hwnd, change_message) };
     if notify_id == 0 {
-        drop(Box::from_raw(context));
-        let _ = DestroyWindow(hwnd);
+        drop(unsafe { Box::from_raw(context) });
+        let _ = unsafe { DestroyWindow(hwnd) };
         return Err("SHChangeNotifyRegister failed".to_string());
     }
 
@@ -208,14 +212,14 @@ unsafe extern "system" fn wnd_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    let context_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const ThreadContext;
+    let context_ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const ThreadContext;
     if !context_ptr.is_null() {
-        let context = &*context_ptr;
+        let context = unsafe { &*context_ptr };
         if window_message == context.change_message {
             context.bridge.reconcile();
             return LRESULT(0);
         }
     }
 
-    DefWindowProcW(hwnd, window_message, wparam, lparam)
+    unsafe { DefWindowProcW(hwnd, window_message, wparam, lparam) }
 }

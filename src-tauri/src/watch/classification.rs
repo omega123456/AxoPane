@@ -4,14 +4,14 @@ use std::path::{Path, PathBuf};
 
 use notify::event::{EventKind, ModifyKind, RenameMode};
 
+use super::WatchedTab;
 #[cfg(feature = "test-utils")]
 use super::coordinator::WatchId;
 use super::coordinator::{MutationKind, RawMutation};
 #[cfg(feature = "test-utils")]
-use super::tab_patch::{resnapshot_tab, SnapshotDraft};
-use super::WatchedTab;
+use super::tab_patch::{SnapshotDraft, resnapshot_tab};
 #[cfg(feature = "test-utils")]
-use super::{is_paired_rename, DirPatch, WatchEmitters, WatchRuntime, WatchTarget, WatchedTabs};
+use super::{DirPatch, WatchEmitters, WatchRuntime, WatchTarget, WatchedTabs, is_paired_rename};
 use crate::fs;
 #[cfg(feature = "test-utils")]
 use crate::fs::DirectoryEntry;

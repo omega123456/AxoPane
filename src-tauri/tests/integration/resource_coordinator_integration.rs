@@ -17,12 +17,10 @@ use std::time::Duration;
 
 use crossbeam_channel::{bounded, unbounded};
 
-use axopane_lib::resource_coordinator::queue::{
-    MAX_CPU_SLOTS, MAX_LATENCY_SLOTS, MAX_QUEUED_JOBS,
-};
+use axopane_lib::resource_coordinator::queue::{MAX_CPU_SLOTS, MAX_LATENCY_SLOTS, MAX_QUEUED_JOBS};
 use axopane_lib::resource_coordinator::{
-    max_throughput_slots, throughput_slots_for_parallelism_for_tests, JobClass, JobSpec,
-    ResourceCoordinator, SubmitError,
+    JobClass, JobSpec, ResourceCoordinator, SubmitError, max_throughput_slots,
+    throughput_slots_for_parallelism_for_tests,
 };
 
 /// Generous bound for "this must resolve quickly" assertions. Never used as

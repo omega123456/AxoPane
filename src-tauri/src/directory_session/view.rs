@@ -1,4 +1,4 @@
-use crate::fs::{compare_entries, DirectoryEntry, SortOrder};
+use crate::fs::{DirectoryEntry, SortOrder, compare_entries};
 
 use super::model::ViewParams;
 

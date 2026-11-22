@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use self::coordinator::{WatchCoordinator, WatchId};
 use crate::fs::{DirectoryEntry, SortDirection, SortKey};
 
-pub use capture::{begin_capture, drain_captured_mutations, CaptureHandle};
+pub use capture::{CaptureHandle, begin_capture, drain_captured_mutations};
 #[cfg(feature = "test-utils")]
 pub use capture::{capture_handle_for_tests, drain_captured_mutations_for_tests};
 #[cfg(feature = "test-utils")]
@@ -30,7 +30,7 @@ pub use runtime::{
     forward_notify_result_for_tests, forward_notify_result_with_before_lock_for_tests,
     process_compacted_batch_for_tests, while_tabs_locked_for_tests,
 };
-pub use tab_patch::{diff_entries, snapshot_for_target, PatchLabel};
+pub use tab_patch::{PatchLabel, diff_entries, snapshot_for_target};
 use tab_patch::{snapshot_for_watch_baseline, snapshot_from_entries_for_watch};
 
 const RENAME_EVENT_PATH_COUNT: usize = 2;

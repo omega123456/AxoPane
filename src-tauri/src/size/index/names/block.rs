@@ -1,9 +1,9 @@
 use std::cmp::Ordering;
 use std::ops::Range;
 
-use super::signature::{signature_of, SignatureFilter, SignedName};
-use super::{names_in, NAME_TERMINATOR};
-use crate::size::index::persist::{put_u32, Reader};
+use super::signature::{SignatureFilter, SignedName, signature_of};
+use super::{NAME_TERMINATOR, names_in};
+use crate::size::index::persist::{Reader, put_u32};
 use crate::size::index::segment::format::le_u32;
 
 pub const BLOCK_TARGET_BYTES: usize = 256 * 1024;
@@ -78,7 +78,7 @@ impl<'bytes> NameSignatures<'bytes> {
         self.bytes.is_empty()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = u32> + 'bytes {
+    pub fn iter(&self) -> impl Iterator<Item = u32> + use<'bytes> {
         self.bytes.chunks_exact(FIELD_BYTES).filter_map(le_u32)
     }
 }
@@ -186,7 +186,7 @@ impl<'bytes> BlockView<'bytes> {
         split_regions(stored).ok_or(NamesCorrupt)
     }
 
-    pub fn folders(&self) -> impl Iterator<Item = BlockFolder<'bytes>> {
+    pub fn folders(&self) -> impl Iterator<Item = BlockFolder<'bytes>> + use<'bytes> {
         let view = *self;
         (0..self.folder_count()).map_while(move |position| view.folder_at(position))
     }

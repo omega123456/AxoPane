@@ -5,11 +5,11 @@ use std::io::{BufReader, BufWriter};
 #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
 use std::process::{Child, Command, Stdio};
 #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
+use std::sync::OnceLock;
+#[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
 use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
 use std::sync::mpsc;
-#[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
-use std::sync::OnceLock;
 #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
 use std::sync::{Arc, Mutex};
 #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
@@ -17,9 +17,9 @@ use std::thread;
 
 #[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
 use super::helper_entry::HELPER_ARGUMENT;
-#[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
-use super::helper_protocol::{read_frame, write_frame, HelperRequest, HelperResponse};
 use super::helper_protocol::{HelperOperation, HelperResult};
+#[cfg(all(not(feature = "test-utils"), target_os = "windows"))]
+use super::helper_protocol::{HelperRequest, HelperResponse, read_frame, write_frame};
 
 pub const DISCOVERY_DEADLINE: Duration = Duration::from_secs(2);
 pub const INVOCATION_DEADLINE: Duration = Duration::from_secs(5);

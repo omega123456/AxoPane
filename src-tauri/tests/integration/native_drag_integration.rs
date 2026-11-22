@@ -1,4 +1,4 @@
-use axopane_lib::native_drag::{drag_paths, start_native_drag, StartNativeDragRequest};
+use axopane_lib::native_drag::{StartNativeDragRequest, drag_paths, start_native_drag};
 use tempfile::tempdir;
 
 fn request(paths: &[&std::path::Path]) -> StartNativeDragRequest {

@@ -1,6 +1,6 @@
 use super::builder::{BuildError, BuiltSegment, SegmentBuilder, SegmentEntry};
 use super::format::NodeFlags;
-use super::spill::{key_of, GraftTarget, SortedRecord, SortedRecords, KEY_SEPARATOR};
+use super::spill::{GraftTarget, KEY_SEPARATOR, SortedRecord, SortedRecords, key_of};
 use crate::size::index::names::NAME_TERMINATOR;
 
 const ROOT_DEPTH: usize = 0;

@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Condvar, Mutex};
 
 use super::delete::remove_target;
-use super::execution::{record_transfer_failure, ItemTransfer, TransferFailure, WorkerContext};
+use super::execution::{ItemTransfer, TransferFailure, WorkerContext, record_transfer_failure};
 use super::paths::{is_real_directory, normalized_components, path_entry_exists, unique_name};
 use super::progress::{advance_item, count_skipped_bytes, emit_operation_progress};
 use super::{

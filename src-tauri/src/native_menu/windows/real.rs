@@ -8,28 +8,27 @@ use crate::native_menu::types::{
     NativeMenuCanonicalActionKind, NativeMenuIcon, NativeMenuIconKind, NativeMenuTargetKind,
 };
 use crate::native_menu::windows_shell::{
-    is_background_target, parent_directory, sanitize_menu_label, OwnedPidl,
+    OwnedPidl, is_background_target, parent_directory, sanitize_menu_label,
 };
 use crate::win32::gdi::bitmap_to_data_url;
 use crate::win32::shell::ShellExecuteRequest;
 use crate::win32::wide_nul;
 use std::ffi::OsStr;
-use windows::core::{Interface, PCWSTR};
 use windows::Win32::Foundation::E_FAIL;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, MAX_PATH, WPARAM};
 use windows::Win32::System::Com::IBindCtx;
 use windows::Win32::UI::Shell::{
-    Common::ITEMIDLIST, IContextMenu, IContextMenu2, IContextMenu3, IShellFolder, SHBindToObject,
-    SHBindToParent, SHGetDesktopFolder, SHOpenWithDialog, CMF_CANRENAME, CMF_EXPLORE,
-    CMF_EXTENDEDVERBS, CMF_INCLUDESTATIC, CMF_ITEMMENU, CMF_NODEFAULT, CMF_NORMAL,
-    CMF_SYNCCASCADEMENU, CMINVOKECOMMANDINFO, GCS_VERBW, OAIF_ALLOW_REGISTRATION, OAIF_EXEC,
-    OPENASINFO,
+    CMF_CANRENAME, CMF_EXPLORE, CMF_EXTENDEDVERBS, CMF_INCLUDESTATIC, CMF_ITEMMENU, CMF_NODEFAULT,
+    CMF_NORMAL, CMF_SYNCCASCADEMENU, CMINVOKECOMMANDINFO, Common::ITEMIDLIST, GCS_VERBW,
+    IContextMenu, IContextMenu2, IContextMenu3, IShellFolder, OAIF_ALLOW_REGISTRATION, OAIF_EXEC,
+    OPENASINFO, SHBindToObject, SHBindToParent, SHGetDesktopFolder, SHOpenWithDialog,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, DestroyMenu, GetMenuItemCount, GetMenuItemInfoW, MENUITEMINFOW, MFS_DISABLED,
     MFS_GRAYED, MFT_SEPARATOR, MIIM_BITMAP, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING,
     MIIM_SUBMENU, SW_SHOWNORMAL, WM_INITMENUPOPUP,
 };
+use windows::core::{Interface, PCWSTR};
 
 const COMMAND_ID_FIRST: u32 = 1;
 const COMMAND_ID_LAST: u32 = 0x7FFF;
@@ -82,12 +81,12 @@ pub(super) fn invoke_impl(invocation: ProviderInvocation) -> MenuActionStatus {
                 Ok(()) => MenuActionStatus::handled_with_message("invoked"),
                 Err(error) => {
                     log::warn!(
-                    "modern menu invocation failed for request {} clsid {:032x} at path {:?}: {}",
-                    request.request_id,
-                    clsid,
-                    command_path,
-                    error
-                );
+                        "modern menu invocation failed for request {} clsid {:032x} at path {:?}: {}",
+                        request.request_id,
+                        clsid,
+                        command_path,
+                        error
+                    );
                     MenuActionStatus::unsupported("native-invoke-failed")
                 }
             }
@@ -310,7 +309,7 @@ unsafe fn bind_to_parent(
     pidl: *const ITEMIDLIST,
 ) -> windows::core::Result<(IShellFolder, *mut ITEMIDLIST)> {
     let mut child = null_mut();
-    let parent = SHBindToParent::<IShellFolder>(pidl, Some(&mut child))?;
+    let parent = unsafe { SHBindToParent::<IShellFolder>(pidl, Some(&mut child)) }?;
     Ok((parent, child))
 }
 

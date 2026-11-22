@@ -1,9 +1,9 @@
 use crate::common;
 
 use axopane_lib::persist::{
-    default_column_widths, default_columns, default_date_format, default_favourites_height_px,
-    default_pane_split, default_sort_direction, default_sort_key, default_tree_width_px,
-    default_update_check_interval, default_view_mode, default_zoom, Config, LayoutConfig,
+    Config, LayoutConfig, default_column_widths, default_columns, default_date_format,
+    default_favourites_height_px, default_pane_split, default_sort_direction, default_sort_key,
+    default_tree_width_px, default_update_check_interval, default_view_mode, default_zoom,
 };
 
 #[test]

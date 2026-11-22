@@ -12,7 +12,7 @@ use super::assemble;
 use super::builder::{BuildError, BuiltSegment, SegmentTarget};
 use crate::resource_coordinator::scan_pool::run_on_scan_workers;
 use crate::size::index::names::file::remove_if_present;
-use crate::size::index::names::{PackedNames, NAME_TERMINATOR};
+use crate::size::index::names::{NAME_TERMINATOR, PackedNames};
 use crate::size::index::persist::Reader;
 use crate::size::index::tree::DirectoryListing;
 

@@ -2,7 +2,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use super::overlay::Facts;
-use super::{NodeId, HEAP_BIT, NONE};
+use super::{HEAP_BIT, NONE, NodeId};
 use crate::size::index::names::ReadFailure;
 use crate::size::index::segment::{ChildIds, MappedSegment, SegmentCorrupt};
 
@@ -23,7 +23,7 @@ impl<'tree> Children<'tree> {
         }
     }
 
-    pub(crate) fn iter(&self) -> impl DoubleEndedIterator<Item = NodeId> + 'tree {
+    pub(crate) fn iter(&self) -> impl DoubleEndedIterator<Item = NodeId> + use<'tree> {
         let first_mapped_id = self.first_mapped_id;
         let mapped = self
             .mapped

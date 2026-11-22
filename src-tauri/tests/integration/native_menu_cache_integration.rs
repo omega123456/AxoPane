@@ -7,13 +7,13 @@ use std::sync::{Arc, Mutex};
 use axopane_lib::ipc::types::{
     InvokeNativeMenuRequest, LoadNativeMenuRequest, NativeMenuTargetKind,
 };
+use axopane_lib::native_menu::NativeMenuService;
 use axopane_lib::native_menu::menu_cache::MenuCache;
 use axopane_lib::native_menu::provider::{
     NativeMenuProvider, ProviderInvocation, ProviderNativeMenuItem,
 };
 use axopane_lib::native_menu::shell_executor::ShellExecutor;
 use axopane_lib::native_menu::types::{NativeMenuIcon, NativeMenuIconKind};
-use axopane_lib::native_menu::NativeMenuService;
 
 const OVERSIZED_MENU_LABEL_BYTES: usize = 17 * 1024 * 1024;
 
@@ -233,12 +233,16 @@ fn cache_helpers_report_population() {
     cache.insert(&file_request("req", "C:\\one\\report.txt"), &[]);
     assert!(!cache.is_empty());
     assert_eq!(cache.len(), 1);
-    assert!(cache
-        .get(&file_request("req", "C:\\two\\other.txt"))
-        .is_some());
-    assert!(cache
-        .get(&file_request("req", "C:\\two\\other.png"))
-        .is_none());
+    assert!(
+        cache
+            .get(&file_request("req", "C:\\two\\other.txt"))
+            .is_some()
+    );
+    assert!(
+        cache
+            .get(&file_request("req", "C:\\two\\other.png"))
+            .is_none()
+    );
 }
 
 #[test]

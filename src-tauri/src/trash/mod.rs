@@ -69,11 +69,24 @@ fn move_to_trash_impl(paths: &[String]) -> Result<(), String> {
 }
 
 #[cfg(feature = "test-utils")]
+static FAKE_TRASH_DIR_OVERRIDE: std::sync::Mutex<Option<std::path::PathBuf>> =
+    std::sync::Mutex::new(None);
+
+#[cfg(feature = "test-utils")]
+pub fn set_fake_trash_dir_for_tests(path: &std::path::Path) {
+    let mut override_dir = FAKE_TRASH_DIR_OVERRIDE
+        .lock()
+        .expect("fake trash dir override lock");
+    *override_dir = Some(path.to_path_buf());
+}
+
+#[cfg(feature = "test-utils")]
 pub fn fake_trash_dir() -> std::path::PathBuf {
-    if let Some(override_dir) = std::env::var_os("AXOPANE_TEST_FAKE_TRASH_DIR") {
-        return std::path::PathBuf::from(override_dir);
-    }
-    std::env::temp_dir().join("axopane-fake-trash")
+    let override_dir = FAKE_TRASH_DIR_OVERRIDE
+        .lock()
+        .expect("fake trash dir override lock")
+        .clone();
+    override_dir.unwrap_or_else(|| std::env::temp_dir().join("axopane-fake-trash"))
 }
 
 #[cfg(feature = "test-utils")]

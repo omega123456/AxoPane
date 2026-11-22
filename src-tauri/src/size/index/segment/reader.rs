@@ -6,8 +6,8 @@ use std::sync::Arc;
 use memmap2::Mmap;
 
 use super::format::{
-    decode_range, le_u32, le_u64, Cell, CellRun, Column, Layout, NodeFlags, OpenedTree,
-    SegmentPaths, TreeHeader, NO_PARENT,
+    Cell, CellRun, Column, Layout, NO_PARENT, NodeFlags, OpenedTree, SegmentPaths, TreeHeader,
+    decode_range, le_u32, le_u64,
 };
 use crate::size::index::names::block;
 use crate::size::index::names::file::MappedNames;
@@ -50,7 +50,7 @@ impl<'segment> ChildIds<'segment> {
         le_u32(self.bytes.get(start..start.checked_add(CHILD_ID_BYTES)?)?)
     }
 
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = u32> + 'segment {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = u32> + use<'segment> {
         self.bytes.chunks_exact(CHILD_ID_BYTES).filter_map(le_u32)
     }
 }

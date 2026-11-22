@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Instant, SystemTime};
 
 use crossbeam_channel::{Receiver, Sender};
@@ -26,8 +26,8 @@ use crate::size::{SizeRequest, SizeSource, SizeStateKind, SizeUpdate};
 use super::lanes::{BoostJob, Lane, ScanJob, ScanKind, WalkOutcome};
 use super::scan_batch::FinishedBatch;
 use super::service::{
-    unix_secs, unknown, BoostRequest, Clock, IndexOptions, Shared, SizeEmitter, StatusEmitter,
-    View, WalkTuning,
+    BoostRequest, Clock, IndexOptions, Shared, SizeEmitter, StatusEmitter, View, WalkTuning,
+    unix_secs, unknown,
 };
 use super::subscriptions::SubscribedFolder;
 

@@ -132,18 +132,18 @@ pub fn classify_patch(input: ClassifyPatchInput<'_>) -> Option<SessionPatch> {
         return None;
     }
 
-    if total_touched == 1 {
-        if let Some(delta) = single_row_delta(&input) {
-            return Some(SessionPatch::Delta {
-                pane_id: pane_id.to_string(),
-                tab_id: tab_id.to_string(),
-                path: path.to_string(),
-                previous_baseline,
-                next_baseline,
-                total_rows: next_view.len() as u64,
-                deltas: vec![delta],
-            });
-        }
+    if total_touched == 1
+        && let Some(delta) = single_row_delta(&input)
+    {
+        return Some(SessionPatch::Delta {
+            pane_id: pane_id.to_string(),
+            tab_id: tab_id.to_string(),
+            path: path.to_string(),
+            previous_baseline,
+            next_baseline,
+            total_rows: next_view.len() as u64,
+            deltas: vec![delta],
+        });
     }
 
     Some(SessionPatch::ReplaceView {

@@ -6,13 +6,13 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crossbeam_channel::bounded;
 use axopane_lib::reconcile::{ReconcileCoordinator, ReconcileResource};
 use axopane_lib::resource_coordinator::{JobClass, JobSpec, ResourceCoordinator};
 use axopane_lib::watch::coordinator::{
-    CompactedBatch, ControlMessage, MutationKind, RawMutation, WatchCoordinator, WatchId,
-    MAX_PENDING_MUTATIONS_PER_WATCH,
+    CompactedBatch, ControlMessage, MAX_PENDING_MUTATIONS_PER_WATCH, MutationKind, RawMutation,
+    WatchCoordinator, WatchId,
 };
+use crossbeam_channel::bounded;
 
 const PROMPT: Duration = Duration::from_millis(800);
 
@@ -146,16 +146,10 @@ fn bump_generation_advances_per_target_and_is_current_tracks_the_latest() {
 #[test]
 fn generation_for_tests_reports_the_reserved_test_targets_generation() {
     let reconcile = ReconcileCoordinator::default();
-    assert_eq!(
-        axopane_lib::reconcile::generation_for_tests(&reconcile),
-        0
-    );
+    assert_eq!(axopane_lib::reconcile::generation_for_tests(&reconcile), 0);
     reconcile.bump_generation("test");
     reconcile.bump_generation("test");
-    assert_eq!(
-        axopane_lib::reconcile::generation_for_tests(&reconcile),
-        2
-    );
+    assert_eq!(axopane_lib::reconcile::generation_for_tests(&reconcile), 2);
 }
 
 #[test]
