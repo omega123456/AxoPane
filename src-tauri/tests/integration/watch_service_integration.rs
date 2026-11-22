@@ -4,8 +4,8 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use file_explorer_lib::fs::{self as app_fs, SortDirection, SortKey};
-use file_explorer_lib::watch::{
+use axopane_lib::fs::{self as app_fs, SortDirection, SortKey};
+use axopane_lib::watch::{
     create_runtime, forward_notify_result_with_before_lock_for_tests, insert_tab_for_tests,
     snapshot_for_target, tab_snapshot_for_tests, while_tabs_locked_for_tests, DirPatch,
     TabWatchArm, WatchEmitters, WatchService, WatchTarget,

@@ -7,21 +7,21 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use file_explorer_lib::resource_coordinator::{
+use axopane_lib::resource_coordinator::{
     max_throughput_slots, JobClass, JobSpec, ResourceCoordinator,
 };
-use file_explorer_lib::size::everything::EverythingAvailability;
-use file_explorer_lib::size::everything::{
+use axopane_lib::size::everything::EverythingAvailability;
+use axopane_lib::size::everything::{
     build_exact_folder_or_queries, escape_exact_folder_query_path, join_everything_result_path,
     map_everything_result_sizes, normalize_result_path, EverythingHandle,
     EVERYTHING_BATCH_CHUNK_SIZE,
 };
-use file_explorer_lib::size::manual::{calculate, ManualSizeError};
-use file_explorer_lib::size::{
+use axopane_lib::size::manual::{calculate, ManualSizeError};
+use axopane_lib::size::{
     RequestMode, SizeBackend, SizeRequest, SizeRequestWithVolumes, SizeService, SizeSource,
     SizeStateKind, SizeUpdate, DEFAULT_MANUAL_SIZE_TIMEOUT,
 };
-use file_explorer_lib::volumes::VolumeInfo;
+use axopane_lib::volumes::VolumeInfo;
 use tempfile::tempdir;
 
 #[test]
@@ -97,9 +97,9 @@ fn manual_size_error_converts_shared_traversal_failures() {
     let fixture = tempdir().expect("temp dir");
     let missing = fixture.path().join("missing-root");
 
-    let walk_error = match file_explorer_lib::traversal::walk(
+    let walk_error = match axopane_lib::traversal::walk(
         &missing,
-        file_explorer_lib::traversal::TraversalOptions::default(),
+        axopane_lib::traversal::TraversalOptions::default(),
         Arc::new(AtomicBool::new(false)),
     ) {
         Err(error) => error,
@@ -597,9 +597,9 @@ fn everything_backed_requests_emit_batched_ready_and_na_results() {
     let status = service.folder_size_index_status();
     assert_eq!(
         status.backend,
-        file_explorer_lib::size::IndexBackend::Everything
+        axopane_lib::size::IndexBackend::Everything
     );
-    assert_eq!(status.state, file_explorer_lib::size::IndexState::UpToDate);
+    assert_eq!(status.state, axopane_lib::size::IndexState::UpToDate);
     assert!(status.is_available);
 
     service.request_paths_with_mode(

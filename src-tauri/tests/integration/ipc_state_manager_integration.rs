@@ -6,19 +6,19 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use file_explorer_lib::fs::{SortDirection, SortKey};
-use file_explorer_lib::ipc::commands;
-use file_explorer_lib::ipc::types::{
+use axopane_lib::fs::{SortDirection, SortKey};
+use axopane_lib::ipc::commands;
+use axopane_lib::ipc::types::{
     AddIndexExclusionRequest, CancelSizeRequest, CancelSizesRequest, CreateEntryRequest,
     IndexCommandError, LogFrontendRequest, OpIdRequest, OpenPathRequest,
     RemoveIndexExclusionRequest, ReorderOpsRequest, ResolveConflictRequest, SaveConfigRequest,
     SaveSessionRequest, SetTabWatchRequest, TrashEntriesRequest,
 };
-use file_explorer_lib::ops::{
+use axopane_lib::ops::{
     ConflictResolution, OpItem, OpKind, OpStatus, OpsService, StartOpRequest,
 };
-use file_explorer_lib::persist::{Config, PersistenceState, Session};
-use file_explorer_lib::size::{size_path_from_string, SizeService};
+use axopane_lib::persist::{Config, PersistenceState, Session};
+use axopane_lib::size::{size_path_from_string, SizeService};
 use tempfile::tempdir;
 
 fn op_item(path: &Path) -> OpItem {
@@ -68,8 +68,8 @@ fn path_text(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn list_request(path: &Path, show_hidden: bool) -> file_explorer_lib::ipc::types::ListDirRequest {
-    file_explorer_lib::ipc::types::ListDirRequest {
+fn list_request(path: &Path, show_hidden: bool) -> axopane_lib::ipc::types::ListDirRequest {
+    axopane_lib::ipc::types::ListDirRequest {
         path: path_text(path),
         sort_key: SortKey::Name,
         sort_direction: SortDirection::Asc,
@@ -164,7 +164,7 @@ fn commands_cover_filesystem_entry_lifecycle() {
     let listing = commands::list_dir(list_request(root, true)).expect("list dir");
     assert_eq!(listing.entries.len(), 2);
 
-    let renamed = commands::rename_entry(file_explorer_lib::ipc::types::RenameEntryRequest {
+    let renamed = commands::rename_entry(axopane_lib::ipc::types::RenameEntryRequest {
         path: path_text(&root.join("todo.txt")),
         new_name: "done.txt".to_string(),
     })
@@ -212,18 +212,18 @@ fn size_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
     (fixture, size_root)
 }
 
-fn has_ready_or_na(state: file_explorer_lib::size::SizeStateKind) -> bool {
+fn has_ready_or_na(state: axopane_lib::size::SizeStateKind) -> bool {
     matches!(
         state,
-        file_explorer_lib::size::SizeStateKind::Ready | file_explorer_lib::size::SizeStateKind::Na
+        axopane_lib::size::SizeStateKind::Ready | axopane_lib::size::SizeStateKind::Na
     )
 }
 
-fn expected_auto_size_state() -> file_explorer_lib::size::SizeStateKind {
+fn expected_auto_size_state() -> axopane_lib::size::SizeStateKind {
     if cfg!(target_os = "macos") {
-        return file_explorer_lib::size::SizeStateKind::Unknown;
+        return axopane_lib::size::SizeStateKind::Unknown;
     }
-    file_explorer_lib::size::SizeStateKind::Ready
+    axopane_lib::size::SizeStateKind::Ready
 }
 
 fn fixture_network_root() -> String {
@@ -241,17 +241,17 @@ fn commands_report_unavailable_size_index_and_auto_sizing() {
     let status = commands::folder_size_index_status(as_state(&size_service));
     assert!(!status.is_available);
     let backend = if cfg!(windows) {
-        file_explorer_lib::size::IndexBackend::Everything
+        axopane_lib::size::IndexBackend::Everything
     } else {
-        file_explorer_lib::size::IndexBackend::None
+        axopane_lib::size::IndexBackend::None
     };
     assert_eq!(status.backend, backend);
     assert_eq!(
         status.state,
-        file_explorer_lib::size::IndexState::Unavailable
+        axopane_lib::size::IndexState::Unavailable
     );
     commands::set_size_subscriptions(
-        file_explorer_lib::ipc::types::SizeSubscriptionsRequest {
+        axopane_lib::ipc::types::SizeSubscriptionsRequest {
             pane_id: "left".to_string(),
             current_path: None,
             folder_paths: Vec::new(),
@@ -260,9 +260,9 @@ fn commands_report_unavailable_size_index_and_auto_sizing() {
     );
 
     let auto_batches = commands::request_folder_sizes(
-        file_explorer_lib::ipc::types::FolderSizesRequest {
+        axopane_lib::ipc::types::FolderSizesRequest {
             paths: vec![path_text(&size_root)],
-            mode: Some(file_explorer_lib::size::RequestMode::Auto),
+            mode: Some(axopane_lib::size::RequestMode::Auto),
         },
         as_state(&size_service),
     );
@@ -282,7 +282,7 @@ fn commands_size_a_folder_and_cancel_idle_requests() {
     let (_fixture, size_root) = size_fixture();
 
     let size_batches = commands::request_folder_size(
-        file_explorer_lib::ipc::types::FolderSizeRequest {
+        axopane_lib::ipc::types::FolderSizeRequest {
             path: path_text(&size_root),
             mode: None,
         },
@@ -315,7 +315,7 @@ fn commands_mark_network_folders_as_not_applicable() {
     let (_fixture, size_root) = size_fixture();
 
     let network_size_batches = commands::request_folder_sizes(
-        file_explorer_lib::ipc::types::FolderSizesRequest {
+        axopane_lib::ipc::types::FolderSizesRequest {
             paths: vec![path_text(&size_root), fixture_network_root()],
             mode: None,
         },
@@ -329,8 +329,8 @@ fn commands_mark_network_folders_as_not_applicable() {
         .iter()
         .any(|event| event.path == size_root.to_string_lossy() && has_ready_or_na(event.state)));
     assert!(network_size_events.iter().any(|event| {
-        matches!(event.state, file_explorer_lib::size::SizeStateKind::Na)
-            && event.source == file_explorer_lib::size::SizeSource::Network
+        matches!(event.state, axopane_lib::size::SizeStateKind::Na)
+            && event.source == axopane_lib::size::SizeSource::Network
     }));
 }
 
@@ -342,7 +342,7 @@ fn commands_return_placeholder_icons_in_request_order() {
         path_text(&size_root.join("file-1.txt")),
     ];
     let icon_batches =
-        commands::request_icons(file_explorer_lib::ipc::types::RequestIconsRequest {
+        commands::request_icons(axopane_lib::ipc::types::RequestIconsRequest {
             paths: icon_paths.clone(),
         });
     let icon_events: Vec<_> = icon_batches.into_iter().flatten().collect();
@@ -358,13 +358,13 @@ fn commands_return_placeholder_icons_in_request_order() {
         .all(|event| event.icon_data_url.is_none()));
 }
 
-fn thumbnail_candidate(path: &Path) -> file_explorer_lib::ipc::types::ThumbnailCandidateRequest {
-    file_explorer_lib::ipc::types::ThumbnailCandidateRequest {
+fn thumbnail_candidate(path: &Path) -> axopane_lib::ipc::types::ThumbnailCandidateRequest {
+    axopane_lib::ipc::types::ThumbnailCandidateRequest {
         path: path_text(path),
         modified_unix_seconds: 0,
         size_bytes: 32,
         is_directory: false,
-        priority: file_explorer_lib::ipc::types::ThumbnailPriority::Visible,
+        priority: axopane_lib::ipc::types::ThumbnailPriority::Visible,
         order: 0,
     }
 }
@@ -372,11 +372,11 @@ fn thumbnail_candidate(path: &Path) -> file_explorer_lib::ipc::types::ThumbnailC
 #[test]
 fn commands_request_and_cancel_thumbnails() {
     let (_fixture, size_root) = size_fixture();
-    let thumbnail_service = Arc::new(file_explorer_lib::thumbnails::ThumbnailService::new(
-        Arc::new(file_explorer_lib::resource_coordinator::ResourceCoordinator::new()),
+    let thumbnail_service = Arc::new(axopane_lib::thumbnails::ThumbnailService::new(
+        Arc::new(axopane_lib::resource_coordinator::ResourceCoordinator::new()),
     ));
     commands::request_thumbnails(
-        file_explorer_lib::ipc::types::RequestThumbnailsRequest {
+        axopane_lib::ipc::types::RequestThumbnailsRequest {
             pane_id: "left".into(),
             tab_id: "tab".into(),
             path: path_text(&size_root),
@@ -388,7 +388,7 @@ fn commands_request_and_cancel_thumbnails() {
     )
     .expect("request thumbnails");
     commands::cancel_thumbnails(
-        file_explorer_lib::ipc::types::CancelThumbnailsRequest {
+        axopane_lib::ipc::types::CancelThumbnailsRequest {
             pane_id: "left".into(),
             tab_id: "tab".into(),
             path: path_text(&size_root),
@@ -419,8 +419,8 @@ fn commands_format_and_record_frontend_logs() {
 }
 
 fn set_watch(
-    watch_service: &Arc<file_explorer_lib::watch::WatchService>,
-    target: Option<file_explorer_lib::watch::WatchTarget>,
+    watch_service: &Arc<axopane_lib::watch::WatchService>,
+    target: Option<axopane_lib::watch::WatchTarget>,
 ) -> Result<(), String> {
     commands::set_tab_watch(
         SetTabWatchRequest {
@@ -433,9 +433,9 @@ fn set_watch(
 
 #[test]
 fn commands_reseed_and_clear_tab_watches() {
-    let watch_service = Arc::new(file_explorer_lib::watch::WatchService::default());
+    let watch_service = Arc::new(axopane_lib::watch::WatchService::default());
     let fixture = tempdir().expect("temp dir");
-    let watch_target = file_explorer_lib::watch::WatchTarget {
+    let watch_target = axopane_lib::watch::WatchTarget {
         tab_id: "left-1".to_string(),
         path: path_text(fixture.path()),
         sort_key: SortKey::Name,
@@ -449,7 +449,7 @@ fn commands_reseed_and_clear_tab_watches() {
     set_watch(&watch_service, Some(watch_target.clone()))
         .expect("reseed tab watch after file write");
     let baseline =
-        file_explorer_lib::watch::tab_snapshot_for_tests(&watch_service, &watch_target.tab_id)
+        axopane_lib::watch::tab_snapshot_for_tests(&watch_service, &watch_target.tab_id)
             .expect("baseline recorded for tab");
     assert!(baseline.keys().any(|path| path.ends_with("watch.txt")));
     set_watch(&watch_service, None).expect("clear tab watch");

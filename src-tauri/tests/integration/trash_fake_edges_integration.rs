@@ -1,4 +1,4 @@
-use file_explorer_lib::trash::move_to_trash;
+use axopane_lib::trash::move_to_trash;
 
 #[test]
 fn fake_trash_rejects_blank_paths_without_a_file_name() {

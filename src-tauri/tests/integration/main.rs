@@ -1,38 +1,38 @@
 pub mod directory_session {
     pub mod model {
-        pub use file_explorer_lib::directory_session::model::*;
+        pub use axopane_lib::directory_session::model::*;
     }
 }
 
 pub mod error_text {
-    pub use file_explorer_lib::error_text::*;
+    pub use axopane_lib::error_text::*;
 }
 
 pub mod fs {
-    pub use file_explorer_lib::fs::*;
+    pub use axopane_lib::fs::*;
 }
 
 pub mod ipc {
     pub mod types {
-        pub use file_explorer_lib::ipc::types::*;
+        pub use axopane_lib::ipc::types::*;
     }
 }
 
 pub mod resource_coordinator {
-    pub use file_explorer_lib::resource_coordinator::*;
+    pub use axopane_lib::resource_coordinator::*;
 }
 
 pub mod traversal {
-    pub use file_explorer_lib::traversal::*;
+    pub use axopane_lib::traversal::*;
 }
 
 pub mod volumes {
-    pub use file_explorer_lib::volumes::*;
+    pub use axopane_lib::volumes::*;
 }
 
 #[cfg(windows)]
 pub mod win32 {
-    pub use file_explorer_lib::win32::*;
+    pub use axopane_lib::win32::*;
 }
 
 pub mod common;

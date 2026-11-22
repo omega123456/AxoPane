@@ -3,10 +3,10 @@ use std::panic;
 use std::sync::Arc;
 use std::thread;
 
-use file_explorer_lib::logging::panic::{
+use axopane_lib::logging::panic::{
     install_panic_logging, NON_TEXT_PAYLOAD, PANIC_TARGET, UNNAMED_THREAD,
 };
-use file_explorer_lib::logging::{current_local_date, read_current_day_logs, FileLogger, LogLevel};
+use axopane_lib::logging::{current_local_date, read_current_day_logs, FileLogger, LogLevel};
 use tempfile::tempdir;
 
 const WORKER_NAME: &str = "size-index";

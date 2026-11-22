@@ -1,5 +1,5 @@
-use file_explorer_lib::native_menu::canonical::{classify_canonical_action, normalize_verb};
-use file_explorer_lib::native_menu::types::NativeMenuCanonicalActionKind;
+use axopane_lib::native_menu::canonical::{classify_canonical_action, normalize_verb};
+use axopane_lib::native_menu::types::NativeMenuCanonicalActionKind;
 
 #[test]
 fn normalize_verb_keeps_lowercase_alphanumerics_only() {

@@ -7,17 +7,17 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use file_explorer_lib::resource_coordinator::parallelism::{
+use axopane_lib::resource_coordinator::parallelism::{
     walker_helper_budget, walker_job_threads,
 };
-use file_explorer_lib::size::fast_walk::{
+use axopane_lib::size::fast_walk::{
     helper_threads_for_tests, list_dir, subtree_records, subtree_total, DirHook, DirRecord,
     HelperThreadCounts, Qos, WalkOptions, INDEX_EXCLUDED_ROOTS,
 };
-use file_explorer_lib::size::index::names::PackedNames;
-use file_explorer_lib::size::index::platform::DATA_VOLUME_PREFIX;
-use file_explorer_lib::size::manual::{calculate, ManualSizeError};
-use file_explorer_lib::traversal::{walk, TraversalOptions};
+use axopane_lib::size::index::names::PackedNames;
+use axopane_lib::size::index::platform::DATA_VOLUME_PREFIX;
+use axopane_lib::size::manual::{calculate, ManualSizeError};
+use axopane_lib::traversal::{walk, TraversalOptions};
 use tempfile::tempdir;
 
 fn options() -> WalkOptions {

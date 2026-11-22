@@ -8,14 +8,14 @@
 //! `windows` module does not exist on other targets.
 #![cfg(target_os = "windows")]
 
-use file_explorer_lib::ipc::types::{MenuActionStatus, OpenWithRequest, ShowPropertiesRequest};
-use file_explorer_lib::native_menu::helper_supervisor::HelperRole;
-use file_explorer_lib::native_menu::provider::{
+use axopane_lib::ipc::types::{MenuActionStatus, OpenWithRequest, ShowPropertiesRequest};
+use axopane_lib::native_menu::helper_supervisor::HelperRole;
+use axopane_lib::native_menu::provider::{
     NativeMenuProvider, ProviderInvocation, RoleMenuRequest,
 };
-use file_explorer_lib::native_menu::shell_executor::ShellExecutor;
-use file_explorer_lib::native_menu::types::{LoadNativeMenuRequest, NativeMenuTargetKind};
-use file_explorer_lib::native_menu::windows::{
+use axopane_lib::native_menu::shell_executor::ShellExecutor;
+use axopane_lib::native_menu::types::{LoadNativeMenuRequest, NativeMenuTargetKind};
+use axopane_lib::native_menu::windows::{
     open_with, show_properties, WindowsNativeMenuProvider,
 };
 

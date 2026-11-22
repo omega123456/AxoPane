@@ -1,4 +1,4 @@
-use file_explorer_lib::resource_coordinator::parallelism::{
+use axopane_lib::resource_coordinator::parallelism::{
     max_throughput_slots, scan_workers, scan_workers_for_tests,
     throughput_slots_for_parallelism_for_tests, walker_helper_budget,
     walker_helper_budget_for_tests, walker_job_threads, walker_job_threads_for_tests,

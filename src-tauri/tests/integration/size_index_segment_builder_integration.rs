@@ -1,10 +1,10 @@
 use std::fs;
 use std::path::Path;
 
-use file_explorer_lib::size::index::names::signature::{is_non_ascii, signature_of, DOT_BIT};
-use file_explorer_lib::size::index::names::{names_in, PackedNames};
-use file_explorer_lib::size::index::persist::temp_path;
-use file_explorer_lib::size::index::segment::{
+use axopane_lib::size::index::names::signature::{is_non_ascii, signature_of, DOT_BIT};
+use axopane_lib::size::index::names::{names_in, PackedNames};
+use axopane_lib::size::index::persist::temp_path;
+use axopane_lib::size::index::segment::{
     BuildError, MappedSegment, NodeFlags, SegmentBuilder, SegmentCorrupt, SegmentEntry,
     SegmentPaths, SegmentTarget, CHUNK_BYTES, TREE_FORMAT_VERSION,
 };

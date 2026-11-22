@@ -4,15 +4,15 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use file_explorer_lib::ops::manifest::ProgressiveManifest;
-use file_explorer_lib::ops::{
+use axopane_lib::ops::manifest::ProgressiveManifest;
+use axopane_lib::ops::{
     archive_root_name_for_tests, archive_stem_for_item_for_tests, begin_file_progress_for_tests,
     copy_dir_recursive, copy_file_with_progress, copy_path, delete_path_with_progress, move_path,
     process_item_for_tests, ConflictDecision, ConflictInfo, ConflictResolution,
     CurrentFileProgress, OpItem, OpKind, OpRuntime, OpState, OpStatus, OpsService, RateSample,
     TreeCopy, WorkerContext,
 };
-use file_explorer_lib::volumes::VolumeInfo;
+use axopane_lib::volumes::VolumeInfo;
 
 fn item(path: &str, name: &str) -> OpItem {
     OpItem {
@@ -92,7 +92,7 @@ fn worker_context(
 ) {
     let shared_operation = Arc::new(Mutex::new(state));
     let resolver = Arc::new(std::sync::Condvar::new());
-    let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
+    let progress: Option<Arc<dyn Fn(axopane_lib::ops::OpProgress) + Send + Sync>> = None;
     let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
 
     let shared_operation_ref = Box::leak(Box::new(shared_operation.clone()));
@@ -339,7 +339,7 @@ fn file_operation_helpers_copy_and_move_paths_directly() {
 
     let shared_operation = Arc::new(Mutex::new(state()));
     let resolver = Arc::new(std::sync::Condvar::new());
-    let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
+    let progress: Option<Arc<dyn Fn(axopane_lib::ops::OpProgress) + Send + Sync>> = None;
     let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
     let context = WorkerContext {
         shared_operation: &shared_operation,
@@ -413,7 +413,7 @@ fn file_operation_helpers_respect_cancellation_before_copying() {
 
     let shared_operation = Arc::new(Mutex::new(cancelled_state));
     let resolver = Arc::new(std::sync::Condvar::new());
-    let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
+    let progress: Option<Arc<dyn Fn(axopane_lib::ops::OpProgress) + Send + Sync>> = None;
     let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
     let context = WorkerContext {
         shared_operation: &shared_operation,
@@ -455,7 +455,7 @@ fn file_operation_helpers_delete_paths_with_progress_directly() {
     delete_state.runtime.copied_bytes = 0;
     let shared_operation = Arc::new(Mutex::new(delete_state));
     let resolver = Arc::new(std::sync::Condvar::new());
-    let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
+    let progress: Option<Arc<dyn Fn(axopane_lib::ops::OpProgress) + Send + Sync>> = None;
     let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
     let context = WorkerContext {
         shared_operation: &shared_operation,
@@ -510,7 +510,7 @@ fn file_operation_helpers_delete_a_folder_containing_symlinks() {
     delete_state.kind = OpKind::Delete;
     let shared_operation = Arc::new(Mutex::new(delete_state));
     let resolver = Arc::new(std::sync::Condvar::new());
-    let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
+    let progress: Option<Arc<dyn Fn(axopane_lib::ops::OpProgress) + Send + Sync>> = None;
     let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
     let context = WorkerContext {
         shared_operation: &shared_operation,
@@ -540,7 +540,7 @@ fn file_operation_helpers_surface_io_errors_directly() {
 
     let shared_operation = Arc::new(Mutex::new(state()));
     let resolver = Arc::new(std::sync::Condvar::new());
-    let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
+    let progress: Option<Arc<dyn Fn(axopane_lib::ops::OpProgress) + Send + Sync>> = None;
     let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
     let context = WorkerContext {
         shared_operation: &shared_operation,
@@ -596,7 +596,7 @@ fn copy_dir_recursive_surfaces_create_dir_all_errors_for_the_target() {
 
     let shared_operation = Arc::new(Mutex::new(state()));
     let resolver = Arc::new(std::sync::Condvar::new());
-    let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
+    let progress: Option<Arc<dyn Fn(axopane_lib::ops::OpProgress) + Send + Sync>> = None;
     let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
     let context = WorkerContext {
         shared_operation: &shared_operation,
@@ -641,7 +641,7 @@ fn delete_path_with_progress_surfaces_read_dir_and_remove_dir_errors_for_directo
     delete_state.kind = OpKind::Delete;
     let shared_operation = Arc::new(Mutex::new(delete_state));
     let resolver = Arc::new(std::sync::Condvar::new());
-    let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
+    let progress: Option<Arc<dyn Fn(axopane_lib::ops::OpProgress) + Send + Sync>> = None;
     let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
     let context = WorkerContext {
         shared_operation: &shared_operation,
@@ -1106,7 +1106,7 @@ fn ops_test_hooks_cover_archive_name_fallback_paths() {
 
 #[test]
 fn test_utils_run_is_a_safe_noop() {
-    file_explorer_lib::run();
+    axopane_lib::run();
 }
 
 /// Mirrors what `move_path_with_total_discovery`'s cross-device fallback does

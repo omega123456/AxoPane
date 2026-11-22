@@ -1,11 +1,11 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use file_explorer_lib::size::index::segment::{
+use axopane_lib::size::index::segment::{
     BuildError, GraftTarget, MappedSegment, SegmentTarget, SpillOptions, SpillRecord, WalkSpill,
     RUN_BYTES,
 };
-use file_explorer_lib::size::index::tree::FolderSizeTree;
+use axopane_lib::size::index::tree::FolderSizeTree;
 use tempfile::{tempdir, TempDir};
 
 use crate::common::segment::{

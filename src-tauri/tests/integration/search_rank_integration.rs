@@ -1,11 +1,11 @@
 use std::cmp::Ordering;
 use std::time::{Duration, SystemTime};
 
-use file_explorer_lib::search::path_style::PathStyle;
-use file_explorer_lib::search::query::{parse, ParsedQuery};
-use file_explorer_lib::search::rank::{compare, score, Scored};
-use file_explorer_lib::search::results::rank_candidates;
-use file_explorer_lib::search::Candidate;
+use axopane_lib::search::path_style::PathStyle;
+use axopane_lib::search::query::{parse, ParsedQuery};
+use axopane_lib::search::rank::{compare, score, Scored};
+use axopane_lib::search::results::rank_candidates;
+use axopane_lib::search::Candidate;
 
 const WIN: PathStyle = PathStyle::Windows;
 const POSIX: PathStyle = PathStyle::Posix;

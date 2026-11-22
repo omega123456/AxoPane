@@ -6,9 +6,9 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use file_explorer_lib::fs::{SortDirection, SortKey};
-use file_explorer_lib::ipc::commands;
-use file_explorer_lib::ipc::types::{
+use axopane_lib::fs::{SortDirection, SortKey};
+use axopane_lib::ipc::commands;
+use axopane_lib::ipc::types::{
     AppConfig, CancelSizeResponse, ConflictResolution, CreateEntryRequest, FolderSizeRequest,
     FolderSizesRequest, IconStateEvent, InitialShellResponse, ListDirRequest, ListDirResponse,
     ListTreeChildrenRequest, ListTreeChildrenResponse, OpIdRequest, OpSnapshot, OpenPathRequest,
@@ -16,12 +16,12 @@ use file_explorer_lib::ipc::types::{
     SaveSessionRequest, SessionState, SetTabWatchRequest, SizeStateEvent, TrashEntriesRequest,
     WatchTarget,
 };
-use file_explorer_lib::ops::{OpItem, OpKind, OpStatus, OpsService, StartOpRequest};
-use file_explorer_lib::persist::{Config, PersistenceState, Session};
-use file_explorer_lib::resource_coordinator::ResourceCoordinator;
-use file_explorer_lib::size::{FolderSizeIndexStatus, IndexBackend, SizeService};
-use file_explorer_lib::thumbnails::ThumbnailService;
-use file_explorer_lib::watch::WatchService;
+use axopane_lib::ops::{OpItem, OpKind, OpStatus, OpsService, StartOpRequest};
+use axopane_lib::persist::{Config, PersistenceState, Session};
+use axopane_lib::resource_coordinator::ResourceCoordinator;
+use axopane_lib::size::{FolderSizeIndexStatus, IndexBackend, SizeService};
+use axopane_lib::thumbnails::ThumbnailService;
+use axopane_lib::watch::WatchService;
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
@@ -365,7 +365,7 @@ fn ipc_commands_cover_filesystem_entry_lifecycle() {
     assert_eq!(tree_children.children.len(), 1);
     assert_eq!(tree_children.children[0].name, "Docs");
 
-    let rename_request = file_explorer_lib::ipc::types::RenameEntryRequest {
+    let rename_request = axopane_lib::ipc::types::RenameEntryRequest {
         path: path_text(&root.join("todo.txt")),
         new_name: "done.txt".to_string(),
     };
@@ -456,8 +456,8 @@ fn has_ready_or_na(batches: Vec<Vec<SizeStateEvent>>) -> bool {
     batches.into_iter().flatten().any(|event| {
         matches!(
             event.state,
-            file_explorer_lib::size::SizeStateKind::Ready
-                | file_explorer_lib::size::SizeStateKind::Na
+            axopane_lib::size::SizeStateKind::Ready
+                | axopane_lib::size::SizeStateKind::Na
         )
     })
 }
@@ -493,7 +493,7 @@ fn ipc_commands_size_folders_and_return_icons() {
         .expect("request folder sizes");
     assert!(has_ready_or_na(size_batches));
 
-    let cancel_request = file_explorer_lib::ipc::types::CancelSizeRequest {
+    let cancel_request = axopane_lib::ipc::types::CancelSizeRequest {
         path: path_text(&size_root),
     };
     let cancel_response: CancelSizeResponse = test_app
@@ -524,7 +524,7 @@ fn ipc_commands_record_frontend_logs() {
     test_app
         .invoke_payload::<(), _>(
             "log_frontend",
-            file_explorer_lib::ipc::types::LogFrontendRequest {
+            axopane_lib::ipc::types::LogFrontendRequest {
                 level: "trace".to_string(),
                 message: "refresh issued".to_string(),
                 category: Some("ipc".to_string()),

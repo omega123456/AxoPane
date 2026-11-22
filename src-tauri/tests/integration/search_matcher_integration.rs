@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use file_explorer_lib::search::matcher::{
+use axopane_lib::search::matcher::{
     match_token, match_words, merge_ranges, nfc, FoldedName, Match, NameKind, Pattern, Token,
     Words, CONTAINS, EXACT, FUZZY, FUZZY_MIN_CHARS, PREFIX,
 };

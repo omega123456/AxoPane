@@ -4,7 +4,7 @@
 //! fixtures directly, so they exercise the parsing/fallback logic without any
 //! dependency on a real app bundle.
 
-use file_explorer_lib::app_picker::bundle::parse_bundle_metadata;
+use axopane_lib::app_picker::bundle::parse_bundle_metadata;
 use serde_json::json;
 use std::fs;
 use tempfile::tempdir;

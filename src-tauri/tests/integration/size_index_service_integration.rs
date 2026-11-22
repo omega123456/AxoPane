@@ -9,23 +9,23 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-use file_explorer_lib::resource_coordinator::ResourceCoordinator;
-use file_explorer_lib::search::service::{
+use axopane_lib::resource_coordinator::ResourceCoordinator;
+use axopane_lib::search::service::{
     RunTicket, SearchBackend, SearchBackendKind, SearchPage, SearchQueryRequest, SearchService,
 };
-use file_explorer_lib::search::source::FolderTreeSource;
-use file_explorer_lib::search::{SearchError, SearchScope};
-use file_explorer_lib::size::fast_walk::{subtree_total, TestHooks, WalkOptions};
-use file_explorer_lib::size::index::names::OverlayThreshold;
-use file_explorer_lib::size::index::persist::{self, ChangeFlags};
-use file_explorer_lib::size::index::platform::{
+use axopane_lib::search::source::FolderTreeSource;
+use axopane_lib::search::{SearchError, SearchScope};
+use axopane_lib::size::fast_walk::{subtree_total, TestHooks, WalkOptions};
+use axopane_lib::size::index::names::OverlayThreshold;
+use axopane_lib::size::index::persist::{self, ChangeFlags};
+use axopane_lib::size::index::platform::{
     normalize, protected_roots, stream_exclusions, FakePlatform, PowerSignal, RawEvent,
     DATA_VOLUME_PREFIX,
 };
-use file_explorer_lib::size::index::{
+use axopane_lib::size::index::{
     IndexOptions, LaneSnapshot, TreeUnavailable, WalkBatching, SNAPSHOT_FILE,
 };
-use file_explorer_lib::size::{
+use axopane_lib::size::{
     FolderSizeIndexStatus, IndexBackend, IndexState, NaReason, PaneSubscriptions, PauseReason,
     RequestMode, SizeBackend, SizeRequest, SizeRequestWithVolumes, SizeService, SizeSource,
     SizeStateKind, SizeUpdate,

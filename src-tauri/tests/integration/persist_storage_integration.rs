@@ -4,7 +4,7 @@ use std::fs;
 use std::thread;
 use std::time::Duration;
 
-use file_explorer_lib::persist::{
+use axopane_lib::persist::{
     load_json_or_default, write_json_atomic, write_json_atomic_with_failure, ColumnConfig, Config,
     LayoutConfig, PersistError, PersistedStore, PersistenceState, Session, SessionPane, SessionTab,
 };

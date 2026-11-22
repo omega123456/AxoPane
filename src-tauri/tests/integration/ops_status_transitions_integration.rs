@@ -1,5 +1,5 @@
-use file_explorer_lib::ops::status::{Cancellation, RejectedTransition, RunOutcome, StatusAction};
-use file_explorer_lib::ops::OpStatus;
+use axopane_lib::ops::status::{Cancellation, RejectedTransition, RunOutcome, StatusAction};
+use axopane_lib::ops::OpStatus;
 
 const ALL_STATUSES: [OpStatus; 7] = [
     OpStatus::Pending,

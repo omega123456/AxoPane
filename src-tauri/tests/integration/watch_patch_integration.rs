@@ -3,11 +3,11 @@
 //! updates). Exercises `classify_patch` end-to-end through its public
 //! surface, plus the `SessionPatch` accessor methods.
 
-use file_explorer_lib::directory_session::model::{
+use axopane_lib::directory_session::model::{
     NavigationRevision, SessionBaseline, SessionId, ViewRevision, WatchRevision,
 };
-use file_explorer_lib::fs::DirectoryEntry;
-use file_explorer_lib::watch::patch::{
+use axopane_lib::fs::DirectoryEntry;
+use axopane_lib::watch::patch::{
     classify_patch, ClassifyPatchInput, MetadataDelta, RowDelta, SessionPatch,
 };
 

@@ -3,7 +3,7 @@
 
 use std::fs;
 
-use file_explorer_lib::logging::{
+use axopane_lib::logging::{
     current_local_date, daily_log_file_name, read_current_day_logs, FileLogger, LogLevel,
     LogMessage,
 };

@@ -1,4 +1,4 @@
-use file_explorer_lib::search::path_style::{PathParts, PathStyle};
+use axopane_lib::search::path_style::{PathParts, PathStyle};
 
 const WIN: PathStyle = PathStyle::Windows;
 const POSIX: PathStyle = PathStyle::Posix;

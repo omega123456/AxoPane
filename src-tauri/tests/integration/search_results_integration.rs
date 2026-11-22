@@ -1,7 +1,7 @@
-use file_explorer_lib::search::path_style::PathStyle;
-use file_explorer_lib::search::query::parse;
-use file_explorer_lib::search::results::{rank_candidates, ResultSet, CANDIDATE_CAP, PAGE_SIZE};
-use file_explorer_lib::search::Candidate;
+use axopane_lib::search::path_style::PathStyle;
+use axopane_lib::search::query::parse;
+use axopane_lib::search::results::{rank_candidates, ResultSet, CANDIDATE_CAP, PAGE_SIZE};
+use axopane_lib::search::Candidate;
 
 fn folder(path: String) -> Candidate {
     Candidate {

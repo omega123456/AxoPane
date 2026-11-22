@@ -2,13 +2,13 @@ use std::fs::{self, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use file_explorer_lib::size::index::names::block::{checksum, BlockBuilder, BuiltBlock};
-use file_explorer_lib::size::index::names::file::{
+use axopane_lib::size::index::names::block::{checksum, BlockBuilder, BuiltBlock};
+use axopane_lib::size::index::names::file::{
     remove_if_present, spill_path, MappedNames, NamesFileWriter, NamesHeader, NAMES_FILE,
     NAMES_FORMAT_VERSION, SPILL_SUFFIX,
 };
-use file_explorer_lib::size::index::names::PackedNames;
-use file_explorer_lib::size::index::persist::temp_path;
+use axopane_lib::size::index::names::PackedNames;
+use axopane_lib::size::index::persist::temp_path;
 use tempfile::{tempdir, TempDir};
 
 const HEADER_BYTES: usize = 48;

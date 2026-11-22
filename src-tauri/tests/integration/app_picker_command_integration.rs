@@ -5,9 +5,9 @@
 //! observe the safe test-utils fake / unsupported fallback — never a "real
 //! API success" branch — per the project's machine-global-state testing rule.
 
-use file_explorer_lib::ipc::commands;
-use file_explorer_lib::ipc::executor::Cancellation;
-use file_explorer_lib::ipc::types::{GetDefaultApplicationRequest, SetDefaultApplicationRequest};
+use axopane_lib::ipc::commands;
+use axopane_lib::ipc::executor::Cancellation;
+use axopane_lib::ipc::types::{GetDefaultApplicationRequest, SetDefaultApplicationRequest};
 
 #[test]
 fn list_applications_returns_the_deterministic_test_utils_fake() {
@@ -42,7 +42,7 @@ fn default_application_owner_rejects_cancelled_request_before_platform_work() {
     let cancellation = Cancellation::default();
     cancellation.cancel();
     let response = tauri::async_runtime::block_on(
-        file_explorer_lib::app_picker::set_default_application_cancellable(
+        axopane_lib::app_picker::set_default_application_cancellable(
             SetDefaultApplicationRequest {
                 path: "/Users/example/report.pdf".to_string(),
                 bundle_path: "/Applications/Fake Preview.app".to_string(),

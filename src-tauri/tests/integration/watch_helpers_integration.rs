@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use file_explorer_lib::fs::{DirectoryEntry, SortDirection, SortKey};
-use file_explorer_lib::watch::{
+use axopane_lib::fs::{DirectoryEntry, SortDirection, SortKey};
+use axopane_lib::watch::{
     diff_entries, pane_scope, snapshot_for_target, DirPatch, PatchLabel, TabWatchArm,
     WatchEmitters, WatchService, WatchTarget,
 };

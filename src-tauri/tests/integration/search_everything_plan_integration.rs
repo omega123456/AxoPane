@@ -1,12 +1,12 @@
 use std::time::{Duration, SystemTime};
 
-use file_explorer_lib::search::everything_plan::{
+use axopane_lib::search::everything_plan::{
     browse_children_queries, passes, row_to_candidate, EverythingPass,
 };
-use file_explorer_lib::search::path_style::PathStyle;
-use file_explorer_lib::search::query::{parse, ParsedQuery};
-use file_explorer_lib::search::{SearchOptions, SearchScope};
-use file_explorer_lib::size::everything::EverythingRow;
+use axopane_lib::search::path_style::PathStyle;
+use axopane_lib::search::query::{parse, ParsedQuery};
+use axopane_lib::search::{SearchOptions, SearchScope};
+use axopane_lib::size::everything::EverythingRow;
 
 const HIDDEN: SearchOptions = SearchOptions {
     include_hidden: true,

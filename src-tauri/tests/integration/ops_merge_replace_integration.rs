@@ -5,7 +5,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use file_explorer_lib::ops::{
+use axopane_lib::ops::{
     process_item_for_tests, ConflictResolution, CurrentFileProgress, OpItem, OpKind, OpProgress,
     OpRuntime, OpState, OpStatus, WorkerContext,
 };

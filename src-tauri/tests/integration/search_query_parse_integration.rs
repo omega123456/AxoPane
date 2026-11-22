@@ -1,6 +1,6 @@
-use file_explorer_lib::search::matcher::{FoldedName, NameKind, Token};
-use file_explorer_lib::search::path_style::PathStyle;
-use file_explorer_lib::search::query::{parse, ParseError, ParsedQuery, MIN_QUERY_CHARS};
+use axopane_lib::search::matcher::{FoldedName, NameKind, Token};
+use axopane_lib::search::path_style::PathStyle;
+use axopane_lib::search::query::{parse, ParseError, ParsedQuery, MIN_QUERY_CHARS};
 
 const WIN: PathStyle = PathStyle::Windows;
 const POSIX: PathStyle = PathStyle::Posix;

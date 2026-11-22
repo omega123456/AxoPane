@@ -1,14 +1,14 @@
 use crate::common;
 
-use file_explorer_lib::ipc::types::{LoadNativeMenuRequest, NativeMenuTargetKind};
-use file_explorer_lib::native_menu::helper_entry::{dispatch_for_tests, run_framed_stdio};
-use file_explorer_lib::native_menu::helper_protocol::{
+use axopane_lib::ipc::types::{LoadNativeMenuRequest, NativeMenuTargetKind};
+use axopane_lib::native_menu::helper_entry::{dispatch_for_tests, run_framed_stdio};
+use axopane_lib::native_menu::helper_protocol::{
     read_frame, write_frame, HelperOperation, HelperRequest, MAX_FRAME_BYTES,
 };
-use file_explorer_lib::native_menu::helper_supervisor::{
+use axopane_lib::native_menu::helper_supervisor::{
     HelperCall, HelperFailure, HelperRole, HelperSupervisor, DISCOVERY_DEADLINE,
 };
-use file_explorer_lib::native_menu::menu_cache::MenuCache;
+use axopane_lib::native_menu::menu_cache::MenuCache;
 use std::io::Cursor;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc};
@@ -68,7 +68,7 @@ fn test_utils_helper_dispatch_never_reaches_native_shell_code() {
     let result = dispatch_for_tests(HelperOperation::Discover(request("safe-dispatch", "txt")));
     assert!(matches!(
         result,
-        file_explorer_lib::native_menu::helper_protocol::HelperResult::Status(status)
+        axopane_lib::native_menu::helper_protocol::HelperResult::Status(status)
             if !status.handled && status.message.as_deref() == Some("unsupported")
     ));
 }
@@ -84,14 +84,14 @@ fn framed_stdio_dispatches_a_safe_test_utils_response_then_accepts_eof() {
     let mut output = Vec::new();
     run_framed_stdio(Cursor::new(input), &mut output).expect("stdio helper completes at EOF");
     let response =
-        read_frame::<_, file_explorer_lib::native_menu::helper_protocol::HelperResponse>(
+        read_frame::<_, axopane_lib::native_menu::helper_protocol::HelperResponse>(
             &mut Cursor::new(output),
         )
         .expect("response frame");
     assert_eq!(response.request_id, 73);
     assert!(matches!(
         response.result,
-        file_explorer_lib::native_menu::helper_protocol::HelperResult::Status(_)
+        axopane_lib::native_menu::helper_protocol::HelperResult::Status(_)
     ));
 }
 

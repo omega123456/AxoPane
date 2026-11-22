@@ -7,14 +7,14 @@ use base64::Engine;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use file_explorer_lib::ipc::types::ThumbnailQuality;
-use file_explorer_lib::resource_coordinator::ResourceCoordinator;
-use file_explorer_lib::thumbnails::provider::{ProviderCapability, ThumbnailProvider};
-use file_explorer_lib::thumbnails::scheduler::ThumbnailSubscriber;
-use file_explorer_lib::thumbnails::types::{
+use axopane_lib::ipc::types::ThumbnailQuality;
+use axopane_lib::resource_coordinator::ResourceCoordinator;
+use axopane_lib::thumbnails::provider::{ProviderCapability, ThumbnailProvider};
+use axopane_lib::thumbnails::scheduler::ThumbnailSubscriber;
+use axopane_lib::thumbnails::types::{
     ThumbnailCandidate, ThumbnailFingerprint, ThumbnailState,
 };
-use file_explorer_lib::thumbnails::{
+use axopane_lib::thumbnails::{
     ThumbnailService, MAX_RESULTS_PER_BATCH, MAX_RESULT_BYTES_PER_BATCH,
 };
 use tempfile::tempdir;
@@ -22,7 +22,7 @@ use tempfile::tempdir;
 fn candidate(path: &Path) -> ThumbnailCandidate {
     let metadata = fs::metadata(path).expect("metadata");
     let modified_rfc3339 =
-        file_explorer_lib::fs::system_time_to_rfc3339(Some(metadata.modified().expect("modified")))
+        axopane_lib::fs::system_time_to_rfc3339(Some(metadata.modified().expect("modified")))
             .expect("listing timestamp");
     let modified_unix_seconds = u64::try_from(
         OffsetDateTime::parse(&modified_rfc3339, &Rfc3339)
@@ -54,7 +54,7 @@ fn fake_provider_emits_contextual_ready_and_negative_results_in_a_timed_batch() 
     let now = Arc::new(Mutex::new(0_u64));
     let clock_now = Arc::clone(&now);
     let service = ThumbnailService::new_with_provider_and_clock(
-        file_explorer_lib::thumbnails::platform_provider().into(),
+        axopane_lib::thumbnails::platform_provider().into(),
         Arc::new(ResourceCoordinator::new()),
         Arc::new(move || *clock_now.lock().expect("clock")),
     );
@@ -103,7 +103,7 @@ fn eight_results_flush_immediately_without_advancing_the_clock() {
     let now = Arc::new(Mutex::new(0_u64));
     let clock_now = Arc::clone(&now);
     let service = ThumbnailService::new_with_provider_and_clock(
-        file_explorer_lib::thumbnails::platform_provider().into(),
+        axopane_lib::thumbnails::platform_provider().into(),
         Arc::new(ResourceCoordinator::new()),
         Arc::new(move || *clock_now.lock().expect("clock")),
     );
@@ -141,9 +141,9 @@ impl ThumbnailProvider for ProgressiveProvider {
     fn generate(
         &self,
         _candidate: &ThumbnailCandidate,
-        preview: file_explorer_lib::thumbnails::provider::ThumbnailPreviewCallback,
+        preview: axopane_lib::thumbnails::provider::ThumbnailPreviewCallback,
     ) -> ThumbnailState {
-        let state = file_explorer_lib::thumbnails::types::validated_png_data_url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+ZfGHkAAAAABJRU5ErkJggg==".to_string())
+        let state = axopane_lib::thumbnails::types::validated_png_data_url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+ZfGHkAAAAABJRU5ErkJggg==".to_string())
             .expect("valid preview");
         let ThumbnailState::Ready { data_url, .. } = state else {
             unreachable!("validated preview is ready")
@@ -209,7 +209,7 @@ impl ThumbnailProvider for LargeProgressiveProvider {
     fn generate(
         &self,
         _candidate: &ThumbnailCandidate,
-        preview: file_explorer_lib::thumbnails::provider::ThumbnailPreviewCallback,
+        preview: axopane_lib::thumbnails::provider::ThumbnailPreviewCallback,
     ) -> ThumbnailState {
         let _ = self.started.send(());
         let _ = self.release.lock().expect("release").recv();
@@ -217,7 +217,7 @@ impl ThumbnailProvider for LargeProgressiveProvider {
         png.extend_from_slice(&1_u32.to_be_bytes());
         png.extend_from_slice(&1_u32.to_be_bytes());
         png.resize(200_000, 0);
-        let state = file_explorer_lib::thumbnails::types::validated_png_data_url(format!(
+        let state = axopane_lib::thumbnails::types::validated_png_data_url(format!(
             "data:image/png;base64,{}",
             base64::engine::general_purpose::STANDARD.encode(png)
         ))

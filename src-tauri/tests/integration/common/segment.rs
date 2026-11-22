@@ -1,13 +1,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use file_explorer_lib::size::index::names::block::checksum;
-use file_explorer_lib::size::index::names::{names_in, FileNameStore, PackedNames, SavedNames};
-use file_explorer_lib::size::index::segment::{
+use axopane_lib::size::index::names::block::checksum;
+use axopane_lib::size::index::names::{names_in, FileNameStore, PackedNames, SavedNames};
+use axopane_lib::size::index::segment::{
     BaseRewrite, BuildError, GraftTarget, MappedSegment, RewriteProgress, RewriteSource,
     SegmentBuilder, SegmentPaths, SegmentTarget, SpillOptions, SpillRecord, WalkSpill, RUN_BYTES,
 };
-use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
+use axopane_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
 
 pub const FIRST_SEQUENCE: u64 = 1;
 pub const CHECKSUM_BYTES: usize = 8;

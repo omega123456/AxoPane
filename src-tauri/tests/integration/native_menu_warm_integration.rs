@@ -3,16 +3,16 @@ use crate::common;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use file_explorer_lib::ipc::commands;
-use file_explorer_lib::ipc::types::{
+use axopane_lib::ipc::commands;
+use axopane_lib::ipc::types::{
     InvokeNativeMenuRequest, LoadNativeMenuRequest, MenuActionStatus, NativeMenuTargetKind,
     WarmNativeMenusRequest,
 };
-use file_explorer_lib::native_menu::provider::{
+use axopane_lib::native_menu::provider::{
     NativeMenuProvider, ProviderInvocation, ProviderNativeMenuItem,
 };
-use file_explorer_lib::native_menu::shell_executor::ShellExecutor;
-use file_explorer_lib::native_menu::NativeMenuService;
+use axopane_lib::native_menu::shell_executor::ShellExecutor;
+use axopane_lib::native_menu::NativeMenuService;
 
 /// Provider that records every enumeration call so tests can assert warming
 /// dedupes by type instead of re-enumerating per path.

@@ -1,4 +1,4 @@
-use file_explorer_lib::ipc::{events, types::*};
+use axopane_lib::ipc::{events, types::*};
 
 #[test]
 fn thumbnail_contract_serializes_context_and_event_name() {

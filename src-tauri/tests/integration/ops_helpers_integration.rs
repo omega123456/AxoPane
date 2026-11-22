@@ -4,12 +4,12 @@ use std::fs;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use file_explorer_lib::ops::{
+use axopane_lib::ops::{
     fallback_root, is_nested_copy_target, measure_tree_size, normalized_components, parent_dir,
     remove_source, remove_target, requested_pop, split_name, unique_name, volume_root_for,
     FileNameParts,
 };
-use file_explorer_lib::volumes::VolumeInfo;
+use axopane_lib::volumes::VolumeInfo;
 use tempfile::tempdir;
 
 fn file_name_parts(stem: &str, extension: &str) -> FileNameParts {

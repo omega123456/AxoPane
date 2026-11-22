@@ -5,16 +5,16 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use file_explorer_lib::search::file_scan::BLOCKS_PER_READ;
-use file_explorer_lib::search::path_style::PathStyle;
-use file_explorer_lib::search::results::{rank_candidates, CANDIDATE_CAP};
-use file_explorer_lib::search::source::FolderTreeSource;
-use file_explorer_lib::search::tree_scan::{candidates, TreeSearchRun};
-use file_explorer_lib::search::{CandidateBatch, Control, SearchError, SearchOptions, SearchScope};
-use file_explorer_lib::size::index::names::file::NAMES_FILE;
-use file_explorer_lib::size::index::names::{FileNameStore, PackedNames};
-use file_explorer_lib::size::index::segment::{MappedSegment, SegmentTarget};
-use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree, Graft};
+use axopane_lib::search::file_scan::BLOCKS_PER_READ;
+use axopane_lib::search::path_style::PathStyle;
+use axopane_lib::search::results::{rank_candidates, CANDIDATE_CAP};
+use axopane_lib::search::source::FolderTreeSource;
+use axopane_lib::search::tree_scan::{candidates, TreeSearchRun};
+use axopane_lib::search::{CandidateBatch, Control, SearchError, SearchOptions, SearchScope};
+use axopane_lib::size::index::names::file::NAMES_FILE;
+use axopane_lib::size::index::names::{FileNameStore, PackedNames};
+use axopane_lib::size::index::segment::{MappedSegment, SegmentTarget};
+use axopane_lib::size::index::tree::{DirectoryListing, FolderSizeTree, Graft};
 use tempfile::{tempdir, TempDir};
 
 use crate::common::segment::{

@@ -3,12 +3,12 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use file_explorer_lib::size::index::names::signature::signature_of;
-use file_explorer_lib::size::index::segment::{
+use axopane_lib::size::index::names::signature::signature_of;
+use axopane_lib::size::index::segment::{
     GraftTarget, MappedSegment, NodeFlags, SegmentBuilder, SegmentEntry, SegmentTarget,
     SpillOptions, WalkSpill, RUN_BYTES,
 };
-use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree, Forest, Graft};
+use axopane_lib::size::index::tree::{DirectoryListing, FolderSizeTree, Forest, Graft};
 use tempfile::{tempdir, TempDir};
 
 use crate::common::segment::{

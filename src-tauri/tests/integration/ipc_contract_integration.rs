@@ -4,17 +4,17 @@ use std::fs;
 
 use std::sync::Arc;
 
-use file_explorer_lib::directory_session::DirectorySessionService;
-use file_explorer_lib::fs::{SortDirection, SortKey};
-use file_explorer_lib::ipc::commands;
-use file_explorer_lib::ipc::events;
-use file_explorer_lib::ipc::mock;
-use file_explorer_lib::ipc::types::{
+use axopane_lib::directory_session::DirectorySessionService;
+use axopane_lib::fs::{SortDirection, SortKey};
+use axopane_lib::ipc::commands;
+use axopane_lib::ipc::events;
+use axopane_lib::ipc::mock;
+use axopane_lib::ipc::types::{
     ActiveItemsSortRequest, ActiveItemsSortResponse, CreateEntryRequest, FileClipboardMode,
     ItemCountRequestContext, ListDirRequest, ListTreeChildrenRequest, OpenPathRequest,
     RenameEntryRequest, TrashEntriesRequest, VisibleItemCountsRequest, WriteFileClipboardRequest,
 };
-use file_explorer_lib::item_counts::ItemCountService;
+use axopane_lib::item_counts::ItemCountService;
 use tempfile::tempdir;
 
 #[test]
@@ -213,7 +213,7 @@ fn file_clipboard_commands_are_safe_noops_under_test_utils() {
     assert!(clipboard.items.is_empty());
 
     commands::clear_file_clipboard().expect("clipboard clear");
-    commands::noop_dir_patch(file_explorer_lib::watch::DirPatch {
+    commands::noop_dir_patch(axopane_lib::watch::DirPatch {
         tab_id: String::new(),
         path: String::new(),
         reason: String::new(),

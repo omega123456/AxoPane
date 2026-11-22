@@ -1,6 +1,6 @@
-use file_explorer_lib::ipc::commands;
-use file_explorer_lib::ipc::types::SetWindowThemeRequest;
-use file_explorer_lib::window_chrome::{
+use axopane_lib::ipc::commands;
+use axopane_lib::ipc::types::SetWindowThemeRequest;
+use axopane_lib::window_chrome::{
     apply_backdrop, backdrop_for_build, current_backdrop, native_theme, WindowBackdrop,
     MICA_MIN_BUILD,
 };

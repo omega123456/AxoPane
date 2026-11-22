@@ -10,10 +10,10 @@
 
 use std::sync::Arc;
 
-use file_explorer_lib::volumes::registry::{
+use axopane_lib::volumes::registry::{
     RegistrySnapshot, VolumeAvailability, VolumeRegistry, VolumeResourceKind,
 };
-use file_explorer_lib::volumes::VolumeInfo;
+use axopane_lib::volumes::VolumeInfo;
 
 #[derive(Clone, Copy)]
 struct VolumeFlags {
@@ -306,7 +306,7 @@ fn snapshot_volumes_carry_available_status_and_a_validation_timestamp() {
 fn to_volume_infos_preserves_legacy_ipc_shape_and_order() {
     let registry = new_registry();
     let infos = registry.snapshot().to_volume_infos();
-    let fixture = file_explorer_lib::volumes::list_volumes();
+    let fixture = axopane_lib::volumes::list_volumes();
 
     assert_eq!(infos.len(), fixture.len());
     for (info, expected) in infos.iter().zip(fixture.iter()) {

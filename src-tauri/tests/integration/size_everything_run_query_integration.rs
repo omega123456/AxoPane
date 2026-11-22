@@ -1,9 +1,9 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use file_explorer_lib::search::source::EverythingSource;
-use file_explorer_lib::search::SearchError;
-use file_explorer_lib::size::everything::{
+use axopane_lib::search::source::EverythingSource;
+use axopane_lib::search::SearchError;
+use axopane_lib::size::everything::{
     filetime_to_system_time, EverythingHandle, EverythingQuery, EverythingQueryResult,
     EverythingRow, EverythingSort,
 };

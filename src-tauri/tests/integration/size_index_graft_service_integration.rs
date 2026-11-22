@@ -3,10 +3,10 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
-use file_explorer_lib::size::index::persist::{self, ChangeFlags};
-use file_explorer_lib::size::index::platform::{PowerSignal, RawEvent};
-use file_explorer_lib::size::index::HEAP_BATCH_RECORDS;
-use file_explorer_lib::size::{IndexState, RequestMode, SizeStateKind};
+use axopane_lib::size::index::persist::{self, ChangeFlags};
+use axopane_lib::size::index::platform::{PowerSignal, RawEvent};
+use axopane_lib::size::index::HEAP_BATCH_RECORDS;
+use axopane_lib::size::{IndexState, RequestMode, SizeStateKind};
 
 use crate::size_index_names_service_integration::{
     barrier, base_segment, blur, create_more_folders_than_a_small_overlay_holds, files_on_disk,

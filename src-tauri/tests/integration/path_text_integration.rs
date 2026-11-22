@@ -1,4 +1,4 @@
-use file_explorer_lib::path_text::{
+use axopane_lib::path_text::{
     is_drive_designator, starts_with_drive_designator, strip_unc_prefix, strip_verbatim_prefix,
 };
 

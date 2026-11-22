@@ -2,22 +2,22 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use file_explorer_lib::search::service::{
+use axopane_lib::search::service::{
     RunTicket, SearchBackend, SearchBackendKind, SearchCapabilities, SearchHit, SearchPage,
     SearchPageRequest, SearchQueryRequest, SearchRejection, SearchService, SearchTicket,
 };
-use file_explorer_lib::search::source::FolderTreeSource;
-use file_explorer_lib::search::{SearchError, SearchScope};
-use file_explorer_lib::size::everything::{
+use axopane_lib::search::source::FolderTreeSource;
+use axopane_lib::search::{SearchError, SearchScope};
+use axopane_lib::size::everything::{
     EverythingHandle, EverythingQuery, EverythingQueryResult, EverythingRow,
 };
-use file_explorer_lib::size::index::names::block::BLOCK_TARGET_BYTES;
-use file_explorer_lib::size::index::names::file::NAMES_FILE;
-use file_explorer_lib::size::index::names::{FileNameStore, PackedNames};
-use file_explorer_lib::size::index::segment::SegmentTarget;
-use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
-use file_explorer_lib::size::index::IndexRead;
-use file_explorer_lib::size::SizeService;
+use axopane_lib::size::index::names::block::BLOCK_TARGET_BYTES;
+use axopane_lib::size::index::names::file::NAMES_FILE;
+use axopane_lib::size::index::names::{FileNameStore, PackedNames};
+use axopane_lib::size::index::segment::SegmentTarget;
+use axopane_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
+use axopane_lib::size::index::IndexRead;
+use axopane_lib::size::SizeService;
 use serde_json::json;
 use tempfile::tempdir;
 

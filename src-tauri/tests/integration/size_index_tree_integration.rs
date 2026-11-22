@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use file_explorer_lib::size::index::tree::{
+use axopane_lib::size::index::tree::{
     DirectoryListing, FolderSizeTree, FolderTotal, LowerBound,
 };
 

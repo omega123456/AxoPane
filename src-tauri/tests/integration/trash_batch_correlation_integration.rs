@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use file_explorer_lib::trash::{
+use axopane_lib::trash::{
     delete_batch_with_adapter_for_tests, BatchCorrelation, ManifestBatch, StableFileIdentity,
     SystemTrashAdapter, TrashFacts, TrashSnapshotEntry,
 };

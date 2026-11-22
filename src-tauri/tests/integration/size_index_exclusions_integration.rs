@@ -1,22 +1,22 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use file_explorer_lib::ipc::commands;
-use file_explorer_lib::ipc::types::{
+use axopane_lib::ipc::commands;
+use axopane_lib::ipc::types::{
     AddIndexExclusionRequest, AddIndexExclusionResponse, IndexExclusionOutcomeKind,
     RemoveIndexExclusionRequest,
 };
-use file_explorer_lib::persist::PersistenceState;
-use file_explorer_lib::search::service::{SearchBackend, SearchService};
-use file_explorer_lib::search::SearchScope;
-use file_explorer_lib::size::index::exclusions::{
+use axopane_lib::persist::PersistenceState;
+use axopane_lib::search::service::{SearchBackend, SearchService};
+use axopane_lib::search::SearchScope;
+use axopane_lib::size::index::exclusions::{
     is_within, plan_reconcile, same_path, ExclusionRules, ExclusionSet, ExclusionVerdict,
     PathVerdict, ReconcilePlan,
 };
-use file_explorer_lib::size::index::persist;
-use file_explorer_lib::size::index::platform::{RawEvent, DATA_VOLUME_PREFIX};
-use file_explorer_lib::size::index::tree::FolderTotal;
-use file_explorer_lib::size::{IndexState, RequestMode, SizeSource, SizeStateKind};
+use axopane_lib::size::index::persist;
+use axopane_lib::size::index::platform::{RawEvent, DATA_VOLUME_PREFIX};
+use axopane_lib::size::index::tree::FolderTotal;
+use axopane_lib::size::{IndexState, RequestMode, SizeSource, SizeStateKind};
 use tempfile::tempdir;
 
 use crate::ipc_state_manager_integration::as_state;

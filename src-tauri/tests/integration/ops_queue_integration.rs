@@ -7,11 +7,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use file_explorer_lib::ops::{
+use axopane_lib::ops::{
     ConflictDecision, ConflictResolution, CurrentFileProgress, OpItem, OpKind, OpProgress,
     OpRuntime, OpState, OpStatus, OpsService, StartOpRequest,
 };
-use file_explorer_lib::volumes::VolumeInfo;
+use axopane_lib::volumes::VolumeInfo;
 use tempfile::tempdir;
 
 fn volume(mount: &str) -> VolumeInfo {

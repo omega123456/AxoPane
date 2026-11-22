@@ -1,10 +1,10 @@
 use std::fs;
 use std::path::Path;
 
-use file_explorer_lib::ipc::commands;
-use file_explorer_lib::size::index::persist::{self, SegmentRef};
-use file_explorer_lib::size::index::segment::SegmentPaths;
-use file_explorer_lib::size::{FolderSizeIndexStorage, IndexState};
+use axopane_lib::ipc::commands;
+use axopane_lib::size::index::persist::{self, SegmentRef};
+use axopane_lib::size::index::segment::SegmentPaths;
+use axopane_lib::size::{FolderSizeIndexStorage, IndexState};
 
 use crate::ipc_state_manager_integration::as_state;
 use crate::size_index_service_integration::{wait_until, Harness};

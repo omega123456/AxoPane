@@ -3,7 +3,7 @@ use crate::common;
 use std::fs;
 use std::path::Path;
 
-use file_explorer_lib::file_icons::{icon_data_url_for_path, icon_pool, resolve_icon};
+use axopane_lib::file_icons::{icon_data_url_for_path, icon_pool, resolve_icon};
 use tempfile::tempdir;
 
 #[test]

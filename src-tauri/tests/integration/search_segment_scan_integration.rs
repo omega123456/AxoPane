@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use file_explorer_lib::search::path_style::PathStyle;
-use file_explorer_lib::search::query::parse;
-use file_explorer_lib::search::tree_scan::{candidates_in_chunks, TreeSearchRun};
-use file_explorer_lib::search::{Control, SearchOptions};
-use file_explorer_lib::size::index::names::PackedNames;
-use file_explorer_lib::size::index::tree::DirectoryListing;
+use axopane_lib::search::path_style::PathStyle;
+use axopane_lib::search::query::parse;
+use axopane_lib::search::tree_scan::{candidates_in_chunks, TreeSearchRun};
+use axopane_lib::search::{Control, SearchOptions};
+use axopane_lib::size::index::names::PackedNames;
+use axopane_lib::size::index::tree::DirectoryListing;
 use tempfile::{tempdir, TempDir};
 
 use crate::common::segment::{index_over, walked, walked_segment, SegmentPlace, Walked};

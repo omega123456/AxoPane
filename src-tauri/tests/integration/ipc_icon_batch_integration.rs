@@ -13,8 +13,8 @@
 //     manually-stepped clock, matching the existing whitebox convention used
 //     for the ops/watch throttle tests.
 
-use file_explorer_lib::ipc::commands;
-use file_explorer_lib::ipc::types::{IconStateEvent, RequestIconsRequest};
+use axopane_lib::ipc::commands;
+use axopane_lib::ipc::types::{IconStateEvent, RequestIconsRequest};
 
 fn paths(count: usize) -> Vec<String> {
     (0..count)

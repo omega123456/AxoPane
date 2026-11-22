@@ -7,19 +7,19 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use file_explorer_lib::ops::manifest::{DiscoveredFile, ProgressiveManifest};
-use file_explorer_lib::ops::transfer::macos::MacosCapabilities;
-use file_explorer_lib::ops::transfer::portable::PortableAdapter;
-use file_explorer_lib::ops::transfer::windows::WindowsCapabilities;
-use file_explorer_lib::ops::transfer::{
+use axopane_lib::ops::manifest::{DiscoveredFile, ProgressiveManifest};
+use axopane_lib::ops::transfer::macos::MacosCapabilities;
+use axopane_lib::ops::transfer::portable::PortableAdapter;
+use axopane_lib::ops::transfer::windows::WindowsCapabilities;
+use axopane_lib::ops::transfer::{
     AdapterSelection, PortableReason, TransferAdapter, TransferRequirements,
 };
-use file_explorer_lib::ops::worker::{rename_or_cross_device, transfer_admission, TransferPaths};
-use file_explorer_lib::ops::{
+use axopane_lib::ops::worker::{rename_or_cross_device, transfer_admission, TransferPaths};
+use axopane_lib::ops::{
     adapter_selection_calls_for_tests, copy_path, move_path, CurrentFileProgress, OpItem, OpKind,
     OpRuntime, OpState, WorkerContext,
 };
-use file_explorer_lib::resource_coordinator::JobClass;
+use axopane_lib::resource_coordinator::JobClass;
 
 fn item(path: &str, name: &str) -> OpItem {
     OpItem {
@@ -36,7 +36,7 @@ fn state() -> OpState {
         destination_dir: std::path::PathBuf::from("dest"),
         items: vec![item("source", "source")],
         volumes: Default::default(),
-        status: file_explorer_lib::ops::OpStatus::Active,
+        status: axopane_lib::ops::OpStatus::Active,
         total_items: 1,
         total_bytes: 0,
         cancel: Arc::new(AtomicBool::new(false)),
@@ -73,7 +73,7 @@ fn worker_context(
 ) {
     let shared_operation = Arc::new(Mutex::new(state));
     let resolver = Arc::new(std::sync::Condvar::new());
-    let progress: Option<Arc<dyn Fn(file_explorer_lib::ops::OpProgress) + Send + Sync>> = None;
+    let progress: Option<Arc<dyn Fn(axopane_lib::ops::OpProgress) + Send + Sync>> = None;
     let instant_now: Arc<dyn Fn() -> Instant + Send + Sync> = Arc::new(Instant::now);
 
     let shared_operation_ref = Box::leak(Box::new(shared_operation.clone()));

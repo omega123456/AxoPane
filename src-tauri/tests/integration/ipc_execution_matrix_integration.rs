@@ -8,9 +8,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::common::wait_until;
-use file_explorer_lib::ipc::executor::{Cancellation, IpcExecutor, LatencyRequest};
-use file_explorer_lib::reconcile::{ReconcileCoordinator, ReconcileResource};
-use file_explorer_lib::resource_coordinator::{JobClass, JobSpec, ResourceCoordinator};
+use axopane_lib::ipc::executor::{Cancellation, IpcExecutor, LatencyRequest};
+use axopane_lib::reconcile::{ReconcileCoordinator, ReconcileResource};
+use axopane_lib::resource_coordinator::{JobClass, JobSpec, ResourceCoordinator};
 
 const HEAVY_MATRIX: &[(&str, &str)] = &[
     ("directory session/range/release", "DirectorySessionService"),

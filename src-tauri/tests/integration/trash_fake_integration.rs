@@ -1,6 +1,6 @@
 use std::fs;
 
-use file_explorer_lib::trash::{
+use axopane_lib::trash::{
     ensure_fake_trash_dir_for_tests, fake_trash_dir, move_to_fake_trash_path_for_tests,
     move_to_trash, move_to_trash_cancellable,
 };

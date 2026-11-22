@@ -5,15 +5,15 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use file_explorer_lib::size::index::names::file::spill_path;
-use file_explorer_lib::size::index::names::{
+use axopane_lib::size::index::names::file::spill_path;
+use axopane_lib::size::index::names::{
     FileNameStore, NamesCounters, OverlayThreshold, OVERLAY_THRESHOLD_BYTES,
 };
-use file_explorer_lib::size::index::persist::{self, temp_path, ChangeFlags, SegmentRef, Snapshot};
-use file_explorer_lib::size::index::platform::{IndexPlatform, RawEvent};
-use file_explorer_lib::size::index::segment::SegmentPaths;
-use file_explorer_lib::size::index::{names_path_beside, IndexRead};
-use file_explorer_lib::size::{IndexState, PaneSubscriptions};
+use axopane_lib::size::index::persist::{self, temp_path, ChangeFlags, SegmentRef, Snapshot};
+use axopane_lib::size::index::platform::{IndexPlatform, RawEvent};
+use axopane_lib::size::index::segment::SegmentPaths;
+use axopane_lib::size::index::{names_path_beside, IndexRead};
+use axopane_lib::size::{IndexState, PaneSubscriptions};
 
 use crate::size_index_service_integration::{wait_until, Harness};
 

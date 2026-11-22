@@ -6,11 +6,11 @@
 
 use std::collections::HashSet;
 
-use file_explorer_lib::native_menu::modern_match::{
+use axopane_lib::native_menu::modern_match::{
     format_guid_braced, handler_matches, parse_guid_u128, path_key, path_type_tokens,
     selected_paths, selection_type_tokens,
 };
-use file_explorer_lib::native_menu::types::{LoadNativeMenuRequest, NativeMenuTargetKind};
+use axopane_lib::native_menu::types::{LoadNativeMenuRequest, NativeMenuTargetKind};
 
 const WINRAR_CLSID: u128 = 0xB41DB860_64E4_11D2_9906_E49FADC173CA;
 

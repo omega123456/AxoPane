@@ -4,16 +4,16 @@ use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use file_explorer_lib::ipc::types::{
+use axopane_lib::ipc::types::{
     InvokeNativeMenuRequest, LoadNativeMenuRequest, NativeMenuTargetKind,
 };
-use file_explorer_lib::native_menu::menu_cache::MenuCache;
-use file_explorer_lib::native_menu::provider::{
+use axopane_lib::native_menu::menu_cache::MenuCache;
+use axopane_lib::native_menu::provider::{
     NativeMenuProvider, ProviderInvocation, ProviderNativeMenuItem,
 };
-use file_explorer_lib::native_menu::shell_executor::ShellExecutor;
-use file_explorer_lib::native_menu::types::{NativeMenuIcon, NativeMenuIconKind};
-use file_explorer_lib::native_menu::NativeMenuService;
+use axopane_lib::native_menu::shell_executor::ShellExecutor;
+use axopane_lib::native_menu::types::{NativeMenuIcon, NativeMenuIconKind};
+use axopane_lib::native_menu::NativeMenuService;
 
 const OVERSIZED_MENU_LABEL_BYTES: usize = 17 * 1024 * 1024;
 
@@ -100,22 +100,22 @@ impl NativeMenuProvider for RecordingProvider {
         &self,
         invocation: &ProviderInvocation,
         _executor: &ShellExecutor,
-    ) -> file_explorer_lib::ipc::types::MenuActionStatus {
+    ) -> axopane_lib::ipc::types::MenuActionStatus {
         match invocation {
             ProviderInvocation::Windows { request, .. } => {
-                file_explorer_lib::ipc::types::MenuActionStatus::handled_with_message(format!(
+                axopane_lib::ipc::types::MenuActionStatus::handled_with_message(format!(
                     "windows:{}",
                     request.selected_paths.join(",")
                 ))
             }
             ProviderInvocation::WindowsModern { request, .. } => {
-                file_explorer_lib::ipc::types::MenuActionStatus::handled_with_message(format!(
+                axopane_lib::ipc::types::MenuActionStatus::handled_with_message(format!(
                     "modern:{}",
                     request.selected_paths.join(",")
                 ))
             }
             ProviderInvocation::Fake { action_id } => {
-                file_explorer_lib::ipc::types::MenuActionStatus::handled_with_message(format!(
+                axopane_lib::ipc::types::MenuActionStatus::handled_with_message(format!(
                     "fake:{action_id}"
                 ))
             }

@@ -1,13 +1,13 @@
 use std::fs;
 use std::sync::Arc;
 
-use file_explorer_lib::directory_session::{
+use axopane_lib::directory_session::{
     BeginNavigationRequest, BeginNavigationResponse, DirectorySessionService, ViewParams,
 };
-use file_explorer_lib::fs::{SortDirection, SortKey};
-use file_explorer_lib::ipc::commands;
-use file_explorer_lib::resource_coordinator::ResourceCoordinator;
-use file_explorer_lib::volumes::registry::VolumeRegistry;
+use axopane_lib::fs::{SortDirection, SortKey};
+use axopane_lib::ipc::commands;
+use axopane_lib::resource_coordinator::ResourceCoordinator;
+use axopane_lib::volumes::registry::VolumeRegistry;
 use serde_json::json;
 use tauri::ipc::InvokeBody;
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};

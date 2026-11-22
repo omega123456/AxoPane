@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 
-use file_explorer_lib::size::scheduler::{ScheduledJob, SizeScheduler, MAX_SIZE_METADATA_ENTRIES};
+use axopane_lib::size::scheduler::{ScheduledJob, SizeScheduler, MAX_SIZE_METADATA_ENTRIES};
 
 fn token() -> Arc<AtomicBool> {
     Arc::new(AtomicBool::new(false))

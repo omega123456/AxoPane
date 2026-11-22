@@ -2,14 +2,14 @@ use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use file_explorer_lib::size::index::names::file::MappedNames;
-use file_explorer_lib::size::index::names::writer::RewriteStats;
-use file_explorer_lib::size::index::names::{FileNameStore, PackedNames};
-use file_explorer_lib::size::index::segment::{
+use axopane_lib::size::index::names::file::MappedNames;
+use axopane_lib::size::index::names::writer::RewriteStats;
+use axopane_lib::size::index::names::{FileNameStore, PackedNames};
+use axopane_lib::size::index::segment::{
     BaseRewrite, MappedSegment, RewriteFailure, RewriteProgress, RewriteSource, SegmentBuilder,
     SegmentPaths, SegmentTarget,
 };
-use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
+use axopane_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
 use tempfile::{tempdir, TempDir};
 
 use crate::common::segment::{compacted, index_over, Compaction, SegmentBackedIndex};

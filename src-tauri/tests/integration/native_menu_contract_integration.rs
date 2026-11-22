@@ -1,11 +1,11 @@
 use crate::common;
 
-use file_explorer_lib::ipc::commands;
-use file_explorer_lib::ipc::types::{
+use axopane_lib::ipc::commands;
+use axopane_lib::ipc::types::{
     InvokeNativeMenuRequest, LoadNativeMenuRequest, NativeMenuIconKind, NativeMenuTargetKind,
     OpenWithRequest, ShowPropertiesRequest,
 };
-use file_explorer_lib::native_menu::NativeMenuService;
+use axopane_lib::native_menu::NativeMenuService;
 
 fn as_state<'a, T: Send + Sync + 'static>(value: &'a T) -> tauri::State<'a, T> {
     unsafe { std::mem::transmute::<&'a T, tauri::State<'a, T>>(value) }

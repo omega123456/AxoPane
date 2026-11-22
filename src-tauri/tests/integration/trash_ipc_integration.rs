@@ -1,7 +1,7 @@
 use std::fs;
 
-use file_explorer_lib::ipc::commands;
-use file_explorer_lib::ipc::types::{
+use axopane_lib::ipc::commands;
+use axopane_lib::ipc::types::{
     DeleteFromTrashRequest, RestoreTrashRequest, TrashEntriesRequest,
 };
 use tempfile::tempdir;

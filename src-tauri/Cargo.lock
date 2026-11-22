@@ -98,6 +98,57 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "axopane"
+version = "5.5.0"
+dependencies = [
+ "base64 0.22.1",
+ "block2",
+ "clipboard-rs",
+ "core-foundation-sys",
+ "crossbeam-channel",
+ "dispatch2",
+ "drag",
+ "dunce",
+ "fsevent-sys",
+ "ignore",
+ "lexical-sort",
+ "libc",
+ "libloading 0.8.9",
+ "log",
+ "memmap2",
+ "notify",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-foundation",
+ "objc2-quick-look-thumbnailing",
+ "objc2-uniform-type-identifiers",
+ "png 0.17.16",
+ "rayon",
+ "roxmltree",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-prevent-default",
+ "tauri-plugin-process",
+ "tauri-plugin-updater",
+ "tauri-plugin-window-state",
+ "tempfile",
+ "time",
+ "tokio",
+ "trash",
+ "unicode-normalization",
+ "windows 0.61.3",
+ "windows-core 0.61.2",
+ "windows-sys 0.61.2",
+ "zip",
+]
+
+[[package]]
 name = "base64"
 version = "0.21.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -926,57 +977,6 @@ checksum = "38e2275cc4e4fc009b0669731a1e5ab7ebf11f469eaede2bab9309a5b4d6057f"
 dependencies = [
  "memoffset",
  "rustc_version",
-]
-
-[[package]]
-name = "file-explorer"
-version = "5.5.0"
-dependencies = [
- "base64 0.22.1",
- "block2",
- "clipboard-rs",
- "core-foundation-sys",
- "crossbeam-channel",
- "dispatch2",
- "drag",
- "dunce",
- "fsevent-sys",
- "ignore",
- "lexical-sort",
- "libc",
- "libloading 0.8.9",
- "log",
- "memmap2",
- "notify",
- "objc2",
- "objc2-app-kit",
- "objc2-core-foundation",
- "objc2-core-graphics",
- "objc2-foundation",
- "objc2-quick-look-thumbnailing",
- "objc2-uniform-type-identifiers",
- "png 0.17.16",
- "rayon",
- "roxmltree",
- "serde",
- "serde_json",
- "sysinfo",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-prevent-default",
- "tauri-plugin-process",
- "tauri-plugin-updater",
- "tauri-plugin-window-state",
- "tempfile",
- "time",
- "tokio",
- "trash",
- "unicode-normalization",
- "windows 0.61.3",
- "windows-core 0.61.2",
- "windows-sys 0.61.2",
- "zip",
 ]
 
 [[package]]

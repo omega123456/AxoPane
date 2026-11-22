@@ -1,9 +1,9 @@
-use file_explorer_lib::size::index::names::block::{
+use axopane_lib::size::index::names::block::{
     checksum, BlockBuilder, BlockFolder, BlockSpan, BlockView, BuiltBlock, NamesCorrupt,
     StoredBlock, BLOCK_TARGET_BYTES,
 };
-use file_explorer_lib::size::index::names::signature::signature_of;
-use file_explorer_lib::size::index::names::{names_in, PackedNames};
+use axopane_lib::size::index::names::signature::signature_of;
+use axopane_lib::size::index::names::{names_in, PackedNames};
 
 fn packed(names: &[&str]) -> PackedNames {
     PackedNames::from_names(names.iter().map(|name| name.as_bytes()))

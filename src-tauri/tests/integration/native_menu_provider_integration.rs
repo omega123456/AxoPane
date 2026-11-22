@@ -2,17 +2,17 @@ use crate::common;
 
 use std::sync::Arc;
 
-use file_explorer_lib::ipc::types::{
+use axopane_lib::ipc::types::{
     InvokeNativeMenuRequest, LoadNativeMenuRequest, NativeMenuIconKind, NativeMenuTargetKind,
 };
-use file_explorer_lib::native_menu::fake_provider::FakeNativeMenuProvider;
-use file_explorer_lib::native_menu::provider::{
+use axopane_lib::native_menu::fake_provider::FakeNativeMenuProvider;
+use axopane_lib::native_menu::provider::{
     dedupe_provider_items, NativeMenuProvider, ProviderInvocation, ProviderNativeMenuItem,
 };
-use file_explorer_lib::native_menu::token_store::{IssuedInvocation, NativeMenuTokenStore};
-use file_explorer_lib::native_menu::types::NativeMenuCanonicalActionKind;
-use file_explorer_lib::native_menu::unsupported::{self, UnsupportedNativeMenuProvider};
-use file_explorer_lib::native_menu::NativeMenuService;
+use axopane_lib::native_menu::token_store::{IssuedInvocation, NativeMenuTokenStore};
+use axopane_lib::native_menu::types::NativeMenuCanonicalActionKind;
+use axopane_lib::native_menu::unsupported::{self, UnsupportedNativeMenuProvider};
+use axopane_lib::native_menu::NativeMenuService;
 
 fn fixture_folder_request(request_id: &str) -> LoadNativeMenuRequest {
     load_request(
@@ -26,7 +26,7 @@ fn fixture_folder_request(request_id: &str) -> LoadNativeMenuRequest {
     )
 }
 
-fn top_level_token(response: &file_explorer_lib::ipc::types::LoadNativeMenuResponse) -> String {
+fn top_level_token(response: &axopane_lib::ipc::types::LoadNativeMenuResponse) -> String {
     response.items[2]
         .invoke_token
         .clone()
@@ -172,7 +172,7 @@ const TARGET_MAPPING_CASES: [TargetMappingCase; 7] = [
 ];
 
 fn assert_item_deduped(
-    response: &file_explorer_lib::ipc::types::LoadNativeMenuResponse,
+    response: &axopane_lib::ipc::types::LoadNativeMenuResponse,
     duplicate_id: &str,
     kind: &NativeMenuTargetKind,
 ) {
@@ -209,7 +209,7 @@ fn fake_provider_covers_phase_five_target_mapping() {
 #[test]
 fn fake_provider_returns_an_empty_menu_for_tab_targets() {
     let provider = FakeNativeMenuProvider;
-    let executor = file_explorer_lib::native_menu::shell_executor::ShellExecutor::default();
+    let executor = axopane_lib::native_menu::shell_executor::ShellExecutor::default();
 
     let items = provider.load_menu(
         &load_request(
@@ -277,7 +277,7 @@ fn token_store_replaces_takes_and_clears_request_tokens() {
 #[test]
 fn fake_provider_rejects_windows_shell_invocations_in_test_utils() {
     let provider = FakeNativeMenuProvider;
-    let executor = file_explorer_lib::native_menu::shell_executor::ShellExecutor::default();
+    let executor = axopane_lib::native_menu::shell_executor::ShellExecutor::default();
 
     let status = provider.invoke(
         &ProviderInvocation::Windows {
@@ -305,7 +305,7 @@ fn fake_provider_rejects_windows_shell_invocations_in_test_utils() {
 #[test]
 fn fake_provider_rejects_modern_windows_invocations_in_test_utils() {
     let provider = FakeNativeMenuProvider;
-    let executor = file_explorer_lib::native_menu::shell_executor::ShellExecutor::default();
+    let executor = axopane_lib::native_menu::shell_executor::ShellExecutor::default();
 
     let status = provider.invoke(
         &ProviderInvocation::WindowsModern {
@@ -335,7 +335,7 @@ fn fake_provider_rejects_modern_windows_invocations_in_test_utils() {
 #[test]
 fn unsupported_provider_returns_safe_statuses() {
     let provider = UnsupportedNativeMenuProvider;
-    let executor = file_explorer_lib::native_menu::shell_executor::ShellExecutor::default();
+    let executor = axopane_lib::native_menu::shell_executor::ShellExecutor::default();
 
     let items = provider.load_menu(
         &load_request(

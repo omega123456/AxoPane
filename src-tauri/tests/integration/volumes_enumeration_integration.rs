@@ -1,4 +1,4 @@
-use file_explorer_lib::volumes::{
+use axopane_lib::volumes::{
     add_network_mount_if_missing, list_volumes, path_is_network, MountEntry, VolumeInfo,
 };
 

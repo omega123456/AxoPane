@@ -1,4 +1,4 @@
-use file_explorer_lib::volumes::registry::RegistrySnapshot;
+use axopane_lib::volumes::registry::RegistrySnapshot;
 
 const CAPTURED_AT_MS: u64 = 1_000;
 const LATER_MS: u64 = 2_000;

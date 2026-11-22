@@ -10,8 +10,8 @@
 
 use std::sync::{Arc, Mutex};
 
-use file_explorer_lib::fs::{self, DirectoryEntry, SortDirection, SortKey};
-use file_explorer_lib::watch::{
+use axopane_lib::fs::{self, DirectoryEntry, SortDirection, SortKey};
+use axopane_lib::watch::{
     create_runtime, diff_entries, handle_debounce_result_for_tests, insert_tab_for_tests,
     snapshot_for_target, tab_snapshot_for_tests, DirPatch, PatchLabel, TabWatchArm, WatchEmitters,
     WatchService, WatchTarget,

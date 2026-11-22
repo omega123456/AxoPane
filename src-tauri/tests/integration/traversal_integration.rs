@@ -2,7 +2,7 @@ use std::fs;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use file_explorer_lib::traversal::{
+use axopane_lib::traversal::{
     is_real_directory, safe_destination, walk, walk_without_links, TraversalError, TraversalOptions,
 };
 use tempfile::tempdir;

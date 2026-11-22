@@ -1,9 +1,9 @@
-use file_explorer_lib::size::index::names::block::{checksum, BlockBuilder, BlockView};
-use file_explorer_lib::size::index::names::signature::{
+use axopane_lib::size::index::names::block::{checksum, BlockBuilder, BlockView};
+use axopane_lib::size::index::names::signature::{
     byte_bit, is_non_ascii, signature_of, DASH_BIT, DIGIT_BIT, DOT_BIT, NON_ASCII_BIT,
     OTHER_ASCII_BIT, UNDERSCORE_BIT,
 };
-use file_explorer_lib::size::index::names::PackedNames;
+use axopane_lib::size::index::names::PackedNames;
 
 const LETTER_COUNT: u32 = 26;
 const FOLDER_COUNT_BYTES: usize = 4;

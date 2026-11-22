@@ -1,14 +1,14 @@
-use file_explorer_lib::fs::{SortDirection, SortKey};
+use axopane_lib::fs::{SortDirection, SortKey};
 use std::fs;
 use tempfile::tempdir;
 
-use file_explorer_lib::directory_session::{
+use axopane_lib::directory_session::{
     enumerate_snapshot_for_tests, BeginNavigationRequest, DirectorySessionService,
     EnumerationAdmission, EnumerationTarget, GetSessionRangeRequest, PanePath, Reconciled,
     ReleaseSessionRequest, ReviseSessionViewRequest, SessionRejection, ViewParams, WatchMutation,
     SESSION_PAGE_SIZE,
 };
-use file_explorer_lib::watch::patch::SessionPatch;
+use axopane_lib::watch::patch::SessionPatch;
 
 fn view_params() -> ViewParams {
     ViewParams {
@@ -130,20 +130,20 @@ fn capture_reconciliation_never_drops_a_racing_mutation_via_direct_unit_check() 
     write_files(dir.path(), 2);
 
     let capture =
-        file_explorer_lib::watch::capture_handle_for_tests(dir.path()).expect("begin capture");
+        axopane_lib::watch::capture_handle_for_tests(dir.path()).expect("begin capture");
     fs::write(dir.path().join("new-during-capture.txt"), b"x").expect("write file");
     // Give the OS watcher a brief, bounded moment to deliver the event before
     // we drain — this is not a fixed-delay wait for correctness (the
     // assertion below tolerates either outcome the contract allows), it only
     // avoids flaking on slow CI filesystem-event delivery.
     std::thread::sleep(std::time::Duration::from_millis(50));
-    let mutated = file_explorer_lib::watch::drain_captured_mutations_for_tests(capture);
+    let mutated = axopane_lib::watch::drain_captured_mutations_for_tests(capture);
 
     // Whatever the capture reported (a resolved mutation set, or `None`
     // meaning "resnapshot required"), a fresh enumeration afterward must
     // reflect the new file either way.
     let _ = mutated;
-    let entries = file_explorer_lib::directory_session::enumerate_snapshot_for_tests(
+    let entries = axopane_lib::directory_session::enumerate_snapshot_for_tests(
         dir.path(),
         &view_params(),
     )
@@ -169,7 +169,7 @@ fn a_definite_racing_mutation_still_resnapshots_instead_of_trusting_stale_entrie
     // Snapshot before the racing file exists, mirroring what a real
     // `enumerate_snapshot` read could return if it happened to race a
     // concurrent mutation and miss it (readdir is not guaranteed atomic).
-    let stale_entries = file_explorer_lib::directory_session::enumerate_snapshot_for_tests(
+    let stale_entries = axopane_lib::directory_session::enumerate_snapshot_for_tests(
         dir.path(),
         &view_params(),
     )
@@ -195,7 +195,7 @@ fn a_definite_racing_mutation_still_resnapshots_instead_of_trusting_stale_entrie
     let Reconciled {
         snapshot: resolved,
         watch_revision,
-    } = file_explorer_lib::directory_session::resolve_reconciliation_for_tests(
+    } = axopane_lib::directory_session::resolve_reconciliation_for_tests(
         target,
         stale_entries,
         drained,
@@ -228,7 +228,7 @@ fn stale_range_revisions_are_rejected_not_served() {
     // Superseded session id (as if begin_navigation had run again).
     let mut stale_session = begin.baseline;
     stale_session.session_id =
-        file_explorer_lib::directory_session::SessionId(stale_session.session_id.0 + 999);
+        axopane_lib::directory_session::SessionId(stale_session.session_id.0 + 999);
     let result = service.get_range(&GetSessionRangeRequest {
         pane_id: "left".to_string(),
         tab_id: "left-1".to_string(),
@@ -442,7 +442,7 @@ fn revise_view_rejects_missing_session_wrong_tab_and_stale_session_id() {
     let result = service.revise_view(ReviseSessionViewRequest {
         pane_id: "left".to_string(),
         tab_id: "left-1".to_string(),
-        session_id: file_explorer_lib::directory_session::SessionId(1),
+        session_id: axopane_lib::directory_session::SessionId(1),
         view: view_params(),
     });
     assert_eq!(result, Err(SessionRejection::NoActiveSession));
@@ -467,7 +467,7 @@ fn revise_view_rejects_missing_session_wrong_tab_and_stale_session_id() {
     let result = service.revise_view(ReviseSessionViewRequest {
         pane_id: "left".to_string(),
         tab_id: "left-1".to_string(),
-        session_id: file_explorer_lib::directory_session::SessionId(
+        session_id: axopane_lib::directory_session::SessionId(
             begin.baseline.session_id.0 + 999,
         ),
         view: view_params(),
@@ -520,7 +520,7 @@ fn session_rejection_display_covers_every_variant() {
 
 #[test]
 fn begin_navigation_uses_resource_coordinator_admission_when_a_resource_key_is_supplied() {
-    use file_explorer_lib::resource_coordinator::ResourceCoordinator;
+    use axopane_lib::resource_coordinator::ResourceCoordinator;
 
     let dir = tempdir().expect("temp dir");
     write_files(dir.path(), 3);
@@ -773,7 +773,7 @@ fn apply_metadata_only_builds_a_metadata_patch_and_rejects_bad_input() {
 
     let snapshot = enumerate_snapshot_for_tests(dir.path(), &view_params()).expect("snapshot");
     let target = snapshot.first().expect("at least one entry").clone();
-    let updates = vec![file_explorer_lib::watch::patch::MetadataDelta {
+    let updates = vec![axopane_lib::watch::patch::MetadataDelta {
         path: target.path.clone(),
         entry: target.clone(),
     }];

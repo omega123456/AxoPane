@@ -1,6 +1,6 @@
 use std::fs;
 
-use file_explorer_lib::trash::{
+use axopane_lib::trash::{
     delete_from_trash_for_tests, empty_trash_for_tests, list_trash_for_tests,
     move_to_trash_into_for_tests, restore_from_trash_for_tests,
 };

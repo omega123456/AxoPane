@@ -4,11 +4,11 @@ use std::path::{Path, PathBuf};
 use std::slice;
 use std::sync::Arc;
 
-use file_explorer_lib::size::index::names::signature::signature_of;
-use file_explorer_lib::size::index::segment::{
+use axopane_lib::size::index::names::signature::signature_of;
+use axopane_lib::size::index::segment::{
     MappedSegment, NodeFlags, SegmentBuilder, SegmentEntry, SegmentTarget,
 };
-use file_explorer_lib::size::index::tree::{
+use axopane_lib::size::index::tree::{
     DirectoryListing, FolderSizeTree, TreeOverlayStats, OVERLAY_CAP_DEAD_RANGES,
     OVERLAY_CAP_FOLDERS,
 };

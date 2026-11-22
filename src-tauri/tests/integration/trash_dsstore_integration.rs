@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use file_explorer_lib::trash::{parse_put_back_for_tests, resolve_original_path_for_tests};
+use axopane_lib::trash::{parse_put_back_for_tests, resolve_original_path_for_tests};
 
 const FIXTURE: &[u8] = include_bytes!("fixtures/trash_put_back.dsstore");
 

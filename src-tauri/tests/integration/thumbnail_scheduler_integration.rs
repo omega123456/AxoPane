@@ -3,16 +3,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use file_explorer_lib::ipc::types::ThumbnailPriority;
-use file_explorer_lib::resource_coordinator::ResourceCoordinator;
-use file_explorer_lib::thumbnails::provider::{
+use axopane_lib::ipc::types::ThumbnailPriority;
+use axopane_lib::resource_coordinator::ResourceCoordinator;
+use axopane_lib::thumbnails::provider::{
     ProviderCapability, ThumbnailPreviewCallback, ThumbnailProvider,
 };
-use file_explorer_lib::thumbnails::scheduler::{
+use axopane_lib::thumbnails::scheduler::{
     DesiredThumbnail, SchedulerCounts, SchedulerParts, ScopeRequest, ThumbnailScheduler,
     ThumbnailSubscriber, MAX_ACTIVE_JOBS, MAX_DESIRED_PER_SCOPE,
 };
-use file_explorer_lib::thumbnails::types::{
+use axopane_lib::thumbnails::types::{
     ThumbnailCandidate, ThumbnailFingerprint, ThumbnailState,
 };
 
@@ -82,7 +82,7 @@ fn shares_work_and_preserves_live_subscriber_context() {
     let results = Arc::new(std::sync::Mutex::new(Vec::new()));
     let received = Arc::clone(&results);
     let scheduler = ThumbnailScheduler::new(
-        file_explorer_lib::thumbnails::platform_provider().into(),
+        axopane_lib::thumbnails::platform_provider().into(),
         Arc::new(ResourceCoordinator::new()),
         Arc::new(move |_, _, subscribers| received.lock().expect("results").push(subscribers)),
     );
@@ -102,7 +102,7 @@ fn verifies_metadata_once_per_generated_miss() {
     let checks_for_verifier = Arc::clone(&checks);
     let (completed_sender, completed_receiver) = mpsc::channel();
     let parts = SchedulerParts::new(
-        file_explorer_lib::thumbnails::platform_provider().into(),
+        axopane_lib::thumbnails::platform_provider().into(),
         Arc::new(ResourceCoordinator::new()),
         Arc::new(move |_, _, _| {
             let _ = completed_sender.send(());
@@ -125,7 +125,7 @@ fn limits_are_fixed_and_scope_cancellation_is_safe() {
     assert_eq!(MAX_ACTIVE_JOBS, 2);
     assert_eq!(MAX_DESIRED_PER_SCOPE, 4_096);
     let scheduler = ThumbnailScheduler::new(
-        file_explorer_lib::thumbnails::platform_provider().into(),
+        axopane_lib::thumbnails::platform_provider().into(),
         Arc::new(ResourceCoordinator::new()),
         Arc::new(|_, _: ThumbnailState, _| {}),
     );

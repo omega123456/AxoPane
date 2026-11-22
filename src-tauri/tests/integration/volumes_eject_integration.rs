@@ -1,5 +1,5 @@
-use file_explorer_lib::ipc::commands;
-use file_explorer_lib::ipc::types::EjectVolumeRequest;
+use axopane_lib::ipc::commands;
+use axopane_lib::ipc::types::EjectVolumeRequest;
 
 #[test]
 fn eject_volume_is_unsupported_under_test_utils_for_a_removable_fixture() {

@@ -2,14 +2,14 @@ use std::fs::{self, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use file_explorer_lib::size::index::names::file::{NAMES_FILE, SPILL_SUFFIX};
-use file_explorer_lib::size::index::names::writer::RewriteStats;
-use file_explorer_lib::size::index::names::{
+use axopane_lib::size::index::names::file::{NAMES_FILE, SPILL_SUFFIX};
+use axopane_lib::size::index::names::writer::RewriteStats;
+use axopane_lib::size::index::names::{
     names_in, FileNameStore, FolderNames, NamesCounters, NamesCursor, NamesUnreadable,
     OverlayStats, OverlayThreshold, PackedNames, SavedNames, OVERLAY_THRESHOLD_BYTES,
     OVERLAY_THRESHOLD_FOLDERS,
 };
-use file_explorer_lib::size::index::segment::{
+use axopane_lib::size::index::segment::{
     MappedSegment, NodeFlags, SegmentBuilder, SegmentEntry, SegmentTarget,
 };
 use tempfile::{tempdir, TempDir};

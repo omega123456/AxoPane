@@ -3,7 +3,7 @@
 
 use std::fs;
 
-use file_explorer_lib::logging::{
+use axopane_lib::logging::{
     current_local_date, current_local_datetime, daily_log_file_name, escape_message,
     format_log_line, format_timestamp, parse_log_file_date, parse_log_line, prune_old_logs,
     read_current_day_logs, unescape_message, LogLevel, LogMessage, RETENTION_DAYS,
@@ -135,7 +135,7 @@ fn format_and_parse_line_round_trip_preserves_fields() {
         "2026-06-30T12:00:00Z",
         LogMessage {
             level: LogLevel::Warn,
-            target: "file_explorer_lib::ipc",
+            target: "axopane_lib::ipc",
             message: "queue stalled :: retrying\nnext",
         },
     );
@@ -143,7 +143,7 @@ fn format_and_parse_line_round_trip_preserves_fields() {
     assert_eq!(entry.id, 0);
     assert_eq!(entry.timestamp, "2026-06-30T12:00:00Z");
     assert_eq!(entry.level, "warn");
-    assert_eq!(entry.target, "file_explorer_lib::ipc");
+    assert_eq!(entry.target, "axopane_lib::ipc");
     assert_eq!(entry.message, "queue stalled :: retrying\nnext");
 }
 

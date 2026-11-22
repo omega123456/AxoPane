@@ -1,4 +1,4 @@
-use file_explorer_lib::ipc::commands;
+use axopane_lib::ipc::commands;
 use tauri::test::{mock_builder, mock_context, noop_assets};
 
 #[test]

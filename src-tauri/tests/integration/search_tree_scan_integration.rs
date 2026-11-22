@@ -4,17 +4,17 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-use file_explorer_lib::search::path_style::PathStyle;
-use file_explorer_lib::search::query::{parse, ParsedQuery};
-use file_explorer_lib::search::results::{rank_candidates, CANDIDATE_CAP};
-use file_explorer_lib::search::source::FolderTreeSource;
-use file_explorer_lib::search::tree_scan::{
+use axopane_lib::search::path_style::PathStyle;
+use axopane_lib::search::query::{parse, ParsedQuery};
+use axopane_lib::search::results::{rank_candidates, CANDIDATE_CAP};
+use axopane_lib::search::source::FolderTreeSource;
+use axopane_lib::search::tree_scan::{
     candidates, candidates_in_chunks, TreeSearchRun, SLOTS_PER_READ,
 };
-use file_explorer_lib::search::{CandidateBatch, Control, SearchError, SearchOptions, SearchScope};
-use file_explorer_lib::size::index::names::FileNameStore;
-use file_explorer_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
-use file_explorer_lib::size::index::IndexRead;
+use axopane_lib::search::{CandidateBatch, Control, SearchError, SearchOptions, SearchScope};
+use axopane_lib::size::index::names::FileNameStore;
+use axopane_lib::size::index::tree::{DirectoryListing, FolderSizeTree};
+use axopane_lib::size::index::IndexRead;
 
 const NO_NAMES_FILE: &str = "no-file-names.bin";
 

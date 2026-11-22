@@ -2,7 +2,7 @@
 //! file from disk is ever read here, keeping the test deterministic and
 //! independent of any installed application.
 
-use file_explorer_lib::app_picker::icns::{icns_to_data_url, largest_embedded_png};
+use axopane_lib::app_picker::icns::{icns_to_data_url, largest_embedded_png};
 
 fn icns_chunk(os_type: &[u8; 4], payload: &[u8]) -> Vec<u8> {
     let mut chunk = Vec::new();

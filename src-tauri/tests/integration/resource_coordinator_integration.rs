@@ -17,10 +17,10 @@ use std::time::Duration;
 
 use crossbeam_channel::{bounded, unbounded};
 
-use file_explorer_lib::resource_coordinator::queue::{
+use axopane_lib::resource_coordinator::queue::{
     MAX_CPU_SLOTS, MAX_LATENCY_SLOTS, MAX_QUEUED_JOBS,
 };
-use file_explorer_lib::resource_coordinator::{
+use axopane_lib::resource_coordinator::{
     max_throughput_slots, throughput_slots_for_parallelism_for_tests, JobClass, JobSpec,
     ResourceCoordinator, SubmitError,
 };

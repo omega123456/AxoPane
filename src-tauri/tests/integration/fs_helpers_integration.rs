@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 use std::fs;
 use std::time::SystemTime;
 
-use file_explorer_lib::fs::{
+use axopane_lib::fs::{
     collect_attributes, compare_entries, compare_optional_string, compare_optional_u64,
     directory_entry_from_path, infer_type_label, natural_name_compare, platform_root,
     read_item_count, system_time_to_rfc3339, validate_name, DirectoryEntry, SortDirection, SortKey,

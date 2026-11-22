@@ -1,14 +1,14 @@
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use file_explorer_lib::directory_session::{
+use axopane_lib::directory_session::{
     BeginNavigationRequest, DirectorySessionService, EnumerationAdmission, ViewParams,
 };
-use file_explorer_lib::fs::{self as explorer_fs, SortDirection, SortKey};
-use file_explorer_lib::item_counts::cache::{
+use axopane_lib::fs::{self as explorer_fs, SortDirection, SortKey};
+use axopane_lib::item_counts::cache::{
     CountResolution, ItemCountCache, ItemCountState, ITEM_COUNT_CACHE_LIMIT,
 };
-use file_explorer_lib::item_counts::{
+use axopane_lib::item_counts::{
     ActiveItemsSortRequest, ActiveItemsSortResponse, ItemCountRequestContext, ItemCountService,
     VisibleItemCountsRequest, AUTO_ITEM_COUNT_LIMIT, MAX_AUTOMATIC_ITEM_COUNT_QUEUE,
 };
@@ -352,10 +352,10 @@ fn explicit_items_sort_serves_full_relisting() {
     let ActiveItemsSortResponse::Ready(ready) = response else {
         panic!("expected ready result");
     };
-    let canonical_root = file_explorer_lib::fs::canonicalize_dir(root).expect("canonical root");
+    let canonical_root = axopane_lib::fs::canonicalize_dir(root).expect("canonical root");
     assert_eq!(
         ready.path,
-        file_explorer_lib::fs::display_path_from_path(&canonical_root)
+        axopane_lib::fs::display_path_from_path(&canonical_root)
     );
     assert_eq!(
         ready

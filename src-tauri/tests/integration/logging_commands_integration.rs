@@ -4,13 +4,13 @@
 use std::fs;
 use std::sync::Arc;
 
-use file_explorer_lib::ipc::commands::{apply_log_level, read_logs, set_log_level};
-use file_explorer_lib::ipc::types::SetLogLevelRequest;
-use file_explorer_lib::logging::{
+use axopane_lib::ipc::commands::{apply_log_level, read_logs, set_log_level};
+use axopane_lib::ipc::types::SetLogLevelRequest;
+use axopane_lib::logging::{
     current_local_date, daily_log_file_name, format_log_line, FileLogger, LogLevel, LogMessage,
     LoggingState,
 };
-use file_explorer_lib::persist::PersistenceState;
+use axopane_lib::persist::PersistenceState;
 use tempfile::{tempdir, TempDir};
 
 fn as_state<'a, T: Send + Sync + 'static>(value: &'a T) -> tauri::State<'a, T> {

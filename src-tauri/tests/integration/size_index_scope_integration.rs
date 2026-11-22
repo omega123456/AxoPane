@@ -4,16 +4,16 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use file_explorer_lib::ipc::commands;
-use file_explorer_lib::ipc::types::SaveConfigRequest;
-use file_explorer_lib::persist::{Config, PersistenceState};
-use file_explorer_lib::search::source::FolderTreeSource;
-use file_explorer_lib::search::SearchError;
-use file_explorer_lib::size::index::names::file::spill_path;
-use file_explorer_lib::size::index::names_path_beside;
-use file_explorer_lib::size::index::persist::{self, ChangeFlags, SnapshotMeta};
-use file_explorer_lib::size::index::platform::RawEvent;
-use file_explorer_lib::size::{
+use axopane_lib::ipc::commands;
+use axopane_lib::ipc::types::SaveConfigRequest;
+use axopane_lib::persist::{Config, PersistenceState};
+use axopane_lib::search::source::FolderTreeSource;
+use axopane_lib::search::SearchError;
+use axopane_lib::size::index::names::file::spill_path;
+use axopane_lib::size::index::names_path_beside;
+use axopane_lib::size::index::persist::{self, ChangeFlags, SnapshotMeta};
+use axopane_lib::size::index::platform::RawEvent;
+use axopane_lib::size::{
     FolderSizeIndexStatus, IndexBackend, IndexScope, IndexState, IndexUnsupported, SizeBackend,
 };
 use tempfile::tempdir;

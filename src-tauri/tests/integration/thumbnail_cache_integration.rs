@@ -3,10 +3,10 @@ use crate::common;
 use std::path::Path;
 
 use base64::Engine;
-use file_explorer_lib::thumbnails::cache::{
+use axopane_lib::thumbnails::cache::{
     ThumbnailCache, ThumbnailCacheEntry, NEGATIVE_TTL_SECONDS,
 };
-use file_explorer_lib::thumbnails::types::{
+use axopane_lib::thumbnails::types::{
     validated_png_data_url, ThumbnailCacheKey, ThumbnailFingerprint, ThumbnailState,
     MAX_DATA_URL_BYTES,
 };
@@ -73,7 +73,7 @@ fn low_quality_preview_survives_failure_and_delays_upgrade_retry() {
             key: key.clone(),
             state: ThumbnailState::Ready {
                 data_url,
-                quality: file_explorer_lib::ipc::types::ThumbnailQuality::Low,
+                quality: axopane_lib::ipc::types::ThumbnailQuality::Low,
             },
         },
         10,
@@ -114,7 +114,7 @@ fn unavailable_upgrade_preserves_low_quality_for_the_negative_ttl() {
             key: key.clone(),
             state: ThumbnailState::Ready {
                 data_url,
-                quality: file_explorer_lib::ipc::types::ThumbnailQuality::Low,
+                quality: axopane_lib::ipc::types::ThumbnailQuality::Low,
             },
         },
         10,

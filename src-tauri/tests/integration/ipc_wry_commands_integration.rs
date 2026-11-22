@@ -4,15 +4,15 @@ use std::fs;
 use std::sync::Arc;
 use std::time::Duration;
 
-use file_explorer_lib::fs::{SortDirection, SortKey};
-use file_explorer_lib::ipc::commands;
-use file_explorer_lib::ipc::types::{
+use axopane_lib::fs::{SortDirection, SortKey};
+use axopane_lib::ipc::commands;
+use axopane_lib::ipc::types::{
     FolderSizeRequest, FolderSizesRequest, SetTabWatchRequest, WatchTarget,
 };
-use file_explorer_lib::ops::OpsService;
-use file_explorer_lib::persist::PersistenceState;
-use file_explorer_lib::size::SizeService;
-use file_explorer_lib::watch::WatchService;
+use axopane_lib::ops::OpsService;
+use axopane_lib::persist::PersistenceState;
+use axopane_lib::size::SizeService;
+use axopane_lib::watch::WatchService;
 use tauri::test::{mock_builder, mock_context, noop_assets};
 use tauri::Manager;
 use tempfile::tempdir;
@@ -71,7 +71,7 @@ fn concrete_apphandle_commands_cover_volume_and_watch_wrappers() {
     fs::write(root.join("after.txt"), b"after").expect("after");
 
     set_watch(&app, Some(watch_target.clone())).expect("reseed watch after file changes");
-    let baseline = file_explorer_lib::watch::tab_snapshot_for_tests(
+    let baseline = axopane_lib::watch::tab_snapshot_for_tests(
         &app.state::<Arc<WatchService>>(),
         &watch_target.tab_id,
     )

@@ -1,5 +1,5 @@
-use file_explorer_lib::ops::{OpItem, OpKind, OpStatus, OpsService, StartOpRequest};
-use file_explorer_lib::volumes::VolumeInfo;
+use axopane_lib::ops::{OpItem, OpKind, OpStatus, OpsService, StartOpRequest};
+use axopane_lib::volumes::VolumeInfo;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Read;

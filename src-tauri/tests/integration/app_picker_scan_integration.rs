@@ -3,7 +3,7 @@
 //! of touching the real `/Applications`, satisfying the project's rule that
 //! tests never depend on real machine-global filesystem state.
 
-use file_explorer_lib::app_picker::scan::scan_app_roots;
+use axopane_lib::app_picker::scan::scan_app_roots;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::tempdir;

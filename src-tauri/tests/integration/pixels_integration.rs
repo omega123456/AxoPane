@@ -1,4 +1,4 @@
-use file_explorer_lib::pixels::{
+use axopane_lib::pixels::{
     encode_rgba_png, png_data_url, premultiplied_bgra_to_rgba, unpremultiply,
 };
 

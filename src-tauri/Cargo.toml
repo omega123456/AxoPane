@@ -1,12 +1,12 @@
 [package]
-name = "file-explorer"
+name = "axopane"
 version = "5.5.0"
-description = "Phase 1 scaffold for the file explorer"
-authors = ["OpenAI"]
+description = "A fast, lightweight dual-pane file explorer for Windows and macOS"
+authors = ["omega123456"]
 edition = "2021"
 
 [lib]
-name = "file_explorer_lib"
+name = "axopane_lib"
 crate-type = ["rlib"]
 test = false
 

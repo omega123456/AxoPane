@@ -1,8 +1,8 @@
 //! Covers the `log_frontend` command and its formatting/level helpers, which back
 //! the frontend logger's IPC sink (`src/lib/app-log-commands.ts`).
 
-use file_explorer_lib::ipc::commands::{format_frontend_log, frontend_log_level, log_frontend};
-use file_explorer_lib::ipc::types::LogFrontendRequest;
+use axopane_lib::ipc::commands::{format_frontend_log, frontend_log_level, log_frontend};
+use axopane_lib::ipc::types::LogFrontendRequest;
 
 #[test]
 fn maps_known_levels_and_folds_trace_into_debug() {

@@ -1,6 +1,6 @@
 use std::fs;
 
-use file_explorer_lib::fs::{create_directory, create_file, rename_entry, FsError};
+use axopane_lib::fs::{create_directory, create_file, rename_entry, FsError};
 use tempfile::tempdir;
 
 #[test]

@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use file_explorer_lib::ipc::commands;
-use file_explorer_lib::ipc::types::{
+use axopane_lib::ipc::commands;
+use axopane_lib::ipc::types::{
     SearchPageRequest, SearchQueryRequest, SearchRejection, SearchScope,
 };
-use file_explorer_lib::search::service::{SearchBackend, SearchService};
-use file_explorer_lib::size::everything::{
+use axopane_lib::search::service::{SearchBackend, SearchService};
+use axopane_lib::size::everything::{
     EverythingHandle, EverythingQuery, EverythingQueryResult, EverythingRow,
 };
 

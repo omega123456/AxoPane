@@ -3,7 +3,7 @@ use crate::common;
 use std::fs;
 use std::path::Path;
 
-use file_explorer_lib::fs::{
+use axopane_lib::fs::{
     canonicalize_dir, default_start_dir, display_path_from_text, expand_env_vars_with,
     expand_home_path_with, list_dir, list_tree_children, ListDirOptions, ListTreeChildrenOptions,
     SortDirection, SortKey, TreeExpandability,
@@ -251,7 +251,7 @@ fn list_tree_children_returns_only_lightweight_directory_nodes() {
     // A parent listing does not open every child to probe grandchildren.
     assert_eq!(
         folder2.expandability,
-        file_explorer_lib::fs::TreeExpandability::Unknown
+        axopane_lib::fs::TreeExpandability::Unknown
     );
     assert!(!folder2.has_children);
     assert!(visible.children.iter().all(|child| child.name != ".hidden"));
