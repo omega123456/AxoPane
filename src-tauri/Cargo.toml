@@ -1,6 +1,6 @@
 [package]
 name = "axopane"
-version = "5.5.0"
+version = "5.6.0"
 description = "A fast, lightweight dual-pane file explorer for Windows and macOS"
 authors = ["omega123456"]
 edition = "2024"
