@@ -114,7 +114,12 @@ function useSettingsDraft() {
     updateDraft((current) => ({ ...current, layout: { ...current.layout, [key]: value } }))
   }
 
-  return { draft, updateDraft, updateLayout, resetDraft: () => updateDraft(defaultDraftKeepingIndex) }
+  return {
+    draft,
+    updateDraft,
+    updateLayout,
+    resetDraft: () => updateDraft(defaultDraftKeepingIndex),
+  }
 }
 
 function useShortcutCapture(updateDraft: DraftUpdater) {

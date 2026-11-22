@@ -7,7 +7,10 @@ import { localRulesPlugin } from '../../../scripts/eslint-named-conditions.mjs'
 
 const RULE_ID = 'local/named-conditions'
 const virtualFileName = 'named-conditions-fixture.ts'
-const typedProjectDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'named-conditions-project')
+const typedProjectDir = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  'named-conditions-project',
+)
 
 type LintTarget = {
   config: Linter.Config[]

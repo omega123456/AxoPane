@@ -2,11 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SettingsModal } from '@/components/dialogs/SettingsModal'
-import type {
-  AppConfig,
-  IndexExclusionOutcome,
-  IndexExclusionOutcomeKind,
-} from '@/lib/types/ipc'
+import type { AppConfig, IndexExclusionOutcome, IndexExclusionOutcomeKind } from '@/lib/types/ipc'
 import { ipc } from '@/tests/ipc-mock'
 import { useConfigStore } from '@/stores/config-store'
 import { usePanesStore } from '@/stores/panes-store'
