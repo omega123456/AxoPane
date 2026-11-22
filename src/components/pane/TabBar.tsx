@@ -19,7 +19,6 @@ import { NO_CLASS, TEXT_SECONDARY, HOVER_ON_POINTER } from '@/lib/class-names'
 type TabBarProps = {
   paneId: PaneId
   title: string
-  currentPath: string
 }
 
 function invalidDropCursorClass(isInvalid: boolean) {
@@ -42,9 +41,9 @@ function dragSourceClass(isDragSource: boolean) {
     : NO_CLASS
 }
 
-export function TabBar({ paneId, title, currentPath }: TabBarProps) {
+export function TabBar({ paneId, title }: TabBarProps) {
   const paneTabs = useTabsStore((state) => state.panes[paneId])
-  const openTabFromPath = usePanesStore((state) => state.openTabFromPath)
+  const openNewTab = usePanesStore((state) => state.openNewTab)
   const dragState = useTabDragState()
   const { ref: stripRef } = useTabStripDropTarget(paneId)
   const canClose = paneTabs.tabs.length > 1
@@ -71,7 +70,7 @@ export function TabBar({ paneId, title, currentPath }: TabBarProps) {
       <button
         type="button"
         aria-label={`New tab in ${title}`}
-        onClick={() => void openTabFromPath(paneId, currentPath)}
+        onClick={() => void openNewTab(paneId)}
         className={`ml-1 inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-control ${TEXT_SECONDARY} hover:bg-light-hover hover:text-light-text dark:hover:bg-dark-hover dark:hover:text-dark-text ${FOCUS_RING}`}
       >
         <PlusIcon className="h-4 w-4" />

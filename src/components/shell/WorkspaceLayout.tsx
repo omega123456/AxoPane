@@ -150,6 +150,5 @@ export function WorkspaceLayout({ commandBar }: { commandBar?: ReactNode }) {
 
 function PaneTabs({ paneId }: { paneId: PaneId }) {
   const title = usePanesStore((state) => state.panes[paneId].title)
-  const path = usePanesStore((state) => state.panes[paneId].path)
-  return <TabBar paneId={paneId} title={title} currentPath={path} />
+  return <TabBar paneId={paneId} title={title} />
 }

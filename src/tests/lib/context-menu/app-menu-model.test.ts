@@ -182,6 +182,9 @@ describe('buildAppContextMenuContent', () => {
       action: { kind: 'add-favourite', path: '.' },
     })
     expect(rows.find((row) => row.label === 'Unlock tab')).toBeDefined()
+    expect(rows.find((row) => row.label === 'Clone tab')).toMatchObject({
+      action: { kind: 'clone-tab', tabId: first.id },
+    })
     expect(rows.find((row) => row.label === 'Close tab')).toMatchObject({ disabled: true })
     expect(rows.find((row) => row.label === 'Close tabs to the left')).toMatchObject({
       disabled: true,

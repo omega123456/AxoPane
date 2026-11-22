@@ -4,6 +4,7 @@ import {
   planTabMove,
   withActiveTab,
   withAddedTab,
+  withClonedTab,
   withClosedTab,
   withHydratedPane,
   withMovedTabs,
@@ -28,8 +29,8 @@ function tab(id: string, overrides: Partial<TabState> = {}): TabState {
 
 function panes(leftIds: string[], activeTabIndex = 0, rightIds = ['r1']): TabPanes {
   return {
-    left: { activeTabIndex, tabs: leftIds.map((id) => tab(id)) },
-    right: { activeTabIndex: 0, tabs: rightIds.map((id) => tab(id)) },
+    left: { activeTabIndex, tabs: leftIds.map((id) => tab(id)), previouslyActiveTabIds: [] },
+    right: { activeTabIndex: 0, tabs: rightIds.map((id) => tab(id)), previouslyActiveTabIds: [] },
   }
 }
 
@@ -81,7 +82,7 @@ describe('tab-transitions', () => {
       destinationTabId: 'new-id',
     })
     const moved = withMovedTabs(state, move!)
-    expect(moved.left).toEqual({ activeTabIndex: 0, tabs: [tab('a')] })
+    expect(moved.left).toEqual({ activeTabIndex: 0, tabs: [tab('a')], previouslyActiveTabIds: [] })
     expect(moved.right.tabs.map((item) => item.id)).toEqual(['r1', 'new-id'])
     expect(moved.right.activeTabIndex).toBe(1)
     const inactive = planTabMove(
@@ -133,6 +134,69 @@ describe('tab-transitions', () => {
     const locked = withTabLocked(panes(['a', 'b']), 'left', { tabId: 'a', locked: true })
     expect(locked.left.tabs[0].locked).toBe(true)
     expect(withClosedTab(locked, 'left', 'a')).toBeNull()
+  })
+
+  it('returns to the previously active tab when the active tab closes', () => {
+    const visitedCThenA = withActiveTab(
+      withActiveTab(panes(['a', 'b', 'c', 'd'], 1), 'left', 'c')!,
+      'left',
+      'a',
+    )!
+    const afterClosingA = withClosedTab(visitedCThenA, 'left', 'a')!
+    expect(afterClosingA.left.tabs[afterClosingA.left.activeTabIndex].id).toBe('c')
+    const afterClosingC = withClosedTab(afterClosingA, 'left', 'c')!
+    expect(afterClosingC.left.tabs[afterClosingC.left.activeTabIndex].id).toBe('b')
+    const afterClosingB = withClosedTab(afterClosingC, 'left', 'b')!
+    expect(afterClosingB.left.tabs[afterClosingB.left.activeTabIndex].id).toBe('d')
+  })
+
+  it('forgets closed tabs from the activation history', () => {
+    const visitedBThenC = withActiveTab(
+      withActiveTab(panes(['a', 'b', 'c'], 0), 'left', 'b')!,
+      'left',
+      'c',
+    )!
+    const withoutB = withClosedTab(visitedBThenC, 'left', 'b')!
+    expect(withoutB.left.previouslyActiveTabIds).toEqual(['a'])
+    const afterClosingC = withClosedTab(withoutB, 'left', 'c')!
+    expect(afterClosingC.left.tabs[afterClosingC.left.activeTabIndex].id).toBe('a')
+  })
+
+  it('returns to the tab active before a newly added tab when it closes', () => {
+    const opened = withAddedTab(panes(['a', 'b', 'c'], 0), 'left', {
+      tab: tab('d'),
+      activate: true,
+    })
+    const afterClosingD = withClosedTab(opened, 'left', 'd')!
+    expect(afterClosingD.left.tabs[afterClosingD.left.activeTabIndex].id).toBe('a')
+    const background = withAddedTab(panes(['a', 'b'], 1), 'left', {
+      tab: tab('c'),
+      activate: false,
+    })
+    expect(background.left.previouslyActiveTabIds).toEqual([])
+  })
+
+  it('returns the source pane to its previously active tab when the active tab moves away', () => {
+    const visitedC = withActiveTab(panes(['a', 'b', 'c'], 0), 'left', 'c')!
+    const move = planTabMove(
+      visitedC,
+      { sourcePaneId: 'left', tabId: 'c', destinationPaneId: 'right', destinationIndex: 0 },
+      newId,
+    )
+    const moved = withMovedTabs(visitedC, move!)
+    expect(moved.left.tabs[moved.left.activeTabIndex].id).toBe('a')
+    expect(moved.right.previouslyActiveTabIds).toEqual(['r1'])
+  })
+
+  it('clones a tab next to the original, unlocked and active', () => {
+    const state = withTabLocked(panes(['a', 'b', 'c'], 2), 'left', { tabId: 'a', locked: true })
+    const cloned = withClonedTab(state, 'left', { tabId: 'a', cloneId: 'a-clone' })!
+    expect(cloned.left.tabs.map((item) => item.id)).toEqual(['a', 'a-clone', 'b', 'c'])
+    expect(cloned.left.tabs[1]).toEqual({ ...tab('a'), id: 'a-clone', locked: false })
+    expect(cloned.left.activeTabIndex).toBe(1)
+    const afterClosingClone = withClosedTab(cloned, 'left', 'a-clone')!
+    expect(afterClosingClone.left.tabs[afterClosingClone.left.activeTabIndex].id).toBe('c')
+    expect(withClonedTab(state, 'left', { tabId: 'zz', cloneId: 'zz-clone' })).toBeNull()
   })
 
   it('activates and patches the active tab', () => {

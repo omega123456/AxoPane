@@ -18,14 +18,16 @@ export function isPathInsideVolume(path: string, mountRoot: string) {
     return true
   }
 
-  const remainder = normalizedPath.slice(normalizedRoot.length)
-  if (!remainder) {
+  if (!normalizedPath.startsWith(normalizedRoot)) {
     return false
   }
 
-  return endsWithSeparator(normalizedRoot)
-    ? normalizedPath.startsWith(normalizedRoot)
-    : startsWithSeparator(remainder)
+  const remainder = normalizedPath.slice(normalizedRoot.length)
+  return isPathSegmentBoundary(normalizedRoot, remainder)
+}
+
+function isPathSegmentBoundary(root: string, remainder: string) {
+  return endsWithSeparator(root) || startsWithSeparator(remainder)
 }
 
 function endsWithSeparator(path: string) {
@@ -59,6 +61,10 @@ export function findVolumeForPath(path: string, volumes: VolumeInfo[]): VolumeIn
     }
   }
   return match
+}
+
+export function driveRootForPath(path: string, volumes: VolumeInfo[]): string {
+  return findVolumeForPath(path, volumes)?.mountRoot ?? path
 }
 
 export function isNetworkPath(path: string, volumes: VolumeInfo[]): boolean {

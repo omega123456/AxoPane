@@ -1,4 +1,5 @@
 import { log } from '@/lib/app-log-commands'
+import { driveRootForPath } from '@/lib/volumes'
 import { panesStore } from '@/stores/panes/store-handle'
 import { resetPaneForActiveTab } from '@/stores/panes/listing-load'
 import { listingSessions, parkRevealPath } from '@/stores/panes/listing-runtime'
@@ -37,6 +38,25 @@ export async function openTabFromPath(
     ...paneResetForTab(state, paneId, tab),
   }))
 
+  await reloadWithFreshSession(paneId)
+}
+
+export async function openNewTab(paneId: PaneId) {
+  const { panes, volumes } = panesStore().getState()
+  await openTabFromPath(paneId, driveRootForPath(panes[paneId].path, volumes))
+}
+
+export async function cloneTab(paneId: PaneId, tabId: string) {
+  const cloneId = useTabsStore.getState().cloneTab(paneId, tabId)
+  if (!cloneId) {
+    return
+  }
+  log.debug('cloneTab', { paneId, tabId, cloneId })
+  const clone = activeTab(paneId)
+  panesStore().setState((state) => ({
+    ...focusRequested(state, paneId),
+    ...paneResetForTab(state, paneId, clone),
+  }))
   await reloadWithFreshSession(paneId)
 }
 

@@ -144,8 +144,46 @@ describe('Navigation: tabs, breadcrumb, session, live patching', () => {
     await waitFor(() => {
       const pane = useTabsStore.getState().panes.left
       expect(pane.tabs.map((tab) => tab.id)).toEqual([second, first])
-      expect(usePanesStore.getState().panes.left.path).toBe('C:\\Users\\Omega')
+      expect(usePanesStore.getState().panes.left.path).toBe('C:\\')
     })
+  })
+
+  it('opens new tabs at the root of the current drive from the button and Ctrl+T', async () => {
+    const user = userEvent.setup()
+    installDefaults()
+    renderApp()
+    await waitFor(() => expect(getRow('Left pane', 'Documents')).toBeTruthy())
+
+    const leftPane = screen.getByRole('group', { name: 'Left pane tabs' })
+    await user.click(within(leftPane).getByRole('button', { name: 'New tab in Left pane' }))
+    await waitFor(() => expect(usePanesStore.getState().panes.left.path).toBe('C:\\'))
+    expect(useTabsStore.getState().panes.left.tabs.map((tab) => tab.path)).toEqual([
+      'C:\\Users\\Omega',
+      'C:\\',
+    ])
+
+    screen.getByLabelText('Left pane').focus()
+    await user.keyboard('{Control>}t{/Control}')
+    await waitFor(() => expect(useTabsStore.getState().panes.left.tabs).toHaveLength(3))
+    expect(useTabsStore.getState().panes.left.tabs[2].path).toBe('C:\\')
+  })
+
+  it('clones a tab from its context menu', async () => {
+    const user = userEvent.setup()
+    installDefaults()
+    renderApp()
+    await waitFor(() => expect(getRow('Left pane', 'Documents')).toBeTruthy())
+
+    const leftPane = screen.getByRole('group', { name: 'Left pane tabs' })
+    await user.pointer({ keys: '[MouseRight]', target: within(leftPane).getAllByRole('tab')[0] })
+    await user.click(await screen.findByRole('menuitem', { name: 'Clone tab' }))
+
+    await waitFor(() => {
+      const pane = useTabsStore.getState().panes.left
+      expect(pane.tabs.map((tab) => tab.path)).toEqual(['C:\\Users\\Omega', 'C:\\Users\\Omega'])
+      expect(pane.activeTabIndex).toBe(1)
+    })
+    await waitFor(() => expect(getRow('Left pane', 'Documents')).toBeTruthy())
   })
 
   it('opens a folder in a new tab on middle-click', async () => {

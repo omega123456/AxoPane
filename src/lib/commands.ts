@@ -33,6 +33,7 @@ const trashPaneCommands = new Set<CommandId>([
   'clearFilter',
   'showSettings',
   'searchEverywhere',
+  'newTab',
 ])
 
 const trashOnlyCommands = new Set<CommandId>(['restore', 'emptyTrash'])
@@ -308,6 +309,7 @@ const commandHandlers: Record<CommandId, CommandHandler> = {
   goUp: ({ panes, paneId }) => void panes.goUp(paneId),
   refresh: ({ panes, paneId }) => void panes.refreshSizes(paneId),
   calculateSize: calculateFocusedSize,
+  newTab: ({ panes, paneId }) => void panes.openNewTab(paneId),
   openInNewTab: (context) => openDirectoryInPane(context, context.paneId),
   openInOtherPane: (context) => openDirectoryInPane(context, otherPane(context.paneId)),
   selectAll: selectAllEntries,

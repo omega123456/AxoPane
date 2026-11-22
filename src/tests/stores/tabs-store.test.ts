@@ -15,6 +15,16 @@ beforeEach(() => {
 })
 
 describe('tabs-store', () => {
+  it('clones a tab with a fresh id, refusing unknown tabs', () => {
+    const store = useTabsStore.getState()
+    const original = store.panes.left.tabs[0]
+    const cloneId = store.cloneTab('left', original.id)
+    const pane = useTabsStore.getState().panes.left
+    expect(pane.tabs[pane.activeTabIndex]).toEqual({ ...original, id: cloneId })
+    expect(cloneId).not.toBe(original.id)
+    expect(useTabsStore.getState().cloneTab('left', 'missing')).toBeNull()
+  })
+
   it('adds and activates a new tab', () => {
     const store = useTabsStore.getState()
     const id = store.addTab('left', {

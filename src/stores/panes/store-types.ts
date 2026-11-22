@@ -38,6 +38,8 @@ export type PanesStore = PanesData & {
     path: string,
     options?: { revealPath?: string },
   ) => Promise<void>
+  openNewTab: (paneId: PaneId) => Promise<void>
+  cloneTab: (paneId: PaneId, tabId: string) => Promise<void>
   closeTab: (paneId: PaneId, tabId: string) => Promise<void>
   closeTabsBeside: (paneId: PaneId, tabId: string, side: 'left' | 'right') => Promise<void>
   setTabLocked: (paneId: PaneId, tabId: string, locked: boolean) => void

@@ -14,10 +14,16 @@ export type TabState = {
   locked: boolean
 }
 
-export type PaneTabs = {
+export type PaneTabList = {
   activeTabIndex: number
   tabs: TabState[]
 }
+
+export type PaneTabs = PaneTabList & {
+  previouslyActiveTabIds: string[]
+}
+
+type TabSelection = Pick<PaneTabs, 'activeTabIndex' | 'previouslyActiveTabIds'>
 
 export type TabPanes = Record<PaneId, PaneTabs>
 
@@ -59,6 +65,47 @@ function withPane(panes: TabPanes, paneId: PaneId, pane: PaneTabs): TabPanes {
   return { ...panes, [paneId]: pane }
 }
 
+function activeTabId(pane: PaneTabs) {
+  return pane.tabs[pane.activeTabIndex]?.id
+}
+
+function indexOfTab(tabs: TabState[], tabId: string) {
+  return clampIndex(
+    tabs.findIndex((tab) => tab.id === tabId),
+    tabs.length,
+  )
+}
+
+function withoutTabId(tabIds: string[], tabId: string) {
+  return tabIds.filter((id) => id !== tabId)
+}
+
+function historyAfterSwitch(pane: PaneTabs, nextActiveTabId: string) {
+  const earlierTabIds = withoutTabId(pane.previouslyActiveTabIds, nextActiveTabId)
+  return [...earlierTabIds, activeTabId(pane)]
+}
+
+function selectionAfterRemoval(
+  pane: PaneTabs,
+  removedTabId: string,
+  remainingTabs: TabState[],
+): TabSelection {
+  const history = withoutTabId(pane.previouslyActiveTabIds, removedTabId)
+  const currentActiveTabId = activeTabId(pane)
+  if (currentActiveTabId !== removedTabId) {
+    return {
+      activeTabIndex: indexOfTab(remainingTabs, currentActiveTabId),
+      previouslyActiveTabIds: history,
+    }
+  }
+  const neighbourTabId = remainingTabs[clampIndex(pane.activeTabIndex, remainingTabs.length)].id
+  const nextActiveTabId = history.at(-1) ?? neighbourTabId
+  return {
+    activeTabIndex: indexOfTab(remainingTabs, nextActiveTabId),
+    previouslyActiveTabIds: withoutTabId(history, nextActiveTabId),
+  }
+}
+
 function keepsOrder(tabs: TabState[], original: TabState[]) {
   return tabs.every((item, index) => item.id === original[index]?.id)
 }
@@ -83,18 +130,6 @@ function reorderTab(
     panes: { [sourcePaneId]: { ...source, tabs, activeTabIndex } },
     result: { kind: 'reorder', paneId: sourcePaneId, tabId },
   }
-}
-
-function sourceActiveIndexAfterRemoval(
-  source: PaneTabs,
-  sourceIndex: number,
-  remaining: TabState[],
-) {
-  if (sourceIndex === source.activeTabIndex) {
-    return Math.min(sourceIndex, remaining.length - 1)
-  }
-  const sourceActiveTabId = source.tabs[source.activeTabIndex]?.id
-  return remaining.findIndex((tab) => tab.id === sourceActiveTabId)
 }
 
 function canTransferTab(source: PaneTabs, destination: PaneTabs, destinationIndex: number) {
@@ -126,14 +161,13 @@ function transferTab(
   return {
     panes: {
       [sourcePaneId]: {
-        ...source,
         tabs: sourceTabs,
-        activeTabIndex: sourceActiveIndexAfterRemoval(source, sourceIndex, sourceTabs),
+        ...selectionAfterRemoval(source, tabId, sourceTabs),
       },
       [destinationPaneId]: {
-        ...destination,
         tabs: destinationTabs,
         activeTabIndex: destinationIndex,
+        previouslyActiveTabIds: historyAfterSwitch(destination, destinationTabId),
       },
     },
     result: {
@@ -171,7 +205,7 @@ export function withMovedTabs(panes: TabPanes, move: PlannedTabMove): TabPanes {
 }
 
 export type PaneHydration = {
-  pane: PaneTabs
+  pane: PaneTabList
   fallbackTabs: () => TabState[]
 }
 
@@ -185,6 +219,7 @@ export function withHydratedPane(
   return withPane(panes, paneId, {
     activeTabIndex: clampIndex(pane.activeTabIndex, pane.tabs.length),
     tabs,
+    previouslyActiveTabIds: [],
   })
 }
 
@@ -200,18 +235,39 @@ export function withAddedTab(
 ): TabPanes {
   const pane = panes[paneId]
   const tabs = [...pane.tabs, tab]
-  const activeTabIndex = activate ? tabs.length - 1 : pane.activeTabIndex
-  return withPane(panes, paneId, { tabs, activeTabIndex })
+  if (!activate) {
+    return withPane(panes, paneId, { ...pane, tabs })
+  }
+  return withPane(panes, paneId, {
+    tabs,
+    activeTabIndex: tabs.length - 1,
+    previouslyActiveTabIds: historyAfterSwitch(pane, tab.id),
+  })
 }
 
-function activeIndexAfterClose(pane: PaneTabs, closingIndex: number, remainingCount: number) {
-  if (closingIndex < pane.activeTabIndex) {
-    return pane.activeTabIndex - 1
+export type TabClone = {
+  tabId: string
+  cloneId: string
+}
+
+export function withClonedTab(
+  panes: TabPanes,
+  paneId: PaneId,
+  { tabId, cloneId }: TabClone,
+): TabPanes | null {
+  const pane = panes[paneId]
+  const sourceIndex = pane.tabs.findIndex((tab) => tab.id === tabId)
+  if (sourceIndex === -1) {
+    return null
   }
-  if (closingIndex === pane.activeTabIndex) {
-    return Math.min(pane.activeTabIndex, remainingCount - 1)
-  }
-  return pane.activeTabIndex
+  const cloneIndex = sourceIndex + 1
+  const clone = { ...pane.tabs[sourceIndex], id: cloneId, locked: false }
+  const tabs = [...pane.tabs.slice(0, cloneIndex), clone, ...pane.tabs.slice(cloneIndex)]
+  return withPane(panes, paneId, {
+    tabs,
+    activeTabIndex: cloneIndex,
+    previouslyActiveTabIds: historyAfterSwitch(pane, cloneId),
+  })
 }
 
 function closableTabIndex(pane: PaneTabs, tabId: string) {
@@ -234,8 +290,7 @@ export function withClosedTab(panes: TabPanes, paneId: PaneId, tabId: string): T
   }
 
   const tabs = pane.tabs.filter((tab) => tab.id !== tabId)
-  const activeTabIndex = activeIndexAfterClose(pane, closingIndex, tabs.length)
-  return withPane(panes, paneId, { tabs, activeTabIndex: clampIndex(activeTabIndex, tabs.length) })
+  return withPane(panes, paneId, { tabs, ...selectionAfterRemoval(pane, tabId, tabs) })
 }
 
 export type TabLock = {
@@ -262,7 +317,11 @@ export function withActiveTab(panes: TabPanes, paneId: PaneId, tabId: string): T
   if (index === pane.activeTabIndex) {
     return null
   }
-  return withPane(panes, paneId, { ...pane, activeTabIndex: index })
+  return withPane(panes, paneId, {
+    tabs: pane.tabs,
+    activeTabIndex: index,
+    previouslyActiveTabIds: historyAfterSwitch(pane, tabId),
+  })
 }
 
 export function withPatchedActiveTab(panes: TabPanes, paneId: PaneId, patch: TabPatch): TabPanes {

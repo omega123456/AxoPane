@@ -36,6 +36,10 @@ export type ContextMenuAction =
       paneId: PaneId
     }
   | {
+      kind: 'clone-tab'
+      tabId: string
+    }
+  | {
       kind: 'close-tab'
       tabId: string
     }
@@ -124,6 +128,10 @@ export function openPathInExplicitPaneContextAction(
   paneId: PaneId,
 ): ContextMenuAction {
   return { kind: 'open-path-in-explicit-pane', path, paneId }
+}
+
+export function cloneTabContextAction(tabId: string): ContextMenuAction {
+  return { kind: 'clone-tab', tabId }
 }
 
 export function closeTabContextAction(tabId: string): ContextMenuAction {
@@ -269,6 +277,7 @@ const contextMenuActionHandlers: KindHandlers<ContextMenuAction, [paneId: PaneId
     void usePanesStore.getState().openTabFromPath(paneId, action.path),
   'open-path-in-explicit-pane': (action) =>
     void usePanesStore.getState().openTabFromPath(action.paneId, action.path),
+  'clone-tab': (action, paneId) => void usePanesStore.getState().cloneTab(paneId, action.tabId),
   'close-tab': (action, paneId) => void usePanesStore.getState().closeTab(paneId, action.tabId),
   'close-tabs-beside': (action, paneId) =>
     void usePanesStore.getState().closeTabsBeside(paneId, action.tabId, action.side),

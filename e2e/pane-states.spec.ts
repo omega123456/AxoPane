@@ -133,6 +133,7 @@ test('tab context menu', async ({ page }) => {
   const tab = page.getByRole('group', { name: 'Left pane tabs' }).getByRole('tab').nth(1)
   await tab.click({ button: 'right' })
   await expect(page.getByRole('menuitem', { name: 'Move tab right' })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: 'Clone tab' })).toBeVisible()
   await expect(page.getByRole('menuitem', { name: 'Add to Favourites' })).toBeVisible()
 })
 

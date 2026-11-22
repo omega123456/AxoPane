@@ -47,6 +47,9 @@ describe('keymap', () => {
 
     const copyToClipboard = new KeyboardEvent('keydown', { key: 'c', ctrlKey: true })
     expect(resolveCommandForEvent(copyToClipboard, defaultKeymap)).toBe('copy')
+
+    const newTab = new KeyboardEvent('keydown', { key: 't', ctrlKey: true })
+    expect(resolveCommandForEvent(newTab, defaultKeymap)).toBe('newTab')
   })
 
   it('treats Command as the primary modifier on macOS', () => {

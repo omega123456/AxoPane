@@ -30,9 +30,11 @@ import {
 import { bindPanesStore } from '@/stores/panes/store-handle'
 import type { PanesStore } from '@/stores/panes/store-types'
 import {
+  cloneTab,
   closeTab,
   closeTabsBeside,
   moveTab,
+  openNewTab,
   openTabFromPath,
   setTabLocked,
   switchTab,
@@ -67,6 +69,8 @@ export const usePanesStore = create<PanesStore>(() => ({
   goBack,
   goForward,
   openTabFromPath,
+  openNewTab,
+  cloneTab,
   closeTab,
   closeTabsBeside,
   setTabLocked,

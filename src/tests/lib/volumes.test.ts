@@ -1,4 +1,5 @@
 import {
+  driveRootForPath,
   findVolumeForPath,
   groupVolumesByCategory,
   isNetworkPath,
@@ -52,6 +53,32 @@ describe('groupVolumesByCategory', () => {
 
   it('returns nothing for an empty volume list', () => {
     expect(groupVolumesByCategory([])).toEqual([])
+  })
+})
+
+describe('driveRootForPath', () => {
+  const c = volume({ mountRoot: 'C:\\', label: 'Windows' })
+  const macRoot = volume({ mountRoot: '/', label: 'Macintosh HD' })
+  const external = volume({ mountRoot: '/Volumes/External', label: 'External' })
+
+  it('returns the mount root of the drive holding the path', () => {
+    expect(driveRootForPath('C:\\Users\\me', [c])).toBe('C:\\')
+    expect(driveRootForPath('/Users/me', [macRoot, external])).toBe('/')
+    expect(driveRootForPath('/Volumes/External/photos', [macRoot, external])).toBe(
+      '/Volumes/External',
+    )
+  })
+
+  it('ignores a same-length mount root that is not a prefix of the path', () => {
+    const dataVolume = volume({ mountRoot: '/System/Volumes/Data', label: 'Data' })
+    expect(driveRootForPath('/Users/sample.person/Projects', [macRoot, dataVolume])).toBe('/')
+    expect(driveRootForPath('/System/Volumes/Data/Users', [macRoot, dataVolume])).toBe(
+      '/System/Volumes/Data',
+    )
+  })
+
+  it('keeps the path when no drive holds it', () => {
+    expect(driveRootForPath('D:\\data', [c])).toBe('D:\\data')
   })
 })
 

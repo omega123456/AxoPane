@@ -8,11 +8,13 @@ import {
   planTabMove,
   withActiveTab,
   withAddedTab,
+  withClonedTab,
   withClosedTab,
   withHydratedPane,
   withMovedTabs,
   withPatchedActiveTab,
   withTabLocked,
+  type PaneTabList,
   type PaneTabs,
   type TabMoveRequest,
   type TabMoveResult,
@@ -31,8 +33,9 @@ type NewTabState = Omit<TabState, 'id' | 'viewMode' | 'locked'> & {
 
 type TabsStore = {
   panes: TabPanes
-  hydrate: (paneId: PaneId, pane: PaneTabs) => void
+  hydrate: (paneId: PaneId, pane: PaneTabList) => void
   addTab: (paneId: PaneId, tab: NewTabState, options?: { activate?: boolean }) => string
+  cloneTab: (paneId: PaneId, tabId: string) => string | null
   closeTab: (paneId: PaneId, tabId: string) => void
   setTabLocked: (paneId: PaneId, tabId: string, locked: boolean) => void
   setActiveTab: (paneId: PaneId, tabId: string) => void
@@ -80,6 +83,7 @@ function singleTabPane(path: string): PaneTabs {
         locked: false,
       },
     ],
+    previouslyActiveTabIds: [],
   }
 }
 
@@ -121,6 +125,15 @@ export const useTabsStore = create<TabsStore>((set, get) => ({
       panes: withAddedTab(state.panes, paneId, { tab: completedTab(id, tab), activate }),
     }))
     return id
+  },
+  cloneTab: (paneId, tabId) => {
+    const cloneId = createTabId(paneId)
+    const panes = withClonedTab(get().panes, paneId, { tabId, cloneId })
+    if (!panes) {
+      return null
+    }
+    set({ panes })
+    return cloneId
   },
   closeTab: (paneId, tabId) =>
     set((state) => panesChange(withClosedTab(state.panes, paneId, tabId)) ?? state),
@@ -168,7 +181,7 @@ export function toSessionPane(paneId: PaneId): SessionPane {
   }
 }
 
-export function fromSessionPane(paneId: PaneId, pane: SessionPane): PaneTabs {
+export function fromSessionPane(paneId: PaneId, pane: SessionPane): PaneTabList {
   return {
     activeTabIndex: pane.activeTabIndex,
     tabs: pane.tabs.map((tab) => ({

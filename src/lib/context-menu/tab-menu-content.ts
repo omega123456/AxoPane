@@ -1,4 +1,5 @@
 import {
+  cloneTabContextAction,
   closeTabContextAction,
   closeTabsBesideContextAction,
   navigateContextAction,
@@ -128,6 +129,12 @@ export function buildTabContent(paneId: PaneId, target: TabTarget): ContextMenuC
           action: navigateContextAction(path, 'other-pane'),
           strong: true,
           icon: { kind: 'app', name: 'open-in-other-pane' },
+        }),
+        customRow({
+          id: `clone-tab-${target.tabId}`,
+          label: 'Clone tab',
+          action: cloneTabContextAction(target.tabId),
+          icon: { kind: 'app', name: 'copy' },
         }),
       ]),
       moveTabSection(paneId, target, { tabIndex, flags }),

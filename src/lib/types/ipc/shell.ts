@@ -21,6 +21,7 @@ export type CommandId =
   | 'newFolder'
   | 'newFile'
   | 'calculateSize'
+  | 'newTab'
   | 'openInNewTab'
   | 'openInOtherPane'
   | 'selectAll'
